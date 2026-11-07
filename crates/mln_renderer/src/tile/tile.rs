@@ -20,6 +20,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, Timestamp};
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_mask::TileMask;
@@ -220,6 +221,10 @@ pub trait Tile {
     fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool;
 
     fn set_show_collision_boxes(&self, _show: bool) {}
+
+    /// Takes effect with the next `set_layers`, so a relayout costs one
+    /// parse.
+    fn set_subdivision_granularity(&self, _value: &SubdivisionGranularitySetting) {}
 
     fn set_layers(&self, _layers: &[Immutable<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
 

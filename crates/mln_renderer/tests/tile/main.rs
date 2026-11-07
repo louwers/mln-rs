@@ -18,6 +18,7 @@ use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::identity::SimpleIdentity;
 use mln_util::range::Range;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
 
 /// The fixture shared by `RasterTileTest` and `RasterDEMTileTest`
@@ -65,6 +66,7 @@ impl RasterTileTest {
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,

@@ -7,14 +7,18 @@
 // MLT tiles).
 
 use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorOptions};
-use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_tile::geometry_tile_data::{classify_rings, limit_holes};
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates};
+use mln_tile_id::CanonicalTileID;
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
+use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 
 use crate::bucket::GeometryTooLongException;
 use crate::buckets::fill_bucket::{FillBucket, FillLayoutVertex};
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
+use crate::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
+use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
 
 fn add_ring_vertices(vertices: &mut Vec<FillLayoutVertex>, ring: &GeometryCoordinates) -> usize {
     for point in ring {
@@ -102,11 +106,69 @@ fn add_outline_indices(
     line_segment.index_length += n_vertices * 2;
 }
 
+fn inside_tile_x(point: &GeometryCoordinate) -> bool {
+    point.x >= 0 && i32::from(point.x) <= EXTENT
+}
+
+/// On zoom 0 the tile's buffer wraps around the planet onto the tile itself,
+/// so the outline keeps only the runs of vertices inside the tile's X extent,
+/// the way the subdivided fill drops its triangles. `generate` is the
+/// generator's `generate`.
+fn generate_outline(
+    generate: &mut impl FnMut(&GeometryCoordinates, &PolylineGeneratorOptions),
+    ring: &GeometryCoordinates,
+    canonical: &CanonicalTileID,
+    ring_options: &PolylineGeneratorOptions,
+) {
+    if canonical.z != 0 || ring.iter().all(inside_tile_x) {
+        generate(ring, ring_options);
+        return;
+    }
+    let mut run_options = *ring_options;
+    run_options.type_ = FeatureType::LineString;
+    let mut run = GeometryCoordinates::new();
+    for point in ring {
+        if inside_tile_x(point) {
+            run.push(*point);
+            continue;
+        }
+        if run.len() > 1 {
+            generate(&run, &run_options);
+        }
+        run.clear();
+    }
+    if run.len() > 1 {
+        generate(&run, &run_options);
+    }
+}
+
+fn add_subdivided_polygon(
+    subdivided: &SubdivisionResult,
+    fill_vertices: &mut Vec<FillLayoutVertex>,
+    fill_indexes: &mut Vec<u16>,
+    fill_segments: &mut Vec<SegmentBase>,
+    line_indexes: &mut Vec<u16>,
+    line_segments: &mut Vec<SegmentBase>,
+) {
+    let lines = MeshLines { segments: line_segments, indexes: line_indexes, lists: &subdivided.line_index_lists };
+    fill_large_mesh_arrays(
+        fill_vertices,
+        |x, y| FillBucket::layout_vertex(GeometryCoordinate::new(x, y)),
+        fill_segments,
+        fill_indexes,
+        &subdivided.vertices,
+        &subdivided.triangle_indices,
+        Some(lines),
+        MAX_SEGMENT_VERTICES,
+    );
+}
+
 /// `generateFillAndOutineBuffers(geometry, fillVertices, fillIndexes,
 /// fillSegments, lineVertices, lineIndexes, lineSegments, basicLineIndexes,
-/// basicLineSegments)`: outlines built both with triangle primitives AND
-/// with simple lines (the `MLN_TRIANGULATE_FILL_OUTLINES` variant the WebGPU
-/// fill bucket uses).
+/// basicLineSegments, canonical, subdivisionGranularity)`: outlines built
+/// both with triangle primitives AND with simple lines (the
+/// `MLN_TRIANGULATE_FILL_OUTLINES` variant the WebGPU fill bucket uses). C++
+/// defaults `subdivision_granularity` to 1.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_fill_and_outline_buffers(
     geometry: &GeometryCollection,
@@ -118,6 +180,8 @@ pub fn generate_fill_and_outline_buffers(
     line_segments: &mut Vec<SegmentBase>,
     basic_line_indexes: &mut Vec<u16>,
     basic_line_segments: &mut Vec<SegmentBase>,
+    canonical: &CanonicalTileID,
+    subdivision_granularity: u32,
 ) -> Result<(), GeometryTooLongException> {
     let mut line_generator = PolylineGenerator::new(
         line_vertices,
@@ -133,6 +197,26 @@ pub fn generate_fill_and_outline_buffers(
     for mut polygon in classify_rings(geometry) {
         // Optimize polygons with many interior rings for earcut tessellation.
         limit_holes(&mut polygon, 500);
+
+        if subdivision_granularity >= 2 {
+            for ring in polygon.iter() {
+                generate_outline(
+                    &mut |ring, options| line_generator.generate(ring, options),
+                    &subdivide_vertex_line(ring, subdivision_granularity, true),
+                    canonical,
+                    &line_options,
+                );
+            }
+            add_subdivided_polygon(
+                &subdivide_polygon(&polygon, canonical, subdivision_granularity, true),
+                fill_vertices,
+                fill_indexes,
+                fill_segments,
+                basic_line_indexes,
+                basic_line_segments,
+            );
+            continue;
+        }
 
         let total_vertices = total_vertices_check(&polygon)?;
         let start_vertices = fill_vertices.len();

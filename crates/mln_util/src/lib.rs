@@ -45,6 +45,7 @@ pub mod projection;
 pub mod quaternion;
 pub mod size;
 pub mod string_indexer;
+pub mod subdivision_granularity;
 pub mod tile_server_options;
 pub mod tileset;
 pub mod tiny_sdf;

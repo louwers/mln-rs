@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
-use mln_gfx::shaders::segment::SegmentBase;
+use mln_gfx::shaders::segment::{MAX_SEGMENT_VERTICES, SegmentBase};
 use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{Image, Value};
@@ -30,18 +30,21 @@ use mln_style_types::LightAnchorType;
 use mln_style_types::image::ImagePositions;
 use mln_tile::geometry_tile_data::{classify_rings, limit_holes};
 use mln_tile_id::CanonicalTileID;
-use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
+use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::mat3::{Mat3, matrix as mat3};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::vectors::Vec3f;
 
 use crate::bucket::{Bucket, BucketBase};
+use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_layer::RenderLayer;
+use crate::util::subdivision::{SubdivisionResult, subdivide_polygon, subdivide_vertex_line};
 
 crate::paint_property_binders!(
     /// `FillExtrusionBinders = PaintPropertyBinders<FillExtrusionPaintProperties::DataDrivenProperties>`.
@@ -87,6 +90,7 @@ pub struct FillExtrusionBucket {
     /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: Vec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
+    pub subdivision_granularity: SubdivisionGranularitySetting,
 
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
@@ -95,6 +99,11 @@ pub struct FillExtrusionBucket {
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 static ROUNDED_CORNERS_LOGGED: AtomicBool = AtomicBool::new(false);
+
+// Each ring vertex can add a wall quad beside itself.
+fn wall_vertex_count(ring_vertices: usize) -> usize {
+    if ring_vertices == 0 { 0 } else { 5 * (ring_vertices - 1) + 1 }
+}
 
 /// `util::dist<uint16_t>(a, b)`: `static_cast<uint16_t>` of the double
 /// distance (x86-64: through a 32-bit conversion, keeping the low bits).
@@ -134,8 +143,13 @@ impl FillExtrusionBucket {
             vertices: Vec::new(),
             triangles: Vec::new(),
             triangle_segments: Vec::new(),
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
         }
+    }
+
+    pub fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
+        self.subdivision_granularity = *value;
     }
 
     /// `layoutVertex(p, nx, ny, t, edgeDistance)` (non-instanced).
@@ -218,8 +232,29 @@ impl Bucket for FillExtrusionBucket {
                 Log::warning(Event::Render, "TODO(port): fill-extrusion-rounded-corner-distance (roundPolygonCorners)");
             }
 
+            // On the globe the walls follow subdivided rings and the roof is a
+            // subdivided mesh of its own, spread over as many segments as it
+            // needs. Walls too long for a segment are drawn as on Mercator.
+            let granularity = self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z);
+            let mut subdivided: Option<Vec<GeometryCoordinates>> = None;
+            let mut roof: Option<SubdivisionResult> = None;
+            if granularity >= 2 && rounded_corner_distance <= 0.0 {
+                let mut subdivided_rings: Vec<GeometryCoordinates> = Vec::new();
+                let mut ring_vertices = 0;
+                for ring in polygon.iter() {
+                    subdivided_rings.push(subdivide_vertex_line(ring, granularity, true));
+                    ring_vertices += subdivided_rings.last().expect("ring").len();
+                }
+                if wall_vertex_count(ring_vertices) <= MAX_SEGMENT_VERTICES {
+                    subdivided = Some(subdivided_rings);
+                    roof = Some(subdivide_polygon(&polygon, canonical, granularity, false));
+                }
+            }
+            // `polyVariant`
+            let poly: &[GeometryCoordinates] = subdivided.as_deref().unwrap_or(&polygon[..]);
+
             let mut total_vertices: usize = 0;
-            for ring in polygon.iter() {
+            for ring in poly.iter() {
                 total_vertices += ring.len();
                 if total_vertices > usize::from(u16::MAX) {
                     return Err(Arc::new(GeometryTooLongException));
@@ -232,11 +267,12 @@ impl Bucket for FillExtrusionBucket {
 
             let mut flat_indices: Vec<u32> = Vec::with_capacity(total_vertices);
 
+            let wall_vertices = wall_vertex_count(total_vertices);
+
             let start_vertices = self.vertices.len();
 
             if self.triangle_segments.is_empty()
-                || self.triangle_segments.last().expect("segment").vertex_length + (5 * (total_vertices - 1) + 1)
-                    > usize::from(u16::MAX)
+                || self.triangle_segments.last().expect("segment").vertex_length + wall_vertices > usize::from(u16::MAX)
             {
                 self.triangle_segments.push(SegmentBase::new(start_vertices, self.triangles.len()));
             }
@@ -245,9 +281,9 @@ impl Bucket for FillExtrusionBucket {
             debug_assert!(self.triangle_segments[segment_index].vertex_length <= usize::from(u16::MAX));
             let mut triangle_index = self.triangle_segments[segment_index].vertex_length as u16;
 
-            debug_assert!(usize::from(triangle_index) + (5 * (total_vertices - 1) + 1) <= usize::from(u16::MAX));
+            debug_assert!(usize::from(triangle_index) + wall_vertices <= usize::from(u16::MAX));
 
-            for ring in polygon.iter() {
+            for ring in poly.iter() {
                 let n_vertices = ring.len();
 
                 if n_vertices == 0 {
@@ -301,7 +337,7 @@ impl Bucket for FillExtrusionBucket {
                 }
             }
 
-            let indices: Vec<u32> = earcut::earcut::<u32, _, _>(&polygon[..]);
+            let indices: Vec<u32> = if roof.is_none() { earcut::earcut::<u32, _, _>(poly) } else { Vec::new() };
 
             let n_indices = indices.len();
             debug_assert!(n_indices % 3 == 0);
@@ -318,7 +354,23 @@ impl Bucket for FillExtrusionBucket {
             let segment = &mut self.triangle_segments[segment_index];
             segment.vertex_length += total_vertices;
             segment.index_length += n_indices;
-            // (instanceSegments: MLN_USE_FILL_EXTRUSION_INSTANCING only.)
+
+            // The roof's triangles index only its own vertices, so it
+            // continues the walls' segment or starts its own.
+            if let Some(roof) = &roof {
+                fill_large_mesh_arrays(
+                    &mut self.vertices,
+                    |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0, 1, 0),
+                    &mut self.triangle_segments,
+                    &mut self.triangles,
+                    &roof.vertices,
+                    &roof.triangle_indices,
+                    None,
+                    MAX_SEGMENT_VERTICES,
+                );
+            }
+            // (instanceSegments, and the roof's vertices counted into them:
+            // MLN_USE_FILL_EXTRUSION_INSTANCING only.)
         }
 
         let length = self.vertices.len();
@@ -418,6 +470,9 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
         overscaling: u32,
     ) -> FillExtrusionBucket {
         FillExtrusionBucket::new(layout.clone(), layer_properties_map, zoom, overscaling)
+    }
+    fn set_subdivision_granularity(bucket: &mut FillExtrusionBucket, value: &SubdivisionGranularitySetting) {
+        bucket.set_subdivision_granularity(value);
     }
 }
 

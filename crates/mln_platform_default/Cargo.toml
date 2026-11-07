@@ -69,7 +69,9 @@ geojson = { package = "mln-rs-geojson", path = "../../vendor/geojson" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }
 mln_platform_default_image = { package = "mln-rs-platform-default-image", path = "../mln_platform_default_image" }
+mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
+mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 

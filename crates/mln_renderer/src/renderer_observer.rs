@@ -1,6 +1,9 @@
 // Ports include/mln/renderer/renderer_observer.hpp
 
+use mln_tile_id::OverscaledTileID;
 pub use mln_util::exception::ExceptionPtr;
+
+use crate::tile::tile::TileOperation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -14,7 +17,7 @@ pub enum RenderMode {
 /// C++ has four `onDidFinishRenderingFrame` overloads that forward to each
 /// other; the port keeps the one the renderer calls (with the stats).
 // TODO(port): `gfx::RenderingStats` in on_did_finish_rendering_frame,
-// `onRegisterShaders`, shader compile callbacks, glyph and tile callbacks,
+// `onRegisterShaders`, shader compile callbacks, glyph callbacks,
 // `SymbolErrorObserver::onSymbolError`.
 pub trait RendererObserver {
     /// Signals that a repaint is required.
@@ -42,6 +45,9 @@ pub trait RendererObserver {
     }
 
     fn on_remove_unused_style_images(&self, _ids: &[String]) {}
+
+    /// Tile loading.
+    fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
 
     /// Render layer or drawable failed.
     fn on_render_error(&self, _error: ExceptionPtr) {}

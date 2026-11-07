@@ -18,6 +18,7 @@ use mln_util::Color;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::buckets::line_bucket::LineLayoutVertex;
@@ -60,6 +61,7 @@ pub struct FillBucket {
     /// `gfx::IndexVector<gfx::Triangles>`.
     pub triangles: Vec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
+    pub subdivision_granularity: SubdivisionGranularitySetting,
 
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
@@ -95,10 +97,15 @@ impl FillBucket {
             vertices: Vec::new(),
             triangles: Vec::new(),
             triangle_segments: Vec::new(),
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
             sdf_patterns: HashMap::new(),
             mixed_sdf_pattern_layers: HashSet::new(),
         }
+    }
+
+    pub fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
+        self.subdivision_granularity = *value;
     }
 
     /// `layoutVertex(Point<int16_t> p)`.
@@ -106,7 +113,11 @@ impl FillBucket {
         FillLayoutVertex { a1: [p.x, p.y] }
     }
 
-    fn generate_buffers(&mut self, geometry: &GeometryCollection) -> Result<(), ExceptionPtr> {
+    fn generate_buffers(
+        &mut self,
+        geometry: &GeometryCollection,
+        canonical: &CanonicalTileID,
+    ) -> Result<(), ExceptionPtr> {
         generate_fill_and_outline_buffers(
             geometry,
             &mut self.vertices,
@@ -117,6 +128,8 @@ impl FillBucket {
             &mut self.line_segments,
             &mut self.basic_lines,
             &mut self.basic_line_segments,
+            canonical,
+            self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z),
         )
         .map_err(|e| Arc::new(e) as ExceptionPtr)
     }
@@ -163,7 +176,7 @@ impl Bucket for FillBucket {
     ) -> Result<(), ExceptionPtr> {
         let vertex_offset = self.vertices.len();
 
-        self.generate_buffers(geometry)?;
+        self.generate_buffers(geometry, canonical)?;
         self.populate_binders(feature, pattern_positions, pattern_dependencies, index, canonical);
 
         if self.base.retain_features_by_id {

@@ -14,6 +14,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::sources::geojson_source::{GeoJSONData, TileFeatures};
 use mln_tile_id::OverscaledTileID;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::tile::geojson_tile_data::GeoJSONTileData;
 use crate::tile::geometry_tile::GeometryTile;
@@ -109,6 +110,10 @@ impl Tile for GeoJSONTile {
 
     fn set_show_collision_boxes(&self, show: bool) {
         self.tile.set_show_collision_boxes(show);
+    }
+
+    fn set_subdivision_granularity(&self, value: &SubdivisionGranularitySetting) {
+        self.tile.set_subdivision_granularity(value);
     }
 
     // layers: feature state

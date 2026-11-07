@@ -415,6 +415,16 @@ const DEBUG_ATTRIBUTES: &[AttributeInfo] = &[attr(5, Short2, ID_DEBUG_POS_VERTEX
 const DEBUG_TEXTURES: &[TextureInfo] = &[tex(0, ID_DEBUG_OVERLAY_TEXTURE)];
 shader_source!(DEBUG_SHADER, DEBUG_SHADER, "DebugShader", DEBUG_ATTRIBUTES, DEBUG_TEXTURES);
 
+// src/mln/shaders/webgpu/sky.cpp
+const SKY_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_SKY_POS_VERTEX_ATTRIBUTE)];
+shader_source!(SKY_SHADER, SKY_SHADER, "SkyShader", SKY_ATTRIBUTES, &[]);
+const ATMOSPHERE_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
+shader_source!(ATMOSPHERE_SHADER, ATMOSPHERE_SHADER, "AtmosphereShader", ATMOSPHERE_ATTRIBUTES, &[]);
+
+// src/mln/shaders/webgpu/globe_depth.cpp
+const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
+shader_source!(GLOBE_DEPTH_SHADER, GLOBE_DEPTH_SHADER, "GlobeDepthShader", GLOBE_DEPTH_ATTRIBUTES, &[]);
+
 /// `ShaderSource<shader_id, WebGPU>`, or `None` for types not ported yet.
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
@@ -448,6 +458,9 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
         BuiltIn::CollisionBoxShader => Some(&COLLISION_BOX_SHADER),
         BuiltIn::CollisionCircleShader => Some(&COLLISION_CIRCLE_SHADER),
         BuiltIn::DebugShader => Some(&DEBUG_SHADER), // layers: debug
+        BuiltIn::GlobeDepthShader => Some(&GLOBE_DEPTH_SHADER),
+        BuiltIn::SkyShader => Some(&SKY_SHADER),
+        BuiltIn::AtmosphereShader => Some(&ATMOSPHERE_SHADER),
         _ => None,
     }
 }

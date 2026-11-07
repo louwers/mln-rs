@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -1125,7 +1125,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-actor"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-util",
@@ -1133,14 +1133,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-cheap-ruler"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
 ]
 
 [[package]]
 name = "mln-rs-conversion"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
@@ -1149,11 +1149,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-csscolorparser"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-earcut"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-earcut-test-fixtures",
  "mln-rs-geometry",
@@ -1162,11 +1162,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-earcut-test-fixtures"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-expression"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-conversion",
  "mln-rs-feature",
@@ -1184,7 +1184,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-expression-test"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
@@ -1199,14 +1199,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-feature"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
 ]
 
 [[package]]
 name = "mln-rs-geojson"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -1216,7 +1216,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geojson-vt"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
@@ -1227,11 +1227,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geometry"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-gfx"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "mln-rs-geometry",
@@ -1242,7 +1242,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-glfw"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "glfw",
  "mln-rs-actor",
@@ -1254,6 +1254,7 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
  "mln-rs-util",
  "mln-rs-webgpu",
  "serde_json",
@@ -1262,18 +1263,18 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-kdbush"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-libstdcxx",
 ]
 
 [[package]]
 name = "mln-rs-libstdcxx"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-map"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-geometry",
@@ -1282,34 +1283,37 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
+ "mln-rs-tile-id",
  "mln-rs-util",
 ]
 
 [[package]]
 name = "mln-rs-map-types"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
  "mln-rs-math",
+ "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
 ]
 
 [[package]]
 name = "mln-rs-math"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-nunicode"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-pixelmatch"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-platform-default"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-feature",
@@ -1323,7 +1327,9 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
  "mln-rs-test-server",
+ "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-webgpu",
  "serde_json",
@@ -1331,7 +1337,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-platform-default-image"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "flate2",
  "image-webp",
@@ -1341,11 +1347,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-pmtiles"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-polylabel"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
  "mln-rs-libstdcxx",
@@ -1354,15 +1360,15 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-protozero"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-rapidjson"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-render-test"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -1387,7 +1393,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-renderer"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "mln-rs-actor",
@@ -1421,11 +1427,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-shelf-pack"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-sprite"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-geometry",
@@ -1438,7 +1444,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-storage"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-feature",
@@ -1457,7 +1463,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-storage-offline"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -1477,7 +1483,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -1502,7 +1508,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-codegen"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-csscolorparser",
  "serde_json",
@@ -1510,7 +1516,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-types"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-math",
@@ -1520,7 +1526,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-supercluster"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -1531,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-test-server"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "httpmock",
  "mln-rs-util",
@@ -1539,7 +1545,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-text"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "harfrust",
  "mln-rs-math",
@@ -1552,7 +1558,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-tile"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -1567,7 +1573,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-tile-id"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -1576,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-util"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
@@ -1594,7 +1600,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-vector-tile"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -1603,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wagyu"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
  "mln-rs-libstdcxx",
@@ -1611,7 +1617,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-webgpu"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "mln-rs-gfx",

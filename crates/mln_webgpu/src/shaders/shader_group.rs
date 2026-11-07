@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::shader_group::{self, ShaderGroupData, StringIDSetsPair, get_shader_name, property_hash};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shader_group::{self, GLOBE_DEFINE, ShaderGroupData, StringIDSetsPair, get_shader_name, property_hash};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -15,7 +16,7 @@ use mln_gfx::util_hash::hash_combine;
 
 use crate::context::Context;
 use crate::shaders::shader_program::ShaderProgram;
-use crate::shaders::shader_source::shader_source;
+use crate::shaders::shader_source::{prelude, shader_source};
 use crate::shaders::wgsl_preprocessor::preprocess_wgsl;
 
 const UNIFORM_PREFIX: &str = "HAS_UNIFORM_u_";
@@ -54,6 +55,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
         &self,
         gfx_context: &dyn GfxContext,
         properties_as_uniforms: &StringIDSetsPair,
+        variant: ProjectionVariant,
         _first_attrib_name: &str,
     ) -> Option<ShaderProgramBasePtr> {
         let source = shader_source(self.shader_id)?;
@@ -64,6 +66,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
         let mut seed = 0u64;
         hash_combine(&mut seed, property_hash(properties_as_uniforms));
         hash_combine(&mut seed, self.program_parameters.get_defines_hash());
+        hash_combine(&mut seed, variant as u64);
         let shader_name = get_shader_name(name, seed);
 
         if let Some(shader) = self.get_typed(&shader_name, ShaderProgram::NAME) {
@@ -72,10 +75,18 @@ impl shader_group::ShaderGroup for ShaderGroup {
 
         let mut additional_defines = HashMap::new();
         Self::add_additional_defines(properties_as_uniforms, &mut additional_defines);
+        if variant == ProjectionVariant::Globe {
+            additional_defines.insert(GLOBE_DEFINE.to_owned(), String::new());
+        }
 
+        // The common prelude goes through the preprocessor with the shader,
+        // so its `#ifdef`s see the defines.
+        let common_prelude = format!("{}\n", prelude());
         let (mut vertex_source, mut fragment_source) = match source.wgsl.prelude {
-            Some(prelude) => (format!("{prelude}{vert}"), format!("{prelude}{frag}")),
-            None => (vert.to_owned(), frag.to_owned()),
+            Some(shader_prelude) => {
+                (format!("{common_prelude}{shader_prelude}{vert}"), format!("{common_prelude}{shader_prelude}{frag}"))
+            }
+            None => (format!("{common_prelude}{vert}"), format!("{common_prelude}{frag}")),
         };
 
         let mut define_set: HashMap<String, bool> = HashMap::new();

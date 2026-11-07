@@ -8,6 +8,7 @@
 //   include/mln/shaders/webgpu/debug.hpp
 //   include/mln/shaders/webgpu/fill.hpp
 //   include/mln/shaders/webgpu/fill_extrusion.hpp
+//   include/mln/shaders/webgpu/globe_depth.hpp
 //   include/mln/shaders/webgpu/heatmap.hpp
 //   include/mln/shaders/webgpu/heatmap_texture.hpp
 //   include/mln/shaders/webgpu/hillshade.hpp
@@ -17,12 +18,155 @@
 //   include/mln/shaders/webgpu/raster.hpp
 //   include/mln/shaders/webgpu/shader_group.hpp
 //   include/mln/shaders/webgpu/shader_program.hpp
+//   include/mln/shaders/webgpu/sky.hpp
 //   include/mln/shaders/webgpu/symbol.hpp
 //   include/mln/shaders/webgpu/wgsl_preprocessor.hpp
 //   include/mln/shaders/webgpu/widevector.hpp
 // The WGSL is copied unchanged from the C++ raw string literals.
 
 use super::shader_source::WgslShaderSource;
+
+/// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::WebGPU>`
+pub const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "AtmosphereShader",
+    name: r#"AtmosphereShader"#,
+    vertex: Some(r#"
+struct VertexInput {
+    @location(0) position: vec2<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) view_direction: vec3<f32>,
+};
+
+struct AtmospherePropsUBO {
+    inv_view_projection: mat4x4<f32>,
+    camera_position: vec4<f32>,
+    sun_position: vec4<f32>,
+};
+
+@group(0) @binding(5) var<uniform> atmosphere: AtmospherePropsUBO;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let view_position = atmosphere.inv_view_projection * vec4<f32>(pos, 0.0, 1.0);
+    var out: VertexOutput;
+    // WebGPU uses a zero-to-one NDC depth range, so 0.5 matches WebGL's
+    // framebuffer depth for clip-space z=0.
+    out.position = vec4<f32>(pos, 0.5, 1.0);
+    out.view_direction = view_position.xyz / view_position.w - atmosphere.camera_position.xyz;
+    return out;
+}
+"#),
+    fragment: Some(r#"
+struct FragmentInput {
+    @location(0) view_direction: vec3<f32>,
+};
+
+struct AtmospherePropsUBO {
+    inv_view_projection: mat4x4<f32>,
+    camera_position: vec4<f32>,
+    sun_position: vec4<f32>,
+};
+
+@group(0) @binding(5) var<uniform> atmosphere: AtmospherePropsUBO;
+
+const ATMOSPHERE_PI: f32 = 3.141592653589793;
+const PRIMARY_STEPS: i32 = 5;
+const LIGHT_STEPS: i32 = 3;
+const EARTH_RADIUS: f32 = 6371000.0;
+const ATMOSPHERE_RADIUS: f32 = 6471000.0;
+
+fn ray_sphere_intersection(origin: vec3<f32>, direction: vec3<f32>, radius: f32) -> vec2<f32> {
+    let a = dot(direction, direction);
+    let b = 2.0 * dot(direction, origin);
+    let c = dot(origin, origin) - radius * radius;
+    let discriminant = b * b - 4.0 * a * c;
+    if (discriminant < 0.0) {
+        return vec2<f32>(1e5, -1e5);
+    }
+    let root = sqrt(discriminant);
+    return vec2<f32>((-b - root) / (2.0 * a), (-b + root) / (2.0 * a));
+}
+
+fn scatter(direction: vec3<f32>, origin: vec3<f32>, sun: vec3<f32>) -> vec4<f32> {
+    let rayleigh_coefficient = vec3<f32>(5.5e-6, 13.0e-6, 22.4e-6);
+    let mie_coefficient = 21e-6;
+    let rayleigh_height = 8e3;
+    let mie_height = 1.2e3;
+    let mie_direction = 0.758;
+    let ray = normalize(direction);
+    let sun_direction = normalize(sun);
+
+    var bounds = ray_sphere_intersection(origin, ray, ATMOSPHERE_RADIUS);
+    if (bounds.x > bounds.y) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    bounds.x = max(bounds.x, 0.0);
+    let ground = ray_sphere_intersection(origin, ray, EARTH_RADIUS);
+    if (ground.x <= ground.y && ground.x > 0.0) {
+        bounds.y = min(bounds.y, ground.x);
+    }
+
+    let primary_step = (bounds.y - bounds.x) / f32(PRIMARY_STEPS);
+    var primary_time = bounds.x + primary_step * 0.5;
+    var primary_rayleigh_depth = 0.0;
+    var primary_mie_depth = 0.0;
+    var total_rayleigh = vec3<f32>(0.0);
+    var total_mie = vec3<f32>(0.0);
+    let mu = dot(ray, sun_direction);
+    let mu_squared = mu * mu;
+    let g_squared = mie_direction * mie_direction;
+    let rayleigh_phase = 3.0 / (16.0 * ATMOSPHERE_PI) * (1.0 + mu_squared);
+    let mie_phase = 3.0 / (8.0 * ATMOSPHERE_PI) * ((1.0 - g_squared) * (mu_squared + 1.0)) /
+        (pow(1.0 + g_squared - 2.0 * mu * mie_direction, 1.5) * (2.0 + g_squared));
+
+    for (var i: i32 = 0; i < PRIMARY_STEPS; i++) {
+        let sample_position = origin + ray * primary_time;
+        let sample_height = length(sample_position) - EARTH_RADIUS;
+        let rayleigh_step = exp(-sample_height / rayleigh_height) * primary_step;
+        let mie_step = exp(-sample_height / mie_height) * primary_step;
+        primary_rayleigh_depth += rayleigh_step;
+        primary_mie_depth += mie_step;
+        let light_step = ray_sphere_intersection(sample_position, sun_direction, ATMOSPHERE_RADIUS).y /
+            f32(LIGHT_STEPS);
+        var light_time = light_step * 0.5;
+        var light_rayleigh_depth = 0.0;
+        var light_mie_depth = 0.0;
+        for (var j: i32 = 0; j < LIGHT_STEPS; j++) {
+            let light_position = sample_position + sun_direction * light_time;
+            let light_height = length(light_position) - EARTH_RADIUS;
+            light_rayleigh_depth += exp(-light_height / rayleigh_height) * light_step;
+            light_mie_depth += exp(-light_height / mie_height) * light_step;
+            light_time += light_step;
+        }
+        let attenuation = exp(-(mie_coefficient * (primary_mie_depth + light_mie_depth) +
+            rayleigh_coefficient * (primary_rayleigh_depth + light_rayleigh_depth)));
+        total_rayleigh += rayleigh_step * attenuation;
+        total_mie += mie_step * attenuation;
+        primary_time += primary_step;
+    }
+
+    let opacity = exp(-(length(rayleigh_coefficient) * length(total_rayleigh) +
+        mie_coefficient * length(total_mie)));
+    let color = 22.0 * (rayleigh_phase * rayleigh_coefficient * total_rayleigh +
+        mie_phase * mie_coefficient * total_mie);
+    return vec4<f32>(color, opacity);
+}
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    let camera = atmosphere.camera_position.xyz * EARTH_RADIUS;
+    var color = scatter(in.view_direction, camera, atmosphere.sun_position.xyz);
+    color = vec4<f32>(1.0 - exp(-color.rgb), color.a);
+    color = pow(color, vec4<f32>(1.0 / 2.2));
+    return vec4<f32>(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
+}
+"#),
+    prelude: None,
+};
 
 /// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::WebGPU>`
 pub const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
@@ -74,17 +218,14 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundPatternDrawableUnionUBO>;
-@group(0) @binding(4) var<uniform> props: BackgroundPatternPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     let drawable = drawableVector[globalIndex.value];
-    let matrix = mat4x4<f32>(drawable.matrix_col0,
-                             drawable.matrix_col1,
-                             drawable.matrix_col2,
-                             drawable.matrix_col3);
 
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
 
@@ -105,7 +246,7 @@ fn main(in: VertexInput) -> VertexOutput {
         pos
     );
 
-    let clip = matrix * vec4<f32>(pos, 0.0, 1.0);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
     return out;
 }
@@ -137,7 +278,7 @@ struct GlobalPaintParamsUBO {
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(4) var<uniform> props: BackgroundPatternPropsUBO;
+@group(0) @binding(5) var<uniform> props: BackgroundPatternPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
 
@@ -203,17 +344,15 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<BackgroundDrawableUnionUBO>;
-@group(0) @binding(4) var<uniform> props: BackgroundPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-    let matrix = mat4x4<f32>(drawable.matrix_col0,
-                             drawable.matrix_col1,
-                             drawable.matrix_col2,
-                             drawable.matrix_col3);
-    let clip = matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
     return out;
 }
@@ -227,7 +366,7 @@ struct BackgroundPropsUBO {
     pad3: f32,
 };
 
-@group(0) @binding(4) var<uniform> props: BackgroundPropsUBO;
+@group(0) @binding(5) var<uniform> props: BackgroundPropsUBO;
 
 @fragment
 fn main() -> @location(0) vec4<f32> {
@@ -312,19 +451,45 @@ fn main(in: VertexInput) -> VertexOutput {
 
     let radius_with_stroke = radius + stroke_width;
 
+    let projection = projectionVector[globalIndex.value];
     var position: vec4<f32>;
     if (pitch_with_map) {
+#ifdef PROJECTION_GLOBE
+        let center_vector = projectToSphere(circle_center + projection.translate, vec2<f32>(0.0, 0.0), projection);
+        var angle_scale = drawable.globe_extrude_scale;
+#endif
         var corner_position = circle_center;
         if (scale_with_map) {
             corner_position += scaled_extrude * radius_with_stroke;
+#ifdef PROJECTION_GLOBE
+            angle_scale *= radius_with_stroke;
+#endif
         } else {
+#ifdef PROJECTION_GLOBE
+            let projected_center = interpolateProjection(circle_center, center_vector, 0.0, projection);
+            angle_scale *= radius_with_stroke * (projected_center.w / paintParams.camera_to_center_distance);
+#else
             let projected_center = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+#endif
             corner_position += scaled_extrude * radius_with_stroke *
                                (projected_center.w / paintParams.camera_to_center_distance);
         }
+#ifdef PROJECTION_GLOBE
+        let corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
+        position = interpolateProjection(corner_position, corner_vector, 0.0, projection);
+#else
         position = drawable.matrix * vec4<f32>(corner_position, 0.0, 1.0);
+#endif
     } else {
+#ifdef PROJECTION_GLOBE
+        position = projectTile(circle_center, projection);
+        if (position.z / position.w > 1.0) {
+            position.x = 10000.0;
+            position.y = 10000.0;
+        }
+#else
         position = drawable.matrix * vec4<f32>(circle_center, 0.0, 1.0);
+#endif
         var factor = position.w;
         if (scale_with_map) {
             factor = paintParams.camera_to_center_distance;
@@ -389,7 +554,7 @@ struct CircleDrawableUBO {
     stroke_color_t: f32,
     stroke_width_t: f32,
     stroke_opacity_t: f32,
-    pad1: f32,
+    globe_extrude_scale: f32,
     pad2: f32,
     pad3: f32,
 };
@@ -427,7 +592,8 @@ struct GlobalIndexUBO {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<CircleDrawableUBO>;
-@group(0) @binding(4) var<uniform> props: CircleEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: CircleEvaluatedPropsUBO;
 "#),
 };
 
@@ -452,12 +618,21 @@ struct ClipUBO {
     pad3: f32,
 };
 
+#ifdef PROJECTION_GLOBE
+@group(0) @binding(0) var<uniform> clip: ProjectionUBO;
+#else
 @group(0) @binding(0) var<uniform> clip: ClipUBO;
+#endif
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
+#ifdef PROJECTION_GLOBE
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let clip_pos = projectTileWithPoles(pos, pos, clip);
+#else
     let clip_pos = clip.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+#endif
     out.position = vec4<f32>(clip_pos.x, clip_pos.y, clip_pos.z, clip_pos.w);
     return out;
 }
@@ -514,13 +689,18 @@ struct GlobalPaintParamsUBO {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
-@group(0) @binding(4) var<uniform> tile_props: CollisionTilePropsUBO;
+@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
+@group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
+#ifdef PROJECTION_GLOBE
+    let projected_point = projectTile(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), projection);
+#else
     let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y), 0.0, 1.0);
+#endif
     let camera_to_anchor_distance = projected_point.w;
 
     let collision_perspective_ratio = clamp(
@@ -528,7 +708,15 @@ fn main(in: VertexInput) -> VertexOutput {
         0.0,
         4.0);
 
+#ifdef PROJECTION_GLOBE
+    out.position = projectTile(vec2<f32>(f32(in.position.x), f32(in.position.y)), projection);
+    // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
+    if (out.position.z / out.position.w < 1.1) {
+        out.position.z = 0.0;
+    }
+#else
     out.position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+#endif
     let extrude_shift = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y)) + in.shift;
     out.position.x += extrude_shift.x * tile_props.extrude_scale.x * out.position.w * collision_perspective_ratio;
     out.position.y += extrude_shift.y * tile_props.extrude_scale.y * out.position.w * collision_perspective_ratio;
@@ -613,7 +801,8 @@ struct CollisionTilePropsUBO {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<uniform> drawable: CollisionDrawableUBO;
-@group(0) @binding(4) var<uniform> tile_props: CollisionTilePropsUBO;
+@group(0) @binding(4) var<uniform> projection: ProjectionUBO;
+@group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -621,7 +810,11 @@ fn main(in: VertexInput) -> VertexOutput {
 
 
 
+#ifdef PROJECTION_GLOBE
+    let projected_point = projectTile(vec2<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y)), projection);
+#else
     let projected_point = drawable.matrix * vec4<f32>(f32(in.anchor_position.x), f32(in.anchor_position.y), 0.0, 1.0);
+#endif
     let camera_to_anchor_distance = projected_point.w;
 
     let perspective = max(camera_to_anchor_distance, 1e-6);
@@ -630,7 +823,15 @@ fn main(in: VertexInput) -> VertexOutput {
         0.0,
         4.0);
 
+#ifdef PROJECTION_GLOBE
+    var position = projectTile(vec2<f32>(f32(in.position.x), f32(in.position.y)), projection);
+    // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
+    if (position.z / position.w < 1.1) {
+        position.z = 0.0;
+    }
+#else
     var position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+#endif
     let padding_factor = 1.2;
     let extrude_vec = vec2<f32>(f32(in.extrude.x), f32(in.extrude.y));
     position.x += extrude_vec.x * tile_props.extrude_scale.x * padding_factor * position.w * collision_perspective_ratio;
@@ -661,7 +862,7 @@ struct CollisionTilePropsUBO {
     pad1: f32,
 };
 
-@group(0) @binding(4) var<uniform> tile_props: CollisionTilePropsUBO;
+@group(0) @binding(5) var<uniform> tile_props: CollisionTilePropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
@@ -727,7 +928,8 @@ struct ColorReliefTilePropsUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<ColorReliefDrawableUBO>;
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -735,9 +937,10 @@ fn main(in: VertexInput) -> VertexOutput {
     let drawable = drawableVector[globalIndex.value];
     let tileProps = tilePropsVector[globalIndex.value];
 
-    out.position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    out.position = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
 
-    let a_pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let a_pos = pos;
     let epsilon = vec2<f32>(1.0, 1.0) / tileProps.dimension;
     let scale = (tileProps.dimension.x - 2.0) / tileProps.dimension.x;
     out.frag_position = (a_pos / 8192.0) * scale + epsilon;
@@ -774,8 +977,8 @@ struct ColorReliefEvaluatedPropsUBO {
 };
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: ColorReliefEvaluatedPropsUBO;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<ColorReliefTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: ColorReliefEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
 @group(1) @binding(2) var elevation_stops_texture: texture_2d<f32>;
@@ -866,14 +1069,21 @@ struct DebugUBO {
     pad3: f32,
 };
 
-@group(0) @binding(0) var<uniform> debug: DebugUBO;
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> debug: DebugUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
 
     let scaled_pos = vec2<f32>(f32(in.position.x), f32(in.position.y)) * debug.overlay_scale;
-    out.position = debug.matrix * vec4<f32>(scaled_pos, 0.0, 1.0);
+    out.position = projectTile(scaled_pos, projectionVector[globalIndex.value]);
 
     // This vertex shader expects a EXTENT x EXTENT quad,
     // The UV coordinates for the overlay texture can be calculated using that knowledge
@@ -896,7 +1106,7 @@ struct DebugUBO {
     pad3: f32,
 };
 
-@group(0) @binding(0) var<uniform> debug: DebugUBO;
+@group(0) @binding(5) var<uniform> debug: DebugUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var overlay_texture: texture_2d<f32>;
 
@@ -1000,8 +1210,9 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionPatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: FillExtrusionPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -1029,7 +1240,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let z = select(baseValue, heightValue, t > 0.0);
     let decimals = unpack_float(f32(in.decimals_ed.x / 2)) / 128.0;
 
-    out.position = drawable.matrix * vec4<f32>(vec2<f32>(in.position) + decimals, z, 1.0);
+    out.position = projectTileFor3D(vec2<f32>(in.position) + decimals, z, projectionVector[globalIndex.value]);
 
     var patternPos: vec2<f32>;
     if (normal.z == 1.0) {
@@ -1139,8 +1350,8 @@ struct GlobalIndexUBO {
     pad0: vec3<u32>,
 };
 
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: FillExtrusionPropsUBO;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillExtrusionPatternTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -1240,7 +1451,8 @@ struct GlobalIndexUBO {
 };
 
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillExtrusionDrawableUBO>;
-@group(0) @binding(5) var<uniform> props: FillExtrusionPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(6) var<uniform> props: FillExtrusionPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -1266,7 +1478,7 @@ fn main(in: VertexInput) -> VertexOutput {
     let z = select(baseValue, heightValue, t > 0.0);
     let decimals = unpack_float(f32(in.decimals_ed.x / 2)) / 128.0;
 
-    out.position = drawable.matrix * vec4<f32>(vec2<f32>(in.position) + decimals, z, 1.0);
+    out.position = projectTileFor3D(vec2<f32>(in.position) + decimals, z, projectionVector[globalIndex.value]);
 
 #ifdef OVERDRAW_INSPECTOR
     out.color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
@@ -1406,8 +1618,9 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlinePatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -1451,7 +1664,7 @@ fn main(in: VertexInput) -> VertexOutput {
     );
 
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip = drawable.matrix * vec4<f32>(pos, 0.0, 1.0);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     let invW = 1.0 / clip.w;
     let ndcXY = clip.xy * invW;
 
@@ -1530,8 +1743,8 @@ struct GlobalIndexUBO {
     pad0: vec3<u32>,
 };
 
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillOutlinePatternTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -1666,7 +1879,8 @@ struct GlobalIndexUBO {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineDrawableUnionUBO>;
-@group(0) @binding(5) var<uniform> props: FillOutlineEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -1674,7 +1888,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     // Transform position using the matrix
     let drawable = drawableVector[globalIndex.value].fill;
-    let clip = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     let invW = 1.0 / clip.w;
     let ndcXY = clip.xy * invW;
     out.position = clip;
@@ -1710,7 +1925,7 @@ struct FillOutlineEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(5) var<uniform> props: FillOutlineEvaluatedPropsUBO;
+@group(0) @binding(6) var<uniform> props: FillOutlineEvaluatedPropsUBO;
 
 struct FragmentInput {
     @location(0) color: vec4<f32>,
@@ -1789,6 +2004,7 @@ struct GlobalIndexUBO {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillOutlineTriangulatedDrawableUnionUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -1816,8 +2032,8 @@ fn main(in: VertexInput) -> VertexOutput {
     let dist = extrude * outset * SCALE;
     let extrude_vec = dist / ratio;
 
-    let projected_extrude = matrix * vec4<f32>(extrude_vec, 0.0, 0.0);
-    let base = matrix * vec4<f32>(pos, 0.0, 1.0);
+    let projected_extrude = projectionVector[globalIndex.value].fallback_matrix * vec4<f32>(extrude_vec, 0.0, 0.0);
+    let base = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     let clip = base + projected_extrude;
     out.position = clip;
 
@@ -1861,7 +2077,7 @@ struct GlobalPaintParamsUBO {
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
@@ -1964,8 +2180,9 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillPatternDrawableUBO>;
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -2009,7 +2226,7 @@ fn main(in: VertexInput) -> VertexOutput {
     );
 
     let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
-    let clip = drawable.matrix * vec4<f32>(pos, 0.0, 1.0);
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
     out.v_pos_a = get_pattern_pos(
         drawable.pixel_coord_upper,
@@ -2081,8 +2298,8 @@ struct GlobalIndexUBO {
     pad0: vec3<u32>,
 };
 
-@group(0) @binding(4) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(5) var<storage, read> tilePropsVector: array<FillPatternTilePropsUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var pattern_texture: texture_2d<f32>;
@@ -2200,7 +2417,8 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<FillDrawableUnionUBO>;
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -2208,7 +2426,8 @@ fn main(in: VertexInput) -> VertexOutput {
 
     // Transform position using the matrix
     let drawable = drawableVector[globalIndex.value].fill;
-    let clip = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
 
     var color: vec4<f32>;
@@ -2241,7 +2460,7 @@ struct FillEvaluatedPropsUBO {
     to_scale: f32,
 };
 
-@group(0) @binding(5) var<uniform> props: FillEvaluatedPropsUBO;
+@group(0) @binding(6) var<uniform> props: FillEvaluatedPropsUBO;
 
 struct FragmentInput {
     @location(0) color: vec4<f32>,
@@ -2265,6 +2484,43 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
 
     return color * opacity;
+}
+"#),
+    prelude: None,
+};
+
+/// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::WebGPU>`
+pub const GLOBE_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "GlobeDepthShader",
+    name: r#"GlobeDepthShader"#,
+    vertex: Some(r#"
+struct VertexInput {
+    @location(0) position: vec2<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+};
+
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
+};
+
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    var out: VertexOutput;
+    out.position = projectTileFor3D(vec2<f32>(f32(in.position.x), f32(in.position.y)), 0.0, projectionVector[globalIndex.value]);
+    return out;
+}
+"#),
+    fragment: Some(r#"
+@fragment
+fn main() -> @location(0) vec4<f32> {
+    return vec4<f32>(0.0);
 }
 "#),
     prelude: None,
@@ -2296,7 +2552,7 @@ struct HeatmapDrawableUBO {
     extrude_scale: f32,
     weight_t: f32,
     radius_t: f32,
-    pad1: f32,
+    globe_extrude_scale: f32,
 };
 
 struct HeatmapEvaluatedPropsUBO {
@@ -2313,7 +2569,8 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<HeatmapDrawableUBO>;
-@group(0) @binding(4) var<uniform> props: HeatmapEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: HeatmapEvaluatedPropsUBO;
 
 const ZERO: f32 = 1.0 / 255.0 / 16.0;
 const GAUSS_COEF: f32 = 0.3989422804014327;
@@ -2345,7 +2602,13 @@ fn main(in: VertexInput) -> VertexOutput {
     let scaled_extrude = extrude * radius * drawable.extrude_scale;
 
     let base = floor(pos * 0.5);
+#ifdef PROJECTION_GLOBE
+    let center_vector = projectToSphere(base, vec2<f32>(0.0, 0.0), projectionVector[globalIndex.value]);
+    let corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
+    out.position = interpolateProjection(base + scaled_extrude, corner_vector, 0.0, projectionVector[globalIndex.value]);
+#else
     out.position = drawable.matrix * vec4<f32>(base + scaled_extrude, 0.0, 1.0);
+#endif
     out.weight = weight;
     out.extrude = extrude;
 
@@ -2367,7 +2630,7 @@ struct HeatmapEvaluatedPropsUBO {
 
 const GAUSS_COEF: f32 = 0.3989422804014327;
 
-@group(0) @binding(4) var<uniform> props: HeatmapEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: HeatmapEvaluatedPropsUBO;
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
@@ -2413,7 +2676,7 @@ struct GlobalPaintParamsUBO {
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
-@group(0) @binding(4) var<uniform> ubo: HeatmapTextureUBO;
+@group(0) @binding(5) var<uniform> ubo: HeatmapTextureUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -2441,7 +2704,7 @@ struct HeatmapTextureUBO {
     pad3: f32,
 };
 
-@group(0) @binding(4) var<uniform> ubo: HeatmapTextureUBO;
+@group(0) @binding(5) var<uniform> ubo: HeatmapTextureUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var heatmap_texture: texture_2d<f32>;
 @group(1) @binding(2) var color_ramp_texture: texture_2d<f32>;
@@ -2483,7 +2746,7 @@ struct HillshadePrepareTilePropsUBO {
 };
 
 @group(0) @binding(2) var<uniform> drawable: HillshadePrepareDrawableUBO;
-@group(0) @binding(4) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
+@group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -2508,7 +2771,7 @@ struct HillshadePrepareTilePropsUBO {
     maxzoom: f32,
 };
 
-@group(0) @binding(4) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
+@group(0) @binding(5) var<uniform> tileProps: HillshadePrepareTilePropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var dem_texture: texture_2d<f32>;
 
@@ -2590,12 +2853,14 @@ struct HillshadeDrawableUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<HillshadeDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-    out.position = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    out.position = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
 
     var tex = vec2<f32>(f32(in.texcoord.x), f32(in.texcoord.y)) / 8192.0;
     tex.y = 1.0 - tex.y;
@@ -2639,7 +2904,7 @@ struct HillshadeEvaluatedPropsUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<HillshadeTilePropsUBO>;
-@group(0) @binding(4) var<uniform> props: HillshadeEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: HillshadeEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var hillshade_texture: texture_2d<f32>;
 
@@ -2803,6 +3068,9 @@ struct VertexOutput {
     @location(6) v_opacity: f32,
     @location(7) v_floorwidth: f32,
     @location(8) v_lineprogress: f32,
+#ifdef PROJECTION_GLOBE
+    @location(9) v_tile_x: f32,
+#endif
 };
 
 struct LineSDFDrawableUBO {
@@ -2866,7 +3134,8 @@ struct LineSDFDrawableEntry {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -2940,8 +3209,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let t = 1.0 - abs(u);
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
+#ifdef PROJECTION_GLOBE
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
+    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let projected_extrude = position_globe - projected_no_extrude;
+    let position = position_globe;
+#else
     let projected_extrude = drawable.matrix * vec4<f32>(dist / drawable.ratio, 0.0, 0.0);
     let position = drawable.matrix * vec4<f32>(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // Calculate gamma scale
     let extrude_length_without_perspective = length(dist);
@@ -2982,6 +3261,9 @@ struct FragmentInput {
     @location(6) v_opacity: f32,
     @location(7) v_floorwidth: f32,
     @location(8) v_lineprogress: f32,
+#ifdef PROJECTION_GLOBE
+    @location(9) v_tile_x: f32,
+#endif
 };
 
 struct LineSDFTilePropsUBO {
@@ -3025,6 +3307,11 @@ struct LineSDFTilePropsEntry {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef PROJECTION_GLOBE
+    if (clippedAtAntimeridian(in.v_tile_x)) {
+        discard;
+    }
+#endif
     let tileProps = tilePropsVector[globalIndex.value].data;
 
     // Calculate the distance of the pixel from the line
@@ -3075,6 +3362,9 @@ struct VertexOutput {
     @location(3) v_lineprogress: f32,
     @location(4) v_blur: f32,
     @location(5) v_opacity: f32,
+#ifdef PROJECTION_GLOBE
+    @location(6) v_tile_x: f32,
+#endif
 };
 
 struct LineGradientDrawableUBO {
@@ -3134,7 +3424,8 @@ struct LineGradientDrawableEntry {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineGradientDrawableEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -3199,8 +3490,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let t = 1.0 - abs(u);
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
+#ifdef PROJECTION_GLOBE
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
+    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let projected_extrude = position_globe - projected_no_extrude;
+    let position = position_globe;
+#else
     let projected_extrude = drawable.matrix * vec4<f32>(dist / drawable.ratio, 0.0, 0.0);
     let position = drawable.matrix * vec4<f32>(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // Calculate gamma scale
     let extrude_length_without_perspective = length(dist);
@@ -3225,6 +3526,9 @@ struct FragmentInput {
     @location(3) v_lineprogress: f32,
     @location(4) v_blur: f32,
     @location(5) v_opacity: f32,
+#ifdef PROJECTION_GLOBE
+    @location(6) v_tile_x: f32,
+#endif
 };
 
 struct GlobalPaintParamsUBO {
@@ -3245,6 +3549,11 @@ struct GlobalPaintParamsUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef PROJECTION_GLOBE
+    if (clippedAtAntimeridian(in.v_tile_x)) {
+        discard;
+    }
+#endif
     // Calculate the distance of the pixel from the line
     let dist = length(in.v_normal) * in.v_width2.x;
 
@@ -3290,6 +3599,9 @@ struct VertexOutput {
     @location(6) v_pattern_from: vec4<f32>,
     @location(7) v_pattern_to: vec4<f32>,
     @location(8) v_floorwidth: f32,
+#ifdef PROJECTION_GLOBE
+    @location(9) v_tile_x: f32,
+#endif
 };
 
 struct LinePatternDrawableUBO {
@@ -3357,8 +3669,9 @@ struct LinePatternTilePropsEntry {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LinePatternDrawableEntry>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LinePatternTilePropsEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -3432,8 +3745,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let t = 1.0 - abs(u);
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
+#ifdef PROJECTION_GLOBE
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
+    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let extrudedPos = pos + (offset2 + dist) / ratio * adjustedThickness;
+    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let projected_extrude = position_globe - projected_no_extrude;
+    let position = position_globe;
+#else
     let projected_extrude = drawable.matrix * vec4<f32>(dist / ratio, 0.0, 0.0);
     let position = drawable.matrix * vec4<f32>(pos + offset2 / ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     let extrude_length_without_perspective = length(dist);
     let extrude_length_with_perspective = length(projected_extrude.xy / position.w * paintParams.units_to_pixels);
@@ -3464,6 +3787,9 @@ struct FragmentInput {
     @location(6) v_pattern_from: vec4<f32>,
     @location(7) v_pattern_to: vec4<f32>,
     @location(8) v_floorwidth: f32,
+#ifdef PROJECTION_GLOBE
+    @location(9) v_tile_x: f32,
+#endif
 };
 
 struct GlobalPaintParamsUBO {
@@ -3504,6 +3830,11 @@ struct LinePatternTilePropsEntry {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef PROJECTION_GLOBE
+    if (clippedAtAntimeridian(in.v_tile_x)) {
+        discard;
+    }
+#endif
     let tileProps = tilePropsVector[globalIndex.value].data;
 
     var pattern_from = in.v_pattern_from;
@@ -3598,6 +3929,9 @@ struct VertexOutput {
     @location(6) v_blur: f32,
     @location(7) v_opacity: f32,
     @location(8) v_floorwidth: f32,
+#ifdef PROJECTION_GLOBE
+    @location(9) v_tile_x: f32,
+#endif
 };
 
 struct LineSDFDrawableUBO {
@@ -3675,8 +4009,9 @@ struct LineSDFTilePropsEntry {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineSDFDrawableEntry>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<LineSDFTilePropsEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -3754,8 +4089,18 @@ fn main(in: VertexInput) -> VertexOutput {
     let t = 1.0 - abs(u);
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * mat2x2<f32>(t, -u, u, t);
 
+#ifdef PROJECTION_GLOBE
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
+    let projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    let position_globe = projectTile(extrudedPos, projectionVector[globalIndex.value]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let projected_extrude = position_globe - projected_no_extrude;
+    let position = position_globe;
+#else
     let projected_extrude = drawable.matrix * vec4<f32>(dist / drawable.ratio, 0.0, 0.0);
     let position = drawable.matrix * vec4<f32>(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // Calculate gamma scale
     let extrude_length_without_perspective = length(dist);
@@ -3796,6 +4141,9 @@ struct FragmentInput {
     @location(6) v_blur: f32,
     @location(7) v_opacity: f32,
     @location(8) v_floorwidth: f32,
+#ifdef PROJECTION_GLOBE
+    @location(9) v_tile_x: f32,
+#endif
 };
 
 struct LineSDFTilePropsUBO {
@@ -3837,6 +4185,11 @@ struct LineSDFTilePropsEntry {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef PROJECTION_GLOBE
+    if (clippedAtAntimeridian(in.v_tile_x)) {
+        discard;
+    }
+#endif
     let tileProps = tilePropsVector[globalIndex.value].data;
 
     // Calculate the distance of the pixel from the line
@@ -3885,6 +4238,9 @@ struct VertexOutput {
     @location(3) v_color: vec4<f32>,
     @location(4) v_blur: f32,
     @location(5) v_opacity: f32,
+#ifdef PROJECTION_GLOBE
+    @location(6) v_tile_x: f32,
+#endif
 };
 
 struct LineDrawableUBO {
@@ -3936,7 +4292,8 @@ struct LineDrawableEntry {
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<LineDrawableEntry>;
-@group(0) @binding(4) var<uniform> props: LineEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: LineEvaluatedPropsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 
 @vertex
@@ -4006,17 +4363,24 @@ fn main(in: VertexInput) -> VertexOutput {
     let t = 1.0 - abs(u);
     let offset2 = offset * a_extrude * LINE_NORMAL_SCALE * normal.y * mat2x2<f32>(t, -u, u, t);
 
+#ifdef PROJECTION_GLOBE
+    let adjustedThickness = projectLineThickness(pos.y, projectionVector[globalIndex.value]);
+    let projected_no_extrude = projectTile(pos + offset2 / ratio * adjustedThickness, projectionVector[globalIndex.value]);
+    let extrudedPos = pos + (offset2 + dist) / ratio * adjustedThickness;
+    let base = projectTile(extrudedPos, projectionVector[globalIndex.value]);
+    out.v_tile_x = antimeridianClipX(extrudedPos, projectionVector[globalIndex.value]);
+    let projected_extrude = base - projected_no_extrude;
+#else
     let projected_extrude = drawable.matrix * vec4<f32>(dist / ratio, 0.0, 0.0);
-    let base = drawable.matrix * vec4<f32>(pos + offset2 / ratio, 0.0, 1.0);
-    let clip = base + projected_extrude;
+    let base = drawable.matrix * vec4<f32>(pos + offset2 / ratio, 0.0, 1.0) + projected_extrude;
+#endif
+    let inv_w = 1.0 / base.w;
 
-    let inv_w = 1.0 / clip.w;
-
-    out.position = clip;
+    out.position = base;
 
     let extrude_length_without_perspective = length(dist);
     let extrude_length_with_perspective =
-        length((projected_extrude.xy / clip.w) * paintParams.units_to_pixels);
+        length((projected_extrude.xy / base.w) * paintParams.units_to_pixels);
     let gamma_denom = max(extrude_length_with_perspective, 1e-6);
 
     out.v_width2 = vec2<f32>(outset, inset);
@@ -4037,6 +4401,9 @@ struct FragmentInput {
     @location(3) v_color: vec4<f32>,
     @location(4) v_blur: f32,
     @location(5) v_opacity: f32,
+#ifdef PROJECTION_GLOBE
+    @location(6) v_tile_x: f32,
+#endif
 };
 
 struct GlobalPaintParamsUBO {
@@ -4055,6 +4422,11 @@ struct GlobalPaintParamsUBO {
 
 @fragment
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+#ifdef PROJECTION_GLOBE
+    if (clippedAtAntimeridian(in.v_tile_x)) {
+        discard;
+    }
+#endif
     // Calculate the distance of the pixel from the line in pixels
     let dist = length(in.v_normal) * in.v_width2.x;
 
@@ -4083,17 +4455,18 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
 };
 
-struct LocationIndicatorUBO {
-    matrix: mat4x4<f32>,
-    color: vec4<f32>,
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
 };
 
-@group(0) @binding(4) var<uniform> ubo: LocationIndicatorUBO;
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.position = ubo.matrix * vec4<f32>(in.position, 0.0, 1.0);
+    out.position = projectTile(in.position, projectionVector[globalIndex.value]);
     return out;
 }
 "#),
@@ -4103,7 +4476,7 @@ struct LocationIndicatorUBO {
     color: vec4<f32>,
 };
 
-@group(0) @binding(4) var<uniform> ubo: LocationIndicatorUBO;
+@group(0) @binding(5) var<uniform> ubo: LocationIndicatorUBO;
 
 @fragment
 fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
@@ -4128,17 +4501,18 @@ struct VertexOutput {
     @location(0) uv: vec2<f32>,
 };
 
-struct LocationIndicatorUBO {
-    matrix: mat4x4<f32>,
-    color: vec4<f32>,
+struct GlobalIndexUBO {
+    value: u32,
+    pad0: vec3<u32>,
 };
 
-@group(0) @binding(4) var<uniform> ubo: LocationIndicatorUBO;
+@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
-    out.position = ubo.matrix * vec4<f32>(in.position, 0.0, 1.0);
+    out.position = projectTile(in.position, projectionVector[globalIndex.value]);
     out.uv = in.uv;
     return out;
 }
@@ -4149,9 +4523,9 @@ struct LocationIndicatorUBO {
     color: vec4<f32>,
 };
 
-@group(0) @binding(4) var<uniform> ubo: LocationIndicatorUBO;
-@group(0) @binding(1) var colorTexture: texture_2d<f32>;
-@group(0) @binding(2) var colorSampler: sampler;
+@group(0) @binding(5) var<uniform> ubo: LocationIndicatorUBO;
+@group(1) @binding(0) var colorSampler: sampler;
+@group(1) @binding(1) var colorTexture: texture_2d<f32>;
 
 @fragment
 fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
@@ -4237,6 +4611,165 @@ fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
     let offset = gl_mod(offset_b, pattern_size);
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
+
+struct ProjectionUBO {
+    matrix: mat4x4<f32>,
+    fallback_matrix: mat4x4<f32>,
+    tile_mercator_coords: vec4<f32>,
+    clipping_plane: vec4<f32>,
+    projection_transition: f32,
+    depth_offset: f32,
+    translate: vec2<f32>,
+};
+
+// Pole vertices carry these sentinel Y values in their raw position.
+const GLOBE_POLE_NORTH_Y: f32 = -32767.5;
+const GLOBE_POLE_SOUTH_Y: f32 = 32766.5;
+
+#ifdef PROJECTION_GLOBE
+
+const GLOBE_RADIUS: f32 = 6371008.8;
+
+// Tile position (0..EXTENT) to a point on the unit sphere; the pole sentinels in rawPos map to the poles.
+fn projectToSphere(translatedPos: vec2<f32>, rawPos: vec2<f32>, projection: ProjectionUBO) -> vec3<f32> {
+    let mercator_pos = projection.tile_mercator_coords.xy + projection.tile_mercator_coords.zw * translatedPos;
+    let spherical_x = mercator_pos.x * PI * 2.0 + PI;
+    // sin/cos of the latitude from the Mercator Y via the tangent half-angle identities: no atan, and float32 precision survives near the equator.
+    let t = exp(PI - (mercator_pos.y * PI * 2.0));
+    let t2 = t * t;
+    let denom = t2 + 1.0;
+    let sin_sy = (t2 - 1.0) / denom;
+    let cos_sy = (2.0 * t) / denom;
+    var pos = vec3<f32>(sin(spherical_x) * cos_sy, sin_sy, cos(spherical_x) * cos_sy);
+    if (rawPos.y < GLOBE_POLE_NORTH_Y) {
+        pos = vec3<f32>(0.0, 1.0, 0.0);
+    }
+    if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
+        pos = vec3<f32>(0.0, -1.0, 0.0);
+    }
+    return pos;
+}
+
+fn globeRotateVector(vec: vec3<f32>, angles: vec2<f32>) -> vec3<f32> {
+    var axisRight = vec3<f32>(vec.z, 0.0, -vec.x);
+    var axisUp = cross(axisRight, vec);
+    axisRight = normalize(axisRight);
+    axisUp = normalize(axisUp);
+    let t = tan(angles);
+    return normalize(vec + axisRight * t.x + axisUp * t.y);
+}
+
+// cos(latitude) at a tile Y, from the same exp() form as projectToSphere.
+fn circumferenceRatioAtTileY(tileY: f32, projection: ProjectionUBO) -> f32 {
+    let mercator_pos_y = projection.tile_mercator_coords.y + projection.tile_mercator_coords.w * tileY;
+    let t = exp(PI - (mercator_pos_y * PI * 2.0));
+    return (2.0 * t) / (t * t + 1.0);
+}
+
+fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
+    let thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
+    if (projection.projection_transition < 0.999) {
+        return mix(1.0, thickness, projection.projection_transition);
+    }
+    return thickness;
+}
+
+fn globeComputeClippingZ(spherePos: vec3<f32>, projection: ProjectionUBO) -> f32 {
+    return 1.0 - (dot(spherePos, projection.clipping_plane.xyz) + projection.clipping_plane.w);
+}
+
+fn interpolateProjection(posInTile: vec2<f32>, spherePos: vec3<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
+    let elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
+    var globePosition = projection.matrix * vec4<f32>(elevatedPos, 1.0);
+    // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
+    globePosition.z = globeComputeClippingZ(elevatedPos, projection) * globePosition.w - projection.depth_offset;
+
+    if (projection.projection_transition > 0.999) {
+        return globePosition;
+    }
+
+    let flatPosition = projection.fallback_matrix * vec4<f32>(posInTile, elevation, 1.0);
+    let z_globeness_threshold = 0.2;
+    var result = globePosition;
+    result.z = mix(0.0, globePosition.z, clamp((projection.projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
+    let xyw = mix(flatPosition.xyw, globePosition.xyw, projection.projection_transition);
+    result.x = xyw.x;
+    result.y = xyw.y;
+    result.w = xyw.z;
+    if ((posInTile.y < GLOBE_POLE_NORTH_Y) || (posInTile.y > GLOBE_POLE_SOUTH_Y)) {
+        result = globePosition;
+        let poles_hidden_anim_percentage = 0.02;
+        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
+    }
+    return result;
+}
+
+// Keeps the matrix Z, for geometry that needs the depth buffer.
+fn interpolateProjectionFor3D(posInTile: vec2<f32>, spherePos: vec3<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
+    let elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
+    let globePosition = projection.matrix * vec4<f32>(elevatedPos, 1.0);
+    if (projection.projection_transition > 0.999) {
+        return globePosition;
+    }
+    let fallbackPosition = projection.fallback_matrix * vec4<f32>(posInTile, elevation, 1.0);
+    return mix(fallbackPosition, globePosition, projection.projection_transition);
+}
+
+fn projectTile(pos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, vec2<f32>(0.0, 0.0), projection), 0.0, projection);
+}
+
+// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
+// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
+fn antimeridianClipX(posInTile: vec2<f32>, projection: ProjectionUBO) -> f32 {
+    return select(0.0, posInTile.x, projection.tile_mercator_coords.z * 8192.0 >= 1.0);
+}
+
+fn clippedAtAntimeridian(tileX: f32) -> bool {
+    return tileX < 0.0 || tileX >= 8192.0;
+}
+
+// The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
+fn projectTileWithPoles(pos: vec2<f32>, rawPos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, rawPos, projection), 0.0, projection);
+}
+
+fn projectTileWithElevation(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, vec2<f32>(0.0, 0.0), projection), elevation, projection);
+}
+
+fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
+    return interpolateProjectionFor3D(pos, projectToSphere(pos + projection.translate, pos, projection), elevation, projection);
+}
+
+#else
+
+fn projectTile(pos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {
+    return projection.matrix * vec4<f32>(pos, 0.0, 1.0);
+}
+
+// Pole vertices only exist on the globe; put them behind the near plane so their triangles are clipped.
+fn projectTileWithPoles(pos: vec2<f32>, rawPos: vec2<f32>, projection: ProjectionUBO) -> vec4<f32> {
+    var result = projection.matrix * vec4<f32>(pos, 0.0, 1.0);
+    if (rawPos.y < GLOBE_POLE_NORTH_Y || rawPos.y > GLOBE_POLE_SOUTH_Y) {
+        result.z = -10000000.0;
+    }
+    return result;
+}
+
+fn projectTileWithElevation(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
+    return projection.matrix * vec4<f32>(pos, elevation, 1.0);
+}
+
+fn projectTileFor3D(pos: vec2<f32>, elevation: f32, projection: ProjectionUBO) -> vec4<f32> {
+    return projection.matrix * vec4<f32>(pos, elevation, 1.0);
+}
+
+fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
+    return 1.0;
+}
+
+#endif
 "#),
 };
 
@@ -4282,13 +4815,15 @@ struct GlobalIndexUBO {
 
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<RasterDrawableUBO>;
-@group(0) @binding(4) var<uniform> props: RasterEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
     var out: VertexOutput;
     let drawable = drawableVector[globalIndex.value];
-    let clip = drawable.matrix * vec4<f32>(f32(in.position.x), f32(in.position.y), 0.0, 1.0);
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    let clip = projectTileWithPoles(pos, pos, projectionVector[globalIndex.value]);
     out.position = clip;
 
     let tex = vec2<f32>(f32(in.texcoord.x), f32(in.texcoord.y));
@@ -4320,7 +4855,7 @@ struct RasterEvaluatedPropsUBO {
     pad2: f32,
 };
 
-@group(0) @binding(4) var<uniform> props: RasterEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: RasterEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var image0: texture_2d<f32>;
 @group(1) @binding(2) var image1: texture_2d<f32>;
@@ -4360,6 +4895,65 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
+/// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::WebGPU>`
+pub const SKY_SHADER: WgslShaderSource = WgslShaderSource {
+    built_in: "SkyShader",
+    name: r#"SkyShader"#,
+    vertex: Some(r#"
+struct VertexInput {
+    @location(0) position: vec2<i32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) pos: vec2<f32>,
+};
+
+@vertex
+fn main(in: VertexInput) -> VertexOutput {
+    let pos = vec2<f32>(f32(in.position.x), f32(in.position.y));
+    var out: VertexOutput;
+    out.position = vec4<f32>(pos, 1.0, 1.0);
+    out.pos = pos;
+    return out;
+}
+"#),
+    fragment: Some(r#"
+struct FragmentInput {
+    @location(0) pos: vec2<f32>,
+};
+
+struct SkyPropsUBO {
+    sky_color: vec4<f32>,
+    horizon_color: vec4<f32>,
+    horizon: vec2<f32>,
+    horizon_normal: vec2<f32>,
+    viewport_size: vec2<f32>,
+    sky_horizon_blend: f32,
+    sky_blend: f32,
+};
+
+@group(0) @binding(5) var<uniform> sky: SkyPropsUBO;
+
+@fragment
+fn main(in: FragmentInput) -> @location(0) vec4<f32> {
+    let pixel = (in.pos * 0.5 + 0.5) * sky.viewport_size;
+    let distance_to_horizon = dot(pixel - sky.horizon, sky.horizon_normal);
+    var color = vec4<f32>(0.0);
+    if (distance_to_horizon > 0.0) {
+        if (sky.sky_horizon_blend > 0.0 && distance_to_horizon < sky.sky_horizon_blend) {
+            let blend = 1.0 - distance_to_horizon / sky.sky_horizon_blend;
+            color = mix(sky.sky_color, sky.horizon_color, blend * blend);
+        } else {
+            color = sky.sky_color;
+        }
+    }
+    return color * (1.0 - sky.sky_blend);
+}
+"#),
+    prelude: None,
+};
+
 /// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolIconShader",
@@ -4388,6 +4982,7 @@ struct VertexOutput {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -4437,7 +5032,9 @@ fn main(in: VertexInput) -> VertexOutput {
         size = drawable.size;
     }
 
-    let projectedPoint = drawable.matrix * vec4<f32>(a_pos, 0.0, 1.0);
+    let projection = projectionVector[globalIndex.value];
+    let translated_a_pos = a_pos + drawable.translation;
+    let projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
     let camera_to_anchor_distance = projectedPoint.w;
     let pitch_with_map = drawable.pitch_with_map != 0u;
     let distance_ratio = select(
@@ -4456,7 +5053,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = drawable.matrix * vec4<f32>(a_pos + vec2<f32>(1.0, 0.0), 0.0, 1.0);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), 0.0, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -4466,10 +5063,28 @@ fn main(in: VertexInput) -> VertexOutput {
     let angle_cos = cos(segment_angle + symbol_rotation);
     let rotation_matrix = mat2x2<f32>(angle_cos, -angle_sin, angle_sin, angle_cos);
 
-    let projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
-    let pos0 = projected_pos.xy / projected_pos.w;
+    var projected_pos: vec4<f32>;
+    if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
+        projected_pos = vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+    } else if (drawable.pitch_with_map != 0u) {
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, 0.0, 1.0);
+    } else {
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, 0.0, projection);
+    }
+    let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
+
+    var projectionScaling = 1.0;
+#ifdef PROJECTION_GLOBE
+    if (drawable.pitch_with_map != 0u) {
+        let anchor_pos_tile_y = (drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w, z, 1.0)).y;
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+    }
+#endif
     let posOffset = a_offset * max(a_minFontScale, vec2<f32>(fontScale)) / 32.0 + a_pxoffset / 16.0;
-    let position = drawable.coord_matrix * vec4<f32>(pos0 + rotation_matrix * posOffset, 0.0, 1.0);
+    var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * posOffset * projectionScaling, z, 1.0);
+    if (drawable.pitch_with_map != 0u) {
+        position = projectTileWithElevation(position.xy, position.z, projection);
+    }
 
     out.position = position;
     out.tex = a_tex / drawable.texsize;
@@ -4492,7 +5107,7 @@ struct FragmentInput {
 
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<uniform> props: SymbolEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var image: texture_2d<f32>;
 
@@ -4553,6 +5168,13 @@ struct SymbolDrawableUBO {
     opacity_t: f32,
     halo_width_t: f32,
     halo_blur_t: f32,
+
+    is_along_line: u32,
+    is_variable_anchor: u32,
+    pitched_scale: f32,
+    translation: vec2<f32>,
+    pad1: f32,
+    pad2: f32,
 };
 
 struct SymbolTilePropsUBO {
@@ -4640,7 +5262,8 @@ struct VertexOutput {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
-@group(0) @binding(4) var<uniform> props: SymbolEvaluatedPropsUBO;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
+@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 
 @vertex
 fn main(in: VertexInput) -> VertexOutput {
@@ -4682,7 +5305,9 @@ fn main(in: VertexInput) -> VertexOutput {
         size = drawable.size;
     }
 
-    let projectedPoint = drawable.matrix * vec4<f32>(a_pos, 0.0, 1.0);
+    let projection = projectionVector[globalIndex.value];
+    let translated_a_pos = a_pos + drawable.translation;
+    let projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
     let camera_to_anchor_distance = projectedPoint.w;
     let pitch_with_map = drawable.pitch_with_map != 0u;
     let distance_ratio = select(
@@ -4701,7 +5326,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = drawable.matrix * vec4<f32>(a_pos + vec2<f32>(1.0, 0.0), 0.0, 1.0);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), 0.0, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -4711,10 +5336,28 @@ fn main(in: VertexInput) -> VertexOutput {
     let angle_cos = cos(segment_angle + symbol_rotation);
     let rotation_matrix = mat2x2<f32>(angle_cos, -angle_sin, angle_sin, angle_cos);
 
-    let projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+    var projected_pos: vec4<f32>;
+    if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
+        projected_pos = vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+    } else if (drawable.pitch_with_map != 0u) {
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, 0.0, 1.0);
+    } else {
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, 0.0, projection);
+    }
+    let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
+
+    var projectionScaling = 1.0;
+#ifdef PROJECTION_GLOBE
+    if (drawable.pitch_with_map != 0u) {
+        let anchor_pos_tile_y = (drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w, z, 1.0)).y;
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+    }
+#endif
     let pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
-    let pos0 = projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot;
-    let position = drawable.coord_matrix * vec4<f32>(pos0, 0.0, 1.0);
+    var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
+    if (drawable.pitch_with_map != 0u) {
+        position = projectTileWithElevation(position.xy, position.z, projection);
+    }
 
     out.position = position;
     out.tex = a_tex / drawable.texsize;
@@ -4766,7 +5409,7 @@ struct FragmentInput {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<uniform> props: SymbolEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var texture_sampler: sampler;
 @group(1) @binding(1) var glyph_atlas: texture_2d<f32>;
 
@@ -4872,6 +5515,13 @@ struct SymbolDrawableUBO {
     opacity_t: f32,
     halo_width_t: f32,
     halo_blur_t: f32,
+
+    is_along_line: u32,
+    is_variable_anchor: u32,
+    pitched_scale: f32,
+    translation: vec2<f32>,
+    pad1: f32,
+    pad2: f32,
 };
 
 struct SymbolTilePropsUBO {
@@ -4959,6 +5609,7 @@ struct VertexOutput {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
 @group(0) @binding(2) var<storage, read> drawableVector: array<SymbolDrawableUBO>;
+@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 
 const SDF = 1.0;
 const ICON = 0.0;
@@ -5003,7 +5654,9 @@ fn main(in: VertexInput) -> VertexOutput {
         size = drawable.size;
     }
 
-    let projectedPoint = drawable.matrix * vec4<f32>(a_pos, 0.0, 1.0);
+    let projection = projectionVector[globalIndex.value];
+    let translated_a_pos = a_pos + drawable.translation;
+    let projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
     let camera_to_anchor_distance = projectedPoint.w;
     let pitch_with_map = drawable.pitch_with_map != 0u;
     let distance_ratio = select(
@@ -5021,7 +5674,7 @@ fn main(in: VertexInput) -> VertexOutput {
 
     var symbol_rotation = 0.0;
     if (drawable.rotate_symbol != 0u) {
-        let offsetProjectedPoint = drawable.matrix * vec4<f32>(a_pos + vec2<f32>(1.0, 0.0), 0.0, 1.0);
+        let offsetProjectedPoint = projectTileWithElevation(translated_a_pos + vec2<f32>(1.0, 0.0), 0.0, projection);
         let a = projectedPoint.xy / projectedPoint.w;
         let b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
         symbol_rotation = atan2((b.y - a.y) / paintParams.aspect_ratio, b.x - a.x);
@@ -5031,10 +5684,28 @@ fn main(in: VertexInput) -> VertexOutput {
     let angle_cos = cos(segment_angle + symbol_rotation);
     let rotation_matrix = mat2x2<f32>(angle_cos, -angle_sin, angle_sin, angle_cos);
 
-    let projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+    var projected_pos: vec4<f32>;
+    if (drawable.is_along_line != 0u || drawable.is_variable_anchor != 0u) {
+        projected_pos = vec4<f32>(in.projected_pos.xy, 0.0, 1.0);
+    } else if (drawable.pitch_with_map != 0u) {
+        projected_pos = drawable.label_plane_matrix * vec4<f32>(in.projected_pos.xy + drawable.translation, 0.0, 1.0);
+    } else {
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(in.projected_pos.xy + drawable.translation, 0.0, projection);
+    }
+    let z = select(0.0, projected_pos.z / projected_pos.w, drawable.pitch_with_map != 0u);
+
+    var projectionScaling = 1.0;
+#ifdef PROJECTION_GLOBE
+    if (drawable.pitch_with_map != 0u && drawable.is_along_line == 0u) {
+        let anchor_pos_tile_y = (drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w, z, 1.0)).y;
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+    }
+#endif
     let pos_rot = a_offset / 32.0 * fontScale;
-    let pos0 = projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot;
-    let position = drawable.coord_matrix * vec4<f32>(pos0, 0.0, 1.0);
+    var position = drawable.coord_matrix * vec4<f32>(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
+    if (drawable.pitch_with_map != 0u) {
+        position = projectTileWithElevation(position.xy, position.z, projection);
+    }
     let gamma_scale = position.w;
     let is_icon = select(1.0, 0.0, is_sdf == SDF);
 
@@ -5093,7 +5764,7 @@ struct FragmentInput {
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
 @group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<uniform> props: SymbolEvaluatedPropsUBO;
+@group(0) @binding(5) var<uniform> props: SymbolEvaluatedPropsUBO;
 @group(1) @binding(0) var glyph_sampler: sampler;
 @group(1) @binding(1) var glyph_image: texture_2d<f32>;
 @group(1) @binding(2) var icon_sampler: sampler;
@@ -5208,6 +5879,13 @@ struct SymbolDrawableUBO {
     opacity_t: f32,
     halo_width_t: f32,
     halo_blur_t: f32,
+
+    is_along_line: u32,
+    is_variable_anchor: u32,
+    pitched_scale: f32,
+    translation: vec2<f32>,
+    pad1: f32,
+    pad2: f32,
 };
 
 struct SymbolTilePropsUBO {
@@ -5310,6 +5988,7 @@ fn main(@location(0) color: vec4<f32>, @location(1) texCoord: vec2<f32>) -> @loc
 
 /// Every extracted specialisation, sorted by `BuiltIn` name.
 pub const ALL: &[&WgslShaderSource] = &[
+    &ATMOSPHERE_SHADER,
     &BACKGROUND_PATTERN_SHADER,
     &BACKGROUND_SHADER,
     &CIRCLE_SHADER,
@@ -5325,6 +6004,7 @@ pub const ALL: &[&WgslShaderSource] = &[
     &FILL_OUTLINE_TRIANGULATED_SHADER,
     &FILL_PATTERN_SHADER,
     &FILL_SHADER,
+    &GLOBE_DEPTH_SHADER,
     &HEATMAP_SHADER,
     &HEATMAP_TEXTURE_SHADER,
     &HILLSHADE_PREPARE_SHADER,
@@ -5338,6 +6018,7 @@ pub const ALL: &[&WgslShaderSource] = &[
     &LOCATION_INDICATOR_TEXTURED_SHADER,
     &PRELUDE,
     &RASTER_SHADER,
+    &SKY_SHADER,
     &SYMBOL_ICON_SHADER,
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,

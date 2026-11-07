@@ -379,7 +379,7 @@ impl RenderLayer for RenderLineLayer {
         zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
-        _pos_matrix: &mln_util::mat4::Mat4,
+        _projector: &mln_map_types::TileProjector<'_>,
         feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         use mln_style::properties::Property;
@@ -460,12 +460,13 @@ impl RenderLayer for RenderLineLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
+        state: &TransformState,
         _parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
         _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        self.update_projection_variant(state);
         // TODO(port): stats.renderedFeatures.clear() (rendered-feature capture).
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
@@ -682,8 +683,12 @@ impl RenderLayer for RenderLineLayer {
                 let Some(group) = self.line_gradient_sdf_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(context, &properties_as_uniforms, POS_NORMAL_ATTRIB_NAME)
-                else {
+                let Some(shader) = group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    POS_NORMAL_ATTRIB_NAME,
+                ) else {
                     continue;
                 };
 
@@ -711,8 +716,12 @@ impl RenderLayer for RenderLineLayer {
                 let Some(group) = self.line_sdf_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(context, &properties_as_uniforms, POS_NORMAL_ATTRIB_NAME)
-                else {
+                let Some(shader) = group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    POS_NORMAL_ATTRIB_NAME,
+                ) else {
                     continue;
                 };
 
@@ -734,8 +743,12 @@ impl RenderLayer for RenderLineLayer {
                 let Some(group) = self.line_pattern_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(context, &properties_as_uniforms, POS_NORMAL_ATTRIB_NAME)
-                else {
+                let Some(shader) = group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    POS_NORMAL_ATTRIB_NAME,
+                ) else {
                     continue;
                 };
 
@@ -775,8 +788,12 @@ impl RenderLayer for RenderLineLayer {
                 let Some(group) = self.line_gradient_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(context, &properties_as_uniforms, POS_NORMAL_ATTRIB_NAME)
-                else {
+                let Some(shader) = group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    POS_NORMAL_ATTRIB_NAME,
+                ) else {
                     continue;
                 };
 
@@ -804,8 +821,12 @@ impl RenderLayer for RenderLineLayer {
                 let Some(group) = self.line_shader_group.clone() else {
                     continue;
                 };
-                let Some(shader) = group.get_or_create_shader(context, &properties_as_uniforms, POS_NORMAL_ATTRIB_NAME)
-                else {
+                let Some(shader) = group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    POS_NORMAL_ATTRIB_NAME,
+                ) else {
                     continue;
                 };
 

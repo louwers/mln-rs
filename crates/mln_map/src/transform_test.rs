@@ -1,4 +1,7 @@
-// Ports test/map/transform.test.cpp (TEST(Transform, *) and TEST(Camera, *)).
+// Ports test/map/transform.test.cpp (TEST(Transform, *), TEST(Camera, *), the
+// projection seam's TEST(MercatorProjection, *) and TEST(TransformState, *),
+// and the globe's TEST(VerticalPerspectiveProjection, *),
+// TEST(GlobeTransform, *) and TEST(TileProjector, *)).
 //
 // The C++ AnimationOptions callbacks capture the Transform by reference and
 // assert on it. The Rust callbacks can't borrow the Transform that is calling
@@ -12,10 +15,16 @@
 
 use std::cell::{Cell, RefCell};
 
+use mln_map_types::projection_base::ProjectionBase;
 use mln_map_types::util_camera::Camera as UtilCamera;
+use mln_map_types::{MercatorProjection, TileProjector};
+use mln_style_types::ProjectionType;
+use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::chrono::{milliseconds, seconds};
-use mln_util::constants::{LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM};
+use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
+use mln_util::mat4::{Mat4, matrix};
 use mln_util::quaternion::Quaternion;
+use mln_util::unitbezier::UnitBezier;
 use mln_util::vectors::{Vec3, Vec4};
 
 use super::*;
@@ -91,6 +100,34 @@ fn assert_vec3_near_1e5(arg: &Vec3, vec: &Vec3) {
         && (vec[1] - arg[1]).abs() <= ABS_DOUBLE_ERROR
         && (vec[2] - arg[2]).abs() <= ABS_DOUBLE_ERROR;
     assert!(near, "Vec3NearEquals1E5: {arg:?} vs {vec:?}");
+}
+
+/// gtest's `SCOPED_TRACE`: prints the trace when a failed assertion unwinds
+/// the scope.
+struct ScopedTrace(String);
+
+impl Drop for ScopedTrace {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            eprintln!("trace: {}", self.0);
+        }
+    }
+}
+
+/// `std::hypot(x, y, z)`.
+fn hypot3(x: f64, y: f64, z: f64) -> f64 {
+    (x * x + y * y + z * z).sqrt()
+}
+
+/// `std::clamp(value, lo, hi)`: `value < lo ? lo : hi < value ? hi : value`.
+fn std_clamp(value: f64, lo: f64, hi: f64) -> f64 {
+    if value < lo {
+        lo
+    } else if hi < value {
+        hi
+    } else {
+        value
+    }
 }
 
 fn rotated_frame(quaternion: &Vec4) -> (Vec3, Vec3, Vec3) {
@@ -309,6 +346,27 @@ fn unwrapped_lat_lng() {
     assert_near(wrapped_leftwards.longitude(), -437.0, 1e-8);
     wrapped_leftwards.wrap();
     assert_near(wrapped_leftwards.longitude(), -77.0, 1e-8);
+}
+
+// The copy unwrapForShortestPath finds for a wrapped center, a point 180
+// degrees away included, and that copy moved into the center's own world when
+// bounds keep the center past the antimeridian.
+// gtest: Transform.LatLngNearCenter
+#[test]
+fn lat_lng_near_center() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -10.0))).with_zoom(Some(4.0)));
+    assert_near(-181.0, transform.get_state().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
+    assert_near(170.0, transform.get_state().lat_lng_near_center(&ll(0.0, 170.0)).longitude(), 1e-9);
+
+    transform.set_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 181.0))));
+    assert_near(181.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(179.0, transform.get_state().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
+    assert_near(180.2, transform.get_state().lat_lng_near_center(&ll(0.0, -179.8)).longitude(), 1e-9);
+    assert_near(350.0, transform.get_state().lat_lng_near_center(&ll(0.0, -10.0)).longitude(), 1e-9);
 }
 
 // gtest: Transform.ConstrainHeightOnly
@@ -1292,6 +1350,24 @@ fn free_camera_options_invalid_z() {
     assert!(transform.get_free_camera_options().position.unwrap()[2] <= 1.0);
 }
 
+// gtest: Transform.CameraFollowsJumpsBelowAFractionalMinimumZoom
+#[test]
+fn camera_follows_jumps_below_a_fractional_minimum_zoom() {
+    let mercator_y = 0.5 - (PI / 4.0 + deg2rad(10.0) / 2.0).tan().ln() / (2.0 * PI);
+    for min_zoom in [1.525373023184723, 1.55, 3.1, 6.2] {
+        let _trace = ScopedTrace(std_to_string(min_zoom));
+        let mut transform = new_transform();
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.set_min_zoom(min_zoom);
+        transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(min_zoom + 2.0)));
+        transform.jump_to(&cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(0.0)));
+        assert!(transform.get_state().valid());
+        let position = transform.get_free_camera_options().position.unwrap();
+        assert_near(200.0 / 360.0, position[0], 1e-12);
+        assert_near(mercator_y, position[1], 1e-12);
+    }
+}
+
 // gtest: Transform.FreeCameraOptionsHighPitch
 #[test]
 fn free_camera_options_high_pitch() {
@@ -1509,4 +1585,2219 @@ fn set_orientation_with_roll_no_pitch() {
     assert_near(bearing - roll, bearing_, 1.0e-9);
     assert_near(pitch, pitch_, 1.0e-9);
     assert_near(0.0, roll_, 1.0e-9);
+}
+
+/// The tile matrix as `TransformState::matrix_for` computed it before the
+/// projection seam.
+fn reference_tile_matrix(scale: f64, tile_id: &UnwrappedTileID) -> Mat4 {
+    let tile_scale: u64 = 1u64 << tile_id.canonical.z;
+    let s = Projection::world_size(scale) / tile_scale as f64;
+
+    let mut m: Mat4 = [0.0; 16];
+    matrix::identity(&mut m);
+    let a = m;
+    matrix::translate(
+        &mut m,
+        &a,
+        (tile_id.canonical.x as i64 + tile_id.wrap as i64 * tile_scale as i64) as f64 * s,
+        tile_id.canonical.y as f64 * s,
+        0.0,
+    );
+    let a = m;
+    matrix::scale(&mut m, &a, s / EXTENT as f64, s / EXTENT as f64, 1.0);
+    m
+}
+
+// gtest: MercatorProjection.MatchesStaticProjection
+#[test]
+fn matches_static_projection() {
+    let projection = MercatorProjection;
+    for zoom in [0.0, 1.0, 3.5, 7.25, 12.0, 18.0] {
+        let scale = 2.0f64.powf(zoom);
+        for lat in [-85.0, -45.0, 0.0, 30.0, 80.0] {
+            for lon in [-180.0, -90.0, 0.0, 45.0, 179.0] {
+                let lat_lng = ll(lat, lon);
+                let expected = Projection::project(&lat_lng, scale);
+                let actual = projection.project(&lat_lng, scale);
+                assert_eq!(expected.x, actual.x);
+                assert_eq!(expected.y, actual.y);
+
+                let unprojected = projection.unproject(&actual, scale, WrapMode::Wrapped).unwrap();
+                let expected_unprojected = Projection::unproject(&expected, scale, WrapMode::Wrapped).unwrap();
+                assert_eq!(expected_unprojected.latitude(), unprojected.latitude());
+                assert_eq!(expected_unprojected.longitude(), unprojected.longitude());
+            }
+        }
+    }
+}
+
+// gtest: TransformState.ProjectionDataMatchesTileMatrix
+#[test]
+fn projection_data_matches_tile_matrix() {
+    let mut transform = new_transform();
+    let tile_ids = [
+        UnwrappedTileID::new(0, 0, 0),
+        UnwrappedTileID::new(1, 0, 1),
+        UnwrappedTileID::new(3, 5, 2),
+        UnwrappedTileID::new(10, 512, 340),
+        UnwrappedTileID::new(14, 16000, 8000),
+        UnwrappedTileID::with_wrap(-1, CanonicalTileID::new(2, 1, 1)),
+    ];
+
+    for size in [Size::new(1, 1), Size::new(512, 512), Size::new(1024, 768), Size::new(333, 777)] {
+        transform.resize(size).unwrap();
+        for zoom in [0.0, 2.5, 6.0, 11.75, 16.0] {
+            for pitch in [0.0, 30.0, 60.0] {
+                for bearing in [0.0, 45.0, 210.0] {
+                    for roll in [0.0, 15.0] {
+                        transform.jump_to(
+                            &cam()
+                                .with_center(Some(ll(37.7749, -122.4194)))
+                                .with_zoom(Some(zoom))
+                                .with_pitch(Some(pitch))
+                                .with_bearing(Some(bearing))
+                                .with_roll(Some(roll)),
+                        );
+                        let state = transform.get_state();
+                        let scale = state.get_scale();
+
+                        for aligned in [false, true] {
+                            let mut proj_matrix: Mat4 = [0.0; 16];
+                            state.get_proj_matrix(&mut proj_matrix, 1, aligned);
+
+                            for tile_id in &tile_ids {
+                                let tile_matrix = reference_tile_matrix(scale, tile_id);
+                                let mut actual_tile_matrix: Mat4 = [0.0; 16];
+                                state.matrix_for(&mut actual_tile_matrix, tile_id);
+                                assert_eq!(tile_matrix, actual_tile_matrix);
+
+                                let mut expected: Mat4 = [0.0; 16];
+                                matrix::multiply(&mut expected, &proj_matrix, &tile_matrix);
+                                assert_eq!(expected, state.get_projection_data_with(tile_id, &proj_matrix).main_matrix);
+                            }
+                        }
+
+                        for tile_id in &tile_ids {
+                            let mut expected: Mat4 = [0.0; 16];
+                            matrix::multiply(
+                                &mut expected,
+                                &state.get_projection_matrix(),
+                                &reference_tile_matrix(scale, tile_id),
+                            );
+                            assert_eq!(expected, state.get_projection_data(tile_id).main_matrix);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// gtest: TransformState.ProjectionDataMercatorFields
+#[test]
+fn projection_data_mercator_fields() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.jump_to(
+        &cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(5.0)).with_pitch(Some(20.0)).with_bearing(Some(30.0)),
+    );
+    let state = transform.get_state();
+
+    for tile_id in [
+        UnwrappedTileID::new(0, 0, 0),
+        UnwrappedTileID::new(3, 5, 2),
+        UnwrappedTileID::with_wrap(-1, CanonicalTileID::new(2, 1, 1)),
+    ] {
+        let data = state.get_projection_data(&tile_id);
+        let tile_scale = (1u32 << tile_id.canonical.z) as f64;
+        assert_eq!(data.main_matrix, data.fallback_matrix);
+        assert_eq!(tile_id.canonical.x as f64 / tile_scale, data.tile_mercator_coords[0]);
+        assert_eq!(tile_id.canonical.y as f64 / tile_scale, data.tile_mercator_coords[1]);
+        assert_eq!(1.0 / tile_scale / EXTENT as f64, data.tile_mercator_coords[2]);
+        assert_eq!(1.0 / tile_scale / EXTENT as f64, data.tile_mercator_coords[3]);
+        assert_eq!([0.0, 0.0, 0.0, 0.0], data.clipping_plane);
+        assert_eq!(0.0, data.projection_transition);
+    }
+}
+
+// gtest: Transform.GlobeProjectionDefinition
+#[test]
+fn globe_projection_definition() {
+    let mut transform = new_transform();
+    assert!(!transform.get_state().is_globe_rendering());
+    assert_double_eq(0.0, transform.get_state().get_projection_transition());
+    transform.set_projection_definition(&ProjectionDefinition::between_names("vertical-perspective", "mercator", 0.5));
+    assert!(transform.get_state().is_globe_rendering());
+    assert_double_eq(0.5, transform.get_state().get_projection_transition());
+    // The transition is how far the globe has gone, whichever way the
+    // definition reads.
+    transform.set_projection_definition(&ProjectionDefinition::between_names("vertical-perspective", "mercator", 0.25));
+    assert_double_eq(0.75, transform.get_state().get_projection_transition());
+    transform.set_projection_definition(&ProjectionDefinition::between_names("mercator", "vertical-perspective", 0.25));
+    assert_double_eq(0.25, transform.get_state().get_projection_transition());
+    transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+    assert!(!transform.get_state().is_globe_rendering());
+    assert_double_eq(0.0, transform.get_state().get_projection_transition());
+}
+
+// A transition past either end, from a literal or an overshooting curve,
+// holds at that end's projection.
+// gtest: Transform.GlobeProjectionTransitionPastEitherEnd
+#[test]
+fn globe_projection_transition_past_either_end() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::between_names("mercator", "vertical-perspective", 1.5));
+    assert_double_eq(1.0, transform.get_state().get_projection_transition());
+    transform.jump_to(&cam().with_zoom(Some(1.0)));
+    for step in 1..=3 {
+        transform.jump_to(&cam().with_center(Some(ll(0.0, 40.0 + 120.0 * f64::from(step)))));
+    }
+    assert_near(400.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    // Past Mercator the globe leaves as it does at 0, so the center wraps back
+    // into Mercator's world.
+    transform.set_projection_definition(&ProjectionDefinition::between_names("vertical-perspective", "mercator", 1.5));
+    assert!(!transform.get_state().is_globe_rendering());
+    assert_double_eq(0.0, transform.get_state().get_projection_transition());
+    assert_near(40.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+}
+
+// An animation that crosses into the globe ends where a jump to its camera
+// would, at a zoom only the globe allows.
+// gtest: Transform.AnimationIntoTheGlobeTakesTheGlobesMinimumZoom
+#[test]
+fn animation_into_the_globe_takes_the_globes_minimum_zoom() {
+    let projection_for_zoom =
+        |zoom: f64| ProjectionDefinition::from_name(if zoom < 3.0 { "vertical-perspective" } else { "mercator" });
+    // A viewport taller than the world raises Mercator's minimum zoom, which
+    // the globe does not have.
+    for size in [Size::new(512, 512), Size::new(512, 1024)] {
+        for (center, zoom) in [(ll(60.0, 0.0), -0.5), (ll(0.0, 0.0), 0.0)] {
+            for fly in [false, true] {
+                let _trace = ScopedTrace(format!(
+                    "{} to zoom {} at {} on {} px",
+                    if fly { "flyTo" } else { "easeTo" },
+                    std_to_string(zoom),
+                    std_to_string(center.latitude()),
+                    size.height
+                ));
+                let mut transform = new_transform();
+                transform.resize(size).unwrap();
+                let projection_for_zoom_fn: ProjectionForZoomFn = Rc::new(projection_for_zoom);
+                transform.set_projection_for_zoom(Some(projection_for_zoom_fn));
+                transform.set_projection_definition(&projection_for_zoom(5.0));
+                transform.jump_to(&cam().with_center(Some(center)).with_zoom(Some(5.0)));
+                let camera = cam().with_center(Some(center)).with_zoom(Some(zoom));
+                let animation = AnimationOptions::new(milliseconds(1000));
+                if fly {
+                    transform.fly_to(&camera, &animation, false);
+                } else {
+                    transform.ease_to(&camera, &animation);
+                }
+                // As the map does each frame, the projection follows the zoom.
+                for frame in 1..=20 {
+                    transform.update_transitions(transform.get_transition_start() + milliseconds(50 * frame));
+                    let definition = projection_for_zoom(transform.get_zoom());
+                    transform.set_projection_definition(&definition);
+                }
+                assert!(transform.get_state().is_globe_rendering());
+                assert_near(zoom, transform.get_zoom(), 1e-9);
+            }
+        }
+    }
+}
+
+// gtest: VerticalPerspectiveProjection.TileCoordinatesToSphere
+#[test]
+fn tile_coordinates_to_sphere() {
+    let near =
+        |a: &Vec3, b: &Vec3| (a[0] - b[0]).abs() < 1e-9 && (a[1] - b[1]).abs() < 1e-9 && (a[2] - b[2]).abs() < 1e-9;
+    let world = UnwrappedTileID::new(0, 0, 0);
+    let half = f64::from(EXTENT) / 2.0;
+    // (0°, 0°) is the +Z axis; the equator runs through ±X; latitude is Y.
+    assert!(near(
+        &[0.0, 0.0, 1.0],
+        &VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half, half), &world)
+    ));
+    assert!(near(
+        &[1.0, 0.0, 0.0],
+        &VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half * 1.5, half), &world)
+    ));
+    assert!(near(
+        &[-1.0, 0.0, 0.0],
+        &VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half * 0.5, half), &world)
+    ));
+    let north = VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half, 0.0), &world);
+    assert!(north[1] > 0.99);
+    let south = VerticalPerspectiveProjection::tile_coordinates_to_sphere(&Point::new(half, f64::from(EXTENT)), &world);
+    assert!(south[1] < -0.99);
+}
+
+/// `setUpGlobe(transform, center, zoom, bearing = 0, pitch = 0)`.
+fn set_up_globe(transform: &mut Transform, center: &LatLng, zoom: f64, bearing: f64, pitch: f64) {
+    transform.resize(Size::new(800, 600)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    transform.jump_to(
+        &cam().with_center(Some(*center)).with_zoom(Some(zoom)).with_bearing(Some(bearing)).with_pitch(Some(pitch)),
+    );
+}
+
+/// The GL JS camera tests run on a 512 by 512 globe.
+fn set_up_globe_camera(transform: &mut Transform, center: &LatLng, zoom: f64) {
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    transform.jump_to(&cam().with_center(Some(*center)).with_zoom(Some(zoom)));
+}
+
+/// One second with a linear easing, so a frame at half time is the frame at
+/// k = 0.5.
+fn linear_second() -> AnimationOptions {
+    AnimationOptions {
+        duration: Some(milliseconds(1000)),
+        easing: Some(UnitBezier::new(0.0, 0.0, 1.0, 1.0)),
+        ..AnimationOptions::default()
+    }
+}
+
+fn run_to(transform: &mut Transform, k: f64) {
+    transform.update_transitions(transform.get_transition_start() + milliseconds((k * 1000.0) as i64));
+}
+
+// gtest: VerticalPerspectiveProjection.CenterProjectsToScreenCenter
+#[test]
+fn center_projects_to_screen_center() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(37.0, -122.0), 3.0, 20.0, 30.0);
+    let state = transform.get_state();
+    assert!(state.is_globe_rendering());
+
+    let radius = VerticalPerspectiveProjection::globe_radius_pixels(
+        Projection::world_size(state.get_scale()),
+        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+    );
+    let m = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
+    let center = VerticalPerspectiveProjection::surface_vector(&state.get_lat_lng(WrapMode::Unwrapped));
+    let surface: Vec4 = [center[0], center[1], center[2], 1.0];
+    let mut clip: Vec4 = [0.0; 4];
+    matrix::transform_mat4(&mut clip, &surface, &m);
+    assert_near(0.0, clip[0] / clip[3], 1e-6);
+    assert_near(0.0, clip[1] / clip[3], 1e-6);
+
+    let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
+    assert!(plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3] > 0.0);
+    let antipode: Vec4 = [-surface[0], -surface[1], -surface[2], 1.0];
+    assert!(plane[0] * antipode[0] + plane[1] * antipode[1] + plane[2] * antipode[2] + plane[3] < 0.0);
+}
+
+// gtest: GlobeTransform.CachedViewStateFollowsTheCamera
+#[test]
+fn cached_view_state_follows_the_camera() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(20.0, -40.0), 2.5, 35.0, 25.0);
+    let check = |state: &TransformState| {
+        let radius = VerticalPerspectiveProjection::globe_radius_pixels(
+            Projection::world_size(state.get_scale()),
+            state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+        );
+        assert_double_eq(radius, state.get_globe_radius_pixels());
+        let expected = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
+        let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
+        let camera = VerticalPerspectiveProjection::camera_position(state, radius);
+        for i in 0..16 {
+            let _trace = ScopedTrace(format!("element {i}"));
+            assert_double_eq(expected[i], state.get_globe_view_projection_matrix()[i]);
+        }
+        for i in 0..4 {
+            let _trace = ScopedTrace(format!("plane {i}"));
+            assert_double_eq(plane[i], state.get_globe_clipping_plane()[i]);
+        }
+        for i in 0..3 {
+            let _trace = ScopedTrace(format!("camera {i}"));
+            assert_double_eq(camera[i], state.get_globe_camera_position()[i]);
+        }
+        let mut round_trip: Mat4 = [0.0; 16];
+        matrix::multiply(
+            &mut round_trip,
+            &state.get_globe_view_projection_matrix(),
+            &state.get_inverse_globe_view_projection_matrix(),
+        );
+        for (i, value) in round_trip.iter().enumerate() {
+            let _trace = ScopedTrace(format!("inverse element {i}"));
+            assert_near(if i % 5 == 0 { 1.0 } else { 0.0 }, *value, 1e-9);
+        }
+    };
+    check(transform.get_state());
+    transform.jump_to(
+        &cam()
+            .with_center(Some(ll(-30.0, 100.0)))
+            .with_zoom(Some(4.0))
+            .with_pitch(Some(50.0))
+            .with_bearing(Some(-80.0)),
+    );
+    check(transform.get_state());
+    transform.resize(Size::new(1024, 300)).unwrap();
+    check(transform.get_state());
+}
+
+// gtest: GlobeTransform.UnprojectRoundTrip
+#[test]
+fn unproject_round_trip() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(20.0, -40.0), 2.5, 35.0, 25.0);
+    for point in [sc(400.0, 300.0), sc(300.0, 200.0), sc(500.0, 420.0)] {
+        let lat_lng = transform.screen_coordinate_to_lat_lng(&point, WrapMode::Wrapped);
+        let back = transform.lat_lng_to_screen_coordinate(&lat_lng);
+        assert_near(point.x, back.x, 1e-6);
+        assert_near(point.y, back.y, 1e-6);
+    }
+    let center = transform.screen_coordinate_to_lat_lng(&sc(400.0, 300.0), WrapMode::Wrapped);
+    assert_near(20.0, center.latitude(), 1e-9);
+    assert_near(-40.0, center.longitude(), 1e-9);
+}
+
+// gtest: GlobeTransform.OffGlobePixelsSnapToTheHorizon
+#[test]
+fn off_globe_pixels_snap_to_the_horizon() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 0.0), 0.5, 0.0, 0.0);
+    // Zoom 0.5 shows the whole globe with room around it; a corner pixel is
+    // off the planet.
+    let corner = transform.screen_coordinate_to_lat_lng(&sc(0.0, 0.0), WrapMode::Wrapped);
+    assert!(corner.latitude() < 90.0);
+    assert!(corner.latitude() > 0.0);
+    assert!(corner.longitude() < 0.0);
+    // The snap lands on the horizon: from a camera `d` radii out, that circle
+    // is acos(1 / d) from the center.
+    let camera = transform.get_state().get_globe_camera_position();
+    let horizon = (1.0 / hypot3(camera[0], camera[1], camera[2])).acos();
+    let angle = (deg2rad(corner.latitude()).cos() * deg2rad(corner.longitude()).cos()).acos();
+    assert_near(horizon, angle, 1e-6);
+}
+
+// gtest: GlobeTransform.MoveByPutsTheDraggedPointAtTheCenter
+#[test]
+fn move_by_puts_the_dragged_point_at_the_center() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(10.0, 20.0), 3.0, 0.0, 0.0);
+    for i in 0..8 {
+        let offset = sc(if i % 2 != 0 { 60.0 } else { -45.0 }, if i % 3 != 0 { 30.0 } else { -50.0 });
+        let expected =
+            transform.screen_coordinate_to_lat_lng(&sc(400.0 - offset.x, 300.0 - offset.y), WrapMode::Wrapped);
+        let zoom_before = transform.get_zoom();
+        let latitude_before = transform.get_lat_lng(WrapMode::Wrapped).latitude();
+        transform.move_by(&offset, &AnimationOptions::default());
+        assert_near(expected.latitude(), transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+        assert_near(expected.longitude(), transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+        // The planet keeps its apparent size: zoom follows the latitude.
+        assert_near(
+            zoom_before + VerticalPerspectiveProjection::zoom_adjustment(latitude_before, expected.latitude()),
+            transform.get_zoom(),
+            1e-6,
+        );
+    }
+}
+
+// gtest: GlobeTransform.AnchoredZoomKeepsTheAnchorInPlace
+#[test]
+fn anchored_zoom_keeps_the_anchor_in_place() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(30.0, 15.0), 3.0, 0.0, 0.0);
+    let anchor = sc(250.0, 180.0);
+    let anchor_lat_lng = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped);
+    transform.jump_to(&cam().with_zoom(Some(4.5)).with_anchor(Some(anchor)));
+    assert_ne!(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+    let after = transform.lat_lng_to_screen_coordinate(&anchor_lat_lng);
+    assert_near(anchor.x, after.x, 0.5);
+    assert_near(anchor.y, after.y, 0.5);
+}
+
+// gtest: GlobeTransform.ZoomingOutAroundAnAnchorNearTheHorizonStaysContinuous
+#[test]
+fn zooming_out_around_an_anchor_near_the_horizon_stays_continuous() {
+    // A fast pinch-out with the focal point drifting off the planet: the exact
+    // re-anchoring jumped the center by ten degrees of latitude and the zoom
+    // by half a level for one frame (a much larger globe); GL JS blends in a
+    // damped heuristic near the horizon.
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(48.0, 10.0), 6.0, 0.0, 0.0);
+    let anchor = sc(600.0, 200.0);
+    let mut last_radius = transform.get_state().get_globe_radius_pixels();
+    let mut last_center = transform.get_lat_lng(WrapMode::Wrapped);
+    for i in 1..=60 {
+        transform.ease_to(
+            &cam().with_zoom(Some(6.0 - f64::from(i) * 0.1)).with_anchor(Some(anchor)),
+            &AnimationOptions::default(),
+        );
+        if i % 3 == 0 {
+            transform.move_by(&sc(-7.0, 4.0), &AnimationOptions::default());
+        }
+        let radius = transform.get_state().get_globe_radius_pixels();
+        let center = transform.get_lat_lng(WrapMode::Wrapped);
+        assert!(radius <= last_radius * 1.005, "step {i}");
+        assert!((center.latitude() - last_center.latitude()).abs() < 5.0, "step {i}");
+        last_radius = radius;
+        last_center = center;
+    }
+}
+
+// Near the limb the zoom around a point leans on GL JS's damped heuristic,
+// which adds up step by step: an animated zoom moves the center about as far
+// as the same zoom in one jump.
+// gtest: GlobeTransform.AnimatedZoomAroundAPointNearTheLimbMovesLikeAJump
+#[test]
+fn animated_zoom_around_a_point_near_the_limb_moves_like_a_jump() {
+    let anchor = sc(256.0 + 159.0, 256.0);
+    let mut jumped = new_transform();
+    set_up_globe_camera(&mut jumped, &ll(0.0, 0.0), 1.0);
+    jumped.jump_to(&cam().with_zoom(Some(2.0)).with_anchor(Some(anchor)));
+    let jump_move = jumped.get_lat_lng(WrapMode::Wrapped).longitude();
+    assert!(jump_move > 1.0, "{jump_move}");
+
+    let mut animated = new_transform();
+    set_up_globe_camera(&mut animated, &ll(0.0, 0.0), 1.0);
+    animated.ease_to(&cam().with_zoom(Some(2.0)).with_anchor(Some(anchor)), &linear_second());
+    for frame in 1..=10 {
+        run_to(&mut animated, f64::from(frame) / 10.0);
+    }
+    assert_near(2.0, animated.get_zoom(), 1e-9);
+    let animated_move = animated.get_lat_lng(WrapMode::Wrapped).longitude();
+    assert!(animated_move > 0.75 * jump_move, "{animated_move} {jump_move}");
+    assert!(animated_move < 1.25 * jump_move, "{animated_move} {jump_move}");
+}
+
+// An animation around an anchor ends where the same change in one jump does,
+// zoom included: the planet keeps its size as the anchor carries the center
+// to another latitude.
+// gtest: GlobeTransform.AnimationsAroundAnAnchorEndLikeAJump
+#[test]
+fn animations_around_an_anchor_end_like_a_jump() {
+    let anchor = sc(256.0, 256.0 - 150.0);
+    for rotate in [false, true] {
+        let _trace = ScopedTrace(if rotate { "rotate" } else { "zoom" }.to_owned());
+        let change = if rotate {
+            cam().with_bearing(Some(60.0)).with_anchor(Some(anchor))
+        } else {
+            cam().with_zoom(Some(4.0)).with_anchor(Some(anchor))
+        };
+        let mut jumped = new_transform();
+        set_up_globe_camera(&mut jumped, &ll(45.0, 0.0), 3.0);
+        jumped.jump_to(&change);
+        assert!((jumped.get_lat_lng(WrapMode::Wrapped).latitude() - 45.0).abs() > 0.5);
+
+        let mut animated = new_transform();
+        set_up_globe_camera(&mut animated, &ll(45.0, 0.0), 3.0);
+        animated.ease_to(&change, &linear_second());
+        for frame in 1..=10 {
+            run_to(&mut animated, f64::from(frame) / 10.0);
+        }
+        assert_near(
+            jumped.get_lat_lng(WrapMode::Wrapped).latitude(),
+            animated.get_lat_lng(WrapMode::Wrapped).latitude(),
+            1e-6,
+        );
+        assert_near(
+            jumped.get_lat_lng(WrapMode::Wrapped).longitude(),
+            animated.get_lat_lng(WrapMode::Wrapped).longitude(),
+            1e-6,
+        );
+        assert_near(jumped.get_zoom(), animated.get_zoom(), 1e-6);
+    }
+}
+
+// gtest: GlobeTransform.PolesAreReachableAndZoomFollowsLatitude
+#[test]
+fn poles_are_reachable_and_zoom_follows_latitude() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 0.0), 0.0, 0.0, 0.0);
+    let radius_at_equator = transform.get_state().get_globe_radius_pixels();
+    transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))));
+    assert_near(80.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    // Moving the center towards the pole lowers the zoom by log2(cos 80),
+    // below the map's minimum zoom of 0, so the planet keeps its size on
+    // screen.
+    assert_near(VerticalPerspectiveProjection::zoom_adjustment(0.0, 80.0), transform.get_zoom(), 1e-9);
+    assert_near(radius_at_equator, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(3.0)));
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))));
+    assert_near(3.0 + VerticalPerspectiveProjection::zoom_adjustment(80.0, 0.0), transform.get_zoom(), 1e-9);
+
+    // Past the Mercator range the center goes as far toward the pole as the
+    // zoom it lands on allows, and the zoom follows the edge of the range:
+    // the planet keeps its size. A drag over the pole stops where the zoom
+    // lets the center go. GL JS: 89 at zoom 1.9907089805355933, then
+    // 89.50632407943635.
+    let radius_before = transform.get_state().get_globe_radius_pixels();
+    transform.jump_to(&cam().with_center(Some(ll(89.0, 0.0))));
+    assert_near(89.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(1.9907089805355933, transform.get_zoom(), 1e-6);
+    assert_near(radius_before, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    transform.move_by(&sc(0.0, 300.0), &AnimationOptions::default());
+    assert_near(89.50632407943635, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(radius_before, transform.get_state().get_globe_radius_pixels(), 1e-6);
+}
+
+// gtest: GlobeTransform.BoundsKeepTheCenterInside
+#[test]
+fn bounds_keep_the_center_inside() {
+    // GL JS ignores `maxBounds` on the globe (its TODO); native keeps honoring
+    // them, in every constrain mode.
+    let bounds = LatLngBounds::hull(ll(40.0, -10.0), ll(70.0, 40.0));
+    for mode in [ConstrainMode::HeightOnly, ConstrainMode::WidthAndHeight, ConstrainMode::Screen] {
+        let _trace = ScopedTrace(format!("{mode:?}"));
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(56.0, 11.0), 4.0, 0.0, 0.0);
+        transform.set_constrain_mode(mode);
+        transform.set_lat_lng_bounds(bounds).unwrap();
+        assert_near(56.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+        assert_near(11.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        for outside in [ll(56.0, -65.0), ll(80.0, 11.0), ll(56.0, 50.0), ll(30.0, 11.0)] {
+            transform.jump_to(&cam().with_center(Some(outside)).with_zoom(Some(4.0)));
+            let center = transform.get_lat_lng(WrapMode::Wrapped);
+            assert!(bounds.contains(&center), "{}, {}", center.latitude(), center.longitude());
+        }
+        // A center the whole screen fits around stays where it was asked for.
+        transform.jump_to(&cam().with_center(Some(ll(55.0, 15.0))).with_zoom(Some(4.0)));
+        assert_near(55.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+        assert_near(15.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        if mode == ConstrainMode::Screen {
+            // The screen has to fit inside the bounds, so zooming out is
+            // stopped short.
+            transform.jump_to(&cam().with_center(Some(ll(56.0, 11.0))).with_zoom(Some(1.0)));
+            assert!(transform.get_zoom() > 1.0);
+            assert!(bounds.contains(&transform.get_lat_lng(WrapMode::Wrapped)));
+        }
+    }
+}
+
+// gtest: GlobeTransform.MinZoomFollowsLatitude
+#[test]
+fn min_zoom_follows_latitude() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 0.0), 2.0, 0.0, 0.0);
+    assert_double_eq(0.0, transform.get_state().get_min_zoom());
+    assert_double_eq(0.0, transform.get_state().get_min_zoom_at_latitude(0.0));
+    assert_near(-1.0, transform.get_state().get_min_zoom_at_latitude(60.0), 1e-12);
+    assert_near(deg2rad(80.0).cos().log2(), transform.get_state().get_min_zoom_at_latitude(80.0), 1e-12);
+
+    // Zoom requests clamp to the floor at the requested center, not at the
+    // equator's.
+    transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(-5.0)));
+    assert_near(transform.get_state().get_min_zoom_at_latitude(80.0), transform.get_zoom(), 1e-9);
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(-1.0)));
+    assert_double_eq(0.0, transform.get_zoom());
+    assert_eq!(0, transform.get_state().get_integer_zoom());
+
+    // Integer zoom never wraps below zero.
+    transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(-2.0)));
+    assert_near(-2.0, transform.get_zoom(), 1e-9);
+    assert_eq!(0, transform.get_state().get_integer_zoom());
+
+    // Mercator keeps the plain minimum.
+    transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+    assert_double_eq(transform.get_state().get_min_zoom(), transform.get_state().get_min_zoom_at_latitude(80.0));
+    transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(-2.0)));
+    assert!(transform.get_zoom() >= 0.0);
+}
+
+// gtest: GlobeTransform.CameraFollowsTheGlobeBelowTheMinimumScale
+#[test]
+fn camera_follows_the_globe_below_the_minimum_scale() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(80.0, 0.0), 8.0, 0.0, 0.0);
+    transform.set_min_zoom(6.0);
+    transform.jump_to(&cam().with_center(Some(ll(80.0, 90.0))).with_zoom(Some(0.0)));
+    assert_near(transform.get_state().get_min_zoom_at_latitude(80.0), transform.get_zoom(), 1e-9);
+    assert!(transform.get_zoom() < 6.0);
+    assert!(transform.get_state().valid());
+    let position = transform.get_free_camera_options().position.unwrap();
+    assert_near(0.75, position[0], 1e-12);
+    assert_near(0.5 - (PI / 4.0 + deg2rad(80.0) / 2.0).tan().ln() / (2.0 * PI), position[1], 1e-12);
+}
+
+// gtest: GlobeTransform.ZoomAdjustment
+#[test]
+fn zoom_adjustment() {
+    assert_double_eq(0.0, VerticalPerspectiveProjection::zoom_adjustment(20.0, 20.0));
+    assert_near(-1.0, VerticalPerspectiveProjection::zoom_adjustment(0.0, 60.0), 1e-12);
+    assert_near(1.0, VerticalPerspectiveProjection::zoom_adjustment(60.0, 0.0), 1e-12);
+    // Past the Mercator range the globe keeps its size at the edge of the
+    // range.
+    assert_eq!(0.0, VerticalPerspectiveProjection::zoom_adjustment(LATITUDE_MAX, 90.0));
+}
+
+// The expected numbers below come from GL JS's own camera (`camera.test.ts`,
+// "globe projection" suites, and its `VerticalPerspectiveCameraHelper`) run on
+// the same 512 by 512 viewport with a linear easing.
+
+// gtest: GlobeTransform.EaseAdjustsTheZoomToTheNewLatitude
+#[test]
+fn ease_adjusts_the_zoom_to_the_new_latitude() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 1.0);
+    transform.ease_to(&cam().with_center(Some(ll(40.0, 0.0))), &linear_second());
+    run_to(&mut transform, 1.0);
+    assert!(!transform.in_transition());
+    assert_near(40.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(0.61549999962236379, transform.get_zoom(), 1e-9);
+}
+
+// gtest: GlobeTransform.FlyAdjustsTheZoomToTheNewLatitude
+#[test]
+fn fly_adjusts_the_zoom_to_the_new_latitude() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 1.0);
+    transform.fly_to(&cam().with_center(Some(ll(40.0, 0.0))), &linear_second(), false);
+    run_to(&mut transform, 0.5);
+    assert_near(20.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(0.87493158146277261, transform.get_zoom(), 1e-9);
+    run_to(&mut transform, 1.0);
+    assert!(!transform.in_transition());
+    assert_near(40.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(0.61549999962236379, transform.get_zoom(), 1e-9);
+}
+
+// gtest: GlobeTransform.EaseKeepsThePlanetSizeAcrossLatitudes
+#[test]
+fn ease_keeps_the_planet_size_across_latitudes() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+    let radius = transform.get_state().get_globe_radius_pixels();
+    transform.ease_to(&cam().with_center(Some(ll(60.0, 0.0))), &linear_second());
+    run_to(&mut transform, 0.5);
+    assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(0.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(2.7924812503605780, transform.get_zoom(), 1e-9);
+    assert_near(radius, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    run_to(&mut transform, 1.0);
+    assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(2.0, transform.get_zoom(), 1e-9);
+    assert_near(radius, transform.get_state().get_globe_radius_pixels(), 1e-6);
+}
+
+// gtest: GlobeTransform.EaseFollowsTheLongitudeSpeedCurve
+#[test]
+fn ease_follows_the_longitude_speed_curve() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+    transform.ease_to(&cam().with_center(Some(ll(60.0, 60.0))), &linear_second());
+    run_to(&mut transform, 0.5);
+    assert_near(25.026136930423718, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(2.7924812503605780, transform.get_zoom(), 1e-9);
+    run_to(&mut transform, 1.0);
+    assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(2.0, transform.get_zoom(), 1e-9);
+}
+
+// gtest: GlobeTransform.EaseWithZoomSpeedsUpTheCenter
+#[test]
+fn ease_with_zoom_speeds_up_the_center() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+    transform.ease_to(&cam().with_center(Some(ll(60.0, 0.0))).with_zoom(Some(5.0)), &linear_second());
+    run_to(&mut transform, 0.5);
+    assert_near(42.426406871192853, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(4.0619751435424885, transform.get_zoom(), 1e-9);
+    run_to(&mut transform, 1.0);
+    assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(5.0, transform.get_zoom(), 1e-9);
+}
+
+// gtest: GlobeTransform.FlyFollowsTheGlobePath
+#[test]
+fn fly_follows_the_globe_path() {
+    {
+        let mut transform = new_transform();
+        set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+        transform.fly_to(&cam().with_center(Some(ll(60.0, 60.0))), &linear_second(), false);
+        run_to(&mut transform, 0.5);
+        assert_near(25.026136930425196, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
+        assert_near(1.8176209209717085, transform.get_zoom(), 1e-9);
+        run_to(&mut transform, 1.0);
+        assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-8);
+        assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
+        assert_near(2.0, transform.get_zoom(), 1e-9);
+    }
+    {
+        let mut transform = new_transform();
+        set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+        transform.fly_to(&cam().with_center(Some(ll(60.0, 60.0))).with_zoom(Some(6.0)), &linear_second(), false);
+        run_to(&mut transform, 0.5);
+        assert_near(54.663652625664554, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        assert_near(56.470588235293114, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+        assert_near(2.4045752372957860, transform.get_zoom(), 1e-9);
+        run_to(&mut transform, 1.0);
+        assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-8);
+        assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
+        assert_near(6.0, transform.get_zoom(), 1e-9);
+    }
+}
+
+// gtest: GlobeTransform.FlyStaysAboveTheMinimumZoom
+#[test]
+fn fly_stays_above_the_minimum_zoom() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 20.0);
+    let mut animation = linear_second();
+    animation.min_zoom = Some(10.0);
+    transform.fly_to(&cam().with_center(Some(ll(0.0, 1.0))).with_zoom(Some(20.0)), &animation, false);
+    let mut lowest = 20.0;
+    for frame in 1..=10 {
+        run_to(&mut transform, f64::from(frame) / 10.0);
+        lowest = std_min(lowest, transform.get_zoom());
+    }
+    // GL JS bottoms out at 9.9999993 on the same frames.
+    assert!(lowest >= 10.0 - 1e-5, "{lowest}");
+    assert!(lowest <= 10.01, "{lowest}");
+    assert_near(20.0, transform.get_zoom(), 1e-9);
+}
+
+// gtest: GlobeTransform.CameraForBoundsFitsTheGlobe
+#[test]
+fn camera_for_bounds_fits_the_globe() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 0.0);
+    let bounds = LatLngBounds::hull(ll(16.0, -133.0), ll(50.0, -68.0));
+    let corners = [bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()];
+
+    // The flat fit the globe starts from is 1.4e-8 zoom from GL JS's
+    // 2.4694852833012204 on Mercator already, and the globe fit inherits that;
+    // the zooms below are GL JS's to within 1.6e-8.
+    {
+        let mut flat = new_transform();
+        flat.resize(Size::new(512, 512)).unwrap();
+        flat.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
+        let flat_fit = crate::map::camera_for_lat_lngs(&corners, &flat, &EdgeInsets::default());
+        assert!(flat_fit.zoom.is_some());
+        assert_near(2.4694852833012204, flat_fit.zoom.unwrap(), 1e-7);
+    }
+
+    let mut fit = crate::map::camera_for_lat_lngs(&corners, &transform, &EdgeInsets::default());
+    assert!(fit.center.is_some() && fit.zoom.is_some());
+    assert_near(-100.5, fit.center.unwrap().longitude(), 1e-9);
+    assert_near(34.717077774070773, fit.center.unwrap().latitude(), 1e-9);
+    assert_near(2.4964711163134550, fit.zoom.unwrap(), 1e-7);
+
+    fit = crate::map::camera_for_lat_lngs(&corners, &transform, &insets(15.0, 15.0, 15.0, 15.0));
+    assert!(fit.center.is_some() && fit.zoom.is_some());
+    assert_near(-100.5, fit.center.unwrap().longitude(), 1e-9);
+    assert_near(34.717077774070773, fit.center.unwrap().latitude(), 1e-9);
+    assert_near(2.3985253272853888, fit.zoom.unwrap(), 1e-7);
+
+    transform.jump_to(&cam().with_bearing(Some(45.0)));
+    fit = crate::map::camera_for_lat_lngs(&corners, &transform, &EdgeInsets::default());
+    assert!(fit.center.is_some() && fit.zoom.is_some());
+    assert_near(-100.5, fit.center.unwrap().longitude(), 1e-9);
+    assert_near(34.717077774070773, fit.center.unwrap().latitude(), 1e-9);
+    assert_near(2.4499189488903967, fit.zoom.unwrap(), 1e-7);
+}
+
+// Bounds fitted with uneven padding fill the padded part of the view the
+// camera shows: every corner and edge midpoint lands inside it and the nearest
+// touches its edge.
+// gtest: GlobeTransform.CameraForBoundsFitsThePaddedView
+#[test]
+fn camera_for_bounds_fits_the_padded_view() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 0.0);
+    let bounds = LatLngBounds::hull(ll(16.0, -133.0), ll(50.0, -68.0));
+    let corners = [bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()];
+    let mid_latitude = (bounds.north() + bounds.south()) / 2.0;
+    let mid_longitude = (bounds.west() + bounds.east()) / 2.0;
+    let samples = [
+        bounds.northwest(),
+        bounds.southwest(),
+        bounds.southeast(),
+        bounds.northeast(),
+        ll(mid_latitude, bounds.west()),
+        ll(mid_latitude, bounds.east()),
+        ll(bounds.north(), mid_longitude),
+        ll(bounds.south(), mid_longitude),
+    ];
+
+    for padding in [insets(0.0, 0.0, 200.0, 0.0), insets(150.0, 60.0, 0.0, 0.0)] {
+        let _trace =
+            ScopedTrace(format!("{} {} {} {}", padding.top(), padding.left(), padding.bottom(), padding.right()));
+        let fit = crate::map::camera_for_lat_lngs(&corners, &transform, &padding);
+        assert!(fit.center.is_some() && fit.zoom.is_some());
+        let mut shown = Transform::from_state(transform.get_state().clone());
+        shown.jump_to(&fit);
+        let state = shown.get_state();
+        let left = padding.left() / 512.0 * 2.0 - 1.0;
+        let right = (512.0 - padding.right()) / 512.0 * 2.0 - 1.0;
+        let top = padding.top() / 512.0 * -2.0 + 1.0;
+        let bottom = (512.0 - padding.bottom()) / 512.0 * -2.0 + 1.0;
+        let mut nearest = f64::INFINITY;
+        for sample in &samples {
+            let surface = VerticalPerspectiveProjection::surface_vector(sample);
+            let clip = matrix::transform_mat4_value(
+                &[surface[0], surface[1], surface[2], 1.0],
+                &state.get_globe_view_projection_matrix(),
+            );
+            let x = clip[0] / clip[3];
+            let y = clip[1] / clip[3];
+            // std::min({nearest, x - left, right - x, top - y, y - bottom})
+            nearest = [x - left, right - x, top - y, y - bottom].into_iter().fold(nearest, std_min);
+        }
+        assert_near(0.0, nearest, 1e-3);
+    }
+}
+
+// gtest: TileProjector.MercatorMatchesTheTileMatrix
+#[test]
+fn mercator_matches_the_tile_matrix() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+    transform.jump_to(
+        &cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(1.0)).with_bearing(Some(30.0)).with_pitch(Some(20.0)),
+    );
+    let state = transform.get_state();
+    assert!(!state.is_globe_rendering());
+
+    // The bottom-right corner of tile 1/0/0 is lat 0, lng 0: the map center.
+    let tile_id = UnwrappedTileID::new(1, 0, 0);
+    let projector = TileProjector::new(state, &tile_id);
+    let corner = Point::new(f64::from(EXTENT), f64::from(EXTENT));
+    let pos =
+        matrix::transform_mat4_value(&[corner.x, corner.y, 0.0, 1.0], &state.get_projection_data(&tile_id).main_matrix);
+
+    let projected = projector.project(&corner, 0.0);
+    assert_near(pos[0] / pos[3], projected.point.x, 1e-9);
+    assert_near(pos[1] / pos[3], projected.point.y, 1e-9);
+    assert_near(0.0, projected.point.x, 1e-6);
+    assert_near(0.0, projected.point.y, 1e-6);
+    assert_double_eq(pos[3], projected.signed_distance_from_camera);
+    assert!(!projected.occluded);
+    assert!(!projector.project(&Point::new(0.0, 0.0), 0.0).occluded);
+    assert_double_eq(1.0, projector.circle_radius_correction());
+    assert_double_eq(1.0, projector.pitched_text_correction(&Point::new(100.0, 100.0)));
+    assert_double_eq(1.0, state.get_projection().pixel_scale(state));
+}
+
+// gtest: TileProjector.GlobeOccludesTheFarSideAndCorrectsForLatitude
+#[test]
+fn globe_occludes_the_far_side_and_corrects_for_latitude() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(40.0, 0.0), 1.0, 0.0, 0.0);
+    let state = transform.get_state();
+    let tile_id = UnwrappedTileID::new(1, 0, 0);
+    let projector = TileProjector::new(state, &tile_id);
+
+    // The bottom-right corner (lat 0, lng 0) faces the camera; the bottom-left
+    // one (lng -180, lat 0) is behind it.
+    assert!(!projector.project(&Point::new(f64::from(EXTENT), f64::from(EXTENT)), 0.0).occluded);
+    assert!(projector.project(&Point::new(0.0, f64::from(EXTENT)), 0.0).occluded);
+
+    let cos40 = deg2rad(40.0).cos();
+    assert_near(cos40, projector.circle_radius_correction(), 1e-12);
+    assert_near(1.0 / cos40, state.get_projection().pixel_scale(state), 1e-12);
+    // Tile y of latitude 60 in tile 1/0/0.
+    let tile_y = Projection::project(&ll(60.0, 0.0), 2.0).y / TILE_SIZE_D * f64::from(EXTENT);
+    assert_near(cos40 / deg2rad(60.0).cos(), projector.pitched_text_correction(&Point::new(100.0, tile_y)), 1e-6);
+    assert_near(cos40, projector.pitched_text_correction(&Point::new(100.0, f64::from(EXTENT))), 1e-6);
+}
+
+// A query on the globe is padded with GL JS's Mercator pitch factor, taken at
+// the screen corner's unclamped Mercator position: the values are GL JS's
+// `GlobeTransform.maxPitchScaleFactor()` for the same views.
+// Map-aligned circles, pitched text and line widths blend their globe size
+// with Mercator's through the projection transition: the values are GL JS's
+// `GlobeTransform` corrections for the same center and transition.
+// gtest: Transform.GlobeSizeCorrectionsBlendThroughTheTransition
+#[test]
+fn globe_size_corrections_blend_through_the_transition() {
+    struct Case {
+        latitude: f64,
+        transition: f64,
+        circle: f64,
+        pixel: f64,
+        pitched: f64,
+    }
+    for c in [
+        Case {
+            latitude: 52.499167,
+            transition: 0.5,
+            circle: 0.8043864815927202,
+            pixel: 1.321324254256826,
+            pitched: 1.2637600088069,
+        },
+        Case { latitude: 60.0, transition: 0.25, circle: 0.875, pixel: 1.25, pitched: 1.0636473098322572 },
+        Case { latitude: 60.0, transition: 1.0, circle: 0.5, pixel: 2.0, pitched: 1.2545892393290283 },
+        Case { latitude: 0.0, transition: 0.5, circle: 1.0, pixel: 1.0, pitched: 1.7545892393290279 },
+    ] {
+        let mut transform = new_transform();
+        transform.resize(Size::new(256, 256)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::between(
+            ProjectionType::Mercator,
+            ProjectionType::VerticalPerspective,
+            c.transition,
+        ));
+        transform.jump_to(&cam().with_center(Some(ll(c.latitude, 13.418056))).with_zoom(Some(11.5)));
+        let state = transform.get_state();
+        let projection = state.get_projection();
+        assert_near(c.circle, projection.circle_radius_correction(state), 1e-9);
+        assert_near(c.pixel, projection.pixel_scale(state), 1e-9);
+        // An anchor a quarter of the way down the zoom 0 tile, at 66.5 degrees
+        // north.
+        assert_near(
+            c.pitched,
+            projection.pitched_text_correction(state, &Point::new(4096.0, 2048.0), &UnwrappedTileID::new(0, 0, 0)),
+            1e-9,
+        );
+    }
+}
+
+// gtest: Transform.GlobeMaxPitchScaleFactor
+#[test]
+fn globe_max_pitch_scale_factor() {
+    struct View {
+        center: LatLng,
+        zoom: f64,
+        pitch: f64,
+        factor: f64,
+    }
+    for view in [
+        View { center: ll(20.0, 30.0), zoom: 1.0, pitch: 50.0, factor: 1.659065925812732 },
+        View { center: ll(0.0, 0.0), zoom: 1.0, pitch: 60.0, factor: 2.3660254037842425 },
+        View { center: ll(20.0, 30.0), zoom: 2.0, pitch: 50.0, factor: 1.6590659258122578 },
+    ] {
+        let mut transform = new_transform();
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform
+            .jump_to(&cam().with_center(Some(view.center)).with_zoom(Some(view.zoom)).with_pitch(Some(view.pitch)));
+        assert_near(view.factor, f64::from(transform.get_state().max_pitch_scale_factor()), 1e-4);
+    }
+}
+
+// gtest: Transform.GlobeLocationOcclusion
+#[test]
+fn globe_location_occlusion() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 0.0), 1.0, 0.0, 0.0);
+    assert!(!transform.is_location_occluded(&ll(0.0, 0.0)));
+    assert!(!transform.is_location_occluded(&ll(0.0, 60.0)));
+    assert!(!transform.is_location_occluded(&ll(-60.0, 0.0)));
+    assert!(transform.is_location_occluded(&ll(0.0, 100.0)));
+    assert!(transform.is_location_occluded(&ll(0.0, 180.0)));
+    assert!(transform.is_location_occluded(&ll(-30.0, -120.0)));
+
+    set_up_globe(&mut transform, &ll(0.0, 180.0), 1.0, 0.0, 0.0);
+    assert!(transform.is_location_occluded(&ll(0.0, 0.0)));
+    assert!(!transform.is_location_occluded(&ll(0.0, 180.0)));
+
+    transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+    assert!(!transform.is_location_occluded(&ll(0.0, 0.0)));
+
+    let mut unsized_transform = new_transform();
+    unsized_transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    assert!(!unsized_transform.is_location_occluded(&ll(0.0, 180.0)));
+}
+
+// gtest: Transform.GlobeCenterLongitudeStaysContinuous
+#[test]
+fn globe_center_longitude_stays_continuous() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 179.0), 1.0, 0.0, 0.0);
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -179.0))));
+    assert_near(181.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(-179.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    transform.move_by(&sc(-40.0, 0.0), &AnimationOptions::default());
+    assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() > 181.0);
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 179.0))));
+    assert_near(179.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+
+    // Mercator keeps its wrapped center.
+    transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -179.0))));
+    assert_near(-179.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+}
+
+// Leaving the globe applies Mercator's limits again: its lowest zoom for the
+// view's height and a wrapped center.
+// gtest: Transform.LeavingTheGlobeConstrainsTheCamera
+#[test]
+fn leaving_the_globe_constrains_the_camera() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(400, 800)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.3)));
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 120.0))));
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -150.0))));
+    assert_near(210.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(0.3, transform.get_zoom(), 1e-9);
+
+    transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+    assert_near((800.0f64 / 512.0).log2(), transform.get_zoom(), 1e-9);
+    assert_near(-150.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+}
+
+// Bounds across the antimeridian keep a globe center past 180 degrees, which
+// the globe hands over wrapped.
+// gtest: Transform.GlobeBoundsAcrossTheAntimeridian
+#[test]
+fn globe_bounds_across_the_antimeridian() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 150.0), 3.0, 0.0, 0.0);
+    transform.set_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 120.0), ll(10.0, 240.0))).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 175.0))));
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -175.0))));
+    assert_near(185.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+
+    // A drag east across the antimeridian.
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 179.0))));
+    transform.move_by(&sc(-100.0, 0.0), &AnimationOptions::default());
+    assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() > 180.0);
+    assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() < 240.0);
+}
+
+// The camera the platforms read carries the wrapped center, whichever copy of
+// it the globe keeps. Bounds across the antimeridian keep the center in their
+// own range, past 180 degrees: the camera reports it there, so jumping back to
+// the reported camera does not move the map, on either projection.
+// gtest: Transform.CameraRoundTripsInsideBoundsAcrossTheAntimeridian
+#[test]
+fn camera_round_trips_inside_bounds_across_the_antimeridian() {
+    for globe in [false, true] {
+        let _trace = ScopedTrace(if globe { "globe" } else { "mercator" }.to_owned());
+        let mut transform = new_transform();
+        transform.resize(Size::new(800, 600)).unwrap();
+        if globe {
+            transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        }
+        transform.jump_to(&cam().with_center(Some(ll(0.0, 180.0))).with_zoom(Some(5.0)));
+        transform.set_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))).unwrap();
+        transform.jump_to(&cam().with_center(Some(ll(0.0, 185.0))));
+        assert_near(185.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+        let camera = transform.get_camera_options(None);
+        transform.jump_to(&camera);
+        assert_near(185.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+        if globe {
+            transform.set_projection_definition(&ProjectionDefinition::from_name("mercator"));
+            assert_near(185.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+        }
+    }
+}
+
+// gtest: Transform.GlobeCameraCenterIsWrapped
+#[test]
+fn globe_camera_center_is_wrapped() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 179.0), 1.0, 0.0, 0.0);
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -179.0))));
+    assert_near(181.0, transform.get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(-179.0, transform.get_camera_options(None).center.unwrap().longitude(), 1e-9);
+}
+
+// The expected centers are GL JS's inertia (handlePanInertia) for the same
+// transforms: a fling turns the planet by degrees per pixel at the center's
+// latitude, and the zoom follows the latitude to keep the planet's size.
+// gtest: Transform.GlobeFlingEndsAtGLJSInertiaCenter
+#[test]
+fn globe_fling_ends_at_gljs_inertia_center() {
+    struct Pan {
+        center: LatLng,
+        zoom: f64,
+        bearing: f64,
+        offset: ScreenCoordinate,
+        expected: LatLng,
+    }
+    for pan in [
+        Pan {
+            center: ll(30.0, -20.0),
+            zoom: 4.0,
+            bearing: 30.0,
+            offset: sc(120.0, -80.0),
+            expected: ll(29.64674667013475, -26.3247433402695),
+        },
+        Pan {
+            center: ll(-45.0, 170.0),
+            zoom: 8.0,
+            bearing: -100.0,
+            offset: sc(-50.0, 25.0),
+            expected: ll(-44.91280009391755, 169.90853166980656),
+        },
+        Pan {
+            center: ll(70.0, 0.0),
+            zoom: 5.0,
+            bearing: 0.0,
+            offset: sc(200.0, 0.0),
+            expected: ll(70.0, -4.23757815424085),
+        },
+    ] {
+        let _trace = ScopedTrace(format!("zoom {}", std_to_string(pan.zoom)));
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &pan.center, pan.zoom, pan.bearing, 0.0);
+        transform.move_by(&pan.offset, &linear_second());
+        transform.update_transitions(transform.get_transition_start() + milliseconds(1000));
+        assert_near(pan.expected.latitude(), transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+        assert_near(pan.expected.longitude(), transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        assert_near(
+            pan.zoom + VerticalPerspectiveProjection::zoom_adjustment(pan.center.latitude(), pan.expected.latitude()),
+            transform.get_zoom(),
+            1e-9,
+        );
+    }
+}
+
+// A fling toward a pole eases along its own meridian, as GL JS's inertia
+// does, as far toward the pole as the zoom it starts from lets the center go:
+// onto the pole from zoom 1.5 on this 800 by 600 view, short of it from zoom
+// 3. Moving the location under the end of the fling to the center took it
+// over the pole, and the planet spun as it bounced back.
+// gtest: Transform.GlobeFlingTowardAPoleStaysOnItsMeridian
+#[test]
+fn globe_fling_toward_a_pole_stays_on_its_meridian() {
+    struct Fling {
+        zoom: f64,
+        /// GL JS's latitude and zoom halfway and at the end.
+        halves: [(f64, f64); 2],
+    }
+    for fling in [
+        Fling { zoom: 1.5, halves: [(75.0, 0.5500156865235035), (90.0, -1.0350518437681169)] },
+        Fling { zoom: 3.0, halves: [(73.2171601091423, 2.2078682014999638), (86.43432021828463, 0.4649481562318831)] },
+    ] {
+        let _trace = ScopedTrace(format!("zoom {}", std_to_string(fling.zoom)));
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(60.0, 10.0), fling.zoom, 0.0, 0.0);
+        transform.move_by(&sc(0.0, 3000.0), &linear_second());
+        let mut latitude = 60.0;
+        for frame in 1..=20 {
+            transform.update_transitions(transform.get_transition_start() + milliseconds(50 * frame));
+            assert_near(10.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+            assert!(transform.get_lat_lng(WrapMode::Wrapped).latitude() >= latitude - 1e-9, "frame {frame}");
+            latitude = transform.get_lat_lng(WrapMode::Wrapped).latitude();
+            if frame % 10 == 0 {
+                let (expected_latitude, expected_zoom) = fling.halves[(frame / 10 - 1) as usize];
+                assert_near(expected_latitude, latitude, 1e-6);
+                assert_near(expected_zoom, transform.get_zoom(), 1e-6);
+            }
+        }
+    }
+}
+
+// A fling worth more than half a turn stops at 179.5° the way it was going,
+// like GL JS's inertia, rather than easing the shorter way round, against the
+// fling.
+// gtest: Transform.GlobeFlingStopsShortOfHalfATurn
+#[test]
+fn globe_fling_stops_short_of_half_a_turn() {
+    let mut transform = new_transform();
+    set_up_globe(&mut transform, &ll(0.0, 0.0), 0.5, 0.0, 0.0);
+    transform.move_by(&sc(-5000.0, 0.0), &linear_second());
+    let mut longitude = 0.0;
+    for frame in 1..=20 {
+        transform.update_transitions(transform.get_transition_start() + milliseconds(50 * frame));
+        assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() >= longitude - 1e-9, "frame {frame}");
+        longitude = transform.get_lat_lng(WrapMode::Unwrapped).longitude();
+    }
+    assert_near(179.5, longitude, 1e-9);
+    assert_near(0.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+}
+
+// GL JS's drag (`versorSetLocationAtPoint` in globe_utils.ts at a6976b2d2) on a
+// 640 by 480 vertical perspective globe, one step at a time from the state GL
+// JS had before it. GL JS builds the step's rotation with `quat.fromValues`, a
+// Float32Array, which near a pole moves its center by up to 2e-3 degrees a
+// step; the expected centers are GL JS's drag run in doubles. The location
+// under a pixel differs from GL JS's by a few times 1e-8 degrees, which a step
+// carries.
+// gtest: GlobeTransform.DragCenterMatchesGLJS
+#[test]
+fn drag_center_matches_gljs() {
+    // (name, center, zoom, bearing, pitch, point, panDelta, expected)
+    type Step = (&'static str, (f64, f64), f64, f64, f64, (f64, f64), (f64, f64), (f64, f64));
+    let steps: [Step; 30] = [
+        (
+            "center-drag-east 0",
+            (20.0, 10.0),
+            1.0,
+            0.0,
+            0.0,
+            (330.0, 240.0),
+            (10.0, 0.0),
+            (19.96528220871278, 6.48152888184427),
+        ),
+        (
+            "center-drag-east 2",
+            (19.93062984381388, 2.96383097806563),
+            1.0006345588283656,
+            0.0,
+            0.0,
+            (330.0, 240.0),
+            (10.0, 0.0),
+            (19.89604275335306, -0.5530967909885476),
+        ),
+        (
+            "center-drag-east 4",
+            (19.86152078591744, -4.06925749079096),
+            1.0012643498868492,
+            0.0,
+            0.0,
+            (330.0, 240.0),
+            (10.0, 0.0),
+            (19.8270637906032, -7.584654172731689),
+        ),
+        (
+            "off-center-drag 2",
+            (16.074405186537916, 4.212860800653175),
+            1.0322017912167816,
+            0.0,
+            0.0,
+            (400.0, 180.0),
+            (6.0, -4.0),
+            (14.115311037321156, 1.3609496277557582),
+        ),
+        (
+            "off-center-drag 4",
+            (12.158623543717447, -1.4683004008273883),
+            1.057008507859097,
+            0.0,
+            0.0,
+            (400.0, 180.0),
+            (6.0, -4.0),
+            (10.204304619531165, -4.278521558340458),
+        ),
+        (
+            "drag-north-into-pole 0",
+            (70.0, -100.0),
+            1.0,
+            0.0,
+            0.0,
+            (320.0, 300.0),
+            (0.0, 6.0),
+            (70.73728720083854, -100.00000000000205),
+        ),
+        (
+            "drag-north-into-pole 20",
+            (84.74574401678998, -100.00000000000068),
+            -0.9010463352914224,
+            0.0,
+            0.0,
+            (320.0, 300.0),
+            (0.0, 6.0),
+            (85.48303121762915, -100.00000000000068),
+        ),
+        (
+            "drag-north-into-pole 21",
+            (85.48303121762915, -100.00000000000068),
+            -0.9872050442266238,
+            0.0,
+            0.0,
+            (320.0, 300.0),
+            (0.0, 6.0),
+            (86.22031841846909, -100.00000000000068),
+        ),
+        (
+            "drag-north-into-pole 27",
+            (89.90675442266692, -100.00000000000068),
+            -0.9872050442266238,
+            0.0,
+            0.0,
+            (320.0, 300.0),
+            (0.0, 6.0),
+            (90.0, -100.00000000000068),
+        ),
+        (
+            "drag-north-into-pole 28",
+            (90.0, -100.00000000000068),
+            -0.9872050442266238,
+            0.0,
+            0.0,
+            (320.0, 300.0),
+            (0.0, 6.0),
+            (90.0, -100.00000000000068),
+        ),
+        (
+            "side-drag-at-pole 0",
+            (85.0511287798066, -100.0),
+            1.0,
+            0.0,
+            0.0,
+            (380.0, 240.0),
+            (6.0, 0.0),
+            (85.0477656113963, -101.87137817590371),
+        ),
+        (
+            "side-drag-at-pole 30",
+            (84.95121303919578, -155.737980622539),
+            1.0287640984336475,
+            0.0,
+            0.0,
+            (380.0, 240.0),
+            (6.0, 0.0),
+            (84.94791671962916, -157.58177081818087),
+        ),
+        (
+            "side-drag-at-pole 59",
+            (84.85648183647973, 151.15114974424728),
+            1.0555120380074723,
+            0.0,
+            0.0,
+            (380.0, 240.0),
+            (6.0, 0.0),
+            (84.85324650692623, 149.33280710271083),
+        ),
+        (
+            "side-drag-centred-pole 0",
+            (89.0, 0.0),
+            0.5,
+            0.0,
+            0.0,
+            (340.0, 200.0),
+            (0.0, 8.0),
+            (89.34438829057913, 13.508337366700857),
+        ),
+        (
+            "side-drag-centred-pole 2",
+            (89.68877639444831, 22.57677926378733),
+            0.5,
+            0.0,
+            0.0,
+            (340.0, 200.0),
+            (0.0, 8.0),
+            (90.0, 28.803865724291313),
+        ),
+        (
+            "side-drag-centred-pole 15",
+            (90.0, 83.80781405685116),
+            0.5,
+            0.0,
+            0.0,
+            (340.0, 200.0),
+            (0.0, 8.0),
+            (90.0, 88.39147641789782),
+        ),
+        (
+            "side-drag-centred-pole 29",
+            (90.0, 147.97908711150444),
+            0.5,
+            0.0,
+            0.0,
+            (340.0, 200.0),
+            (0.0, 8.0),
+            (90.0, 152.5627494725511),
+        ),
+        (
+            "drag-off-globe 0",
+            (10.0, 5.0),
+            1.0,
+            0.0,
+            0.0,
+            (620.0, 240.0),
+            (20.0, 0.0),
+            (9.982236219514714, 1.5494610302675937),
+        ),
+        (
+            "drag-off-globe 2",
+            (9.964504640751409, -1.9008899375490955),
+            1.0001573094988878,
+            0.0,
+            0.0,
+            (620.0, 240.0),
+            (20.0, 0.0),
+            (9.946805201839899, -5.3510535945838456),
+        ),
+        (
+            "drag-off-globe 4",
+            (9.929137841049005, -8.801030629313573),
+            1.0003134815524495,
+            0.0,
+            0.0,
+            (620.0, 240.0),
+            (20.0, 0.0),
+            (9.911502496783827, -12.250821727578682),
+        ),
+        (
+            "drag-bearing-pitch 0",
+            (40.0, 30.0),
+            2.5,
+            30.0,
+            40.0,
+            (300.0, 330.0),
+            (-7.0, 5.0),
+            (40.100686468998106, 30.988488451527928),
+        ),
+        (
+            "drag-bearing-pitch 4",
+            (40.40265566873954, 33.96278116325789),
+            2.4914316029001595,
+            30.0,
+            40.0,
+            (300.0, 330.0),
+            (-7.0, 5.0),
+            (40.50328185738783, 34.95717865523261),
+        ),
+        (
+            "drag-bearing-pitch 7",
+            (40.70448865902955, 36.95046737255302),
+            2.4849281889924244,
+            30.0,
+            40.0,
+            (300.0, 330.0),
+            (-7.0, 5.0),
+            (40.80506918481425, 37.94937335237137),
+        ),
+        (
+            "drag-across-antimeridian 0",
+            (0.0, 175.0),
+            1.5,
+            0.0,
+            0.0,
+            (300.0, 240.0),
+            (-12.0, 0.0),
+            (0.0, 177.9946248399193),
+        ),
+        (
+            "drag-across-antimeridian 5",
+            (0.0, -170.02687580040782),
+            1.5,
+            0.0,
+            0.0,
+            (300.0, 240.0),
+            (-12.0, 0.0),
+            (0.0, -167.0322509604884),
+        ),
+        (
+            "drag-across-antimeridian 9",
+            (0.0, -158.0483764407433),
+            1.5,
+            0.0,
+            0.0,
+            (300.0, 240.0),
+            (-12.0, 0.0),
+            (0.0, -155.0537516008231),
+        ),
+        (
+            "drag-south-pole 0",
+            (-80.0, 40.0),
+            0.8,
+            0.0,
+            0.0,
+            (320.0, 200.0),
+            (0.0, -7.0),
+            (-80.49305711248556, 40.00000000000148),
+        ),
+        (
+            "drag-south-pole 10",
+            (-84.93057112485239, 40.00000000000193),
+            -0.17465574390064653,
+            0.0,
+            0.0,
+            (320.0, 200.0),
+            (0.0, -7.0),
+            (-85.42362823733717, 40.00000000000193),
+        ),
+        (
+            "drag-south-pole 19",
+            (-89.36808513722191, 40.00000000000193),
+            -0.20929101946440645,
+            0.0,
+            0.0,
+            (320.0, 200.0),
+            (0.0, -7.0),
+            (-89.86114224970903, 40.00000000000193),
+        ),
+        (
+            "drag-south-pole 20",
+            (-89.86114224970903, 40.00000000000193),
+            -0.20929101946440645,
+            0.0,
+            0.0,
+            (320.0, 200.0),
+            (0.0, -7.0),
+            (-90.0, 40.00000000000193),
+        ),
+    ];
+    for (name, center, zoom, bearing, pitch, point, pan_delta, expected) in steps {
+        let _trace = ScopedTrace(name.to_owned());
+        let mut transform = new_transform();
+        transform.resize(Size::new(640, 480)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(
+            &cam()
+                .with_center(Some(ll(center.0, center.1)))
+                .with_zoom(Some(zoom))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch)),
+        );
+        let center = VerticalPerspectiveProjection::drag_center(
+            transform.get_state(),
+            &sc(point.0, 480.0 - point.1),
+            &sc(pan_delta.0, -pan_delta.1),
+        );
+        assert_near(expected.0, center.latitude(), 1e-7);
+        assert_near(
+            0.0,
+            VerticalPerspectiveProjection::difference_of_angles_degrees(expected.1, center.longitude()),
+            1e-4,
+        );
+    }
+}
+
+// Dragging sideways at the pole turns the globe around it with the latitude
+// held, as GL JS's drag does. The center used to come from the location
+// beside it, so it slid away from the pole and the planet spun.
+// gtest: GlobeTransform.DragAroundThePoleHoldsItsLatitude
+#[test]
+fn drag_around_the_pole_holds_its_latitude() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(640, 480)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    transform.jump_to(&cam().with_center(Some(ll(LATITUDE_MAX, -100.0))).with_zoom(Some(1.0)));
+    for _ in 0..60 {
+        transform.move_by_with_anchor(&sc(6.0, 0.0), Some(sc(380.0, 240.0)), &AnimationOptions::default());
+    }
+    // GL JS after the same 60 steps, run in doubles as in
+    // DragCenterMatchesGLJS.
+    assert_near(84.85324650692623, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(
+        0.0,
+        VerticalPerspectiveProjection::difference_of_angles_degrees(
+            149.33280710271083,
+            transform.get_lat_lng(WrapMode::Wrapped).longitude(),
+        ),
+        1e-6,
+    );
+    assert_near(1.0564167839713543, transform.get_zoom(), 1e-6);
+}
+
+// Dragging north over the pole stops on it, as GL JS's drag does, the zoom
+// holding the planet's size from the edge of the Mercator range on. GL JS
+// after the same 40 steps, run in doubles: (90, -100) at zoom
+// -0.9872050442266238.
+// gtest: GlobeTransform.DragOverThePoleStopsOnIt
+#[test]
+fn drag_over_the_pole_stops_on_it() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(640, 480)).unwrap();
+    transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    transform.jump_to(&cam().with_center(Some(ll(70.0, -100.0))).with_zoom(Some(1.0)));
+    for _ in 0..40 {
+        transform.move_by_with_anchor(&sc(0.0, 6.0), Some(sc(320.0, 300.0)), &AnimationOptions::default());
+    }
+    assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+    assert_near(-100.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+    assert_near(-0.9872050442266238, transform.get_zoom(), 1e-6);
+}
+
+// GL JS's drag without the fixed bearing
+// (`versorSetLocationAtPoint(tr, location, anchor, panDelta, false)` in
+// globe_utils.ts at 638b3f9ec) on a 640 by 480 globe with a 45 degree field of
+// view, run in doubles: one step at a time from the state GL JS had before it,
+// the anchor the cursor while it is on the planet and the center otherwise.
+// Steps with the cursor off the planet go through the falloff, where native
+// and GL JS differ by a few times 1e-7 degrees.
+// gtest: GlobeTransform.FreeBearingDragMatchesGLJS
+#[test]
+fn free_bearing_drag_matches_gljs() {
+    // (name, center, zoom, bearing, pitch, anchor, panDelta, expected,
+    // expectedBearing)
+    type Step = (&'static str, (f64, f64), f64, f64, f64, (f64, f64), (f64, f64), (f64, f64), f64);
+    let steps: [Step; 18] = [
+        (
+            "mid-globe-east 0",
+            (20.0, 10.0),
+            1.0,
+            0.0,
+            0.0,
+            (340.0, 240.0),
+            (10.0, 0.0),
+            (19.964831035703163, 6.458738472277901),
+            -1.2105018410808273,
+        ),
+        (
+            "mid-globe-east 7",
+            (18.019206354761504, -16.65450732839554),
+            1.0171849312490204,
+            -8.825955295711765,
+            0.0,
+            (410.0, 240.0),
+            (10.0, 0.0),
+            (17.29289010262656, -21.199373456415287),
+            -10.205107464700406,
+        ),
+        (
+            "over-north-pole 13",
+            (79.41551935272437, -99.99999999999989),
+            0.10315332639360152,
+            3.410605131648481e-13,
+            0.0,
+            (320.0, 284.0),
+            (0.0, 6.0),
+            (80.14639071459133, -99.99999999999807),
+            2.0463630789890885e-12,
+        ),
+        (
+            "over-north-pole 25",
+            (88.49295346569899, -99.99999999998397),
+            -0.9872050442266241,
+            1.671196514507756e-11,
+            0.0,
+            (320.0, 356.0),
+            (0.0, 6.0),
+            (89.29419866472097, -99.99999999996294),
+            3.8198777474462986e-11,
+        ),
+        (
+            "over-north-pole 26",
+            (89.29419866472097, -99.99999999996294),
+            -0.9872050442266241,
+            3.8198777474462986e-11,
+            0.0,
+            (320.0, 362.0),
+            (0.0, 6.0),
+            (89.89453036004743, 79.99999999974375),
+            179.99999999974605,
+        ),
+        (
+            "over-north-pole 27",
+            (89.89453036004743, 79.99999999974375),
+            -0.9872050442266241,
+            179.99999999974605,
+            0.0,
+            (320.0, 368.0),
+            (0.0, 6.0),
+            (89.07238060450973, 79.99999999996999),
+            179.99999999997203,
+        ),
+        (
+            "over-north-pole 39",
+            (78.96870340062405, 79.99999999999284),
+            0.16209611242931793,
+            179.999999999995,
+            0.0,
+            (320.0, 440.0),
+            (0.0, 6.0),
+            (77.9082916607387, 79.99999999999159),
+            179.99999999999363,
+        ),
+        (
+            "across-pole-on-globe 19",
+            (89.340072693097, -100.00000000001774),
+            -0.009291019464406594,
+            -1.6825651982799172e-11,
+            0.0,
+            (320.0, 320.0),
+            (0.0, 8.0),
+            (89.83806502107838, -100.00000000007714),
+            -7.651124178664759e-11,
+        ),
+        (
+            "across-pole-on-globe 20",
+            (89.83806502107838, -100.00000000007714),
+            -0.009291019464406594,
+            -7.651124178664759e-11,
+            0.0,
+            (320.0, 328.0),
+            (0.0, 8.0),
+            (89.6617557958742, 80.00000000003092),
+            -179.99999999996658,
+        ),
+        (
+            "across-pole-on-globe 21",
+            (89.6617557958742, 80.00000000003092),
+            -0.009291019464406594,
+            -179.99999999996658,
+            0.0,
+            (320.0, 336.0),
+            (0.0, 8.0),
+            (89.15914508699329, 80.00000000001307),
+            -179.99999999998465,
+        ),
+        (
+            "beside-north-pole 0",
+            (85.05, -100.0),
+            1.0,
+            0.0,
+            0.0,
+            (386.0, 240.0),
+            (6.0, 0.0),
+            (85.04662278483669, -102.12115815315576),
+            -2.113243435839649,
+        ),
+        (
+            "beside-north-pole 29",
+            (82.61847217815794, -148.0453022994218),
+            1.5742929546363558,
+            -47.80814125537427,
+            0.0,
+            (560.0, 240.0),
+            (6.0, 0.0),
+            (82.46976369277144, -149.0658211264905),
+            -48.82003297275798,
+        ),
+        (
+            "off-globe-and-back 5",
+            (59.63182334571161, 0.0),
+            0.015938893735801596,
+            0.0,
+            0.0,
+            (320.0, 240.0),
+            (0.0, 25.0),
+            (68.48553614142399, 0.0),
+            0.0,
+        ),
+        (
+            "off-globe-and-back 9",
+            (84.95332547144974, 180.0),
+            -2.506889874048772,
+            180.0,
+            0.0,
+            (320.0, 240.0),
+            (0.0, 25.0),
+            (76.09961267574481, 180.0),
+            180.0,
+        ),
+        (
+            "off-globe-and-back 15",
+            (84.95332547144743, 180.0),
+            -2.5068898740481123,
+            180.0,
+            0.0,
+            (320.0, 240.0),
+            (0.0, -25.0),
+            (86.19296173284701, 0.0),
+            0.0,
+        ),
+        (
+            "off-globe-and-back 20",
+            (33.13938452686452, 0.0),
+            0.7438908494163972,
+            0.0,
+            0.0,
+            (320.0, 315.0),
+            (0.0, -25.0),
+            (20.561601743914935, 0.0),
+            0.0,
+        ),
+        (
+            "bearing-pitch 0",
+            (40.0, 30.0),
+            1.5,
+            30.0,
+            20.0,
+            (308.0, 255.0),
+            (8.0, -5.0),
+            (39.90522931489954, 27.677367870127796),
+            28.54888958514232,
+        ),
+        (
+            "bearing-pitch 9",
+            (36.75658194038969, 8.665623636743362),
+            1.5647074495325435,
+            17.020204416245633,
+            20.0,
+            (380.0, 210.0),
+            (8.0, -5.0),
+            (36.00738235824049, 6.187079071036919),
+            15.610527473047796,
+        ),
+    ];
+    for (name, center, zoom, bearing, pitch, anchor, pan_delta, expected, expected_bearing) in steps {
+        let _trace = ScopedTrace(name.to_owned());
+        let mut transform = new_transform();
+        transform.resize(Size::new(640, 480)).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(
+            &cam()
+                .with_center(Some(ll(center.0, center.1)))
+                .with_zoom(Some(zoom))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch))
+                .with_fov(Some(45.0)),
+        );
+        let drag = VerticalPerspectiveProjection::drag_camera(
+            transform.get_state(),
+            &sc(anchor.0, 480.0 - anchor.1),
+            &sc(pan_delta.0, -pan_delta.1),
+        );
+        assert_near(expected.0, drag.center.latitude(), 1e-6);
+        assert_near(
+            0.0,
+            VerticalPerspectiveProjection::difference_of_angles_degrees(expected.1, drag.center.longitude()),
+            1e-6,
+        );
+        assert_near(
+            0.0,
+            VerticalPerspectiveProjection::difference_of_angles_degrees(expected_bearing, drag.bearing),
+            1e-6,
+        );
+    }
+}
+
+// With a free bearing the location under the cursor stays under it, over the
+// pole too, where the bearing turns round; with the bearing held the drag
+// stops on the pole and the location stays behind.
+// gtest: GlobeTransform.FreeBearingDragKeepsTheLocationUnderTheCursor
+#[test]
+fn free_bearing_drag_keeps_the_location_under_the_cursor() {
+    for free_bearing in [true, false] {
+        let _trace = ScopedTrace(if free_bearing { "free bearing" } else { "bearing held" }.to_owned());
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(80.0, -100.0), 1.0, 0.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        let mut cursor = sc(400.0, 220.0);
+        let mut max_slip = 0.0;
+        for _ in 0..40 {
+            let grabbed = transform.screen_coordinate_to_lat_lng(&cursor, WrapMode::Wrapped);
+            cursor.y += 8.0;
+            transform.move_by_with_anchor(&sc(0.0, 8.0), Some(cursor), &AnimationOptions::default());
+            let point = transform.lat_lng_to_screen_coordinate(&grabbed);
+            max_slip = std_max(max_slip, (point.x - cursor.x).hypot(point.y - cursor.y));
+        }
+        if free_bearing {
+            assert!(max_slip < 1e-6, "{max_slip}");
+            assert_near(80.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+            assert_near(180.0, mln_math::rad2deg(transform.get_bearing()).abs(), 1e-6);
+        } else {
+            assert!(max_slip > 4.0, "{max_slip}");
+            assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+        }
+    }
+}
+
+// A zoom around a point beside the pole: with the bearing held the center's
+// longitude swings towards the point's and the planet turns about the pole,
+// as GL JS's does; with a free bearing the planet only grows around the
+// point.
+// gtest: GlobeTransform.FreeBearingZoomAroundThePoleKeepsTheViewsOrientation
+#[test]
+fn free_bearing_zoom_around_the_pole_keeps_the_views_orientation() {
+    for free_bearing in [true, false] {
+        let _trace = ScopedTrace(if free_bearing { "free bearing" } else { "bearing held" }.to_owned());
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(89.0, 0.0), 1.0, 0.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        let anchor = sc(520.0, 220.0);
+        let location = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped);
+        let beside = transform.screen_coordinate_to_lat_lng(&sc(anchor.x + 20.0, anchor.y), WrapMode::Wrapped);
+        transform.jump_to(&cam().with_zoom(Some(1.6)).with_anchor(Some(anchor)));
+        let point = transform.lat_lng_to_screen_coordinate(&location);
+        let beside_point = transform.lat_lng_to_screen_coordinate(&beside);
+        let turn = mln_math::rad2deg((beside_point.y - point.y).atan2(beside_point.x - point.x));
+        if free_bearing {
+            assert_near(anchor.x, point.x, 1e-6);
+            assert_near(anchor.y, point.y, 1e-6);
+            assert_near(0.0, turn, 0.5);
+        } else {
+            assert!(turn.abs() > 10.0, "{turn}");
+        }
+    }
+}
+
+// A fling over the pole with the bearing free turns the planet on about one
+// axis: the center moves away from where it started at every frame, over the
+// pole and down the far side, and the bearing turns round. With the bearing
+// held, GL JS's fling, it stops on the pole.
+// gtest: GlobeTransform.FreeBearingFlingCarriesOnOverThePole
+#[test]
+fn free_bearing_fling_carries_on_over_the_pole() {
+    for free_bearing in [true, false] {
+        let _trace = ScopedTrace(if free_bearing { "free bearing" } else { "bearing held" }.to_owned());
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &ll(85.0, -100.0), 1.0, 0.0, 0.0);
+        transform.set_globe_free_bearing(free_bearing);
+        let start = VerticalPerspectiveProjection::surface_vector(&transform.get_lat_lng(WrapMode::Wrapped));
+        transform.move_by(&sc(0.0, 400.0), &linear_second());
+        let mut previous = 0.0;
+        for frame in 1..=20 {
+            transform.update_transitions(transform.get_transition_start() + milliseconds(50 * frame));
+            let center = VerticalPerspectiveProjection::surface_vector(&transform.get_lat_lng(WrapMode::Wrapped));
+            let distance =
+                std_clamp(start[0] * center[0] + start[1] * center[1] + start[2] * center[2], -1.0, 1.0).acos();
+            assert!(distance >= previous - 1e-9, "frame {frame}");
+            previous = distance;
+        }
+        if free_bearing {
+            assert!(transform.get_lat_lng(WrapMode::Wrapped).latitude() < 85.0);
+            assert_near(80.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+            assert_near(180.0, mln_math::rad2deg(transform.get_bearing()).abs(), 1e-6);
+        } else {
+            assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+            assert_near(0.0, mln_math::rad2deg(transform.get_bearing()), 1e-9);
+        }
+    }
+}
+
+// GL JS #8629, its camera at 512 by 512: the center reaches the pole while
+// the area past the Mercator range fits in the view, and comes back to the
+// edge of the range as a zoom in grows that area past it.
+// gtest: GlobeTransform.CenterReachesThePoleAtLowZoom
+#[test]
+fn center_reaches_the_pole_at_low_zoom() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(60.2, 0.0), 8.0);
+    transform.jump_to(&cam().with_center(Some(ll(90.0, 0.0))).with_zoom(Some(0.0)));
+    assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+    assert_near(0.0, transform.get_zoom(), 1e-9);
+
+    set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 0.0);
+    transform.jump_to(&cam().with_center(Some(ll(90.0, 0.0))).with_zoom(Some(2.0)));
+    assert_near(88.57750940365021, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+
+    for (zoom, latitude) in [
+        (1.0, 90.0),
+        (1.5, 90.0),
+        (2.0, 88.57750940365021),
+        (2.5, 87.06149291090357),
+        (3.0, 85.98950736849177),
+        (4.0, LATITUDE_MAX),
+    ] {
+        let _trace = ScopedTrace(format!("zoom {}", std_to_string(zoom)));
+        set_up_globe_camera(&mut transform, &ll(90.0, 0.0), 0.5);
+        transform.jump_to(&cam().with_zoom(Some(zoom)));
+        assert_near(latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+        assert_near(zoom, transform.get_zoom(), 1e-9);
+    }
+}
+
+// iOS's quick zoom is anchored on the middle of the view, so with the center
+// on the pole it zooms around the pole, a location with no longitude of its
+// own. The center keeps its meridian and comes down it once the zoom in brings
+// the pole's area past the view: GL JS's latitudes with its camera at 512 by
+// 512, the center at 30°E. GL JS turns the planet about the pole towards the
+// prime meridian when the center is more than 45° from it; here it keeps the
+// meridian there too. A zoom around the pole from below it is GL JS's: the
+// center stays put and the pole moves off the anchor.
+// gtest: GlobeTransform.ZoomAroundThePoleKeepsTheCentersMeridian
+#[test]
+fn zoom_around_the_pole_keeps_the_centers_meridian() {
+    let gljs_latitudes = [
+        90.0,
+        90.0,
+        90.0,
+        90.0,
+        90.0,
+        90.0,
+        89.7739138279545,
+        89.34717269436429,
+        88.9490091378788,
+        88.57750940365021,
+        88.23088789526778,
+        87.90747859237072,
+        87.60572704299784,
+        87.3241828921856,
+        87.06149291090357,
+        86.81639449182124,
+        86.58770958064392,
+        86.37433901384881,
+        86.17525723560607,
+    ];
+    for longitude in [30.0, 120.0] {
+        let _trace = ScopedTrace(format!("longitude {}", std_to_string(longitude)));
+        let mut transform = new_transform();
+        set_up_globe_camera(&mut transform, &ll(90.0, longitude), 1.0);
+        let mut zoom = 1.0;
+        for latitude in gljs_latitudes {
+            zoom += 0.1;
+            let _zoom_trace = ScopedTrace(format!("zoom {}", std_to_string(zoom)));
+            transform.jump_to(&cam().with_zoom(Some(zoom)).with_anchor(Some(sc(256.0, 256.0))));
+            assert_near(longitude, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+            assert_near(latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+        }
+    }
+
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(88.0, 30.0), 1.5);
+    let pole = transform.lat_lng_to_screen_coordinate(&ll(90.0, 0.0));
+    transform.jump_to(&cam().with_zoom(Some(1.7)).with_anchor(Some(pole)));
+    assert_near(88.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(149.15333659991416, transform.lat_lng_to_screen_coordinate(&ll(90.0, 0.0)).y, 1e-4);
+}
+
+// Without a zoom, GL JS's jump bounds a center past the Mercator range by the
+// zoom it lands on, and its ease and flight bound it by the zoom they start
+// from (GL JS's camera at 512 by 512).
+// gtest: GlobeTransform.JumpBoundsThePoleByTheZoomItLandsOn
+#[test]
+fn jump_bounds_the_pole_by_the_zoom_it_lands_on() {
+    let landing_zoom = -0.5129658685303338;
+    let mut jump = new_transform();
+    set_up_globe_camera(&mut jump, &ll(10.0, 0.0), 3.0);
+    jump.jump_to(&cam().with_center(Some(ll(89.0, 30.0))));
+    assert_near(89.0, jump.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(30.0, jump.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(landing_zoom, jump.get_zoom(), 1e-6);
+
+    let mut ease = new_transform();
+    set_up_globe_camera(&mut ease, &ll(10.0, 0.0), 3.0);
+    ease.ease_to(&cam().with_center(Some(ll(89.0, 30.0))), &linear_second());
+    run_to(&mut ease, 0.5);
+    assert_near(47.99475368424589, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(7.785022180215378, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+    assert_near(2.442592415258865, ease.get_zoom(), 1e-6);
+    run_to(&mut ease, 1.0);
+    assert_near(85.98950736849177, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(30.0, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(landing_zoom, ease.get_zoom(), 1e-6);
+
+    let mut fly = new_transform();
+    set_up_globe_camera(&mut fly, &ll(10.0, 0.0), 3.0);
+    fly.fly_to(&cam().with_center(Some(ll(89.0, 30.0))), &linear_second(), false);
+    run_to(&mut fly, 1.0);
+    assert_near(85.98950736849132, fly.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(landing_zoom, fly.get_zoom(), 1e-6);
+}
+
+// Eases onto, off, and at the pole follow GL JS's camera at 512 by 512,
+// halfway and at the end: a zoom in at the pole eases the center back to the
+// edge of the Mercator range.
+// gtest: GlobeTransform.EasesOntoAndOffThePole
+#[test]
+fn eases_onto_and_off_the_pole() {
+    struct Frame {
+        latitude: f64,
+        longitude: f64,
+        zoom: f64,
+    }
+    struct Ease {
+        name: &'static str,
+        start: LatLng,
+        start_zoom: f64,
+        camera: CameraOptions,
+        halves: [Frame; 2],
+    }
+    for ease in [
+        Ease {
+            name: "onto the pole",
+            start: ll(60.0, 20.0),
+            start_zoom: 2.0,
+            camera: cam().with_center(Some(ll(90.0, 20.0))).with_zoom(Some(0.0)),
+            halves: [
+                Frame { latitude: 78.05612639366316, longitude: 20.0, zoom: 0.9949038280649232 },
+                Frame { latitude: 90.0, longitude: 20.0, zoom: 0.0 },
+            ],
+        },
+        Ease {
+            name: "onto the pole without a zoom",
+            start: ll(60.0, 20.0),
+            start_zoom: 1.0,
+            camera: cam().with_center(Some(ll(89.5, 50.0))),
+            halves: [
+                Frame { latitude: 74.75, longitude: 29.139640453666175, zoom: 0.07330592239273392 },
+                Frame { latitude: 89.5, longitude: 50.0, zoom: -1.5350518437681169 },
+            ],
+        },
+        Ease {
+            name: "off the pole",
+            start: ll(90.0, 0.0),
+            start_zoom: 0.0,
+            camera: cam().with_center(Some(ll(30.0, 40.0))).with_zoom(Some(1.0)),
+            halves: [
+                Frame { latitude: 68.78679656440357, longitude: 24.852188049491588, zoom: 0.9047067439922991 },
+                Frame { latitude: 30.0, longitude: 40.0, zoom: 1.0 },
+            ],
+        },
+        Ease {
+            name: "zooming in at the pole",
+            start: ll(90.0, 0.0),
+            start_zoom: 0.5,
+            camera: cam().with_zoom(Some(4.0)),
+            halves: [
+                Frame { latitude: 86.50061975668255, longitude: 0.0, zoom: 2.25 },
+                Frame { latitude: LATITUDE_MAX, longitude: 0.0, zoom: 4.0 },
+            ],
+        },
+    ] {
+        let _trace = ScopedTrace(ease.name.to_owned());
+        let mut transform = new_transform();
+        set_up_globe_camera(&mut transform, &ease.start, ease.start_zoom);
+        transform.ease_to(&ease.camera, &linear_second());
+        for half in 1..=2 {
+            run_to(&mut transform, f64::from(half) / 2.0);
+            let expected = &ease.halves[(half - 1) as usize];
+            assert_near(expected.latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+            assert_near(expected.longitude, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+            assert_near(expected.zoom, transform.get_zoom(), 1e-6);
+        }
+    }
+}
+
+// Flights land on the pole as GL JS's do (its camera at 512 by 512). From zoom
+// 2, GL JS's flight to the pole itself stops at that zoom's limit, as its
+// `setLocationAtPoint` has no solution for the pole at the center of the
+// view; a flight to any other latitude lands, as this one to 89.9 does, and
+// GL JS's own test flies onto the pole from zoom 8.
+// gtest: GlobeTransform.FliesOntoThePole
+#[test]
+fn flies_onto_the_pole() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(60.2, 0.0), 8.0);
+    transform.fly_to(&cam().with_center(Some(ll(90.0, 0.0))).with_zoom(Some(0.0)), &linear_second(), false);
+    run_to(&mut transform, 1.0);
+    assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+    assert_near(0.0, transform.get_zoom(), 1e-9);
+
+    set_up_globe_camera(&mut transform, &ll(60.0, 20.0), 2.0);
+    transform.fly_to(&cam().with_center(Some(ll(89.9, 20.0))).with_zoom(Some(0.0)), &linear_second(), false);
+    for (k, latitude, zoom) in [(0.5, 77.69090627898427, 0.6859841910974791), (1.0, 89.9, 0.0)] {
+        let _trace = ScopedTrace(format!("k {}", std_to_string(k)));
+        run_to(&mut transform, k);
+        assert_near(latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+        assert_near(20.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        assert_near(zoom, transform.get_zoom(), 1e-6);
+    }
+}
+
+// GL JS's zoom around a point near the pole on an 800 by 600 globe: the center
+// goes past the Mercator range as far as the new zoom lets it.
+// gtest: GlobeTransform.ZoomAroundNearThePoleMatchesGLJS
+#[test]
+fn zoom_around_near_the_pole_matches_gljs() {
+    struct Zoom {
+        center: LatLng,
+        zoom: f64,
+        zoom_delta: f64,
+        anchor: ScreenCoordinate,
+        expected: LatLng,
+    }
+    for zoom in [
+        Zoom {
+            center: ll(89.0, 0.0),
+            zoom: 1.0,
+            zoom_delta: 1.0,
+            anchor: sc(450.0, 200.0),
+            expected: ll(88.2247980153879, 39.898924941760924),
+        },
+        Zoom {
+            center: ll(90.0, 0.0),
+            zoom: 0.5,
+            zoom_delta: 2.0,
+            anchor: sc(400.0, 300.0),
+            expected: ll(87.69055327579845, 0.0),
+        },
+    ] {
+        let _trace = ScopedTrace(format!("zoom {}", std_to_string(zoom.zoom)));
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, &zoom.center, zoom.zoom, 0.0, 0.0);
+        transform.jump_to(&cam().with_zoom(Some(zoom.zoom + zoom.zoom_delta)).with_anchor(Some(zoom.anchor)));
+        assert_near(zoom.expected.latitude(), transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+        assert_near(zoom.expected.longitude(), transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+        assert_near(zoom.zoom + zoom.zoom_delta, transform.get_zoom(), 1e-9);
+    }
+}
+
+// On Mercator a move across the antimeridian during a gesture starts on the
+// world copy next to the one it ends on, as it does on main: the camera
+// reports that copy, which converts back to the middle of the view.
+// gtest: Transform.MercatorCameraCenterIsOnTheTransformsWorldCopy
+#[test]
+fn mercator_camera_center_is_on_the_transforms_world_copy() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(800, 600)).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(5.0)));
+    let degree = 512.0 * 32.0 / 360.0;
+    transform.set_gesture_in_progress(true);
+    transform.move_by(&sc(-2.0 * degree, 0.0), &AnimationOptions::new(seconds(10)));
+    transform.update_transitions(transform.get_transition_start());
+    assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() < -180.0);
+    let center = transform.get_camera_options(None).center.unwrap();
+    assert_near(transform.get_lat_lng(WrapMode::Unwrapped).longitude(), center.longitude(), 1e-9);
+    let point = transform.lat_lng_to_screen_coordinate(&center);
+    assert_near(400.0, point.x, 1e-6);
+    assert_near(300.0, point.y, 1e-6);
 }

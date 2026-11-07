@@ -11,19 +11,21 @@ mod gtest_prefetch;
 mod support;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use feature::Value;
 use geojson::{Feature, GeoJSON, Geometry, Point};
 use mln_actor::{RunLoop, Timer};
+use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
-    BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection, NorthOrientation,
-    ProjectionMode, RenderMode, TileLodMode, ViewportMode,
+    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
+    NorthOrientation, ProjectionMode, RenderMode, TileLodMode, ViewportMode,
 };
 use mln_platform_default::HeadlessFrontend;
+use mln_renderer::tile::tile::TileOperation;
 use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Error as ResponseError, Reason};
@@ -37,13 +39,16 @@ use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
 use mln_style::layers::raster_layer::RasterLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
+use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
 use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{PropertyValue, TransitionOptions};
+use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_test_server::HttpServer;
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::Color;
 use mln_util::chrono::{Duration, Timestamp};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -405,6 +410,47 @@ fn camera_to_lat_lng_bounds_unwrapped_cross_date_line() {
     );
 
     assert!(map.lat_lng_bounds_for_camera_unwrapped(&camera).crosses_antimeridian());
+}
+
+// gtest: Map.PixelForLatLngWithTheCenterPastTheAntimeridian
+#[test]
+fn pixel_for_lat_lng_with_the_center_past_the_antimeridian() {
+    let test = MapTest::new();
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map()
+        .set_bounds(&BoundOptions::default().with_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))))
+        .unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 181.0))).with_zoom(Some(4.0)));
+    assert_near(181.0, test.map().get_camera_options(None).center.unwrap().longitude(), 1e-9);
+
+    // A degree is 512 * 2^4 / 360 pixels at zoom 4.
+    let degree = 512.0 * 16.0 / 360.0;
+    let projection = MapProjection::new(&test.map());
+    for (longitude, x) in [(179.0, 256.0 - 2.0 * degree), (-179.5, 256.0 - 0.5 * degree)] {
+        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+    }
+}
+
+// gtest: Map.PixelForLatLngDuringAFlingAcrossTheAntimeridian
+#[test]
+fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(4.0)));
+
+    let degree = 512.0 * 16.0 / 360.0;
+    test.map().set_gesture_in_progress(true);
+    test.map().move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(Duration::from_secs(10)));
+    let center = test.map().get_camera_options(None).center.unwrap().longitude();
+    assert!(center < -180.0, "{center}");
+
+    let projection = MapProjection::new(&test.map());
+    for (longitude, nearest) in [(179.5, -180.5), (-179.5, -179.5)] {
+        let x = 256.0 + (nearest - center) * degree;
+        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+    }
 }
 
 // gtest: Map.LatLngForPixelUnwrapped
@@ -776,7 +822,7 @@ fn style_expired() {
 
 // gtest: Map.StyleExpiredWithAnnotations
 #[test]
-#[ignore = "TODO(port): annotations (Map::addAnnotation, AnnotationManager); see map.test.cpp:647"]
+#[ignore = "TODO(port): annotations (Map::addAnnotation, AnnotationManager); see map.test.cpp:688"]
 fn style_expired_with_annotations() {
     // Adding an annotation should not prevent revalidation of an expired style.
     let test = MapTest::fake();
@@ -816,6 +862,39 @@ fn style_expired_with_render() {
 
     test.file_source.respond(Kind::Style, &response);
     assert_eq!(1, test.file_source.requests_len());
+}
+
+// gtest: Map.StyleExpiredWithProjection
+#[test]
+fn style_expired_with_projection() {
+    // A projection set at runtime, whole or in place, keeps the next response
+    // from overwriting the style.
+
+    for in_place in [false, true] {
+        let test = MapTest::fake();
+
+        test.map().get_style_mut().load_url("maptiler://maps/test");
+
+        let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
+        test.file_source.respond(Kind::Style, &response);
+
+        if in_place {
+            test.map()
+                .get_style_mut()
+                .get_projection_mut()
+                .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
+        } else {
+            let mut projection = Projection::new();
+            projection.set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
+            test.map().get_style_mut().set_projection(projection);
+        }
+
+        test.file_source.respond(Kind::Style, &response);
+        let map = test.map();
+        let type_ = map.get_style().get_projection().get_type();
+        assert!(type_.is_constant(), "{in_place}");
+        assert_eq!(ProjectionType::Globe, type_.as_constant().from, "{in_place}");
+    }
 }
 
 // gtest: Map.StyleEarlyMutation
@@ -1080,9 +1159,9 @@ fn dont_load_unneeded_tiles() {
 
 // gtest: Map.ContinuousRendering
 #[test]
-#[ignore = "TODO(port): AssetFileSource (the style's asset:// URLs under ResourceOptions::withAssetPath); also TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:922"]
+#[ignore = "TODO(port): AssetFileSource (the style's asset:// URLs under ResourceOptions::withAssetPath); also TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
 fn continuous_rendering() {
-    // test/map/map.test.cpp:922: a Continuous map over
+    // test/map/map.test.cpp:994: a Continuous map over
     // ResourceOptions().withCachePath(":memory:").withAssetPath(
     // "test/fixtures/api/assets") loads test/fixtures/api/water.json and must
     // stop rendering (no frame for 1 s) within 10 s.
@@ -1198,6 +1277,28 @@ fn issue15216() {
     test.map().get_style_mut().add_layer(Box::new(RasterLayer::new("RasterLayer", "ImageSource")), None).unwrap();
     // Passes, if there is no assertion hit.
     test.run_loop.run_once();
+}
+
+// gtest: Map.GlobeImageSourceBelowZoomZero
+#[test]
+fn globe_image_source_below_zoom_zero() {
+    // An image source asked for its tile cover at zoom -1.5 on the globe; the
+    // zoom was cast to an unsigned tile zoom and the render never returned.
+    let test = MapTest::new();
+    test.load_json(&read_file("test/fixtures/api/empty.json"));
+    test.map()
+        .get_style_mut()
+        .get_projection_mut()
+        .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("vertical-perspective")));
+    let coords = [ll(60.0, -10.0), ll(60.0, 10.0), ll(50.0, 10.0), ll(50.0, -10.0)];
+    let source = ImageSource::new("image", coords);
+    source.set_image(decode_image("test/fixtures/image/no_profile.png"));
+    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+    test.map().get_style_mut().add_layer(Box::new(RasterLayer::new("raster", "image")), None).unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(-1.5)));
+    assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+    let image = test.render().image;
+    assert_eq!(test.frontend.get_size().width, image.size.width);
 }
 
 // https://github.com/maplibre/maplibre-native/pull/4753
@@ -1399,20 +1500,130 @@ fn no_hang_on_missing_image() {
 
 // gtest: Map.PrefetchDeltaOverride
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource (the test counts tiles of a vector and a custom source); see map.test.cpp:1261"]
+#[ignore = "TODO(port): CustomGeometrySource (the test counts tiles of a vector and a custom source); see map.test.cpp:1350"]
 fn prefetch_delta_override() {
-    // test/map/map.test.cpp:1261: with setPrefetchZoomDelta(0) on a vector and
+    // test/map/map.test.cpp:1350: with setPrefetchZoomDelta(0) on a vector and
     // a CustomGeometrySource, z16 requests 2 x 4 tiles; resetting the delta
     // to the default requests 4 parent tiles per source.
+}
+
+// gtest: Map.GlobePrefetchRequestsCoarserTiles
+#[test]
+fn globe_prefetch_requests_coarser_tiles() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(
+        r#"{"version": 8, "projection": {"type": "vertical-perspective"}, "sources": {},
+                 "layers": [{"id": "vector", "type": "fill", "source": "vector"}]}"#,
+    );
+    test.map().get_style_mut().add_source(Box::new(vector_source("vector", "a/{z}/{x}/{y}"))).unwrap();
+
+    // C++ guards `zooms` with a mutex; the stub file source answers on this thread.
+    let zooms: Rc<RefCell<BTreeSet<i32>>> = Rc::new(RefCell::new(BTreeSet::new()));
+    {
+        let zooms = zooms.clone();
+        test.file_source.set_response(Kind::Tile, move |resource: &Resource| {
+            if let Some(tile_data) = &resource.tile_data {
+                zooms.borrow_mut().insert(i32::from(tile_data.z));
+            }
+            no_content()
+        });
+    }
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, 10.0))).with_zoom(Some(8.0)));
+    let run_loop = test.run_loop.clone();
+    test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    run_with_timeout(&test.run_loop, 60);
+
+    assert!(zooms.borrow().contains(&4));
+    assert!(zooms.borrow().contains(&8));
+}
+
+// gtest: Map.GlobeTileDrawnForItsChildrenMeetsFinerTilesWithoutAGap
+#[test]
+fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.frontend.clone().set_size(Size::new(512, 512));
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.load_json(
+        r#"{"version": 8, "projection": {"type": "vertical-perspective"},
+                 "sources": {"ocean": {"type": "vector", "tiles": ["a/{z}/{x}/{y}"]}},
+                 "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}},
+                            {"id": "ocean", "type": "fill", "source": "ocean", "source-layer": "water",
+                             "paint": {"fill-color": "blue"}}]}"#,
+    );
+
+    let ocean = Arc::new(read_bytes("test/fixtures/map/globe_tile_masks/ocean.mvt"));
+    // C++ guards `holdChildren` and `served` with a mutex; the stub file source answers on this thread.
+    let hold_children = Rc::new(Cell::new(false));
+    let served: Rc<RefCell<BTreeSet<CanonicalTileID>>> = Rc::new(RefCell::new(BTreeSet::new()));
+    {
+        let hold_children = hold_children.clone();
+        let served = served.clone();
+        test.file_source.set_response(Kind::Tile, move |resource: &Resource| {
+            let tile = resource.tile_data.as_ref().expect("tile data");
+            if hold_children.get() && tile.z == 8 && tile.x / 2 == 20 && tile.y / 2 == 49 {
+                return None;
+            }
+            served.borrow_mut().insert(CanonicalTileID::new(tile.z as u8, tile.x as u32, tile.y as u32));
+            let mut response = Response::new();
+            response.data = Some(ocean.clone());
+            Some(response)
+        });
+    }
+
+    // The view's center is the corner of tile 7/20/49. Its children never arrive, so it is drawn in their place
+    // beside tile 8/41/100, along an edge it draws as one chord and its finer neighbor as two.
+    test.map().jump_to(&cam().with_center(Some(ll(36.6026, -120.9375))).with_zoom(Some(7.6)));
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    }
+    run_with_timeout(&test.run_loop, 60);
+    test.observer.did_finish_loading_map_callback.clear();
+
+    hold_children.set(true);
+    served.borrow_mut().clear();
+    let parsed: Rc<RefCell<BTreeSet<CanonicalTileID>>> = Rc::new(RefCell::new(BTreeSet::new()));
+    {
+        let parsed = parsed.clone();
+        test.observer.on_tile_action_callback.set(move |(op, id, _)| {
+            if op == TileOperation::EndParse {
+                parsed.borrow_mut().insert(id.canonical);
+            }
+        });
+    }
+    let all_parsed = Rc::new(Cell::new(false));
+    {
+        let all_parsed = all_parsed.clone();
+        let served = served.clone();
+        let parsed = parsed.clone();
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |_| {
+            if all_parsed.get() {
+                run_loop.stop();
+                return;
+            }
+            let served = served.borrow();
+            all_parsed.set(!served.is_empty() && served.is_subset(&parsed.borrow()));
+        });
+    }
+    test.map().jump_to(&cam().with_zoom(Some(8.2)));
+    run_with_timeout(&test.run_loop, 60);
+
+    let image = {
+        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+        test.frontend.read_still_image()
+    };
+    let background = image.data.chunks_exact(4).filter(|pixel| pixel[0] > 128 && pixel[2] < 128).count();
+    assert_eq!(0, background);
 }
 
 // Test that custom source's tile pyramid is reset
 // if there is a significant change.
 // gtest: Map.PrefetchDeltaOverrideCustomSource
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource; see map.test.cpp:1337"]
+#[ignore = "TODO(port): CustomGeometrySource; see map.test.cpp:1528"]
 fn prefetch_delta_override_custom_source() {
-    // test/map/map.test.cpp:1337: removing and re-adding the custom source
+    // test/map/map.test.cpp:1528: removing and re-adding the custom source
     // re-requests the z16 tiles and their parents (8 requests).
 }
 
@@ -1762,10 +1973,16 @@ fn volatile_source() {
 
 // gtest: Map.ObserveShaderRegistration
 #[test]
-#[ignore = "TODO(port): MapObserver::onRegisterShaders (gfx::ShaderRegistry observer hook); see map.test.cpp:1671"]
+#[ignore = "TODO(port): MapObserver::onRegisterShaders (gfx::ShaderRegistry observer hook); see map.test.cpp:1862"]
 fn observe_shader_registration() {
-    // test/map/map.test.cpp:1671: the first render calls onRegisterShaders,
+    // test/map/map.test.cpp:1862: the first render calls onRegisterShaders,
     // the second does not.
+}
+
+// gtest: Map.GlobeDepthShaderIdFollowsTheExistingShaders
+#[test]
+fn globe_depth_shader_id_follows_the_existing_shaders() {
+    assert_eq!(BuiltIn::WideVectorShader as i32 + 1, BuiltIn::GlobeDepthShader as i32);
 }
 
 // gtest: Map.ResourceError
@@ -1847,9 +2064,9 @@ fn resource_error() {
 
 // gtest: Map.StencilOverflow
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource and RenderResult::stats (gfx::RenderingStats::stencilUpdates); see map.test.cpp:1767"]
+#[ignore = "TODO(port): CustomGeometrySource and RenderResult::stats (gfx::RenderingStats::stencilUpdates); see map.test.cpp:1964"]
 fn stencil_overflow() {
-    // test/map/map.test.cpp:1767: a CustomGeometrySource with 16 px tiles at
+    // test/map/map.test.cpp:1964: a CustomGeometrySource with 16 px tiles at
     // z5 renders without crashing; ASSERT_LE(0, result.stats.stencilUpdates).
 }
 
@@ -1905,9 +2122,9 @@ fn invalid_utf8_in_tile() {
 
 // gtest: Map.ObserveTileLifecycle
 #[test]
-#[ignore = "TODO(port): MapObserver::onTileAction and onPre/PostCompileShader (TileOperation), and AssetFileSource for the asset:// style; see map.test.cpp:1843"]
+#[ignore = "TODO(port): MapObserver::onPre/PostCompileShader, and AssetFileSource for the asset:// style; see map.test.cpp:2040"]
 fn observe_tile_lifecycle() {
-    // test/map/map.test.cpp:1843: checks the order of the tile operations
+    // test/map/map.test.cpp:2040: checks the order of the tile operations
     // (RequestedFromCache/Network, LoadFromCache/Network, StartParse,
     // EndParse, Cancelled) for the four z10 tiles around San Francisco and
     // the pre/post compile events of the fill and fill-outline shaders.
@@ -2010,9 +2227,280 @@ fn style_update_zoom_dependency() {
     check_image("test/fixtures/map/style_update_zoom_dependency/after_update_green", &test.render().image, 0.0006, 0.1);
 }
 
+// gtest: Map.GlobeHandOffKeepsTiles
+#[test]
+fn globe_hand_off_keeps_tiles() {
+    // Crossing the globe's Mercator hand-off must not re-parse the tiles already on screen.
+    let _run_loop = RunLoop::new();
+    // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
+    let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let parsed = parsed.clone();
+        observer.on_tile_action_callback.set(move |(op, id, source_id)| {
+            if source_id != "mapbox" || op != TileOperation::StartParse {
+                return;
+            }
+            parsed.borrow_mut().push(id);
+        });
+    }
+
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    // C++ runs from the checkout's root; the asset path is relative to it.
+    let asset_path = cpp_root().join("test/fixtures/api/assets");
+    let mut map = Map::with_file_source(
+        &frontend,
+        observer.clone(),
+        Arc::new(MainResourceLoader::new(
+            &ResourceOptions::default()
+                .with_cache_path(":memory:")
+                .with_asset_path(asset_path.to_str().expect("asset path")),
+            &ClientOptions::default(),
+        )),
+        MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+    );
+
+    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.get_style_mut()
+        .get_projection_mut()
+        .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
+    let center = ll(37.8, -122.5); // the fixture has tile 10/163/395
+    map.jump_to(&cam().with_center(Some(center)).with_zoom(Some(10.5)));
+    frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
+    assert!(map.get_transform_state().is_globe_rendering());
+    let first_visit = std::mem::take(&mut *parsed.borrow_mut());
+    assert!(!first_visit.is_empty());
+
+    // Zoom 12.5 is Mercator. The zoom-10 tiles stay on screen while their children load; they must not be parsed
+    // again.
+    map.jump_to(&cam().with_center(Some(center)).with_zoom(Some(12.5)));
+    frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
+    assert!(!map.get_transform_state().is_globe_rendering());
+    let parsed = parsed.borrow();
+    let reparsed: Vec<&OverscaledTileID> = parsed.iter().filter(|id| first_visit.contains(id)).collect();
+    assert!(
+        reparsed.is_empty(),
+        "{} of {} tiles were parsed again after the hand-off",
+        reparsed.len(),
+        first_visit.len()
+    );
+}
+
+// gtest: Map.GlobeKeepsItsTilesAcrossTheAntimeridian
+#[test]
+fn globe_keeps_its_tiles_across_the_antimeridian() {
+    // The globe's zoom-0 tile takes the wrap of the world copy the center is in, so it changes wrap whenever the
+    // center crosses the antimeridian. It is the same piece of the sphere in either, and must not be parsed again.
+    let test = MapTest::new();
+    test.frontend.clone().set_size(Size::new(512, 512));
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.load_json(
+        r#"{"version": 8, "projection": {"type": "globe"},
+                 "sources": {"ocean": {"type": "vector", "tiles": ["a/{z}/{x}/{y}"]}},
+                 "layers": [{"id": "ocean", "type": "fill", "source": "ocean", "source-layer": "water",
+                             "paint": {"fill-color": "blue"}}]}"#,
+    );
+    let ocean = Arc::new(read_bytes("test/fixtures/map/globe_tile_masks/ocean.mvt"));
+    test.file_source.set_response(Kind::Tile, move |_: &Resource| {
+        let mut response = Response::new();
+        response.data = Some(ocean.clone());
+        Some(response)
+    });
+    // C++ guards `parsed` with a mutex; the observer is called on this thread.
+    let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
+    {
+        let parsed = parsed.clone();
+        test.observer.on_tile_action_callback.set(move |(op, id, _)| {
+            if op == TileOperation::StartParse {
+                parsed.borrow_mut().push(id);
+            }
+        });
+    }
+
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(0.0)));
+    test.render();
+    assert!(test.map().get_transform_state().is_globe_rendering());
+    {
+        let mut parsed = parsed.borrow_mut();
+        assert!(!parsed.is_empty());
+        for id in parsed.iter() {
+            assert_eq!(OverscaledTileID::with_zxy(0, 0, 0, 0, 0), *id);
+        }
+        parsed.clear();
+    }
+
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 181.0))));
+    test.render();
+    assert_near(181.0, test.map().get_transform_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    let parsed = parsed.borrow();
+    assert!(parsed.is_empty(), "{} tiles parsed again, the first {}", parsed.len(), parsed[0]);
+}
+
+// gtest: Map.GlobeSetBoundsKeepsAZoomTheGlobeAllows
+#[test]
+fn globe_set_bounds_keeps_a_zoom_the_globe_allows() {
+    let test = MapTest::new();
+    test.load_json(r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#);
+    test.map().jump_to(&cam().with_center(Some(ll(70.0, 0.0))).with_zoom(Some(-1.5)));
+    assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+    test.map().set_bounds(&BoundOptions::default().with_min_zoom(0.0)).unwrap();
+    assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+}
+
+// gtest: Map.GlobeBoundsForCamera
+#[test]
+fn globe_bounds_for_camera() {
+    let test = MapTest::new();
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map().set_bounds(&BoundOptions::default().with_max_pitch(85.0)).unwrap();
+    test.load_json(r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#);
+    struct Case {
+        lng: f64,
+        lat: f64,
+        zoom: f64,
+        bearing: f64,
+        pitch: f64,
+        west: f64,
+        south: f64,
+        east: f64,
+        north: f64,
+    }
+    let case = |lng, lat, zoom, bearing, pitch, west, south, east, north| Case {
+        lng,
+        lat,
+        zoom,
+        bearing,
+        pitch,
+        west,
+        south,
+        east,
+        north,
+    };
+    let cases = [
+        case(0.0, 0.0, 1.0, 0.0, 0.0, -79.91796042106967, -79.91796042106967, 79.91796042106967, 79.91796042106967),
+        case(
+            30.0,
+            20.0,
+            1.5,
+            30.0,
+            30.0,
+            -56.805975633856576,
+            -56.895025199618885,
+            94.30772744796946,
+            73.43306521431964,
+        ),
+        case(0.0, 75.0, 1.0, 0.0, 0.0, -180.0, 32.70922481421371, 180.0, 90.0),
+        case(0.0, 75.0, 2.5, 0.0, 0.0, -54.89062256787065, 64.72883925258952, 54.89062256787065, 83.47499358170649),
+        case(10.0, 10.0, 3.0, 0.0, 0.0, -25.90264541368299, -19.587774363137328, 45.90264541369834, 36.43783991311318),
+        case(170.0, -10.0, 2.0, 45.0, 40.0, 90.75153870575207, -71.2057256347772, 267.1780088196146, 42.32122600031687),
+        // Looking away from the north pole, which is behind the camera, with
+        // the top of the view in the sky.
+        case(0.0, 80.0, 3.0, 180.0, 75.0, -27.136824618012838, 69.5727070878645, 27.136824618012724, 86.22734028617919),
+        case(0.0, 84.5, 5.0, 180.0, 84.0, -9.769090999914397, 81.42454063588696, 9.769090999914397, 85.70848143480487),
+        case(0.0, 85.0, 6.0, 180.0, 85.0, -7.12413211181115, 82.92590257945324, 7.12413211181115, 85.57800114051855),
+    ];
+    for c in &cases {
+        let camera = cam()
+            .with_center(Some(ll(c.lat, c.lng)))
+            .with_zoom(Some(c.zoom))
+            .with_bearing(Some(c.bearing))
+            .with_pitch(Some(c.pitch));
+        let map = test.map();
+        for bounds in [map.lat_lng_bounds_for_camera(&camera), map.lat_lng_bounds_for_camera_unwrapped(&camera)] {
+            assert_near(c.west, bounds.west(), 1e-5);
+            assert_near(c.south, bounds.south(), 1e-5);
+            assert_near(c.east, bounds.east(), 1e-5);
+            assert_near(c.north, bounds.north(), 1e-5);
+        }
+    }
+}
+
+// gtest: Map.GlobeSkyPixelSnapsToTheHorizonAhead
+#[test]
+fn globe_sky_pixel_snaps_to_the_horizon_ahead() {
+    let test = MapTest::new();
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map().set_bounds(&BoundOptions::default().with_max_pitch(85.0)).unwrap();
+    test.load_json(r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#);
+    test.map().jump_to(
+        &cam().with_center(Some(ll(84.5, 0.0))).with_zoom(Some(5.0)).with_bearing(Some(180.0)).with_pitch(Some(84.0)),
+    );
+    let top = test.map().lat_lng_for_pixel(&ScreenCoordinate::new(256.0, 0.0), WrapMode::Wrapped);
+    assert_near(81.42454063588696, top.latitude(), 1e-6);
+    assert_near(0.0, top.longitude(), 1e-6);
+}
+
+// gtest: Map.SetBoundsLiftsTheZoomToAMinimumAboveTheMaximum
+#[test]
+fn set_bounds_lifts_the_zoom_to_a_minimum_above_the_maximum() {
+    let test = MapTest::new();
+    test.map().set_bounds(&BoundOptions::default().with_max_zoom(8.0)).unwrap();
+    test.map().jump_to(&cam().with_zoom(Some(6.0)));
+    test.map().set_bounds(&BoundOptions::default().with_min_zoom(10.0).with_max_zoom(16.0)).unwrap();
+    assert_near(10.0, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
+}
+
+// gtest: Map.GlobeBoundedSourceLoadsFinerTiles
+#[test]
+fn globe_bounded_source_loads_finer_tiles() {
+    // Just below an integer zoom the globe cover asks for the next zoom's tiles nearest the camera; a source with
+    // bounds must create them.
+    let _run_loop = RunLoop::new();
+    // C++ guards `parsed` with `tileMutex`; the observer is called on this thread.
+    let parsed: Rc<RefCell<Vec<OverscaledTileID>>> = Rc::new(RefCell::new(Vec::new()));
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let parsed = parsed.clone();
+        observer.on_tile_action_callback.set(move |(op, id, source_id)| {
+            if source_id != "bounded" || op != TileOperation::StartParse {
+                return;
+            }
+            parsed.borrow_mut().push(id);
+        });
+    }
+
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    // C++ runs from the checkout's root; the asset path is relative to it.
+    let asset_path = cpp_root().join("test/fixtures/api/assets");
+    let mut map = Map::with_file_source(
+        &frontend,
+        observer.clone(),
+        Arc::new(MainResourceLoader::new(
+            &ResourceOptions::default()
+                .with_cache_path(":memory:")
+                .with_asset_path(asset_path.to_str().expect("asset path")),
+            &ClientOptions::default(),
+        )),
+        MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+    );
+
+    // The same tile answers every request, so the cover alone decides what loads.
+    map.get_style_mut().load_json(
+        r#"{
+        "version": 8,
+        "projection": {"type": "globe"},
+        "sources": {
+            "bounded": {
+                "type": "vector",
+                "maxzoom": 15,
+                "bounds": [-180, -85.0511, 180, 85.0511],
+                "tiles": ["asset://streets/10-163-395.vector.pbf"]
+            }
+        },
+        "layers": [{"id": "water", "type": "fill", "source": "bounded", "source-layer": "water"}]
+    }"#,
+    );
+    map.jump_to(&cam().with_center(Some(ll(37.8, -122.5))).with_zoom(Some(10.95)));
+    frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
+    assert!(map.get_transform_state().is_globe_rendering());
+
+    let parsed = parsed.borrow();
+    assert!(parsed.iter().any(|id| id.canonical.z == 11), "{} tiles parsed, none at zoom 11", parsed.len());
+}
+
 // gtest: Map.LineLayerDepthDistribution
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2105"]
+#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2509"]
 fn line_layer_depth_distribution() {
     let test = MapTest::new();
 
@@ -2060,7 +2548,7 @@ fn line_layer_depth_distribution() {
 
 // gtest: Map.SetFrustumOffset
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2156"]
+#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2560"]
 fn set_frustum_offset() {
     let test = MapTest::new();
 
@@ -2159,7 +2647,7 @@ fn count_green_pixels(image: &PremultipliedImage) -> usize {
 
 // gtest: Map.LocationIndicatorAccuracyColorsTransition
 #[test]
-#[ignore = "TODO(port): RenderLocationIndicatorLayer (the location-indicator layer type is registered in the style but not rendered); see map.test.cpp:2255"]
+#[ignore = "TODO(port): RenderLocationIndicatorLayer (the location-indicator layer type is registered in the style but not rendered); see map.test.cpp:2659"]
 fn location_indicator_accuracy_colors_transition() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
     test.load_json(
@@ -2235,18 +2723,18 @@ fn location_indicator_accuracy_colors_transition() {
 
 // gtest: Map.RenderingStatisticsTrackDrawsAcrossFrames
 #[test]
-#[ignore = "TODO(port): HeadlessFrontend::RenderResult::stats (gfx::RenderingStats numFrames/numDrawCalls/totalDrawCalls); see map.test.cpp:2321"]
+#[ignore = "TODO(port): HeadlessFrontend::RenderResult::stats (gfx::RenderingStats numFrames/numDrawCalls/totalDrawCalls); see map.test.cpp:2725"]
 fn rendering_statistics_track_draws_across_frames() {
-    // test/map/map.test.cpp:2321: numFrames counts up per render, numDrawCalls
+    // test/map/map.test.cpp:2725: numFrames counts up per render, numDrawCalls
     // is the frame's and totalDrawCalls the running sum; a hidden circle layer
     // draws nothing.
 }
 
 // gtest: Map.LocationIndicatorWithoutImages
 #[test]
-#[ignore = "TODO(port): RenderResult::stats (numDrawCalls) and RenderLocationIndicatorLayer; see map.test.cpp:2342"]
+#[ignore = "TODO(port): RenderResult::stats (numDrawCalls) and RenderLocationIndicatorLayer; see map.test.cpp:2746"]
 fn location_indicator_without_images() {
-    // test/map/map.test.cpp:2342: a location-indicator with accuracy-radius 0
+    // test/map/map.test.cpp:2746: a location-indicator with accuracy-radius 0
     // and no images produces no draw call.
 }
 

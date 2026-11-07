@@ -4,6 +4,7 @@
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::circle_layer_ubo::{CircleDrawableUBO, CircleEvaluatedPropsUBO};
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -14,7 +15,9 @@ use mln_util::immutable::Immutable;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
 use crate::buckets::circle_bucket::CircleBucket;
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{
+    LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,
+};
 use crate::paint_parameters::PaintParameters;
 
 pub struct CircleLayerTweaker {
@@ -86,7 +89,9 @@ impl LayerTweaker for CircleLayerTweaker {
 
         let mut i: u32 = 0;
         let mut drawable_ubo_vector = vec![CircleDrawableUBO::default(); layer_group.get_drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
 
+        let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
             debug_assert!(drawable.get_tile_id().is_some(), "Circles only render with tiles");
@@ -117,7 +122,7 @@ impl LayerTweaker for CircleLayerTweaker {
             let anchor = *evaluated.get::<CircleTranslateAnchor>();
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = false;
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 translation,
@@ -127,8 +132,11 @@ impl LayerTweaker for CircleLayerTweaker {
                 drawable,
                 false,
             );
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             let pixels_to_tile_units = tile_id.pixels_to_tile_units(1.0, zoom);
+            let globe_extrude_scale = globe_extrude_scale(&tile_id, zoom, latitude_scale);
             let extrude_scale = if pitch_with_map {
                 [pixels_to_tile_units, pixels_to_tile_units]
             } else {
@@ -146,7 +154,7 @@ impl LayerTweaker for CircleLayerTweaker {
                 stroke_color_t: binders.circle_stroke_color.interpolation_factor(zoom),
                 stroke_width_t: binders.circle_stroke_width.interpolation_factor(zoom),
                 stroke_opacity_t: binders.circle_stroke_opacity.interpolation_factor(zoom),
-                pad1: 0.0,
+                globe_extrude_scale,
                 pad2: 0.0,
                 pad3: 0.0,
             };
@@ -163,5 +171,6 @@ impl LayerTweaker for CircleLayerTweaker {
         }
 
         layer_group.mutable_uniform_buffers().set(ID_CIRCLE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);
     }
 }

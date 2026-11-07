@@ -202,6 +202,15 @@ impl RendererImpl {
 
             // Give the layers a chance to upload
             orchestrator.visit_layer_groups(|layer_group| layer_group.upload(&*upload_pass));
+            if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
+                globe_depth.borrow_mut().upload(&*upload_pass);
+            }
+            if let Some(sky) = orchestrator.get_sky_layer_group() {
+                sky.borrow_mut().upload(&*upload_pass);
+            }
+            if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
+                atmosphere.borrow_mut().upload(&*upload_pass);
+            }
 
             // Give the render targets a chance to upload
             // dem-heatmap
@@ -286,18 +295,39 @@ impl RendererImpl {
         }
         context.bind_global_uniform_buffers(parameters.render_pass.as_deref().expect("render pass"));
 
+        // drawableSkyPass
+        if let Some(sky) = orchestrator.get_sky_layer_group() {
+            parameters.pass = RenderPass::Translucent;
+            parameters.depth_range_size =
+                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.current_layer = orchestrator.num_layer_groups() as u32 + 1;
+            sky.borrow_mut().render(&mut parameters);
+        }
+
         // drawableOpaquePass
         {
             parameters.pass = RenderPass::Opaque;
             parameters.depth_range_size =
                 1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
 
-            // draw layer groups, opaque pass
-            parameters.current_layer = 0;
-            orchestrator.visit_layer_groups_reversed(|layer_group| {
-                layer_group.render(&mut parameters);
-                parameters.current_layer += 1;
-            });
+            // draw layer groups, opaque pass: front to back with the depth
+            // buffer, except on the globe, where 2D layers carry no depth and
+            // are painted bottom to top.
+            if render_tree_parameters.transform_params.state.is_globe_rendering() {
+                parameters.current_layer = (orchestrator.num_layer_groups() as u32).wrapping_sub(1);
+                orchestrator.visit_layer_groups(|layer_group| {
+                    layer_group.render(&mut parameters);
+                    if parameters.current_layer > 0 {
+                        parameters.current_layer -= 1;
+                    }
+                });
+            } else {
+                parameters.current_layer = 0;
+                orchestrator.visit_layer_groups_reversed(|layer_group| {
+                    layer_group.render(&mut parameters);
+                    parameters.current_layer += 1;
+                });
+            }
         }
 
         // drawableTranslucentPass
@@ -305,6 +335,12 @@ impl RendererImpl {
             parameters.pass = RenderPass::Translucent;
             parameters.depth_range_size =
                 1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
+
+            // The planet goes into the depth buffer first, so 3D geometry
+            // behind the horizon stays hidden.
+            if let Some(globe_depth) = orchestrator.get_globe_depth_layer_group() {
+                globe_depth.borrow_mut().render(&mut parameters);
+            }
 
             // draw layer groups, translucent pass
             parameters.current_layer = (orchestrator.num_layer_groups() as u32).wrapping_sub(1);
@@ -330,6 +366,15 @@ impl RendererImpl {
                 }
                 i -= 1;
             }
+        }
+
+        // drawableAtmospherePass
+        if let Some(atmosphere) = orchestrator.get_atmosphere_layer_group() {
+            parameters.pass = RenderPass::Translucent;
+            parameters.depth_range_size =
+                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
+            parameters.current_layer = orchestrator.num_layer_groups() as u32 + 1;
+            atmosphere.borrow_mut().render(&mut parameters);
         }
 
         // drawableDebugOverlays

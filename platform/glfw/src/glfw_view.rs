@@ -35,6 +35,9 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, Map, MapDebugOptions, MapObserver, NorthOrientation,
     RenderFrameStatus, TileLodMode,
 };
+use mln_style::PropertyValue;
+use mln_style::projection::Projection;
+use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::chrono::Duration;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
@@ -169,6 +172,7 @@ const HELP: &str = "
 - Press `F6` to cycle through Tile LOD modes
 - Press `F7` to lower the zoom level without changing the camera
 - Press `F8` to higher the zoom level without changing the camera
+- Press `F9` to toggle between the globe and Mercator
 - Press `Esc` to quit
 
 (Not ported yet: annotations 1-0/K/L/W/M/C/Q, B, E, F, F1, G, H, I, J, R, T, Y.)
@@ -303,6 +307,9 @@ impl GLFWView {
     /// `setMap(Map*)`
     pub fn set_map(&self, map: Rc<RefCell<Map>>) {
         // TODO(port): map->addAnnotationImage(makeImage("default_marker", 22, 22, 1)).
+        // The window always rotates (right drag), so drags and zooms on the
+        // globe turn the bearing with the planet.
+        map.borrow_mut().set_globe_free_bearing(true);
         self.state.borrow_mut().map = Some(map);
     }
 
@@ -541,6 +548,18 @@ impl ViewState {
                 Key::F6 => self.cycle_tile_lod_profile(),
                 Key::F7 => self.tile_lod_zoom_shift(false),
                 Key::F8 => self.tile_lod_zoom_shift(true),
+                Key::F9 => self.with_map(|map| {
+                    let mut style = map.get_style_mut();
+                    let current = style.get_projection().get_type();
+                    let globe = current.is_constant() && current.as_constant().from == ProjectionType::Globe;
+                    let mut projection = Projection::new();
+                    projection.set_type(PropertyValue::Constant(ProjectionDefinition::new(if globe {
+                        ProjectionType::Mercator
+                    } else {
+                        ProjectionType::Globe
+                    })));
+                    style.set_projection(projection);
+                }),
                 Key::Q
                 | Key::C
                 | Key::B
@@ -743,7 +762,13 @@ impl ViewState {
             let dx = x - self.last_x;
             let dy = y - self.last_y;
             if dx != 0.0 || dy != 0.0 {
-                self.with_map(|map| map.move_by(&ScreenCoordinate::new(dx, dy), &AnimationOptions::default()));
+                self.with_map(|map| {
+                    map.move_by_with_anchor(
+                        &ScreenCoordinate::new(dx, dy),
+                        Some(ScreenCoordinate::new(x, y)),
+                        &AnimationOptions::default(),
+                    )
+                });
             }
         } else if self.rotating {
             let (first, second) = (ScreenCoordinate::new(self.last_x, self.last_y), ScreenCoordinate::new(x, y));

@@ -25,6 +25,7 @@ enum InterpolateOutput {
     Number,
     Color,
     Padding,
+    ProjectionDefinition,
     VariableAnchorOffsetCollection,
     Array,
 }
@@ -36,6 +37,7 @@ impl InterpolateOutput {
             InterpolateOutput::Number => Type::Number,
             InterpolateOutput::Color => Type::Color,
             InterpolateOutput::Padding => Type::Padding,
+            InterpolateOutput::ProjectionDefinition => Type::ProjectionDefinition,
             InterpolateOutput::VariableAnchorOffsetCollection => Type::VariableAnchorOffsetCollection,
             InterpolateOutput::Array => Type::array(Type::Value),
         }
@@ -47,6 +49,7 @@ impl InterpolateOutput {
             (InterpolateOutput::Number, Value::Number(_))
                 | (InterpolateOutput::Color, Value::Color(_))
                 | (InterpolateOutput::Padding, Value::Padding(_))
+                | (InterpolateOutput::ProjectionDefinition, Value::ProjectionDefinition(_))
                 | (InterpolateOutput::VariableAnchorOffsetCollection, Value::VariableAnchorOffsetCollection(_))
                 | (InterpolateOutput::Array, Value::Array(_))
         )
@@ -135,6 +138,9 @@ impl Interpolate {
                 interpolate_float(a.bottom, b.bottom, t),
                 interpolate_float(a.left, b.left, t),
             )),
+            (Value::ProjectionDefinition(a), Value::ProjectionDefinition(b)) => {
+                Value::ProjectionDefinition(mln_util::interpolate::interpolate(a, b, t))
+            }
             (Value::VariableAnchorOffsetCollection(a), Value::VariableAnchorOffsetCollection(b)) => {
                 // Interpolator<VariableAnchorOffsetCollection> only has a
                 // float overload. It throws std::runtime_error on mismatched
@@ -447,6 +453,7 @@ pub fn create_interpolate(
         Type::Number => InterpolateOutput::Number,
         Type::Color => InterpolateOutput::Color,
         Type::Padding => InterpolateOutput::Padding,
+        Type::ProjectionDefinition => InterpolateOutput::ProjectionDefinition,
         Type::VariableAnchorOffsetCollection => InterpolateOutput::VariableAnchorOffsetCollection,
         Type::Array(array_type) => {
             if array_type.item_type != Type::Number || array_type.n.is_none() {

@@ -1,22 +1,38 @@
 // Compiles every WGSL source extracted from include/mln/shaders/webgpu/*.hpp
-// the way webgpu::ShaderGroup + ShaderProgram do (struct prelude if any,
-// preprocessor with the default ProgramParameters defines, Prelude prepended)
-// and reports which ones wgpu's WGSL front end (naga) rejects. C++ compiles
-// them with Dawn's Tint, so a failure here is a wgpu-vs-Dawn difference.
+// the way webgpu::ShaderGroup + ShaderProgram do (Prelude, then the struct
+// prelude if any, through the preprocessor with the default ProgramParameters
+// defines, in both projection variants) and reports which ones wgpu's WGSL
+// front end (naga) rejects. C++ compiles them with Dawn's Tint, so a failure
+// here is a wgpu-vs-Dawn difference.
 //
 // The shaders on the M1 path must compile; the rest are reported only.
 
 use std::collections::HashMap;
 
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer_backend::RendererBackend;
+use mln_gfx::shader_group::GLOBE_DEFINE;
 use mln_util::size::Size;
 use mln_webgpu::HeadlessBackend;
 use mln_webgpu::shaders::shader_program::ShaderProgram;
+use mln_webgpu::shaders::shader_source::{WgslShaderSource, prelude};
 use mln_webgpu::shaders::wgsl_preprocessor::preprocess_wgsl;
 use mln_webgpu::shaders::wgsl_sources::ALL;
 
-const REQUIRED: &[&str] = &["BackgroundShader", "BackgroundPatternShader", "ClippingMaskProgram"];
+const REQUIRED: &[&str] = &[
+    "BackgroundShader",
+    "BackgroundPatternShader",
+    "ClippingMaskProgram",
+    "GlobeDepthShader",
+    "SkyShader",
+    "AtmosphereShader",
+];
+
+/// Prelude, the struct prelude and the stage's source, before preprocessing.
+fn assemble(source: &WgslShaderSource, stage: &str) -> String {
+    format!("{}\n{}{stage}", prelude(), source.prelude.unwrap_or(""))
+}
 
 #[test]
 fn all_extracted_wgsl_compiles() {
@@ -24,27 +40,31 @@ fn all_extracted_wgsl_compiles() {
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
     let context = backend.get_context().as_any().downcast_ref::<mln_webgpu::Context>().unwrap();
 
-    // ProgramParameters(pixelRatio, overdraw=false): only DEVICE_PIXEL_RATIO.
-    let defines: HashMap<String, bool> = [("DEVICE_PIXEL_RATIO".to_owned(), true)].into_iter().collect();
-    let mut failed = Vec::new();
-    let mut compiled = 0;
-    for source in ALL {
-        let (Some(vertex), Some(fragment)) = (source.vertex, source.fragment) else {
-            continue; // Prelude
-        };
-        let prelude = source.prelude.unwrap_or("");
-        let vertex = preprocess_wgsl(&format!("{prelude}{vertex}"), &defines);
-        let fragment = preprocess_wgsl(&format!("{prelude}{fragment}"), &defines);
-        let program = ShaderProgram::new(context, &vertex, &fragment, &[], &[], source.name);
-        if program.has_shader_modules() {
-            compiled += 1;
-        } else {
-            failed.push(source.built_in);
+    for variant in [ProjectionVariant::Mercator, ProjectionVariant::Globe] {
+        // ProgramParameters(pixelRatio, overdraw=false): only DEVICE_PIXEL_RATIO.
+        let mut defines: HashMap<String, bool> = [("DEVICE_PIXEL_RATIO".to_owned(), true)].into_iter().collect();
+        if variant == ProjectionVariant::Globe {
+            defines.insert(GLOBE_DEFINE.to_owned(), true);
         }
-    }
-    eprintln!("compiled {compiled} WGSL shader sources; rejected by naga: {failed:?}");
-    for required in REQUIRED {
-        assert!(!failed.contains(required), "{required} must compile");
+        let mut failed = Vec::new();
+        let mut compiled = 0;
+        for source in ALL {
+            let (Some(vertex), Some(fragment)) = (source.vertex, source.fragment) else {
+                continue; // Prelude
+            };
+            let vertex = preprocess_wgsl(&assemble(source, vertex), &defines);
+            let fragment = preprocess_wgsl(&assemble(source, fragment), &defines);
+            let program = ShaderProgram::new(context, &vertex, &fragment, &[], &[], source.name);
+            if program.has_shader_modules() {
+                compiled += 1;
+            } else {
+                failed.push(source.built_in);
+            }
+        }
+        eprintln!("{variant:?}: compiled {compiled} WGSL shader sources; rejected by naga: {failed:?}");
+        for required in REQUIRED {
+            assert!(!failed.contains(required), "{required} must compile ({variant:?})");
+        }
     }
 }
 
@@ -77,9 +97,8 @@ fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
         let (Some(vertex), Some(fragment)) = (source.vertex, source.fragment) else {
             continue;
         };
-        let prelude = source.prelude.unwrap_or("");
-        let vertex = format!("{prelude}{vertex}");
-        let fragment = format!("{prelude}{fragment}");
+        let vertex = assemble(source, vertex);
+        let fragment = assemble(source, fragment);
         let mut defines: HashMap<String, bool> = [("DEVICE_PIXEL_RATIO".to_owned(), true)].into_iter().collect();
         for sym in conditional_symbols(&vertex).into_iter().chain(conditional_symbols(&fragment)) {
             defines.insert(sym, true);

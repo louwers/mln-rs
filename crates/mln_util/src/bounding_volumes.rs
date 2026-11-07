@@ -3,7 +3,7 @@
 
 use geometry::Point;
 
-use crate::mat3::{vec3_cross, vec3_dot, vec3_normalize, vec3_sub};
+use crate::mat3::{vec3_add, vec3_cross, vec3_dot, vec3_length, vec3_normalize, vec3_scale, vec3_sub};
 use crate::mat4::{Mat4, matrix};
 use crate::vectors::{Vec3, Vec3i, Vec4};
 
@@ -23,6 +23,83 @@ fn to_vec3(v: &Vec4) -> Vec3 {
 
 fn vec4_dot(a: &Vec4, b: &Vec4) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3]
+}
+
+fn ray_plane_intersection(origin: &Vec3, direction: &Vec3, plane: &Vec4) -> Option<f64> {
+    let normal: Vec3 = [plane[0], plane[1], plane[2]];
+    let along = vec3_dot(direction, &normal);
+    if along == 0.0 {
+        return None;
+    }
+    Some((-vec3_dot(origin, &normal) - plane[3]) / along)
+}
+
+fn plane_through(p0: &Vec3, p1: &Vec3, p2: &Vec3) -> Vec4 {
+    let n = vec3_normalize(&vec3_cross(&vec3_sub(p0, p1), &vec3_sub(p2, p1)));
+    [n[0], n[1], n[2], -vec3_dot(&n, p1)]
+}
+
+/// The distance from the near plane to the point of the horizon circle
+/// farthest along the view direction, if the camera is not looking straight
+/// down.
+fn ideal_near_far_plane_distance(horizon_plane: &Vec4, near_plane: &Vec4) -> Option<f64> {
+    let view: Vec3 = [near_plane[0], near_plane[1], near_plane[2]];
+    let horizon_length = vec3_length(&[horizon_plane[0], horizon_plane[1], horizon_plane[2]]);
+    let horizon_normal = vec3_scale(&[horizon_plane[0], horizon_plane[1], horizon_plane[2]], 1.0 / horizon_length);
+    let horizon_distance = horizon_plane[3] / horizon_length;
+    let projected_view = vec3_sub(&view, &vec3_scale(&horizon_normal, vec3_dot(&view, &horizon_normal)));
+    let projected_length = vec3_length(&projected_view);
+    if projected_length <= 0.0 {
+        return None;
+    }
+    let circle_radius = (1.0 - horizon_distance * horizon_distance).sqrt();
+    let circle_center = vec3_scale(&horizon_normal, -horizon_distance);
+    let farthest = vec3_add(&circle_center, &vec3_scale(&projected_view, circle_radius / projected_length));
+    Some(vec3_dot(&view, &farthest) + near_plane[3])
+}
+
+/// Moves the far corners in along the frustum's edges until the far plane
+/// reaches no further than the horizon; port of GL JS
+/// `adjustFarPlaneByHorizonPlane`. The near corners are the first four.
+fn adjust_far_plane_by_horizon_plane(corners: &mut [Vec4; 8], near_plane_indices: &Vec3i, horizon_plane: &Vec4) {
+    const NEAR_OFFSET: usize = 0;
+    const FAR_OFFSET: usize = 4;
+    let mut ray_lengths = [0.0f64; 4];
+    let mut ray_directions: [Vec3; 4] = [[0.0; 3]; 4];
+    let mut max_distance = 0.0;
+    for i in 0..4 {
+        let ray = vec3_sub(&to_vec3(&corners[i + FAR_OFFSET]), &to_vec3(&corners[i + NEAR_OFFSET]));
+        ray_lengths[i] = vec3_length(&ray);
+        ray_directions[i] = vec3_scale(&ray, 1.0 / ray_lengths[i]);
+    }
+    for i in 0..4 {
+        let distance = ray_plane_intersection(&to_vec3(&corners[i + NEAR_OFFSET]), &ray_directions[i], horizon_plane);
+        // Rays parallel to the horizon or pointing away from it keep their
+        // length.
+        let length = match distance {
+            Some(distance) if distance >= 0.0 => distance,
+            _ => ray_lengths[i],
+        };
+        max_distance = std_max(max_distance, length);
+    }
+    let near_plane = plane_through(
+        &to_vec3(&corners[near_plane_indices[0] as usize]),
+        &to_vec3(&corners[near_plane_indices[1] as usize]),
+        &to_vec3(&corners[near_plane_indices[2] as usize]),
+    );
+    if let Some(ideal) = ideal_near_far_plane_distance(horizon_plane, &near_plane) {
+        // The rays make the same angle with the near plane at all four
+        // corners.
+        max_distance =
+            std_min(max_distance, ideal / vec3_dot(&ray_directions[0], &[near_plane[0], near_plane[1], near_plane[2]]));
+    }
+    for i in 0..4 {
+        let far = vec3_add(
+            &to_vec3(&corners[i + NEAR_OFFSET]),
+            &vec3_scale(&ray_directions[i], std_min(max_distance, ray_lengths[i])),
+        );
+        corners[i + FAR_OFFSET] = [far[0], far[1], far[2], 1.0];
+    }
 }
 
 fn project_points_to_axis<const N: usize>(points: &[Vec3; N], origin: &Vec3, axis: &Vec3) -> Point<f64> {
@@ -181,8 +258,16 @@ impl Frustum {
         Frustum { bounds, points, planes, projections }
     }
 
-    /// C++ default: `flippedY = false`.
-    pub fn from_inv_proj_matrix(inv_proj: &Mat4, world_size: f64, zoom: f64, flipped_y: bool) -> Frustum {
+    /// C++ defaults: `flippedY = false`, `horizonPlane = std::nullopt`. With
+    /// `horizon_plane`, the far plane is pulled in to the horizon so nothing
+    /// behind it counts as visible.
+    pub fn from_inv_proj_matrix(
+        inv_proj: &Mat4,
+        world_size: f64,
+        zoom: f64,
+        flipped_y: bool,
+        horizon_plane: Option<&Vec4>,
+    ) -> Frustum {
         // Define frustum corner points in normalized clip space
         let mut corner_coords: [Vec4; 8] = [
             [-1.0, 1.0, -1.0, 1.0],
@@ -223,19 +308,18 @@ impl Frustum {
             }
         }
 
+        if let Some(horizon_plane) = horizon_plane {
+            adjust_far_plane_by_horizon_plane(&mut corner_coords, &frustum_plane_point_indices[4], horizon_plane);
+        }
+
         let mut frustum_planes: [Vec4; 6] = [[0.0; 4]; 6];
 
         for (i, indices) in frustum_plane_point_indices.iter().enumerate() {
-            // Compute plane equation using 3 points on the plane
-            let p0 = to_vec3(&corner_coords[indices[0] as usize]);
-            let p1 = to_vec3(&corner_coords[indices[1] as usize]);
-            let p2 = to_vec3(&corner_coords[indices[2] as usize]);
-
-            let a = vec3_sub(&p0, &p1);
-            let b = vec3_sub(&p2, &p1);
-            let n = vec3_normalize(&vec3_cross(&a, &b));
-
-            frustum_planes[i] = [n[0], n[1], n[2], -vec3_dot(&n, &p1)];
+            frustum_planes[i] = plane_through(
+                &to_vec3(&corner_coords[indices[0] as usize]),
+                &to_vec3(&corner_coords[indices[1] as usize]),
+                &to_vec3(&corner_coords[indices[2] as usize]),
+            );
         }
 
         let mut frustum_points: [Vec3; 8] = [[0.0; 3]; 8];

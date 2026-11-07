@@ -1,9 +1,10 @@
 // Ports test/api/{api_misuse.test.cpp, custom_geometry_source.test.cpp,
-// custom_layer.test.cpp, recycle_map.cpp}. test/api/annotations.test.cpp
-// and test/api/query.test.cpp are the modules below; the fixture is in
-// support/mod.rs.
+// custom_layer.test.cpp, recycle_map.cpp}. test/api/annotations.test.cpp,
+// test/api/location_indicator.test.cpp and test/api/query.test.cpp are the
+// modules below; the fixture is in support/mod.rs.
 
 mod gtest_annotations;
+mod gtest_location_indicator;
 mod gtest_query;
 mod support;
 
@@ -53,9 +54,9 @@ fn grid() {
 
 // gtest: CustomLayer.Basic
 #[test]
-#[ignore = "OpenGL-only in C++ (returns early on other backends; the CustomLayerHost draws with GL calls); also TODO(port): CustomLayer and AssetFileSource; see custom_layer.test.cpp:93"]
+#[ignore = "OpenGL-only in C++ (returns early on other backends; the CustomLayerHost draws with GL calls); also TODO(port): CustomLayer and AssetFileSource; see custom_layer.test.cpp:109"]
 fn basic() {
-    // test/api/custom_layer.test.cpp:93: a GL CustomLayer drawing a triangle
+    // test/api/custom_layer.test.cpp:109: a GL CustomLayer drawing a triangle
     // under a fill layer (test/fixtures/custom_layer/basic, 0.0006, 0.1).
 }
 

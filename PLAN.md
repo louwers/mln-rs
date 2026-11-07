@@ -44,13 +44,7 @@ port, not a redesign:
   builds the C++ core with Bazel and tests the released crates against it.
 - Everything runs through the justfile (`just test`, ...). On NixOS, the
   tests and apps run inside the C++ repo's `#linux` flake shell.
-- Test data comes from the C++ repo, copied into the packages' `testdata/`
-  (PORTING.md, "Build and test") from the reference checkout: the
-  `maplibre-native-next-support` branch of `louwers/maplibre-native`,
-  currently `4e03abe94cf562b10562c528578d109c7273694d` (upstream
-  `maplibre/maplibre-native` commit
-  `8e144d0eca082e8350335b2172a6dfdc939b9cef` plus the changes that make its
-  Bazel module usable as a dependency, which mln-rs-difftests needs).
+- Test data comes from the C++ repo, copied into the packages' `testdata/` (PORTING.md, "Build and test") from the reference checkout: the `maplibre-native-next-support-globe-sky` branch of `johncarmack1984/maplibre-native`, currently `d171bf4b99343a27d0bfebf9ddf1ae79e5a616aa`. That is the globe branch of maplibre/maplibre-native#4533 (`phased/12h`) with the `maplibre-native-next-support` branch of `louwers/maplibre-native` merged in (`4e03abe94cf562b10562c528578d109c7273694d`: upstream `maplibre/maplibre-native` commit `8e144d0eca082e8350335b2172a6dfdc939b9cef` plus the changes that make its Bazel module usable as a dependency, which mln-rs-difftests needs), and then the `codex/sky-style-spec-4414` branch of `ClayWarren/maplibre-native` (maplibre/maplibre-native#4534).
 
 ## 2. Crate map
 

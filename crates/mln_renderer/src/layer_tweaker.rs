@@ -12,15 +12,22 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use geometry::Point;
+use mln_gfx::context::Context;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
+use mln_gfx::shaders::shader_defines::ID_PROJECTION_UBO;
+use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::{Drawable, LayerGroupBase};
-use mln_map_types::TransformState;
+use mln_map_types::{ProjectionData, TransformState};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 use mln_tile_id::UnwrappedTileID;
+use mln_util::constants::{EXTENT, M2PI};
 use mln_util::immutable::Immutable;
 use mln_util::mat4::{Mat4, matrix};
 
+use crate::layers::cast_matrix;
 use crate::paint_parameters::{PaintParameters, TransformParameters};
+use crate::render_tile::RenderTile;
 
 pub type LayerTweakerPtr = Rc<RefCell<dyn LayerTweaker>>;
 
@@ -29,11 +36,34 @@ pub struct LayerTweakerBase {
     pub id: String,
     pub evaluated_properties: Immutable<dyn LayerProperties>,
     pub properties_updated: bool,
+    pub projection_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl LayerTweakerBase {
     pub fn new(id: String, properties: Immutable<dyn LayerProperties>) -> Self {
-        LayerTweakerBase { id, evaluated_properties: properties, properties_updated: true }
+        LayerTweakerBase {
+            id,
+            evaluated_properties: properties,
+            properties_updated: true,
+            projection_uniform_buffer: None,
+        }
+    }
+
+    /// `uploadProjectionUBOs(layerUniforms, ubos, context)`: upload the
+    /// per-drawable projection blocks of this layer, indexed like the
+    /// drawable UBO array.
+    pub fn upload_projection_ubos(
+        &mut self,
+        layer_uniforms: &mut UniformBufferArray,
+        ubos: &[ProjectionUBO],
+        context: &dyn Context,
+    ) {
+        let bytes: &[u8] = bytemuck::cast_slice(ubos);
+        match &self.projection_uniform_buffer {
+            Some(buffer) if buffer.get_size() >= bytes.len() => buffer.update(bytes),
+            _ => self.projection_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
+        }
+        layer_uniforms.set(ID_PROJECTION_UBO, self.projection_uniform_buffer.clone());
     }
 }
 
@@ -100,6 +130,72 @@ pub fn get_tile_matrix(
         in_viewport_pixel_units,
         aligned,
     )
+}
+
+/// `LayerTweaker::getProjectionData(tileID, parameters, translation, anchor,
+/// nearClipped, inViewportPixelUnits, drawable, aligned = false)`: the
+/// projection contract for this tile, `getTileMatrix` plus the per-tile
+/// projection fields.
+#[allow(clippy::too_many_arguments)]
+pub fn get_projection_data(
+    tile_id: &UnwrappedTileID,
+    parameters: &PaintParameters<'_>,
+    translation: &[f32; 2],
+    anchor: TranslateAnchorType,
+    near_clipped: bool,
+    in_viewport_pixel_units: bool,
+    drawable: &dyn Drawable,
+    aligned: bool,
+) -> ProjectionData {
+    let mut data = parameters.state.get_projection_data_for_matrix(
+        tile_id,
+        &get_tile_matrix(
+            tile_id,
+            parameters,
+            translation,
+            anchor,
+            near_clipped,
+            in_viewport_pixel_units,
+            drawable,
+            aligned,
+        ),
+    );
+    if !in_viewport_pixel_units {
+        let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.state);
+        data.translate = [f64::from(translate[0]), f64::from(translate[1])];
+    }
+    // MLN_GLOBE_DEPTH_OFFSET_IN_SHADER (every backend but OpenGL): the same
+    // per-layer shift `multiplyWithProjectionMatrix` bakes into the Mercator
+    // matrix.
+    if !drawable.get_is_3d() && drawable.get_enable_depth() {
+        let steps = (1u32.wrapping_add(parameters.current_layer))
+            .wrapping_mul(PaintParameters::NUM_SUBLAYERS as u32)
+            .wrapping_sub(drawable.get_sub_layer_index() as u32);
+        data.depth_offset = f64::from(steps as f32 * PaintParameters::DEPTH_EPSILON);
+    }
+    data
+}
+
+/// `LayerTweaker::toProjectionUBO`.
+pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
+    ProjectionUBO {
+        matrix: cast_matrix(&data.main_matrix),
+        fallback_matrix: cast_matrix(&data.fallback_matrix),
+        tile_mercator_coords: data.tile_mercator_coords.map(|v| v as f32),
+        clipping_plane: data.clipping_plane.map(|v| v as f32),
+        projection_transition: data.projection_transition as f32,
+        depth_offset: data.depth_offset as f32,
+        translate: data.translate.map(|v| v as f32),
+    }
+}
+
+/// `LayerTweaker::globeExtrudeScale`: radians per pixel on the sphere for a
+/// tile (GL JS `globeExtrudeScale`). `latitude_scale` is the cosine of the
+/// center latitude on the globe and 1 on Mercator.
+pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
+    (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
+        * M2PI
+        * latitude_scale) as f32
 }
 
 /// The static `getTileMatrix(tileID, transformState, transformParams, ...)`

@@ -223,7 +223,7 @@ impl RenderLayer for RenderFillLayer {
         _zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
-        _pos_matrix: &mln_util::mat4::Mat4,
+        _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         let evaluated = get_evaluated::<FillLayerProperties>(&self.base.evaluated_properties);
@@ -245,7 +245,7 @@ impl RenderLayer for RenderFillLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
+        state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
         _render_tree: &RenderTree,
@@ -283,6 +283,8 @@ impl RenderLayer for RenderFillLayer {
             self.base.layer_tweaker = Some(tweaker.clone());
             changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
         }
+
+        self.update_projection_variant(state);
 
         if self.fill_shader_group.is_none() {
             self.fill_shader_group = shaders.get_shader_group(FILL_SHADER_NAME);
@@ -465,7 +467,12 @@ impl RenderLayer for RenderFillLayer {
 
             if self.unevaluated.get::<FillPattern>().is_undefined() {
                 // Simple fill
-                let fill_shader = fill_shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos");
+                let fill_shader = fill_shader_group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    "a_pos",
+                );
 
                 let outline_triangulated_shader = if do_outline && !data_driven_outline {
                     let outline_properties_as_uniforms: StringIDSetsPair = (
@@ -478,15 +485,25 @@ impl RenderLayer for RenderFillLayer {
                         .into_iter()
                         .collect(),
                     );
-                    self.outline_triangulated_shader_group
-                        .as_ref()
-                        .and_then(|group| group.get_or_create_shader(context, &outline_properties_as_uniforms, "a_pos"))
+                    self.outline_triangulated_shader_group.as_ref().and_then(|group| {
+                        group.get_or_create_shader(
+                            context,
+                            &outline_properties_as_uniforms,
+                            self.base.projection_variant,
+                            "a_pos",
+                        )
+                    })
                 } else {
                     None
                 };
 
                 let outline_shader = if do_outline {
-                    outline_shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos")
+                    outline_shader_group.get_or_create_shader(
+                        context,
+                        &properties_as_uniforms,
+                        self.base.projection_variant,
+                        "a_pos",
+                    )
                 } else {
                     None
                 };
@@ -584,9 +601,19 @@ impl RenderLayer for RenderFillLayer {
                     continue;
                 };
 
-                let fill_shader = pattern_shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos");
+                let fill_shader = pattern_shader_group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    "a_pos",
+                );
                 let outline_shader = if do_outline {
-                    outline_pattern_shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos")
+                    outline_pattern_shader_group.get_or_create_shader(
+                        context,
+                        &properties_as_uniforms,
+                        self.base.projection_variant,
+                        "a_pos",
+                    )
                 } else {
                     None
                 };

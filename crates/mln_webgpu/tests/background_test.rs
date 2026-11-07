@@ -19,6 +19,7 @@ use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::headless_backend::HeadlessBackend as _;
 use mln_gfx::paint_parameters::PaintParameters;
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::render_pass::{RenderPass as GfxRenderPass, RenderPassDescriptor};
 use mln_gfx::renderable::SwapBehaviour;
 use mln_gfx::renderer::layer_group::{LayerGroupBasePtr, visit_layer_group_drawables};
@@ -28,10 +29,11 @@ use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
 use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::{
-    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO,
+    ID_BACKGROUND_DRAWABLE_UBO, ID_BACKGROUND_POS_VERTEX_ATTRIBUTE, ID_BACKGROUND_PROPS_UBO, ID_PROJECTION_UBO,
 };
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::{DepthMaskType, StencilOpType};
@@ -80,8 +82,8 @@ impl PaintParameters for TestPaintParameters<'_> {
         }
         DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask }
     }
-    fn depth_mode_for_3d(&self) -> DepthMode {
-        DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask: DepthMaskType::ReadWrite }
+    fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
+        DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask }
     }
     fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) -> bool {
         true
@@ -91,6 +93,10 @@ impl PaintParameters for TestPaintParameters<'_> {
     }
     fn stencil_mode_for_3d(&mut self) -> StencilMode {
         StencilMode::disabled()
+    }
+    fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
+        modes.fill(StencilMode::disabled());
+        true
     }
 }
 
@@ -103,7 +109,9 @@ struct Background {
 /// with one background drawable.
 fn build_layer_group(context: &dyn Context, registry: &ShaderRegistry, passes: RenderPass) -> LayerGroupBasePtr {
     let layer_group = context.create_tile_layer_group(0, 64, "background".to_owned()).expect("layer group");
-    let shader = context.get_generic_shader(registry, "BackgroundShader").expect("BackgroundShader");
+    let shader = context
+        .get_generic_shader(registry, "BackgroundShader", ProjectionVariant::Mercator)
+        .expect("BackgroundShader");
 
     // RenderStaticData::tileVertices(), quadTriangleIndices(), tileTriangleSegments()
     let tile_vertices: [[i16; 2]; 4] = [[0, 0], [EXTENT, 0], [0, EXTENT], [EXTENT, EXTENT]];
@@ -151,16 +159,23 @@ fn tweak(context: &dyn Context, layer_group: &LayerGroupBasePtr, bg: &Background
     group.mutable_uniform_buffers().create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props_ubo, context);
 
     let mut drawable_ubo_vector: Vec<BackgroundDrawableUnionUBO> = Vec::new();
+    let mut projection_ubo_vector: Vec<ProjectionUBO> = Vec::new();
     let mut i = 0u32;
     visit_layer_group_drawables(&mut *group, |drawable| {
         assert!(drawable.get_tile_id().is_some());
         drawable_ubo_vector.push(BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix }));
+        // The vertex shader projects with the projection block, which on
+        // Mercator carries the same matrix.
+        projection_ubo_vector.push(ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() });
         drawable.set_ubo_index(i);
         i += 1;
     });
     let drawable_uniform_buffer: UniformBufferPtr =
         context.create_uniform_buffer(bytemuck::cast_slice(&drawable_ubo_vector), false, true);
     group.mutable_uniform_buffers().set(ID_BACKGROUND_DRAWABLE_UBO, Some(drawable_uniform_buffer));
+    let projection_uniform_buffer: UniformBufferPtr =
+        context.create_uniform_buffer(bytemuck::cast_slice(&projection_ubo_vector), false, true);
+    group.mutable_uniform_buffers().set(ID_PROJECTION_UBO, Some(projection_uniform_buffer));
 }
 
 /// Column-major matrix mapping tile x in [0, EXTENT] to clip x in [-1, 0]
@@ -300,8 +315,8 @@ fn background_shader_opaque_and_translucent() {
 
     // The shader program was created once and is reused from the group.
     let context = backend.get_context();
-    let a = context.get_generic_shader(&registry, "BackgroundShader").unwrap();
-    let b = context.get_generic_shader(&registry, "BackgroundShader").unwrap();
+    let a = context.get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator).unwrap();
+    let b = context.get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator).unwrap();
     assert!(std::rc::Rc::ptr_eq(&a, &b));
 }
 

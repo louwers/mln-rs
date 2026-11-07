@@ -25,8 +25,10 @@ use std::sync::{Arc, Mutex};
 use mln_actor::{LocalObject, RunLoop, Timer};
 use mln_map::{Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus};
 use mln_platform_default::{HeadlessFrontend, RenderResult};
+use mln_renderer::tile::tile::TileOperation;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
+use mln_tile_id::OverscaledTileID;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
 
@@ -181,8 +183,8 @@ impl<A> CallbackSlot<A> {
 
 /// `StubMapObserver`.
 // TODO(port): onRegisterShaders, onPre/PostCompileShader,
-// onShaderCompileFailed, onGlyphs*, onTileAction callbacks (MapObserver has
-// none of them yet).
+// onShaderCompileFailed, onGlyphs* callbacks (MapObserver has none of them
+// yet).
 #[derive(Default)]
 pub struct StubMapObserver {
     pub will_start_loading_map_callback: CallbackSlot<()>,
@@ -191,6 +193,7 @@ pub struct StubMapObserver {
     pub did_finish_loading_style_callback: CallbackSlot<()>,
     pub did_finish_rendering_frame_callback: CallbackSlot<RenderFrameStatus>,
     pub did_become_idle_callback: CallbackSlot<()>,
+    pub on_tile_action_callback: CallbackSlot<(TileOperation, OverscaledTileID, String)>,
 }
 
 impl MapObserver for StubMapObserver {
@@ -211,6 +214,9 @@ impl MapObserver for StubMapObserver {
     }
     fn on_did_become_idle(&self) {
         self.did_become_idle_callback.call(());
+    }
+    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
+        self.on_tile_action_callback.call((op, *id, source_id.to_owned()));
     }
 }
 

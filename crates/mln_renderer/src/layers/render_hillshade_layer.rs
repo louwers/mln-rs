@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::texture2d::SamplerState;
@@ -46,6 +47,7 @@ use super::render_heatmap_layer::activate_render_target;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
@@ -78,6 +80,7 @@ pub struct RenderHillshadeLayer {
     activated_render_targets: Vec<RenderTargetPtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     prepare_layer_tweaker: Option<LayerTweakerPtr>,
 
@@ -100,6 +103,7 @@ impl RenderHillshadeLayer {
             hillshade_shader: None,
             activated_render_targets: Vec::new(),
             static_data_shared_vertices: None,
+            globe_meshes: GlobeTileMeshCache::new(),
             prepare_layer_tweaker: None,
             bucket_render_targets: HashMap::new(),
         }
@@ -242,12 +246,18 @@ impl RenderLayer for RenderHillshadeLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
+        state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
         _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        if self.update_projection_variant(state) {
+            self.hillshade_shader = None;
+            if self.base.projection_variant == ProjectionVariant::Mercator {
+                self.globe_meshes.clear();
+            }
+        }
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
             return;
@@ -278,11 +288,13 @@ impl RenderLayer for RenderHillshadeLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if self.hillshade_prepare_shader.is_none() {
-            self.hillshade_prepare_shader = context.get_generic_shader(shaders, HILLSHADE_PREPARE_SHADER_GROUP_NAME);
+            self.hillshade_prepare_shader =
+                context.get_generic_shader(shaders, HILLSHADE_PREPARE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
 
         if self.hillshade_shader.is_none() {
-            self.hillshade_shader = context.get_generic_shader(shaders, HILLSHADE_SHADER_GROUP_NAME);
+            self.hillshade_shader =
+                context.get_generic_shader(shaders, HILLSHADE_SHADER_GROUP_NAME, self.base.projection_variant);
         }
 
         let (Some(hillshade_prepare_shader), Some(hillshade_shader)) =
@@ -437,7 +449,19 @@ impl RenderLayer for RenderHillshadeLayer {
             // Set up tile drawable
             let (vertices, vertex_count, indices, segments, geometry_time) = {
                 let geometry = bucket.geometry();
-                if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty() {
+                if self.base.projection_variant == ProjectionVariant::Globe {
+                    let globe_mesh =
+                        self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
+                    let vertices: VertexVectorBasePtr = globe_mesh.vertices.clone();
+                    (
+                        vertices,
+                        globe_mesh.vertices.elements(),
+                        globe_mesh.indices.clone(),
+                        globe_mesh.segments.iter().map(SegmentBase::copy).collect::<Vec<SegmentBase>>(),
+                        geometry.last_modified,
+                    )
+                } else if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty()
+                {
                     let indices: IndexVectorBasePtr =
                         Rc::new(RefCell::new(IndexVectorBase::new(geometry.indices.clone())));
                     (

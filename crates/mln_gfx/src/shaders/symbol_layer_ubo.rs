@@ -27,12 +27,15 @@ pub struct SymbolDrawableUBO {
     /* 248 */ pub opacity_t: f32,
     /* 252 */ pub halo_width_t: f32,
     /* 256 */ pub halo_blur_t: f32,
-    /* 260 */ pub pad1: f32,
-    /* 264 */ pub pad2: f32,
-    /* 268 */ pub pad3: f32,
-    /* 272 */
+    /* 260 */ pub is_along_line: i32,
+    /* 264 */ pub is_variable_anchor: i32,
+    /* 268 */ pub pitched_scale: f32,
+    /* 272 */ pub translation: [f32; 2],
+    /* 280 */ pub pad1: f32,
+    /* 284 */ pub pad2: f32,
+    /* 288 */
 }
-const _: () = assert!(std::mem::size_of::<SymbolDrawableUBO>() == 17 * 16);
+const _: () = assert!(std::mem::size_of::<SymbolDrawableUBO>() == 18 * 16);
 
 /// `struct alignas(16) SymbolTilePropsUBO`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]

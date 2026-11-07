@@ -7,6 +7,7 @@ use mln_gfx::drawable::Drawable as _;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};
 use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::types::DepthMaskType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 
 use crate::drawable::Drawable;
@@ -83,22 +84,35 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         let mut depth_mode_3d: Option<DepthMode> = None;
         let mut stencil_mode_3d: Option<StencilMode> = None;
 
+        // 3D features take the group-wide depth state, and a stencil value
+        // shared across the group when it has stencil tiles or their own when
+        // it does not
         let stencil_tiles = self.inner.stencil_tiles.clone().filter(|t| !t.is_empty());
-        if stencil_tiles.is_some() {
-            let pass = parameters.pass();
-            self.inner.visit_drawables_ref(|drawable| {
-                if drawable.get_enabled() && drawable.get_is_3d() && drawable.has_render_pass(pass) {
-                    features_3d = true;
-                    if drawable.get_enable_stencil() {
-                        stencil_3d = true;
+        let has_stencil_tiles = stencil_tiles.is_some();
+        // `ownStencilModes`: C++ keys them by drawable; here each drawable
+        // that takes one has a slot, by its place in the visiting order.
+        let mut own_stencil_slots: Vec<Option<usize>> = Vec::new();
+        let mut own_stencil_modes: Vec<StencilMode> = Vec::new();
+        let pass = parameters.pass();
+        self.inner.visit_drawables_ref(|drawable| {
+            let mut slot = None;
+            if drawable.get_enabled() && drawable.get_is_3d() && drawable.has_render_pass(pass) {
+                features_3d = true;
+                if drawable.get_enable_stencil() {
+                    stencil_3d = true;
+                    if !has_stencil_tiles {
+                        slot = Some(own_stencil_modes.len());
+                        own_stencil_modes.push(StencilMode::default());
                     }
                 }
-            });
-        }
+            }
+            own_stencil_slots.push(slot);
+        });
+        let own_stencil_modes_taken = parameters.stencil_modes_for_3d(&mut own_stencil_modes);
 
         if features_3d {
-            depth_mode_3d = Some(parameters.depth_mode_for_3d());
-            if stencil_3d {
+            depth_mode_3d = Some(parameters.depth_mode_for_3d(DepthMaskType::ReadWrite));
+            if stencil_3d && has_stencil_tiles {
                 stencil_mode_3d = Some(parameters.stencil_mode_for_3d());
             }
         } else if let Some(tiles) = &stencil_tiles {
@@ -112,9 +126,9 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         let initial_draw_calls = parameters.context().rendering_stats().num_draw_calls;
         let name = self.inner.base.name.clone();
         let uniform_buffers = &self.uniform_buffers;
-        let pass = parameters.pass();
 
         self.inner.visit_drawables(|drawable| {
+            let own_slot = own_stencil_slots.get(visit_count).copied().flatten();
             visit_count += 1;
             if !drawable.get_enabled() || !drawable.has_render_pass(pass) {
                 return;
@@ -150,9 +164,23 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                     (true, Some(d)) => d,
                     _ => DepthMode::disabled(),
                 };
-                let stencil = match (webgpu_drawable.get_enable_stencil(), stencil_mode_3d) {
-                    (true, Some(s)) => s,
-                    _ => StencilMode::disabled(),
+                if let Some(slot) = own_slot
+                    && !own_stencil_modes_taken
+                {
+                    // A clear between two draws draws over the zoom 0 tile
+                    // with buffers of its own. (C++ then binds the group's
+                    // uniform buffers again; here each drawable carries its
+                    // copies, so there is nothing to bind.)
+                    own_stencil_modes[slot] = parameters.stencil_mode_for_3d();
+                }
+                let stencil = if !webgpu_drawable.get_enable_stencil() {
+                    StencilMode::disabled()
+                } else if let Some(slot) = own_slot {
+                    own_stencil_modes[slot]
+                } else if let Some(s) = stencil_mode_3d {
+                    s
+                } else {
+                    StencilMode::disabled()
                 };
                 webgpu_drawable.set_depth_mode_for_3d(&depth);
                 webgpu_drawable.set_stencil_mode_for_3d(&stencil);

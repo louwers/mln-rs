@@ -12,13 +12,14 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry, UploadPass};
 use mln_map_types::TransformState;
 use mln_style::expression::Dependency;
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
-use mln_style_types::VisibilityType;
+use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
@@ -49,6 +50,20 @@ pub struct LayerRenderData {
 // symbols: `BucketPlacementData`. C++ holds `reference_wrapper`s to the
 // bucket and the render tile; here the bucket is shared and the tile is
 // kept alive by the vector that owns it.
+/// A symbol layer's `*-translate` in pixels, carried into placement the way
+/// GL JS passes `translation`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SymbolTranslate {
+    pub offset: [f32; 2],
+    pub anchor: TranslateAnchorType,
+}
+
+impl Default for SymbolTranslate {
+    fn default() -> Self {
+        SymbolTranslate { offset: [0.0, 0.0], anchor: TranslateAnchorType::Map }
+    }
+}
+
 /// `BucketPlacementData`.
 #[derive(Clone)]
 pub struct BucketPlacementData {
@@ -59,6 +74,8 @@ pub struct BucketPlacementData {
     pub feature_index: Option<Arc<crate::geometry::feature_index::FeatureIndex>>,
     pub source_id: String,
     pub sort_key_range: Option<crate::buckets::symbol_bucket::SortKeyRange>,
+    pub text_translate: SymbolTranslate,
+    pub icon_translate: SymbolTranslate,
 }
 
 impl BucketPlacementData {
@@ -113,6 +130,10 @@ pub struct RenderLayerBase {
     pub render_tile_ids: HashMap<OverscaledTileID, SimpleIdentity>,
     // symbols: `placementData`.
     pub placement_data: LayerPlacementData,
+    // symbols: `followerData`.
+    pub follower_data: LayerPlacementData,
+    /// The projection variant this layer's drawables are built with.
+    pub projection_variant: ProjectionVariant,
     // TODO(port): sourceForState (feature state), hasRenderFailures.
 }
 
@@ -134,6 +155,8 @@ impl RenderLayerBase {
             render_tiles_owner: Rc::new(Vec::new()),
             render_tile_ids: HashMap::new(),
             placement_data: Vec::new(), // symbols
+            follower_data: Vec::new(),  // symbols
+            projection_variant: ProjectionVariant::Mercator,
         }
     }
 }
@@ -161,6 +184,12 @@ pub trait RenderLayer {
     /// PaintParameters::depthModeFor3D().
     fn is_3d(&self) -> bool {
         false
+    }
+
+    /// Returns true if the layer may draw depth-tested 3D geometry, which the
+    /// planet's depth hides behind the horizon.
+    fn needs_globe_depth(&self) -> bool {
+        self.is_3d()
     }
 
     fn upload(&mut self, _upload_pass: &dyn UploadPass) {}
@@ -256,6 +285,18 @@ pub trait RenderLayer {
 
     // Non-virtual members of the C++ class.
 
+    /// Picks the shader variant for the state's projection; returns true and
+    /// drops the drawables when it changed.
+    fn update_projection_variant(&mut self, state: &TransformState) -> bool {
+        let variant = if state.is_globe_rendering() { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
+        if variant == self.base().projection_variant {
+            return false;
+        }
+        self.base_mut().projection_variant = variant;
+        self.remove_all_drawables();
+        true
+    }
+
     /// `addRenderPassesFromTiles()`.
     fn add_render_passes_from_tiles(&mut self) {
         let base = self.base_mut();
@@ -347,6 +388,12 @@ pub trait RenderLayer {
         &self.base().placement_data
     }
 
+    /// symbols: `getFollowerData()`: buckets that another layer places and
+    /// this layer draws, at its own translation.
+    fn get_follower_data(&self) -> &LayerPlacementData {
+        &self.base().follower_data
+    }
+
     fn get_layer_index(&self) -> i32 {
         self.base().layer_index
     }
@@ -365,7 +412,10 @@ pub trait RenderLayer {
     /// Checks whether this layer can be rendered.
     fn supports_zoom(&self, zoom: f32) -> bool {
         // TODO: shall we use rounding or epsilon comparisons?
-        self.base().base_impl.min_zoom <= zoom && self.base().base_impl.max_zoom >= zoom
+        // A minimum of 0 is "no minimum": the globe zooms below 0 toward the
+        // poles. (`std::max(zoom, 0.0f)`.)
+        let zoom_or_zero = if zoom < 0.0 { 0.0 } else { zoom };
+        self.base().base_impl.min_zoom <= zoom_or_zero && self.base().base_impl.max_zoom >= zoom
     }
 
     fn is_layer_renderable(&self) -> bool {
@@ -377,8 +427,9 @@ pub trait RenderLayer {
     }
 
     // query: `queryIntersectsFeature(queryGeometry, feature, zoom,
-    // transformState, pixelsToTileUnits, posMatrix, featureState)`; C++
-    // returns false unless a layer type overrides it.
+    // transformState, pixelsToTileUnits, projector, featureState)`, with the
+    // tile's projector in place of its matrix; C++ returns false unless a
+    // layer type overrides it.
     #[allow(clippy::too_many_arguments)]
     fn query_intersects_feature(
         &self,
@@ -387,7 +438,7 @@ pub trait RenderLayer {
         _zoom: f32,
         _transform_state: &TransformState,
         _pixels_to_tile_units: f32,
-        _pos_matrix: &mln_util::mat4::Mat4,
+        _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         false

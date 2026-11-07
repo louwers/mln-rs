@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::ColorReliefTilePropsUBO;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::*;
@@ -48,6 +49,7 @@ use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLaye
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};
 use crate::buckets::hillshade_bucket::{HillshadeBucket, HillshadeLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::globe_tile_mesh::GlobeTileMeshCache;
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::paint_parameters::PaintParameters;
 use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
@@ -87,6 +89,7 @@ pub struct RenderColorReliefLayer {
     color_relief_shader: Option<ShaderProgramBasePtr>,
 
     static_data_shared_vertices: Option<VertexVectorBasePtr>,
+    globe_meshes: GlobeTileMeshCache<HillshadeLayoutVertex>,
 
     /// The DEM texture of each bucket, with the bucket's prepare generation
     /// it was made at (C++ makes one per drawable and frame from the
@@ -115,6 +118,7 @@ impl RenderColorReliefLayer {
             color_stops_texture: None,
             color_relief_shader: None,
             static_data_shared_vertices: None,
+            globe_meshes: GlobeTileMeshCache::new(),
             dem_textures: HashMap::new(),
         };
 
@@ -327,12 +331,18 @@ impl RenderLayer for RenderColorReliefLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
+        state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
         _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        if self.update_projection_variant(state) {
+            self.color_relief_shader = None;
+            if self.base.projection_variant == ProjectionVariant::Mercator {
+                self.globe_meshes.clear();
+            }
+        }
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
             return;
@@ -363,7 +373,8 @@ impl RenderLayer for RenderColorReliefLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if self.color_relief_shader.is_none() {
-            self.color_relief_shader = context.get_generic_shader(shaders, COLOR_RELIEF_SHADER_GROUP_NAME);
+            self.color_relief_shader =
+                context.get_generic_shader(shaders, COLOR_RELIEF_SHADER_GROUP_NAME, self.base.projection_variant);
         }
         let Some(color_relief_shader) = self.color_relief_shader.clone() else {
             Log::error(Event::Render, "ColorRelief shader failed to load");
@@ -473,7 +484,19 @@ impl RenderLayer for RenderColorReliefLayer {
                 Instant,
             ) = {
                 let geometry = bucket.geometry();
-                if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty() {
+                if self.base.projection_variant == ProjectionVariant::Globe {
+                    let globe_mesh =
+                        self.globe_meshes.get(&tile_id.canonical, &geometry.mask, HillshadeBucket::layout_vertex);
+                    let vertices: VertexVectorBasePtr = globe_mesh.vertices.clone();
+                    (
+                        vertices,
+                        globe_mesh.vertices.elements(),
+                        globe_mesh.indices.clone(),
+                        globe_mesh.segments.iter().map(SegmentBase::copy).collect(),
+                        geometry.last_modified,
+                    )
+                } else if !geometry.vertices.is_empty() && !geometry.indices.is_empty() && !geometry.segments.is_empty()
+                {
                     (
                         shared_vertices(&geometry.vertices),
                         geometry.vertices.len(),

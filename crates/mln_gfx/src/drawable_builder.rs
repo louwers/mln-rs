@@ -371,6 +371,12 @@ pub trait DrawableBuilder {
     }
     fn set_is_3d(&mut self, value: bool) {
         self.base_mut().is_3d = value;
+        // Historically every 3D drawable used PaintParameters::depthModeFor3D(),
+        // which always wrote depth regardless of the builder's default. Preserve
+        // that behavior while allowing callers to opt into ReadOnly afterwards.
+        if value {
+            self.base_mut().depth_type = DepthMaskType::ReadWrite;
+        }
     }
     /// Set the draw priority on all drawables including those already generated
     fn reset_draw_priority(&mut self, value: DrawPriority) {

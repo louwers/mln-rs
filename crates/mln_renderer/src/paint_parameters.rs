@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, LinearBlend, Mask};
+use mln_gfx::globe_clip_mask::GlobeClipMask;
 use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::render_pass::RenderPass as GfxRenderPass;
 use mln_gfx::shaders::clipping_mask_ubo::ClipUBO;
@@ -15,13 +16,16 @@ use mln_gfx::{
     ColorMode, CommandEncoder, Context, DepthMaskType, DepthMode, RendererBackend, ScissorRect, ShaderRegistry,
     StencilMode,
 };
-use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState, ViewportMode};
-use mln_tile_id::UnwrappedTileID;
+use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileLodMode, TransformState, ViewportMode};
+use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::chrono::TimePoint;
-use mln_util::mat4::{Mat4, matrix};
+use mln_util::mat4::Mat4;
 use mln_util::size::Size;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
+use crate::globe_tile_mesh::raw_globe_tile_mesh;
+use crate::layer_tweaker::to_projection_ubo;
 use crate::line_atlas::LineAtlas;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_pass::RenderPass;
@@ -110,6 +114,14 @@ pub struct PaintParameters<'a> {
     pub capture_rendered_features: bool,
 }
 
+/// The WebGPU context's `rawGlobeTileMesh(tile, borders,
+/// SubdivisionGranularitySetting::globe().stencil)`, in the form the gfx trait
+/// takes it (see `Context::render_globe_tile_clipping_masks`).
+fn globe_clip_mesh(tile: &CanonicalTileID, borders: bool) -> (Vec<u8>, Vec<u16>) {
+    let mesh = raw_globe_tile_mesh(tile, borders, &SubdivisionGranularitySetting::globe().stencil);
+    (mesh.vertices, mesh.indices)
+}
+
 impl<'a> PaintParameters<'a> {
     pub const NUM_SUBLAYERS: i32 = 3;
     /// `1.0f / (1 << 11)` (non-OpenGL backends).
@@ -182,26 +194,28 @@ impl<'a> PaintParameters<'a> {
 
     /// `matrixForTile(const UnwrappedTileID&, bool aligned = false)`.
     pub fn matrix_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> Mat4 {
-        let mut m: Mat4 = [0.0; 16];
-        self.state.matrix_for(&mut m, tile_id);
-        let b = m;
-        matrix::multiply(
-            &mut m,
+        self.projection_data_for_tile(tile_id, aligned).main_matrix
+    }
+
+    /// `projectionDataForTile(const UnwrappedTileID&, bool aligned = false)`.
+    pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
+        self.state.get_projection_data_with(
+            tile_id,
             if aligned { &self.transform_params.aligned_proj_matrix } else { &self.transform_params.proj_matrix },
-            &b,
-        );
-        m
+        )
     }
 
     pub fn depth_mode_for_sublayer(&self, _n: u8, mask: DepthMaskType) -> DepthMode {
-        if self.current_layer < self.opaque_pass_cutoff {
+        // On the globe, 2D layers are ordered by draw order alone; their Z is
+        // the back-hemisphere clip.
+        if self.current_layer < self.opaque_pass_cutoff || self.state.is_globe_rendering() {
             return DepthMode::disabled();
         }
         DepthMode { func: DepthFunctionType::LessEqual, mask }
     }
 
-    pub fn depth_mode_for_3d(&self) -> DepthMode {
-        DepthMode { func: DepthFunctionType::LessEqual, mask: DepthMaskType::ReadWrite }
+    pub fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
+        DepthMode { func: DepthFunctionType::LessEqual, mask }
     }
 
     pub fn color_mode_for_render_pass(&self) -> ColorMode {
@@ -226,7 +240,27 @@ impl<'a> PaintParameters<'a> {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
-        // WebGPU clears stencil through render pass descriptor
+        // The render pass clears the stencil only where it begins; within it,
+        // draw zero over the zoom 0 tile, as Metal does.
+        let render_pass = self.render_pass.as_deref().expect("render pass");
+        if self.state.is_globe_rendering() {
+            let masks = [GlobeClipMask {
+                projection: to_projection_ubo(&self.projection_data_for_tile(&UnwrappedTileID::new(0, 0, 0), false)),
+                stencil_ref: 0,
+                tile: CanonicalTileID::new(0, 0, 0),
+            }];
+            self.context.render_globe_tile_clipping_masks(render_pass, self.shaders, &masks, &globe_clip_mesh);
+        } else {
+            let matrix = self.matrix_for_tile(&UnwrappedTileID::new(0, 0, 0), false);
+            let tile_ubo = [ClipUBO {
+                matrix: std::array::from_fn(|i| matrix[i] as f32),
+                stencil_ref: 0,
+                pad1: 0.0,
+                pad2: 0.0,
+                pad3: 0.0,
+            }];
+            self.context.render_tile_clipping_masks(render_pass, self.shaders, &tile_ubo);
+        }
         self.context.rendering_stats().stencil_clears += 1;
     }
 
@@ -253,9 +287,14 @@ impl<'a> PaintParameters<'a> {
         if self.next_stencil_id as usize + count > Self::MAX_STENCIL_VALUE as usize {
             self.clear_stencil();
         }
+        if !self.state.is_globe_rendering() {
+            self.context.release_globe_clip_masks();
+        }
 
         // MLN_RENDER_BACKEND_WEBGPU
+        let globe = self.state.is_globe_rendering();
         let mut tile_ubos: Vec<ClipUBO> = Vec::new();
+        let mut globe_masks: Vec<GlobeClipMask> = Vec::new();
         for tile_id in tile_ids {
             let stencil_id = self.next_stencil_id;
             if self.tile_clipping_mask_ids.contains_key(tile_id) {
@@ -263,6 +302,15 @@ impl<'a> PaintParameters<'a> {
             }
             self.tile_clipping_mask_ids.insert(*tile_id, stencil_id);
             self.next_stencil_id += 1;
+
+            if globe {
+                globe_masks.push(GlobeClipMask {
+                    projection: to_projection_ubo(&self.projection_data_for_tile(tile_id, false)),
+                    stencil_ref: stencil_id as u32,
+                    tile: tile_id.canonical,
+                });
+                continue;
+            }
 
             if tile_ubos.is_empty() {
                 tile_ubos.reserve(count);
@@ -278,9 +326,18 @@ impl<'a> PaintParameters<'a> {
             });
         }
 
-        if !tile_ubos.is_empty() {
+        if !tile_ubos.is_empty() || !globe_masks.is_empty() {
             let render_pass = self.render_pass.as_deref().expect("render pass");
-            self.context.render_tile_clipping_masks(render_pass, self.shaders, &tile_ubos);
+            if globe {
+                self.context.render_globe_tile_clipping_masks(
+                    render_pass,
+                    self.shaders,
+                    &globe_masks,
+                    &globe_clip_mesh,
+                );
+            } else {
+                self.context.render_tile_clipping_masks(render_pass, self.shaders, &tile_ubos);
+            }
             self.context.rendering_stats().stencil_updates += 1;
         }
 
@@ -322,6 +379,26 @@ impl<'a> PaintParameters<'a> {
             pass: StencilOpType::Replace,
         }
     }
+
+    /// Give each drawable a 3D stencil mode of its own, clearing the stencil
+    /// buffer first if they would not all fit, so no value handed out before
+    /// the clear is drawn after it. Returns false, handing out none, when
+    /// there are more drawables than the buffer holds values: the caller then
+    /// takes each one's value with `stencil_mode_for_3d` as it draws it, so a
+    /// clear falls between two draws. (C++ takes the modes keyed by drawable;
+    /// see the gfx trait.)
+    pub fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
+        if modes.len() >= Self::MAX_STENCIL_VALUE as usize {
+            return false;
+        }
+        if self.next_stencil_id as usize + modes.len() > Self::MAX_STENCIL_VALUE as usize {
+            self.clear_stencil();
+        }
+        for mode in modes.iter_mut() {
+            *mode = self.stencil_mode_for_3d();
+        }
+        true
+    }
 }
 
 impl GfxPaintParameters for PaintParameters<'_> {
@@ -349,8 +426,8 @@ impl GfxPaintParameters for PaintParameters<'_> {
         PaintParameters::depth_mode_for_sublayer(self, n, mask)
     }
 
-    fn depth_mode_for_3d(&self) -> DepthMode {
-        PaintParameters::depth_mode_for_3d(self)
+    fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
+        PaintParameters::depth_mode_for_3d(self, mask)
     }
 
     fn render_tile_clipping_masks(&mut self, tile_ids: &[UnwrappedTileID]) -> bool {
@@ -363,6 +440,10 @@ impl GfxPaintParameters for PaintParameters<'_> {
 
     fn stencil_mode_for_3d(&mut self) -> StencilMode {
         PaintParameters::stencil_mode_for_3d(self)
+    }
+
+    fn stencil_modes_for_3d(&mut self, modes: &mut [StencilMode]) -> bool {
+        PaintParameters::stencil_modes_for_3d(self, modes)
     }
 
     // conformance: for DrawableAtlasesTweaker.

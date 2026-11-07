@@ -43,5 +43,6 @@ fn every_layer_type_is_generated() {
         assert!(paths.contains(&format!("layers/{t}_layer_properties.rs").as_str()), "{t}");
     }
     assert!(paths.contains(&"light.rs"));
-    assert_eq!(files.len(), 23);
+    assert!(paths.contains(&"sky.rs"));
+    assert_eq!(files.len(), 24);
 }

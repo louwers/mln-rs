@@ -104,6 +104,20 @@ impl TileCache {
         tile
     }
 
+    /// Pop the tile cached under any wrap of `key` and give it `key`'s wrap.
+    /// On the globe every wrap of a tile is the same piece of the sphere.
+    pub fn pop_any_wrap(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
+        let found = *self
+            .tiles
+            .keys()
+            .find(|entry| entry.overscaled_z == key.overscaled_z && entry.canonical == key.canonical)?;
+        self.remove_key(&found);
+        let tile = self.tiles.remove(&found)?;
+        debug_assert!(tile.is_renderable());
+        tile.base().set_id(*key);
+        Some(tile)
+    }
+
     pub fn get(&self, key: &OverscaledTileID) -> Option<&dyn Tile> {
         self.tiles.get(key).map(|t| t.as_ref())
     }

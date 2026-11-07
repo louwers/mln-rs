@@ -5,7 +5,7 @@
 // glyph.
 
 use geometry::Point;
-use mln_map_types::TransformState;
+use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_text::glyph::WritingModeType;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::constants::ONE_EM;
@@ -61,11 +61,11 @@ pub fn get_tile_skew_matrix(state: &TransformState) -> Mat4 {
     m
 }
 
-/// `getLabelPlaneMatrix(posMatrix, pitchWithMap, rotateWithMap, state,
-/// pixelsToTileUnits)`: a matrix for converting from tile units to the
-/// correct label coordinate space.
+/// `getLabelPlaneMatrix(pitchWithMap, rotateWithMap, state,
+/// pixelsToTileUnits)`: a matrix for converting to the correct label
+/// coordinate space, from tile units when pitched with the map and from clip
+/// space otherwise; the shaders apply the tile's projection themselves.
 pub fn get_label_plane_matrix(
-    pos_matrix: &Mat4,
     pitch_with_map: bool,
     rotate_with_map: bool,
     state: &TransformState,
@@ -90,17 +90,15 @@ pub fn get_label_plane_matrix(
         matrix::scale(&mut m, &a, f64::from(size.width) / 2.0, -(f64::from(size.height) / 2.0), 1.0);
         let a = m;
         matrix::translate(&mut m, &a, 1.0, -1.0, 0.0);
-        let a = m;
-        matrix::multiply(&mut m, &a, pos_matrix);
     }
     m
 }
 
-/// `getGlCoordMatrix(posMatrix, pitchWithMap, rotateWithMap, state,
+/// `getGlCoordMatrix(pitchWithMap, rotateWithMap, state,
 /// pixelsToTileUnits)`: a matrix for converting from the correct label
-/// coordinate space to gl coords.
+/// coordinate space back to tile units when pitched with the map, and to gl
+/// coords otherwise.
 pub fn get_gl_coord_matrix(
-    pos_matrix: &Mat4,
     pitch_with_map: bool,
     rotate_with_map: bool,
     state: &TransformState,
@@ -109,8 +107,6 @@ pub fn get_gl_coord_matrix(
     let mut m: Mat4 = [0.0; 16];
     matrix::identity(&mut m);
     if pitch_with_map {
-        let a = m;
-        matrix::multiply(&mut m, &a, pos_matrix);
         let s = f64::from(pixels_to_tile_units);
         let a = m;
         matrix::scale(&mut m, &a, s, s, 1.0);
@@ -225,10 +221,136 @@ pub fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed
     }
 }
 
-/// `isVisible(anchorPos, clippingBuffer)`.
-fn is_visible(anchor_pos: &Vec4, clipping_buffer: &[f64; 2]) -> bool {
-    let x = anchor_pos[0] / anchor_pos[3];
-    let y = anchor_pos[1] / anchor_pos[3];
+/// `PlacementResult`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PlacementResult {
+    Ok,
+    NotEnoughRoom,
+    NeedsFlipping,
+    UseVertical,
+}
+
+/// Projects tile points to the label plane a symbol is laid out in, through
+/// the tile's projection.
+pub struct LabelPlaneProjector<'a> {
+    tile: TileProjector<'a>,
+    pitch_with_map: bool,
+    translation: Point<f32>,
+    pitched_label_plane_matrix: Mat4,
+    pitched_label_plane_matrix_inverse: Mat4,
+    width: f32,
+    height: f32,
+}
+
+impl<'a> LabelPlaneProjector<'a> {
+    /// C++ defaults `translation` to (0, 0).
+    pub fn new(
+        tile: &TileProjector<'a>,
+        pitch_with_map: bool,
+        rotate_with_map: bool,
+        pixels_to_tile_units: f32,
+        translation: Point<f32>,
+    ) -> Self {
+        let size = tile.get_transform_state().get_size();
+        let mut pitched_label_plane_matrix: Mat4 = [0.0; 16];
+        let mut pitched_label_plane_matrix_inverse: Mat4 = [0.0; 16];
+        // Only pitched labels lay out in the pitched plane; the others go
+        // through the projection.
+        if pitch_with_map {
+            pitched_label_plane_matrix =
+                get_label_plane_matrix(true, rotate_with_map, tile.get_transform_state(), pixels_to_tile_units);
+            matrix::invert(&mut pitched_label_plane_matrix_inverse, &pitched_label_plane_matrix);
+        } else {
+            matrix::identity(&mut pitched_label_plane_matrix);
+            matrix::identity(&mut pitched_label_plane_matrix_inverse);
+        }
+        LabelPlaneProjector {
+            tile: *tile,
+            pitch_with_map,
+            translation,
+            pitched_label_plane_matrix,
+            pitched_label_plane_matrix_inverse,
+            width: size.width as f32,
+            height: size.height as f32,
+        }
+    }
+
+    /// Tile units to the label plane; distance and occlusion come from the
+    /// projection.
+    pub fn project(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
+        let translated = add(tile_point, self.translation);
+        if self.pitch_with_map {
+            let projected = project(translated, &self.pitched_label_plane_matrix);
+            return ProjectedTilePoint {
+                point: Point::new(f64::from(projected.0.x), f64::from(projected.0.y)),
+                signed_distance_from_camera: f64::from(projected.1),
+                occluded: false,
+            };
+        }
+        let mut projected = self.tile.project(&Point::new(f64::from(translated.x), f64::from(translated.y)), 0.0);
+        projected.point = Point::new(
+            (projected.point.x * 0.5 + 0.5) * f64::from(self.width),
+            (-projected.point.y * 0.5 + 0.5) * f64::from(self.height),
+        );
+        projected
+    }
+
+    /// Label plane to clip space, for orientation checks.
+    pub fn to_clip_space(&self, label_plane_point: Point<f32>) -> Point<f32> {
+        if self.pitch_with_map {
+            let tile_point = project(label_plane_point, &self.pitched_label_plane_matrix_inverse).0;
+            let projected = self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0);
+            return Point::new(projected.point.x as f32, projected.point.y as f32);
+        }
+        Point::new((label_plane_point.x / self.width) * 2.0 - 1.0, 1.0 - (label_plane_point.y / self.height) * 2.0)
+    }
+
+    /// Tile units straight to clip space.
+    pub fn to_clip_space_from_tile(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
+        self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0)
+    }
+}
+
+/// The projections of one symbol's line vertices, so each vertex is
+/// projected once however many glyphs walk it.
+#[derive(Debug, Default)]
+pub struct LineProjectionCache {
+    points: Vec<Option<ProjectedTilePoint>>,
+    occluded: bool,
+}
+
+impl LineProjectionCache {
+    pub fn reset(&mut self, vertex_count: usize) {
+        self.points.clear();
+        self.points.resize(vertex_count, None);
+        self.occluded = false;
+    }
+
+    pub fn get(
+        &mut self,
+        index: usize,
+        line: &GeometryCoordinates,
+        label_plane: &LabelPlaneProjector<'_>,
+    ) -> ProjectedTilePoint {
+        if let Some(cached) = self.points[index] {
+            return cached;
+        }
+        let projected = label_plane.project(convert_point(&line[index]));
+        self.occluded |= projected.occluded;
+        self.points[index] = Some(projected);
+        projected
+    }
+
+    /// Whether any vertex projected so far is behind the globe's horizon.
+    pub fn any_occluded(&self) -> bool {
+        self.occluded
+    }
+}
+
+/// `isVisible(anchorPos, clippingBuffer)`, with the anchor in clip space.
+fn is_visible(anchor_pos: &Point<f64>, clipping_buffer: &[f64; 2]) -> bool {
+    let x = anchor_pos.x;
+    let y = anchor_pos.y;
     x >= -clipping_buffer[0] && x <= clipping_buffer[0] && y >= -clipping_buffer[1] && y <= clipping_buffer[1]
 }
 
@@ -257,22 +379,14 @@ pub fn hide_glyphs(num_glyphs: usize, dynamic_vertex_array: &mut Vec<SymbolDynam
     }
 }
 
-/// `PlacementResult`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum PlacementResult {
-    Ok,
-    NotEnoughRoom,
-    NeedsFlipping,
-    UseVertical,
-}
-
-/// `projectTruncatedLineSegment(...)`.
+/// `projectTruncatedLineSegment(...)`; `project_point` takes a tile point to
+/// the space the line is laid out in.
 fn project_truncated_line_segment(
     previous_tile_point: Point<f32>,
     current_tile_point: Point<f32>,
     previous_projected_point: Point<f32>,
     minimum_length: f32,
-    projection_matrix: &Mat4,
+    project_point: impl Fn(Point<f32>) -> Point<f32>,
 ) -> Point<f32> {
     // We are assuming "previousTilePoint" won't project to a point within one
     // unit of the camera plane If it did, that would mean our label extended
@@ -280,7 +394,7 @@ fn project_truncated_line_segment(
     // the plane of the camera. We wouldn't be able to render the label anyway
     // once it crossed the plane of the camera.
     let projected_unit_vertex =
-        project(add(previous_tile_point, unit_f32(sub(previous_tile_point, current_tile_point))), projection_matrix).0;
+        project_point(add(previous_tile_point, unit_f32(sub(previous_tile_point, current_tile_point))));
     let projected_unit_segment = sub(previous_projected_point, projected_unit_vertex);
 
     add(previous_projected_point, mul(projected_unit_segment, minimum_length / mag_f32(projected_unit_segment)))
@@ -298,7 +412,8 @@ fn place_glyph_along_line(
     anchor_segment: u16,
     line: &GeometryCoordinates,
     tile_distances: &[f32],
-    label_plane_matrix: &Mat4,
+    label_plane: &LabelPlaneProjector<'_>,
+    projections: &mut LineProjectionCache,
     return_tile_distance: bool,
 ) -> Option<PlacedGlyph> {
     let combined_offset_x = if flip { offset_x - line_offset_x } else { offset_x + line_offset_x };
@@ -335,9 +450,9 @@ fn place_glyph_along_line(
         }
 
         prev = current;
-        let projection = project(convert_point(&line[current_index as usize]), label_plane_matrix);
-        if projection.1 > 0.0 {
-            current = projection.0;
+        let projection = projections.get(current_index as usize, line, label_plane);
+        if projection.signed_distance_from_camera > 0.0 {
+            current = Point::new(projection.point.x as f32, projection.point.y as f32);
         } else {
             // The vertex is behind the plane of the camera, so we can't project it
             // Instead, we'll create a vertex along the line that's far enough to include the glyph
@@ -352,7 +467,10 @@ fn place_glyph_along_line(
                 current_tile_point,
                 prev,
                 abs_offset_x - distance_to_prev + 1.0,
-                label_plane_matrix,
+                |p| {
+                    let projected = label_plane.project(p);
+                    Point::new(projected.point.x as f32, projected.point.y as f32)
+                },
             );
         }
 
@@ -400,7 +518,8 @@ pub fn place_first_and_last_glyph(
     anchor_point: Point<f32>,
     tile_anchor_point: Point<f32>,
     symbol: &PlacedSymbol,
-    label_plane_matrix: &Mat4,
+    label_plane: &LabelPlaneProjector<'_>,
+    projections: &mut LineProjectionCache,
     return_tile_distance: bool,
 ) -> Option<(PlacedGlyph, PlacedGlyph)> {
     let (Some(&first_glyph_offset), Some(&last_glyph_offset)) =
@@ -420,7 +539,8 @@ pub fn place_first_and_last_glyph(
         symbol.segment as u16,
         &symbol.line,
         &symbol.tile_distances,
-        label_plane_matrix,
+        label_plane,
+        projections,
         return_tile_distance,
     )?;
 
@@ -434,9 +554,14 @@ pub fn place_first_and_last_glyph(
         symbol.segment as u16,
         &symbol.line,
         &symbol.tile_distances,
-        label_plane_matrix,
+        label_plane,
+        projections,
         return_tile_distance,
     )?;
+    // A line label with any vertex behind the planet is hidden whole.
+    if projections.any_occluded() {
+        return None;
+    }
 
     Some((first_placed_glyph, last_placed_glyph))
 }
@@ -479,9 +604,8 @@ fn place_glyphs_along_line(
     font_size: f32,
     flip: bool,
     keep_upright: bool,
-    pos_matrix: &Mat4,
-    label_plane_matrix: &Mat4,
-    gl_coord_matrix: &Mat4,
+    label_plane: &LabelPlaneProjector<'_>,
+    projections: &mut LineProjectionCache,
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
     projected_anchor_point: Point<f32>,
     aspect_ratio: f32,
@@ -500,14 +624,15 @@ fn place_glyphs_along_line(
             projected_anchor_point,
             symbol.anchor_point,
             symbol,
-            label_plane_matrix,
+            label_plane,
+            projections,
             false,
         ) else {
             return PlacementResult::NotEnoughRoom;
         };
 
-        let first_point = project(first_and_last_glyph.0.point, gl_coord_matrix).0;
-        let last_point = project(first_and_last_glyph.1.point, gl_coord_matrix).0;
+        let first_point = label_plane.to_clip_space(first_and_last_glyph.0.point);
+        let last_point = label_plane.to_clip_space(first_and_last_glyph.1.point);
 
         if keep_upright && !flip {
             if let Some(orientation_change) =
@@ -533,7 +658,8 @@ fn place_glyphs_along_line(
                 symbol.segment as u16,
                 &symbol.line,
                 &symbol.tile_distances,
-                label_plane_matrix,
+                label_plane,
+                projections,
                 false,
             );
             match placed_glyph {
@@ -548,17 +674,21 @@ fn place_glyphs_along_line(
         // Only a single glyph to place
         // So, determine whether to flip based on projected angle of the line segment it's on
         if keep_upright && !flip {
-            let a = project(symbol.anchor_point, pos_matrix).0;
+            let to_clip = |p: Point<f32>| {
+                let projected = label_plane.to_clip_space_from_tile(p);
+                Point::new(projected.point.x as f32, projected.point.y as f32)
+            };
+            let a = to_clip(symbol.anchor_point);
             let tile_segment_end = convert_point(&symbol.line[symbol.segment + 1]);
-            let projected_vertex = project(tile_segment_end, pos_matrix);
+            let projected_vertex = label_plane.to_clip_space_from_tile(tile_segment_end);
             // We know the anchor will be in the viewport, but the end of the
             // line segment may be behind the plane of the camera, in which case
             // we can use a point at any arbitrary (closer) point on the
             // segment.
-            let b = if projected_vertex.1 > 0.0 {
-                projected_vertex.0
+            let b = if projected_vertex.signed_distance_from_camera > 0.0 {
+                Point::new(projected_vertex.point.x as f32, projected_vertex.point.y as f32)
             } else {
-                project_truncated_line_segment(symbol.anchor_point, tile_segment_end, a, 1.0, pos_matrix)
+                project_truncated_line_segment(symbol.anchor_point, tile_segment_end, a, 1.0, to_clip)
             };
 
             if let Some(orientation_change) = requires_orientation_change(symbol.writing_modes, a, b, aspect_ratio) {
@@ -566,7 +696,7 @@ fn place_glyphs_along_line(
             }
         }
         let glyph_offset_x = symbol.glyph_offsets[0];
-        let Some(single_glyph) = place_glyph_along_line(
+        let single_glyph = place_glyph_along_line(
             font_scale * glyph_offset_x,
             line_offset_x,
             line_offset_y,
@@ -576,9 +706,11 @@ fn place_glyphs_along_line(
             symbol.segment as u16,
             &symbol.line,
             &symbol.tile_distances,
-            label_plane_matrix,
+            label_plane,
+            projections,
             false,
-        ) else {
+        );
+        let Some(single_glyph) = single_glyph.filter(|_| !projections.any_occluded()) else {
             return PlacementResult::NotEnoughRoom;
         };
 
@@ -598,19 +730,21 @@ fn place_glyphs_along_line(
     PlacementResult::Ok
 }
 
-/// `reprojectLineLabels(dynamicVertexArray, placedSymbols, posMatrix,
-/// pitchWithMap, rotateWithMap, keepUpright, tile, sizeBinder, state)`.
+/// `reprojectLineLabels(dynamicVertexArray, placedSymbols, tileProjector,
+/// pitchWithMap, rotateWithMap, keepUpright, tile, sizeBinder, state,
+/// translation)`.
 #[allow(clippy::too_many_arguments)]
 pub fn reproject_line_labels(
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
     placed_symbols: &[PlacedSymbol],
-    pos_matrix: &Mat4,
+    tile_projector: &TileProjector<'_>,
     pitch_with_map: bool,
     rotate_with_map: bool,
     keep_upright: bool,
     tile: &RenderTile,
     size_binder: &SymbolSizeBinder,
     state: &TransformState,
+    translation: Point<f32>,
 ) {
     let partially_evaluated_size = size_binder.evaluate_for_zoom(state.get_zoom() as f32);
 
@@ -619,14 +753,13 @@ pub fn reproject_line_labels(
 
     let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
 
-    let label_plane_matrix =
-        get_label_plane_matrix(pos_matrix, pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
-
-    let gl_coord_matrix = get_gl_coord_matrix(pos_matrix, pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
+    let label_plane =
+        LabelPlaneProjector::new(tile_projector, pitch_with_map, rotate_with_map, pixels_to_tile_units, translation);
 
     dynamic_vertex_array.clear();
 
     let mut use_vertical = false;
+    let mut projections = LineProjectionCache::default();
 
     for placed_symbol in placed_symbols {
         // Don't do calculations for vertical glyphs unless the previous symbol
@@ -641,33 +774,36 @@ pub fn reproject_line_labels(
         // immediately after its horizontal counterpart
         use_vertical = false;
 
-        let mut anchor_pos: Vec4 = [placed_symbol.anchor_point.x as f64, placed_symbol.anchor_point.y as f64, 0.0, 1.0];
-        let a = anchor_pos;
-        matrix::transform_mat4(&mut anchor_pos, &a, pos_matrix);
+        let tile_anchor = Point::new(f64::from(placed_symbol.anchor_point.x), f64::from(placed_symbol.anchor_point.y));
+        let anchor_pos = tile_projector.project(&tile_anchor, 0.0);
 
         // Don't bother calculating the correct point for invisible labels.
-        if !is_visible(&anchor_pos, &clipping_buffer) {
+        if anchor_pos.occluded || !is_visible(&anchor_pos.point, &clipping_buffer) {
             hide_glyphs(placed_symbol.glyph_offsets.len(), dynamic_vertex_array);
             continue;
         }
 
-        let camera_to_anchor_distance = anchor_pos[3] as f32;
+        let camera_to_anchor_distance = anchor_pos.signed_distance_from_camera as f32;
         let perspective_ratio = 0.5 + 0.5 * (camera_to_anchor_distance / state.get_camera_to_center_distance());
 
         let font_size = evaluate_size_for_feature(&partially_evaluated_size, placed_symbol);
-        let pitch_scaled_font_size =
-            if pitch_with_map { font_size * perspective_ratio } else { font_size / perspective_ratio };
+        let pitch_scaled_font_size = if pitch_with_map {
+            font_size * perspective_ratio * tile_projector.pitched_text_correction(&tile_anchor) as f32
+        } else {
+            font_size / perspective_ratio
+        };
 
-        let anchor_point = project(placed_symbol.anchor_point, &label_plane_matrix).0;
+        let projected_anchor = label_plane.project(placed_symbol.anchor_point).point;
+        let anchor_point = Point::new(projected_anchor.x as f32, projected_anchor.y as f32);
 
+        projections.reset(placed_symbol.line.len());
         let place_unflipped = place_glyphs_along_line(
             placed_symbol,
             pitch_scaled_font_size,
             false, /*unflipped*/
             keep_upright,
-            pos_matrix,
-            &label_plane_matrix,
-            &gl_coord_matrix,
+            &label_plane,
+            &mut projections,
             dynamic_vertex_array,
             anchor_point,
             size.aspect_ratio(),
@@ -683,9 +819,8 @@ pub fn reproject_line_labels(
                     pitch_scaled_font_size,
                     true, /*flipped*/
                     keep_upright,
-                    pos_matrix,
-                    &label_plane_matrix,
-                    &gl_coord_matrix,
+                    &label_plane,
+                    &mut projections,
                     dynamic_vertex_array,
                     anchor_point,
                     size.aspect_ratio(),

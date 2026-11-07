@@ -121,7 +121,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         _zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
-        _pos_matrix: &mln_util::mat4::Mat4,
+        _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties);
@@ -143,12 +143,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
+        state: &TransformState,
         _update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
         _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        self.update_projection_variant(state);
         // TODO(port): stats.renderedFeatures.clear() (rendered-feature capture).
 
         let render_tiles = match self.base.render_tiles.clone() {
@@ -333,7 +334,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 );
             }
 
-            let Some(shader) = shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos") else {
+            let Some(shader) = shader_group.get_or_create_shader(
+                context,
+                &properties_as_uniforms,
+                self.base.projection_variant,
+                "a_pos",
+            ) else {
                 continue;
             };
 

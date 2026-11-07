@@ -35,3 +35,22 @@ pub struct GlobalPaintParamsUBO {
     /* 48 */
 }
 const _: () = assert!(std::mem::size_of::<GlobalPaintParamsUBO>() == 3 * 16);
+
+/// `struct alignas(16) ProjectionUBO` (176 bytes): the per-drawable
+/// projection block (see `ProjectionData`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
+#[repr(C, align(16))]
+pub struct ProjectionUBO {
+    /*   0 */ pub matrix: [f32; 4 * 4],
+    /*  64 */ pub fallback_matrix: [f32; 4 * 4],
+    /* 128 */ pub tile_mercator_coords: [f32; 4],
+    /* 144 */ pub clipping_plane: [f32; 4],
+    /* 160 */ pub projection_transition: f32,
+    /* 164 */ pub depth_offset: f32,
+    /// Tile-unit translation the sphere path adds; the fallback matrix
+    /// carries its own.
+    /* 168 */
+    pub translate: [f32; 2],
+    /* 176 */
+}
+const _: () = assert!(std::mem::size_of::<ProjectionUBO>() == 11 * 16);

@@ -14,7 +14,7 @@ use mln_expression::format_expression::{FormatExpression, FormatExpressionSectio
 use mln_expression::formatted::Formatted;
 use mln_expression::image_expression::ImageExpression;
 use mln_expression::match_::{Match, MatchLabel};
-use mln_style_types::VariableAnchorOffsetCollection;
+use mln_style_types::{ProjectionDefinition, VariableAnchorOffsetCollection};
 use mln_util::{Color, ColorSpace, Padding};
 
 use super::{Converter, Convertible, Error, convert};
@@ -148,6 +148,7 @@ fn interpolatable(type_: &Type) -> bool {
         Type::Number => true,
         Type::Color => true,
         Type::Padding => true,
+        Type::ProjectionDefinition => true,
         Type::VariableAnchorOffsetCollection => true,
         Type::Array(array) => {
             // Arrays are interpolatable if they have a fixed size and item type is Number,
@@ -205,6 +206,10 @@ fn convert_literal(
         Type::Padding => {
             let result = convert::<Padding>(value, error)?;
             Some(dsl::literal(Value::Padding(result)))
+        }
+        Type::ProjectionDefinition => {
+            let result = convert::<ProjectionDefinition>(value, error)?;
+            Some(dsl::literal(Value::ProjectionDefinition(result)))
         }
         Type::VariableAnchorOffsetCollection => {
             let result = convert::<VariableAnchorOffsetCollection>(value, error)?;
@@ -767,6 +772,7 @@ pub fn convert_function_to_expression_for_type(
             Type::Boolean => Some(dsl::boolean(get(), default_expr(err))),
             Type::Color => Some(dsl::to_color(get(), default_expr(err))),
             Type::Padding => Some(dsl::to_padding(get(), default_expr(err))),
+            Type::ProjectionDefinition => Some(dsl::to_projection_definition(get(), default_expr(err))),
             Type::VariableAnchorOffsetCollection => Some(dsl::to_variable_anchor_offset(get(), default_expr(err))),
             Type::Array(_) => Some(dsl::assertion(type_.clone(), get(), default_expr(err))),
             Type::Formatted => Some(dsl::to_formatted(get(), default_expr(err))),

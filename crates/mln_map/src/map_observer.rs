@@ -4,6 +4,8 @@
 // `Rc<dyn MapObserver>`); implementations use `Cell`/`RefCell` for state.
 
 use mln_renderer::ExceptionPtr;
+use mln_renderer::tile::tile::TileOperation;
+use mln_tile_id::OverscaledTileID;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapLoadError {
@@ -38,7 +40,7 @@ pub struct RenderFrameStatus {
 
 /// `MapObserver`. All methods have the C++ default (empty) bodies.
 // TODO(port): onSourceChanged(style::Source&), onRegisterShaders, shader
-// compile callbacks, glyph/tile/sprite request callbacks.
+// compile callbacks, glyph/sprite request callbacks.
 pub trait MapObserver {
     fn on_camera_will_change(&self, _mode: CameraChangeMode) {}
     fn on_camera_is_changing(&self) {}
@@ -58,6 +60,7 @@ pub trait MapObserver {
     fn on_can_remove_unused_style_image(&self, _id: &str) -> bool {
         true
     }
+    fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
     fn on_render_error(&self, _error: ExceptionPtr) {}
     /// Called with a description of a corrupted symbol detected by the
     /// symbol guard checks.

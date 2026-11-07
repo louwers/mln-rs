@@ -3,9 +3,11 @@
 // branches: the port's backend is WebGPU).
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use mln_gfx::{Drawable, LayerGroupBase, UniformBufferPtr};
+use mln_map_types::{MercatorProjection, ProjectionBase, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_properties::*;
 use mln_style::properties::Property;
@@ -17,9 +19,10 @@ use mln_util::mat4::{Mat4, matrix};
 use super::render_symbol_layer::{SymbolDrawableData, SymbolType};
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::buckets::symbol_bucket::SymbolBucket;
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layout::symbol_projection::{get_gl_coord_matrix, get_label_plane_matrix};
 use crate::paint_parameters::PaintParameters;
+use crate::render_tile::RenderTile;
 
 pub struct SymbolLayerTweaker {
     base: LayerTweakerBase,
@@ -107,6 +110,7 @@ impl LayerTweaker for SymbolLayerTweaker {
         let count = layer_group.get_drawable_count();
         let mut drawable_ubo_vector = vec![SymbolDrawableUBO::default(); count];
         let mut tile_props_ubo_vector = vec![SymbolTilePropsUBO::default(); count];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
 
         let cam_dist = state.get_camera_to_center_distance();
         let screen_space_prop = symbol_layer_properties.layer_impl().layout.get::<SymbolScreenSpace>();
@@ -115,6 +119,8 @@ impl LayerTweaker for SymbolLayerTweaker {
         } else {
             SymbolScreenSpace::default_value()
         };
+
+        let pitched_scale = state.get_projection().circle_radius_correction(state) as f32;
 
         let self_ptr: *const Self = self;
         let id = self.base.id.clone();
@@ -152,26 +158,23 @@ impl LayerTweaker for SymbolLayerTweaker {
 
             // from RenderTile::translatedMatrix
             let translate = if is_text { evaluated.get::<TextTranslate>() } else { evaluated.get::<IconTranslate>() };
-            let matrix: Mat4 = if is_screen_space {
-                let mut m: Mat4 = [0.0; 16];
-                matrix::ortho(&mut m, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
-                let a = m;
-                matrix::translate(&mut m, &a, 0.0, -f64::from(EXTENT), 0.0);
-                let a = m;
-                matrix::translate(&mut m, &a, f64::from(translate[0]), f64::from(translate[1]), 0.0);
-                m
+            let anchor =
+                if is_text { *evaluated.get::<TextTranslateAnchor>() } else { *evaluated.get::<IconTranslateAnchor>() };
+            let mut projection: ProjectionData = if is_screen_space {
+                let mut screen_matrix: Mat4 = [0.0; 16];
+                matrix::ortho(&mut screen_matrix, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
+                let a = screen_matrix;
+                matrix::translate(&mut screen_matrix, &a, 0.0, -f64::from(EXTENT), 0.0);
+                let a = screen_matrix;
+                matrix::translate(&mut screen_matrix, &a, f64::from(translate[0]), f64::from(translate[1]), 0.0);
+                MercatorProjection.get_projection_data(state, &tile_id, &screen_matrix)
             } else {
                 const NEAR_CLIPPED: bool = false;
                 const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-                let anchor = if is_text {
-                    *evaluated.get::<TextTranslateAnchor>()
-                } else {
-                    *evaluated.get::<IconTranslateAnchor>()
-                };
-                get_tile_matrix(
+                get_projection_data(
                     &tile_id,
                     parameters,
-                    translate,
+                    &[0.0, 0.0],
                     anchor,
                     NEAR_CLIPPED,
                     IN_VIEWPORT_PIXEL_UNITS,
@@ -179,6 +182,18 @@ impl LayerTweaker for SymbolLayerTweaker {
                     false,
                 )
             };
+            // The translation stays out of the matrices on every projection:
+            // the shader adds it to point anchors, and placement to the
+            // positions it lays out (variable anchors, line labels), so it
+            // applies once.
+            let tile_translation: [f32; 2] = if is_screen_space {
+                [0.0, 0.0]
+            } else {
+                RenderTile::tile_unit_translation(&tile_id, translate, anchor, state)
+            };
+            projection.translate = [0.0, 0.0];
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             // from symbol_program, makeValues
             let current_zoom = state.get_zoom() as f32;
@@ -194,10 +209,9 @@ impl LayerTweaker for SymbolLayerTweaker {
                 matrix::identity(&mut m);
                 m
             } else {
-                get_label_plane_matrix(&matrix, pitch_with_map, rotate_with_map, state, pixels_to_tile_units)
+                get_label_plane_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units)
             };
-            let gl_coord_matrix =
-                get_gl_coord_matrix(&matrix, pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
+            let gl_coord_matrix = get_gl_coord_matrix(pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
             let gamma_scale = if symbol_data.pitch_alignment == AlignmentType::Map {
                 (state.get_pitch().cos() as f32) * cam_dist
             } else {
@@ -253,9 +267,12 @@ impl LayerTweaker for SymbolLayerTweaker {
                 opacity_t,
                 halo_width_t,
                 halo_blur_t,
+                is_along_line: along_line as i32,
+                is_variable_anchor: has_variable_placement as i32,
+                pitched_scale,
+                translation: tile_translation,
                 pad1: 0.0,
                 pad2: 0.0,
-                pad3: 0.0,
             };
             tile_props_ubo_vector[i as usize] = SymbolTilePropsUBO {
                 is_text: is_text as i32,
@@ -281,5 +298,6 @@ impl LayerTweaker for SymbolLayerTweaker {
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_SYMBOL_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         layer_uniforms.set(ID_SYMBOL_TILE_PROPS_UBO, self.tile_props_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_uniforms, &projection_ubo_vector, context);
     }
 }

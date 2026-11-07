@@ -22,11 +22,13 @@ use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
 use crate::render_layer::RenderLayer;
+use crate::util::subdivision::subdivide_vertex_line;
 
 crate::paint_property_binders!(
     /// `LineBinders = PaintPropertyBinders<LinePaintProperties::DataDrivenProperties>`.
@@ -63,6 +65,7 @@ pub struct LineBucket {
     pub paint_property_binders: BTreeMap<String, RwLock<LineBinders>>,
     zoom: f32,
     overscaling: u32,
+    subdivision_granularity: SubdivisionGranularitySetting,
 }
 
 /// Scale the extrusion vector so that the normal length is this value.
@@ -97,7 +100,12 @@ impl LineBucket {
             paint_property_binders,
             zoom,
             overscaling,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
         }
+    }
+
+    pub fn set_subdivision_granularity(&mut self, value: &SubdivisionGranularitySetting) {
+        self.subdivision_granularity = *value;
     }
 
     /// `layoutVertex(p, e, round, up, dir, linesofar = 0)`.
@@ -146,14 +154,22 @@ impl LineBucket {
 
     fn add_geometry(
         &mut self,
-        coordinates: &GeometryCoordinates,
+        input_coordinates: &GeometryCoordinates,
         feature: &dyn GeometryTileFeature,
         canonical: &CanonicalTileID,
     ) {
         // Ignore empty coordinates.
-        if coordinates.is_empty() {
+        if input_coordinates.is_empty() {
             return;
         }
+        let granularity = self.subdivision_granularity.line.get_granularity_for_zoom_level(canonical.z);
+        let subdivided;
+        let coordinates = if granularity >= 2 {
+            subdivided = subdivide_vertex_line(input_coordinates, granularity, false);
+            &subdivided
+        } else {
+            input_coordinates
+        };
 
         let mut options = PolylineGeneratorOptions { type_: feature.get_type(), ..Default::default() };
         let len = {

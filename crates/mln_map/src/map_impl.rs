@@ -21,15 +21,19 @@ use std::sync::Arc;
 
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{CameraOptions, MapDebugOptions, MapMode, TileLodMode};
+use mln_renderer::tile::tile::TileOperation;
 use mln_renderer::{ExceptionPtr, RenderMode, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::FileSource;
 use mln_style::Style;
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
+use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Clock, TimePoint};
 use mln_util::exception::{NotFoundException, StyleLoadException, StyleParseException};
 use mln_util::identity::SimpleIdentity;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::map_observer::{CameraChangeMode, MapLoadError, MapObserver, RenderFrameStatus};
 use crate::map_options::MapOptions;
@@ -208,6 +212,13 @@ impl MapImpl {
             file_source,
         });
         map.transform.borrow_mut().set_north_orientation(map_options.north_orientation());
+        // C++ captures `this`; the map owns the transform, so a `Weak`.
+        let weak_map: Weak<MapImpl> = Rc::downgrade(&map);
+        map.transform.borrow_mut().set_projection_for_zoom(Some(Rc::new(move |zoom: f64| {
+            weak_map
+                .upgrade()
+                .map_or_else(|| ProjectionDefinition::new(ProjectionType::Mercator), |map| map.projection_at(zoom))
+        })));
         let style_observer: Rc<dyn StyleObserver> = Rc::new(MapStyleObserver { map: Rc::downgrade(&map) });
         map.style.borrow_mut().impl_.set_observer(Some(style_observer));
         let weak: Weak<MapImpl> = Rc::downgrade(&map);
@@ -283,6 +294,9 @@ impl MapImpl {
         let time_point = if self.mode == MapMode::Continuous { Clock::now() } else { TimePoint::max() };
 
         self.transform.borrow_mut().update_transitions(time_point);
+        let zoom = self.transform.borrow().get_zoom();
+        let projection = self.projection_at(zoom);
+        self.transform.borrow_mut().set_projection_definition(&projection);
 
         let params = {
             let style = self.style.borrow();
@@ -299,6 +313,7 @@ impl MapImpl {
                 sprite_loaded: style_impl.are_sprites_loaded(),
                 transition_options: style_impl.get_transition_options(),
                 light: style_impl.get_light_impl(),
+                sky: style_impl.get_sky_impl(),
                 images: style_impl.get_image_impls(),
                 sources: style_impl.get_source_impls(),
                 layers: style_impl.get_layer_impls(),
@@ -314,6 +329,11 @@ impl MapImpl {
                 tile_lod_pitch_threshold: self.tile_lod_pitch_threshold.get(),
                 tile_lod_zoom_shift: self.tile_lod_zoom_shift.get(),
                 tile_lod_mode: self.tile_lod_mode.get(),
+                subdivision_granularity: if self.mode == MapMode::Tile {
+                    SubdivisionGranularitySetting::none()
+                } else {
+                    style_impl.get_projection().impl_.get_subdivision_granularity()
+                },
             }
         };
 
@@ -360,8 +380,22 @@ impl MapImpl {
 
     pub fn jump_to(&self, camera: &CameraOptions) {
         self.camera_mutated.set(true);
+        // The style's projection decides how the camera is constrained, so it
+        // has to be in place first.
+        let zoom = camera.zoom.unwrap_or_else(|| self.transform.borrow().get_zoom());
+        let projection = self.projection_at(zoom);
+        self.transform.borrow_mut().set_projection_definition(&projection);
         self.transform.borrow_mut().jump_to(camera);
         self.on_update();
+    }
+
+    /// The style's projection at the zoom; always Mercator in tile mode,
+    /// whose tiles are Mercator tiles.
+    pub(crate) fn projection_at(&self, zoom: f64) -> ProjectionDefinition {
+        if self.mode == MapMode::Tile {
+            return ProjectionDefinition::new(ProjectionType::Mercator);
+        }
+        self.style.borrow().impl_.get_projection().impl_.evaluate(zoom as f32)
     }
 }
 
@@ -456,6 +490,12 @@ impl RendererObserver for MapImpl {
                 self.process_pending_style_events();
             }
         }
+    }
+
+    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
+        self.observer.on_tile_action(op, id, source_id);
+
+        // TODO(port): actionJournal->impl->onTileAction(op, id, sourceID).
     }
 
     fn on_render_error(&self, error: ExceptionPtr) {
