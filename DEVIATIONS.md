@@ -194,6 +194,16 @@ account for it.
   LineGradientShader, LinePatternShader, LineSDFShader,
   LineGradientSDFShader. The WGSL of all of them is extracted
   (tools/extract_wgsl.rs). Others arrive with their layers.
+- **[webgpu] Small uniform buffers are updated in place**
+  (uniform_buffer.cpp, gfx/uniform_buffer.cpp `createOrUpdate`). C++
+  `webgpu::UniformBuffer::getSize()` is the size padded to 256 bytes, which
+  `UniformBufferArray::createOrUpdate` compares to the data size, so every
+  update of a UBO whose size isn't a multiple of 256 (`GlobalPaintParamsUBO`,
+  most layer UBOs) creates a new GPU buffer. The port's `get_size` is the
+  data size, so those updates write the existing buffer, as for the other
+  UBOs. Bind groups still bind the whole padded buffer: some UBOs hold less
+  data than their shader struct. Same pixels: the render suite's results are
+  unchanged.
 - **[expression] nunicode `b4_utf8` writes invalid UTF-8**
   (vendor/nunicode/include/libnu/utf8_internal.h). For 4-byte codepoints with
   bit 12 set, the C puts that bit into the third byte (mask `0x001F00`

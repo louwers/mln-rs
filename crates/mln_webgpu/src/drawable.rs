@@ -457,8 +457,11 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        resources
-                            .push((binding_info.binding, EntryResource::Buffer(gpu_buffer, buffer.get_size() as u64)));
+                        // The whole (256-byte aligned) buffer, as C++ binds
+                        // `getSize()`: some UBOs hold less data than their
+                        // shader struct.
+                        let size = gpu_buffer.size();
+                        resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, size)));
                     }
                     BindingType::Sampler => {
                         let Some(texture) = find_texture_for_binding(binding_info.binding, true) else {
