@@ -170,7 +170,8 @@ impl HeadlessFrontend {
     }
 
     /// `latLngForPixel(point)`.
-    pub fn lat_lng_for_pixel(&self, point: &mln_util::geo::ScreenCoordinate) -> mln_util::geo::LatLng {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor.
+    pub fn lat_lng_for_pixel(&self, point: &mln_util::geo::ScreenCoordinate) -> Result<mln_util::geo::LatLng, String> {
         match self.shared.update_parameters.borrow().as_ref() {
             Some(parameters) => {
                 let state = &parameters.transform_state;
@@ -178,7 +179,7 @@ impl HeadlessFrontend {
                 flipped_point.y = f64::from(state.get_size().height) - flipped_point.y;
                 state.screen_coordinate_to_lat_lng(&flipped_point, mln_util::geo::WrapMode::Wrapped)
             }
-            None => mln_util::geo::LatLng::default(),
+            None => Ok(mln_util::geo::LatLng::default()),
         }
     }
 

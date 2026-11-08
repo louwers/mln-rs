@@ -46,12 +46,6 @@ fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
     LatLng::with_mode(lat, lon, mode).unwrap_or_else(|e| panic!("{e}"))
 }
 
-/// `Projection::unproject`, which constructs a LatLng and so can throw
-/// std::domain_error; nothing catches it on these paths.
-fn unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> LatLng {
-    Projection::unproject(p, scale, wrap_mode).unwrap_or_else(|e| panic!("{e}"))
-}
-
 fn lat_lng_from_mercator(mercator_coordinate: Point<f64>, wrap_mode: WrapMode) -> LatLng {
     lat_lng(
         mln_math::rad2deg(2.0 * (PI - mercator_coordinate.y * 2.0 * PI).exp().atan() - (PI / 2.0)),
@@ -1165,9 +1159,15 @@ impl TransformState {
     }
 
     /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Unwrapped)`.
-    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> LatLng {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
+    /// infinite point).
+    pub fn screen_coordinate_to_lat_lng(
+        &self,
+        point: &ScreenCoordinate,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, String> {
         let coord = self.screen_coordinate_to_tile_coordinate(point, 0);
-        unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
+        Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
     }
 
     fn coordinate_point_matrix(&self, proj_matrix: &Mat4) -> Mat4 {
@@ -1259,19 +1259,23 @@ impl TransformState {
         // center and zoom is outside the bounds or not.
         if let Some(mut anchor) = requested_camera.anchor {
             anchor.y = self.get_size().height as f64 - anchor.y;
-            let anchor_lat_lng = self.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped);
-
             // The screenCoordinateToLatLng function requires the matrices
             // inside the state to reflect the requested scale. So we create a
             // copy and set the requested zoom before the conversion. This will
             // give us the same result as the transition calculations.
             let mut state = self.clone();
             state.set_lat_lng_zoom(&self.get_lat_lng(WrapMode::Unwrapped), self.scale_zoom(requested_scale));
-            let screen_lat_lng = state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped);
-
-            let lat_lng_coord = Projection::project(&anchor_lat_lng, requested_scale);
-            let anchor_coord = Projection::project(&screen_lat_lng, requested_scale);
-            anchor_offset = Point::new(lat_lng_coord.x - anchor_coord.x, lat_lng_coord.y - anchor_coord.y);
+            // C++ throws std::domain_error out of the camera change for an
+            // anchor that has no LatLng; the port ignores the anchor, as
+            // Transform::startTransition does.
+            if let (Ok(anchor_lat_lng), Ok(screen_lat_lng)) = (
+                self.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
+                state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped),
+            ) {
+                let lat_lng_coord = Projection::project(&anchor_lat_lng, requested_scale);
+                let anchor_coord = Projection::project(&screen_lat_lng, requested_scale);
+                anchor_offset = Point::new(lat_lng_coord.x - anchor_coord.x, lat_lng_coord.y - anchor_coord.y);
+            }
         }
 
         let current_bounds = self.get_lat_lng_bounds();
@@ -1366,8 +1370,9 @@ impl TransformState {
         if result_x != start_x || result_y != start_y {
             // If we made changes just drop any anchor point
             requested_camera.anchor = None;
+            // The clamped point is inside the bounds, so it has a LatLng.
             requested_camera.center =
-                Some(unproject(&Point::new(result_x, result_y), requested_scale, WrapMode::Unwrapped));
+                Projection::unproject(&Point::new(result_x, result_y), requested_scale, WrapMode::Unwrapped).ok();
         }
     }
 
@@ -1382,24 +1387,27 @@ impl TransformState {
 
     /// Recenter the map so that the given coordinate is located at the given
     /// point on screen.
-    pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
+    /// infinite anchor).
+    pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), String> {
         let center_coord = Projection::project(&self.get_lat_lng(WrapMode::Unwrapped), self.scale);
         let lat_lng_coord = Projection::project(lat_lng, self.scale);
         let anchor_coord =
-            Projection::project(&self.screen_coordinate_to_lat_lng(anchor, WrapMode::Unwrapped), self.scale);
-        let center = unproject(
+            Projection::project(&self.screen_coordinate_to_lat_lng(anchor, WrapMode::Unwrapped)?, self.scale);
+        let center = Projection::unproject(
             &Point::new(
                 center_coord.x + lat_lng_coord.x - anchor_coord.x,
                 center_coord.y + lat_lng_coord.y - anchor_coord.y,
             ),
             self.scale,
             WrapMode::Unwrapped,
-        );
+        )?;
         // Wrapped, as easeTo and GL JS's setLocationAtPoint leave it, unless
         // bounds keep it in their range.
         let target = if self.bounds == LatLngBounds::default() { center.wrapped() } else { center };
         let zoom = self.get_zoom();
         self.set_lat_lng_zoom(&target, zoom);
+        Ok(())
     }
 
     pub fn set_lat_lng_zoom(&mut self, lat_lng: &LatLng, zoom: f64) {
@@ -1455,11 +1463,15 @@ impl TransformState {
         if self.size.is_empty() {
             return 0.0;
         }
-        // C++ builds the point from `static_cast<float>(height)`.
-        let lat_lng = self.screen_coordinate_to_lat_lng(
+        // C++ builds the point from `static_cast<float>(height)`. A point on
+        // the screen has a LatLng unless the state holds NaN, where C++
+        // throws; the port renders without the pitch factor.
+        let Ok(lat_lng) = self.screen_coordinate_to_lat_lng(
             &ScreenCoordinate::new(0.0, self.get_size().height as f32 as f64),
             WrapMode::Unwrapped,
-        );
+        ) else {
+            return 0.0;
+        };
 
         let pt = Projection::project(&lat_lng, self.scale);
         let p: Vec4 = [pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D, 0.0, 1.0];

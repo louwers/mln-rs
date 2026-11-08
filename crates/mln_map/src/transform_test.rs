@@ -248,11 +248,11 @@ fn perspective_projection() {
     assert_double_eq(-77.0, loc.longitude());
     assert_double_eq(38.0, loc.latitude());
 
-    let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(0.0, 1000.0), WrapMode::Unwrapped);
+    let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(0.0, 1000.0), WrapMode::Unwrapped).unwrap();
     assert_near(-77.59198961199148, loc.longitude(), 1e-6);
     assert_near(38.74661326302018, loc.latitude(), 1e-6);
 
-    let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(1000.0, 0.0), WrapMode::Unwrapped);
+    let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(1000.0, 0.0), WrapMode::Unwrapped).unwrap();
     assert_near(-76.75823239205641, loc.longitude(), 1e-6);
     assert_near(37.692872969426375, loc.latitude(), 1e-6);
 
@@ -292,19 +292,21 @@ fn unwrapped_lat_lng() {
     assert_double_eq(from_get_lat_lng.latitude(), 38.0);
     assert_double_eq(from_get_lat_lng.longitude(), -77.0);
 
-    let from_screen_coordinate = state.screen_coordinate_to_lat_lng(&sc(500.0, 500.0), WrapMode::Unwrapped);
+    let from_screen_coordinate = state.screen_coordinate_to_lat_lng(&sc(500.0, 500.0), WrapMode::Unwrapped).unwrap();
     assert_near(from_screen_coordinate.latitude(), 38.0, 1e-8);
     assert_near(from_screen_coordinate.longitude(), -77.0, 1e-8);
 
-    let mut wrapped_rightwards =
-        state.screen_coordinate_to_lat_lng(&state.lat_lng_to_screen_coordinate(&ll(38.0, 283.0)), WrapMode::Unwrapped);
+    let mut wrapped_rightwards = state
+        .screen_coordinate_to_lat_lng(&state.lat_lng_to_screen_coordinate(&ll(38.0, 283.0)), WrapMode::Unwrapped)
+        .unwrap();
     assert_near(wrapped_rightwards.latitude(), 38.0, 1e-8);
     assert_near(wrapped_rightwards.longitude(), 283.0, 1e-8);
     wrapped_rightwards.wrap();
     assert_near(wrapped_rightwards.longitude(), -77.0, 1e-8);
 
-    let mut wrapped_leftwards =
-        state.screen_coordinate_to_lat_lng(&state.lat_lng_to_screen_coordinate(&ll(38.0, -437.0)), WrapMode::Unwrapped);
+    let mut wrapped_leftwards = state
+        .screen_coordinate_to_lat_lng(&state.lat_lng_to_screen_coordinate(&ll(38.0, -437.0)), WrapMode::Unwrapped)
+        .unwrap();
     assert_double_eq(wrapped_leftwards.latitude(), wrapped_rightwards.latitude());
     assert_near(wrapped_leftwards.longitude(), -437.0, 1e-8);
     wrapped_leftwards.wrap();
@@ -358,7 +360,8 @@ fn anchor() {
     assert_double_eq(10.0, transform.get_zoom());
     assert_double_eq(0.0, transform.get_bearing());
 
-    let anchor_lat_lng = transform.get_state().screen_coordinate_to_lat_lng(&anchor_point, WrapMode::Unwrapped);
+    let anchor_lat_lng =
+        transform.get_state().screen_coordinate_to_lat_lng(&anchor_point, WrapMode::Unwrapped).unwrap();
     assert_ne!(lat_lng.latitude(), anchor_lat_lng.latitude());
     assert_ne!(lat_lng.longitude(), anchor_lat_lng.longitude());
 
@@ -458,8 +461,10 @@ fn padding() {
     assert_double_eq(-100.0, true_center.longitude());
     assert_double_eq(10.0, transform.get_zoom());
 
-    let screen_center = transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 / 2.0), WrapMode::Wrapped);
-    let upper_half_center = transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 * 0.25), WrapMode::Wrapped);
+    let screen_center =
+        transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 / 2.0), WrapMode::Wrapped).unwrap();
+    let upper_half_center =
+        transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 * 0.25), WrapMode::Wrapped).unwrap();
 
     let padding = insets(1000.0 / 2.0, 0.0, 0.0, 0.0);
     // CameraOption center and zoom don't change when padding changes: center of
@@ -473,13 +478,13 @@ fn padding() {
     // However, LatLng is now at the center of lower half - verify conversion
     // from screen coordinate to LatLng.
     let padded_lower_half_screen_center =
-        transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 * 0.75), WrapMode::Wrapped);
+        transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 * 0.75), WrapMode::Wrapped).unwrap();
     assert_near(screen_center.latitude(), padded_lower_half_screen_center.latitude(), 1e-10);
     assert_near(screen_center.longitude(), padded_lower_half_screen_center.longitude(), 1e-10);
 
     // LatLng previously in upper half center, should now be under screen center.
     let padded_screen_center =
-        transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 / 2.0), WrapMode::Wrapped);
+        transform.screen_coordinate_to_lat_lng(&sc(1000.0 / 2.0, 1000.0 / 2.0), WrapMode::Wrapped).unwrap();
     assert_near(upper_half_center.latitude(), padded_screen_center.latitude(), 1e-10);
     assert_near(upper_half_center.longitude(), padded_screen_center.longitude(), 1e-10);
 }
@@ -501,14 +506,18 @@ fn move_by() {
         let odd = x % 2 != 0;
         let forward = x % 10 != 0;
 
-        let coordinate = transform.screen_coordinate_to_lat_lng(
-            &sc(if odd { 400.0 } else { 600.0 }, if forward { 400.0 } else { 600.0 }),
-            WrapMode::Wrapped,
-        );
-        transform.move_by(
-            &sc(if odd { 100.0 } else { -100.0 }, if forward { 100.0 } else { -100.0 }),
-            &AnimationOptions::default(),
-        );
+        let coordinate = transform
+            .screen_coordinate_to_lat_lng(
+                &sc(if odd { 400.0 } else { 600.0 }, if forward { 400.0 } else { 600.0 }),
+                WrapMode::Wrapped,
+            )
+            .unwrap();
+        transform
+            .move_by(
+                &sc(if odd { 100.0 } else { -100.0 }, if forward { 100.0 } else { -100.0 }),
+                &AnimationOptions::default(),
+            )
+            .unwrap();
 
         true_center = transform.get_lat_lng(WrapMode::Wrapped);
         assert_near(coordinate.latitude(), true_center.latitude(), 1e-8);
@@ -532,14 +541,14 @@ fn move_by_pitched_does_not_cross_horizon() {
 
     // Panning "up" the screen on a north-up pitched map moves the center north.
     transform.jump_to(&start);
-    transform.move_by(&sc(0.0, 300.0), &AnimationOptions::default());
+    transform.move_by(&sc(0.0, 300.0), &AnimationOptions::default()).unwrap();
     let moderate_lat = transform.get_lat_lng(WrapMode::Wrapped).latitude();
 
     // A fling-sized offset toward the horizon must keep moving the center the same
     // way (north) -- before the fix it reversed south and stay bounded (clamped
     // short of the horizon).
     transform.jump_to(&start);
-    transform.move_by(&sc(0.0, 100000.0), &AnimationOptions::default());
+    transform.move_by(&sc(0.0, 100000.0), &AnimationOptions::default()).unwrap();
     let fling_lat = transform.get_lat_lng(WrapMode::Wrapped).latitude();
 
     assert!(moderate_lat > 0.0, "{moderate_lat}"); // moved north
@@ -597,7 +606,8 @@ fn antimeridian() {
     assert_double_eq(437.95925272648344, pixel_waikiri_shortest.x);
     assert_double_eq(pixel_waikiri.y, pixel_waikiri_shortest.y);
 
-    let coordinate_from_pixel = transform.screen_coordinate_to_lat_lng(&pixel_waikiri_longest, WrapMode::Wrapped);
+    let coordinate_from_pixel =
+        transform.screen_coordinate_to_lat_lng(&pixel_waikiri_longest, WrapMode::Wrapped).unwrap();
     assert_near(coordinate_waikiri.latitude(), coordinate_from_pixel.latitude(), 1e-4);
     assert_near(coordinate_waikiri.longitude(), coordinate_from_pixel.longitude(), 1e-4);
 
@@ -606,7 +616,8 @@ fn antimeridian() {
     assert_double_eq(pixel_waikiri_longest.x, pixel_waikiri_shortest.x);
     assert_double_eq(pixel_waikiri_longest.y, pixel_waikiri_shortest.y);
 
-    let coordinate_from_pixel = transform.screen_coordinate_to_lat_lng(&pixel_waikiri_shortest, WrapMode::Wrapped);
+    let coordinate_from_pixel =
+        transform.screen_coordinate_to_lat_lng(&pixel_waikiri_shortest, WrapMode::Wrapped).unwrap();
     assert_near(coordinate_waikiri.latitude(), coordinate_from_pixel.latitude(), 1e-4);
     assert_near(coordinate_waikiri.longitude(), coordinate_from_pixel.longitude(), 1e-4);
 }
@@ -829,7 +840,7 @@ fn default_transform() {
     }
 
     let center = sc(max as f64 / 2.0, max as f64 / 2.0);
-    let lat_lng = transform.get_state().screen_coordinate_to_lat_lng(&center, WrapMode::Unwrapped);
+    let lat_lng = transform.get_state().screen_coordinate_to_lat_lng(&center, WrapMode::Unwrapped).unwrap();
     assert_near(lat_lng.latitude(), null_island.latitude(), 1e-8);
     assert_near(lat_lng.longitude(), null_island.longitude(), 1e-8);
 
@@ -977,7 +988,7 @@ fn lat_lng_bounds() {
             assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), longitude, 1e-4);
         }
     };
-    transform.move_by(&sc(-500.0, -500.0), &ease_options);
+    transform.move_by(&sc(-500.0, -500.0), &ease_options).unwrap();
     check_swipe(&transform, 120.0);
 
     transform.update_transitions(transform.get_transition_start() + milliseconds(0));
@@ -996,7 +1007,7 @@ fn lat_lng_bounds() {
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), -120.0);
 
     // Simulate swipe to the right.
-    transform.move_by(&sc(500.0, 500.0), &ease_options);
+    transform.move_by(&sc(500.0, 500.0), &ease_options).unwrap();
     check_swipe(&transform, -120.0);
 
     transform.update_transitions(transform.get_transition_start() + milliseconds(0));
@@ -1047,14 +1058,14 @@ fn lat_lng_bounds() {
     transform.jump_to(&cam().with_center(Some(ll(inside.latitude(), -119.0))));
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), -120.0);
 
-    transform.move_by(&sc(-500.0, 0.0), &AnimationOptions::default());
+    transform.move_by(&sc(-500.0, 0.0), &AnimationOptions::default()).unwrap();
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), -120.0);
 
     // Constrain to the right edge.
     transform.jump_to(&cam().with_center(Some(ll(inside.latitude(), -241.0))));
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 120.0);
 
-    transform.move_by(&sc(500.0, 0.0), &AnimationOptions::default());
+    transform.move_by(&sc(500.0, 0.0), &AnimationOptions::default()).unwrap();
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 120.0);
 }
 
@@ -1529,4 +1540,22 @@ fn padding_interpolated_to_nan_keeps_the_insets() {
         false,
     );
     assert_eq!(transform.get_state().get_edge_insets(), infinite);
+}
+
+// Port-only: a screen coordinate without a LatLng is the C++ LatLng
+// constructor's std::domain_error, returned instead of thrown.
+#[test]
+fn nan_screen_coordinates_are_errors() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    let nan = sc(f64::NAN, 500.0);
+    let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
+    assert!(error.ends_with("must not be NaN"), "{error}");
+    let center = transform.get_lat_lng(WrapMode::Wrapped);
+    assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
+    assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
+    // An anchor without a LatLng is ignored (C++ throws).
+    transform.jump_to(&CameraOptions { anchor: Some(nan), zoom: Some(2.0), ..cam() });
+    assert_eq!(transform.get_zoom(), 2.0);
+    assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
 }

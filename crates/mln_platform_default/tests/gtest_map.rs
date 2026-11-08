@@ -130,7 +130,7 @@ fn renderer_state() {
     assert_near(options.bearing.unwrap(), bearing_in_degrees, 1e-7);
 
     {
-        let lat_lng = test.frontend.lat_lng_for_pixel(&ScreenCoordinate::new(0.0, 0.0));
+        let lat_lng = test.frontend.lat_lng_for_pixel(&ScreenCoordinate::new(0.0, 0.0)).unwrap();
         let point = test.frontend.pixel_for_lat_lng(&coordinate);
         assert_near(coordinate.latitude(), lat_lng.latitude(), 1e-1);
         assert_near(coordinate.longitude(), lat_lng.longitude(), 1e-1);
@@ -206,7 +206,7 @@ fn new_york_test() -> (MapTest, LatLngBounds) {
 fn lat_lng_bounds_to_camera() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None);
+    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 1.55467, 1e-5);
 }
@@ -216,7 +216,8 @@ fn lat_lng_bounds_to_camera() {
 fn lat_lng_bounds_to_camera_with_excessive_padding() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &insets(500.0, 0.0, 1200.0, 0.0), None, None);
+    let virtual_camera =
+        test.map().camera_for_lat_lng_bounds(&bounds, &insets(500.0, 0.0, 1200.0, 0.0), None, None).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 16.0, 1e-5);
 }
@@ -226,7 +227,8 @@ fn lat_lng_bounds_to_camera_with_excessive_padding() {
 fn lat_lng_bounds_to_camera_with_bearing() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), None);
+    let virtual_camera =
+        test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), None).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 1.21385, 1e-5);
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 35.0, 1e-5);
@@ -237,14 +239,16 @@ fn lat_lng_bounds_to_camera_with_bearing() {
 fn lat_lng_bounds_to_camera_with_bearing_pitch_and_padding() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), Some(20.0));
+    let virtual_camera =
+        test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), Some(20.0)).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 13.66272, 1e-5);
     assert_double_eq(virtual_camera.pitch.unwrap(), 20.0);
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 35.0, 1e-5);
 
     let padding = insets(10.0, 20.0, 30.0, 40.0);
-    let virtual_camera_padded = test.map().camera_for_lat_lng_bounds(&bounds, &padding, Some(35.0), Some(20.0));
+    let virtual_camera_padded =
+        test.map().camera_for_lat_lng_bounds(&bounds, &padding, Some(35.0), Some(20.0)).unwrap();
     assert!(bounds.contains(&virtual_camera_padded.center.unwrap()));
     assert_double_eq(virtual_camera_padded.center.unwrap().latitude(), virtual_camera.center.unwrap().latitude());
     assert_double_eq(virtual_camera_padded.center.unwrap().longitude(), virtual_camera.center.unwrap().longitude());
@@ -270,7 +274,7 @@ fn lat_lngs() -> Vec<LatLng> {
 fn lat_lngs_to_camera() {
     let test = MapTest::new();
 
-    let virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), None);
+    let virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), None).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 2.75434, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.49288, 1e-5);
@@ -282,7 +286,8 @@ fn lat_lngs_to_camera() {
 fn lat_lngs_to_camera_with_bearing_and_pitch() {
     let test = MapTest::new();
 
-    let virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0));
+    let virtual_camera =
+        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 3.04378, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.53718, 1e-5);
@@ -297,7 +302,7 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
 
     test.map().set_bounds(&BoundOptions::default().with_min_pitch(0.0).with_max_pitch(0.0)).unwrap();
     let mut virtual_camera =
-        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(45.0));
+        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(45.0)).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 2.75434, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.49288, 1e-5);
@@ -307,7 +312,8 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
     assert_double_eq(test.map().get_bounds().max_pitch.unwrap(), 0.0);
 
     test.map().set_bounds(&BoundOptions::default().with_min_pitch(20.0).with_max_pitch(60.0)).unwrap();
-    virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(0.0));
+    virtual_camera =
+        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(0.0)).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 3.04378, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.53718, 1e-5);
@@ -328,20 +334,21 @@ fn camera_to_lat_lng_bounds() {
     let bounds = {
         let map = test.map();
         LatLngBounds::hull(
-            map.lat_lng_for_pixel(&ScreenCoordinate::default(), WrapMode::Wrapped),
+            map.lat_lng_for_pixel(&ScreenCoordinate::default(), WrapMode::Wrapped).unwrap(),
             map.lat_lng_for_pixel(
                 &ScreenCoordinate::new(f64::from(size.width), f64::from(size.height)),
                 WrapMode::Wrapped,
-            ),
+            )
+            .unwrap(),
         )
     };
 
     let camera = test.map().get_camera_options(None);
 
-    assert_eq!(bounds, test.map().lat_lng_bounds_for_camera(&camera));
+    assert_eq!(bounds, test.map().lat_lng_bounds_for_camera(&camera).unwrap());
 
     // Map::cameraForLatLngBounds only sets zoom and center.
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None);
+    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None).unwrap();
     assert_near(camera.zoom.unwrap(), virtual_camera.zoom.unwrap(), 1e-7);
     assert_near(camera.center.unwrap().latitude(), virtual_camera.center.unwrap().latitude(), 1e-7);
     assert_near(camera.center.unwrap().longitude(), virtual_camera.center.unwrap().longitude(), 1e-7);
@@ -373,7 +380,8 @@ fn camera_to_lat_lng_bounds_unwrapped_with_rotation() {
     for point in corners_and_center(size) {
         assert!(
             map.lat_lng_bounds_for_camera_unwrapped(&camera)
-                .contains(&map.lat_lng_for_pixel(&point, WrapMode::Wrapped)),
+                .unwrap()
+                .contains(&map.lat_lng_for_pixel(&point, WrapMode::Wrapped).unwrap()),
             "{point:?}"
         );
     }
@@ -395,16 +403,18 @@ fn camera_to_lat_lng_bounds_unwrapped_cross_date_line() {
     for point in &points[..4] {
         assert!(
             map.lat_lng_bounds_for_camera_unwrapped(&camera)
-                .contains_with_mode(&map.lat_lng_for_pixel(point, WrapMode::Wrapped), WrapMode::Wrapped),
+                .unwrap()
+                .contains_with_mode(&map.lat_lng_for_pixel(point, WrapMode::Wrapped).unwrap(), WrapMode::Wrapped),
             "{point:?}"
         );
     }
     assert!(
         map.lat_lng_bounds_for_camera_unwrapped(&camera)
-            .contains(&map.lat_lng_for_pixel(&points[4], WrapMode::Wrapped))
+            .unwrap()
+            .contains(&map.lat_lng_for_pixel(&points[4], WrapMode::Wrapped).unwrap())
     );
 
-    assert!(map.lat_lng_bounds_for_camera_unwrapped(&camera).crosses_antimeridian());
+    assert!(map.lat_lng_bounds_for_camera_unwrapped(&camera).unwrap().crosses_antimeridian());
 }
 
 // gtest: Map.LatLngForPixelUnwrapped
@@ -417,30 +427,33 @@ fn lat_lng_for_pixel_unwrapped() {
     let right_pixel = ScreenCoordinate::new(2048.0, 256.0);
 
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
-    let left = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped);
-    let right = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped);
+    let left = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped).unwrap();
+    let right = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).unwrap();
     assert_near(-720.0, left.longitude(), 1e-4);
     assert_near(720.0, right.longitude(), 1e-4);
-    assert_near(0.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).longitude(), 1e-4);
-    assert_near(0.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).longitude(), 1e-4);
+    assert_near(0.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
+    assert_near(0.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
 
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 180.0))).with_zoom(Some(4.0)));
-    let west = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped);
-    let east = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped);
+    let west = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped).unwrap();
+    let east = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).unwrap();
     assert_near(-225.0, west.longitude(), 1e-4);
     assert_near(-135.0, east.longitude(), 1e-4);
-    assert_near(135.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).longitude(), 1e-4);
-    assert_near(-135.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).longitude(), 1e-4);
+    assert_near(135.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
+    assert_near(-135.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
     assert_near(90.0, east.longitude() - west.longitude(), 1e-4);
 
-    let both = test.map().lat_lngs_for_pixels(&[left_pixel, right_pixel], WrapMode::Unwrapped);
+    let both = test.map().lat_lngs_for_pixels(&[left_pixel, right_pixel], WrapMode::Unwrapped).unwrap();
     assert_eq!(2, both.len());
     assert_double_eq(west.longitude(), both[0].longitude());
     assert_double_eq(east.longitude(), both[1].longitude());
 
     let projection = MapProjection::new(&test.map());
-    assert_double_eq(east.longitude(), projection.lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).longitude());
-    assert_near(-135.0, projection.lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).longitude(), 1e-4);
+    assert_double_eq(
+        east.longitude(),
+        projection.lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).unwrap().longitude(),
+    );
+    assert_near(-135.0, projection.lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
 }
 
 // A zoom around a point keeps the place under it. Across the antimeridian the
@@ -454,7 +467,7 @@ fn pixel_for_lat_lng_after_zoom_around_a_point_across_the_antimeridian() {
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.9))).with_zoom(Some(5.0)));
 
     let anchor = ScreenCoordinate::new(230.0, 128.0);
-    let place = test.map().lat_lng_for_pixel(&anchor, WrapMode::Wrapped);
+    let place = test.map().lat_lng_for_pixel(&anchor, WrapMode::Wrapped).unwrap();
     test.map().jump_to(&cam().with_zoom(Some(6.0)).with_anchor(Some(anchor)));
 
     assert!(test.map().get_camera_options(None).center.unwrap().longitude().abs() <= 180.0);
@@ -2028,7 +2041,7 @@ fn line_layer_depth_distribution() {
     let colors = [Color::red(), Color::green(), Color::blue()];
     let bounds = {
         let map = test.map();
-        map.lat_lng_bounds_for_camera(&map.get_camera_options(None))
+        map.lat_lng_bounds_for_camera(&map.get_camera_options(None)).unwrap()
     };
 
     let get_source = |index: u32| {

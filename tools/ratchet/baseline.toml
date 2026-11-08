@@ -40,7 +40,7 @@
 "crates/mln_gfx/src/shaders/program_parameters.rs" = 2
 "crates/mln_map/src/map_impl.rs" = 2
 "crates/mln_map/src/transform.rs" = 1
-"crates/mln_map_types/src/transform_state.rs" = 4
+"crates/mln_map_types/src/transform_state.rs" = 3
 "crates/mln_map_types/src/util_camera.rs" = 1
 "crates/mln_platform_default/src/headless_frontend.rs" = 1
 "crates/mln_platform_default/src/map_snapshotter.rs" = 1

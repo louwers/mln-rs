@@ -574,7 +574,9 @@ impl Transform {
     // MARK: - Position
 
     /// Pans the map by the given amount.
-    pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
+    /// infinite offset).
+    pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), String> {
         let mut center_offset = *offset;
 
         // Reduce the offset so that it never goes past the horizon. If it
@@ -598,8 +600,9 @@ impl Transform {
         let center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
         let point_on_screen = ScreenCoordinate::new(center.x - center_offset.x, center.y - center_offset.y);
         // Use unwrapped LatLng to carry information about moveBy direction.
-        let center = self.screen_coordinate_to_lat_lng(&point_on_screen, WrapMode::Unwrapped);
+        let center = self.screen_coordinate_to_lat_lng(&point_on_screen, WrapMode::Unwrapped)?;
         self.ease_to(&CameraOptions::default().with_center(Some(center)), animation);
+        Ok(())
     }
 
     /// `getLatLng(LatLng::WrapMode = LatLng::Wrapped)`.
@@ -817,7 +820,16 @@ impl Transform {
         let mut anchor_lat_lng = LatLng::default();
         if let Some(a) = anchor.as_mut() {
             a.y = self.state.get_size().height as f64 - a.y;
-            anchor_lat_lng = self.state.screen_coordinate_to_lat_lng(a, WrapMode::Unwrapped);
+            // C++ throws std::domain_error out of the camera change for an
+            // anchor that has no LatLng (NaN or infinite); the port logs it
+            // and ignores the anchor.
+            match self.state.screen_coordinate_to_lat_lng(a, WrapMode::Unwrapped) {
+                Ok(lat_lng) => anchor_lat_lng = lat_lng,
+                Err(e) => {
+                    Log::error(Event::General, &e);
+                    anchor = None;
+                }
+            }
         }
 
         self.transition_start = Clock::now();
@@ -837,8 +849,12 @@ impl Transform {
                 frame(&mut transform.state, ease.solve(t as f64, 0.001));
             }
 
-            if let Some(anchor) = anchor {
-                transform.state.move_lat_lng(&anchor_lat_lng, &anchor);
+            // The anchor had a LatLng at the start; a frame can't return the
+            // C++ exception, so it is logged, as in frame_edge_insets.
+            if let Some(anchor) = anchor
+                && let Err(e) = transform.state.move_lat_lng(&anchor_lat_lng, &anchor)
+            {
+                Log::error(Event::General, &e);
             }
 
             // At t = 1.0, a DidChangeAnimated notification should be sent
@@ -991,7 +1007,12 @@ impl Transform {
     }
 
     /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Wrapped)`.
-    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> LatLng {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor.
+    pub fn screen_coordinate_to_lat_lng(
+        &self,
+        point: &ScreenCoordinate,
+        wrap_mode: WrapMode,
+    ) -> Result<LatLng, String> {
         let mut flipped_point = *point;
         flipped_point.y = self.state.get_size().height as f64 - flipped_point.y;
         self.state.screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)

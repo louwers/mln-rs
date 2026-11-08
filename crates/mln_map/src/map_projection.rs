@@ -31,7 +31,8 @@ impl MapProjection {
         self.transform.lat_lng_to_screen_coordinate(&unwrapped_lat_lng)
     }
 
-    pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> LatLng {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor.
+    pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, String> {
         // The implementation is just a copy from map.cpp
         self.transform.screen_coordinate_to_lat_lng(pixel, wrap_mode)
     }
@@ -46,10 +47,12 @@ impl MapProjection {
 
     /// Set the underneath camera so the requested coordinates are visible
     /// with the inset.
-    pub fn set_visible_coordinates(&mut self, lat_lngs: &[LatLng], padding: &EdgeInsets) {
-        let camera = camera_for_lat_lngs(lat_lngs, &self.transform, padding)
+    /// `Err`: as `Map::camera_for_lat_lngs`.
+    pub fn set_visible_coordinates(&mut self, lat_lngs: &[LatLng], padding: &EdgeInsets) -> Result<(), String> {
+        let camera = camera_for_lat_lngs(lat_lngs, &self.transform, padding)?
             .with_bearing(Some(mln_math::rad2deg(-self.transform.get_bearing())))
             .with_pitch(Some(mln_math::rad2deg(self.transform.get_pitch())));
         self.transform.jump_to(&camera);
+        Ok(())
     }
 }

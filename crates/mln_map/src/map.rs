@@ -186,18 +186,20 @@ impl Map {
 
     // query: the render-test runner's tile mode uses it.
     /// `latLngBoundsForCamera(camera)`.
-    pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> mln_util::geo::LatLngBounds {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor, for a
+    /// camera whose corners have no LatLng.
+    pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<mln_util::geo::LatLngBounds, String> {
         let mut shallow = crate::transform::Transform::from_state(self.impl_.transform.borrow().get_state().clone());
         let size = shallow.get_state().get_size();
 
         shallow.jump_to(camera);
-        mln_util::geo::LatLngBounds::hull(
-            shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), mln_util::geo::WrapMode::Wrapped),
+        Ok(mln_util::geo::LatLngBounds::hull(
+            shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), mln_util::geo::WrapMode::Wrapped)?,
             shallow.screen_coordinate_to_lat_lng(
                 &ScreenCoordinate::new(f64::from(size.width), f64::from(size.height)),
                 mln_util::geo::WrapMode::Wrapped,
-            ),
-        )
+            )?,
+        ))
     }
 
     pub fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) {
@@ -212,10 +214,13 @@ impl Map {
         self.impl_.on_update();
     }
 
-    pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) {
+    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
+    /// infinite point).
+    pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), String> {
         self.impl_.camera_mutated.set(true);
-        self.impl_.transform.borrow_mut().move_by(point, animation);
+        self.impl_.transform.borrow_mut().move_by(point, animation)?;
         self.impl_.on_update();
+        Ok(())
     }
 
     pub fn pitch_by(&mut self, pitch: f64, animation: &AnimationOptions) {
@@ -239,14 +244,16 @@ impl Map {
 
     // gtests-core: cameraForLatLngBounds, cameraForLatLngs,
     // latLngBoundsForCameraUnwrapped (test/map/map.test.cpp).
-    /// `cameraForLatLngBounds(bounds, padding, bearing, pitch)`.
+    /// `cameraForLatLngBounds(bounds, padding, bearing, pitch)`. `Err`: the
+    /// std::domain_error of the C++ LatLng constructor, for a center that
+    /// has none (padding that pushes it to infinity).
     pub fn camera_for_lat_lng_bounds(
         &self,
         bounds: &LatLngBounds,
         padding: &EdgeInsets,
         bearing: Option<f64>,
         pitch: Option<f64>,
-    ) -> CameraOptions {
+    ) -> Result<CameraOptions, String> {
         self.camera_for_lat_lngs(
             &[bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()],
             padding,
@@ -255,14 +262,15 @@ impl Map {
         )
     }
 
-    /// `cameraForLatLngs(latLngs, padding, bearing, pitch)`.
+    /// `cameraForLatLngs(latLngs, padding, bearing, pitch)`. `Err`: as
+    /// [`camera_for_lat_lng_bounds`](Self::camera_for_lat_lng_bounds).
     pub fn camera_for_lat_lngs(
         &self,
         lat_lngs: &[LatLng],
         padding: &EdgeInsets,
         bearing: Option<f64>,
         pitch: Option<f64>,
-    ) -> CameraOptions {
+    ) -> Result<CameraOptions, String> {
         if bearing.is_none() && pitch.is_none() {
             return camera_for_lat_lngs(lat_lngs, &self.impl_.transform.borrow(), padding);
         }
@@ -271,27 +279,28 @@ impl Map {
 
         transform.jump_to(&CameraOptions::default().with_bearing(bearing).with_pitch(pitch));
 
-        camera_for_lat_lngs(lat_lngs, &transform, padding)
+        Ok(camera_for_lat_lngs(lat_lngs, &transform, padding)?
             .with_bearing(Some(mln_math::rad2deg(-transform.get_bearing())))
-            .with_pitch(Some(mln_math::rad2deg(transform.get_pitch())))
+            .with_pitch(Some(mln_math::rad2deg(transform.get_pitch()))))
     }
 
     // TODO(port): cameraForGeometry.
 
     /// `latLngBoundsForCameraUnwrapped(camera)`.
-    pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> LatLngBounds {
+    /// `Err`: as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera).
+    pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, String> {
         let mut shallow = crate::transform::Transform::from_state(self.impl_.transform.borrow().get_state().clone());
         let size = shallow.get_state().get_size();
 
         shallow.jump_to(camera);
         let width = f64::from(size.width);
         let height = f64::from(size.height);
-        let mut nw = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), WrapMode::Wrapped);
-        let mut se = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(width, height), WrapMode::Wrapped);
-        let mut ne = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(width, 0.0), WrapMode::Wrapped);
-        let mut sw = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, height), WrapMode::Wrapped);
-        let center =
-            shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(width / 2.0, height / 2.0), WrapMode::Wrapped);
+        let mut nw = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, 0.0), WrapMode::Wrapped)?;
+        let mut se = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(width, height), WrapMode::Wrapped)?;
+        let mut ne = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(width, 0.0), WrapMode::Wrapped)?;
+        let mut sw = shallow.screen_coordinate_to_lat_lng(&ScreenCoordinate::new(0.0, height), WrapMode::Wrapped)?;
+        let center = shallow
+            .screen_coordinate_to_lat_lng(&ScreenCoordinate::new(width / 2.0, height / 2.0), WrapMode::Wrapped)?;
         nw.unwrap_for_shortest_path(&center);
         se.unwrap_for_shortest_path(&center);
         ne.unwrap_for_shortest_path(&center);
@@ -300,7 +309,7 @@ impl Map {
         bounds.extend(&ne);
         bounds.extend(&sw);
         bounds.extend(&center);
-        bounds
+        Ok(bounds)
     }
 
     // MARK: - Bounds
@@ -508,8 +517,9 @@ impl Map {
         transform.lat_lng_to_screen_coordinate(&unwrapped_lat_lng)
     }
 
-    /// `latLngForPixel(pixel, wrapMode)`.
-    pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> LatLng {
+    /// `latLngForPixel(pixel, wrapMode)`. `Err`: the std::domain_error of
+    /// the C++ LatLng constructor (a NaN or infinite pixel).
+    pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, String> {
         self.impl_.transform.borrow().screen_coordinate_to_lat_lng(pixel, wrap_mode)
     }
 
@@ -519,7 +529,11 @@ impl Map {
     }
 
     /// `latLngsForPixels(screenCoords, wrapMode)`.
-    pub fn lat_lngs_for_pixels(&self, screen_coords: &[ScreenCoordinate], wrap_mode: WrapMode) -> Vec<LatLng> {
+    pub fn lat_lngs_for_pixels(
+        &self,
+        screen_coords: &[ScreenCoordinate],
+        wrap_mode: WrapMode,
+    ) -> Result<Vec<LatLng>, String> {
         screen_coords.iter().map(|point| self.lat_lng_for_pixel(point, wrap_mode)).collect()
     }
 
@@ -571,9 +585,9 @@ pub(crate) fn camera_for_lat_lngs(
     lat_lngs: &[LatLng],
     transform: &crate::transform::Transform,
     padding: &EdgeInsets,
-) -> CameraOptions {
+) -> Result<CameraOptions, String> {
     if lat_lngs.is_empty() {
-        return CameraOptions::default();
+        return Ok(CameraOptions::default());
     }
     let size = transform.get_state().get_size();
     // Calculate the bounds of the possibly rotated shape with respect to the viewport.
@@ -618,8 +632,8 @@ pub(crate) fn camera_for_lat_lngs(
     // Calculate the center point of a virtual bounds that is extended in all directions by padding.
     let center_pixel = ScreenCoordinate::new((ne_pixel.x + sw_pixel.x) / 2.0, (ne_pixel.y + sw_pixel.y) / 2.0);
 
-    CameraOptions::default()
-        .with_center(Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)))
+    Ok(CameraOptions::default()
+        .with_center(Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?))
         .with_padding(Some(*padding))
-        .with_zoom(Some(zoom))
+        .with_zoom(Some(zoom)))
 }
