@@ -166,6 +166,9 @@ fn load_from(tileset: Tileset, tile: Vec<u8>, layers: &[Immutable<dyn LayerPrope
             image_manager: image_manager.clone(),
             glyph_manager: mln_renderer::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(mln_renderer::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+            tile_worker_transport: std::rc::Rc::new(
+                mln_renderer::tile::tile_worker_transport::InProcessTransport::new(thread_pool.clone()),
+            ),
         },
     );
 

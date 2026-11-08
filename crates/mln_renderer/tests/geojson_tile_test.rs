@@ -61,6 +61,9 @@ impl GeoJSONTileTest {
             dynamic_texture_atlas: std::sync::Arc::new(
                 mln_renderer::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new(),
             ),
+            tile_worker_transport: std::rc::Rc::new(
+                mln_renderer::tile::tile_worker_transport::InProcessTransport::new(self.thread_pool.clone()),
+            ),
         }
     }
 }

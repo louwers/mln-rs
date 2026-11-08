@@ -76,6 +76,9 @@ fn tile_parameters<'a>(
         image_manager: mln_renderer::image_manager::ImageManager::create(),
         glyph_manager: mln_renderer::text::glyph_manager::GlyphManager::new(None),
         dynamic_texture_atlas: std::sync::Arc::new(mln_renderer::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+        tile_worker_transport: Rc::new(mln_renderer::tile::tile_worker_transport::InProcessTransport::new(
+            thread_pool.clone(),
+        )),
     }
 }
 

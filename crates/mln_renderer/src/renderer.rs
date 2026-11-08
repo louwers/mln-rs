@@ -10,6 +10,7 @@ use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 
 use crate::renderer_impl::RendererImpl;
 use crate::renderer_observer::RendererObserver;
+use crate::tile::tile_worker_transport::TileWorkerTransport;
 use crate::update_parameters::UpdateParameters;
 
 pub struct Renderer {
@@ -36,6 +37,13 @@ impl Renderer {
 
     pub fn mark_context_lost(&mut self) {
         self.impl_mut().orchestrator.mark_context_lost();
+    }
+
+    /// Port-only: the transport that creates the tile workers of tiles
+    /// created from now on (by default on the map's thread pool). Set it
+    /// before the first render so that every tile uses it.
+    pub fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
+        self.impl_mut().orchestrator.set_tile_worker_transport(transport);
     }
 
     pub fn set_observer(&mut self, observer: Option<Weak<dyn RendererObserver>>) {

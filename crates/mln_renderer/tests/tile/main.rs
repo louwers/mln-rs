@@ -71,6 +71,9 @@ impl RasterTileTest {
             image_manager: mln_renderer::image_manager::ImageManager::create(),
             glyph_manager: mln_renderer::text::glyph_manager::GlyphManager::new(None),
             dynamic_texture_atlas: Arc::new(mln_renderer::gfx::dynamic_texture_atlas::DynamicTextureAtlas::new()),
+            tile_worker_transport: std::rc::Rc::new(
+                mln_renderer::tile::tile_worker_transport::InProcessTransport::new(self.thread_pool.clone()),
+            ),
         }
     }
 }

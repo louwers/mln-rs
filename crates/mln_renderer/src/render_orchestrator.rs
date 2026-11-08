@@ -49,6 +49,7 @@ use crate::renderer_observer::RendererObserver;
 use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile::TileOperation;
+use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
 use crate::tile_parameters::TileParameters;
 use crate::update_parameters::UpdateParameters;
 
@@ -217,6 +218,8 @@ pub struct RenderOrchestrator {
     filtered_layers_for_source: Vec<Immutable<dyn LayerProperties>>,
 
     thread_pool: TaggedScheduler,
+    /// Port-only: creates the tiles' workers (tile_worker_transport.rs).
+    tile_worker_transport: Rc<dyn TileWorkerTransport>,
 
     global_state: Option<Arc<GlobalStateMap>>,
 
@@ -250,6 +253,7 @@ impl RenderOrchestrator {
         // symbols: `glyphManager->setObserver(this)`.
         let glyph_manager = GlyphManager::new(None);
         glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { observer: observer.clone() })));
+        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         RenderOrchestrator {
             observer: observer.clone(),
             source_observer: Rc::new(OrchestratorSourceObserver { observer }),
@@ -275,7 +279,8 @@ impl RenderOrchestrator {
             tile_cache_enabled: true,
             ordered_layers: Vec::new(),
             filtered_layers_for_source: Vec::new(),
-            thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
+            tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
+            thread_pool,
             global_state: None,
             layer_groups_by_layer_index: BTreeMap::new(),
             layer_group_tweakers: HashMap::new(),
@@ -287,6 +292,13 @@ impl RenderOrchestrator {
 
     pub fn mark_context_lost(&mut self) {
         self.context_lost = true;
+    }
+
+    /// Port-only: the transport that creates the workers of the tiles
+    /// created from now on (by default `InProcessTransport`, on the thread
+    /// pool).
+    pub fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
+        self.tile_worker_transport = transport;
     }
 
     pub fn set_observer(&mut self, observer: Option<Weak<dyn RendererObserver>>) {
@@ -380,6 +392,7 @@ impl RenderOrchestrator {
             image_manager: self.image_manager.clone(),
             glyph_manager: self.glyph_manager.clone(),
             dynamic_texture_atlas: self.dynamic_texture_atlas.clone(),
+            tile_worker_transport: self.tile_worker_transport.clone(),
         };
 
         self.glyph_manager.set_url(&update_parameters.glyph_url);
