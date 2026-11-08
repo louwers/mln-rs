@@ -6,10 +6,19 @@
 // -0.0 (rapidjson: unsigned 0), rounds long decimals correctly (rapidjson's
 // default parse can be off by one ULP), and, without `preserve_order`,
 // iterates object members in key order (rapidjson: document order).
+//
+// The array and object accessors have preconditions that rapidjson only
+// asserts (undefined behaviour with NDEBUG): a non-array has length 0, a
+// member past the end or of a non-array is null (undefined), and a
+// non-object has no members. So a converter that skips a check (the C++
+// `isExpression` reads `["in"]`'s second member) gets an error or a
+// default, not a panic.
 
 use feature::Value;
 
 use crate::conversion::{ConversionTraits, Convertible, Error};
+
+static NULL: serde_json::Value = serde_json::Value::Null;
 
 impl ConversionTraits for serde_json::Value {
     fn is_undefined(&self) -> bool {
@@ -23,14 +32,14 @@ impl ConversionTraits for serde_json::Value {
     fn array_length(&self) -> usize {
         match self {
             serde_json::Value::Array(a) => a.len(),
-            _ => panic!("array_length on a non-array"),
+            _ => 0,
         }
     }
 
     fn array_member(&self, i: usize) -> Convertible<'_> {
         match self {
-            serde_json::Value::Array(a) => Convertible::new(&a[i]),
-            _ => panic!("array_member on a non-array"),
+            serde_json::Value::Array(a) => Convertible::new(a.get(i).unwrap_or(&NULL)),
+            _ => Convertible::new(&NULL),
         }
     }
 
@@ -41,13 +50,13 @@ impl ConversionTraits for serde_json::Value {
     fn object_member(&self, name: &str) -> Option<Convertible<'_>> {
         match self {
             serde_json::Value::Object(o) => o.get(name).map(|m| Convertible::new(m)),
-            _ => panic!("object_member on a non-object"),
+            _ => None,
         }
     }
 
     fn each_member(&self, f: &mut dyn FnMut(&str, &Convertible<'_>) -> Option<Error>) -> Option<Error> {
         let serde_json::Value::Object(o) = self else {
-            panic!("each_member on a non-object");
+            return None;
         };
         for (name, value) in o {
             let result = f(name, &Convertible::new(value));
@@ -146,6 +155,19 @@ mod tests {
         });
         assert_eq!(result, Some(Error::new("stop")));
         assert_eq!(seen, 2);
+    }
+
+    // Port-only: rapidjson asserts these preconditions; here they are total.
+    #[test]
+    fn accessors_outside_their_preconditions() {
+        let number = serde_json::json!(1);
+        let c = Convertible::from(&number);
+        assert_eq!(c.array_length(), 0);
+        assert!(c.array_member(0).is_undefined());
+        assert!(c.object_member("a").is_none());
+        assert_eq!(c.each_member(|_, _| Some(Error::new("member"))), None);
+        let array = serde_json::json!([1]);
+        assert!(Convertible::from(&array).array_member(1).is_undefined());
     }
 
     #[test]

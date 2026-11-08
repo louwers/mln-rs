@@ -102,7 +102,12 @@ impl DEMData {
         let o = border_tile_data;
 
         // Tiles from the same source should always be of the same dimensions.
-        debug_assert!(self.dim == o.dim);
+        // C++ asserts it and reads out of bounds when they aren't (tiles of
+        // different sizes, or an empty one from a corrupt image); the port
+        // leaves the border as it is.
+        if self.dim != o.dim || self.dim == 0 {
+            return;
+        }
 
         // We determine the pixel range to backfill based which corner/edge
         // `borderTileData` represents. For example, dx = -1, dy = -1
@@ -289,5 +294,21 @@ mod tests {
 
         dem0.backfill_border(&dem1, 1, -1);
         assert_eq!(dem0.get(4, -1), dem1.get(0, 3));
+    }
+
+    // Port-only: C++ reads out of bounds for neighbours of another size.
+    #[test]
+    fn backfill_border_of_another_size() {
+        let mut dem = DEMData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Mapbox).unwrap();
+        let border = dem.get(-1, -1);
+        let larger = DEMData::new(&fake_image(Size::new(8, 8)), RasterEncoding::Mapbox).unwrap();
+        let empty = DEMData::new(&PremultipliedImage::default(), RasterEncoding::Mapbox).unwrap();
+        for (dx, dy) in [(-1, -1), (0, 1), (1, 0)] {
+            dem.backfill_border(&larger, dx, dy);
+            dem.backfill_border(&empty, dx, dy);
+        }
+        assert_eq!(dem.get(-1, -1), border);
+        let mut empty = empty;
+        empty.backfill_border(&empty.clone(), -1, -1);
     }
 }

@@ -461,3 +461,12 @@ fn legacy_expression_invalid_type() {
     let result = <Filter as Converter>::convert(&Convertible::from(&value), &mut error);
     assert!(result.is_none());
 }
+
+// Port-only: `isExpression` reads `["in"]`'s second member past the end (an
+// assert in C++, undefined behaviour with NDEBUG). Here it is null, so the
+// filter is a legacy one, and a one-element legacy filter passes.
+#[test]
+fn in_without_operands() {
+    assert!(filter(r#"["in"]"#, &[]));
+    assert!(filter(r#"["any", ["in"]]"#, &[]));
+}

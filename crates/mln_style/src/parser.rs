@@ -471,8 +471,10 @@ fn parse_font_faces(faces: &serde_json::Map<String, serde_json::Value>) -> mln_t
                             if range_string.len() <= 2 {
                                 continue;
                             }
-                            let range_string = &range_string[2..];
-                            let Some(pos) = range_string.find('-') else {
+                            // `substr` works on bytes: a multibyte character
+                            // may be cut.
+                            let range_string = &range_string.as_bytes()[2..];
+                            let Some(pos) = range_string.iter().position(|&b| b == b'-') else {
                                 continue;
                             };
                             let (start, end) = (&range_string[..pos], &range_string[pos + 1..]);
@@ -481,11 +483,16 @@ fn parse_font_faces(faces: &serde_json::Map<String, serde_json::Value>) -> mln_t
                             }
                             // `util::parse<int>(s, 16)`: std::from_chars, the
                             // whole string must be consumed.
-                            match (i32::from_str_radix(start, 16), i32::from_str_radix(end, 16)) {
-                                (Ok(start), Ok(end)) => font_face.ranges.push((start as u32, end as u32)),
+                            let parse =
+                                |s: &[u8]| std::str::from_utf8(s).ok().and_then(|s| i32::from_str_radix(s, 16).ok());
+                            match (parse(start), parse(end)) {
+                                (Some(start), Some(end)) => font_face.ranges.push((start as u32, end as u32)),
                                 _ => Log::warning(
                                     Event::ParseStyle,
-                                    format!("Invalid unicode-range in font-face: {range_string}"),
+                                    format!(
+                                        "Invalid unicode-range in font-face: {}",
+                                        String::from_utf8_lossy(range_string)
+                                    ),
                                 ),
                             }
                         }

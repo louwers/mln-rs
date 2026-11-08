@@ -115,8 +115,12 @@ impl TileLoader {
         parameters: &TileParameters<'_>,
         tileset: &Tileset,
     ) -> Self {
+        // C++ `tileset.tiles.at(0)` throws std::out_of_range for a source
+        // without tiles, out of the render update (uncaught). The port gives
+        // the tile that error and loads nothing.
+        let url = tileset.tiles.first().map_or("", String::as_str);
         let resource = Resource::tile(
-            &tileset.tiles[0],
+            url,
             parameters.pixel_ratio,
             id.canonical.x as i32,
             id.canonical.y as i32,
@@ -129,7 +133,7 @@ impl TileLoader {
             encoding,
             necessity: TileNecessity::Optional,
             resource,
-            file_source: parameters.file_source.clone(),
+            file_source: if tileset.tiles.is_empty() { None } else { parameters.file_source.clone() },
             request: None,
             update_parameters: TileUpdateParameters { minimum_update_interval: Duration::zero(), is_volatile: false },
         }));
@@ -138,7 +142,11 @@ impl TileLoader {
         let file_source = loader.state.borrow().file_source.clone();
         let Some(file_source) = file_source else {
             if let Some(tile) = tile_of(&loader.state) {
-                tile.set_error(get_cant_load_tile_error());
+                tile.set_error(if tileset.tiles.is_empty() {
+                    RuntimeError::ptr("vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)")
+                } else {
+                    get_cant_load_tile_error()
+                });
             }
             return loader;
         };

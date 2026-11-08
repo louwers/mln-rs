@@ -188,3 +188,16 @@ fn set_generic_properties() {
     layer.set_property("maxzoom", &Convertible::from(&new_max_zoom), None);
     assert_eq!(22.0_f32, layer.get_max_zoom());
 }
+
+// Port-only: a `text-field` section that is not an array (the C++ reads it as
+// one: undefined behaviour) is a conversion error, not a panic.
+#[test]
+fn text_field_section_not_an_array() {
+    for field in [r#"["foo"]"#, "[1]", r#"[["foo"], 2]"#] {
+        let src =
+            format!(r#"{{"id": "symbol", "type": "symbol", "source": "s", "layout": {{"text-field": {field}}}}}"#);
+        let mut error = Error::default();
+        assert!(convert_layer(&Convertible::from(&parse_json(&src)), &mut error).is_none(), "{field}");
+        assert_eq!(error.message, "Section has to contain a text and std::optional parameters or an image.");
+    }
+}
