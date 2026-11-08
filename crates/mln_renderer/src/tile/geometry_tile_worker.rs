@@ -9,16 +9,16 @@
 // choice for the worker's references.
 //
 // C++ wraps each message handler in `try { ... } catch (...)` and reports
-// the exception to the tile (`GeometryTile::onError`). Rust code that would
-// throw panics (e.g. malformed MVT data in mln_tile, a failing wagyu
-// fixup), so the handlers catch the panic and report its message.
+// the exception to the tile (`GeometryTile::onError`). The port returns the
+// exceptions as `Err` (malformed tiles, a failing wagyu fixup, a too long
+// geometry) and reports those; a panic is a bug and is not caught
+// (`catch_unwind` can't catch it with `panic = "abort"` or on wasm).
 //
 // TODO(port): the ErrorScope for symbol errors, `setObserver`, font faces
 // (HarfBuzz shaping results for complex scripts).
 
 use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
-use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Weak;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,7 +34,7 @@ use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileData;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 
 use crate::bucket::BucketPtr;
@@ -63,18 +63,6 @@ enum State {
     Coalescing,
     NeedsParse,
     NeedsSymbolLayout,
-}
-
-/// The message of a caught panic (C++: the caught exception).
-fn panic_to_exception(payload: Box<dyn std::any::Any + Send>) -> ExceptionPtr {
-    let message = if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_owned()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "unknown error".to_owned()
-    };
-    RuntimeError::ptr(message)
 }
 
 /// `OptionalActorRef<GeometryTile>`: the tile's mailbox, or (synchronous
@@ -203,14 +191,10 @@ impl GeometryTileWorker {
     }
 
     /// Runs `f` as the C++ `try { f } catch (...) { parent.invoke(
-    /// &GeometryTile::onError, std::current_exception(), correlationID); }`:
-    /// both an `Err` (an exception the port returns) and a panic (one it
-    /// does not) are reported.
+    /// &GeometryTile::onError, std::current_exception(), correlationID); }`.
     fn guarded(&mut self, f: impl FnOnce(&mut Self) -> Result<(), ExceptionPtr>) {
-        let error = match catch_unwind(AssertUnwindSafe(|| f(self))) {
-            Ok(Ok(())) => return,
-            Ok(Err(error)) => error,
-            Err(payload) => panic_to_exception(payload),
+        let Err(error) = f(self) else {
+            return;
         };
         let correlation_id = self.correlation_id;
         self.parent.invoke(move |tile: &GeometryTileInner| tile.on_error(error, correlation_id));

@@ -118,6 +118,11 @@ path = "tests/gtest_style_diff.rs"
 name = "gtest_dynamic_texture_atlas"
 path = "tests/gtest_dynamic_texture_atlas.rs"
 
+# Port-only: malformed vector tiles become tile errors, not panics.
+[[test]]
+name = "malformed_tile_test"
+path = "tests/malformed_tile_test.rs"
+
 # Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 [[test]]
 name = "gtest_tile_range"
@@ -130,6 +135,7 @@ mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
+proptest.workspace = true
 serde_json.workspace = true
 
 [lints]

@@ -1545,6 +1545,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-webgpu",
+ "proptest",
  "serde_json",
 ]
 
