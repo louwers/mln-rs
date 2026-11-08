@@ -51,13 +51,20 @@ build:  _dev-shell
 check:
     cargo check --workspace --all-targets
 
+# The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
+# needs the target: `rustup target add wasm32-unknown-unknown`. SQLite builds through sqlite-wasm-rs, which needs a clang
+# that targets wasm32.
+[doc('Check that the libraries build for wasm32-unknown-unknown, as CI does')]
+check-wasm:
+    cargo check --target wasm32-unknown-unknown -p {{main_crate}}
+
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
     rm -rf {{quote(parent_directory(coverage_lcov))}}
     mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
-# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy and the API docs, warnings as errors
-ci-lint:  env-info test-fmt ratchet clippy test-doc && assert-git-is-clean
+# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy, the API docs and the wasm32-unknown-unknown build, warnings as errors
+ci-lint:  env-info test-fmt ratchet clippy test-doc check-wasm && assert-git-is-clean
 
 # Package every crate and compile every Cargo test target, as CI's release-crate job does
 ci-package:  env-info package && assert-git-is-clean

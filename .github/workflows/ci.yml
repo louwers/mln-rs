@@ -112,8 +112,9 @@ jobs:
 
   # Formatting (`just fmt`, every Rust file), the panic and TODO(port)
   # ratchet (`just ratchet`, tools/ratchet), clippy with the workspace's
-  # lints (Cargo.toml) and the API docs as docs.rs builds them, all with
-  # warnings as errors (the justfile denies them in CI).
+  # lints (Cargo.toml), the API docs as docs.rs builds them and the
+  # libraries for wasm32-unknown-unknown (`just check-wasm`, the browser
+  # build), all with warnings as errors (the justfile denies them in CI).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -138,7 +139,7 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt --no-self-update
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown --no-self-update
           rustup default stable
 
       - name: Lint

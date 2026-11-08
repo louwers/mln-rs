@@ -18,7 +18,7 @@
 //
 // The transfer itself is an `HttpTransport`: ureq by default, or another HTTP
 // stack a host sets with `set_transport` (mln-rs-web sets the browser's
-// fetch). Where ureq doesn't build (Emscripten), there is no default.
+// fetch). Where ureq doesn't build (wasm, the browser), there is no default.
 //
 // Differences: ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
@@ -136,13 +136,13 @@ fn current_transport() -> Arc<dyn HttpTransport> {
     default_transport()
 }
 
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(not(target_family = "wasm"))]
 fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(transport::Transport::new())
 }
 
 /// ureq doesn't build here, so requests fail until a host sets a transport.
-#[cfg(target_os = "emscripten")]
+#[cfg(target_family = "wasm")]
 fn default_transport() -> Arc<dyn HttpTransport> {
     struct NoTransport;
     impl HttpTransport for NoTransport {
@@ -232,7 +232,7 @@ pub fn range_header(resource: &Resource) -> Option<String> {
 /// each, so a host whose first (IPv6) address drops packets stalls every new
 /// connection until the OS gives up (75 s on macOS). curl races them (Happy
 /// Eyeballs), so the agent's TCP step does too: see `HappyEyeballsConnector`.
-#[cfg(not(target_os = "emscripten"))]
+#[cfg(not(target_family = "wasm"))]
 mod transport {
     use std::net::SocketAddr;
     use std::sync::{Arc, mpsc};
