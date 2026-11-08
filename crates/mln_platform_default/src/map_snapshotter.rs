@@ -251,7 +251,7 @@ impl MapSnapshotter {
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
         observer: Rc<dyn MapSnapshotterObserver>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let frontend = SnapshotterRendererFrontend::new(size, pixel_ratio);
         let map = Rc::new(RefCell::new(Map::with_resource_options(
             &frontend,
@@ -259,7 +259,7 @@ impl MapSnapshotter {
             MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
             resource_options,
             client_options,
-        )));
+        )?));
 
         let render_still_callback: Rc<RefCell<Option<Callback>>> = Rc::new(RefCell::new(None));
         let still_image_result: Rc<RefCell<Option<Option<ExceptionPtr>>>> = Rc::new(RefCell::new(None));
@@ -315,7 +315,7 @@ impl MapSnapshotter {
             })
         };
 
-        MapSnapshotter {
+        Ok(MapSnapshotter {
             render_still_callback,
             still_image_result,
             deliver,
@@ -323,16 +323,17 @@ impl MapSnapshotter {
             map,
             region: LatLngBounds::empty(),
             region_insets: EdgeInsets::default(),
-        }
+        })
     }
 
     /// `MapSnapshotter(size, pixelRatio, resourceOptions, clientOptions)`.
+    /// `Err` where the C++ Map constructor throws (an empty size).
     pub fn new(
         size: Size,
         pixel_ratio: f32,
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
-    ) -> Self {
+    ) -> Result<Self, String> {
         Self::with_observer(size, pixel_ratio, resource_options, client_options, Rc::new(NullMapSnapshotterObserver))
     }
 

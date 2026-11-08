@@ -29,7 +29,10 @@ impl Map {
     ///
     /// C++ keeps a reference to the frontend; frontends are handles here
     /// (`Clone` shares the same renderer), so the map keeps a clone.
-    pub fn new<F>(frontend: &F, observer: Rc<dyn MapObserver>, map_options: MapOptions) -> Map
+    ///
+    /// `Err` where C++ throws: "failed to resize: size is empty" for an
+    /// empty `map_options.size()`.
+    pub fn new<F>(frontend: &F, observer: Rc<dyn MapObserver>, map_options: MapOptions) -> Result<Map, String>
     where
         F: RendererFrontend + Clone + 'static,
     {
@@ -52,13 +55,13 @@ impl Map {
         map_options: MapOptions,
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
-    ) -> Map
+    ) -> Result<Map, String>
     where
         F: RendererFrontend + Clone + 'static,
     {
         let file_source =
             FileSourceManager::get().get_file_source(FileSourceType::ResourceLoader, resource_options, client_options);
-        Map { impl_: MapImpl::new(Box::new(frontend.clone()), observer, file_source, &map_options) }
+        Ok(Map { impl_: MapImpl::new(Box::new(frontend.clone()), observer, file_source, &map_options)? })
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
@@ -70,11 +73,11 @@ impl Map {
         observer: Rc<dyn MapObserver>,
         file_source: Arc<dyn FileSource>,
         map_options: MapOptions,
-    ) -> Map
+    ) -> Result<Map, String>
     where
         F: RendererFrontend + Clone + 'static,
     {
-        Map { impl_: MapImpl::new(Box::new(frontend.clone()), observer, Some(file_source), &map_options) }
+        Ok(Map { impl_: MapImpl::new(Box::new(frontend.clone()), observer, Some(file_source), &map_options)? })
     }
 
     /// `getClientOptions()`.

@@ -66,15 +66,19 @@ fn lat_lng(lat: f64, lon: f64) -> LatLng {
     LatLng::new(lat, lon).unwrap_or_else(|e| panic!("{e}"))
 }
 
-fn edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
-    // C++ constructs EdgeInsets directly, which throws std::domain_error.
-    EdgeInsets::new(top, left, bottom, right).unwrap_or_else(|e| panic!("{e}"))
+/// An animation frame's `EdgeInsets(top, left, bottom, right)`. C++ throws
+/// std::domain_error for NaN (infinite insets interpolate to NaN) out of
+/// the frame, and nothing catches it; the port logs it, and the frame keeps
+/// the insets.
+fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<EdgeInsets> {
+    EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e)).ok()
 }
 
-/// `Projection::unproject`, which constructs a LatLng and so can throw
-/// std::domain_error; nothing catches it on these paths.
-fn unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> LatLng {
-    Projection::unproject(p, scale, wrap_mode).unwrap_or_else(|e| panic!("{e}"))
+/// An animation frame's `Projection::unproject`, which constructs a LatLng
+/// and so can throw std::domain_error (NaN); handled as
+/// [`frame_edge_insets`]: the frame keeps the center and zoom.
+fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
+    Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e)).ok()
 }
 
 /// `std::to_string(double)`: `%f`.
@@ -297,23 +301,26 @@ impl Transform {
 
         let frame: FrameFn = Rc::new(move |state: &mut TransformState, t: f64| {
             let frame_point = interpolate(&start_point, &end_point, t);
-            let frame_lat_lng = unproject(&frame_point, state.zoom_scale(start_zoom), WrapMode::Unwrapped);
             let frame_zoom = interpolate(&start_zoom, &zoom, t);
-            state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
+            if let Some(frame_lat_lng) =
+                frame_unproject(&frame_point, state.zoom_scale(start_zoom), WrapMode::Unwrapped)
+            {
+                state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
+            }
             state.set_center_altitude(interpolate(&start_center_alt, &center_alt, t));
             if bearing != start_bearing {
                 state.set_bearing(mln_math::wrap(interpolate(&start_bearing, &bearing, t), -PI, PI));
             }
             if padding != start_edge_insets {
-                // Interpolate edge insets. C++ goes through the EdgeInsets
-                // constructor, which throws std::domain_error on NaN (from
-                // infinite insets); nothing catches it.
-                state.set_edge_insets(&edge_insets(
+                // Interpolate edge insets
+                if let Some(insets) = frame_edge_insets(
                     interpolate(&start_edge_insets.top, &padding.top, t),
                     interpolate(&start_edge_insets.left, &padding.left, t),
                     interpolate(&start_edge_insets.bottom, &padding.bottom, t),
                     interpolate(&start_edge_insets.right, &padding.right, t),
-                ));
+                ) {
+                    state.set_edge_insets(&insets);
+                }
             }
             let max_pitch = get_max_pitch_for_edge_insets(state, &state.get_edge_insets());
             if pitch != start_pitch || max_pitch < start_pitch {
@@ -529,21 +536,24 @@ impl Transform {
             }
 
             // Convert to geographic coordinates and set the new viewpoint.
-            let frame_lat_lng = unproject(&frame_point, start_scale, WrapMode::Unwrapped);
-            state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
+            if let Some(frame_lat_lng) = frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped) {
+                state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
+            }
             state.set_center_altitude(interpolate(&start_center_alt, &center_alt, us));
             if bearing != start_bearing {
                 state.set_bearing(mln_math::wrap(interpolate(&start_bearing, &bearing, k), -PI, PI));
             }
 
             if padding != start_edge_insets {
-                // Interpolate edge insets (throwing constructor, as above)
-                state.set_edge_insets(&edge_insets(
+                // Interpolate edge insets
+                if let Some(insets) = frame_edge_insets(
                     interpolate(&start_edge_insets.top, &padding.top, k),
                     interpolate(&start_edge_insets.left, &padding.left, k),
                     interpolate(&start_edge_insets.bottom, &padding.bottom, k),
                     interpolate(&start_edge_insets.right, &padding.right, k),
-                ));
+                ) {
+                    state.set_edge_insets(&insets);
+                }
             }
 
             if pitch != start_pitch {
@@ -804,7 +814,7 @@ impl Transform {
         // center points are mutually exclusive, with preference for the
         // center point when both are set.
         let mut anchor = if camera.center.is_some() { None } else { camera.anchor };
-        let mut anchor_lat_lng = lat_lng(0.0, 0.0);
+        let mut anchor_lat_lng = LatLng::default();
         if let Some(a) = anchor.as_mut() {
             a.y = self.state.get_size().height as f64 - a.y;
             anchor_lat_lng = self.state.screen_coordinate_to_lat_lng(a, WrapMode::Unwrapped);

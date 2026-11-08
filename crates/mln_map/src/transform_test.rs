@@ -1510,3 +1510,23 @@ fn set_orientation_with_roll_no_pitch() {
     assert_near(pitch, pitch_, 1.0e-9);
     assert_near(0.0, roll_, 1.0e-9);
 }
+
+// Port-only: from infinite padding, the insets interpolate to NaN
+// (inf - inf), for which the C++ EdgeInsets constructor throws out of the
+// animation frame (uncaught). The port logs it and keeps the insets.
+#[test]
+fn padding_interpolated_to_nan_keeps_the_insets() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    let infinite = EdgeInsets { top: f64::INFINITY, left: 0.0, bottom: 0.0, right: 0.0 };
+    transform.jump_to(&CameraOptions { padding: Some(infinite), ..cam() });
+    assert_eq!(transform.get_state().get_edge_insets(), infinite);
+    transform.jump_to(&CameraOptions { padding: Some(EdgeInsets::default()), ..cam() });
+    assert_eq!(transform.get_state().get_edge_insets(), infinite);
+    transform.fly_to(
+        &CameraOptions { padding: Some(EdgeInsets::default()), ..cam() },
+        &AnimationOptions::default(),
+        false,
+    );
+    assert_eq!(transform.get_state().get_edge_insets(), infinite);
+}

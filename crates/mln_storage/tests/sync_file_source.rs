@@ -76,7 +76,7 @@ fn load_sync_render() {
     fs.add("maptiler://maps/streets", read_file("test/fixtures/resources/source_vector.json"));
     fs.add("maptiler://sprites/streets/sprite", read_file("test/fixtures/resources/sprite.png"));
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
-    let mut map = Map::with_file_source(&frontend, Rc::new(NullMapObserver), fs, MapOptions::new());
+    let mut map = Map::with_file_source(&frontend, Rc::new(NullMapObserver), fs, MapOptions::new()).unwrap();
     let style = String::from_utf8(read_file("test/fixtures/resources/style_vector.json")).unwrap();
     map.get_style_mut().load_json(&style);
 }

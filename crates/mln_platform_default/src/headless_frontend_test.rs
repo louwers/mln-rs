@@ -17,7 +17,8 @@ fn render_style(style: &str, size: Size, pixel_ratio: f32) -> PremultipliedImage
         &frontend,
         Rc::new(NullMapObserver),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
-    );
+    )
+    .unwrap();
     map.get_style_mut().load_json(style);
     frontend.render(&mut map).expect("render").image
 }
@@ -35,7 +36,7 @@ fn render_still_in_continuous_mode_is_an_error() {
     let _run_loop = RunLoop::new();
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0);
-    let mut map = Map::new(&frontend, Rc::new(NullMapObserver), MapOptions::new().with_size(size));
+    let mut map = Map::new(&frontend, Rc::new(NullMapObserver), MapOptions::new().with_size(size)).unwrap();
     let error = frontend.render(&mut map).err().expect("error");
     assert_eq!(error, "Map is not in static or tile image render modes");
 }

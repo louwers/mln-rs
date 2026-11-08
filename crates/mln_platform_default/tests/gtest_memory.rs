@@ -73,6 +73,7 @@ impl MemoryTest {
             self.file_source.clone(),
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()).with_pixel_ratio(ratio),
         )
+        .unwrap()
     }
 }
 

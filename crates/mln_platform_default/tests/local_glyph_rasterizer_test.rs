@@ -98,7 +98,8 @@ impl LocalGlyphRasterizerTest {
             Rc::new(NullMapObserver),
             file_source,
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
-        );
+        )
+        .unwrap();
         LocalGlyphRasterizerTest { _run_loop: run_loop, frontend, map }
     }
 

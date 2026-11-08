@@ -151,7 +151,8 @@ impl Scene {
             MapOptions::new().with_map_mode(map_mode).with_size(size).with_pixel_ratio(1.0),
             &resource_options,
             &client_options,
-        );
+        )
+        .expect("the map");
         Scene { frontend, map, observer, _file_source: file_source }
     }
 

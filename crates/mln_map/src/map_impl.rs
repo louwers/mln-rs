@@ -169,7 +169,7 @@ impl MapImpl {
         observer: Rc<dyn MapObserver>,
         file_source: Option<Arc<dyn FileSource>>,
         map_options: &MapOptions,
-    ) -> Rc<MapImpl> {
+    ) -> Result<Rc<MapImpl>, String> {
         let transform_observer: Rc<dyn TransformObserver> =
             Rc::new(MapTransformObserver { observer: observer.clone() });
         let pixel_ratio = map_options.pixel_ratio();
@@ -212,12 +212,9 @@ impl MapImpl {
         map.style.borrow_mut().impl_.set_observer(Some(style_observer));
         let weak: Weak<MapImpl> = Rc::downgrade(&map);
         map.renderer_frontend.set_observer(weak);
-        // C++ throws from the constructor for an empty size; the Rust Map
-        // constructor is infallible (agreed interface), so this panics.
-        if let Err(e) = map.transform.borrow_mut().resize(map_options.size()) {
-            panic!("{e}");
-        }
-        map
+        // C++ throws from the constructor for an empty size.
+        map.transform.borrow_mut().resize(map_options.size())?;
+        Ok(map)
     }
 
     // MARK: - style::Observer dispatch

@@ -103,7 +103,7 @@ impl Impl {
                 .with_cross_source_collisions(metadata.cross_source_collisions),
             &resource_options,
             &client_options,
-        );
+        )?;
         if let Some(max_pitch) = metadata.max_pitch {
             map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch)))?;
         }

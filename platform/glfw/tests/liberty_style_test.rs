@@ -59,7 +59,8 @@ fn loads_liberty_over_https() {
     *observer.run_loop.borrow_mut() = Some(run_loop.clone());
     let frontend = RecordingFrontend::default();
     let mut map =
-        Map::new(&frontend, observer.clone(), MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0));
+        Map::new(&frontend, observer.clone(), MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0))
+            .unwrap();
 
     map.get_style_mut().load_url(LIBERTY);
     assert!(!map.get_style().is_loaded());

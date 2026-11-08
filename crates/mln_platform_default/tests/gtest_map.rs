@@ -1461,7 +1461,7 @@ fn expired_sprite_sheet() {
         .with_map_mode(MapMode::Continuous)
         .with_size(frontend.frontend.get_size())
         .with_pixel_ratio(1.0);
-    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, observer.clone(), file_source, options)));
+    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, observer.clone(), file_source, options).unwrap()));
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
     // what it serves.
@@ -2282,7 +2282,8 @@ fn tile_selection_options_publish_updates() {
         observer,
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Continuous),
-    );
+    )
+    .unwrap();
     map.get_style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert!(frontend.parameters.borrow().is_some());
 
@@ -2307,4 +2308,21 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
     check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
     check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+}
+
+// Port-only: the C++ Map constructor throws for an empty size; the Rust one
+// returns the error.
+#[test]
+fn empty_size_is_an_error() {
+    let _loop = RunLoop::new();
+    let frontend = CapturingFrontend::default();
+    for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
+        let result = Map::with_file_source(
+            &frontend,
+            Rc::new(StubMapObserver::default()),
+            Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+            MapOptions::new().with_size(size),
+        );
+        assert_eq!(result.err().as_deref(), Some("failed to resize: size is empty"));
+    }
 }

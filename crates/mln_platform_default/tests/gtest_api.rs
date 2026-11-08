@@ -70,7 +70,8 @@ fn recycle_map_update_images() {
         Rc::new(NullMapObserver),
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
-    );
+    )
+    .unwrap();
 
     let load_style = |map: &mut Map, marker_name: &str, marker_path: &str| {
         let source = GeoJSONSource::with_default_options("geometry");
