@@ -22,6 +22,9 @@
 // - Port-only: `request_readback` copies the next presented frame into a
 //   `PremultipliedImage` (the surface is configured with COPY_SRC when the
 //   surface supports it), so a frame can be checked without screenshots.
+//   The copy is mapped asynchronously: natively `swap` waits for it, and in
+//   the browser, where nothing can wait for the GPU, `take_readback` returns
+//   it once the event loop has mapped it.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -103,7 +106,17 @@ pub struct SurfaceState {
     last_swap_time: Cell<Instant>,
 
     readback_requested: Cell<bool>,
+    /// The copy of the frame `request_readback` asked for, until mapped.
+    pending_readback: RefCell<Option<PendingReadback>>,
     readback: RefCell<Option<PremultipliedImage>>,
+}
+
+/// Port-only: a frame copied into a buffer, waiting to be mapped.
+struct PendingReadback {
+    buffer: wgpu::Buffer,
+    bytes_per_row: u32,
+    size: Size,
+    mapped: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>,
 }
 
 impl SurfaceState {
@@ -158,7 +171,11 @@ impl SurfaceState {
                 if let Some(current) = current {
                     if self.readback_requested.get() {
                         self.readback_requested.set(false);
-                        *self.readback.borrow_mut() = self.read_texture(&current.texture.texture);
+                        *self.pending_readback.borrow_mut() = self.copy_texture(&current.texture.texture);
+                        // Natively this waits for the copy; in the browser it
+                        // returns at once and the event loop maps it later.
+                        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+                        self.finish_readback();
                     }
                     drop(current.view);
                     self.queue.present(current.texture);
@@ -316,8 +333,9 @@ impl SurfaceState {
         *self.depth_stencil.borrow_mut() = Some((texture, view));
     }
 
-    /// Port-only: copies the swapchain texture into an RGBA image.
-    fn read_texture(&self, texture: &wgpu::Texture) -> Option<PremultipliedImage> {
+    /// Port-only: copies the swapchain texture into a buffer and starts
+    /// mapping it (`finish_readback` makes the image).
+    fn copy_texture(&self, texture: &wgpu::Texture) -> Option<PendingReadback> {
         if !self.surface_usage.contains(wgpu::TextureUsages::COPY_SRC) {
             Log::warning(Event::Render, "WebGPU: the surface does not support readback (no COPY_SRC)");
             return None;
@@ -346,21 +364,37 @@ impl SurfaceState {
             wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
         );
         self.queue.submit([encoder.finish()]);
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, mapped) = std::sync::mpsc::channel();
         buffer.map_async(wgpu::MapMode::Read, .., move |result| {
             let _ = tx.send(result);
         });
-        if self.device.poll(wgpu::PollType::wait_indefinitely()).is_err() {
-            return None;
+        Some(PendingReadback { buffer, bytes_per_row, size: Size::new(width, height), mapped })
+    }
+
+    /// Port-only: turns the pending copy into an RGBA image once it is
+    /// mapped (drops it if mapping failed).
+    fn finish_readback(&self) {
+        let mut pending = self.pending_readback.borrow_mut();
+        let Some(readback) = pending.take() else {
+            return;
+        };
+        match readback.mapped.try_recv() {
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                *pending = Some(readback);
+                return;
+            }
+            Ok(Ok(())) => {}
+            Ok(Err(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
         }
-        if !matches!(rx.try_recv(), Ok(Ok(()))) {
-            return None;
-        }
+        let PendingReadback { buffer, bytes_per_row, size, .. } = readback;
+        let (width, height) = (size.width, size.height);
         let bgra =
             matches!(self.swap_chain_format, wgpu::TextureFormat::Bgra8Unorm | wgpu::TextureFormat::Bgra8UnormSrgb);
-        let mut image = PremultipliedImage::new(Size::new(width, height));
+        let mut image = PremultipliedImage::new(size);
         {
-            let mapped = buffer.get_mapped_range(..).ok()?;
+            let Ok(mapped) = buffer.get_mapped_range(..) else {
+                return;
+            };
             for y in 0..height as usize {
                 let src = &mapped[y * bytes_per_row as usize..][..width as usize * 4];
                 let dst = &mut image.data[y * width as usize * 4..][..width as usize * 4];
@@ -373,7 +407,7 @@ impl SurfaceState {
             }
         }
         buffer.unmap();
-        Some(image)
+        *self.readback.borrow_mut() = Some(image);
     }
 }
 
@@ -529,15 +563,18 @@ impl SurfaceBackend {
 
     /// Port-only: a backend on a device and surface that the host created,
     /// as maplibre-native-ffi's `mln_map_attach_web_gpu_surface` passes them,
-    /// or a browser's WebGPU through a custom wgpu backend. There is no
-    /// adapter: the surface is configured with `format`, for rendering only,
-    /// and presents in FIFO order, which every surface supports.
+    /// or the browser's WebGPU (wgpu's `webgpu` backend, platform/web).
+    /// There is no adapter: the surface is configured with `format`, for
+    /// rendering, and for readback too if `usages` (what the surface
+    /// supports) has COPY_SRC; it presents in FIFO order, which every
+    /// surface supports.
     pub fn from_host(
         instance: wgpu::Instance,
         device: wgpu::Device,
         queue: wgpu::Queue,
         surface: wgpu::Surface<'static>,
         format: wgpu::TextureFormat,
+        usages: wgpu::TextureUsages,
         framebuffer_size: Size,
     ) -> SurfaceBackend {
         let renderer_backend = RendererBackend::new(ContextMode::Unique);
@@ -556,7 +593,7 @@ impl SurfaceBackend {
             Parts { instance, adapter: None, device, queue, surface },
             SurfaceChoice {
                 swap_chain_format: format,
-                surface_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                surface_usage: wgpu::TextureUsages::RENDER_ATTACHMENT | (usages & wgpu::TextureUsages::COPY_SRC),
                 present_mode: wgpu::PresentMode::Fifo,
                 depth_stencil_format,
             },
@@ -600,6 +637,7 @@ impl SurfaceBackend {
             framebuffer_size: Cell::new(framebuffer_size),
             last_swap_time: Cell::new(Instant::now()),
             readback_requested: Cell::new(false),
+            pending_readback: RefCell::new(None),
             readback: RefCell::new(None),
         });
 
@@ -679,8 +717,11 @@ impl SurfaceBackend {
         self.state.readback_requested.set(true);
     }
 
-    /// Port-only: the frame copied after `request_readback`, once presented.
+    /// Port-only: the frame copied after `request_readback`, once presented
+    /// and mapped (natively at once; in the browser on a later turn of the
+    /// event loop).
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
+        self.state.finish_readback();
         self.state.readback.borrow_mut().take()
     }
 

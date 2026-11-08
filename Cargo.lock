@@ -1781,6 +1781,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-web"
+version = "0.0.10"
+dependencies = [
+ "js-sys",
+ "mln-rs-actor",
+ "mln-rs-gfx",
+ "mln-rs-map",
+ "mln-rs-renderer",
+ "mln-rs-storage",
+ "mln-rs-util",
+ "mln-rs-webgpu",
+ "sqlite-wasm-rs",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "mln-rs-webgpu"
 version = "0.0.10"
 dependencies = [
@@ -2623,7 +2642,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36bd8e29bf08189a005b2df1df99823aa0861cabe9044e5f31ed54ca292ee618"
 dependencies = [
  "cc",
+ "js-sys",
  "rsqlite-vfs",
+ "wasm-bindgen",
 ]
 
 [[package]]

@@ -16,8 +16,8 @@ version:
   `mln-rs-cheap-ruler` and `mln-rs-earcut-test-fixtures`. mln-rs does not
   depend on them.
 
-The other `publish = false` packages (the GLFW app, the expression test
-runner) are not released.
+The other `publish = false` packages (the GLFW app, the browser build in
+platform/web, the expression test runner) are not released.
 
 ## Cutting a release
 

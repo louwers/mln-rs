@@ -9,6 +9,7 @@ resolver = "3"
 members = [
     "crates/*",
     "platform/glfw",
+    "platform/web",
     "tools/bench",
     "tools/expression-test",
     "tools/render-test",
@@ -121,6 +122,9 @@ regex = { version = "1.13.1" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it.
 rusqlite = { version = "0.41.1", features = ["bundled"] }
+# rusqlite's SQLite on wasm32-unknown-unknown; platform/web turns on its host
+# functions (clock, randomness) through wasm-bindgen.
+sqlite-wasm-rs = { version = "0.6.2", features = ["wasm-bindgen"] }
 # preserve_order: rapidjson iterates object members in document order, and
 # the C++ relies on that (style parser, expression error order).
 # float_roundtrip: correctly rounded float parsing, like rapidjson's full
@@ -132,14 +136,20 @@ skrifa = { version = "0.49.0" }
 unicode-bidi = { version = "0.3.18" }
 # HTTP for the online file source (the C++ default platform uses curl).
 ureq = { version = "3.5.1" }
+# platform/web: the browser's API through wasm-bindgen (whose CLI must be
+# this exact version).
+js-sys = { version = "0.3.107" }
+wasm-bindgen = { version = "=0.2.130" }
+wasm-bindgen-futures = { version = "0.4.80" }
+web-sys = { version = "0.3.107", features = ["Headers", "OffscreenCanvas", "Request", "RequestInit", "Response", "console"] }
 # std::time's clocks, which panic on wasm32-unknown-unknown (mln_util::time):
 # performance.now() and Date.now() there, std::time everywhere else.
 web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
-# wgpu-native) onto the Rust implementation of the same API. The default
-# features are off here because Emscripten builds (mln-rs-web) go without
-# them; the crates turn them on for every other target.
-wgpu = { version = "30.0.1", default-features = false }
+# wgpu-native) onto the Rust implementation of the same API. Its default
+# features hold the native backends, and on wasm32-unknown-unknown the
+# browser's WebGPU (platform/web).
+wgpu = { version = "30.0.1" }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
 # with warnings denied in CI (the `lint` job), except the lints whose fix

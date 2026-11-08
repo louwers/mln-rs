@@ -53,10 +53,10 @@ check:
 
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
 # needs the target: `rustup target add wasm32-unknown-unknown`. SQLite builds through sqlite-wasm-rs, which needs a clang
-# that targets wasm32.
-[doc('Check that the libraries build for wasm32-unknown-unknown, as CI does')]
+# that targets wasm32. Clippy, so that platform/web, which only builds there, is linted too.
+[doc('Check that the libraries and platform/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
-    cargo check --target wasm32-unknown-unknown -p {{main_crate}}
+    cargo clippy --target wasm32-unknown-unknown -p {{main_crate}} -p mln-rs-web
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
@@ -149,6 +149,38 @@ get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 [positional-arguments]
 glfw *args:  _dev-shell
     {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-glfw --bin mln-glfw -- "$@"
+
+# wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
+# Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
+# The release build also gets fat LTO, one codegen unit and opt-level "s", and binaryen's wasm-opt (version 130, e.g.
+# `mise use -g aqua:WebAssembly/binaryen@130`) strips its names and other custom sections. Only stripping: wasm-opt's -O
+# levels made the module both bigger after brotli and slower to load (platform/web/README.md). Serve platform/web/web over
+# HTTP, e.g. `python3 -m http.server -d platform/web/web`, and open it in a browser with WebGPU.
+[doc('Build the browser build (the map and its tile workers in Web Workers) into platform/web/web/pkg')]
+web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ {{quote(profile)}} == release ]]; then
+      # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
+      export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+    fi
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web
+    target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
+    pkg=platform/web/web/pkg
+    wasm-bindgen --target web --out-dir "$pkg" "$target/mln_web.wasm"
+    if [[ {{quote(profile)}} != dev ]]; then
+      command -v wasm-opt > /dev/null ||
+        { echo "error: wasm-opt not found: put binaryen 130 on the PATH (platform/web/README.md)" >&2; exit 1; }
+      wasm-opt --strip-debug --strip-producers --strip-target-features "$pkg/mln_web_bg.wasm" -o "$pkg/mln_web_bg.wasm"
+    fi
+
+# Needs the network (OpenFreeMap), Chromium (`--chromium`) and lavapipe (VK_DRIVER_FILES); builds the native render-test runner.
+# Arguments go to platform/web/check/check.mjs, e.g. `just profile=release web-check --workers 4`.
+[doc('Load OpenFreeMap views in headless Chromium and compare the frames with native renders (platform/web/README.md)')]
+[positional-arguments]
+web-check *args:  web
+    cargo build -p mln-rs-render-test --bin render-test
+    node platform/web/check/check.mjs "$@"
 
 # Report which C++ gtests have Rust ports (`// gtest: Group.Name` markers), e.g. `just gtest-parity --missing util`
 [positional-arguments]
