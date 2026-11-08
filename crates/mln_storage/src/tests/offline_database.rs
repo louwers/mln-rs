@@ -284,6 +284,22 @@ fn put_does_not_store_server_errors() {
     check_log_empty(&log);
 }
 
+// Port-only: C++ dereferences a tile resource's tile data unchecked; one
+// built without it is stored and found by its URL.
+#[test]
+fn tile_resource_without_tile_data() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+
+    let resource = Resource::new(Kind::Tile, "http://example.com/0/0/0.pbf");
+    let mut response = Response::new();
+    response.data = data("tile");
+    assert!(db.put(&resource, &response).0);
+    assert_eq!(b"tile", db.get(&resource).expect("response").data.unwrap().as_slice());
+
+    check_log_empty(&log);
+}
+
 // gtest: OfflineDatabase.PutResource
 #[test]
 fn put_resource() {

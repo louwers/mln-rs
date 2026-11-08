@@ -319,7 +319,8 @@ impl MBTilesFileSourceThread {
         let base_path = url_to_path(&resource.url);
         let path = db_path(&base_path).to_vec();
 
-        let tile_data = resource.tile_data.as_ref().expect("tile resource without tile data");
+        // C++ dereferences `resource.tileData` unchecked.
+        let tile_data = resource.tile_data.as_ref().ok_or("tile resource without tile data")?;
         let iy = tile_data.y;
         let iz = i32::from(tile_data.z as u8);
 

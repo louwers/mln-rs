@@ -266,7 +266,7 @@ impl State {
                     resource.loading_method = LoadingMethod::All;
                     resource.data_range = Some((
                         header.json_metadata_offset,
-                        header.json_metadata_offset + header.json_metadata_bytes - 1,
+                        header.json_metadata_offset.wrapping_add(header.json_metadata_bytes).wrapping_sub(1),
                     ));
 
                     let callback = callback.clone();
@@ -287,7 +287,10 @@ impl State {
                                 format!(
                                     "PMTiles metadata response has no data (range={}-{})",
                                     header.json_metadata_offset,
-                                    header.json_metadata_offset + header.json_metadata_bytes - 1
+                                    header
+                                        .json_metadata_offset
+                                        .wrapping_add(header.json_metadata_bytes)
+                                        .wrapping_sub(1)
                                 ),
                             ));
                             return;
@@ -525,7 +528,13 @@ impl PMTilesFileSourceThread {
     /// Load data for specific tile
     pub fn request_tile(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let url = extract_url(&resource.url);
-        let tile_data = resource.tile_data.clone().expect("tile resource without tile data");
+        // C++ dereferences `resource.tileData` unchecked.
+        let Some(tile_data) = resource.tile_data.clone() else {
+            let mut response = Response::new();
+            response.error = Some(Box::new(Error::new(Reason::Other, "tile resource without tile data")));
+            send(r, response);
+            return;
+        };
 
         let (this, r, url2) = (self.state.clone(), r.clone(), url.clone());
         self.state.get_header(
