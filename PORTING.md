@@ -64,8 +64,14 @@ everyone working in this repo).
 - GPU tests need an adapter: Metal on macOS, Vulkan on Linux (lavapipe
   through `VK_DRIVER_FILES` without a GPU). On NixOS, the justfile runs the
   tests and the apps inside the C++ repo's `#linux` dev shell.
+- `just ratchet` (in `just ci-lint`) counts, per file, the panic sites in
+  the libraries' non-test code (`unwrap`, `expect`, `panic!`, ...) and the
+  `TODO(port)` comments, against `tools/ratchet/baseline.toml`, whose counts
+  only fall. Where C++ throws, return the error; when you remove panics or
+  TODOs, `just ratchet --update` lowers the baseline. A change that must add
+  one raises its file's count by hand, so the review sees it.
 - CI runs the justfile's `ci-*` recipes: `just ci-lint` checks the
-  formatting, and runs clippy and rustdoc with warnings as errors;
+  formatting and the ratchet, and runs clippy and rustdoc with warnings as errors;
   `just ci-coverage` runs the tests and writes their coverage for Codecov.
 
 ## Differential tests (`//difftest/<area>`)
