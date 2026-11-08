@@ -305,12 +305,14 @@ impl TestRunnerImpl for Impl {
             None => None,
         };
         let options = mln_renderer::query::RenderedQueryOptions::new(options.layer_ids.clone(), filter);
-        Ok(self.frontend.with_renderer(|renderer| match geometry {
-            QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),
-            QueryGeometry::Box(screen_box) => {
-                renderer.query_rendered_features_in_box(&screen_box.min, &screen_box.max, &options)
-            }
-        }))
+        self.frontend
+            .with_renderer(|renderer| match geometry {
+                QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),
+                QueryGeometry::Box(screen_box) => {
+                    renderer.query_rendered_features_in_box(&screen_box.min, &screen_box.max, &options)
+                }
+            })
+            .map_err(|e| MapError::Exception(e.to_string()))
     }
 
     // conformance: setTileLod* (Map::setTileLod*, glfw ported them).

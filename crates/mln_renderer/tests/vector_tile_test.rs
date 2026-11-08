@@ -107,5 +107,6 @@ fn issue_8542() {
 
     // Query before data is set
     let mut result = Vec::new();
-    tile.query_source_features(&mut result, &SourceQueryOptions::new(Some(vec!["layer".to_owned()]), None), None);
+    tile.query_source_features(&mut result, &SourceQueryOptions::new(Some(vec!["layer".to_owned()]), None), None)
+        .unwrap();
 }

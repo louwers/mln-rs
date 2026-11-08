@@ -133,7 +133,7 @@ impl Tile for VectorTile {
         global_state: Option<&GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
         feature_state: &crate::source_state::SourceFeatureState,
-    ) {
+    ) -> Result<(), mln_util::exception::ExceptionPtr> {
         self.tile.query_rendered_features(
             result,
             query_geometry,
@@ -143,7 +143,7 @@ impl Tile for VectorTile {
             global_state,
             proj_matrix,
             feature_state,
-        );
+        )
     }
 
     fn query_source_features(
@@ -151,8 +151,8 @@ impl Tile for VectorTile {
         result: &mut Vec<mln_util::feature::Feature>,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
-    ) {
-        self.tile.query_source_features(result, options, global_state);
+    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+        self.tile.query_source_features(result, options, global_state)
     }
 
     fn get_query_padding(&self, layers: &crate::geometry::feature_index::QueryLayers<'_>) -> f32 {

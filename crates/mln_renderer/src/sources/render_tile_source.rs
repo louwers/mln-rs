@@ -507,7 +507,7 @@ impl RenderTileSource {
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
-    ) -> crate::geometry::feature_index::QueryResults {
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::exception::ExceptionPtr> {
         self.tile_pyramid.query_rendered_features(
             geometry,
             transform_state,
@@ -524,7 +524,7 @@ impl RenderTileSource {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         self.tile_pyramid.query_source_features(options, global_state)
     }
 

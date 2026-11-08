@@ -50,12 +50,12 @@ impl QueryTest {
 
     /// `frontend.getRenderer()->queryRenderedFeatures(point, options)`.
     fn query_rendered_features(&self, point: &ScreenCoordinate, options: &RenderedQueryOptions) -> Vec<Feature> {
-        self.0.frontend.with_renderer(|renderer| renderer.query_rendered_features_at_point(point, options))
+        self.0.frontend.with_renderer(|renderer| renderer.query_rendered_features_at_point(point, options)).unwrap()
     }
 
     /// `frontend.getRenderer()->querySourceFeatures(sourceID, options)`.
     fn query_source_features(&self, source_id: &str, options: &SourceQueryOptions) -> Vec<Feature> {
-        self.0.frontend.with_renderer(|renderer| renderer.query_source_features(source_id, options))
+        self.0.frontend.with_renderer(|renderer| renderer.query_source_features(source_id, options)).unwrap()
     }
 
     fn set_global_state_property(&self, name: &str, value: &str) {

@@ -379,3 +379,23 @@ proptest! {
         prop_assert_ne!(outcome, Outcome::Error("timeout".to_owned()));
     }
 }
+
+// C++ throws out of querySourceFeatures for a value it can't read
+// (convertFeature reads the properties, where `values.at` throws
+// std::out_of_range); the port returns it.
+#[test]
+fn query_of_a_bad_value_is_an_error() {
+    use mln_tile_id::GeometryTileData;
+    let data = mln_tile::VectorMVTTileData::new(Arc::new(tile_with_bad_value()));
+    let layer = data.get_layer("l").unwrap().unwrap();
+    let mut result = Vec::new();
+    let error = mln_renderer::tile::geometry_tile::query_layer_source_features(
+        &*layer,
+        &mut result,
+        &mln_renderer::query::SourceQueryOptions::default(),
+        None,
+        &OverscaledTileID::from_zxy(0, 0, 0),
+    )
+    .unwrap_err();
+    assert_eq!(error.to_string(), "vector::_M_range_check: __n (which is 7) >= this->size() (which is 2)");
+}

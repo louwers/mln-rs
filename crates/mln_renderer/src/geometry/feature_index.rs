@@ -22,9 +22,9 @@ use mln_style_types::TranslateAnchorType;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
+use mln_util::exception::ExceptionPtr;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
-use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
 
 use crate::query::RenderedQueryOptions;
@@ -228,9 +228,9 @@ impl FeatureIndex {
         layers: &QueryLayers<'_>,
         additional_query_padding: f32,
         source_feature_state: &SourceFeatureState,
-    ) {
+    ) -> Result<(), ExceptionPtr> {
         if self.tile_data.is_none() {
-            return;
+            return Ok(());
         }
 
         // Determine query radius
@@ -243,7 +243,7 @@ impl FeatureIndex {
 
         // Query the grid index
         let Some((min, max)) = envelope(query_geometry.iter().copied()) else {
-            return;
+            return Ok(());
         };
         // `box.min - additionalPadding` is Point<int16_t> arithmetic.
         let query_box = BBox::new(
@@ -281,8 +281,9 @@ impl FeatureIndex {
                 pixels_to_tile_units,
                 pos_matrix,
                 Some(source_feature_state),
-            );
+            )?;
         }
+        Ok(())
     }
 
     /// `lookupSymbolFeatures(symbolFeatures, options, globalState, layers,
@@ -295,10 +296,10 @@ impl FeatureIndex {
         layers: &QueryLayers<'_>,
         tile_id: &OverscaledTileID,
         feature_sort_order: &FeatureSortOrder,
-    ) -> QueryResults {
+    ) -> Result<QueryResults, ExceptionPtr> {
         let mut result = QueryResults::new();
         if self.tile_data.is_none() {
-            return result;
+            return Ok(result);
         }
         let mut sorted_features: Vec<&IndexedSubfeature> = symbol_features.iter().collect();
 
@@ -342,9 +343,9 @@ impl FeatureIndex {
                 0.0,
                 &unused_matrix,
                 None,
-            );
+            )?;
         }
-        result
+        Ok(result)
     }
 
     /// `addFeature(result, indexedFeature, options, globalState, tileID,
@@ -366,31 +367,27 @@ impl FeatureIndex {
         pixels_to_tile_units: f32,
         pos_matrix: &Mat4,
         source_feature_state: Option<&SourceFeatureState>,
-    ) {
+    ) -> Result<(), ExceptionPtr> {
         let Some(tile_data) = &self.tile_data else {
-            return;
+            return Ok(());
         };
         // C++ `bucketLayerIDs.at(..)` throws for an unknown leader.
         let Some(layer_ids) = self.bucket_layer_ids.get(bucket_leader_id) else {
             debug_assert!(false, "unknown bucket leader {bucket_leader_id}");
-            return;
+            return Ok(());
         };
 
         // C++ fetches the source layer, the feature and its state lazily, at
         // the first of the bucket's layers that is queried; they are the
         // same for every layer.
         if !layer_ids.iter().any(|layer_id| layers.contains_key(layer_id)) {
-            return;
+            return Ok(());
         }
-        // The worker got the layer and the feature from the same data.
-        let Ok(Some(source_layer)) = tile_data.get_layer(source_layer_name) else {
+        let Some(source_layer) = tile_data.get_layer(source_layer_name)? else {
             debug_assert!(false, "source layer {source_layer_name} missing");
-            return;
+            return Ok(());
         };
-        let Ok(feature) = source_layer.get_feature(index) else {
-            debug_assert!(false, "feature {index} of {source_layer_name} missing");
-            return;
-        };
+        let feature = source_layer.get_feature(index)?;
         let source_layer_id = source_layer.get_name();
         let mut state = FeatureState::default();
         if let Some(source_feature_state) = source_feature_state {
@@ -406,8 +403,8 @@ impl FeatureIndex {
 
             let needs_cross_tile_index = render_layer.base().base_impl.get_type_info().cross_tile_index
                 == layer_type_info::CrossTileIndex::Required;
-            if !needs_cross_tile_index
-                && !render_layer.query_intersects_feature(
+            let intersects = needs_cross_tile_index
+                || render_layer.query_intersects_feature(
                     query_geometry,
                     &*feature,
                     f32::from(tile_id.z),
@@ -415,35 +412,34 @@ impl FeatureIndex {
                     pixels_to_tile_units,
                     pos_matrix,
                     &state,
-                )
-            {
+                );
+            feature.check()?;
+            if !intersects {
                 continue;
             }
 
             if let Some(filter) = &options.filter {
                 let context = EvaluationContext::with_zoom_feature(f32::from(tile_id.z), Some(&*feature))
                     .with_global_state(global_state);
-                if !filter.evaluate(&context) {
+                let passes = filter.evaluate(&context);
+                feature.check()?;
+                if !passes {
                     continue;
                 }
             }
 
-            // C++ `convertFeature` throws on malformed geometry (uncaught).
-            let Ok(converted) = mln_tile::geometry_tile_data::convert_feature(&*feature, tile_id) else {
-                continue;
-            };
-            // C++ throws out of the query for a malformed value or geometry
-            // too; skipped in the same way.
-            if let Err(error) = feature.check() {
-                Log::error(Event::ParseTile, error.to_string());
-                continue;
-            }
+            // C++ throws out of the query for a malformed geometry (from
+            // `convertFeature`) or value.
+            let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, tile_id)
+                .map_err(|e| Arc::new(e) as ExceptionPtr)?;
+            feature.check()?;
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().base_impl.source.clone();
             converted.source_layer = source_layer_id.clone();
             converted.state = state.clone();
             result.entry(layer_id.clone()).or_default().push(converted);
         }
+        Ok(())
     }
 
     /// `translateQueryGeometry(queryGeometry, translate, anchorType, bearing,

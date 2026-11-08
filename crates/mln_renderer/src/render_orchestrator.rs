@@ -29,7 +29,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionOptions, TransitionParam
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::exception::ExceptionPtr;
+use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -1110,12 +1110,13 @@ impl RenderOrchestrator {
     }
 
     // query
-    /// `queryRenderedFeatures(geometry, options)`.
+    /// `queryRenderedFeatures(geometry, options)`. `Err`: the exception C++
+    /// throws out of the query (a malformed tile).
     pub fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
         let render_layers: Vec<&crate::render_layer::RenderLayerPtr> = match &options.layer_ids {
             Some(layer_ids) => layer_ids.iter().filter_map(|id| self.render_layers.get(id)).collect(),
             None => self.render_layers.values().collect(),
@@ -1137,7 +1138,7 @@ impl RenderOrchestrator {
         geometry: &[mln_util::geo::ScreenCoordinate],
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
-    ) {
+    ) -> Result<(), ExceptionPtr> {
         let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> = layers
             .iter()
             .filter(|(_, layer)| {
@@ -1147,17 +1148,14 @@ impl RenderOrchestrator {
             .collect();
 
         if cross_tile_symbol_index_layers.is_empty() {
-            return;
+            return Ok(());
         }
         let placement = self.placement_controller.get_placement();
         let mut rendered_symbols = placement.get_collision_index().query_rendered_symbols(&geometry.to_vec());
         let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
         for bucket_instance_id in rendered_symbols.keys() {
-            // C++ `getQueryData` throws for an unknown bucket (uncaught).
-            match placement.get_query_data(*bucket_instance_id) {
-                Ok(query_data) => bucket_query_data.push(query_data),
-                Err(e) => Log::error(Event::General, e),
-            }
+            // C++ `getQueryData` throws for an unknown bucket.
+            bucket_query_data.push(placement.get_query_data(*bucket_instance_id).map_err(RuntimeError::ptr)?);
         }
         // Although symbol query is global, symbol results are only sortable within
         // a bucket For a predictable global sort renderItems, we sort the buckets
@@ -1183,12 +1181,13 @@ impl RenderOrchestrator {
                 &cross_tile_symbol_index_layers,
                 &query_data.tile_id,
                 &query_data.feature_sort_order.borrow().clone(),
-            );
+            )?;
 
             for (layer_id, features) in bucket_symbols {
                 results_by_layer.entry(layer_id).or_default().extend(features);
             }
         }
+        Ok(())
     }
 
     /// `queryRenderedFeatures(geometry, options, layers)`.
@@ -1197,7 +1196,7 @@ impl RenderOrchestrator {
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
         let mut source_ids: BTreeSet<String> = BTreeSet::new();
         let mut filtered_layers = crate::geometry::feature_index::QueryLayers::new();
         for (id, layer) in layers {
@@ -1221,14 +1220,14 @@ impl RenderOrchestrator {
                     options,
                     self.global_state.as_deref(),
                     &proj_matrix,
-                );
+                )?;
                 for (layer_id, features) in source_results {
                     results_by_layer.entry(layer_id).or_insert(features);
                 }
             }
         }
 
-        self.query_rendered_symbols(&mut results_by_layer, geometry, &filtered_layers, options);
+        self.query_rendered_symbols(&mut results_by_layer, geometry, &filtered_layers, options)?;
 
         // TODO(port): DynamicFeatureIndex (populateDynamicRenderFeatureIndex,
         // only the location indicator layer fills it).
@@ -1236,7 +1235,7 @@ impl RenderOrchestrator {
         let mut result = Vec::new();
 
         if results_by_layer.is_empty() {
-            return result;
+            return Ok(result);
         }
 
         // Combine all results based on the style layer renderItems.
@@ -1252,7 +1251,7 @@ impl RenderOrchestrator {
             }
         }
 
-        result
+        Ok(result)
     }
 
     /// `getPlacedSymbolsData()` (a copy: the placement is shared).
@@ -1260,14 +1259,15 @@ impl RenderOrchestrator {
         self.placement_controller.get_placement().get_placed_symbols_data().to_vec()
     }
 
-    /// `querySourceFeatures(sourceID, options)`.
+    /// `querySourceFeatures(sourceID, options)`. `Err`: as
+    /// [`query_rendered_features`](Self::query_rendered_features).
     pub fn query_source_features(
         &self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
         let Some(source) = self.get_render_source(source_id) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
 
         source.query_source_features(options, self.global_state.as_deref())
