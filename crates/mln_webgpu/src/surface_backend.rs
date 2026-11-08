@@ -26,7 +26,7 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use mln_gfx::context::Context as GfxContext;
 use mln_gfx::renderable::{Renderable, RenderableBase};
@@ -36,6 +36,7 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use crate::renderable_resource::{RenderableResource, RenderableResourceBox};
 use crate::renderer_backend::RendererBackend;

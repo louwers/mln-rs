@@ -7,7 +7,7 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 use feature::Feature;
 use geojson::GeoJSON;
@@ -19,7 +19,6 @@ use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-use mln_util::sync::MutexExt;
 
 use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
@@ -131,35 +130,6 @@ pub fn create_geojson_data(
     geojson_source_impl::create(geojson, sequenced_scheduler, options)
 }
 
-/// `Scheduler::GetSequenced()`: one of up to ten single-threaded schedulers,
-/// handed out round robin and kept alive by their users.
-// TODO(port): belongs in mln_actor::scheduler (actor/scheduler.cpp).
-pub fn get_sequenced() -> SchedulerPtr {
-    const SCHEDULERS_COUNT: usize = 10;
-    struct State {
-        weaks: Vec<std::sync::Weak<dyn mln_actor::Scheduler + Send + Sync>>,
-        last_used_index: usize,
-    }
-    static STATE: Mutex<Option<State>> = Mutex::new(None);
-    let mut guard = STATE.lock_unpoisoned();
-    let state = guard.get_or_insert_with(|| State { weaks: Vec::new(), last_used_index: 0 });
-    if state.weaks.is_empty() {
-        for _ in 0..SCHEDULERS_COUNT {
-            let weak: std::sync::Weak<mln_actor::thread_pool::ThreadedScheduler> = std::sync::Weak::new();
-            state.weaks.push(weak);
-        }
-    }
-
-    state.last_used_index = (state.last_used_index + 1) % SCHEDULERS_COUNT;
-    let index = state.last_used_index;
-    if let Some(result) = state.weaks[index].upgrade() {
-        return result;
-    }
-    let result: SchedulerPtr = Arc::new(mln_actor::thread_pool::ThreadedScheduler::new(1));
-    state.weaks[index] = Arc::downgrade(&result);
-    result
-}
-
 struct Inner {
     base: SourceBase,
     url: RefCell<Option<String>>,
@@ -196,7 +166,7 @@ impl GeoJSONSource {
                 url: RefCell::new(None),
                 req: RefCell::new(None),
                 request_generation: Cell::new(0),
-                sequenced_scheduler: get_sequenced(),
+                sequenced_scheduler: scheduler::get_sequenced(),
                 background: scheduler::get_background(),
             }),
         }

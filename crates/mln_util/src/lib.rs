@@ -48,6 +48,7 @@ pub mod string_indexer;
 pub mod sync;
 pub mod tile_server_options;
 pub mod tileset;
+pub mod time;
 pub mod tiny_sdf;
 pub mod tiny_unordered_map;
 pub mod token;

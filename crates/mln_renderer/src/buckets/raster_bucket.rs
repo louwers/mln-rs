@@ -12,7 +12,6 @@
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -21,6 +20,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
 use mln_util::sync::MutexExt;
+use mln_util::time::Instant;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::tile_mask::TileMask;

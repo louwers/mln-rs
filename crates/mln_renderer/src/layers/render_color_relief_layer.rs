@@ -15,7 +15,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shaders::color_relief_layer_ubo::ColorReliefTilePropsUBO;
@@ -43,6 +42,7 @@ use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use super::color_relief_layer_tweaker::{ColorReliefDrawableData, ColorReliefLayerTweaker};
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};

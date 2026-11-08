@@ -21,6 +21,7 @@ feature.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
 rapidjson.workspace = true
+web-time.workspace = true
 
 # Ported C++ gtests of test/util (markers `// gtest: Group.Name`), for
 # mln_util and the low crates next to it.

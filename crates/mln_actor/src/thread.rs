@@ -12,6 +12,12 @@
 // TODO(port): the thread priority setters (`makeThreadPrioritySetter`,
 // platform settings) and `platform::attachThread`/`detachThread` (no-ops on
 // Linux).
+//
+// Port-only: with a cooperative scheduler installed (a host without threads,
+// see cooperative_scheduler.rs) no thread starts: the object is established
+// on the creating thread's RunLoop, which the host drives, and its messages
+// run there. `pause` and `resume` do nothing then (pausing would block the
+// only thread).
 
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::thread::JoinHandle;
@@ -20,23 +26,39 @@ use mln_util::sync::MutexExt;
 
 use crate::actor_ref::ActorRef;
 use crate::established_actor::{AspiringActor, EstablishedActor};
+use crate::local_object::LocalObject;
 use crate::run_loop::{Priority, RunLoop, RunLoopHandle};
 use crate::scheduler;
 
 /// `util::Thread<Object>`.
 pub struct Thread<O: 'static> {
     object: AspiringActor<O>,
-    thread: Option<JoinHandle<()>>,
-    /// `running`: the child's loop, once its object is established.
-    running: Mutex<Option<mpsc::Receiver<RunLoopHandle>>>,
-    run_loop: OnceLock<RunLoopHandle>,
-    paused: Mutex<Option<mpsc::Sender<()>>>,
+    backing: Backing<O>,
+}
+
+/// Where the object lives.
+enum Backing<O: 'static> {
+    /// On a thread of its own (C++).
+    Spawned {
+        thread: Option<JoinHandle<()>>,
+        /// `running`: the child's loop, once its object is established.
+        running: Mutex<Option<mpsc::Receiver<RunLoopHandle>>>,
+        run_loop: OnceLock<RunLoopHandle>,
+        paused: Mutex<Option<mpsc::Sender<()>>>,
+    },
+    /// Port-only: on the creating thread, with a cooperative scheduler.
+    /// Dropping it drops the object.
+    Local { _established: LocalObject<EstablishedActor<O>> },
 }
 
 impl<O: 'static> Thread<O> {
     /// `Thread(name, args...)`.
     pub fn new(name: &str, make: impl FnOnce(ActorRef<O>) -> O + Send + 'static) -> Self {
         let object = AspiringActor::<O>::new();
+        if scheduler::cooperative().is_some() {
+            let established = EstablishedActor::new(&scheduler::get_current(), &object, make);
+            return Thread { object, backing: Backing::Local { _established: LocalObject::new(established) } };
+        }
         let mailbox = object.mailbox.clone();
         let (running_tx, running_rx) = mpsc::channel::<RunLoopHandle>();
         let thread = std::thread::Builder::new()
@@ -52,19 +74,13 @@ impl<O: 'static> Thread<O> {
             .expect("failed to spawn thread");
         Thread {
             object,
-            thread: Some(thread),
-            running: Mutex::new(Some(running_rx)),
-            run_loop: OnceLock::new(),
-            paused: Mutex::new(None),
+            backing: Backing::Spawned {
+                thread: Some(thread),
+                running: Mutex::new(Some(running_rx)),
+                run_loop: OnceLock::new(),
+                paused: Mutex::new(None),
+            },
         }
-    }
-
-    /// `running.wait()`, then the child's `loop`.
-    fn run_loop(&self) -> &RunLoopHandle {
-        self.run_loop.get_or_init(|| {
-            let running = self.running.lock_unpoisoned().take().expect("running");
-            running.recv().expect("thread failed to start")
-        })
     }
 
     /// `actor()`: a reference to the object on the thread. Messages sent
@@ -76,11 +92,14 @@ impl<O: 'static> Thread<O> {
     /// `pause()`: blocks the thread's loop (high priority task) until
     /// `resume()`.
     pub fn pause(&self) {
-        let mut paused = self.paused.lock_unpoisoned();
+        let Backing::Spawned { running, run_loop, paused, .. } = &self.backing else {
+            return;
+        };
+        let mut paused = paused.lock_unpoisoned();
         assert!(paused.is_none());
         let (paused_tx, paused_rx) = mpsc::channel::<()>();
         let (resumed_tx, resumed_rx) = mpsc::channel::<()>();
-        self.run_loop().invoke_with_priority(Priority::High, move || {
+        child_loop(running, run_loop).invoke_with_priority(Priority::High, move || {
             let _ = paused_tx.send(());
             let _ = resumed_rx.recv();
         });
@@ -90,7 +109,10 @@ impl<O: 'static> Thread<O> {
 
     /// `resume()`.
     pub fn resume(&self) {
-        let resumed = self.paused.lock_unpoisoned().take();
+        let Backing::Spawned { paused, .. } = &self.backing else {
+            return;
+        };
+        let resumed = paused.lock_unpoisoned().take();
         assert!(resumed.is_some());
         if let Some(resumed) = resumed {
             let _ = resumed.send(());
@@ -98,21 +120,37 @@ impl<O: 'static> Thread<O> {
     }
 }
 
+/// `running.wait()`, then the child's `loop`.
+fn child_loop<'a>(
+    running: &Mutex<Option<mpsc::Receiver<RunLoopHandle>>>,
+    run_loop: &'a OnceLock<RunLoopHandle>,
+) -> &'a RunLoopHandle {
+    run_loop.get_or_init(|| {
+        let running = running.lock_unpoisoned().take().expect("running");
+        running.recv().expect("thread failed to start")
+    })
+}
+
 impl<O: 'static> Drop for Thread<O> {
     /// `~Thread()`: resume if paused, wait for the queue up to here, stop
     /// the loop and join.
     fn drop(&mut self) {
-        if self.paused.lock_unpoisoned().is_some() {
-            self.resume();
+        if let Backing::Spawned { paused, .. } = &self.backing {
+            if paused.lock_unpoisoned().is_some() {
+                self.resume();
+            }
         }
+        let Backing::Spawned { thread, running, run_loop, .. } = &mut self.backing else {
+            return;
+        };
         let (stoppable_tx, stoppable_rx) = mpsc::channel::<()>();
-        let run_loop = self.run_loop().clone();
+        let run_loop = child_loop(running, run_loop).clone();
         run_loop.invoke(move || {
             let _ = stoppable_tx.send(());
         });
         let _ = stoppable_rx.recv();
         run_loop.stop();
-        if let Some(thread) = self.thread.take() {
+        if let Some(thread) = thread.take() {
             let _ = thread.join();
         }
     }

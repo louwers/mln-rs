@@ -112,10 +112,10 @@ impl Core {
     }
 
     /// `wait`, but returns at `deadline` at the latest.
-    fn wait_until(&self, deadline: std::time::Instant) {
+    fn wait_until(&self, deadline: mln_util::time::Instant) {
         let mut signalled = self.signal.lock_unpoisoned();
         while !*signalled {
-            let now = std::time::Instant::now();
+            let now = mln_util::time::Instant::now();
             if now >= deadline {
                 return;
             }
@@ -256,7 +256,9 @@ impl RunLoop {
         }
     }
 
-    /// `run()`: `uv_run(loop, UV_RUN_DEFAULT)` until `stop()`.
+    /// `run()`: `uv_run(loop, UV_RUN_DEFAULT)` until `stop()`. It blocks, so
+    /// a host that runs on the browser's event loop doesn't call it: it
+    /// drives the loop with `run_once` instead (see `set_waker`).
     pub fn run(&self) {
         let core = &self.inner.core;
         core.stopped.store(false, Ordering::SeqCst);
@@ -275,7 +277,7 @@ impl RunLoop {
     /// `uv__run_timers`: runs the timers that are due, earliest first (ties
     /// in start order). A callback may stop, restart or drop any timer.
     fn run_timers(&self) {
-        let now = std::time::Instant::now();
+        let now = mln_util::time::Instant::now();
         let mut due: Vec<Rc<TimerHandle>> = {
             let mut timers = self.inner.timers.borrow_mut();
             timers.retain(|t| t.strong_count() > 0);
@@ -291,7 +293,7 @@ impl RunLoop {
     }
 
     /// The earliest due time of this loop's running timers.
-    fn next_timer_due(&self) -> Option<std::time::Instant> {
+    fn next_timer_due(&self) -> Option<mln_util::time::Instant> {
         self.inner.timers.borrow().iter().filter_map(Weak::upgrade).filter_map(|t| t.due.get()).min()
     }
 

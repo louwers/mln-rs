@@ -6,15 +6,20 @@
 // schedulers that other threads post to live in an `Arc` (a RunLoop's
 // `RunLoopHandle`, a `ThreadPool`).
 //
+// Port-only: a host without threads installs a `CooperativeScheduler` at
+// startup (`install_cooperative`), which `GetBackground` and `GetSequenced`
+// then return (cooperative_scheduler.rs).
+//
 // TODO(port): `runOnRenderThread`/`runRenderJobs`. (gtests-core added
 // `GetSequenced` and `setExceptionHandler`.)
 
 use std::cell::RefCell;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use mln_util::identity::SimpleIdentity;
 use mln_util::sync::MutexExt;
 
+use crate::cooperative_scheduler::CooperativeScheduler;
 use crate::local_object::LocalObject;
 use crate::thread_pool::{SequencedScheduler, ThreadPool};
 
@@ -79,9 +84,33 @@ pub fn try_get_current() -> Option<SchedulerPtr> {
     LOCAL_SCHEDULER.with(|s| s.borrow().clone())
 }
 
+static COOPERATIVE: OnceLock<Arc<CooperativeScheduler>> = OnceLock::new();
+
+/// Port-only: makes `scheduler` run everything that would otherwise run on
+/// threads of its own: the background and sequenced schedulers, and the
+/// objects of `util::Thread`s, which stay on the creating thread's RunLoop
+/// (see cooperative_scheduler.rs). For a host with one thread (the
+/// browser), which runs the tasks with `CooperativeScheduler::run_until`.
+/// It must come before anything gets a scheduler or starts a `Thread`, and
+/// only once.
+pub fn install_cooperative(scheduler: Arc<CooperativeScheduler>) {
+    if COOPERATIVE.set(scheduler).is_err() {
+        panic!("a cooperative scheduler is already installed");
+    }
+}
+
+/// Port-only: the scheduler `install_cooperative` installed, if any.
+pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
+    COOPERATIVE.get()
+}
+
 /// `Scheduler::GetBackground()`: the process-wide thread pool, created on
-/// first use and kept alive by its users.
+/// first use and kept alive by its users (or the installed cooperative
+/// scheduler).
 pub fn get_background() -> SchedulerPtr {
+    if let Some(cooperative) = cooperative() {
+        return cooperative.clone();
+    }
     static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
     let mut weak = WEAK.lock_unpoisoned();
     if let Some(scheduler) = weak.as_ref().and_then(Weak::upgrade) {
@@ -94,8 +123,11 @@ pub fn get_background() -> SchedulerPtr {
 
 /// `Scheduler::GetSequenced()` (gtests-core): one of 10 process-wide
 /// single-thread schedulers, round robin, each created on first use and
-/// kept alive by its users.
+/// kept alive by its users (or the installed cooperative scheduler).
 pub fn get_sequenced() -> SchedulerPtr {
+    if let Some(cooperative) = cooperative() {
+        return cooperative.clone();
+    }
     const SCHEDULERS_COUNT: usize = 10;
     struct State {
         weaks: Vec<Option<Weak<SequencedScheduler>>>,

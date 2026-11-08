@@ -2,11 +2,13 @@
 // platform/default/src/mln/storage/http_file_source.cpp (curl -> ureq).
 //
 // C++ drives a curl multi handle from the requesting thread's RunLoop (socket
-// watches and a timer). ureq is blocking, so each request runs on one of the
-// file source's worker threads, and the result goes back to the requesting
-// thread through a mailbox, where `handleResult` runs the callback as in
-// C++. Dropping the request cancels it: the mailbox closes, so the callback
-// never runs (an in-flight transfer finishes on its worker and is dropped).
+// watches and a timer). Here the file source hands each request to its
+// `HttpTransport`, which finishes it from whatever thread the transfer ends
+// on, and the result goes back to the requesting thread through a mailbox,
+// where `handleResult` runs the callback as in C++. ureq is blocking, so its
+// transport runs each transfer on one of its worker threads. Dropping the
+// request cancels it: the mailbox closes, so the callback never runs (an
+// in-flight transfer finishes and is dropped).
 //
 // Request headers as in C++: `Range` for data ranges, `If-None-Match` from
 // the prior etag, else `If-Modified-Since` from the prior modification date,
@@ -17,8 +19,9 @@
 // Response fields and errors.
 //
 // The transfer itself is an `HttpTransport`: ureq by default, or another HTTP
-// stack a host sets with `set_transport` (mln-rs-web sets the browser's
-// fetch). Where ureq doesn't build (wasm, the browser), there is no default.
+// stack a host sets with `set_transport` (in the browser, its fetch, which
+// finishes requests from the event loop). Where ureq doesn't build (wasm, the
+// browser), there is no default.
 //
 // Differences: ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
@@ -30,7 +33,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_util::chrono::{Timestamp, parse_timestamp_str};
@@ -74,15 +77,9 @@ impl Drop for HTTPRequest {
     }
 }
 
-struct Job {
-    resource: Resource,
-    reply: ActorRef<HTTPRequestState>,
-    cancelled: Arc<AtomicBool>,
-}
-
 /// `HTTPFileSource::Impl`
 struct Impl {
-    jobs: Mutex<mpsc::Sender<Job>>,
+    transport: Arc<dyn HttpTransport>,
     resource_options: Mutex<ResourceOptions>,
     client_options: Mutex<ClientOptions>,
 }
@@ -105,18 +102,45 @@ pub struct Transfer {
     pub body: Result<Vec<u8>, Box<Error>>,
 }
 
-/// How an `HTTPFileSource` performs a request: one blocking transfer, on one
-/// of the file source's worker threads. A transfer that fails before a
-/// response (a connection error) is an `Err`.
-pub trait HttpTransport: Send + Sync {
-    fn transfer(&self, resource: &Resource) -> Result<Transfer, Box<Error>>;
+/// A request an `HTTPFileSource` hands to its transport: the resource to
+/// fetch, and where its response goes.
+pub struct TransferRequest {
+    resource: Resource,
+    reply: ActorRef<HTTPRequestState>,
+    cancelled: Arc<AtomicBool>,
+}
 
-    /// How many transfers run at a time: one worker thread each. By default
-    /// as many as the online file source's default maximum of concurrent
-    /// requests.
-    fn workers(&self) -> u32 {
-        mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS
+impl TransferRequest {
+    pub fn resource(&self) -> &Resource {
+        &self.resource
     }
+
+    /// Whether the request was dropped, so that nobody waits for the
+    /// transfer any more: a transport can skip it.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Finishes the request with the transfer's result (a transfer that
+    /// failed before a response, such as a connection error, is an `Err`):
+    /// builds the response, as the header callback and
+    /// `handleResult(CURLcode)` do, and hands it to the requesting thread,
+    /// unless the request was dropped. Any thread may call it.
+    pub fn finish(self, transfer: Result<Transfer, Box<Error>>) {
+        let response = build_response(&self.resource, transfer);
+        if !self.is_cancelled() {
+            self.reply.invoke(move |request: &HTTPRequestState| request.handle_result(response));
+        }
+    }
+}
+
+/// How an `HTTPFileSource` performs its requests.
+pub trait HttpTransport: Send + Sync {
+    /// Starts the transfer of `request` without blocking the caller, and
+    /// calls `request.finish` once it is done, from any thread (ureq: one
+    /// of its worker threads; a browser's fetch: the event loop). A request
+    /// dropped without `finish` never answers, as if it had been cancelled.
+    fn start(&self, request: TransferRequest);
 }
 
 static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
@@ -146,22 +170,21 @@ fn default_transport() -> Arc<dyn HttpTransport> {
 fn default_transport() -> Arc<dyn HttpTransport> {
     struct NoTransport;
     impl HttpTransport for NoTransport {
-        fn transfer(&self, resource: &Resource) -> Result<Transfer, Box<Error>> {
-            Err(Box::new(Error::new(
-                Reason::Connection,
-                format!("no HTTP transport for {} (see http_file_source::set_transport)", resource.url),
-            )))
+        fn start(&self, request: TransferRequest) {
+            let message =
+                format!("no HTTP transport for {} (see http_file_source::set_transport)", request.resource.url);
+            request.finish(Err(Box::new(Error::new(Reason::Connection, message))));
         }
     }
     Arc::new(NoTransport)
 }
 
-/// The worker half of `HTTPRequest`: performs the transfer and builds the
-/// response as the header callback and `handleResult(CURLcode)` do.
-fn perform(transport: &dyn HttpTransport, resource: &Resource) -> Response {
+/// The response half of `HTTPRequest`, from a finished transfer: the header
+/// callback and `handleResult(CURLcode)`.
+fn build_response(resource: &Resource, transfer: Result<Transfer, Box<Error>>) -> Response {
     // Make sure a response object exists in case we haven't got any headers or content.
     let mut response = Response::new();
-    let transfer = match transport.transfer(resource) {
+    let transfer = match transfer {
         Ok(transfer) => transfer,
         Err(error) => {
             response.error = Some(error);
@@ -221,12 +244,14 @@ fn perform(transport: &dyn HttpTransport, resource: &Resource) -> Response {
     response
 }
 
-/// The `Range` request header for a resource's data range, for transports.
+/// The `Range` request header for a resource's data range, for transports
+/// (`TransferRequest::resource`).
 pub fn range_header(resource: &Resource) -> Option<String> {
     resource.data_range.map(|(first, second)| format!("bytes={first}-{second}"))
 }
 
-/// curl through ureq: blocking transfers on the worker threads.
+/// curl through ureq: blocking transfers, each on one of the transport's
+/// worker threads.
 ///
 /// ureq connects to a host's addresses one after the other and waits for
 /// each, so a host whose first (IPv6) address drops packets stalls every new
@@ -235,7 +260,7 @@ pub fn range_header(resource: &Resource) -> Option<String> {
 #[cfg(not(target_family = "wasm"))]
 mod transport {
     use std::net::SocketAddr;
-    use std::sync::{Arc, mpsc};
+    use std::sync::{Arc, Mutex, mpsc};
     use std::time::Duration;
 
     use mln_util::chrono::rfc1123;
@@ -245,7 +270,7 @@ mod transport {
         Transport as UreqTransport,
     };
 
-    use super::{Transfer, range_header};
+    use super::{Transfer, TransferRequest, range_header};
     use crate::resource::Resource;
     use crate::response::{Error, Reason};
 
@@ -360,8 +385,57 @@ mod transport {
         Ok(())
     }
 
-    #[derive(Clone)]
+    /// The ureq transport: requests wait in a queue for the next free one
+    /// of its worker threads, which runs the transfer. The workers exit when
+    /// the transport is dropped, each after its current transfer.
     pub struct Transport {
+        requests: mpsc::Sender<TransferRequest>,
+    }
+
+    impl Transport {
+        /// Starts as many workers as the online file source's default
+        /// maximum of concurrent requests.
+        pub fn new() -> Self {
+            let client = Arc::new(Client::new());
+            let (requests, receiver) = mpsc::channel::<TransferRequest>();
+            let receiver = Arc::new(Mutex::new(receiver));
+            for i in 0..mln_util::constants::DEFAULT_MAXIMUM_CONCURRENT_REQUESTS {
+                let client = client.clone();
+                let receiver = receiver.clone();
+                // Detached: a worker exits when the channel closes.
+                let _ = std::thread::Builder::new()
+                    .name(format!("HTTPFileSource {i}"))
+                    .spawn(move || worker(&client, &receiver));
+            }
+            Transport { requests }
+        }
+    }
+
+    impl super::HttpTransport for Transport {
+        fn start(&self, request: TransferRequest) {
+            let _ = self.requests.send(request);
+        }
+    }
+
+    fn worker(client: &Client, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
+        loop {
+            let request = match requests.lock() {
+                Ok(receiver) => receiver.recv(),
+                Err(_) => return,
+            };
+            let Ok(request) = request else {
+                return; // the transport is gone
+            };
+            if request.is_cancelled() {
+                continue;
+            }
+            let transfer = client.transfer(request.resource());
+            request.finish(transfer);
+        }
+    }
+
+    /// One blocking transfer at a time, through ureq.
+    struct Client {
         agent: ureq::Agent,
     }
 
@@ -379,14 +453,8 @@ mod transport {
         Box::new(Error::new(reason, error.to_string()))
     }
 
-    impl super::HttpTransport for Transport {
-        fn transfer(&self, resource: &Resource) -> Result<Transfer, Box<Error>> {
-            Transport::transfer(self, resource)
-        }
-    }
-
-    impl Transport {
-        pub fn new() -> Self {
+    impl Client {
+        fn new() -> Self {
             Self::with_parts(TcpConnector::default(), DefaultResolver::default())
         }
 
@@ -402,10 +470,10 @@ mod transport {
                     .chain(HappyEyeballsConnector { per_address: Arc::new(per_address) })
                     .chain(RustlsConnector::default());
             let agent = ureq::Agent::with_parts(config, connector, resolver);
-            Transport { agent }
+            Client { agent }
         }
 
-        pub fn transfer(&self, resource: &Resource) -> Result<Transfer, Box<Error>> {
+        fn transfer(&self, resource: &Resource) -> Result<Transfer, Box<Error>> {
             let mut request = self.agent.get(&resource.url);
             if let Some(range) = range_header(resource) {
                 request = request.header("Range", range);
@@ -520,13 +588,13 @@ mod transport {
             let dropped: Vec<SocketAddr> =
                 vec!["[2001:db8::1]:80".parse().unwrap(), "[2001:db8::2]:80".parse().unwrap()];
             let attempts = Arc::new(Mutex::new(Vec::new()));
-            let transport = Transport::with_parts(
+            let client = Client::with_parts(
                 DroppingConnector { dropped: dropped.clone(), attempts: attempts.clone() },
                 FixedResolver(vec![dropped[0], dropped[1], server]),
             );
 
             let started = Instant::now();
-            let transfer = transport.transfer(&Resource::style("http://mapeak.test/style.json")).unwrap();
+            let transfer = client.transfer(&Resource::style("http://mapeak.test/style.json")).unwrap();
             assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
             assert_eq!(200, transfer.status);
             assert_eq!(b"ok".to_vec(), transfer.body.unwrap());
@@ -537,49 +605,19 @@ mod transport {
     }
 }
 
-fn worker(transport: Arc<dyn HttpTransport>, jobs: Arc<Mutex<mpsc::Receiver<Job>>>) {
-    loop {
-        let job = match jobs.lock() {
-            Ok(receiver) => receiver.recv(),
-            Err(_) => return,
-        };
-        let Ok(job) = job else {
-            return; // the file source is gone
-        };
-        if job.cancelled.load(Ordering::SeqCst) {
-            continue;
-        }
-        let response = perform(transport.as_ref(), &job.resource);
-        if !job.cancelled.load(Ordering::SeqCst) {
-            job.reply.invoke(move |request: &HTTPRequestState| request.handle_result(response));
-        }
-    }
-}
-
 /// `HTTPFileSource`: plain HTTP(S) requests, used by the OnlineFileSource.
 pub struct HTTPFileSource {
     impl_: Impl,
 }
 
 impl HTTPFileSource {
-    /// `HTTPFileSource(const ResourceOptions&, const ClientOptions&)`: starts
-    /// the transfer threads (`HttpTransport::workers`).
+    /// `HTTPFileSource(const ResourceOptions&, const ClientOptions&)`, with
+    /// the transport `set_transport` set, else ureq's (which starts the
+    /// transfer threads).
     pub fn new(resource_options: &ResourceOptions, client_options: &ClientOptions) -> Self {
-        let transport = current_transport();
-        let (sender, receiver) = mpsc::channel::<Job>();
-        let receiver = Arc::new(Mutex::new(receiver));
-        for i in 0..transport.workers() {
-            let transport = transport.clone();
-            let receiver = receiver.clone();
-            // Detached: a worker exits when the channel closes, after its
-            // current transfer.
-            let _ = std::thread::Builder::new()
-                .name(format!("HTTPFileSource {i}"))
-                .spawn(move || worker(transport, receiver));
-        }
         HTTPFileSource {
             impl_: Impl {
-                jobs: Mutex::new(sender),
+                transport: current_transport(),
                 resource_options: Mutex::new(resource_options.clone()),
                 client_options: Mutex::new(client_options.clone()),
             },
@@ -592,8 +630,11 @@ impl HTTPFileSource {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancelled = Arc::new(AtomicBool::new(false));
-        let job = Job { resource: resource.clone(), reply: ActorRef::new(&mailbox), cancelled: cancelled.clone() };
-        let _ = self.impl_.jobs.lock_unpoisoned().send(job);
+        self.impl_.transport.start(TransferRequest {
+            resource: resource.clone(),
+            reply: ActorRef::new(&mailbox),
+            cancelled: cancelled.clone(),
+        });
         Box::new(HTTPRequest { mailbox, cancelled })
     }
 }

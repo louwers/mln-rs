@@ -16,7 +16,6 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shaders::segment::SegmentBase;
@@ -39,6 +38,7 @@ use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use super::hillshade_layer_tweaker::HillshadeLayerTweaker;
 use super::hillshade_prepare_layer_tweaker::{HillshadePrepareDrawableData, HillshadePrepareLayerTweaker};

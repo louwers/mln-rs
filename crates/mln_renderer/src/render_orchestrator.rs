@@ -316,7 +316,7 @@ impl RenderOrchestrator {
     }
 
     pub fn create_render_tree(&mut self, update_parameters: &Arc<UpdateParameters>) -> Option<RenderTree> {
-        let start_time = std::time::Instant::now();
+        let start_time = mln_util::time::Instant::now();
 
         let is_map_mode_continuous = update_parameters.mode == MapMode::Continuous;
         if !is_map_mode_continuous {

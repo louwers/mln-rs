@@ -28,7 +28,7 @@ use mln_style::layers::{
 };
 use mln_style::observer::SourceObserver;
 use mln_style::source::{self, Source};
-use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data, get_sequenced};
+use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
 use mln_style::sources::geojson_source_impl;
 use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 use mln_style_types::SourceType;
@@ -529,7 +529,8 @@ fn geojson_source_tiles_after_data_reset() {
         r#"{"geometry": {"type": "Point", "coordinates": [1.1, 1.1]}, "type": "Feature", "properties": {}}"#,
     )
     .unwrap();
-    let geojson_data = create_geojson_data(&geojson, get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
+    let geojson_data =
+        create_geojson_data(&geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
     source.set_geojson_data(Some(geojson_data.clone()));
     let mut render_source = RenderGeoJSONSource::new(
         source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),

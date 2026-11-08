@@ -127,6 +127,9 @@ skrifa = { version = "0.49.0" }
 unicode-bidi = { version = "0.3.18" }
 # HTTP for the online file source (the C++ default platform uses curl).
 ureq = { version = "3.5.1" }
+# std::time's clocks, which panic on wasm32-unknown-unknown (mln_util::time):
+# performance.now() and Date.now() there, std::time everywhere else.
+web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
 # wgpu-native) onto the Rust implementation of the same API. The default
 # features are off here because Emscripten builds (mln-rs-web) go without

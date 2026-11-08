@@ -240,7 +240,7 @@ impl Shared {
         if let Some(update_parameters) = update_parameters {
             let mut renderer = shared.renderer.borrow_mut();
             if let Some(renderer) = renderer.as_mut() {
-                let start_time = std::time::Instant::now();
+                let start_time = mln_util::time::Instant::now();
                 let backend = shared.backend.clone();
                 let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
 

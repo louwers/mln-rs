@@ -4,7 +4,8 @@
 // helpers of the legacy program path.
 
 use std::any::Any;
-use std::time::Instant;
+
+use mln_util::time::Instant;
 
 use crate::attribute::AttributeBindingArray;
 use crate::context::Context;

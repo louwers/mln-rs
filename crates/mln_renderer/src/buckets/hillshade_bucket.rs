@@ -13,7 +13,6 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::time::Instant;
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -23,6 +22,7 @@ use mln_util::constants;
 use mln_util::image::PremultipliedImage;
 use mln_util::sync::{MutexExt, RwLockExt};
 use mln_util::tileset::RasterEncoding;
+use mln_util::time::Instant;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::geometry::dem_data::DEMData;

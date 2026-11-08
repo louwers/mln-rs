@@ -10,11 +10,11 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::rc::Rc;
-use std::time::Instant;
 
 use geometry::Point;
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
+use mln_util::time::Instant;
 
 use crate::color_mode::ColorMode;
 use crate::cull_face_mode::CullFaceMode;

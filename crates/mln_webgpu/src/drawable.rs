@@ -7,7 +7,6 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use mln_gfx::attribute::AttributeBindingArray;
@@ -31,6 +30,7 @@ use mln_gfx::upload_pass::UploadPass as _;
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::{IndexBuffer as GfxIndexBuffer, UniqueVertexBufferResource};
+use mln_util::time::Instant;
 
 use crate::context::Context;
 use crate::render_pass::RenderPass;

@@ -11,9 +11,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
 
 use mln_util::chrono::Duration;
+use mln_util::time::Instant;
 
 use crate::run_loop::RunLoop;
 

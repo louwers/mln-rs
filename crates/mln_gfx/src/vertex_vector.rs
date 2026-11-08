@@ -3,7 +3,8 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
+
+use mln_util::time::Instant;
 
 /// `gfx::VertexBufferBase`: backend buffer attached to a shared vertex vector.
 pub trait VertexBufferBase: Any {
