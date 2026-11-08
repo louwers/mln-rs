@@ -424,3 +424,12 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
     let img = backend.read_still_image();
     check_halves(&img, [255, 255, 0, 255], [0, 0, 0, 255]);
 }
+
+// Port-only: a zero-size headless backend makes zero-size offscreen
+// textures, a validation error. Dawn (C++) logs it, and so does the port's
+// handler, where wgpu's default one panics.
+#[test]
+fn zero_size_backend_logs_the_validation_error() {
+    let backend = HeadlessBackend::new(Size { width: 0, height: 0 }, SwapBehaviour::NoFlush, ContextMode::Unique);
+    assert!(backend.get_device().is_some(), "no adapter");
+}
