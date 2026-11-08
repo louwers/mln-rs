@@ -30,6 +30,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 use mln_util::size::Size;
+use mln_util::sync::RwLockExt;
 
 use super::line_layer_tweaker::{LineDrawableData, LineLayerTweaker, LineType};
 use super::{
@@ -595,7 +596,7 @@ impl RenderLayer for RenderLineLayer {
             let Some(binders_lock) = bucket.paint_property_binders.get(&layer_id) else {
                 continue;
             };
-            let binders_guard = binders_lock.read().unwrap();
+            let binders_guard = binders_lock.read_unpoisoned();
             let paint_property_binders = &*binders_guard;
             let evaluated = get_evaluated::<LineLayerProperties>(&render_data.layer_properties);
 

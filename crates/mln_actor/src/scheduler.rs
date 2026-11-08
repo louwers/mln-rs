@@ -13,6 +13,7 @@ use std::cell::RefCell;
 use std::sync::{Arc, Mutex, Weak};
 
 use mln_util::identity::SimpleIdentity;
+use mln_util::sync::MutexExt;
 
 use crate::local_object::LocalObject;
 use crate::thread_pool::{SequencedScheduler, ThreadPool};
@@ -82,7 +83,7 @@ pub fn try_get_current() -> Option<SchedulerPtr> {
 /// first use and kept alive by its users.
 pub fn get_background() -> SchedulerPtr {
     static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
-    let mut weak = WEAK.lock().unwrap();
+    let mut weak = WEAK.lock_unpoisoned();
     if let Some(scheduler) = weak.as_ref().and_then(Weak::upgrade) {
         return scheduler;
     }
@@ -101,7 +102,7 @@ pub fn get_sequenced() -> SchedulerPtr {
         last_used_index: usize,
     }
     static STATE: Mutex<State> = Mutex::new(State { weaks: Vec::new(), last_used_index: 0 });
-    let mut state = STATE.lock().unwrap();
+    let mut state = STATE.lock_unpoisoned();
     if state.weaks.is_empty() {
         state.weaks.resize(SCHEDULERS_COUNT, None);
     }

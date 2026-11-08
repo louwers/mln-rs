@@ -16,6 +16,8 @@
 use std::sync::{Mutex, OnceLock, mpsc};
 use std::thread::JoinHandle;
 
+use mln_util::sync::MutexExt;
+
 use crate::actor_ref::ActorRef;
 use crate::established_actor::{AspiringActor, EstablishedActor};
 use crate::run_loop::{Priority, RunLoop, RunLoopHandle};
@@ -60,7 +62,7 @@ impl<O: 'static> Thread<O> {
     /// `running.wait()`, then the child's `loop`.
     fn run_loop(&self) -> &RunLoopHandle {
         self.run_loop.get_or_init(|| {
-            let running = self.running.lock().unwrap().take().expect("running");
+            let running = self.running.lock_unpoisoned().take().expect("running");
             running.recv().expect("thread failed to start")
         })
     }
@@ -74,7 +76,7 @@ impl<O: 'static> Thread<O> {
     /// `pause()`: blocks the thread's loop (high priority task) until
     /// `resume()`.
     pub fn pause(&self) {
-        let mut paused = self.paused.lock().unwrap();
+        let mut paused = self.paused.lock_unpoisoned();
         assert!(paused.is_none());
         let (paused_tx, paused_rx) = mpsc::channel::<()>();
         let (resumed_tx, resumed_rx) = mpsc::channel::<()>();
@@ -88,7 +90,7 @@ impl<O: 'static> Thread<O> {
 
     /// `resume()`.
     pub fn resume(&self) {
-        let resumed = self.paused.lock().unwrap().take();
+        let resumed = self.paused.lock_unpoisoned().take();
         assert!(resumed.is_some());
         if let Some(resumed) = resumed {
             let _ = resumed.send(());
@@ -100,7 +102,7 @@ impl<O: 'static> Drop for Thread<O> {
     /// `~Thread()`: resume if paused, wait for the queue up to here, stop
     /// the loop and join.
     fn drop(&mut self) {
-        if self.paused.lock().unwrap().is_some() {
+        if self.paused.lock_unpoisoned().is_some() {
             self.resume();
         }
         let (stoppable_tx, stoppable_rx) = mpsc::channel::<()>();

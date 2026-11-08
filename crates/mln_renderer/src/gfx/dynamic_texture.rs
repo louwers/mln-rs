@@ -22,6 +22,7 @@ use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
 use mln_util::size::Size;
+use mln_util::sync::MutexExt;
 use shelf_pack::{ShelfPack, ShelfPackOptions};
 
 /// `TextureHandle`: a bin of a dynamic texture.
@@ -131,7 +132,7 @@ impl DynamicTexture {
     /// `getTexture()`: the GPU texture, once `upload_deferred_images` created
     /// it (render thread).
     pub fn get_texture(&self) -> Option<Texture2DPtr> {
-        let gpu_texture = self.gpu_texture.lock().unwrap();
+        let gpu_texture = self.gpu_texture.lock_unpoisoned();
         gpu_texture.as_ref().and_then(|t| t.get()).and_then(|t| t.borrow().clone())
     }
 
@@ -140,12 +141,12 @@ impl DynamicTexture {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.lock().unwrap().num_textures == 0
+        self.inner.lock_unpoisoned().num_textures == 0
     }
 
     /// `reserveSize(size, uniqueId)`.
     pub fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let bin_ref = inner.shelf_pack.pack_one(unique_id, size.width as i32, size.height as i32)?;
         let bin = *inner.shelf_pack.bin(bin_ref);
         if bin.refcount() == 1 {
@@ -166,7 +167,7 @@ impl DynamicTexture {
     /// `uploadImage(pixelData, texHandle)` (webgpu: queue the pixels of the
     /// handle's rectangle for the next upload pass).
     pub fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let rect = tex_handle.rectangle;
         let byte_size = rect.w as usize * rect.h as usize * pixel_stride(self.pixel_format);
         let image_data = pixel_data[..byte_size].to_vec();
@@ -177,7 +178,7 @@ impl DynamicTexture {
     /// `uploadDeferredImages(UploadPass&)`: creates the texture on first use
     /// and uploads the queued images (render thread).
     pub fn upload_deferred_images(&self, context: &dyn Context) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let texture = match self.get_texture() {
             Some(texture) => texture,
             None => {
@@ -194,7 +195,7 @@ impl DynamicTexture {
                     });
                     t.create();
                 }
-                *self.gpu_texture.lock().unwrap() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
+                *self.gpu_texture.lock_unpoisoned() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
                 texture
             }
         };
@@ -207,7 +208,7 @@ impl DynamicTexture {
 
     /// `removeTexture(texHandle)`: true when the bin's last reference went.
     pub fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let Some(bin) = inner.shelf_pack.get_bin(tex_handle.id) else {
             return false;
         };
@@ -223,7 +224,7 @@ impl DynamicTexture {
     /// Drops the render-thread GPU texture (render thread; a no-op
     /// elsewhere).
     pub(crate) fn release_gpu_texture(&self) {
-        let gpu_texture = self.gpu_texture.lock().unwrap().take();
+        let gpu_texture = self.gpu_texture.lock_unpoisoned().take();
         if let Some(gpu_texture) = gpu_texture {
             if let Some(cell) = gpu_texture.get() {
                 cell.borrow_mut().take();

@@ -8,6 +8,7 @@ use mln_style_types::image::RectU16;
 use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
 use mln_util::immutable::Immutable;
+use mln_util::sync::MutexExt;
 
 use crate::tagged_string::FontStackHash;
 
@@ -348,7 +349,7 @@ pub fn gen_new_glyph_id_type(url: &str, font_stack: &FontStack, pairs: &[(u32, u
     }
     let family = font_stack_to_string(font_stack);
 
-    let mut state = GLYPH_TYPES.lock().unwrap_or_else(|e| e.into_inner());
+    let mut state = GLYPH_TYPES.lock_unpoisoned();
     let state = &mut *state;
     let entry = state
         .types

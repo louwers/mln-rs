@@ -17,6 +17,7 @@ use mln_util::constants::TILE_SIZE_D;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use mln_util::sync::RwLockExt;
 
 use super::render_fill_layer::FillVariant;
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
@@ -120,7 +121,7 @@ impl LayerTweaker for FillLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            let binders_guard = binders_lock.read().unwrap();
+            let binders_guard = binders_lock.read_unpoisoned();
             let binders = &*binders_guard;
             let tile = get_drawable_render_tile(drawable);
             debug_assert!(tile.is_some());

@@ -37,6 +37,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
+use mln_util::sync::RwLockExt;
 
 use super::collision_layer_tweaker::{CollisionDrawableData, CollisionLayerTweaker};
 use super::symbol_layer_tweaker::SymbolLayerTweaker;
@@ -400,7 +401,7 @@ fn update_tile_drawable(
             }
             if refresh.binders {
                 if let Some(paint_props) = bucket.paint_properties.get(layer_id) {
-                    let paint_props = paint_props.read().unwrap_or_else(|e| e.into_inner());
+                    let paint_props = paint_props.read_unpoisoned();
                     let mut properties_as_uniforms = StringIDSetsPair::default();
                     set_binder_attributes(is_text, &paint_props, evaluated, &mut attrs, &mut properties_as_uniforms);
                 }
@@ -1114,7 +1115,7 @@ impl RenderLayer for RenderSymbolLayer {
             let Some(bucket_paint_properties) = bucket.paint_properties.get(self.get_id()) else {
                 continue;
             };
-            let bucket_paint_properties = bucket_paint_properties.read().unwrap_or_else(|e| e.into_inner());
+            let bucket_paint_properties = bucket_paint_properties.read_unpoisoned();
 
             let bucket_layout = &*bucket.layout;
             let values = if is_text {

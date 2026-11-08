@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 
 use harfrust::font::{Blob, Font, TableFunction};
 use harfrust::{Buffer, Direction, Feature, Language, Script, ShapeOptions, ShapePlan, ShaperFont, Tag};
+use mln_util::sync::MutexExt;
 
 use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
 use crate::glyph::{Glyph, GlyphID, GlyphIDType};
@@ -115,7 +116,7 @@ impl Impl {
     }
 
     fn plan(&self, font: &Font, script: [u8; 4], language: &Language, features: &[Feature]) -> Arc<ShapePlan> {
-        let mut plans = self.plans.lock().unwrap_or_else(|e| e.into_inner());
+        let mut plans = self.plans.lock_unpoisoned();
         plans
             .entry(script)
             .or_insert_with(|| {

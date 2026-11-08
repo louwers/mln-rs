@@ -19,6 +19,7 @@ use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::sync::MutexExt;
 
 use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
@@ -140,7 +141,7 @@ pub fn get_sequenced() -> SchedulerPtr {
         last_used_index: usize,
     }
     static STATE: Mutex<Option<State>> = Mutex::new(None);
-    let mut guard = STATE.lock().unwrap();
+    let mut guard = STATE.lock_unpoisoned();
     let state = guard.get_or_insert_with(|| State { weaks: Vec::new(), last_used_index: 0 });
     if state.weaks.is_empty() {
         for _ in 0..SCHEDULERS_COUNT {

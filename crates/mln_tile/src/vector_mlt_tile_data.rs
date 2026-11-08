@@ -22,6 +22,7 @@ use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
+use mln_util::sync::MutexExt;
 
 use crate::mlt::{self, Coordinate, MapLibreTile, Property, Shape};
 
@@ -246,7 +247,7 @@ impl VectorMLTTileData {
     /// The decoded tile (`Impl::getLayer`'s decoding step): decodes once,
     /// then drops the raw data.
     pub fn tile(&self) -> Option<Arc<MapLibreTile>> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
         if let Some(data) = &state.data
             && state.tile.is_none()
         {
@@ -270,10 +271,10 @@ impl VectorMLTTileData {
     /// `layerNames()`: in tile order (MVT: sorted), duplicates included.
     pub fn layer_names(&self) -> Vec<String> {
         let decode = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock_unpoisoned();
             state.data.as_ref().is_some_and(|data| !data.is_empty()) && state.tile.is_none()
         };
-        let tile = if decode { self.tile() } else { self.state.lock().unwrap().tile.clone() };
+        let tile = if decode { self.tile() } else { self.state.lock_unpoisoned().tile.clone() };
         match tile {
             Some(tile) => tile.get_layers().iter().map(|layer| layer.get_name().to_string()).collect(),
             None => Vec::new(),
@@ -285,7 +286,7 @@ impl Clone for VectorMLTTileData {
     /// The C++ copy constructor: shares the data and the decoded tile.
     fn clone(&self) -> Self {
         VectorMLTTileData {
-            state: Mutex::new(self.state.lock().unwrap().clone()),
+            state: Mutex::new(self.state.lock_unpoisoned().clone()),
             fast_pfor_enabled: self.fast_pfor_enabled,
         }
     }

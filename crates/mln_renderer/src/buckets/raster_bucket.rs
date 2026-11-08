@@ -20,6 +20,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
+use mln_util::sync::MutexExt;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::tile_mask::TileMask;
@@ -92,7 +93,7 @@ impl RasterBucket {
 
     /// The masked geometry (C++ reads the members directly).
     pub fn geometry(&self) -> MutexGuard<'_, RasterBucketGeometry> {
-        self.geometry.lock().unwrap_or_else(|e| e.into_inner())
+        self.geometry.lock_unpoisoned()
     }
 
     /// `clear()`.

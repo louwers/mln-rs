@@ -21,6 +21,7 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
+use mln_util::sync::{MutexExt, RwLockExt};
 use mln_util::tileset::RasterEncoding;
 
 use crate::bucket::{Bucket, BucketBase};
@@ -94,17 +95,17 @@ impl HillshadeBucket {
 
     /// The masked geometry (C++ reads the members directly).
     pub fn geometry(&self) -> MutexGuard<'_, HillshadeBucketGeometry> {
-        self.geometry.lock().unwrap_or_else(|e| e.into_inner())
+        self.geometry.lock_unpoisoned()
     }
 
     /// `getDEMData() const`.
     pub fn get_dem_data(&self) -> RwLockReadGuard<'_, DEMData> {
-        self.demdata.read().unwrap_or_else(|e| e.into_inner())
+        self.demdata.read_unpoisoned()
     }
 
     /// `getDEMData()`.
     pub fn get_dem_data_mut(&self) -> RwLockWriteGuard<'_, DEMData> {
-        self.demdata.write().unwrap_or_else(|e| e.into_inner())
+        self.demdata.write_unpoisoned()
     }
 
     pub fn is_prepared(&self) -> bool {

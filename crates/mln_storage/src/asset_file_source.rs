@@ -13,6 +13,7 @@ use std::sync::Mutex;
 use mln_actor::{ActorRef, Thread};
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::ASSET_PROTOCOL;
+use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
 
 use crate::async_request::AsyncRequest;
@@ -91,18 +92,18 @@ impl FileSource for AssetFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
+        *self.client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
+        self.client_options.lock_unpoisoned().clone()
     }
 }

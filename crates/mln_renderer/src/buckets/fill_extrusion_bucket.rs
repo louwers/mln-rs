@@ -36,6 +36,7 @@ use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::mat3::{Mat3, matrix as mat3};
+use mln_util::sync::RwLockExt;
 use mln_util::vectors::Vec3f;
 
 use crate::bucket::{Bucket, BucketBase};
@@ -323,7 +324,7 @@ impl Bucket for FillExtrusionBucket {
 
         let length = self.vertices.len();
         for (id, binders) in self.paint_property_binders.iter_mut() {
-            binders.get_mut().unwrap_or_else(|e| e.into_inner()).populate_vertex_vectors(
+            binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -365,7 +366,7 @@ impl Bucket for FillExtrusionBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write().unwrap_or_else(|e| e.into_inner()).update_vertex_vectors(states, layer, image_positions);
+            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

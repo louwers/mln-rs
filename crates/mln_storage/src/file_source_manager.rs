@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use mln_util::client_options::ClientOptions;
 use mln_util::string::to_string_u64;
+use mln_util::sync::MutexExt;
 
 use crate::asset_file_source::AssetFileSource;
 use crate::database_file_source::DatabaseFileSource;
@@ -126,7 +127,7 @@ impl FileSourceManager {
         let id = Self::file_source_id(resource_options);
 
         let factory = {
-            let mut impl_ = self.impl_.lock().unwrap();
+            let mut impl_ = self.impl_.lock_unpoisoned();
 
             // Remove released file sources.
             impl_.file_sources.retain(|info| info.file_source.strong_count() > 0);
@@ -146,7 +147,7 @@ impl FileSourceManager {
         let file_source = factory(resource_options, client_options);
 
         let existing = {
-            let mut impl_ = self.impl_.lock().unwrap();
+            let mut impl_ = self.impl_.lock_unpoisoned();
             let existing = impl_
                 .file_sources
                 .iter()
@@ -167,12 +168,12 @@ impl FileSourceManager {
     /// factory for the same type was already registered, will unregister
     /// previously registered factory.
     pub fn register_file_source_factory(&self, type_: FileSourceType, factory: FileSourceFactory) {
-        self.impl_.lock().unwrap().file_source_factories.insert(type_, factory);
+        self.impl_.lock_unpoisoned().file_source_factories.insert(type_, factory);
     }
 
     /// Unregisters file source factory. If there are no registered factories
     /// for a FileSourceType invocation has no effect.
     pub fn un_register_file_source_factory(&self, type_: FileSourceType) -> Option<FileSourceFactory> {
-        self.impl_.lock().unwrap().file_source_factories.remove(&type_)
+        self.impl_.lock_unpoisoned().file_source_factories.remove(&type_)
     }
 }

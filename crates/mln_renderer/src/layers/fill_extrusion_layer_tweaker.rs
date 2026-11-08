@@ -19,6 +19,7 @@ use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::constants::TILE_SIZE_D;
 use mln_util::immutable::Immutable;
 use mln_util::size::Size;
+use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
@@ -126,7 +127,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            let binders_guard = binders_lock.read().unwrap_or_else(|e| e.into_inner());
+            let binders_guard = binders_lock.read_unpoisoned();
             let binders = &*binders_guard;
             let tile = get_drawable_render_tile(drawable);
             if tile.is_none() {

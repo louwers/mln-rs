@@ -41,6 +41,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
+use mln_util::sync::MutexExt;
 
 use crate::layout::pattern_layout::PatternDependency;
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
@@ -597,7 +598,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
         pos_b: Option<&ImagePosition>,
         crossfade: &CrossfadeParameters,
     ) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
         match &self.kind {
             CrossFadedPaintPropertyBinderKind::Constant { .. } => {
                 let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) else {
@@ -619,7 +620,9 @@ impl CrossFadedPaintPropertyBinder<Image> {
     /// `uniformValue(...)`.
     pub fn uniform_value(&self, _current_value: &PossiblyEvaluatedFadedPropertyValue<Image>) -> ([u16; 4], [u16; 4]) {
         match &self.kind {
-            CrossFadedPaintPropertyBinderKind::Constant { .. } => self.state.lock().unwrap().constant_pattern_positions,
+            CrossFadedPaintPropertyBinderKind::Constant { .. } => {
+                self.state.lock_unpoisoned().constant_pattern_positions
+            }
             // Uniform values for vertex attribute arrays are unused.
             CrossFadedPaintPropertyBinderKind::Composite { .. } => ([0; 4], [0; 4]),
         }
@@ -631,7 +634,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
             CrossFadedPaintPropertyBinderKind::Constant { .. } => ([0; 8], [0; 8]),
             CrossFadedPaintPropertyBinderKind::Composite { zoom_in_vertex_vector, zoom_out_vertex_vector, .. } => {
                 let pattern: Vec<u16> = bytemuck::pod_collect_to_vec(buffer.get(index, self.vertex_offset, 8));
-                let zoom_value = if self.state.lock().unwrap().crossfade.from_scale == 2.0 {
+                let zoom_value = if self.state.lock_unpoisoned().crossfade.from_scale == 2.0 {
                     zoom_in_vertex_vector[index]
                 } else {
                     zoom_out_vertex_vector[index]

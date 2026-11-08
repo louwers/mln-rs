@@ -24,6 +24,7 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
+use mln_util::sync::RwLockExt;
 
 use super::fill_layer_tweaker::FillLayerTweaker;
 use super::{
@@ -353,7 +354,7 @@ impl RenderLayer for RenderFillLayer {
             let Some(binders_lock) = bucket.paint_property_binders.get(self.get_id()) else {
                 continue;
             };
-            let binders_guard = binders_lock.read().unwrap();
+            let binders_guard = binders_lock.read_unpoisoned();
             let binders = &*binders_guard;
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);

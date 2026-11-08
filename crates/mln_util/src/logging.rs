@@ -11,6 +11,8 @@
 use std::cell::RefCell;
 use std::sync::RwLock;
 
+use crate::sync::RwLockExt;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum EventSeverity {
@@ -93,11 +95,11 @@ pub struct Log;
 
 impl Log {
     pub fn set_observer(observer: Box<dyn Observer>) {
-        *OBSERVER.write().unwrap_or_else(|e| e.into_inner()) = Some(observer);
+        *OBSERVER.write_unpoisoned() = Some(observer);
     }
 
     pub fn remove_observer() -> Option<Box<dyn Observer>> {
-        OBSERVER.write().unwrap_or_else(|e| e.into_inner()).take()
+        OBSERVER.write_unpoisoned().take()
     }
 
     /// Rust addition (see the file comment): an observer for the calling
@@ -139,7 +141,7 @@ impl Log {
                 .with(|o| o.borrow().as_ref().map(|observer| observer.on_record(severity, event, code, msg)));
             let handled = match handled {
                 Some(handled) => handled,
-                None => match &*OBSERVER.read().unwrap_or_else(|e| e.into_inner()) {
+                None => match &*OBSERVER.read_unpoisoned() {
                     Some(observer) => observer.on_record(severity, event, code, msg),
                     None => false,
                 },

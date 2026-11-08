@@ -23,6 +23,7 @@ use mln_actor::{ActorRef, Thread, scheduler};
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
+use mln_util::sync::MutexExt;
 use mln_util::tile_server_options::TileServerOptions;
 
 use crate::async_request::AsyncRequest;
@@ -228,19 +229,19 @@ impl FileSource for DatabaseFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.impl_.resource_options.lock().unwrap() = options;
+        *self.impl_.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock().unwrap().clone()
+        self.impl_.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        *self.impl_.client_options.lock().unwrap() = options;
+        *self.impl_.client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.impl_.client_options.lock().unwrap().clone()
+        self.impl_.client_options.lock_unpoisoned().clone()
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {

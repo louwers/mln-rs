@@ -29,6 +29,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature, 
 use mln_util::Color;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
+use mln_util::sync::{MutexExt, RwLockExt};
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::layout::symbol_instance::SymbolInstance;
@@ -481,12 +482,12 @@ impl SymbolBucket {
 
     /// The mutable state (render thread, after sharing).
     pub fn state(&self) -> MutexGuard<'_, SymbolBucketState> {
-        self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state.lock_unpoisoned()
     }
 
     /// The mutable state while the bucket is still owned (worker thread).
     pub fn state_mut(&mut self) -> &mut SymbolBucketState {
-        self.state.get_mut().unwrap_or_else(|e| e.into_inner())
+        self.state.get_mut_unpoisoned()
     }
 
     pub fn bump_version(&self) {
@@ -785,7 +786,7 @@ impl Bucket for SymbolBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_properties.get(layer_id) {
-            let mut binders = binders.write().unwrap_or_else(|e| e.into_inner());
+            let mut binders = binders.write_unpoisoned();
             binders.icon_binders.update_vertex_vectors(states, layer, image_positions);
             binders.text_binders.update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);

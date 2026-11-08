@@ -25,6 +25,7 @@ use mln_actor::{ActorRef, Thread};
 use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
+use mln_util::sync::MutexExt;
 use pmtiles::{EntryV3, HeaderV3};
 use serde_json::Value as Json;
 
@@ -92,8 +93,8 @@ impl State {
         let mut file_source = self.file_source.borrow_mut();
         file_source
             .get_or_insert_with(|| {
-                let resource_options = self.resource_options.lock().unwrap().clone();
-                let client_options = self.client_options.lock().unwrap().clone();
+                let resource_options = self.resource_options.lock_unpoisoned().clone();
+                let client_options = self.client_options.lock_unpoisoned().clone();
                 FileSourceManager::get()
                     .get_file_source(FileSourceType::ResourceLoader, &resource_options, &client_options)
                     .expect("ResourceLoader file source")
@@ -711,18 +712,18 @@ impl FileSource for PMTilesFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
+        *self.client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
+        self.client_options.lock_unpoisoned().clone()
     }
 }

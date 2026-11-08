@@ -37,6 +37,7 @@ use mln_util::chrono::{Timestamp, parse_timestamp_str};
 use mln_util::client_options::ClientOptions;
 use mln_util::http_header::{CacheControl, parse_retry_headers};
 use mln_util::string::to_string_i64;
+use mln_util::sync::MutexExt;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
@@ -124,12 +125,12 @@ static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
 /// the default (ureq): for a host with its own HTTP stack, such as a
 /// browser's fetch.
 pub fn set_transport(transport: Arc<dyn HttpTransport>) {
-    *TRANSPORT.lock().unwrap() = Some(transport);
+    *TRANSPORT.lock_unpoisoned() = Some(transport);
 }
 
 /// The transport `set_transport` set, else ureq.
 fn current_transport() -> Arc<dyn HttpTransport> {
-    if let Some(transport) = TRANSPORT.lock().unwrap().clone() {
+    if let Some(transport) = TRANSPORT.lock_unpoisoned().clone() {
         return transport;
     }
     default_transport()
@@ -592,7 +593,7 @@ impl HTTPFileSource {
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancelled = Arc::new(AtomicBool::new(false));
         let job = Job { resource: resource.clone(), reply: ActorRef::new(&mailbox), cancelled: cancelled.clone() };
-        let _ = self.impl_.jobs.lock().unwrap().send(job);
+        let _ = self.impl_.jobs.lock_unpoisoned().send(job);
         Box::new(HTTPRequest { mailbox, cancelled })
     }
 }
@@ -607,18 +608,18 @@ impl FileSource for HTTPFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.impl_.resource_options.lock().unwrap() = options;
+        *self.impl_.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock().unwrap().clone()
+        self.impl_.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        *self.impl_.client_options.lock().unwrap() = options;
+        *self.impl_.client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.impl_.client_options.lock().unwrap().clone()
+        self.impl_.client_options.lock_unpoisoned().clone()
     }
 }

@@ -20,6 +20,7 @@
 
 use std::sync::{Arc, Mutex, MutexGuard};
 
+use mln_util::sync::MutexExt;
 use rusqlite::fallible_iterator::FallibleIterator;
 use rusqlite::fallible_streaming_iterator::FallibleStreamingIterator;
 use rusqlite::types::{ToSql, ValueRef};
@@ -140,7 +141,7 @@ impl Database {
 
     /// The connection (`impl->db`).
     pub fn conn(&self) -> MutexGuard<'_, Connection> {
-        self.impl_.lock().unwrap_or_else(|e| e.into_inner())
+        self.impl_.lock_unpoisoned()
     }
 }
 
@@ -185,7 +186,7 @@ impl Transaction {
     }
 
     fn exec(&self, sql: &str) -> Result<(), Exception> {
-        exec(&self.db_impl.lock().unwrap_or_else(|e| e.into_inner()), sql)
+        exec(&self.db_impl.lock_unpoisoned(), sql)
     }
 
     /// `commit()`.

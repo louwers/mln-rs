@@ -11,6 +11,7 @@ use mln_style::layers::circle_layer_properties::*;
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::immutable::Immutable;
+use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
 use crate::buckets::circle_bucket::CircleBucket;
@@ -110,7 +111,7 @@ impl LayerTweaker for CircleLayerTweaker {
                 debug_assert!(false);
                 return;
             };
-            let binders_guard = binders_lock.read().unwrap();
+            let binders_guard = binders_lock.read_unpoisoned();
             let binders = &*binders_guard;
 
             let translation = evaluated.get::<CircleTranslate>();

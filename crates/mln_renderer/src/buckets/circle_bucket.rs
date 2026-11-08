@@ -17,6 +17,7 @@ use mln_style::properties::Property;
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
 use mln_util::immutable::Immutable;
+use mln_util::sync::RwLockExt;
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::paint_property_binder::PaintPropertyBinder;
@@ -124,12 +125,12 @@ impl Bucket for CircleBucket {
         let radius = get_radius_or_width(
             evaluated.get::<CircleRadius>().constant(),
             CircleRadius::default_value(),
-            binders.map(|b| b.read().unwrap().circle_radius.statistics.max()),
+            binders.map(|b| b.read_unpoisoned().circle_radius.statistics.max()),
         );
         let stroke = get_radius_or_width(
             evaluated.get::<CircleStrokeWidth>().constant(),
             CircleStrokeWidth::default_value(),
-            binders.map(|b| b.read().unwrap().circle_stroke_width.statistics.max()),
+            binders.map(|b| b.read_unpoisoned().circle_stroke_width.statistics.max()),
         );
         let translate = evaluated.get::<CircleTranslate>();
         // util::length(a, b) = std::sqrt(a * a + b * b), in float
@@ -144,7 +145,7 @@ impl Bucket for CircleBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write().unwrap().update_vertex_vectors(states, layer, image_positions);
+            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

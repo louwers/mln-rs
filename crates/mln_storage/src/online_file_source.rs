@@ -32,6 +32,7 @@ use mln_util::constants::{
 };
 use mln_util::logging::{Event, Log};
 use mln_util::mapbox;
+use mln_util::sync::MutexExt;
 use mln_util::tile_server_options::TileServerOptions;
 
 use crate::async_request::AsyncRequest;
@@ -615,7 +616,7 @@ impl Impl {
     }
 
     fn get_api_key(&self) -> String {
-        self.cached_resource_options.lock().unwrap().api_key().to_owned()
+        self.cached_resource_options.lock_unpoisoned().api_key().to_owned()
     }
 }
 
@@ -634,7 +635,7 @@ impl OnlineFileSource {
 impl FileSource for OnlineFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let mut res = resource.clone();
-        let options = self.impl_.cached_resource_options.lock().unwrap().tile_server_options();
+        let options = self.impl_.cached_resource_options.lock_unpoisoned().tile_server_options();
         let api_key = self.impl_.get_api_key();
 
         match resource.kind {
@@ -681,7 +682,7 @@ impl FileSource for OnlineFileSource {
             if let Value::String(api_key) = value {
                 let key = api_key.clone();
                 self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_api_key(key));
-                let mut options = self.impl_.cached_resource_options.lock().unwrap();
+                let mut options = self.impl_.cached_resource_options.lock_unpoisoned();
                 *options = options.clone().with_api_key(api_key.clone());
             } else {
                 Log::error(Event::General, "Invalid apiKey property value type.");
@@ -690,7 +691,7 @@ impl FileSource for OnlineFileSource {
             if let Value::String(base_url) = value {
                 let url = base_url.clone();
                 self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_api_base_url(url));
-                let mut options = self.impl_.cached_resource_options.lock().unwrap();
+                let mut options = self.impl_.cached_resource_options.lock_unpoisoned();
                 let tile_server_options = options.tile_server_options().with_base_url(base_url.clone());
                 *options = options.clone().with_tile_server_options(tile_server_options);
             } else {
@@ -704,7 +705,7 @@ impl FileSource for OnlineFileSource {
                     .thread
                     .actor()
                     .invoke(move |t: &OnlineFileSourceThread| t.set_maximum_concurrent_requests(maximum));
-                *self.impl_.cached_maximum_concurrent_requests.lock().unwrap() = maximum;
+                *self.impl_.cached_maximum_concurrent_requests.lock_unpoisoned() = maximum;
             } else {
                 Log::error(Event::General, "Invalid max-concurrent-requests property value type.");
             }
@@ -724,10 +725,10 @@ impl FileSource for OnlineFileSource {
             Value::String(self.impl_.get_api_key())
         } else if key == API_BASE_URL_KEY {
             Value::String(
-                self.impl_.cached_resource_options.lock().unwrap().tile_server_options().base_url().to_owned(),
+                self.impl_.cached_resource_options.lock_unpoisoned().tile_server_options().base_url().to_owned(),
             )
         } else if key == MAX_CONCURRENT_REQUESTS_KEY {
-            Value::Uint(u64::from(*self.impl_.cached_maximum_concurrent_requests.lock().unwrap()))
+            Value::Uint(u64::from(*self.impl_.cached_maximum_concurrent_requests.lock_unpoisoned()))
         } else {
             Log::error(Event::General, format!("Resource provider does not support property {key}"));
             Value::Null
@@ -741,20 +742,20 @@ impl FileSource for OnlineFileSource {
     fn set_resource_options(&self, options: ResourceOptions) {
         let o = options.clone();
         self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_options(o));
-        *self.impl_.cached_resource_options.lock().unwrap() = options;
+        *self.impl_.cached_resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.cached_resource_options.lock().unwrap().clone()
+        self.impl_.cached_resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
         let o = options.clone();
         self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_client_options(o));
-        *self.impl_.cached_client_options.lock().unwrap() = options;
+        *self.impl_.cached_client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.impl_.cached_client_options.lock().unwrap().clone()
+        self.impl_.cached_client_options.lock_unpoisoned().clone()
     }
 }
