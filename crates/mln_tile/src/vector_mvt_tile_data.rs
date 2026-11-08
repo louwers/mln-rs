@@ -2,13 +2,12 @@
 // src/mln/tile/vector_mvt_tile_data.cpp.
 //
 // Exceptions: the C++ `getLayer`, `getFeature`, `getValue`,
-// `getProperties` and `getGeometries` can throw (malformed tiles). The
-// mln_tile_id traits they implement have no error channel, so each has a
-// `try_*` inherent method returning `Result<_, vector_tile::Error>` with the
-// C++ exception, and the trait method panics with its `what()` text where
-// the C++ exception would escape (the C++ GeometryTileWorker catches
-// everything around parsing; its port needs `catch_unwind` or the `try_*`
-// methods).
+// `getProperties` and `getGeometries` can throw (malformed tiles). Each has
+// a `try_*` inherent method returning `Result<_, vector_tile::Error>` with
+// the C++ exception. The trait's `get_layer` and `get_feature` return it;
+// `get_value`, `get_properties` and `get_geometries` return null or empty
+// and keep it for `GeometryTileFeature::error` (the trait has no other
+// channel).
 
 use std::cell::OnceCell;
 use std::collections::BTreeMap;
@@ -17,25 +16,23 @@ use std::sync::Arc;
 use feature::{Identifier, PropertyMap, Value};
 use mln_tile_id::{GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
 use mln_util::constants::EXTENT;
+use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
 use vector_tile::{Error, GeomType};
 
 use crate::geometry_tile_data::fixup_polygons;
 
-fn unwrap_or_throw<T>(r: Result<T, Error>) -> T {
-    match r {
-        Ok(v) => v,
-        // An uncaught C++ exception; see the file comment.
-        Err(e) => panic!("{e}"),
-    }
-}
+static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
+static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
 /// `VectorMVTTileFeature`.
 pub struct VectorMVTTileFeature<'l> {
     feature: vector_tile::Feature<'l, 'l>,
     lines: OnceCell<GeometryCollection>,
     properties: OnceCell<PropertyMap>,
+    /// The first exception of an accessor (`GeometryTileFeature::error`).
+    error: OnceCell<ExceptionPtr>,
 }
 
 impl<'l> VectorMVTTileFeature<'l> {
@@ -45,7 +42,13 @@ impl<'l> VectorMVTTileFeature<'l> {
             feature: vector_tile::Feature::new(view, layer)?,
             lines: OnceCell::new(),
             properties: OnceCell::new(),
+            error: OnceCell::new(),
         })
+    }
+
+    /// Keeps the first exception a trait accessor would have thrown.
+    fn keep_error(&self, error: Error) {
+        let _ = self.error.set(Arc::new(error));
     }
 
     /// `getValue`: `nullopt` for a null value.
@@ -116,11 +119,20 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
     }
 
     fn get_value(&self, key: &str) -> Option<Value> {
-        unwrap_or_throw(self.try_get_value(key))
+        self.try_get_value(key).unwrap_or_else(|e| {
+            self.keep_error(e);
+            None
+        })
     }
 
     fn get_properties(&self) -> &PropertyMap {
-        unwrap_or_throw(self.try_get_properties())
+        match self.try_get_properties() {
+            Ok(properties) => properties,
+            Err(e) => {
+                self.keep_error(e);
+                &EMPTY_PROPERTIES
+            }
+        }
     }
 
     fn get_id(&self) -> Identifier {
@@ -128,7 +140,17 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
     }
 
     fn get_geometries(&self) -> &GeometryCollection {
-        unwrap_or_throw(self.try_get_geometries())
+        match self.try_get_geometries() {
+            Ok(lines) => lines,
+            Err(e) => {
+                self.keep_error(e);
+                &EMPTY_GEOMETRIES
+            }
+        }
+    }
+
+    fn error(&self) -> Option<ExceptionPtr> {
+        self.error.get().cloned()
     }
 }
 
@@ -161,8 +183,11 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
         self.layer.feature_count()
     }
 
-    fn get_feature(&self, index: usize) -> Box<dyn GeometryTileFeature + '_> {
-        Box::new(unwrap_or_throw(self.try_get_feature(index)))
+    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr> {
+        match self.try_get_feature(index) {
+            Ok(feature) => Ok(Box::new(feature)),
+            Err(e) => Err(Arc::new(e)),
+        }
     }
 
     fn get_name(&self) -> String {
@@ -230,7 +255,10 @@ impl GeometryTileData for VectorMVTTileData {
         Box::new(VectorMVTTileData::new(self.data.clone()))
     }
 
-    fn get_layer(&self, name: &str) -> Option<Box<dyn GeometryTileLayer + '_>> {
-        unwrap_or_throw(self.try_get_layer(name)).map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>)
+    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
+        match self.try_get_layer(name) {
+            Ok(layer) => Ok(layer.map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>)),
+            Err(e) => Err(Arc::new(e)),
+        }
     }
 }

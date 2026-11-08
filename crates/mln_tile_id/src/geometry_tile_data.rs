@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
+use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
 
 /// Normalized vector tile coordinates. Each geometry coordinate represents a
@@ -86,6 +87,16 @@ static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
 static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
 
 /// `GeometryTileFeature`.
+///
+/// C++ `getValue`, `getProperties` and `getGeometries` throw on malformed
+/// tiles, from inside expression evaluation as well. Here they return null
+/// or empty instead and keep the first exception, which
+/// [`error`](Self::error) returns: the code that C++ lets the exception
+/// escape from (the tile worker, layouts, queries) checks it after using
+/// the feature and returns it as its error. A tile errors for the same
+/// inputs and message as in C++; the rest of the work on the failing
+/// feature runs on the empty value before the check, and its result is
+/// dropped.
 pub trait GeometryTileFeature {
     fn get_type(&self) -> FeatureType;
 
@@ -105,6 +116,17 @@ pub trait GeometryTileFeature {
     fn get_geometries(&self) -> &GeometryCollection {
         &EMPTY_GEOMETRIES
     }
+
+    /// The first exception a C++ `getValue`, `getProperties` or
+    /// `getGeometries` call on this feature would have thrown (port-only).
+    fn error(&self) -> Option<ExceptionPtr> {
+        None
+    }
+
+    /// `Err` with [`error`](Self::error): where the C++ exception escapes.
+    fn check(&self) -> Result<(), ExceptionPtr> {
+        self.error().map_or(Ok(()), Err)
+    }
 }
 
 /// `GeometryTileLayer`.
@@ -112,7 +134,8 @@ pub trait GeometryTileLayer {
     fn feature_count(&self) -> usize;
 
     /// Returns the feature object at the given position within the layer.
-    fn get_feature(&self, index: usize) -> Box<dyn GeometryTileFeature + '_>;
+    /// `Err`: the exception C++ throws (malformed tile, index past the end).
+    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr>;
 
     fn get_name(&self) -> String;
 }
@@ -121,8 +144,9 @@ pub trait GeometryTileLayer {
 pub trait GeometryTileData {
     fn clone_data(&self) -> Box<dyn GeometryTileData>;
 
-    /// Returns the layer with the given name.
-    fn get_layer(&self, name: &str) -> Option<Box<dyn GeometryTileLayer + '_>>;
+    /// Returns the layer with the given name. `Err`: the exception C++
+    /// throws (malformed tile).
+    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr>;
 }
 
 #[cfg(test)]
@@ -146,6 +170,7 @@ mod tests {
         assert!(f.get_properties().is_empty());
         assert_eq!(f.get_id(), Identifier::Null);
         assert!(f.get_geometries().is_empty());
+        assert!(f.error().is_none());
         let mut c = GeometryCollection::new();
         c.push(vec![Point::new(1, 2)]);
         assert_eq!(c.clone()[0][0], Point::new(1, 2));

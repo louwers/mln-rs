@@ -174,7 +174,8 @@ impl Tile for GeoJSONTile {
         // Ignore the sourceLayer, there is only one
         if let Some(feature_index) = self.tile.get_feature_index() {
             if let Some(tile_data) = feature_index.get_data() {
-                if let Some(layer) = tile_data.get_layer("") {
+                // GeoJSON tile data has no errors.
+                if let Ok(Some(layer)) = tile_data.get_layer("") {
                     crate::tile::geometry_tile::query_layer_source_features(
                         &*layer,
                         result,

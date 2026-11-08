@@ -32,4 +32,6 @@ pub use vector_mvt_tile_data::{VectorMVTTileData, VectorMVTTileFeature, VectorMV
 pub use vector_tile::Error;
 
 #[cfg(test)]
+mod malformed_tile_test;
+#[cfg(test)]
 mod vector_tile_test;

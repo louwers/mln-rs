@@ -330,7 +330,12 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 continue;
             };
             for pos in positions {
-                let feature = layer.get_feature(pos.feature_index);
+                // The worker got the feature from the same data. A value
+                // that C++ throws for (out of the render call) reads as
+                // missing here.
+                let Ok(feature) = layer.get_feature(pos.feature_index) else {
+                    continue;
+                };
                 self.update_vertex_vector(buffer, pos.start, pos.end, &*feature, state);
             }
         }

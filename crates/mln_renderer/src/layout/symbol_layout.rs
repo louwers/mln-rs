@@ -266,7 +266,7 @@ impl SymbolLayout {
         layers: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
         layout_parameters: &mut LayoutParameters<'_>,
-    ) -> Self {
+    ) -> Result<Self, ExceptionPtr> {
         let leader = layers[0]
             .base_impl
             .downcast_ref::<mln_style::layers::symbol_layer_impl::Impl>()
@@ -326,7 +326,7 @@ impl SymbolLayout {
         let has_icon = has_icon_image(&layout);
 
         if !has_text && !has_icon {
-            return this;
+            return Ok(this);
         }
 
         let has_symbol_sort_key = !leader.layout.get::<SymbolSortKey>().is_undefined();
@@ -361,20 +361,26 @@ impl SymbolLayout {
 
         // Determine glyph dependencies
         let source_layer = this.source_layer.clone();
-        let geometry_layer = source_layer.layer();
+        let geometry_layer = source_layer.layer()?;
         let feature_count = geometry_layer.feature_count();
         let canonical_id = this.canonical_id;
         for i in 0..feature_count {
-            let feature = geometry_layer.get_feature(i);
-            if !leader.filter.evaluate(
+            let feature = geometry_layer.get_feature(i)?;
+            let passes = leader.filter.evaluate(
                 &EvaluationContext::with_zoom_feature(this.zoom, Some(&*feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
                     .with_global_state(parameters.global_state.as_deref()),
-            ) {
+            );
+            feature.check()?;
+            if !passes {
                 continue;
             }
 
+            // C++ keeps the feature and reads its values lazily; the copy
+            // reads all of them, so a malformed one is an error here even if
+            // nothing reads it.
             let mut ft = SymbolFeature::new(&*feature);
+            feature.check()?;
             drop(feature);
 
             ft.index = i;
@@ -538,7 +544,7 @@ impl SymbolLayout {
             merge_lines(&mut this.features);
         }
 
-        this
+        Ok(this)
     }
 
     /// `evaluateVariableOffset(anchor, textOffset)`.

@@ -656,7 +656,8 @@ impl Tile for GeometryTile {
 
         for (layer_id, render_data) in &layout_result.layer_render_data {
             let source_layer_id = &render_data.layer_properties.base_impl.source_layer;
-            if let Some(source_layer) = layers.get_layer(source_layer_id) {
+            // The worker got the layer from the same data.
+            if let Ok(Some(source_layer)) = layers.get_layer(source_layer_id) {
                 let Some(feature_states) = states.get(source_layer_id) else {
                     continue;
                 };
@@ -814,8 +815,12 @@ impl Tile for GeometryTile {
         for source_layer in source_layers {
             // Go through all sourceLayers, if any
             // to gather all the features
-            if let Some(layer) = data.get_layer(source_layer) {
-                query_layer_source_features(&*layer, result, options, global_state, &id);
+            // C++ throws out of the query for a malformed tile; the port
+            // logs the exception and skips the layer or the feature.
+            match data.get_layer(source_layer) {
+                Ok(Some(layer)) => query_layer_source_features(&*layer, result, options, global_state, &id),
+                Ok(None) => {}
+                Err(error) => Log::error(Event::ParseTile, error.to_string()),
             }
         }
     }
@@ -823,6 +828,7 @@ impl Tile for GeometryTile {
 
 // query
 use mln_util::feature::Feature;
+use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
 
 use crate::geometry::feature_index::{QueryLayers, QueryResults};
@@ -840,7 +846,13 @@ pub fn query_layer_source_features(
 ) {
     let feature_count = layer.feature_count();
     for i in 0..feature_count {
-        let feature = layer.get_feature(i);
+        let feature = match layer.get_feature(i) {
+            Ok(feature) => feature,
+            Err(error) => {
+                Log::error(Event::ParseTile, error.to_string());
+                continue;
+            }
+        };
 
         // Apply filter, if any
         if let Some(filter) = &options.filter {
@@ -855,7 +867,12 @@ pub fn query_layer_source_features(
         }
 
         // C++ `convertFeature` throws on malformed geometry (uncaught).
-        if let Ok(converted) = mln_tile::geometry_tile_data::convert_feature(&*feature, &id.canonical) {
+        let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, &id.canonical);
+        if let Err(error) = feature.check() {
+            Log::error(Event::ParseTile, error.to_string());
+            continue;
+        }
+        if let Ok(converted) = converted {
             result.push(Feature::from(converted));
         }
     }

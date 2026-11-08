@@ -81,7 +81,6 @@
 "crates/mln_renderer/src/layers/symbol_layer_tweaker.rs" = 1
 "crates/mln_renderer/src/layout/circle_layout.rs" = 4
 "crates/mln_renderer/src/layout/clip_lines.rs" = 1
-"crates/mln_renderer/src/layout/layout.rs" = 1
 "crates/mln_renderer/src/layout/merge_lines.rs" = 3
 "crates/mln_renderer/src/layout/pattern_layout.rs" = 5
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
@@ -102,8 +101,7 @@
 "crates/mln_renderer/src/text/cross_tile_symbol_index.rs" = 2
 "crates/mln_renderer/src/text/placement.rs" = 18
 "crates/mln_renderer/src/text/quads.rs" = 1
-"crates/mln_renderer/src/tile/geojson_tile_data.rs" = 1
-"crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 4
+"crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 3
 "crates/mln_renderer/src/util/tile_cover.rs" = 4
 "crates/mln_renderer/src/util/tile_cover_impl.rs" = 2
 "crates/mln_sprite/src/sprite_loader.rs" = 1
@@ -159,8 +157,7 @@
 "crates/mln_text/src/icu/ushape.rs" = 1
 "crates/mln_text/src/shaping.rs" = 6
 "crates/mln_text/src/tagged_string.rs" = 5
-"crates/mln_tile/src/vector_mlt_tile_data.rs" = 5
-"crates/mln_tile/src/vector_mvt_tile_data.rs" = 1
+"crates/mln_tile/src/vector_mlt_tile_data.rs" = 4
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_util/src/lru_cache.rs" = 1

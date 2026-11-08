@@ -24,6 +24,7 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
+use mln_util::logging::{Event, Log};
 use mln_util::mat4::Mat4;
 
 use crate::query::RenderedQueryOptions;
@@ -381,11 +382,15 @@ impl FeatureIndex {
         if !layer_ids.iter().any(|layer_id| layers.contains_key(layer_id)) {
             return;
         }
-        let Some(source_layer) = tile_data.get_layer(source_layer_name) else {
+        // The worker got the layer and the feature from the same data.
+        let Ok(Some(source_layer)) = tile_data.get_layer(source_layer_name) else {
             debug_assert!(false, "source layer {source_layer_name} missing");
             return;
         };
-        let feature = source_layer.get_feature(index);
+        let Ok(feature) = source_layer.get_feature(index) else {
+            debug_assert!(false, "feature {index} of {source_layer_name} missing");
+            return;
+        };
         let source_layer_id = source_layer.get_name();
         let mut state = FeatureState::default();
         if let Some(source_feature_state) = source_feature_state {
@@ -427,6 +432,12 @@ impl FeatureIndex {
             let Ok(converted) = mln_tile::geometry_tile_data::convert_feature(&*feature, tile_id) else {
                 continue;
             };
+            // C++ throws out of the query for a malformed value or geometry
+            // too; skipped in the same way.
+            if let Err(error) = feature.check() {
+                Log::error(Event::ParseTile, error.to_string());
+                continue;
+            }
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().base_impl.source.clone();
             converted.source_layer = source_layer_id.clone();

@@ -129,7 +129,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         image_dependencies: &mut ImageDependencies,
         available_images: &BTreeSet<String>,
         sorted: bool,
-    ) -> Self {
+    ) -> Result<Self, ExceptionPtr> {
         debug_assert!(!group.is_empty());
         let zoom = parameters.tile_id.overscaled_z as f32;
         let overscaling = parameters.tile_id.overscale_factor();
@@ -162,12 +162,14 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let mut features: Vec<PatternFeature> = Vec::new();
         let feature_count = source_layer.feature_count();
         for i in 0..feature_count {
-            let feature = source_layer.get_feature(i);
-            if !leader_impl.filter.evaluate(
+            let feature = source_layer.get_feature(i)?;
+            let passes = leader_impl.filter.evaluate(
                 &EvaluationContext::with_zoom_feature(zoom, Some(&*feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
                     .with_global_state(parameters.global_state.as_deref()),
-            ) {
+            );
+            feature.check()?;
+            if !passes {
                 continue;
             }
 
@@ -217,9 +219,12 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                 }
             }
 
+            feature.check()?;
+
             if sorted {
                 // PatternFeatureInserter<SortKeyPropertyType>::insert
                 let sort_key = S::sort_key(&layout, &*feature, zoom, &parameters.tile_id.canonical);
+                feature.check()?;
                 let pattern_feature = PatternFeature { i, sort_key, patterns: pattern_dependency_map };
                 // std::lower_bound: the first feature whose key is not less.
                 let lower_bound = features.partition_point(|f| f.sort_key < sort_key);
@@ -230,7 +235,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             }
         }
 
-        PatternLayout {
+        Ok(PatternLayout {
             layer_properties_map,
             bucket_leader_id,
             features,
@@ -241,7 +246,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             has_pattern,
             retain_features_by_id: parameters.retain_features_by_id,
             source_layer: None,
-        }
+        })
     }
 
     /// `PatternLayout(parameters, group, std::move(sourceLayer),
@@ -251,17 +256,17 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         group: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
         sorted: bool,
-    ) -> Self {
+    ) -> Result<Self, ExceptionPtr> {
         let mut layout = PatternLayout::new(
             parameters.bucket_parameters,
             group,
-            &*source_layer.layer(),
+            &*source_layer.layer()?,
             parameters.image_dependencies,
             parameters.available_images,
             sorted,
-        );
+        )?;
         layout.source_layer = Some(source_layer);
-        layout
+        Ok(layout)
     }
 
     /// `hasDependencies()`.
@@ -301,9 +306,10 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
 
         for pattern_feature in &self.features {
             let i = pattern_feature.i;
-            let feature = source_layer.get_feature(i);
+            let feature = source_layer.get_feature(i)?;
             let patterns = pattern_feature.get_patterns();
             let geometries = feature.get_geometries();
+            feature.check()?;
 
             for (layer_id, pattern) in patterns {
                 record_sdf_pattern(&mut bucket, layer_id, &pattern.min);
@@ -313,6 +319,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
 
             insert_feature(geometries, i, &self.source_layer_id, &self.bucket_leader_id);
             bucket.add_feature(&*feature, geometries, pattern_positions, patterns, i, canonical)?;
+            feature.check()?;
         }
         if bucket.has_data() {
             let bucket: BucketPtr = Arc::new(bucket);
@@ -433,7 +440,7 @@ impl<S: PatternLayoutSpec> Layout for PatternLayout<S> {
         canonical: &CanonicalTileID,
     ) -> Result<(), ExceptionPtr> {
         let source_layer = self.source_layer.clone().expect("PatternLayout: source layer");
-        let layer = source_layer.layer();
+        let layer = source_layer.layer()?;
         self.create_bucket_with(
             &*layer,
             pattern_positions,

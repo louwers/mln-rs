@@ -27,21 +27,21 @@ fn parse_results() {
     assert_eq!(layer_names[0], "admin");
     assert_eq!(layer_names[1], "water");
 
-    assert!(data.get_layer("invalid").is_none());
+    assert!(data.get_layer("invalid").unwrap().is_none());
 
-    let layer = data.get_layer("admin").unwrap();
+    let layer = data.get_layer("admin").unwrap().unwrap();
     assert_eq!(layer.get_name(), "admin");
     assert_eq!(layer.feature_count(), 17154);
 
     // ASSERT_THROW(layer->getFeature(17154u), std::out_of_range)
     let typed = data.try_get_layer("admin").unwrap().unwrap();
     assert!(matches!(typed.try_get_feature(17154), Err(crate::Error::OutOfRange(_))));
-    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        layer.get_feature(17154);
-    }));
-    assert!(r.is_err());
+    assert_eq!(
+        layer.get_feature(17154).err().unwrap().to_string(),
+        "vector::_M_range_check: __n (which is 17154) >= this->size() (which is 17154)"
+    );
 
-    let feature = layer.get_feature(0);
+    let feature = layer.get_feature(0).unwrap();
     assert_eq!(feature.get_type(), FeatureType::LineString);
     assert!(matches!(feature.get_id(), Identifier::Uint(_)));
     assert_eq!(feature.get_id(), Identifier::Uint(1));
@@ -85,13 +85,13 @@ fn mlt_parse_results() {
         assert_eq!(layer_names[0], "water");
         assert_eq!(layer_names[1], "admin");
 
-        assert!(data.get_layer("invalid").is_none());
+        assert!(data.get_layer("invalid").unwrap().is_none());
 
-        let layer = data.get_layer("admin").unwrap();
+        let layer = data.get_layer("admin").unwrap().unwrap();
         assert_eq!(layer.get_name(), "admin");
         assert_eq!(layer.feature_count(), 17154);
 
-        let feature = layer.get_feature(0);
+        let feature = layer.get_feature(0).unwrap();
         assert_eq!(feature.get_type(), FeatureType::LineString);
         assert!(matches!(feature.get_id(), Identifier::Uint(_)));
         assert_eq!(feature.get_id(), Identifier::Uint(1));

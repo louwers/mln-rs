@@ -559,7 +559,7 @@ impl GeometryTileWorker {
                 retain_features_by_id: self.capture_rendered_features,
             };
 
-            let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer) else {
+            let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer)? else {
                 continue;
             };
             drop(geometry_layer);
@@ -587,7 +587,7 @@ impl GeometryTileWorker {
                     },
                     SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
                     group,
-                );
+                )?;
                 let Some(mut layout) = layout else {
                     continue;
                 };
@@ -609,26 +609,31 @@ impl GeometryTileWorker {
                 let Some(mut bucket) = layermanager::create_bucket(&parameters, group) else {
                     continue;
                 };
-                let geometry_layer = data.get_layer(source_layer_id).expect("layer");
+                let Some(geometry_layer) = data.get_layer(source_layer_id)? else {
+                    continue;
+                };
 
                 bucket.set_retain_features_by_id(self.capture_rendered_features);
                 bucket.reserve_features(geometry_layer.feature_count());
 
                 let mut i = 0;
                 while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
-                    let feature = geometry_layer.get_feature(i);
+                    let feature = geometry_layer.get_feature(i)?;
 
                     let effective_z = f32::from(self.id.overscaled_z);
-                    if !filter.evaluate(
+                    let passes = filter.evaluate(
                         &EvaluationContext::with_zoom_feature(effective_z, Some(&*feature))
                             .with_canonical_tile_id(Some(&self.id.canonical))
                             .with_global_state(self.global_state.as_deref()),
-                    ) {
+                    );
+                    feature.check()?;
+                    if !passes {
                         i += 1;
                         continue;
                     }
 
                     let geometries = feature.get_geometries();
+                    feature.check()?;
                     bucket.add_feature(
                         &*feature,
                         geometries,
@@ -637,6 +642,7 @@ impl GeometryTileWorker {
                         i,
                         &self.id.canonical,
                     )?;
+                    feature.check()?;
                     feature_index.insert(geometries, i, source_layer_id, &leader_impl.id);
                     i += 1;
                 }
