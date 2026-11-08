@@ -110,7 +110,8 @@ jobs:
           rustup default stable
           just ci-package
 
-  # Formatting (`just fmt`, every Rust file), clippy with the workspace's
+  # Formatting (`just fmt`, every Rust file), the panic and TODO(port)
+  # ratchet (`just ratchet`, tools/ratchet), clippy with the workspace's
   # lints (Cargo.toml) and the API docs as docs.rs builds them, all with
   # warnings as errors (the justfile denies them in CI).
   lint:

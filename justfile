@@ -56,8 +56,8 @@ ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lco
     rm -rf {{quote(parent_directory(coverage_lcov))}}
     mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
-# Run the checks of CI's lint job: formatting, clippy and the API docs, warnings as errors
-ci-lint:  env-info test-fmt clippy test-doc && assert-git-is-clean
+# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy and the API docs, warnings as errors
+ci-lint:  env-info test-fmt ratchet clippy test-doc && assert-git-is-clean
 
 # Package every crate and compile every Cargo test target, as CI's release-crate job does
 ci-package:  env-info package && assert-git-is-clean
@@ -250,6 +250,10 @@ package:
     rm -rf "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/mln-rs-* "${CARGO_TARGET_DIR:-target}"/debug/.fingerprint/mln-rs-*
     cargo package --workspace --locked --exclude mln-rs-glfw
     cargo test --workspace --locked --no-run
+
+# Fail when a file has more library panic sites or TODO(port) comments than tools/ratchet/baseline.toml; `--update` lowers it
+ratchet *args:
+    python3 -I tools/ratchet/ratchet.py {{args}}
 
 # Run the release workflow on main: publish the crates at the version in Cargo.toml (RELEASING.md)
 release:
