@@ -22,9 +22,13 @@ const fn aligned_uniform_size(size: usize) -> usize {
 }
 
 pub struct UniformBuffer {
-    /// `gfx::UniformBuffer::size`: the 256-byte aligned size. (Quirk ported:
-    /// `UniformBufferArray::createOrUpdate` compares it to the unaligned data
-    /// size, so it recreates small UBOs instead of updating them.)
+    /// The size of the data, which `get_size` reports. The GPU buffer is
+    /// padded to 256 bytes. C++ reports the padded size, so
+    /// `UniformBufferArray::createOrUpdate`, which compares it to the data
+    /// size, creates a new GPU buffer on every update of a UBO whose size
+    /// isn't a multiple of 256 bytes. Reporting the data size updates it in
+    /// place. Bind groups still bind the whole padded buffer, because some
+    /// UBOs hold less data than their shader struct.
     size: usize,
     /// C++ keeps `Context&`; only device and queue are used. Holding the
     /// backend state rather than `Rc<Context>` avoids an Rc cycle through the
@@ -64,7 +68,7 @@ impl UniformBuffer {
             }
             buffer = Some(b);
         }
-        UniformBuffer { size: aligned_size, backend, buffer }
+        UniformBuffer { size, backend, buffer }
     }
 
     /// `clone()`: a new buffer of the same size; contents are not copied
@@ -81,6 +85,7 @@ impl UniformBuffer {
 
 impl uniform_buffer::UniformBuffer for UniformBuffer {
     fn update(&self, data: &[u8]) {
+        debug_assert!(data.len() <= aligned_uniform_size(self.size), "update larger than the uniform buffer");
         if !data.is_empty()
             && let Some(buffer) = &self.buffer
             && let Some(queue) = self.backend.get_queue()
