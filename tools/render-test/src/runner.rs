@@ -1294,13 +1294,30 @@ fn self_check_image(metadata: &TestMetadata) -> PremultipliedImage {
     ))
 }
 
-/// The error of a test that panicked: the timeout message for a
-/// `TestTimedOut` (watchdog.rs), else `"<what>: <panic message>"`.
+/// The error of a test that panicked: for a `TestTimedOut` (watchdog.rs),
+/// the timeout message and what the test was waiting for, else
+/// `"<what>: <panic message>"`.
 fn panic_error_message(what: &str, panic: &Box<dyn std::any::Any + Send>) -> String {
     match panic.downcast_ref::<crate::watchdog::TestTimedOut>() {
-        Some(timed_out) => timed_out.message(),
+        Some(timed_out) => format!("{}; {}", timed_out.message(), waiting_for(&ProxyFileSource::pending_requests())),
         None => format!("{what}: {}", panic_message(panic)),
     }
+}
+
+/// The requests a test that timed out was still waiting for, or that it
+/// waited for none, which points at the map itself.
+pub(crate) fn waiting_for(pending: &[(String, std::time::Duration)]) -> String {
+    const SHOWN: usize = 5;
+    if pending.is_empty() {
+        return "no resource request was outstanding".to_string();
+    }
+    let mut list: Vec<String> =
+        pending.iter().take(SHOWN).map(|(url, age)| format!("{url} ({:.1} s)", age.as_secs_f64())).collect();
+    if pending.len() > SHOWN {
+        list.push(format!("and {} more", pending.len() - SHOWN));
+    }
+    let plural = if pending.len() == 1 { "" } else { "s" };
+    format!("waiting for {} request{plural}: {}", pending.len(), list.join(", "))
 }
 
 fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {

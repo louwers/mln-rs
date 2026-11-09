@@ -2,8 +2,10 @@
 // (`ProxyFileSource`), plus `TestRunner::registerProxyFileSource`
 // (render-test/runner.cpp).
 
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Once};
+use std::time::{Duration, Instant};
 
 use feature::Value;
 use mln_storage::file_source::READ_ONLY_MODE_KEY;
@@ -17,6 +19,38 @@ static REQUEST_COUNT: AtomicUsize = AtomicUsize::new(0);
 static TRANSFERRED_SIZE: AtomicUsize = AtomicUsize::new(0);
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static OFFLINE: AtomicBool = AtomicBool::new(true);
+
+/// Port-only: the requests passed on and neither answered nor cancelled yet,
+/// by request number: each URL and when it was requested. A test that times
+/// out reports them (watchdog.rs), so a hang says what it waited for.
+static PENDING: Mutex<BTreeMap<u64, (String, Instant)>> = Mutex::new(BTreeMap::new());
+static NEXT_REQUEST: AtomicU64 = AtomicU64::new(0);
+
+/// Adds a request for `url` to `PENDING` and returns its number.
+pub(crate) fn track(url: &str) -> u64 {
+    let number = NEXT_REQUEST.fetch_add(1, Ordering::SeqCst);
+    PENDING.lock().unwrap().insert(number, (url.to_string(), Instant::now()));
+    number
+}
+
+/// Removes request `number` from `PENDING`, if it is there.
+pub(crate) fn answered(number: u64) {
+    PENDING.lock().unwrap().remove(&number);
+}
+
+/// A request passed on, which leaves `PENDING` when it is cancelled.
+pub(crate) struct PendingRequest {
+    pub(crate) number: u64,
+    pub(crate) _request: Box<dyn AsyncRequest>,
+}
+
+impl AsyncRequest for PendingRequest {}
+
+impl Drop for PendingRequest {
+    fn drop(&mut self) {
+        answered(self.number);
+    }
+}
 
 /// `ProxyFileSource`: loads everything cache-only from the database while
 /// offline and maps the test URLs (`local://`, `http://localhost:2900/`) to
@@ -74,6 +108,13 @@ impl ProxyFileSource {
     pub fn get_transferred_size() -> usize {
         TRANSFERRED_SIZE.load(Ordering::SeqCst)
     }
+
+    /// Port-only: the URLs of the requests that are neither answered nor
+    /// cancelled, oldest first, with how long ago each was made.
+    pub fn pending_requests() -> Vec<(String, Duration)> {
+        let now = Instant::now();
+        PENDING.lock().unwrap().values().map(|(url, since)| (url.clone(), now - *since)).collect()
+    }
 }
 
 /// `str.compare(0, prefix.size(), prefix) == 0` + `replace(0, n, "http://")`.
@@ -113,10 +154,12 @@ impl FileSource for ProxyFileSource {
             }
         }
 
+        let number = track(&transformed.url);
         let logged = transformed.clone();
-        self.default_resource_loader.request(
+        let request = self.default_resource_loader.request(
             &transformed,
             Box::new(move |response: Response| {
+                answered(number);
                 if logged.loading_method == LoadingMethod::CacheOnly && response.no_content {
                     match (&logged.tile_data, logged.kind) {
                         (Some(tile_data), Kind::Tile) => Log::info(
@@ -134,7 +177,8 @@ impl FileSource for ProxyFileSource {
                 }
                 callback(response);
             }),
-        )
+        );
+        Box::new(PendingRequest { number, _request: request })
     }
 
     fn can_request(&self, _resource: &Resource) -> bool {

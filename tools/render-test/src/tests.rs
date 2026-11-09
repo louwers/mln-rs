@@ -609,3 +609,39 @@ fn argument_parsing() {
     assert_eq!(parse_arguments(&args(&["-p", OUR_MANIFEST, "--jobs", "0"])).unwrap().jobs, 0);
     assert_eq!(parse_arguments(&args(&["-p", OUR_MANIFEST, "--jobs=many"])), Err(1));
 }
+
+// A test that times out reports the proxy's requests that are neither
+// answered nor cancelled (runner::waiting_for), so a hang says what it
+// waited for.
+#[test]
+fn pending_requests_leave_when_answered_or_cancelled() {
+    use crate::file_source::{PendingRequest, ProxyFileSource, answered, track};
+    struct Request;
+    impl mln_storage::AsyncRequest for Request {}
+    let is_pending = |url: &str| ProxyFileSource::pending_requests().iter().any(|(pending, _)| pending == url);
+
+    let number = track("http://tiles/answered.mvt");
+    assert!(is_pending("http://tiles/answered.mvt"));
+    answered(number);
+    assert!(!is_pending("http://tiles/answered.mvt"));
+
+    let request = PendingRequest { number: track("http://tiles/cancelled.mvt"), _request: Box::new(Request) };
+    assert!(is_pending("http://tiles/cancelled.mvt"));
+    drop(request);
+    assert!(!is_pending("http://tiles/cancelled.mvt"));
+}
+
+#[test]
+fn timeout_message_lists_the_pending_requests() {
+    use std::time::Duration;
+
+    use crate::runner::waiting_for;
+    assert_eq!(waiting_for(&[]), "no resource request was outstanding");
+    assert_eq!(
+        waiting_for(&[("http://tiles/14-8802-5373.mvt".to_string(), Duration::from_millis(59_940))]),
+        "waiting for 1 request: http://tiles/14-8802-5373.mvt (59.9 s)"
+    );
+    let many: Vec<_> = (0..7).map(|i| (format!("http://tiles/{i}.mvt"), Duration::from_secs(1))).collect();
+    assert!(waiting_for(&many).starts_with("waiting for 7 requests: http://tiles/0.mvt (1.0 s), "));
+    assert!(waiting_for(&many).ends_with("http://tiles/4.mvt (1.0 s), and 2 more"));
+}
