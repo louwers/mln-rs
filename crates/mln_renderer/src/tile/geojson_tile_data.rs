@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use feature::{Feature, Identifier, PropertyMap, Value};
 use mln_tile::{fixup_polygons, to_geometry_collection};
+use mln_tile_id::EncodedTileData;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::{FeatureType, to_feature_type};
@@ -128,5 +129,9 @@ impl GeometryTileData for GeoJSONTileData {
 
     fn get_layer(&self, _name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
         Ok(Some(Box::new(GeoJSONTileLayer::new(self.features.clone()))))
+    }
+
+    fn encoded(&self) -> Option<EncodedTileData> {
+        Some(EncodedTileData::GeoJson(self.features.clone()))
     }
 }

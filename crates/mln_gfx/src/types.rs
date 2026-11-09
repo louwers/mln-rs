@@ -1,5 +1,7 @@
 // Ports include/mln/gfx/types.hpp
 
+use serde::{Deserialize, Serialize};
+
 /// Color blending equation type
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(u8)]
@@ -111,7 +113,7 @@ pub enum BufferUsageType {
 }
 
 /// Texture pixel type
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TexturePixelType {
     RGBA,

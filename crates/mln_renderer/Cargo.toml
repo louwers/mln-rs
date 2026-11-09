@@ -36,6 +36,8 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 nunicode.workspace = true
 polylabel.workspace = true
+postcard.workspace = true
+serde.workspace = true
 shelf_pack.workspace = true
 
 # test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above

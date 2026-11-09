@@ -19,7 +19,9 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::immutable::Immutable;
+use mln_util::serialization::payload::shared_bytes;
 use mln_util::tileset::Tileset;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::buckets::raster_bucket::RasterBucket;
@@ -27,24 +29,37 @@ use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, Tile
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile::tile_worker_transport::{TileEndpoint, WorkerEndpoint};
+use crate::tile::worker_codec::fields;
 use crate::tile_mask::TileMask;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 
 /// The messages a `RasterTile` sends its `RasterTileWorker`: the worker's
-/// public member functions.
+/// public member functions. Port-only: serde writes them for a worker in
+/// another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
 pub enum RasterWorkerMessage {
     /// `parse(data, correlationID)`.
-    Parse { data: Option<Data>, correlation_id: u64 },
+    Parse {
+        #[serde(with = "shared_bytes::option")]
+        data: Option<Data>,
+        correlation_id: u64,
+    },
 }
 
 /// The messages a `RasterTileWorker` sends its `RasterTile`: the tile's
-/// member functions the worker calls.
+/// member functions the worker calls. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
 pub enum RasterTileMessage {
     /// `onParsed(std::move(bucket), correlationID)`.
     Parsed { bucket: Option<Arc<RasterBucket>>, correlation_id: u64 },
     /// `onError(std::current_exception(), correlationID)`.
-    Error { error: ExceptionPtr, correlation_id: u64 },
+    Error {
+        #[serde(with = "fields::exception")]
+        error: ExceptionPtr,
+        correlation_id: u64,
+    },
 }
 
 /// `RasterTileWorker`.

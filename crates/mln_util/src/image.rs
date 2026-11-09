@@ -9,6 +9,7 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use geometry::Point;
+use serde::{Deserialize, Serialize};
 
 use crate::size::Size;
 
@@ -72,10 +73,39 @@ impl std::error::Error for ImageError {}
 /// empty `data` plays the role of `nullptr` (a default-constructed or
 /// moved-from image). C++ images are move-only with an explicit `clone()`;
 /// here `Clone` is that `clone()`.
+///
+/// Port-only: serde writes the pixels as a payload (serialization/payload.rs)
+/// and reads back only images whose pixels fill their size.
+#[derive(Serialize, Deserialize)]
+#[serde(bound = "", try_from = "ImageParts")]
 pub struct Image<M: AlphaMode> {
     pub size: Size,
+    #[serde(with = "crate::serialization::payload::bytes")]
     pub data: Vec<u8>,
+    #[serde(skip)]
     _mode: PhantomData<M>,
+}
+
+/// What `Image` is read from.
+#[derive(Deserialize)]
+struct ImageParts {
+    size: Size,
+    #[serde(with = "crate::serialization::payload::bytes")]
+    data: Vec<u8>,
+}
+
+impl<M: AlphaMode> TryFrom<ImageParts> for Image<M> {
+    type Error = String;
+
+    fn try_from(ImageParts { size, data }: ImageParts) -> Result<Self, String> {
+        // In u64: on wasm32 `bytes()` would wrap for a large size.
+        let bytes =
+            u64::from(size.width).checked_mul(u64::from(size.height)).and_then(|n| n.checked_mul(M::CHANNELS as u64));
+        if bytes != Some(data.len() as u64) {
+            return Err(format!("{} bytes for a {}x{} image", data.len(), size.width, size.height));
+        }
+        Ok(Image::from_vec(size, data))
+    }
 }
 
 pub type UnassociatedImage = Image<Unassociated>;

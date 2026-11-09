@@ -3,6 +3,7 @@
 use std::marker::PhantomData;
 
 use mln_util::Color;
+use serde::{Deserialize, Serialize};
 
 /// The value types a binder keeps statistics for: only `float` tracks a
 /// maximum (the C++ `PaintPropertyStatistics<float>` specialization).
@@ -25,9 +26,11 @@ impl StatisticValue for Color {
 }
 
 /// `PaintPropertyStatistics<T>`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(bound = "")]
 pub struct PaintPropertyStatistics<T> {
     max: Option<f32>,
+    #[serde(skip)]
     _t: PhantomData<T>,
 }
 

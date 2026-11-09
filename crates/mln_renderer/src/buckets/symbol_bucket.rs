@@ -29,7 +29,9 @@ use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature, 
 use mln_util::Color;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
+use mln_util::serialization::payload::pod;
 use mln_util::sync::{MutexExt, RwLockExt};
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
 use crate::layout::symbol_instance::SymbolInstance;
@@ -103,7 +105,7 @@ pub const SIZE_PACK_FACTOR: u16 = 128;
 pub const MAX_PACKED_SIZE: u16 = MAX_GLYPH_ICON_SIZE * SIZE_PACK_FACTOR;
 
 /// `SortKeyRange`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SortKeyRange {
     pub sort_key: f32,
     pub start: usize,
@@ -121,7 +123,7 @@ pub struct ZoomEvaluatedSize {
 }
 
 /// `SymbolSizeBinder` and its three implementations.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum SymbolSizeBinder {
     /// `ConstantSymbolSizeBinder`.
     Constant {
@@ -250,7 +252,7 @@ impl SymbolSizeBinder {
 }
 
 /// `PlacedSymbol`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PlacedSymbol {
     pub anchor_point: Point<f32>,
     pub segment: usize,
@@ -311,12 +313,16 @@ impl PlacedSymbol {
 }
 
 /// `SymbolBucket::Buffer`.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Buffer {
+    #[serde(with = "pod")]
     pub attribute_data: Vec<SymbolLayoutVertex>,
+    #[serde(with = "pod")]
     pub dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
+    #[serde(with = "pod")]
     pub opacity_attribute_data: Vec<SymbolOpacityVertex>,
     /// `TriangleIndexVector` (3 indices per triangle).
+    #[serde(with = "pod")]
     pub triangles: Vec<u16>,
     pub segments: Vec<SegmentBase>,
     pub placed_symbols: Vec<PlacedSymbol>,
@@ -332,18 +338,21 @@ impl Buffer {
 }
 
 /// `SymbolBucket::CollisionBuffer` (+ box lines / circle triangles).
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct CollisionBuffer {
+    #[serde(with = "pod")]
     pub vertices: Vec<CollisionBoxLayoutVertex>,
+    #[serde(with = "pod")]
     pub dynamic_vertices: Vec<CollisionBoxDynamicVertex>,
     pub segments: Vec<SegmentBase>,
     /// `lines` (box buffers: 2 per line) or `triangles` (circle buffers: 3
     /// per triangle).
+    #[serde(with = "pod")]
     pub indices: Vec<u16>,
 }
 
 /// The paint property binders of one layer (`SymbolBucket::PaintProperties`).
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PaintProperties {
     pub icon_binders: SymbolIconBinders,
     pub text_binders: SymbolTextBinders,
@@ -351,7 +360,7 @@ pub struct PaintProperties {
 
 /// The state of a SymbolBucket that placement and sorting change after the
 /// bucket is shared.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SymbolBucketState {
     pub sorted_angle: f32,
     pub static_uploaded: bool,
@@ -379,7 +388,12 @@ pub struct SymbolBucketState {
 
 static MAX_BUCKET_INSTANCE_ID: AtomicU32 = AtomicU32::new(0);
 
+fn next_bucket_instance_id() -> u32 {
+    MAX_BUCKET_INSTANCE_ID.fetch_add(1, Ordering::SeqCst) + 1
+}
+
 /// `SymbolBucket`.
+#[derive(Serialize, Deserialize)]
 pub struct SymbolBucket {
     pub base: BucketBase,
     pub layout: Immutable<SymbolLayoutProperties::PossiblyEvaluated>,
@@ -398,22 +412,30 @@ pub struct SymbolBucket {
     pub icon_size_binder: SymbolSizeBinder,
 
     pub tile_pixel_ratio: f32,
+    /// Port-only: a bucket another side made gets an id of this side's.
+    #[serde(skip, default = "next_bucket_instance_id")]
     pub bucket_instance_id: u32,
     pub allow_vertical_placement: bool,
     pub placement_modes: Vec<TextWritingModeType>,
+    #[serde(skip)]
     has_format_section_overrides: OnceLock<bool>,
 
     /// Bumped whenever the vertex data changes after the bucket is shared
     /// (placement, sorting), so drawables can refresh their attributes.
+    #[serde(skip)]
     pub version: AtomicU32,
     /// What changed (the C++ shared vectors' `updateModified`): the
     /// opacity vertices (placement), the dynamic vertices (line labels,
     /// variable anchors), the triangle order (sortFeatures) and the paint
     /// property binders (feature state). RenderSymbolLayer refreshes only
     /// those in its drawables.
+    #[serde(skip)]
     pub opacity_version: AtomicU32,
+    #[serde(skip)]
     pub dynamic_version: AtomicU32,
+    #[serde(skip)]
     pub sort_version: AtomicU32,
+    #[serde(skip)]
     pub binder_version: AtomicU32,
 
     state: Mutex<SymbolBucketState>,
@@ -467,7 +489,7 @@ impl SymbolBucket {
             text_size_binder: SymbolSizeBinder::create(zoom, text_size, TextSize::default_value_f32()),
             icon_size_binder: SymbolSizeBinder::create(zoom, icon_size, IconSize::default_value_f32()),
             tile_pixel_ratio,
-            bucket_instance_id: MAX_BUCKET_INSTANCE_ID.fetch_add(1, Ordering::SeqCst) + 1,
+            bucket_instance_id: next_bucket_instance_id(),
             allow_vertical_placement,
             placement_modes,
             has_format_section_overrides: OnceLock::new(),

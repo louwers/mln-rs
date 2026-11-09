@@ -9,13 +9,14 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
 use mln_util::immutable::Immutable;
 use mln_util::sync::MutexExt;
+use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;
 
 /// `GlyphIDType` (glyph_range.hpp): `FontPBF` (0) for glyphs from glyph PBFs,
 /// other values are generated at runtime for HarfBuzz-shaped font faces
 /// (`genNewGlyphIDType`), so this is a newtype, not a Rust enum.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct GlyphIDType(pub u16);
 
 #[allow(non_upper_case_globals)]
@@ -60,7 +61,7 @@ impl Ord for GlyphRange {
 /// `union GlyphID`: `complex.code` (UTF-16 code unit or font glyph index)
 /// and `complex.type`; `hash` is the two read as one little-endian
 /// `char32_t`, which is what C++ compares.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct GlyphID {
     pub code: u16,
     pub type_: GlyphIDType,
@@ -116,7 +117,7 @@ pub fn get_glyph_range(glyph: GlyphID) -> GlyphRange {
 }
 
 /// `GlyphMetrics`.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct GlyphMetrics {
     pub width: u32,
     pub height: u32,
@@ -129,7 +130,7 @@ pub struct GlyphMetrics {
 }
 
 /// `Glyph`.
-#[derive(Clone, PartialEq, Debug, Default)]
+#[derive(Clone, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct Glyph {
     pub id: GlyphID,
     /// A signed distance field of the glyph with a border (see `BORDER_SIZE`).
@@ -186,7 +187,7 @@ impl PositionedGlyph {
 
 /// `enum class WritingModeType : uint8_t`, a bitmask
 /// (util/bitmask_operations.hpp).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct WritingModeType(pub u8);
 
 #[allow(non_upper_case_globals)]
@@ -257,7 +258,7 @@ impl Shaping {
 pub type FontFaceRange = (u32, u32);
 
 /// `FontFace`: style defined faces.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FontFace {
     /// an unique glyph id
     pub type_: GlyphIDType,
@@ -295,7 +296,7 @@ pub struct HBShapeRequest {
 pub type HBShapeRequests = BTreeMap<FontStack, BTreeMap<GlyphIDType, BTreeSet<Vec<u16>>>>;
 
 /// `GlyphDependencies`.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GlyphDependencies {
     pub glyphs: BTreeMap<FontStack, GlyphIDs>,
     pub shapes: HBShapeRequests,
@@ -305,7 +306,7 @@ pub struct GlyphDependencies {
 pub type GlyphRangeDependencies = BTreeMap<FontStack, HashSet<GlyphRange>>;
 
 /// `GlyphPosition`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GlyphPosition {
     pub rect: RectU16,
     pub metrics: GlyphMetrics,

@@ -47,10 +47,11 @@ use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas, ImageVersionMap};
+use crate::gfx::dynamic_texture_atlas::{GlyphAtlas, ImageAtlas, ImageVersionMap, TextureAtlas};
 use crate::image_manager::{ImageManager, ImageRequestPair, ImageRequestor, ImageRequestorBase, requestor_key};
 use crate::render_layer::LayerRenderData;
 use crate::render_source::SourcePrepareParameters;
@@ -65,10 +66,15 @@ use crate::tile_render_data::{TileAtlasTextures, TileRenderData};
 /// The atlases of a `LayoutResult`; dropping the last reference releases
 /// their bins (C++ `~LayoutResult`). Shared, so that copies of a
 /// LayoutResult release them once.
+///
+/// Port-only: serde writes the atlases without the atlas they release their
+/// bins to, which is the side's that gets them (tile/worker_codec).
+#[derive(Default, Serialize, Deserialize)]
 pub struct LayoutAtlases {
     pub glyph_atlas: GlyphAtlas,
     pub image_atlas: ImageAtlas,
-    pub dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
+    #[serde(skip)]
+    pub dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
 }
 
 impl Drop for LayoutAtlases {
@@ -94,7 +100,7 @@ impl LayoutResult {
         feature_index: Arc<FeatureIndex>,
         glyph_atlas: GlyphAtlas,
         image_atlas: ImageAtlas,
-        dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
+        dynamic_texture_atlas: Option<Arc<dyn TextureAtlas>>,
     ) -> Self {
         LayoutResult {
             layer_render_data,

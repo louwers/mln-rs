@@ -4,6 +4,8 @@
 // TODO(port): `Tileset` itself (tiles, zoom range, attribution, scheme,
 // encodings, bounds) with the tile sources (M4).
 
+use serde::{Deserialize, Serialize};
+
 /// `Tileset::Scheme`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Scheme {
@@ -13,7 +15,7 @@ pub enum Scheme {
 }
 
 /// `Tileset::RasterEncoding`. (Added by `sources` with the tile sources.)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum RasterEncoding {
     /// Mapbox DEM
     Mapbox,

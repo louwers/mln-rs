@@ -23,10 +23,11 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType
 use mln_style_types::image::RectU16;
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
+use serde::{Deserialize, Serialize};
 use shelf_pack::{ShelfPack, ShelfPackOptions};
 
 /// `TextureHandle`: a bin of a dynamic texture.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TextureHandle {
     id: i32,
     rectangle: RectU16,
@@ -206,6 +207,34 @@ impl DynamicTexture {
         inner.images_to_upload.clear();
     }
 
+    /// Port-only: takes the queued images (handle id, rectangle, pixels),
+    /// in handle order, for a mirror of this texture in another wasm
+    /// instance (tile/worker_codec), which uploads them instead.
+    pub fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
+        let mut inner = self.inner.lock_unpoisoned();
+        let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
+        uploads.sort_by_key(|(id, _, _)| *id);
+        uploads
+    }
+
+    /// Port-only: queues pixels for a bin that the texture this one mirrors
+    /// reserved (`take_uploads`). They replace whatever is still queued for
+    /// the bin or for the space it takes: the mirrored texture reserved that
+    /// space again only after freeing it, so pixels queued there before
+    /// belong to a bin that is gone, and would otherwise be uploaded over
+    /// these in whatever order the queue is drained.
+    pub fn queue_upload(&self, id: i32, rect: RectU16, data: Vec<u8>) {
+        let span = |start: u16, length: u16| u32::from(start)..u32::from(start) + u32::from(length);
+        let intersect = |a: std::ops::Range<u32>, b: std::ops::Range<u32>| a.start < b.end && b.start < a.end;
+        let overlaps = |other: &RectU16| {
+            intersect(span(other.x, other.w), span(rect.x, rect.w))
+                && intersect(span(other.y, other.h), span(rect.y, rect.h))
+        };
+        let mut inner = self.inner.lock_unpoisoned();
+        inner.images_to_upload.retain(|_, (queued, _)| !overlaps(queued));
+        inner.images_to_upload.insert(id, (rect, data));
+    }
+
     /// `removeTexture(texHandle)`: true when the bin's last reference went.
     pub fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
         let mut inner = self.inner.lock_unpoisoned();
@@ -230,5 +259,23 @@ impl DynamicTexture {
                 cell.borrow_mut().take();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pixels queued for a bin of a mirrored texture replace those still
+    /// queued for a freed bin in the same space.
+    #[test]
+    fn queued_uploads_replace_the_space_they_take() {
+        let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
+        let rect = |x, y, w, h| RectU16 { x, y, w, h };
+        texture.queue_upload(1, rect(0, 0, 8, 8), vec![1; 64]);
+        texture.queue_upload(2, rect(8, 0, 8, 8), vec![2; 64]);
+        texture.queue_upload(3, rect(4, 4, 2, 2), vec![3; 4]);
+        let uploads: Vec<(i32, RectU16)> = texture.take_uploads().into_iter().map(|(id, rect, _)| (id, rect)).collect();
+        assert_eq!(uploads, vec![(2, rect(8, 0, 8, 8)), (3, rect(4, 4, 2, 2))]);
     }
 }

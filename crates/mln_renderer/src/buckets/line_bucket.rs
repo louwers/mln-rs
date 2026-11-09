@@ -22,7 +22,9 @@ use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::serialization::payload::pod;
 use mln_util::sync::RwLockExt;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -52,11 +54,14 @@ pub struct LineLayoutVertex {
     pub a2: [u8; 4],
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct LineBucket {
     pub base: BucketBase,
     pub layout: LineLayoutProperties::PossiblyEvaluated,
+    #[serde(with = "pod")]
     pub vertices: Vec<LineLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
+    #[serde(with = "pod")]
     pub triangles: Vec<u16>,
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the

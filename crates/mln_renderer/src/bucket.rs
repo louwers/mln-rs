@@ -21,6 +21,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, G
 use mln_util::exception::ExceptionPtr;
 use mln_util::feature::feature_id_to_string;
 use mln_util::identity::SimpleIdentity;
+use serde::{Deserialize, Serialize};
 
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::RenderLayer;
@@ -34,7 +35,7 @@ pub type FeatureStates = std::collections::HashMap<String, mln_style::expression
 pub type LayerFeatureStates = std::collections::HashMap<String, FeatureStates>;
 
 /// `Bucket::RetainedFeature`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetainedFeature {
     pub feature_id: String,
     pub vertex_offset: usize,
@@ -42,15 +43,21 @@ pub struct RetainedFeature {
 }
 
 /// The data members of `Bucket`.
-#[derive(Debug)]
+///
+/// Port-only: serde writes what a worker sets (tile/worker_codec); the
+/// upload flag, the id and the version are the side's that has the bucket.
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BucketBase {
+    #[serde(skip)]
     pub uploaded: AtomicBool,
+    #[serde(skip, default = "SimpleIdentity::new")]
     pub bucket_id: SimpleIdentity,
     pub retain_features_by_id: bool,
     pub retained_features: Vec<RetainedFeature>,
     /// Port addition: bumped by `update` (feature state). C++ updates the
     /// shared vertex vectors in place (`updateModified()`); the render
     /// layers compare this to refresh their drawables' copies.
+    #[serde(skip)]
     pub version: AtomicU64,
 }
 

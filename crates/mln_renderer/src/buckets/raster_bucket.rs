@@ -21,6 +21,7 @@ use mln_util::constants;
 use mln_util::image::PremultipliedImage;
 use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::tile_mask::TileMask;
@@ -69,10 +70,20 @@ fn full_mask() -> TileMask {
     mask
 }
 
+/// `RasterBucket`.
+///
+/// Port-only: serde writes the image, which is what a worker sets
+/// (tile/worker_codec); the geometry is the tile's (`setMask`).
+#[derive(Serialize, Deserialize)]
 pub struct RasterBucket {
     pub base: BucketBase,
     pub image: Option<Arc<PremultipliedImage>>,
+    #[serde(skip, default = "unmasked")]
     geometry: Mutex<RasterBucketGeometry>,
+}
+
+fn unmasked() -> Mutex<RasterBucketGeometry> {
+    Mutex::new(RasterBucketGeometry::new())
 }
 
 impl RasterBucket {
@@ -83,7 +94,7 @@ impl RasterBucket {
 
     /// `RasterBucket(std::shared_ptr<PremultipliedImage>)`.
     pub fn with_shared_image(image: Option<Arc<PremultipliedImage>>) -> Self {
-        RasterBucket { base: BucketBase::default(), image, geometry: Mutex::new(RasterBucketGeometry::new()) }
+        RasterBucket { base: BucketBase::default(), image, geometry: unmasked() }
     }
 
     /// `layoutVertex(Point<int16_t> p, Point<uint16_t> t)`.

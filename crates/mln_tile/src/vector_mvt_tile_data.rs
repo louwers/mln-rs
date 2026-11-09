@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
-use mln_tile_id::{GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
+use mln_tile_id::{EncodedTileData, GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
 use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
@@ -260,5 +260,9 @@ impl GeometryTileData for VectorMVTTileData {
             Ok(layer) => Ok(layer.map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>)),
             Err(e) => Err(Arc::new(e)),
         }
+    }
+
+    fn encoded(&self) -> Option<EncodedTileData> {
+        Some(EncodedTileData::Mvt(self.data.clone()))
     }
 }

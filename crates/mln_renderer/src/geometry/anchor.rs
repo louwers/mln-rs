@@ -1,9 +1,10 @@
 // Ports src/mln/geometry/anchor.hpp.
 
 use geometry::Point;
+use serde::{Deserialize, Serialize};
 
 /// `Anchor`.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Anchor {
     pub point: Point<f32>,
     pub angle: f32,

@@ -33,9 +33,10 @@ use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::font_stack::FontStack;
 use mln_util::immutable::Immutable;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
+use serde::{Deserialize, Serialize};
 
 /// `HBShapeResult`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HBShapeResult {
     pub str_: Vec<u16>,
     pub adjusts: Arc<Vec<mln_text::HBShapeAdjust>>,

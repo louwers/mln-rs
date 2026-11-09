@@ -15,8 +15,8 @@ use std::sync::{Arc, Mutex};
 
 use feature::{Identifier, PropertyMap, Value};
 use mln_tile_id::{
-    GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData, GeometryTileFeature,
-    GeometryTileLayer,
+    EncodedTileData, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData,
+    GeometryTileFeature, GeometryTileLayer,
 };
 use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
@@ -299,5 +299,12 @@ impl GeometryTileData for VectorMLTTileData {
 
     fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
         Ok(self.get_mlt_layer(name).map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>))
+    }
+
+    /// The raw data, until the first decoding drops it (a tile sends its
+    /// data to its worker before anything decodes it).
+    fn encoded(&self) -> Option<EncodedTileData> {
+        let data = self.state.lock_unpoisoned().data.clone()?;
+        Some(EncodedTileData::Mlt { data, fast_pfor_enabled: self.fast_pfor_enabled })
     }
 }

@@ -33,18 +33,19 @@ use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
+use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, shared_image_map};
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileData;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas};
+use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas, TextureAtlas};
 use crate::group_by_layout::group_layers;
 use crate::image_manager::ImageRequestPair;
 use crate::layermanager;
@@ -54,6 +55,7 @@ use crate::render_layer::LayerRenderData;
 use crate::text::glyph_manager::HBShapeResults;
 use crate::tile::geometry_tile::LayoutResult;
 use crate::tile::tile_worker_transport::TileEndpoint;
+use crate::tile::worker_codec::fields;
 
 /// The tile data the worker parses (C++ `std::unique_ptr<const
 /// GeometryTileData>`, shared here with the feature index instead of
@@ -72,12 +74,20 @@ enum State {
 }
 
 /// The messages a `GeometryTile` sends its `GeometryTileWorker`: the
-/// worker's public member functions.
+/// worker's public member functions. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
 pub enum WorkerMessage {
     /// `setData(data, availableImages, correlationID)`.
-    SetData { data: Option<SharedTileData>, available_images: Immutable<BTreeSet<String>>, correlation_id: u64 },
+    SetData {
+        #[serde(with = "fields::tile_data")]
+        data: Option<SharedTileData>,
+        available_images: Immutable<BTreeSet<String>>,
+        correlation_id: u64,
+    },
     /// `setLayers(layers, globalState, availableImages, correlationID)`.
     SetLayers {
+        #[serde(with = "fields::layers")]
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Immutable<BTreeSet<String>>,
@@ -91,20 +101,42 @@ pub enum WorkerMessage {
     GlyphsAvailable { glyph_map: GlyphMap, results: HBShapeResults },
     /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
     ImagesAvailable {
+        #[serde(with = "shared_image_map")]
         icon_map: ImageMap,
+        #[serde(with = "shared_image_map")]
         pattern_map: ImageMap,
         version_map: ImageVersionMap,
         image_correlation_id: u64,
     },
 }
 
+impl WorkerMessage {
+    /// The message's correlation id, or 0 for the glyph and image replies,
+    /// which have none.
+    pub fn correlation_id(&self) -> u64 {
+        match self {
+            WorkerMessage::SetData { correlation_id, .. }
+            | WorkerMessage::SetLayers { correlation_id, .. }
+            | WorkerMessage::Reset { correlation_id }
+            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
+            WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
+        }
+    }
+}
+
 /// The messages a `GeometryTileWorker` sends its `GeometryTile`: the tile's
-/// member functions the worker calls.
+/// member functions the worker calls. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
 pub enum TileMessage {
     /// `onLayout(result, correlationID)`.
     Layout { result: LayoutResult, correlation_id: u64 },
     /// `onError(error, correlationID)`.
-    Error { error: ExceptionPtr, correlation_id: u64 },
+    Error {
+        #[serde(with = "fields::exception")]
+        error: ExceptionPtr,
+        correlation_id: u64,
+    },
     /// `getGlyphs(glyphDependencies)`.
     GetGlyphs(GlyphDependencies),
     /// `getImages(pair)`.
@@ -769,7 +801,7 @@ impl GeometryTileWorker {
             Arc::from(self.feature_index.take().expect("feature index")),
             glyph_atlas,
             image_atlas,
-            self.dynamic_texture_atlas.clone(),
+            self.dynamic_texture_atlas.clone().map(|atlas| atlas as Arc<dyn TextureAtlas>),
         );
         self.parent.send(TileMessage::Layout { result: layout_result, correlation_id: self.correlation_id });
         Ok(())

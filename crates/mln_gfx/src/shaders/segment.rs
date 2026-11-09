@@ -1,9 +1,11 @@
 // Ports src/mln/shaders/segment.hpp
 
+use serde::{Deserialize, Serialize};
+
 /// `mln::SegmentBase`.
 // TODO(port): `mutable std::map<std::string, gfx::DrawScope> drawScopes` is
 // only used by the legacy (non-drawable) OpenGL path.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub struct SegmentBase {
     pub vertex_offset: usize,
     pub index_offset: usize,

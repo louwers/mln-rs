@@ -13,6 +13,7 @@ use mln_text::glyph::{Shaping, WritingModeType};
 use mln_text::shaping::PositionedIcon;
 use mln_tile_id::geometry_tile_data::GeometryCoordinates;
 use mln_util::Padding;
+use serde::{Deserialize, Serialize};
 
 use crate::geometry::anchor::Anchor;
 use crate::geometry::feature_index::IndexedSubfeature;
@@ -20,7 +21,7 @@ use crate::text::collision_feature::CollisionFeature;
 use crate::text::quads::{SymbolQuads, get_glyph_quads, get_icon_quads};
 
 /// `enum class SymbolContent : uint8_t` (bit flags).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SymbolContent(pub u8);
 
 #[allow(non_upper_case_globals)]
@@ -172,8 +173,11 @@ impl SymbolInstanceSharedData {
 }
 
 /// `SymbolInstance`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolInstance {
+    /// Port-only: not written by serde. The layout releases it before the
+    /// bucket leaves the worker (`releaseSharedData`).
+    #[serde(skip)]
     shared_data: Option<Arc<SymbolInstanceSharedData>>,
     anchor: Anchor,
     symbol_content: SymbolContent,

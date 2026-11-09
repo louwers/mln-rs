@@ -30,6 +30,7 @@ use mln_map_types::MapMode;
 use mln_text::glyph::FontFaces;
 use mln_tile_id::OverscaledTileID;
 use mln_util::logging::{Event, Log};
+use serde::{Deserialize, Serialize};
 
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
 use crate::tile::geometry_tile::GeometryTileInner;
@@ -42,17 +43,25 @@ use crate::tile::raster_tile::{RasterTileInner, RasterTileMessage, RasterTileWor
 /// The arguments of the C++ `GeometryTileWorker` constructor that a tile
 /// passes, plus whether the worker runs synchronously
 /// (`TileParameters::isUpdateSynchronous`).
+///
+/// Serde writes them for a worker in another worker instance (worker_codec),
+/// without what can't cross: there, the instance's host gives the worker an
+/// `obsolete` flag and an atlas of its own, and the worker runs as an actor.
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WorkerParameters {
     pub id: OverscaledTileID,
     pub source_id: String,
     /// Set by the tile when it no longer needs the worker's results.
+    #[serde(skip)]
     pub obsolete: Arc<AtomicBool>,
     pub mode: MapMode,
     pub pixel_ratio: f32,
     pub show_collision_boxes: bool,
+    #[serde(skip)]
     pub dynamic_texture_atlas: Option<DynamicTextureAtlasPtr>,
     pub font_faces: Option<Arc<FontFaces>>,
     pub capture_rendered_features: bool,
+    #[serde(skip)]
     pub synchronous: bool,
 }
 

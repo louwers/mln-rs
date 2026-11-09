@@ -14,7 +14,9 @@ use std::sync::Arc;
 use mln_util::exception::StyleImageException;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
+use mln_util::serialization::shared;
 use mln_util::size::Size;
+use serde::{Deserialize, Serialize};
 
 /// `style::ImageStretch`.
 pub type ImageStretch = (f32, f32);
@@ -22,7 +24,7 @@ pub type ImageStretch = (f32, f32);
 pub type ImageStretches = Vec<ImageStretch>;
 
 /// `style::TextFit`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TextFit {
     StretchOrShrink,
     StretchOnly,
@@ -30,7 +32,7 @@ pub enum TextFit {
 }
 
 /// `style::ImageContent`.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ImageContent {
     pub left: f32,
     pub top: f32,
@@ -39,7 +41,7 @@ pub struct ImageContent {
 }
 
 /// `style::Image::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub id: String,
     pub image: PremultipliedImage,
@@ -214,7 +216,7 @@ impl Image {
 }
 
 /// `enum class ImageType : bool`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ImageType {
     Icon,
     Pattern,
@@ -226,7 +228,7 @@ pub type ImageMap = std::collections::HashMap<String, Immutable<Impl>>;
 pub type ImageDependencies = std::collections::HashMap<String, ImageType>;
 
 /// `Rect<uint16_t>` (util/rect.hpp).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RectU16 {
     pub x: u16,
     pub y: u16,
@@ -235,7 +237,7 @@ pub struct RectU16 {
 }
 
 /// `ImagePosition`: an image's place in an atlas.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImagePosition {
     pub padded_rect: RectU16,
     pub pixel_ratio: f32,
@@ -300,3 +302,47 @@ impl ImagePosition {
 
 /// `ImagePositions = mln::unordered_map<std::string, ImagePosition>`.
 pub type ImagePositions = std::collections::HashMap<String, ImagePosition>;
+
+/// Port-only: the `shared::Kind` of the images of an `ImageMap`, which cross
+/// once per pair of sides, then by key (mln_util::serialization::shared): a
+/// tile worker in another wasm instance gets the same icons and patterns for
+/// every tile.
+pub struct SharedImage;
+
+impl shared::Kind for SharedImage {
+    type Value = Impl;
+    const NAME: &'static str = "image";
+
+    fn write<S: serde::Serializer>(image: &Impl, serializer: S) -> Result<S::Ok, S::Error> {
+        image.serialize(serializer)
+    }
+
+    fn read<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Immutable<Impl>, D::Error> {
+        Impl::deserialize(deserializer).map(Immutable::new)
+    }
+}
+
+/// Port-only: `#[serde(with)]` for an `ImageMap`: its images (keyed by their
+/// ids), in id order.
+pub mod shared_image_map {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    struct Image(
+        #[serde(serialize_with = "shared::serialize::<SharedImage, _>")]
+        #[serde(deserialize_with = "shared::deserialize::<SharedImage, _>")]
+        Immutable<Impl>,
+    );
+
+    pub fn serialize<S: Serializer>(images: &ImageMap, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut images: Vec<_> = images.values().cloned().map(Image).collect();
+        images.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+        images.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ImageMap, D::Error> {
+        Ok(Vec::<Image>::deserialize(deserializer)?.into_iter().map(|image| (image.0.id.clone(), image.0)).collect())
+    }
+}

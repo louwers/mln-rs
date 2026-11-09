@@ -18,7 +18,10 @@ use mln_util::Color;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::serialization::payload::pod;
+use mln_util::serialization::sorted;
 use mln_util::sync::RwLockExt;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::buckets::line_bucket::LineLayoutVertex;
@@ -44,21 +47,27 @@ pub struct FillLayoutVertex {
     pub a1: [i16; 2],
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct FillBucket {
     pub base: BucketBase,
 
     // MLN_TRIANGULATE_FILL_OUTLINES
+    #[serde(with = "pod")]
     pub line_vertices: Vec<LineLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
+    #[serde(with = "pod")]
     pub line_indexes: Vec<u16>,
     pub line_segments: Vec<SegmentBase>,
 
     /// `gfx::IndexVector<gfx::Lines>`.
+    #[serde(with = "pod")]
     pub basic_lines: Vec<u16>,
     pub basic_line_segments: Vec<SegmentBase>,
 
+    #[serde(with = "pod")]
     pub vertices: Vec<FillLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
+    #[serde(with = "pod")]
     pub triangles: Vec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
 
@@ -66,7 +75,9 @@ pub struct FillBucket {
     /// bucket is shared.
     pub paint_property_binders: BTreeMap<String, RwLock<FillBinders>>,
 
+    #[serde(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
+    #[serde(with = "sorted::set")]
     mixed_sdf_pattern_layers: HashSet<String>,
 }
 

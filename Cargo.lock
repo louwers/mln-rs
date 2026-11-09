@@ -1393,6 +1393,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "serde",
 ]
 
 [[package]]
@@ -1448,6 +1449,7 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "serde",
 ]
 
 [[package]]
@@ -1572,7 +1574,9 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-webgpu",
+ "postcard",
  "proptest",
+ "serde",
  "serde_json",
 ]
 
@@ -1706,6 +1710,7 @@ dependencies = [
  "mln-rs-protozero",
  "mln-rs-style-types",
  "mln-rs-util",
+ "serde",
  "skrifa",
  "unicode-bidi",
 ]
@@ -1733,12 +1738,14 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-util",
+ "serde",
 ]
 
 [[package]]
 name = "mln-rs-util"
 version = "0.0.10"
 dependencies = [
+ "bytemuck",
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
  "mln-rs-expression",

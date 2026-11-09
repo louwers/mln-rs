@@ -12,6 +12,8 @@ use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
+use mln_util::serialization::payload::shared_bytes;
+use serde::{Deserialize, Serialize};
 
 /// Normalized vector tile coordinates. Each geometry coordinate represents a
 /// point in a bidimensional space, varying from -V...0...+V, where V is the
@@ -147,6 +149,28 @@ pub trait GeometryTileData {
     /// Returns the layer with the given name. `Err`: the exception C++
     /// throws (malformed tile).
     fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr>;
+
+    /// Port-only: what the data is made from, for a tile worker in another
+    /// wasm instance, which makes the data again (mln_renderer's
+    /// tile/worker_codec): a vector tile's bytes or a GeoJSON tile's
+    /// features. `None` for data that no longer has its bytes.
+    fn encoded(&self) -> Option<EncodedTileData> {
+        None
+    }
+}
+
+/// Port-only: what tile data is made from (`GeometryTileData::encoded`).
+/// The bytes travel beside a message (mln_util::serialization::payload).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum EncodedTileData {
+    Mvt(#[serde(with = "shared_bytes")] Arc<Vec<u8>>),
+    Mlt {
+        #[serde(with = "shared_bytes")]
+        data: Arc<Vec<u8>>,
+        fast_pfor_enabled: bool,
+    },
+    /// `GeoJSONTileData`'s features.
+    GeoJson(Arc<Vec<feature::Feature<i16>>>),
 }
 
 #[cfg(test)]
