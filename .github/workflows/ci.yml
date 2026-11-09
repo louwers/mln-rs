@@ -177,10 +177,74 @@ jobs:
       - name: Check
         run: just ci-test-msrv
 
+  # The browser build in headless Chromium (`just profile=release web-check`,
+  # platform/web/README.md): views of the render suite, served offline from
+  # its cache database to the page with its tile workers in Web Workers, each
+  # frame compared with the native runner's render of the same view
+  # (lavapipe). The Chromium is Playwright's build, pinned, and runs WebGPU on
+  # the SwiftShader it bundles.
+  web:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
+          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: web-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: web-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.61.1-chromium
+
+      - uses: taiki-e/install-action@v2
+        with: { tool: 'just,wasm-bindgen@0.2.130' }
+
+      # wasm-opt, which `just profile=release web` runs.
+      - name: Install binaryen
+        run: |
+          curl -fsSL https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz |
+            tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_130/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown --no-self-update
+          rustup default stable
+
+      # The Chromium that check.mjs uses. The runner's own Chrome brings the
+      # system libraries it needs.
+      - name: Install Chromium
+        run: npx -y playwright@1.61.1 install chromium
+
+      - name: Check
+        run: just profile=release web-check --out "$RUNNER_TEMP/web-check"
+
+      # Each view's style, the page's frame (expected.png) and the native
+      # render and diff (results/).
+      - name: Upload the frames and diffs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-check
+          path: ${{ runner.temp }}/web-check
+          if-no-files-found: ignore
+
   # The one check for branch protection to require: it fails when a job above
   # failed or was cancelled.
   ci-passed:
-    needs: [test, release-crate, lint, msrv]
+    needs: [test, release-crate, lint, msrv, web]
     if: always()
     runs-on: ubuntu-26.04
     permissions: {}

@@ -69,21 +69,46 @@ instance and create its tiles' workers again.
 
 ## Check
 
-`just profile=release web-check` (check/check.mjs, Node with no packages)
-serves web/, loads views of tools/liberty-compare/views.txt in headless
-Chromium (`--enable-unsafe-webgpu`), and, once each map is fully loaded and
-its labels have faded in, reads the frame back inside the page: headless
-Chromium composites WebGPU canvases as white, so a screenshot shows
-nothing. `WebMap::request_pixels` draws the frame again and copies the
-canvas texture into a buffer, which the event loop maps
-(`SurfaceBackend::take_readback`). The frames become the `expected.png` of
-render tests of the same views, which the native render-test runner then
-renders online (lavapipe) and compares with pixelmatch, as the render tests
-do. It needs the network (tiles.openfreemap.org); CI doesn't run it.
+`just profile=release web-check` (check/check.mjs, Node 24 with no
+packages) loads views of the render suite in headless Chromium, offline
+(Chromium resolves no host but the local server's), and compares each
+with the native render-test runner's render of the same view. CI runs it
+(the `web` job), the same way: install Playwright's Chromium once with
+`npx playwright@1.61.1 install chromium` (the check uses that build), and
+keep lavapipe for the native runner (`VK_DRIVER_FILES`).
 
-It prints, for each view, the share of the pixels that pixelmatch counts
-as different. Headless Chromium may pick SwiftShader for WebGPU while the
-runner uses lavapipe, and then single antialiasing pixels along edges
-differ; labels, shields and icons should be placed alike. `--codec <n>`
-renders natively through n codec instances (`--tileWorkerCodec`),
-`--workers <n>` sets the page's Web Workers.
+- The views are render tests of the suite whose operations the page can
+  follow (check.mjs, `VIEWS`): five real-world styles (vector tiles with
+  fills, lines, icons and labels), raster tiles, raster-dem tiles
+  (hillshade and color relief), and raster with GeoJSON. In the raster
+  and raster-dem views only the raster tiles' workers can reply, so their
+  replies show that those tiles decode in the Web Workers.
+- A local server serves the page and every fixture from the suite's
+  cache database (tools/render-test/testdata/metrics/cache-style.db), with
+  the URLs that the runner's file source maps (`local://`, `mapbox://`,
+  ...) rewritten to it. What the cache lacks gets no content, as in the
+  runner.
+- Once a view is fully loaded and its labels have faded in, the page
+  reads its frame back from the GPU: headless Chromium composites WebGPU
+  canvases as white, so a screenshot shows nothing.
+  `WebMap::request_pixels` draws the frame again and copies the canvas
+  texture into a buffer, which the event loop maps
+  (`SurfaceBackend::take_readback`).
+- The frames become the `expected.png` of render tests of the same views,
+  which the native runner renders from the same cache database and
+  compares with pixelmatch, as the render tests do.
+
+It fails when more than 0.1% of a view's pixels differ (the combination
+of raster-dem and vector at z1: 1%, where SwiftShader and lavapipe
+antialias coastlines differently), when the page or a Web Worker logs an
+error or throws (a worker that panics, a tile that fails to load), or
+when a view gets no worker replies. The page renders on SwiftShader, which
+Chromium bundles, and most views come out identical to lavapipe's;
+leaving out one layer of labels changes 0.1% to 2% of the pixels.
+
+Options: `--filter <regex>` picks views, `--workers <n>` sets the page's
+Web Workers (default 2), `--codec <n>` renders natively through n codec
+instances (`--tileWorkerCodec`), `--out <dir>` keeps the frames, the
+native renders and their diffs, `--chromium <path>` uses another
+Chromium. `MLN_WEB_CHECK_LOG=1` prints the consoles of the page and its
+workers, and the fixtures the cache lacks.

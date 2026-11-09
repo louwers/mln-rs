@@ -174,9 +174,10 @@ web:
       wasm-opt --strip-debug --strip-producers --strip-target-features "$pkg/mln_web_bg.wasm" -o "$pkg/mln_web_bg.wasm"
     fi
 
-# Needs the network (OpenFreeMap), Chromium (`--chromium`) and lavapipe (VK_DRIVER_FILES); builds the native render-test runner.
-# Arguments go to platform/web/check/check.mjs, e.g. `just profile=release web-check --workers 4`.
-[doc('Load OpenFreeMap views in headless Chromium and compare the frames with native renders (platform/web/README.md)')]
+# Offline, from the render suite's cache database. Needs Node 24, Playwright's Chromium (`npx playwright@1.61.1 install chromium`)
+# and lavapipe (VK_DRIVER_FILES); builds the native render-test runner. CI's web job runs `just profile=release web-check`.
+# Arguments go to platform/web/check/check.mjs, e.g. `just profile=release web-check --filter real-world`.
+[doc('Load render-suite views in headless Chromium and compare the frames with native renders (platform/web/README.md)')]
 [positional-arguments]
 web-check *args:  web
     cargo build -p mln-rs-render-test --bin render-test
