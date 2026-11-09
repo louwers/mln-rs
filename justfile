@@ -31,6 +31,18 @@ export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'
 @_default:
     {{just}} --list
 
+# Run the benchmarks (tools/bench/README.md), e.g. `just bench --filter Frame`
+bench *args:  bench-fixtures _dev-shell
+    {{dev_shell}} cargo run --release -q -p mln-rs-bench -- run {{args}}
+
+# Compare the benchmarks of this checkout, uncommitted changes included, against a Git ref (tools/bench/README.md)
+bench-compare base='main' *args:  bench-fixtures _dev-shell
+    {{dev_shell}} cargo run --release -q -p mln-rs-bench -- compare {{quote(base)}} {{args}}
+
+# Download the benchmarks' basemap fixture into target/bench-fixtures, once (tools/bench/fixtures.py)
+bench-fixtures:
+    python3 -I tools/bench/fixtures.py target/bench-fixtures
+
 # Build every package and test target
 build:  _dev-shell
     {{dev_shell}} cargo build --workspace --all-targets
