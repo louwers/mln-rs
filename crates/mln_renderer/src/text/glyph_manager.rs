@@ -2,7 +2,7 @@
 // src/mln/text/glyph_manager_observer.hpp.
 //
 // In mln_renderer rather than mln_text: it requests through mln_storage
-// (mln_text stays free of it; see COORDINATION.md [symbols]).
+// (mln_text stays free of it).
 //
 // The manager lives on the render thread (orchestrator-owned, shared with
 // the tiles as `Rc`); its state is in a `RefCell` instead of behind the C++

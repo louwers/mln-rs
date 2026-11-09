@@ -1,5 +1,5 @@
 // Ports src/mln/renderer/cross_faded_property_evaluator.hpp + .cpp (a cut
-// point; see COORDINATION.md).
+// point; see PLAN.md, "Crate map").
 
 use mln_util::interpolate::Interpolate;
 

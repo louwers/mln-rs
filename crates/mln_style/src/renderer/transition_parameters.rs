@@ -1,5 +1,5 @@
 // Ports src/mln/renderer/transition_parameters.hpp (a cut point; see
-// COORDINATION.md).
+// PLAN.md, "Crate map").
 
 use mln_util::chrono::TimePoint;
 

@@ -2,7 +2,7 @@
 //! (`LayerFactory::createLayer`, `LayerManager::createLayer`). The C++
 //! factories also create render layers, buckets and layouts; those parts
 //! need mln_renderer, which sits above mln_style, so they stay with the
-//! renderer (dispatch on `LayerTypeInfo`). A cut point; see COORDINATION.md.
+//! renderer (dispatch on `LayerTypeInfo`). A cut point; see PLAN.md, "Crate map".
 
 pub mod background_layer_factory;
 pub mod circle_layer_factory;

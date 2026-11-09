@@ -1,6 +1,6 @@
 //! Cut-point copies of the src/mln/renderer headers that
 //! src/mln/style/properties.hpp includes. `mln_renderer` uses these instead of
-//! porting them again (see COORDINATION.md).
+//! porting them again (see PLAN.md, "Crate map").
 
 pub mod cross_faded_property_evaluator;
 pub mod data_driven_property_evaluator;

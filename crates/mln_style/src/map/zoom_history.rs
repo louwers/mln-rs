@@ -1,6 +1,6 @@
 // Ports src/mln/map/zoom_history.hpp. It lives in mln_style because
 // renderer/property_evaluation_parameters.hpp needs it (a cut point; see
-// COORDINATION.md).
+// PLAN.md, "Crate map").
 
 use mln_util::chrono::{Duration, TimePoint};
 

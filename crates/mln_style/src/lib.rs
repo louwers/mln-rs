@@ -3,7 +3,7 @@
 //! Impl idiom, the property system and the typed `style/conversion`
 //! converters. Also holds cut-point copies of a few renderer/map headers that
 //! style/properties.hpp includes (`renderer`, `map`) and the style half of
-//! the layer manager (`layermanager`); see COORDINATION.md.
+//! the layer manager (`layermanager`); see PLAN.md, "Crate map".
 //!
 //! Path guide (C++ -> Rust):
 //! - `style::Style`, `Style::Impl` -> `style::Style`, `style::Impl`

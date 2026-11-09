@@ -266,7 +266,7 @@ update:
     cargo update
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
-[doc("Refresh the copies of maplibre-native's files in the packages' testdata/ (PORTING.md) from a checkout of it")]
+[doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
     #!/usr/bin/env bash
     set -euo pipefail

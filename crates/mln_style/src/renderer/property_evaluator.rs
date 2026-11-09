@@ -1,6 +1,6 @@
 // Ports src/mln/renderer/property_evaluator.hpp. It lives in mln_style
 // because style/properties.hpp needs it (a cut point of the C++ include
-// cycle; see COORDINATION.md).
+// cycle; see PLAN.md, "Crate map").
 //
 // C++ evaluators are visitors with three `operator()` overloads that
 // `PropertyValue<T>::evaluate` passes to `variant::visit`; `Evaluator<T>` is

@@ -134,7 +134,7 @@ wgpu = { version = "30.0.1", default-features = false }
 # with warnings denied in CI (the `lint` job), except the lints whose fix
 # would make the port read or behave less like the C++ it mirrors.
 [workspace.lints.rust]
-# PORTING.md: no `unsafe` outside FFI. The FFI modules allow it.
+# No `unsafe` outside FFI. The FFI modules allow it.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

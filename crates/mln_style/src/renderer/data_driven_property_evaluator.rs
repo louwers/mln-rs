@@ -1,5 +1,5 @@
 // Ports src/mln/renderer/data_driven_property_evaluator.hpp (a cut point;
-// see COORDINATION.md).
+// see PLAN.md, "Crate map").
 
 use crate::expression::{Dependency, EvaluationContext, ValueConverter};
 use crate::property_expression::PropertyExpression;

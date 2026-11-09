@@ -1,5 +1,5 @@
 // Ports src/mln/renderer/possibly_evaluated_property_value.hpp (a cut point;
-// see COORDINATION.md).
+// see PLAN.md, "Crate map").
 
 use std::collections::BTreeSet;
 

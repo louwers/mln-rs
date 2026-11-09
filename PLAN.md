@@ -29,8 +29,6 @@ port, not a redesign:
   and rendering OpenFreeMap's Liberty style completely (section 6). Stub
   specifics (exact BiDi, MLT, exotic options) until they block a test.
 
-`PORTING.md` holds the working rules; this file holds the plan.
-
 ## 1. Build
 
 - **Cargo** builds and tests everything (Rust edition 2024): the root
@@ -45,7 +43,7 @@ port, not a redesign:
 - Everything runs through the justfile (`just test`, ...). On NixOS, the
   tests and apps run inside the C++ repo's `#linux` flake shell.
 - Test data comes from the C++ repo, copied into the packages' `testdata/`
-  (PORTING.md, "Build and test") from the reference checkout: the
+  (`just update-testdata`) from the reference checkout: the
   `maplibre-native-next-support` branch of `louwers/maplibre-native`,
   currently `4e03abe94cf562b10562c528578d109c7273694d` (upstream
   `maplibre/maplibre-native` commit
@@ -181,46 +179,3 @@ tile pipeline and fill/line (running), line dashes, fill patterns, raster,
 fill-extrusion, and symbols (layout, atlases, collision, placement), the
 largest piece.
 
-## 7. Current workstreams
-
-Five parallel agents, each owning separate directories (see `PORTING.md`),
-all on the M1 critical path:
-
-| Agent | Owns | First deliverable |
-|---|---|---|
-| `runner` | `tools/render-test`, `//vendor/pixelmatch`, `mln_util::image` (PremultipliedImage, PNG I/O) | runner over the shared fixtures (manifest, metadata, operations, pixelmatch metric), with a reference-image self-check (finished) |
-| `style` | `mln_style_types`, `mln_style` (incl. `style/conversion/*` converters and `PropertyExpression`) | parse the M1 test styles into `Style::Impl` with `BackgroundLayer` properties, transitions and functions (finished) |
-| `shaping` (M5 groundwork, replaces `text`) | `mln_text` (shaping.cpp, BiDi, glyph_manager), `mln_util::i18n`, `//difftest/shaping` | line breaking and positioning identical to C++; BiDi matched against ICU (parked: stub the rest; `symbols` takes over mln_text) |
-| `glfw` (smoke test, parked) | `//platform/glfw`, `mln_webgpu::SurfaceBackend`, online/HTTP file source, `Style::load_url` | `mln-glfw` opens OpenFreeMap Liberty over HTTPS in a window (background, fill, line today) |
-| `dem-heatmap` (conformance wave) | raster-dem/hillshade, heatmap, color-relief | their render tests (79 blocked) (finished: heatmap 17/17, hillshade 27/27, color-relief 5/5) |
-| `query` (conformance wave) | query tests (`queryRenderedFeatures`, feature index), runner operations, tools/render-test, the orchestrator | 124 query tests + ~65 operation-blocked tests |
-| `text-conformance` (conformance wave) | non-placement symbol failures (vertical text, variable anchors, icon-text-fit, line labels, formatted text, ...) | the text/icon/symbol tests that don't need placement |
-| `conformance` (OpenFreeMap / conformance wave) | raster (incl. image sources), fill-extrusion, PatternAtlas + pattern hooks | full-suite pass count up; Liberty's raster, buildings, dashes and patterns (finished: ~160 tests; port ignore list down to ~43) |
-| `symbols` (OpenFreeMap / conformance wave) | symbol layout, glyph and icon atlases, collision, placement, symbol drawables; stubs (e.g. LTR-only) where needed | `text-*`, `icon-*`, `symbol-*` render tests (61 groups); Liberty's 25 symbol layers |
-| `gtests-core` (unit-test parity) | C++ gtests in test/{util,map,api,actor,math,algorithm,geometry,renderer,platform}; `tools/gtest-parity` with `// gtest: Group.Name` markers | parity table per module |
-| `gtests-data` (unit-test parity) | C++ gtests in test/{style,storage,text,tile,sprite,gl} | parity table per module |
-| `sources` (M3) | `mln_style` sources (`source*.rs`, `sources/`, `conversion/source.rs`, GeoJSON conversion), `mln_renderer::{sources,tile}` (RenderSource, TilePyramid, Tile, GeometryTile, GeometryTileWorker, tile loaders, GeoJSON/vector tiles) | GeoJSON and vector sources load tiles and run the worker that creates buckets |
-| `layers` (M3) | `mln_renderer::{buckets,layers}` for circle, fill, line (+ raster), paint property binders, their tweakers; the matching `mln_webgpu`/`mln_gfx` additions (shader attribute tables, polyline building) | circle/fill/line drawables render; the M3 render tests pass (finished: circle 63/63, line 51/51, within, feature state, debug tile borders) |
-| `text` (second wave, replaces `render`) | `mln_text`, `//difftest/text` | HBShaper on HarfRust + skrifa, shaping difftest exact over HarfBuzz's 146 test fonts; glyph PBFs; rasterization (finished) |
-| `tile` (third wave, replaces `runner`) | `//vendor/{protozero,vector-tile}`, `mln_tile` (MVT path), `//difftest/tile` | MVT decoding identical to C++ on every fixture tile (finished; also ported wagyu) |
-| `geometry` (third wave, replaces `expression`) | `//vendor/{earcut,geojson-vt,supercluster,kdbush,polylabel,cheap-ruler,shelf-pack}` (wagyu went to `tile`), `//difftest/geometry` | the vendored geometry libraries, exact |
-| `codegen` (second wave, replaces `gfx`) | `//tools/style-codegen`, generated `mln_style/src/layers/*`, layer factories, `//difftest/style_codegen` | a Rust port of generate-style-code.mjs over the same v8.json; all layer types' style side; defaults and property round trips identical to C++ (finished) |
-| `storage` (second wave, replaces `style`) | `mln_storage`, `mln_sprite`, the sprite-loading path in `mln_style`, `//difftest/storage` | Resource/Response/FileSource, the database file source over `metrics/cache-style.db`, sprite loading; `background-opacity/color` passes (finished) |
-| `gfx` | `mln_gfx`, `mln_webgpu`, WGSL extraction | headless wgpu (lavapipe) offscreen render and readback, then the background shader on the drawable path (finished) |
-| `render` | `mln_util::{mat4,size,...}`, `mln_tile_id`, `mln_actor` (minimal), `mln_renderer`, `mln_map`, `mln_platform_default` | Map, Transform, HeadlessFrontend, RenderOrchestrator and RenderBackgroundLayer; integrates M1 (finished) |
-| `expression` | `mln_math`, existing `mln_util` files, `//vendor/{csscolorparser,rapidjson,maplibre-native-base}`, `mln_conversion`, `mln_expression`, `tools/expression-test`, `//difftest/{util,expression}` | first `Convertible` + seed fixes, then the expressions M1 needs (literal, interpolate incl. HCL/LAB, step, zoom, coercions), then the corpus runner and difftests (finished) |
-
-Next wave (after M1): text with HarfRust (`mln_text` shaping difftests
-against `HBShaper`), MVT decoding (`mln_tile`), storage, codegen for all layer
-types.
-
-## 8. Risks
-
-- **Scale**: start with vertical slices (M1) so integration problems surface
-  early; generate the layer property code instead of porting it by hand.
-- **Float parity**: difftests catch differences per function; the render
-  suites' per-test `allowed` diff absorbs rasterizer differences.
-- **Text stack**: HarfRust shaping should match exactly; rasterization and
-  ICU-dependent behaviour are the expected deviations.
-- **Shared machine**: memory and disk are limited on the dev machine; run
-  the tests of the packages you change rather than everything at once.

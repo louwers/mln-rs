@@ -3,7 +3,7 @@
 //! code and the drawable-path files from `renderer/` that the backends
 //! implement. `mln_webgpu` implements the traits on `wgpu`.
 //!
-//! Crate cut (see COORDINATION.md): `renderer/layer_group.hpp` and
+//! Crate cut (see PLAN.md, "Crate map"): `renderer/layer_group.hpp` and
 //! `renderer/render_pass.hpp` live here (`renderer::layer_group`,
 //! `renderer::render_pass`), and `mln::PaintParameters` is seen through the
 //! `paint_parameters::PaintParameters` trait, because `mln_webgpu` cannot
