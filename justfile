@@ -229,8 +229,13 @@ liberty-references filter='.':  _dev-shell
     done
 
 # The GLFW app is never released, and its tools/ binary is outside the packaged files.
+# The verify step serves the packaged crates to each other from a local registry, and Cargo
+# treats a registry crate's name and version as immutable: it keeps the source it unpacked
+# into CARGO_HOME and the build in target/ from the last run. Delete both, or a branch is
+# verified against an older branch's copy of the in-repo crates at the same version.
 [doc('Package every crate from its packaged sources as the release does (RELEASING.md), and compile every test target')]
 package:
+    rm -rf "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/mln-rs-* "${CARGO_TARGET_DIR:-target}"/debug/.fingerprint/mln-rs-*
     cargo package --workspace --locked --exclude mln-rs-glfw
     cargo test --workspace --locked --no-run
 
