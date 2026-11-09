@@ -272,7 +272,7 @@ fn sprite_parsing_invalid_json() {
 
     let err = parse_sprite("default", &image_1x, json_1x).expect_err("Expected exception");
     // C++: "Failed to parse JSON: Missing a closing quotation mark in string.
-    // at offset 14" (rapidjson's message; DEVIATIONS.md).
+    // at offset 14" (rapidjson's message).
     assert!(err.to_string().starts_with("Failed to parse JSON: "), "{err}");
 }
 

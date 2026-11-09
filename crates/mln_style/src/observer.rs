@@ -36,7 +36,7 @@ pub trait Observer: SourceObserver {
     /// Port-only (glfw): a `loadURL` response arrived. C++'s response
     /// lambda captures the `Style::Impl` and parses at once; in Rust the
     /// owner of the style must call `Impl::process_style_responses` (the
-    /// Map does it when this fires). See DEVIATIONS.md \[glfw\].
+    /// Map does it when this fires).
     fn on_style_response(&self) {}
 }
 

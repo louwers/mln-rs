@@ -186,7 +186,7 @@ fn error_message(name: &str) -> String {
 #[test]
 fn test_parse_error_handling() {
     // C++: rapidjson's "Invalid value." (contains "Invalid"); the port
-    // reports serde_json's syntax error (DEVIATIONS.md).
+    // reports serde_json's syntax error.
     assert!(error_message("invalid.json").contains("expected value"));
 
     // test invalid polygon

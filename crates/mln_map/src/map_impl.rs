@@ -334,7 +334,7 @@ impl MapImpl {
             self.jump_to(&camera);
         }
         // TODO(port): if (LayerManager::annotationsEnabled)
-        // annotationManager.onStyleLoaded() (see DEVIATIONS.md).
+        // annotationManager.onStyleLoaded().
 
         self.observer.on_did_finish_loading_style();
 

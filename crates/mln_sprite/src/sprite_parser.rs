@@ -1,7 +1,7 @@
 // Ports src/mln/sprite/sprite_parser.hpp and src/mln/sprite/sprite_parser.cpp.
 //
 // The JSON is parsed with serde_json (`preserve_order`, so members come in
-// document order as with rapidjson). Deviations (DEVIATIONS.md): syntax
+// document order as with rapidjson). Deviations: syntax
 // error messages after "Failed to parse JSON: " are serde_json's, not
 // rapidjson's "<message> at offset N"; with duplicate keys rapidjson visits
 // every member, serde_json keeps the last value; rapidjson does not

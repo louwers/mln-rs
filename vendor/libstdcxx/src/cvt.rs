@@ -6,7 +6,7 @@
 // - `int32_t`, `int16_t`, `int8_t`, `uint16_t`, `uint8_t`: `cvttsd2si eax`;
 // - `int64_t`, `uint32_t`: `cvttsd2si rax`.
 // Rust's `as` saturates instead. On arm64 C++ saturates like Rust, so these
-// are x86-64 results (see DEVIATIONS.md).
+// are x86-64 results.
 
 /// `cvttsd2si` with a 32-bit destination.
 #[inline]

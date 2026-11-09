@@ -5,7 +5,7 @@
 // framebuffer size queries) stay in //platform/glfw, which creates the
 // surface and reports framebuffer resizes through `set_framebuffer_size`.
 //
-// Differences from C++, all structural (see DEVIATIONS.md [glfw]):
+// Differences from C++, all structural:
 // - The C++ backend reads `glfwGetFramebufferSize` where it needs the size;
 //   here the window reports it (`set_framebuffer_size`, also what C++'s
 //   `onFramebufferResize` calls), so `reconfigureSurface` and the depth
@@ -94,7 +94,7 @@ pub struct SurfaceState {
     /// present mode. FIFO blocks in acquire/present on Wayland while the
     /// window is not visible (no frame callbacks), which stalls the whole
     /// event loop; MAILBOX is vsync'ed without blocking, so it is used when
-    /// the surface supports it (DEVIATIONS.md).
+    /// the surface supports it.
     vsync_present_mode: wgpu::PresentMode,
     /// What `glfwGetFramebufferSize` returns in C++.
     framebuffer_size: Cell<Size>,

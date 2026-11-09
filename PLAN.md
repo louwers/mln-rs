@@ -13,7 +13,7 @@ port, not a redesign:
   query and expression suites with the C++ baselines, and the public API's
   behaviour. Quirks that change those outcomes are ported, not fixed
   (premultiplied `Color`, rapidjson number formatting in serialized
-  expressions, CSS parsing); every known difference goes in `DEVIATIONS.md`.
+  expressions, CSS parsing); differences are commented where they are made.
 - **Prefer a crate over a port** when a one-off comparison against the C++
   shows the difference does not change observable outcomes (`mlt-core`,
   `unicode-bidi`); port when it does (earcut) or when there is no crate.
@@ -108,7 +108,7 @@ per pair when we get there, from the measured edges.
 
 | C++ | Rust | Parity |
 |---|---|---|
-| **harfbuzz** (`text/harfbuzz*.cpp`, `HBShaper`) | **[HarfRust](https://github.com/harfbuzz/harfrust)** (`harfrust` 0.15, locally patched for two HarfRust bugs found by the difftest, to upstream), with the C++ build's `HB_TINY` configuration emulated (hidden AAT tables, no FeatureVariations, HarfBuzz 8.2 UCD tables) | measured: 94.2% of 59,015 shaping cases bit-identical over 149 fonts; the rest is HarfRust's Unicode 18 data vs. HarfBuzz 8.2's Unicode 15 (1,691 cases) and fallback mark positioning that `HB_TINY` disables and HarfRust cannot (1,649), all classified in `DEVIATIONS.md` |
+| **harfbuzz** (`text/harfbuzz*.cpp`, `HBShaper`) | **[HarfRust](https://github.com/harfbuzz/harfrust)** (`harfrust` 0.15, locally patched for two HarfRust bugs found by the difftest, to upstream), with the C++ build's `HB_TINY` configuration emulated (hidden AAT tables, no FeatureVariations, HarfBuzz 8.2 UCD tables) | measured: 94.2% of 59,015 shaping cases bit-identical over 149 fonts; the rest is HarfRust's Unicode 18 data vs. HarfBuzz 8.2's Unicode 15 (1,691 cases) and fallback mark positioning that `HB_TINY` disables and HarfRust cannot (1,649) |
 | freetype (`text/freetype.cpp`: face loading, cmaps, rasterization) | the needed parts of FreeType 2.13 ported (face loading, cmap formats 0-14, charmap selection, the ftgrays rasterizer) plus hb-ft; outlines and hinting via `skrifa` | cmap lookups identical (19.1M); SDF step bit-identical; bitmaps 68% identical, 1.1% of pixels differ (skrifa vs. FreeType hinting) |
 | csscolorparser, rapidjson dtoa, pixelmatch, earcut, kdbush, supercluster, geojson-vt, polylabel, wagyu | ported | exact |
 | earcut: the `earcut` crate (georust) instead? | evaluated, rejected | `//difftest/earcut_crate`: identical without holes, but with holes only 25% identical and 1.1% of polygons cover a different area (earcut.js 3.x hole bridging); the port stays |

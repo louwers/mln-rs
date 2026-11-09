@@ -11,7 +11,10 @@
 //   flavour) and the GSUB/GPOS FeatureVariations (HB_NO_VAR); and user
 //   features `frac=0`, `numr=0`, `dnom=0` (HB_NO_OT_SHAPE_FRACTIONS:
 //   HB_TINY never adds the automatic fraction features).
-// HB_TINY options HarfRust cannot turn off are listed in DEVIATIONS.md.
+// HarfRust has no switch for some HB_TINY options (HB_NO_OT_SHAPE_FALLBACK,
+// HB_NO_OT_SHAPER_VOWEL_CONSTRAINTS, HB_NO_UCD_UNASSIGNED), so a few texts
+// shape differently: fallback mark positioning, an inserted U+25CC, and
+// Unicode 18.0 instead of 15.0 properties.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};

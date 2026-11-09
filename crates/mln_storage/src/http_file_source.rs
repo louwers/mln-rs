@@ -20,7 +20,7 @@
 // stack a host sets with `set_transport` (mln-rs-web sets the browser's
 // fetch). Where ureq doesn't build (Emscripten), there is no default.
 //
-// Differences (DEVIATIONS.md [glfw]): ureq sends `Accept-Encoding: gzip` and
+// Differences: ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
 // ureq's text instead of curl's `curl_easy_strerror: errorbuffer`; dates use
 // the vendored parsedate instead of libcurl's `curl_getdate` (they differ

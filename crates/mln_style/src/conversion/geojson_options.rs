@@ -8,7 +8,7 @@ use crate::expression::dsl;
 use crate::sources::geojson_source::{ClusterProperties, GeoJSONOptions};
 
 // The C++ `static_cast<uint8_t/uint16_t/size_t>(float)` of out-of-range
-// values is UB; the port saturates (`as`), see DEVIATIONS.md.
+// values is UB; the port saturates (`as`).
 
 impl Converter for GeoJSONOptions {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {

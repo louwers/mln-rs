@@ -32,7 +32,7 @@
 //   (std::unordered_map::insert).
 //
 // Where mlt-core rejects a tile that the C++ decoder reads (or the other way
-// round), the tile fails here too; DEVIATIONS.md lists those cases.
+// round), the tile fails here too.
 
 use std::collections::HashMap;
 use std::fmt;

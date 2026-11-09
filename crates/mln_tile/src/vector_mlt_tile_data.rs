@@ -9,8 +9,7 @@
 // no error channel, so `try_get_value`/`try_get_properties` return
 // `Result<_, mlt::Error>` and the trait methods panic with the `what()` text
 // where the C++ exception would escape, as VectorMVTTileFeature does (the
-// GeometryTileWorker port catches it like C++ `catch (...)`). See
-// DEVIATIONS.md.
+// GeometryTileWorker port catches it like C++ `catch (...)`).
 
 use std::cell::OnceCell;
 use std::sync::{Arc, Mutex};

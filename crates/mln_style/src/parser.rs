@@ -3,8 +3,7 @@
 // C++ parses with rapidjson; the port parses with serde_json (with
 // `preserve_order`, so members iterate in document order as in rapidjson).
 // Deviation: the message of a JSON syntax error is serde_json's, not
-// rapidjson's `GetParseError_En(code) + " at offset " + offset` (see
-// DEVIATIONS.md).
+// rapidjson's `GetParseError_En(code) + " at offset " + offset`.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 

@@ -1,6 +1,6 @@
 // A per-test wall-clock limit for the runner, so that one test that never
 // finishes (a tile waiting forever for a reply, a request loop) errors with
-// "timed out" instead of blocking the whole run. See DEVIATIONS.md.
+// "timed out" instead of blocking the whole run.
 //
 // The map runs on the runner's thread and is not `Send`, so a hung test
 // cannot be stopped from outside. Instead the watchdog thread posts a task

@@ -5,7 +5,7 @@
 //! Their NaN handling is specified, their choice between `-0.0` and `+0.0`
 //! is not; `fmin`/`fmax` here implement glibc's (and clang's inline
 //! `llvm.minnum`/`llvm.maxnum` lowering on x86-64): the first argument when
-//! the two compare equal. See DEVIATIONS.md. Don't use `f64::min`/`f64::max`
+//! the two compare equal. Don't use `f64::min`/`f64::max`
 //! where signed zeros matter: Rust leaves that choice unspecified.
 
 use std::f64::consts::PI;

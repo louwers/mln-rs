@@ -8,7 +8,7 @@
 // C++ exception, and the trait method panics with its `what()` text where
 // the C++ exception would escape (the C++ GeometryTileWorker catches
 // everything around parsing; its port needs `catch_unwind` or the `try_*`
-// methods). See DEVIATIONS.md.
+// methods).
 
 use std::cell::OnceCell;
 use std::collections::BTreeMap;

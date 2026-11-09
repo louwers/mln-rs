@@ -23,8 +23,7 @@
 //! preconditions are `debug_assert!`s, and in debug builds `skip_bytes`
 //! resets the tag to 0 exactly as the C++ does without `NDEBUG`. The
 //! wire-type preconditions ("not a varint", ...) are not checked: they depend
-//! on the input data, and the port does what the C++ does with `NDEBUG`
-//! (see DEVIATIONS.md).
+//! on the input data, and the port does what the C++ does with `NDEBUG`.
 
 pub mod data_view;
 pub mod exception;

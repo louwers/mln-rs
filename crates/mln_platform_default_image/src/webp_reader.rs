@@ -1,7 +1,7 @@
 // Ports platform/default/src/mln/util/webp_reader.cpp
 //
 // libwebp (`WebPGetInfo` + `WebPDecodeRGBAInto`) is replaced by the
-// `image-webp` crate (DEVIATIONS.md [dem-heatmap]): lossless (VP8L) images
+// `image-webp` crate: lossless (VP8L) images
 // decode to the same pixels; lossy (VP8) images use its bilinear ("fancy")
 // chroma upsampling, which libwebp also uses by default.
 

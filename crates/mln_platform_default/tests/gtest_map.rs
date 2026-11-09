@@ -674,7 +674,7 @@ fn set_style_invalid_json() {
 
     // C++: "Failed to parse style: Invalid value. at offset 0" (rapidjson);
     // the port parses with serde_json, so the message after the prefix is
-    // serde_json's (DEVIATIONS.md "[style] JSON syntax errors").
+    // serde_json's.
     let serde_error = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
     assert_eq!(
         1,
@@ -2012,7 +2012,7 @@ fn style_update_zoom_dependency() {
 
 // gtest: Map.LineLayerDepthDistribution
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2105"]
+#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2105"]
 fn line_layer_depth_distribution() {
     let test = MapTest::new();
 
@@ -2060,7 +2060,7 @@ fn line_layer_depth_distribution() {
 
 // gtest: Map.SetFrustumOffset
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2156"]
+#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2156"]
 fn set_frustum_offset() {
     let test = MapTest::new();
 

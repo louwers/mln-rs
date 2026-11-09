@@ -1,8 +1,8 @@
 // Ports src/mln/style/rapidjson_conversion.hpp: the JSON front end of
 // Convertible, on serde_json instead of rapidjson.
 //
-// Differences that come from the JSON library, not from this file (see
-// DEVIATIONS.md): serde_json parses the integer literal `-0` as the double
+// Differences that come from the JSON library, not from this file:
+// serde_json parses the integer literal `-0` as the double
 // -0.0 (rapidjson: unsigned 0), rounds long decimals correctly (rapidjson's
 // default parse can be off by one ULP), and, without `preserve_order`,
 // iterates object members in key order (rapidjson: document order).

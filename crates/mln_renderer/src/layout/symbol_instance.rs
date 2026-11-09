@@ -2,7 +2,7 @@
 //
 // Not ported: the MLN_SYMBOL_GUARDS memory-corruption guards (check values,
 // checkIndex, forceFail): they detect C++ memory corruption, which safe
-// Rust cannot have (DEVIATIONS.md [symbols]).
+// Rust cannot have.
 
 use std::sync::Arc;
 

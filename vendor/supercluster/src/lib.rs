@@ -2,8 +2,8 @@
 // Cluster, Options, Supercluster).
 //
 // Property maps are `feature::PropertyMap` (key order; C++:
-// std::unordered_map, which only shows in iteration order, see
-// DEVIATIONS.md). `std::function` map/reduce options are shared closures.
+// std::unordered_map, which only shows in iteration order).
+// `std::function` map/reduce options are shared closures.
 // Exceptions (`std::runtime_error`, `bad_variant_access`) are `Err`s with
 // the C++ `what()`.
 

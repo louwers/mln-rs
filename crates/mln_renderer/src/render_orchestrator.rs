@@ -562,8 +562,7 @@ impl RenderOrchestrator {
         // source that AnnotationManager::onStyleLoaded adds to every style,
         // and handles the layers without a source (background) while it
         // iterates over the first source. Annotations are not ported yet, so
-        // with no style sources the loop runs once without a source. See
-        // DEVIATIONS.md.
+        // with no style sources the loop runs once without a source.
         let source_count = std::cmp::max(self.source_impls.len(), 1);
         for source_index in 0..source_count {
             let source_impl = self.source_impls.get(source_index).cloned();

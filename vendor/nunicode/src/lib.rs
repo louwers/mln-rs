@@ -55,7 +55,7 @@ fn transform_bytes(s: &[u8], f: TransformFn) -> Vec<u8> {
 /// puts bit 12 of a 4-byte codepoint into the third byte instead of the
 /// second, so mappings to such codepoints (e.g. Warang Citi U+118A0 ->
 /// U+118C0) come out as invalid UTF-8 in C++. A `String` cannot hold that;
-/// those bytes become U+FFFD here (see DEVIATIONS.md). The `_bytes`
+/// those bytes become U+FFFD here. The `_bytes`
 /// functions return the exact C++ bytes.
 fn into_string(bytes: Vec<u8>) -> String {
     match String::from_utf8(bytes) {
