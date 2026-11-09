@@ -73,10 +73,10 @@ all). Cutting there gives this layering, bottom to top:
 | `mln_conversion` | `style/conversion.hpp`, `conversion_impl.hpp`, generic `conversion/*` helpers | cut point: `Convertible` over serde_json; JNI/Swift front ends plug in later as in C++ |
 | `mln_actor` | `actor/`, `util/{run_loop,thread,thread_pool}`, `platform/default` loop | std threads and channels, no async runtime |
 | `mln_expression` | `style/expression/` minus `format_section_override` | own corpus: `metrics/integration/expression-tests` |
-| `mln_style` | `style/` (layers, sources, properties, parser, light) | the `Interpolator` impls for style types live here (orphan rule) |
+| `mln_style` | `style/` (layers, sources, properties, parser, light), `format_section_override` | the `Interpolator` impls for style types live here (orphan rule) |
 | `mln_gfx` | `gfx/`, `shaders/` registry, `programs/` | backend-independent drawables, passes, uniform buffers |
 | `mln_webgpu` | `webgpu/` | the first backend: on the `wgpu` crate, using the C++ backend's WGSL sources unchanged |
-| `mln_renderer` | `renderer/`, `util/tile_cover`, `format_section_override` | |
+| `mln_renderer` | `renderer/`, `util/tile_cover` | |
 | `mln_tile`, `mln_storage`, `mln_text`, `mln_layout`, `mln_sprite`, `mln_algorithm`, `mln_geometry` | the matching modules | phases 3-5 |
 | `mln_map` | `map/`, `annotation/`, `layermanager/`, `util/{camera,action_journal}` | top of the core |
 | `mln_platform_default` | `platform/default` (headless frontend and backend, file sources) | |

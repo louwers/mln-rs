@@ -122,7 +122,7 @@ crate::paint_properties!(
 );
 
 /// `LocationIndicatorLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LocationIndicatorLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

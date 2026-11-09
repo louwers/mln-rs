@@ -76,7 +76,7 @@ crate::paint_properties!(
 );
 
 /// `RasterLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RasterLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

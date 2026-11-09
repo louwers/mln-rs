@@ -11,21 +11,24 @@ use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
 use mln_util::immutable::Immutable;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression};
 use crate::filter::Filter;
 use crate::layer::LayerTypeInfo;
+use crate::serialization::shared_expression;
 use crate::util::AsAny;
 
 /// `mln::FontStack` (include/mln/util/font_stack.hpp).
 pub type FontStack = Vec<String>;
 
 /// The data members of `Layer::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ImplBase {
     // Backs an expression-valued "visibility" layout value; the evaluated
     // result is kept in `visibility` and re-evaluated by the style whenever
     // the global state changes.
+    #[serde(with = "shared_expression::option")]
     pub visibility_expression: Option<Arc<dyn Expression>>,
 
     pub id: String,

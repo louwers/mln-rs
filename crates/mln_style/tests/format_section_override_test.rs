@@ -1,5 +1,5 @@
-// Ports the tests of test/style/** that need `FormatSectionOverride`, which
-// is in mln_renderer (PLAN.md crate map): PropertyExpression.
+// Ports the tests of test/style/** that need `FormatSectionOverride`:
+// PropertyExpression.
 // FormatSectionOverride (test/style/property_expression.test.cpp),
 // GlobalStateExpression.FormatSectionOverrideUsesCapturedState
 // (test/style/expression/global_state.test.cpp) and Layer.SymbolLayerOverrides
@@ -18,7 +18,7 @@ use mln_expression::match_::Match;
 use mln_expression::parsing_context::ParsingContext;
 use mln_expression::type_::Type;
 use mln_expression::value::Value;
-use mln_renderer::format_section_override::{FormatSectionOverride, set_overrides};
+use mln_style::format_section_override::{FormatSectionOverride, set_overrides};
 use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides as MockOverrides;
 use mln_style::layers::symbol_layer_properties::{TextColor, TextField};
 use mln_style::layers::{SymbolLayoutProperties, SymbolPaintProperties};

@@ -43,6 +43,7 @@ pub mod parsedate;
 pub mod premultiply;
 pub mod projection;
 pub mod quaternion;
+pub mod serialization;
 pub mod size;
 pub mod string_indexer;
 pub mod sync;

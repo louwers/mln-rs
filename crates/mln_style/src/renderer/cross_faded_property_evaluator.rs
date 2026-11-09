@@ -2,6 +2,7 @@
 // point; see PLAN.md, "Crate map").
 
 use mln_util::interpolate::Interpolate;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{EvaluationContext, ValueConverter};
 use crate::property_expression::PropertyExpression;
@@ -9,7 +10,7 @@ use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameter
 use crate::renderer::property_evaluator::Evaluator;
 
 /// `Faded<T>`.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Faded<T> {
     pub from: T,
     pub to: T,

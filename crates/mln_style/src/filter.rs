@@ -3,13 +3,16 @@
 use std::sync::Arc;
 
 use feature::Value;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{EvaluationContext, Expression, from_expression_value};
+use crate::serialization::shared_expression;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Filter {
     /// C++ `std::optional<std::shared_ptr<const expression::Expression>>`
     /// (never an engaged null pointer).
+    #[serde(with = "shared_expression::option")]
     pub expression: Option<Arc<dyn Expression>>,
     legacy_filter: Option<Value>,
 }

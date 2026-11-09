@@ -2,13 +2,15 @@
 
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::expression::Dependency;
 use crate::property_expression::PropertyExpression;
 use crate::renderer::property_evaluator::Evaluator;
 
 /// `PropertyValue<T>`: `variant<Undefined, T, PropertyExpression<T>>`, in
 /// that order (the default is `Undefined`).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum PropertyValue<T> {
     #[default]
     Undefined,

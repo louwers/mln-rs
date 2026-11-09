@@ -6,11 +6,12 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mln_util::chrono::{Duration, TimePoint};
+use serde::{Deserialize, Serialize};
 
 use crate::expression::GlobalStateMap;
 use crate::map::zoom_history::ZoomHistory;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct CrossfadeParameters {
     pub from_scale: f32,
     pub to_scale: f32,

@@ -7,13 +7,14 @@ use mln_expression::expression::FeatureState;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::interpolate::Interpolate;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, ValueConverter};
 use crate::property_expression::PropertyExpression;
 use crate::renderer::cross_faded_property_evaluator::Faded;
 
 /// `PossiblyEvaluatedPropertyValue<T>`: `variant<T, PropertyExpression<T>>`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PossiblyEvaluatedPropertyValue<T> {
     Constant(T),
     Expression(PropertyExpression<T>),
@@ -126,7 +127,7 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
 /// specialization: `variant<Faded<T>, PropertyExpression<T>>` (the
 /// expression yields a `T`, not a `Faded<T>`), for the cross-faded
 /// data-driven properties (fill-pattern, line-pattern, fill-extrusion-pattern).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PossiblyEvaluatedFadedPropertyValue<T> {
     Constant(Faded<T>),
     Expression(PropertyExpression<T>),

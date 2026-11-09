@@ -3,11 +3,12 @@
 // include/mln/util/interpolate.hpp (orphan rule: it lives next to the type).
 
 use mln_util::interpolate::Interpolate;
+use serde::{Deserialize, Serialize};
 
 // Could be made a template class if needed
 // template <size_t Period>
 // size_t period() const noexcept { return Period; }
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Rotation {
     angle: f64,
 }

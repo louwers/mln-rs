@@ -5,10 +5,12 @@ use std::sync::Arc;
 
 use mln_expression::value::from_expression_value;
 use mln_util::Color;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, EvaluationContext, Expression, GlobalStateMap, collect_global_state_refs};
 use crate::properties::PropertyValueLike;
 use crate::renderer::property_evaluator::Evaluator;
+use crate::serialization::shared_expression;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
 /// interface used for building the paint property traits classes for
@@ -18,7 +20,11 @@ use crate::renderer::property_evaluator::Evaluator;
 /// render layers evaluate the expression separately to build their
 /// color-ramp textures. Referenced global-state keys are retained so those
 /// textures are rebuilt only when one of those keys changes.
-#[derive(Clone, Debug, Default)]
+///
+/// Port-only: serde writes the expression; the global-state keys are
+/// collected from it again.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(from = "ColorRampParts", into = "ColorRampParts")]
 pub struct ColorRampPropertyValue {
     value: Option<Arc<dyn Expression>>,
     global_state_refs: Option<Arc<BTreeSet<String>>>,
@@ -31,6 +37,21 @@ impl PartialEq for ColorRampPropertyValue {
                 (Some(lhs), Some(rhs)) => lhs.equals(rhs.as_ref()),
                 _ => false,
             }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct ColorRampParts(#[serde(with = "shared_expression::option")] Option<Arc<dyn Expression>>);
+
+impl From<ColorRampParts> for ColorRampPropertyValue {
+    fn from(parts: ColorRampParts) -> Self {
+        ColorRampPropertyValue::new(parts.0)
+    }
+}
+
+impl From<ColorRampPropertyValue> for ColorRampParts {
+    fn from(value: ColorRampPropertyValue) -> Self {
+        ColorRampParts(value.value)
     }
 }
 

@@ -103,15 +103,19 @@ impl ConversionTraits for serde_json::Value {
         }
     }
 
-    /// C++ catches the `std::exception` from `mapbox::geojson::convert` and
-    /// stores its `what()` in the error.
     fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJSON> {
-        match geojson::convert(self) {
-            Ok(geojson) => Some(geojson),
-            Err(e) => {
-                error.message = e.message().to_owned();
-                None
-            }
+        to_geojson(self, error)
+    }
+}
+
+/// C++ catches the `std::exception` from `mapbox::geojson::convert` and
+/// stores its `what()` in the error.
+pub(crate) fn to_geojson(value: &serde_json::Value, error: &mut Error) -> Option<geojson::GeoJSON> {
+    match geojson::convert(value) {
+        Ok(geojson) => Some(geojson),
+        Err(e) => {
+            error.message = e.message().to_owned();
+            None
         }
     }
 }

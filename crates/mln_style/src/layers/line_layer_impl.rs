@@ -5,12 +5,14 @@
 
 use std::collections::BTreeSet;
 
+use serde::{Deserialize, Serialize};
+
 use crate::expression::Dependency;
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::line_layer_properties::{LineLayoutProperties, LinePaintProperties};
 
 /// `LineLayer::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
     pub layout: LineLayoutProperties::Unevaluated,

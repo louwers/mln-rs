@@ -1,9 +1,9 @@
 // Ports include/mln/style/expression/format_section_override.hpp and the
 // `setOverrides`/`setOverride` half of `FormatSectionOverrides`
-// (src/mln/style/layers/symbol_layer_impl.hpp). In mln_renderer per
-// PLAN.md's crate map (it wraps a `PossiblyEvaluatedPropertyValue`, a
-// renderer type). The only overridable property is `text-color`, so the
-// template is instantiated for `Color`.
+// (src/mln/style/layers/symbol_layer_impl.hpp). In mln_style, with the
+// `PossiblyEvaluatedPropertyValue` it wraps (renderer/, a cut point). The
+// only overridable property is `text-color`, so the template is instantiated
+// for `Color`.
 
 use std::sync::Arc;
 
@@ -12,12 +12,13 @@ use mln_expression::expression::{
 };
 use mln_expression::type_::Type;
 use mln_expression::value::{Value, ValueConverter};
-use mln_style::expression::GlobalStateMap;
-use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
-use mln_style::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField};
-use mln_style::property_expression::PropertyExpression;
-use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use mln_util::Color;
+
+use crate::expression::GlobalStateMap;
+use crate::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
+use crate::layers::symbol_layer_properties::{SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField};
+use crate::property_expression::PropertyExpression;
+use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 
 /// `FormatSectionOverride<Color>`.
 pub struct FormatSectionOverride {
@@ -34,6 +35,15 @@ impl FormatSectionOverride {
             default_value,
             property_name,
         }
+    }
+}
+
+impl FormatSectionOverride {
+    /// Port-only: the default value and the property name, which serde
+    /// writes for a tile worker in another wasm instance
+    /// (serialization.rs).
+    pub(crate) fn parts(&self) -> (&PossiblyEvaluatedPropertyValue<Color>, &str) {
+        (&self.default_value, &self.property_name)
     }
 }
 

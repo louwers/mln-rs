@@ -1,5 +1,7 @@
 // Ports include/mln/style/expression/error.hpp.
 
+use feature::Value as MbglValue;
+
 use crate::expression::{
     Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind,
 };
@@ -34,6 +36,15 @@ impl Expression for Error {
 
     fn possible_outputs(&self) -> Vec<Option<Value>> {
         Vec::new()
+    }
+
+    /// Port-only: C++ serializes this as `["error"]` (the default), which
+    /// doesn't parse back, since the "error" expression takes its message.
+    /// The legacy property functions put an `Error` where a categorical or
+    /// interval function has no default, so their layers' JSON would not
+    /// parse back.
+    fn serialize(&self) -> MbglValue {
+        MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::String(self.message.clone())])
     }
 
     fn get_operator(&self) -> String {

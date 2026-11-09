@@ -674,6 +674,11 @@ impl Expression for CompoundExpression {
     }
 
     fn possible_outputs(&self) -> Vec<Option<Value>> {
+        // Port-only: "error" never outputs a value, as the `Error` it
+        // serializes from says.
+        if self.signature.name == "error" {
+            return Vec::new();
+        }
         vec![None]
     }
 

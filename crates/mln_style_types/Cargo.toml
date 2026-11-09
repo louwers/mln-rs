@@ -18,6 +18,7 @@ feature.workspace = true
 mln_math.workspace = true
 mln_util.workspace = true
 rapidjson.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true

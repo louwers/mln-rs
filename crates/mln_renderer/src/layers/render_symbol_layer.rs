@@ -694,7 +694,7 @@ impl RenderLayer for RenderSymbolLayer {
         );
 
         if self.has_format_section_overrides {
-            crate::format_section_override::set_overrides(
+            mln_style::format_section_override::set_overrides(
                 &impl_cast(&self.base.base_impl).layout,
                 &mut properties.evaluated,
                 &self.unevaluated,

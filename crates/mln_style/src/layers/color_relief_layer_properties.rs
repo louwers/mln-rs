@@ -32,7 +32,7 @@ crate::paint_properties!(
 );
 
 /// `ColorReliefLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ColorReliefLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

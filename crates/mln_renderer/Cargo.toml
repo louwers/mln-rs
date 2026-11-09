@@ -56,11 +56,6 @@ path = "tests/source_test.rs"
 
 # Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
 # backend) and test/renderer/fill_bucket.test.cpp.
-# gtests-data: the test/style/** gtests that need FormatSectionOverride.
-[[test]]
-name = "format_section_override_test"
-path = "tests/format_section_override_test.rs"
-
 [[test]]
 name = "bucket_test"
 path = "tests/bucket_test.rs"

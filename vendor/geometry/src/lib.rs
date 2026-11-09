@@ -6,8 +6,10 @@
 //! Deliberately not `geo-types`: the port needs the exact generic coordinate
 //! parameter of the C++ types.
 
+use serde::{Deserialize, Serialize};
+
 /// `mapbox::geometry::point<T>`
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Point<T> {
     pub x: T,
     pub y: T,
@@ -30,7 +32,7 @@ pub type GeometryCollection<T> = Vec<Geometry<T>>;
 
 /// `mapbox::geometry::geometry<T>` (a variant in C++; `empty` is the
 /// default-constructed state).
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub enum Geometry<T> {
     #[default]
     Empty,

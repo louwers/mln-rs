@@ -106,12 +106,12 @@ macro_rules! layout_properties {
             #[allow(unused_imports)]
             use $crate::properties::{Field, Property, PropertyValueLike};
 
-            #[derive(Clone, Debug, Default, PartialEq)]
+            #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Unevaluated {
                 $(pub $field: <$prop as Property>::Value,)+
             }
 
-            #[derive(Clone, Debug, Default)]
+            #[derive(Clone, Debug, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct PossiblyEvaluated {
                 $(pub $field: <$prop as Property>::PossiblyEvaluatedType,)+
             }

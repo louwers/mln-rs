@@ -5,8 +5,10 @@
 
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 /// `type::Type`, same variant order as the C++ variant.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Type {
     Null,
     Number,
@@ -25,7 +27,7 @@ pub enum Type {
 }
 
 /// `type::Array`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Array {
     pub item_type: Type,
     pub n: Option<usize>,

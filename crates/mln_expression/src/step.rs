@@ -169,11 +169,27 @@ impl Expression for Step {
 
     fn serialize(&self) -> MbglValue {
         let mut serialized = vec![MbglValue::String(self.get_operator()), self.input.serialize()];
-        for (k, v) in self.stops.iter() {
-            if k > f64::NEG_INFINITY {
+        for (i, (k, v)) in self.stops.iter().enumerate() {
+            // Port-only: C++ writes every label but -infinity's. The legacy
+            // property functions make steps whose first label is finite
+            // (zoom-and-property categorical functions), and
+            // `["step", input, label, output, ...]` doesn't parse back. An
+            // input below the first label takes the first output anyway, so
+            // the first output is written as the step's base output.
+            if i > 0 {
                 serialized.push(MbglValue::Double(k));
             }
             serialized.push(v.serialize());
+        }
+        // Port-only: an interval function with a single stop converts to a
+        // step without stops, and `["step", input, output]` doesn't parse
+        // back ("step" takes at least one stop). Add a stop with the same
+        // output, as gl-js's `fixupDegenerateStepCurve` does when it
+        // converts such a function.
+        if serialized.len() == 3 {
+            let output = serialized[2].clone();
+            serialized.push(MbglValue::Double(0.0));
+            serialized.push(output);
         }
         MbglValue::Array(serialized)
     }

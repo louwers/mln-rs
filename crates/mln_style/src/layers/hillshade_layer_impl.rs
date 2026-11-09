@@ -3,11 +3,13 @@
 // `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
 // hillshade_layer.rs.
 
+use serde::{Deserialize, Serialize};
+
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::hillshade_layer_properties::HillshadePaintProperties;
 
 /// `HillshadeLayer::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
     pub paint: HillshadePaintProperties::Transitionable,

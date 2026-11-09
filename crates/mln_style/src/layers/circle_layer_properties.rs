@@ -113,7 +113,7 @@ crate::paint_properties!(
 );
 
 /// `CircleLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CircleLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

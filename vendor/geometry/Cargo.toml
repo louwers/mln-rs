@@ -13,5 +13,8 @@ name = "geometry"
 # The doc comments have no examples to run.
 doctest = false
 
+[dependencies]
+serde.workspace = true
+
 [lints]
 workspace = true

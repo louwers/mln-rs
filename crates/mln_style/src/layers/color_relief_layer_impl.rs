@@ -3,11 +3,13 @@
 // `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
 // color_relief_layer.rs.
 
+use serde::{Deserialize, Serialize};
+
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::color_relief_layer_properties::ColorReliefPaintProperties;
 
 /// `ColorReliefLayer::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
     pub paint: ColorReliefPaintProperties::Transitionable,

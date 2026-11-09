@@ -42,7 +42,7 @@ crate::paint_properties!(
 );
 
 /// `BackgroundLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BackgroundLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

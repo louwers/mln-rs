@@ -6,6 +6,7 @@
 // two decimals).
 
 use feature::{Value, ValueObject};
+use serde::{Deserialize, Serialize};
 
 use crate::interpolate::interpolate as util_interpolate;
 use crate::string::to_string_double;
@@ -20,7 +21,7 @@ pub enum ColorSpace {
 }
 
 /// Stores a premultiplied color, with all four channels ranging from 0..1.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Color {
     pub r: f32,
     pub g: f32,
@@ -273,6 +274,20 @@ impl Color {
         }
     }
 
+    /// Port-only: `to_array` in double precision and without rounding alpha.
+    fn exact_array(&self) -> [f64; 4] {
+        let a = f64::from(self.a);
+        let channel = |c: f32| (f64::from(c) / a * 255.0).clamp(0.0, 255.0);
+        [channel(self.r), channel(self.g), channel(self.b), a]
+    }
+
+    /// Whether the "rgba" expression of these values makes this color: the
+    /// premultiplication of mln_expression's `rgba`.
+    fn is_made_by(&self, [r, g, b, a]: [f64; 4]) -> bool {
+        let premultiplied = |c: f64| (c / 255.0 * a) as f32;
+        premultiplied(r) == self.r && premultiplied(g) == self.g && premultiplied(b) == self.b && a as f32 == self.a
+    }
+
     /// `operator std::array<float, 4>`.
     pub fn to_float_array(&self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
@@ -296,8 +311,21 @@ impl Color {
 
     /// Emit as an rgba expression array for expression serialization (avoids
     /// "Bare objects invalid" parse errors in expression round trips).
+    ///
+    /// Port-only: when the C++ values (`to_array`) don't make this color
+    /// again (the "rgba" expression premultiplies them back), it writes
+    /// values that do. `to_array` rounds alpha to two decimals and divides
+    /// in float, so a serialized layer could parse back to slightly other
+    /// colors, and a tile worker in another wasm instance, which gets its
+    /// layers that way, would write other colors into its buckets.
     pub fn serialize(&self) -> Value {
-        let array = self.to_array();
+        let mut array = self.to_array();
+        if !self.is_made_by(array) {
+            let exact = self.exact_array();
+            if self.is_made_by(exact) {
+                array = exact;
+            }
+        }
         Value::Array(vec![
             Value::String("rgba".to_owned()),
             Value::Double(array[0]),
@@ -363,5 +391,29 @@ mod tests {
         let c = Color::interpolate(&Color::black(), &Color::white(), 0.5, ColorSpace::Rgb);
         assert!((c.r - 0.5).abs() < 1e-6);
         assert!((c.a - 1.0).abs() < 1e-6);
+    }
+
+    fn serialized(c: &Color) -> [f64; 4] {
+        let Value::Array(a) = c.serialize() else { panic!("not an array") };
+        let n = |v: &Value| match v {
+            Value::Double(d) => *d,
+            _ => panic!("not a number"),
+        };
+        [n(&a[1]), n(&a[2]), n(&a[3]), n(&a[4])]
+    }
+
+    /// Port-only: what `serialize` writes makes the same color again,
+    /// premultiplied as the "rgba" expression does; and it is the C++
+    /// `to_array` when that does.
+    #[test]
+    fn serialize_makes_the_same_color() {
+        for css in ["red", "rgba(255, 0, 0, 0.5)", "rgba(170, 255, 0, 0.6)", "rgba(1, 2, 3, 0.678)", "#123456"] {
+            let c = Color::parse(css).unwrap();
+            let [r, g, b, a] = serialized(&c);
+            let premultiplied = |v: f64| (v / 255.0 * a) as f32;
+            assert_eq!((premultiplied(r), premultiplied(g), premultiplied(b), a as f32), (c.r, c.g, c.b, c.a), "{css}");
+        }
+        assert_eq!(serialized(&Color::parse("rgba(255, 0, 0, 0.5)").unwrap()), [255.0, 0.0, 0.0, 0.5]);
+        assert_eq!(serialized(&Color::parse("rgba(1, 2, 3, 0.678)").unwrap())[3], f64::from(0.678f32));
     }
 }

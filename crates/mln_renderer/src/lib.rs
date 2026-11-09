@@ -5,7 +5,6 @@ pub mod bucket;
 pub mod bucket_parameters;
 pub mod buckets;
 pub mod change_request;
-pub mod format_section_override;
 pub mod geometry;
 pub mod gfx;
 pub mod group_by_layout;

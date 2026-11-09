@@ -11,8 +11,10 @@
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 use std::sync::OnceLock;
 
+use serde::{Deserialize, Serialize};
+
 /// `mln::Duration` (`std::chrono::nanoseconds`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Duration(i64);
 
 impl Duration {
@@ -116,7 +118,7 @@ pub const fn milliseconds(n: i64) -> Duration {
 
 /// `mln::TimePoint` (`steady_clock::time_point`). The default value is the
 /// clock's epoch, as for a default-constructed `time_point`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TimePoint(Duration);
 
 impl TimePoint {

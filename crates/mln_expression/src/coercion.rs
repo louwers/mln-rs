@@ -281,6 +281,15 @@ impl Expression for Coercion {
     }
 
     fn serialize(&self) -> MbglValue {
+        // Port-only: the conversion of a token string without tokens (a
+        // legacy function's stop, say) makes `["to-string", "text"]`, which
+        // the parser folds into the literal it coerces to itself. Writing the
+        // literal makes the serialized form the one it parses back to.
+        if let [input] = self.inputs.as_slice() {
+            if input.get_kind() == Kind::Literal && input.get_type() == self.get_type() {
+                return input.serialize();
+            }
+        }
         match self.get_type() {
             Type::Formatted => {
                 // Since there's no explicit "to-formatted" coercion, the only
@@ -292,7 +301,19 @@ impl Expression for Coercion {
                     MbglValue::Object(ValueObject::new()),
                 ])
             }
-            Type::Image => MbglValue::Array(vec![MbglValue::String("image".to_owned()), self.inputs[0].serialize()]),
+            // Port-only: there is no "to-image" either, and C++ writes
+            // `["image", input]`, which parses back to an image expression
+            // that asserts a string and checks availability, where the
+            // coercion takes any value. The parser makes the coercion
+            // implicitly where an image is expected and the input is a string
+            // or a value, so the input alone parses back to it. Later inputs
+            // never matter, since `to_image` can't fail.
+            Type::Image => self.inputs[0].serialize(),
+            // Port-only: C++ writes "to-variableanchoroffset", which no
+            // parser knows. The coercion is made implicitly, where a
+            // collection is expected and the input is an array or a value, so
+            // the input alone parses back to it.
+            Type::VariableAnchorOffsetCollection if self.inputs.len() == 1 => self.inputs[0].serialize(),
             _ => default_serialize(self),
         }
     }

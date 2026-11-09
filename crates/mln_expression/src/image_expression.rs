@@ -72,6 +72,14 @@ impl Expression for ImageExpression {
     }
 
     fn serialize(&self) -> MbglValue {
+        // Port-only: the legacy property functions wrap a token string's
+        // image expression in a second one (a C++ quirk the conversion
+        // keeps). `["image", ["image", ...]]` doesn't parse back, since
+        // "image" takes a string; the outer one evaluates to the inner one's
+        // image, so it serializes as the inner one.
+        if *self.image_id.get_type() == Type::Image {
+            return self.image_id.serialize();
+        }
         MbglValue::Array(vec![MbglValue::String(self.get_operator()), self.image_id.serialize()])
     }
 

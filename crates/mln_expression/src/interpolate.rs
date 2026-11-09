@@ -266,14 +266,14 @@ impl Expression for Interpolate {
                 }
             }
             Interpolator::CubicBezier(cubic_bezier) => {
-                let p1 = cubic_bezier.ub.p1();
-                let p2 = cubic_bezier.ub.p2();
+                // `ub.getP1()`, `ub.getP2()` in C++ (see `control_points`).
+                let [x1, y1, x2, y2] = cubic_bezier.control_points();
                 serialized.push(MbglValue::Array(vec![
                     MbglValue::String("cubic-bezier".to_owned()),
-                    MbglValue::Double(p1.0),
-                    MbglValue::Double(p1.1),
-                    MbglValue::Double(p2.0),
-                    MbglValue::Double(p2.1),
+                    MbglValue::Double(x1),
+                    MbglValue::Double(y1),
+                    MbglValue::Double(x2),
+                    MbglValue::Double(y2),
                 ]));
             }
         }
