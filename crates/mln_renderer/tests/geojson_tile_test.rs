@@ -12,11 +12,13 @@ use mln_map_types::{ConstrainMode, MapDebugOptions, MapMode, TileLodMode, Viewpo
 use mln_renderer::tile::geojson_tile::GeoJSONTile;
 use mln_renderer::tile::tile::{Tile, TileBase};
 use mln_renderer::tile::tile_observer::TileObserver;
+use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
 use mln_renderer::tile_parameters::TileParameters;
 use mln_style::layer::{Layer, static_immutable_cast};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::{CircleLayer, CircleLayerProperties};
+use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::sources::geojson_source::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::exception::RuntimeError;
@@ -212,4 +214,76 @@ fn issue_9927() {
     tile.geometry_tile().inner().on_error(RuntimeError::ptr("Parse error"), 3);
     assert!(tile.is_renderable());
     assert!(tile.layer_properties_updated(&layer_properties));
+}
+
+/// A circle layer as its render layer evaluates it, which records what the
+/// worker codec sends to evaluate it again.
+fn evaluated_circle_layer_properties() -> Immutable<dyn LayerProperties> {
+    let layer = CircleLayer::new("circle", "source");
+    let render_layer = mln_renderer::layermanager::create_render_layer(&layer.base_impl()).unwrap();
+    render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
+    render_layer.borrow().base().evaluated_properties.clone()
+}
+
+/// A transport whose workers are in `count` worker instances on threads.
+fn serializing_transport(count: usize) -> Rc<SerializingTransport> {
+    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)))
+}
+
+// Port-only: GeoJSON.SynchronousUpdate with a `SerializingTransport`: the
+// worker of a synchronous update stays on this thread, so the tile still
+// completes before `set_layers` returns.
+#[test]
+fn synchronous_update_with_the_serializing_transport() {
+    let test = GeoJSONTileTest::new();
+
+    let mut tile_parameters = test.tile_parameters();
+    tile_parameters.is_update_synchronous = true;
+    tile_parameters.tile_worker_transport = serializing_transport(1);
+    let tile = GeoJSONTile::new(
+        OverscaledTileID::from_zxy(0, 0, 0),
+        "source".to_owned(),
+        &tile_parameters,
+        point_data(),
+        None,
+    );
+    let layer_properties = evaluated_circle_layer_properties();
+    tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state.clone());
+    assert!(tile.is_complete());
+    assert!(tile.is_renderable());
+    assert!(tile.layer_properties_updated(&layer_properties));
+}
+
+// Port-only: tiles whose workers are in worker instances on other threads
+// get their layouts back through the codec, and a data update replaces them.
+#[test]
+fn update_through_the_codec() {
+    let test = GeoJSONTileTest::new();
+
+    let mut tile_parameters = test.tile_parameters();
+    tile_parameters.tile_worker_transport = serializing_transport(2);
+    let layer_properties = evaluated_circle_layer_properties();
+    // Two tiles, so both instances get one.
+    let tiles: Vec<GeoJSONTile> = (0..2)
+        .map(|x| {
+            let id = OverscaledTileID::from_zxy(1, x, 0);
+            let tile = GeoJSONTile::new(id, "source".to_owned(), &tile_parameters, point_data(), None);
+            tile.set_layers(std::slice::from_ref(&layer_properties), tile_parameters.global_state.clone());
+            tile
+        })
+        .collect();
+    while !tiles.iter().all(|tile| tile.is_complete()) {
+        test.run_loop.run_once();
+    }
+    for tile in &tiles {
+        assert!(tile.is_renderable());
+        assert!(tile.layer_properties_updated(&layer_properties));
+    }
+
+    tiles[0].update_data(point_data(), false, false);
+    assert!(!tiles[0].is_complete());
+    while !tiles[0].is_complete() {
+        test.run_loop.run_once();
+    }
+    assert!(tiles[0].is_renderable());
 }

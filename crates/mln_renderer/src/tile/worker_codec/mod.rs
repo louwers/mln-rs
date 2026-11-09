@@ -32,17 +32,24 @@
 //! the instance frees a bin only once nothing here uses it.
 //!
 //! `MapCodec` (map_side.rs) is the map side of one worker instance and
-//! `WorkerCodec` (worker_side.rs) that instance's side.
+//! `WorkerCodec` (worker_side.rs) that instance's side. `TileWorkerHost`
+//! (host.rs) runs an instance's workers behind its `WorkerCodec`, and
+//! `SerializingTransport` (transport.rs) is the `TileWorkerTransport` that
+//! puts the tiles' workers in instances, through their `MapCodec`s.
 
 mod envelope;
 pub(crate) mod fields;
+mod host;
 mod map_side;
+mod transport;
 mod worker_side;
 
 pub use envelope::Encoded;
-pub use map_side::{MapCodec, Reply};
-pub use worker_side::{WorkerAction, WorkerCodec};
+pub use host::TileWorkerHost;
+pub use transport::{ReplySink, SerializingTransport, ThreadWorkerInstances, WorkerInstances};
 
+#[cfg(test)]
+mod host_tests;
 #[cfg(test)]
 mod raster_tests;
 #[cfg(test)]

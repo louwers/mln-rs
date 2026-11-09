@@ -15,7 +15,9 @@ use crate::manifest_parser::ManifestParser;
 use crate::metadata::{MapDebugOptions, MapMode, TestMetadata};
 use crate::parser::{parse_test_metadata, parse_test_operations};
 use crate::render_test::{Arguments, RunResult, parse_arguments, run_render_tests_with};
-use crate::runner::{ImplFactory, MapError, ResourceOptions, TestContext, TestRunner, TestRunnerImpl, UpdateResults};
+use crate::runner::{
+    ImplFactory, ImplOptions, MapError, ResourceOptions, TestContext, TestRunner, TestRunnerImpl, UpdateResults,
+};
 
 const OUR_MANIFEST: &str = "manifests/linux-wgpu.json";
 const CPP_MANIFEST: &str = "testdata/metrics/linux-opengl.json";
@@ -469,7 +471,7 @@ impl Suite {
 }
 
 fn mock_factory() -> ImplFactory {
-    Box::new(|_metadata: &TestMetadata, _options: &ResourceOptions| {
+    Box::new(|_metadata: &TestMetadata, _options: &ResourceOptions, _impl_options: &ImplOptions| {
         Ok(Box::new(MockMap::new(Rc::new(RefCell::new(Vec::new())), [0, 0, 0, 0])) as Box<dyn TestRunnerImpl>)
     })
 }

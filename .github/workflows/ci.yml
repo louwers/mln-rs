@@ -15,10 +15,11 @@ permissions:
 
 jobs:
   # Every test (`just ci-coverage`): the libraries' tests and the shared
-  # render, query and expression suites, on Linux (wgpu renders through
-  # Vulkan/lavapipe) and macOS (through Metal), with their line coverage
-  # uploaded to Codecov (codecov.yml). The differential tests against the C++
-  # core are in louwers/mln-rs-difftests.
+  # render, query and expression suites (the render and query suites twice:
+  # also with the tile workers behind the worker codec), on Linux (wgpu
+  # renders through Vulkan/lavapipe) and macOS (through Metal), with their
+  # line coverage uploaded to Codecov (codecov.yml). The differential tests
+  # against the C++ core are in louwers/mln-rs-difftests.
   test:
     strategy:
       fail-fast: false
@@ -61,14 +62,17 @@ jobs:
       - name: Test
         run: just ci-coverage
 
-      # The render suite's report and actual/diff images (cargo-llvm-cov
-      # builds in target/llvm-cov-target).
+      # The render suite's reports and actual/diff images, from the run with
+      # the tile workers in process and the one through the worker codec
+      # (cargo-llvm-cov builds in target/llvm-cov-target).
       - name: Upload the render test results
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: render-tests-${{ runner.os }}
-          path: target/llvm-cov-target/tmp/render_tests
+          path: |
+            target/llvm-cov-target/tmp/render_tests
+            target/llvm-cov-target/tmp/render_tests_through_the_codec
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov

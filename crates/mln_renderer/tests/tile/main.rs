@@ -28,7 +28,7 @@ pub struct RasterTileTest {
     // never run it.
     file_source: Arc<StubFileSource>,
     transform_state: TransformState,
-    _run_loop: mln_actor::RunLoop,
+    pub run_loop: mln_actor::RunLoop,
     thread_pool: TaggedScheduler,
     pub tileset: Tileset,
 }
@@ -38,7 +38,7 @@ impl RasterTileTest {
         RasterTileTest {
             file_source: Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
             transform_state: TransformState::default(),
-            _run_loop: mln_actor::RunLoop::new(),
+            run_loop: mln_actor::RunLoop::new(),
             thread_pool: TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new()),
             // `Tileset tileset{{"https://example.com"}, {0, 22}, "none"}`.
             tileset: Tileset {
@@ -75,6 +75,32 @@ impl RasterTileTest {
                 mln_renderer::tile::tile_worker_transport::InProcessTransport::new(self.thread_pool.clone()),
             ),
         }
+    }
+}
+
+/// Port-only: a transport whose workers are in `count` worker instances on
+/// threads, reached only through the worker codec.
+pub fn serializing_transport(count: usize) -> std::rc::Rc<mln_renderer::tile::worker_codec::SerializingTransport> {
+    use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
+    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)))
+}
+
+/// Port-only: an opaque PNG whose pixels differ from their neighbours.
+pub fn png(width: u32, height: u32) -> mln_storage::Data {
+    let mut image = mln_util::image::PremultipliedImage::new(mln_util::size::Size::new(width, height));
+    for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
+        pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
+    }
+    Arc::new(mln_platform_default_image::encode_png(&image))
+}
+
+/// Port-only: an observer that records the tiles' errors.
+#[derive(Default)]
+pub struct ErrorObserver(pub std::cell::RefCell<Vec<String>>);
+
+impl mln_renderer::tile::tile_observer::TileObserver for ErrorObserver {
+    fn on_tile_error(&self, _tile: &mln_renderer::tile::TileBase, error: mln_util::exception::ExceptionPtr) {
+        self.0.borrow_mut().push(error.to_string());
     }
 }
 

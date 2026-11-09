@@ -268,7 +268,17 @@ pub enum QueryGeometry {
 /// `Map(frontend, observer, MapOptions().withMapMode(..).withSize(..)
 /// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
 /// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
-pub type ImplFactory = Box<dyn Fn(&TestMetadata, &ResourceOptions) -> Result<Box<dyn TestRunnerImpl>, String>>;
+pub type ImplFactory =
+    Box<dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions) -> Result<Box<dyn TestRunnerImpl>, String>>;
+
+/// Port-only: how the runner's options that C++ does not have set up a map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImplOptions {
+    /// `--tileWorkerCodec=<n>`: the map's tile workers are in n worker
+    /// instances, reached through the worker codec (0: on the map's thread
+    /// pool, as in C++).
+    pub tile_worker_codec: usize,
+}
 
 /// `TestContext` (metadata.hpp).
 pub struct TestContext<'a> {
@@ -352,6 +362,8 @@ pub struct TestRunner {
     output_path: PathBuf,
     /// The per-test wall-clock limit (watchdog.rs).
     watchdog: Option<crate::watchdog::Watchdog>,
+    /// What the factory sets up the maps with.
+    impl_options: ImplOptions,
 }
 
 impl TestRunner {
@@ -363,7 +375,21 @@ impl TestRunner {
         output_path: PathBuf,
     ) -> Self {
         crate::file_source::register_proxy_file_source();
-        TestRunner { maps: HashMap::new(), manifest, update_results, factory, self_check, output_path, watchdog: None }
+        TestRunner {
+            maps: HashMap::new(),
+            manifest,
+            update_results,
+            factory,
+            self_check,
+            output_path,
+            watchdog: None,
+            impl_options: ImplOptions::default(),
+        }
+    }
+
+    /// Sets what the factory sets up the maps with from now on.
+    pub fn set_impl_options(&mut self, options: ImplOptions) {
+        self.impl_options = options;
     }
 
     /// Errors a test that runs longer than `limit` (`None`: no limit).
@@ -932,7 +958,8 @@ impl TestRunner {
                     cache_path: self.manifest.get_cache_path().to_string(),
                     api_key: self.manifest.get_api_key().to_string(),
                 };
-                let created = catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options)));
+                let created =
+                    catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options, &self.impl_options)));
                 match created {
                     Ok(Ok(runner_impl)) => {
                         self.maps.insert(key.clone(), runner_impl);

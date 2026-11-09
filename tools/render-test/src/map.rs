@@ -11,11 +11,14 @@ use mln_actor::RunLoop;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_map::{BoundOptions, Map, MapLoadError, MapObserver, MapOptions, ProjectionMode, RenderMode};
 use mln_platform_default::HeadlessFrontend;
+use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType};
 use mln_util::image::PremultipliedImage;
 
 use crate::metadata::{MapMode, TestMetadata};
-use crate::runner::{CameraOptions, ImplFactory, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl};
+use crate::runner::{
+    CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
+};
 use crate::style_ops;
 
 /// `TestRunnerMapObserver` (runner.hpp).
@@ -74,8 +77,13 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `TestRunner::Impl::Impl(metadata, resourceOptions, clientOptions)`.
-    pub fn new(metadata: &TestMetadata, resource_options: &ResourceOptions) -> Result<Impl, String> {
+    /// `TestRunner::Impl::Impl(metadata, resourceOptions, clientOptions)`,
+    /// plus the port's options (`ImplOptions`).
+    pub fn new(
+        metadata: &TestMetadata,
+        resource_options: &ResourceOptions,
+        impl_options: &ImplOptions,
+    ) -> Result<Impl, String> {
         let client_options = ClientOptions::default();
         let resource_options = mln_storage::ResourceOptions::default()
             .with_cache_path(resource_options.cache_path.clone())
@@ -88,6 +96,11 @@ impl Impl {
             ContextMode::Unique,
             true,
         );
+        if impl_options.tile_worker_codec > 0 {
+            let count = impl_options.tile_worker_codec;
+            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)));
+            frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
+        }
         let file_source = FileSourceManager::get().get_file_source(
             FileSourceType::ResourceLoader,
             &resource_options,
@@ -435,8 +448,8 @@ impl TestRunnerImpl for Impl {
 /// `util::RunLoop` first, as `runRenderTests` does, and keeps it alive.
 pub fn factory() -> ImplFactory {
     let run_loop = RunLoop::new();
-    Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions| {
+    Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions, impl_options: &ImplOptions| {
         let _ = &run_loop;
-        Ok(Box::new(Impl::new(metadata, resource_options)?) as Box<dyn TestRunnerImpl>)
+        Ok(Box::new(Impl::new(metadata, resource_options, impl_options)?) as Box<dyn TestRunnerImpl>)
     })
 }

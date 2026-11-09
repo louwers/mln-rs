@@ -11,6 +11,10 @@
 // - `--timeout=<seconds>`: the per-test time limit (watchdog.rs).
 // - `--jobs=<n>`: runs the tests in n worker processes (jobs.rs), which run
 //   each test with the same `run_test` as the loop here.
+// - `--tileWorkerCodec=<n>`: puts the maps' tile workers in n worker
+//   instances that the map reaches only through bytes (mln_renderer's
+//   worker_codec, as the browser build does), so the suites run through the
+//   codec.
 
 use std::path::{Path, PathBuf};
 
@@ -22,7 +26,7 @@ use crate::log::{self, Event};
 use crate::manifest_parser::{Manifest, ManifestParser};
 use crate::metadata::{TestMetadata, TestPaths, TestStatistics};
 use crate::parser::{create_result_page, parse_test_metadata, serialize_json_value};
-use crate::runner::{ImplFactory, TestRunner, UpdateResults};
+use crate::runner::{ImplFactory, ImplOptions, TestRunner, UpdateResults};
 
 // SHOW_ANSI_COLORS is not defined in the C++ build either.
 const ANSI_COLOR_RED: &str = "";
@@ -65,6 +69,9 @@ const HELP: &str = "  render-test {OPTIONS}
       --jobs=[n]                        Run the tests in n worker processes
                                         (default 1: in this process; 0: one
                                         per CPU)
+      --tileWorkerCodec=[n]             Run the tile workers in n worker
+                                        instances behind the worker codec
+                                        (default 0: on the map's thread pool)
 ";
 
 /// `ArgumentsTuple` plus the options C++ does not have. Serialized for the
@@ -85,6 +92,9 @@ pub struct Arguments {
     /// The number of worker processes that run the tests (1: the tests run
     /// in this process; 0: one per CPU). See jobs.rs.
     pub jobs: usize,
+    /// The number of worker instances behind the worker codec that run the
+    /// maps' tile workers (0: the map's thread pool). See `ImplOptions`.
+    pub tile_worker_codec: usize,
     /// Not an option: the `render-test` executable the workers
     /// run (`None`: this executable). Tests, which run the runner from the
     /// test harness, set the package's binary.
@@ -105,6 +115,7 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
     let mut output: Option<String> = None;
     let mut timeout_millis: u64 = 60_000;
     let mut jobs: usize = 1;
+    let mut tile_worker_codec: usize = 0;
 
     let parse_error = |message: String| -> i32 {
         log::info(Event::General, HELP);
@@ -168,6 +179,12 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
                     jobs = value
                         .parse()
                         .map_err(|_| parse_error(format!("Argument 'jobs' received invalid value type '{value}'")))?;
+                }
+                "tileWorkerCodec" => {
+                    let value = take_value("--tileWorkerCodec")?;
+                    tile_worker_codec = value.parse().map_err(|_| {
+                        parse_error(format!("Argument 'tileWorkerCodec' received invalid value type '{value}'"))
+                    })?;
                 }
                 _ => return Err(parse_error(format!("Flag could not be matched: {name}"))),
             }
@@ -257,6 +274,7 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
         output,
         timeout_millis,
         jobs,
+        tile_worker_codec,
         worker_program: None,
     })
 }
@@ -337,6 +355,7 @@ pub(crate) fn create_runner(
     output_path: PathBuf,
 ) -> TestRunner {
     let mut runner = TestRunner::new(manifest, arguments.update_results, factory, arguments.self_check, output_path);
+    runner.set_impl_options(ImplOptions { tile_worker_codec: arguments.tile_worker_codec });
     if !arguments.self_check && arguments.timeout_millis > 0 {
         runner.set_test_timeout(Some(std::time::Duration::from_millis(arguments.timeout_millis)));
     }

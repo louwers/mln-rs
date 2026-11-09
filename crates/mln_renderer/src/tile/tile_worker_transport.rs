@@ -15,9 +15,10 @@
 //
 // `InProcessTransport` is C++'s arrangement: the worker is an actor on the
 // map's tagged thread pool, or (synchronous updates of geometry tiles) an
-// object the tile calls directly, and messages pass by value. A transport
-// that puts the workers somewhere else (other wasm instances) implements the
-// same traits.
+// object the tile calls directly, and messages pass by value.
+// `SerializingTransport` (worker_codec/transport.rs) puts the workers in
+// other worker instances (the browser's Web Workers) and sends the messages
+// as bytes.
 
 use std::cell::RefCell;
 use std::rc::Weak;
