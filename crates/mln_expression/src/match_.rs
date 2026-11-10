@@ -68,8 +68,7 @@ impl MatchLabel for i64 {
     }
 }
 
-/// `Match<T>::Branches` (C++ `std::unordered_map`; ordered here, see
-/// DEVIATIONS.md).
+/// `Match<T>::Branches` (C++ `std::unordered_map`; ordered here).
 pub type Branches<T> = BTreeMap<T, Arc<dyn Expression>>;
 
 pub struct Match<T: MatchLabel> {

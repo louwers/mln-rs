@@ -13,7 +13,6 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::time::Instant;
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -21,7 +20,10 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
 use mln_util::image::PremultipliedImage;
+use mln_util::sync::{MutexExt, RwLockExt};
 use mln_util::tileset::RasterEncoding;
+use mln_util::time::Instant;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::geometry::dem_data::DEMData;
@@ -54,13 +56,32 @@ fn full_mask() -> TileMask {
     mask
 }
 
+/// `HillshadeBucket`.
+///
+/// Port-only: serde writes the DEM, border included, which is what a worker
+/// sets (tile/worker_codec) and the tile backfills from its neighbours; the
+/// geometry is the tile's (`setMask`) and the render state this side's.
+#[derive(Serialize, Deserialize)]
 pub struct HillshadeBucket {
     pub base: BucketBase,
+    #[serde(skip, default = "unmasked")]
     geometry: Mutex<HillshadeBucketGeometry>,
     demdata: RwLock<DEMData>,
+    #[serde(skip)]
     prepared: AtomicBool,
     /// Incremented where C++ sets `renderTargetPrepared = false`.
+    #[serde(skip)]
     render_target_generation: AtomicU64,
+}
+
+fn unmasked() -> Mutex<HillshadeBucketGeometry> {
+    Mutex::new(HillshadeBucketGeometry {
+        mask: full_mask(),
+        vertices: Vec::new(),
+        indices: Vec::new(),
+        segments: Vec::new(),
+        last_modified: Instant::now(),
+    })
 }
 
 impl HillshadeBucket {
@@ -74,13 +95,7 @@ impl HillshadeBucket {
     pub fn with_dem_data(demdata: DEMData) -> Self {
         HillshadeBucket {
             base: BucketBase::default(),
-            geometry: Mutex::new(HillshadeBucketGeometry {
-                mask: full_mask(),
-                vertices: Vec::new(),
-                indices: Vec::new(),
-                segments: Vec::new(),
-                last_modified: Instant::now(),
-            }),
+            geometry: unmasked(),
             demdata: RwLock::new(demdata),
             prepared: AtomicBool::new(false),
             render_target_generation: AtomicU64::new(0),
@@ -94,17 +109,17 @@ impl HillshadeBucket {
 
     /// The masked geometry (C++ reads the members directly).
     pub fn geometry(&self) -> MutexGuard<'_, HillshadeBucketGeometry> {
-        self.geometry.lock().unwrap_or_else(|e| e.into_inner())
+        self.geometry.lock_unpoisoned()
     }
 
     /// `getDEMData() const`.
     pub fn get_dem_data(&self) -> RwLockReadGuard<'_, DEMData> {
-        self.demdata.read().unwrap_or_else(|e| e.into_inner())
+        self.demdata.read_unpoisoned()
     }
 
     /// `getDEMData()`.
     pub fn get_dem_data_mut(&self) -> RwLockWriteGuard<'_, DEMData> {
-        self.demdata.write().unwrap_or_else(|e| e.into_inner())
+        self.demdata.write_unpoisoned()
     }
 
     pub fn is_prepared(&self) -> bool {

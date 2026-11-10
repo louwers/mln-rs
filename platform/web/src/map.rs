@@ -1,0 +1,325 @@
+//! The map in a Web Worker of its own: a continuous map in the page's canvas
+//! (an OffscreenCanvas), its tile workers in other Web Workers.
+
+use std::cell::{Cell, RefCell};
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
+
+use mln_actor::RunLoop;
+use mln_actor::cooperative_scheduler::CooperativeScheduler;
+use mln_gfx::{BackendScope, RendererBackend, ScopeType};
+use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
+use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
+use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
+use mln_storage::http_file_source;
+use mln_storage::{ClientOptions, ResourceOptions};
+use mln_util::LatLng;
+use mln_util::size::Size;
+use mln_webgpu::SurfaceBackend;
+use wasm_bindgen::prelude::*;
+
+use crate::fetch::FetchTransport;
+use crate::{cooperative_scheduler, deadline, js_error};
+
+/// The Web Workers that run the map's tile workers, reached through a
+/// JavaScript function `post(instance, bytes)`. Their replies come back
+/// through `WebMap::receive`, with their payloads beside them.
+struct WebWorkers {
+    count: usize,
+    post: js_sys::Function,
+}
+
+impl WorkerInstances for WebWorkers {
+    fn count(&self) -> usize {
+        self.count
+    }
+
+    fn post(&self, instance: usize, request: Vec<u8>) {
+        let bytes = js_sys::Uint8Array::from(&request[..]);
+        if let Err(error) = self.post.call2(&JsValue::NULL, &JsValue::from(instance as u32), &bytes) {
+            web_sys::console::error_2(&JsValue::from_str("posting to a tile worker failed:"), &error);
+        }
+    }
+}
+
+thread_local! {
+    /// The worker's `wake` (see `WebMap::create`).
+    static WAKE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
+}
+
+/// The RunLoop's and the scheduler's waker: tells the worker to `tick`. An
+/// instance has one thread, so this runs on the worker's.
+fn wake_host() {
+    WAKE.with(|wake| {
+        if let Some(wake) = wake.borrow().as_ref() {
+            let _ = wake.call0(&JsValue::NULL);
+        }
+    });
+}
+
+#[derive(Default)]
+struct ConsoleMapObserver {
+    loaded: Cell<bool>,
+}
+
+impl MapObserver for ConsoleMapObserver {
+    fn on_did_fail_loading_map(&self, error: MapLoadError, what: &str) {
+        web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load ({error:?}): {what}")));
+    }
+
+    fn on_did_finish_loading_map(&self) {
+        self.loaded.set(true);
+    }
+}
+
+/// What `GLFWRendererFrontend` holds: the renderer and the map's latest
+/// update until the next frame draws it.
+struct FrontendState {
+    backend: Rc<SurfaceBackend>,
+    renderer: RefCell<Option<Renderer>>,
+    parameters: RefCell<Option<Arc<UpdateParameters>>>,
+    dirty: Cell<bool>,
+}
+
+#[derive(Clone)]
+struct Frontend(Rc<FrontendState>);
+
+impl Frontend {
+    /// Draws the latest update if it is new; returns whether it drew.
+    fn render(&self) -> bool {
+        let state = &self.0;
+        if !state.dirty.get() {
+            return false;
+        }
+        let Some(parameters) = state.parameters.borrow().clone() else {
+            return false;
+        };
+        if !state.backend.acquire_next_texture() {
+            return false;
+        }
+        state.dirty.set(false);
+        let backend: &dyn RendererBackend = &*state.backend;
+        let _scope = BackendScope::new(backend, ScopeType::Implicit);
+        if let Some(renderer) = state.renderer.borrow_mut().as_mut() {
+            renderer.render(&parameters);
+        }
+        true
+    }
+}
+
+impl RendererFrontend for Frontend {
+    fn reset(&self) {
+        let renderer = self.0.renderer.borrow_mut().take();
+        drop(renderer);
+    }
+
+    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
+        if let Some(renderer) = self.0.renderer.borrow_mut().as_mut() {
+            renderer.set_observer(Some(observer));
+        }
+    }
+
+    fn update(&self, parameters: Arc<UpdateParameters>) {
+        *self.0.parameters.borrow_mut() = Some(parameters);
+        self.0.dirty.set(true);
+    }
+}
+
+fn physical(size: Size, pixel_ratio: f64) -> Size {
+    Size::new(
+        (f64::from(size.width) * pixel_ratio).round().max(1.0) as u32,
+        (f64::from(size.height) * pixel_ratio).round().max(1.0) as u32,
+    )
+}
+
+/// A continuous map in an OffscreenCanvas, in the Web Worker that runs it
+/// (web/map-worker.js).
+#[wasm_bindgen]
+pub struct WebMap {
+    // Dropped first: the map resets the renderer through the frontend.
+    map: Map,
+    frontend: Frontend,
+    observer: Rc<ConsoleMapObserver>,
+    run_loop: RunLoop,
+    scheduler: Arc<CooperativeScheduler>,
+    transport: Rc<SerializingTransport>,
+    pixel_ratio: f64,
+    received: Cell<u32>,
+}
+
+#[wasm_bindgen]
+impl WebMap {
+    /// Creates the WebGPU device, a surface on `canvas` (the page's canvas,
+    /// transferred to this worker) and the map, at
+    /// `width` x `height` CSS pixels. The tiles' workers run in
+    /// `workers` Web Workers (at least one), reached through
+    /// `post(instance, bytes)`, whose replies go to `receive`. `wake()` is
+    /// called whenever the map gets work between frames (a fetch finished, a
+    /// reply arrived, a task was queued); the worker then calls `tick` soon.
+    pub async fn create(
+        canvas: web_sys::OffscreenCanvas,
+        width: u32,
+        height: u32,
+        pixel_ratio: f64,
+        workers: u32,
+        post: js_sys::Function,
+        wake: js_sys::Function,
+    ) -> Result<WebMap, JsValue> {
+        if workers == 0 {
+            return Err(js_error("the map needs at least one tile worker"));
+        }
+        let scheduler = cooperative_scheduler();
+        http_file_source::set_transport(Arc::new(FetchTransport));
+
+        let size = Size::new(width.max(1), height.max(1));
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::BROWSER_WEBGPU,
+            ..wgpu::InstanceDescriptor::new_without_display_handle()
+        });
+        let surface = instance.create_surface(wgpu::SurfaceTarget::OffscreenCanvas(canvas)).map_err(js_error)?;
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| js_error(format!("WebGPU found no adapter: {e}")))?;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("MapLibre WebGPU Device"),
+                required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| js_error(format!("WebGPU device: {e}")))?;
+        let capabilities = surface.get_capabilities(&adapter);
+        let format = capabilities.formats.first().copied().unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
+        // A WebGPU canvas takes any texture usage, so its frames can be read
+        // back (wgpu reports only RENDER_ATTACHMENT for it).
+        let usages = capabilities.usages | wgpu::TextureUsages::COPY_SRC;
+        let backend = Rc::new(SurfaceBackend::from_host(
+            instance,
+            device,
+            queue,
+            surface,
+            format,
+            usages,
+            physical(size, pixel_ratio),
+        ));
+
+        let run_loop = RunLoop::get();
+        WAKE.with(|w| *w.borrow_mut() = Some(wake));
+        run_loop.set_waker(Some(Arc::new(wake_host)));
+        scheduler.set_waker(Some(Arc::new(wake_host)));
+        let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
+        let mut renderer = Renderer::new(renderer_backend, pixel_ratio as f32);
+        let count = workers as usize;
+        let transport = SerializingTransport::new(|_| Box::new(WebWorkers { count, post }));
+        renderer.set_tile_worker_transport(transport.clone());
+        let frontend = Frontend(Rc::new(FrontendState {
+            backend,
+            renderer: RefCell::new(Some(renderer)),
+            parameters: RefCell::new(None),
+            dirty: Cell::new(false),
+        }));
+        let observer = Rc::new(ConsoleMapObserver::default());
+        let map = Map::with_resource_options(
+            &frontend,
+            observer.clone(),
+            MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32),
+            &ResourceOptions::default(),
+            &ClientOptions::default(),
+        )
+        .map_err(js_error)?;
+        Ok(WebMap { map, frontend, observer, run_loop, scheduler, transport, pixel_ratio, received: Cell::new(0) })
+    }
+
+    /// Loads a style from a URL.
+    pub fn set_style_url(&mut self, url: &str) {
+        self.map.get_style_mut().load_url(url);
+    }
+
+    /// Moves the camera.
+    pub fn jump_to(&mut self, latitude: f64, longitude: f64, zoom: f64, bearing: f64, pitch: f64) {
+        let center = LatLng::new(latitude, longitude).ok();
+        self.map.jump_to(
+            &CameraOptions::default()
+                .with_center(center)
+                .with_zoom(Some(zoom))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch)),
+        );
+    }
+
+    /// Resizes the map and its surface to `width` x `height` CSS pixels.
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
+        let size = Size::new(width.max(1), height.max(1));
+        self.frontend.0.backend.set_framebuffer_size(physical(size, self.pixel_ratio));
+        self.map.set_size(size).map_err(js_error)
+    }
+
+    /// A reply from the tile worker in Web Worker `instance`, as
+    /// `TileWorker::run` returns it: its bytes, then its payloads. Each is
+    /// copied once, into the Vec its image or bucket array takes.
+    pub fn receive(&self, instance: u32, reply: js_sys::Array) {
+        self.received.set(self.received.get() + 1);
+        let mut parts = reply.iter().map(|part| js_sys::Uint8Array::new(&part).to_vec());
+        let bytes = parts.next().unwrap_or_default();
+        self.transport.receive(instance as usize, Encoded { bytes, payloads: parts.collect() });
+    }
+
+    /// How many worker replies arrived so far.
+    pub fn received(&self) -> u32 {
+        self.received.get()
+    }
+
+    /// One animation frame: runs the RunLoop's tasks, draws the map's latest
+    /// update if it is new, then runs the cooperative scheduler's tasks
+    /// (sprites, glyphs, raster tiles) for up to
+    /// `budget_ms` and delivers their results. Returns whether it drew.
+    pub fn frame(&mut self, budget_ms: f64) -> bool {
+        self.run_loop.run_once();
+        let drew = self.frontend.render();
+        self.run_tasks(budget_ms);
+        drew
+    }
+
+    /// Runs the map's work between frames: the RunLoop's tasks (fetches that
+    /// finished, worker replies), then the cooperative scheduler's for up to
+    /// `budget_ms`, and the RunLoop again for what they delivered. Returns
+    /// whether tasks remain, for another `tick`. Drawing waits for `frame`.
+    pub fn tick(&mut self, budget_ms: f64) -> bool {
+        self.run_loop.run_once();
+        self.run_tasks(budget_ms)
+    }
+
+    /// Whether the style loaded and every tile and resource the map needs
+    /// is loaded.
+    pub fn is_fully_loaded(&self) -> bool {
+        self.observer.loaded.get() && self.map.is_fully_loaded()
+    }
+
+    /// Draws the map's latest update again with the next frame and copies
+    /// it (see `take_pixels`).
+    pub fn request_pixels(&self) {
+        self.frontend.0.backend.request_readback();
+        self.frontend.0.dirty.set(true);
+    }
+
+    /// The frame `request_pixels` asked for, as RGBA rows of the canvas's
+    /// physical size, once the GPU has copied it; until then undefined.
+    pub fn take_pixels(&self) -> Option<Vec<u8>> {
+        self.frontend.0.backend.take_readback().map(|image| image.data.to_vec())
+    }
+}
+
+impl WebMap {
+    /// Runs the cooperative scheduler's tasks for up to `budget_ms`, then the
+    /// RunLoop's for what they delivered. Returns whether tasks remain.
+    fn run_tasks(&self, budget_ms: f64) -> bool {
+        let more = self.scheduler.run_until(Some(deadline(budget_ms)));
+        self.run_loop.run_once();
+        more
+    }
+}

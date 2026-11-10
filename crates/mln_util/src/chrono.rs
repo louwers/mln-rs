@@ -11,8 +11,10 @@
 use std::ops::{Add, AddAssign, Neg, Sub, SubAssign};
 use std::sync::OnceLock;
 
+use serde::{Deserialize, Serialize};
+
 /// `mln::Duration` (`std::chrono::nanoseconds`).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Duration(i64);
 
 impl Duration {
@@ -116,7 +118,7 @@ pub const fn milliseconds(n: i64) -> Duration {
 
 /// `mln::TimePoint` (`steady_clock::time_point`). The default value is the
 /// clock's epoch, as for a default-constructed `time_point`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct TimePoint(Duration);
 
 impl TimePoint {
@@ -183,13 +185,13 @@ impl Clock {
     /// compares against `TimePoint(Duration::zero())`, such as
     /// `ZoomHistory`, sees a long-past time, as in C++).
     pub fn now() -> TimePoint {
-        static ANCHOR: OnceLock<(std::time::Instant, i64)> = OnceLock::new();
+        static ANCHOR: OnceLock<(crate::time::Instant, i64)> = OnceLock::new();
         let (instant, base) = ANCHOR.get_or_init(|| {
-            let since_unix = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            let since_unix = crate::time::SystemTime::now()
+                .duration_since(crate::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos() as i64)
                 .unwrap_or(0);
-            (std::time::Instant::now(), since_unix)
+            (crate::time::Instant::now(), since_unix)
         });
         let elapsed = instant.elapsed().as_nanos() as i64;
         TimePoint(Duration(base.wrapping_add(elapsed)))
@@ -246,7 +248,7 @@ impl Timestamp {
 /// `util::now()` (`platform::now()`: `time_point_cast<Seconds>(system_clock::now())`,
 /// which truncates toward zero).
 pub fn now() -> Timestamp {
-    let secs = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+    let secs = match crate::time::SystemTime::now().duration_since(crate::time::UNIX_EPOCH) {
         Ok(d) => d.as_secs() as i64,
         Err(e) => -(e.duration().as_secs() as i64),
     };

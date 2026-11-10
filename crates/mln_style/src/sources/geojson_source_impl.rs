@@ -17,6 +17,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
+use mln_util::sync::MutexExt;
 
 use super::geojson_source::{Features, GeoJSONData, GeoJSONOptions, TileFeatures};
 use crate::expression::{Expression, from_expression_value};
@@ -26,7 +27,7 @@ use crate::source_impl::{self, ImplBase};
 /// `std::runtime_error` for a zoom above maxZoom or a missing parent tile;
 /// the port logs it and hands out an empty tile.
 fn geojsonvt_tile_features(vt: &Mutex<geojson_vt::GeoJSONVT>, id: &CanonicalTileID) -> TileFeatures {
-    match vt.lock().unwrap().get_tile(id.z, id.x, id.y) {
+    match vt.lock_unpoisoned().get_tile(id.z, id.x, id.y) {
         Ok(tile) => tile.features.clone(),
         Err(e) => {
             // TODO(port): C++ lets the exception propagate.

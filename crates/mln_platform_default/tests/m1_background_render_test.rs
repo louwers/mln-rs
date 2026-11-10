@@ -38,7 +38,8 @@ fn run(test: &str) -> (f64, f64) {
         &frontend,
         Rc::new(NullMapObserver),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
-    );
+    )
+    .unwrap();
     map.get_style_mut().load_json(&json);
     let camera = map.get_style().get_default_camera();
     map.jump_to(&camera);

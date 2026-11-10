@@ -2,8 +2,9 @@
 
 use feature::{Value, ValueObject};
 use mln_util::chrono::Duration;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TransitionOptions {
     pub duration: Option<Duration>,
     pub delay: Option<Duration>,

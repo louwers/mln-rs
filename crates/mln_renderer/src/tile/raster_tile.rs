@@ -3,13 +3,15 @@
 //
 // As for GeometryTile (see geometry_tile.rs), the state the worker's
 // replies change is `RasterTileInner`, the target of the tile's mailbox.
+// The tile and its worker exchange only `RasterWorkerMessage`s and
+// `RasterTileMessage`s, and the worker is created by the
+// `TileWorkerTransport` of the TileParameters (tile_worker_transport.rs).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
@@ -17,39 +19,82 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::immutable::Immutable;
+use mln_util::serialization::payload::shared_bytes;
 use mln_util::tileset::Tileset;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::buckets::raster_bucket::RasterBucket;
 use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
+use crate::tile::tile_worker_transport::{TileEndpoint, WorkerEndpoint};
+use crate::tile::worker_codec::fields;
 use crate::tile_mask::TileMask;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 
+/// The messages a `RasterTile` sends its `RasterTileWorker`: the worker's
+/// public member functions. Port-only: serde writes them for a worker in
+/// another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
+pub enum RasterWorkerMessage {
+    /// `parse(data, correlationID)`.
+    Parse {
+        #[serde(with = "shared_bytes::option")]
+        data: Option<Data>,
+        correlation_id: u64,
+    },
+}
+
+/// The messages a `RasterTileWorker` sends its `RasterTile`: the tile's
+/// member functions the worker calls. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
+pub enum RasterTileMessage {
+    /// `onParsed(std::move(bucket), correlationID)`.
+    Parsed { bucket: Option<Arc<RasterBucket>>, correlation_id: u64 },
+    /// `onError(std::current_exception(), correlationID)`.
+    Error {
+        #[serde(with = "fields::exception")]
+        error: ExceptionPtr,
+        correlation_id: u64,
+    },
+}
+
 /// `RasterTileWorker`.
 pub struct RasterTileWorker {
-    parent: ActorRef<RasterTileInner>,
+    parent: Box<dyn TileEndpoint<RasterTileMessage>>,
 }
 
 impl RasterTileWorker {
+    /// `RasterTileWorker(ActorRef<RasterTileWorker>, ActorRef<RasterTile>)`.
+    pub fn new(parent: Box<dyn TileEndpoint<RasterTileMessage>>) -> Self {
+        RasterTileWorker { parent }
+    }
+
+    /// Runs the member function a tile's message stands for.
+    pub fn handle(&mut self, message: RasterWorkerMessage) {
+        match message {
+            RasterWorkerMessage::Parse { data, correlation_id } => self.parse(data, correlation_id),
+        }
+    }
+
     /// `parse(data, correlationID)`.
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64) {
         let Some(data) = data else {
             // No data; empty tile.
-            self.parent.invoke(move |tile: &RasterTileInner| tile.on_parsed(None, correlation_id));
+            self.parent.send(RasterTileMessage::Parsed { bucket: None, correlation_id });
             return;
         };
 
         match mln_platform_default_image::decode_image(&data) {
             Ok(image) => {
                 let bucket = Arc::new(RasterBucket::new(image));
-                self.parent.invoke(move |tile: &RasterTileInner| tile.on_parsed(Some(bucket), correlation_id));
+                self.parent.send(RasterTileMessage::Parsed { bucket: Some(bucket), correlation_id });
             }
             Err(error) => {
-                let error = RuntimeError::ptr(error);
-                self.parent.invoke(move |tile: &RasterTileInner| tile.on_error(error, correlation_id));
+                self.parent.send(RasterTileMessage::Error { error: RuntimeError::ptr(error), correlation_id });
             }
         }
     }
@@ -61,11 +106,20 @@ pub struct RasterTileInner {
     obsolete: Cell<bool>,
     correlation_id: Cell<u64>,
     bucket: RefCell<Option<Arc<RasterBucket>>>,
-    worker: PoolActorRef<RasterTileWorker>,
+    /// `Actor<RasterTileWorker> worker`, behind its transport.
+    worker: Box<dyn WorkerEndpoint<RasterWorkerMessage>>,
     mailbox: Arc<Mailbox>,
 }
 
 impl RasterTileInner {
+    /// Runs the member function a worker's message stands for.
+    pub fn handle_worker_message(&self, message: RasterTileMessage) {
+        match message {
+            RasterTileMessage::Parsed { bucket, correlation_id } => self.on_parsed(bucket, correlation_id),
+            RasterTileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
+        }
+    }
+
     /// `onParsed(std::unique_ptr<RasterBucket>, correlationID)`.
     pub fn on_parsed(&self, result: Option<Arc<RasterBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
@@ -133,7 +187,7 @@ impl LoaderTile for RasterTileInner {
             }
             self.base.pending.set(true);
             let correlation_id = self.correlation_id.get();
-            self.worker.invoke(move |worker: &mut RasterTileWorker| worker.parse(data, correlation_id));
+            self.worker.send(RasterWorkerMessage::Parse { data, correlation_id });
         }
     }
 }
@@ -142,7 +196,6 @@ impl LoaderTile for RasterTileInner {
 pub struct RasterTile {
     inner: Rc<RasterTileInner>,
     loader: Option<TileLoader>,
-    _worker: Actor<RasterTileWorker>,
 }
 
 impl RasterTile {
@@ -156,19 +209,19 @@ impl RasterTile {
     ) -> Self {
         let mailbox = Mailbox::new();
         let parent: ActorRef<RasterTileInner> = ActorRef::new(&mailbox);
-        let worker = Actor::new_tagged(&parameters.thread_pool, move |_self_ref| RasterTileWorker { parent });
+        let worker = parameters.tile_worker_transport.create_raster(Box::new(parent));
         let inner = Rc::new(RasterTileInner {
             base: TileBase::new(Kind::Raster, id, source_id, observer),
             obsolete: Cell::new(false),
             correlation_id: Cell::new(0),
             bucket: RefCell::new(None),
-            worker: worker.self_ref(),
+            worker,
             mailbox: mailbox.clone(),
         });
         mailbox.open(&scheduler::get_current(), inner.clone() as Rc<dyn Any>);
         let weak: std::rc::Weak<RasterTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
-        RasterTile { inner, loader: Some(loader), _worker: worker }
+        RasterTile { inner, loader: Some(loader) }
     }
 
     pub fn inner(&self) -> &Rc<RasterTileInner> {

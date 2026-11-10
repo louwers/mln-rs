@@ -21,15 +21,7 @@ mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 pollster.workspace = true
-
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
-wgpu = { workspace = true, features = ["default"] }
-
-# Under Emscripten (mln-rs-web) the host brings the browser's WebGPU through
-# a custom wgpu backend, and wgpu's GLES backend would link EGL functions
-# that Emscripten doesn't provide.
-[target.'cfg(target_os = "emscripten")'.dependencies]
-wgpu = { workspace = true, features = ["parking_lot", "std", "wgsl"] }
+wgpu.workspace = true
 
 # Headless wgpu smoke test: Vulkan (lavapipe) device, offscreen clear and
 # readback.

@@ -135,7 +135,7 @@ fn renderer_state() {
     assert_near(options.bearing.unwrap(), bearing_in_degrees, 1e-7);
 
     {
-        let lat_lng = test.frontend.lat_lng_for_pixel(&ScreenCoordinate::new(0.0, 0.0));
+        let lat_lng = test.frontend.lat_lng_for_pixel(&ScreenCoordinate::new(0.0, 0.0)).unwrap();
         let point = test.frontend.pixel_for_lat_lng(&coordinate);
         assert_near(coordinate.latitude(), lat_lng.latitude(), 1e-1);
         assert_near(coordinate.longitude(), lat_lng.longitude(), 1e-1);
@@ -211,7 +211,7 @@ fn new_york_test() -> (MapTest, LatLngBounds) {
 fn lat_lng_bounds_to_camera() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None);
+    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 1.55467, 1e-5);
 }
@@ -221,7 +221,8 @@ fn lat_lng_bounds_to_camera() {
 fn lat_lng_bounds_to_camera_with_excessive_padding() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &insets(500.0, 0.0, 1200.0, 0.0), None, None);
+    let virtual_camera =
+        test.map().camera_for_lat_lng_bounds(&bounds, &insets(500.0, 0.0, 1200.0, 0.0), None, None).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 16.0, 1e-5);
 }
@@ -231,7 +232,8 @@ fn lat_lng_bounds_to_camera_with_excessive_padding() {
 fn lat_lng_bounds_to_camera_with_bearing() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), None);
+    let virtual_camera =
+        test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), None).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 1.21385, 1e-5);
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 35.0, 1e-5);
@@ -242,14 +244,16 @@ fn lat_lng_bounds_to_camera_with_bearing() {
 fn lat_lng_bounds_to_camera_with_bearing_pitch_and_padding() {
     let (test, bounds) = new_york_test();
 
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), Some(20.0));
+    let virtual_camera =
+        test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), Some(35.0), Some(20.0)).unwrap();
     assert!(bounds.contains(&virtual_camera.center.unwrap()));
     assert_near(virtual_camera.zoom.unwrap(), 13.66272, 1e-5);
     assert_double_eq(virtual_camera.pitch.unwrap(), 20.0);
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 35.0, 1e-5);
 
     let padding = insets(10.0, 20.0, 30.0, 40.0);
-    let virtual_camera_padded = test.map().camera_for_lat_lng_bounds(&bounds, &padding, Some(35.0), Some(20.0));
+    let virtual_camera_padded =
+        test.map().camera_for_lat_lng_bounds(&bounds, &padding, Some(35.0), Some(20.0)).unwrap();
     assert!(bounds.contains(&virtual_camera_padded.center.unwrap()));
     assert_double_eq(virtual_camera_padded.center.unwrap().latitude(), virtual_camera.center.unwrap().latitude());
     assert_double_eq(virtual_camera_padded.center.unwrap().longitude(), virtual_camera.center.unwrap().longitude());
@@ -275,7 +279,7 @@ fn lat_lngs() -> Vec<LatLng> {
 fn lat_lngs_to_camera() {
     let test = MapTest::new();
 
-    let virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), None);
+    let virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), None).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 2.75434, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.49288, 1e-5);
@@ -287,7 +291,8 @@ fn lat_lngs_to_camera() {
 fn lat_lngs_to_camera_with_bearing_and_pitch() {
     let test = MapTest::new();
 
-    let virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0));
+    let virtual_camera =
+        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 3.04378, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.53718, 1e-5);
@@ -302,7 +307,7 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
 
     test.map().set_bounds(&BoundOptions::default().with_min_pitch(0.0).with_max_pitch(0.0)).unwrap();
     let mut virtual_camera =
-        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(45.0));
+        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(45.0)).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 2.75434, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.49288, 1e-5);
@@ -312,7 +317,8 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
     assert_double_eq(test.map().get_bounds().max_pitch.unwrap(), 0.0);
 
     test.map().set_bounds(&BoundOptions::default().with_min_pitch(20.0).with_max_pitch(60.0)).unwrap();
-    virtual_camera = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(0.0));
+    virtual_camera =
+        test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(0.0)).unwrap();
     assert_near(virtual_camera.bearing.unwrap_or(0.0), 23.0, 1e-5);
     assert_near(virtual_camera.zoom.unwrap_or(0.0), 3.04378, 1e-5);
     assert_near(virtual_camera.center.unwrap().latitude(), 28.53718, 1e-5);
@@ -333,20 +339,21 @@ fn camera_to_lat_lng_bounds() {
     let bounds = {
         let map = test.map();
         LatLngBounds::hull(
-            map.lat_lng_for_pixel(&ScreenCoordinate::default(), WrapMode::Wrapped),
+            map.lat_lng_for_pixel(&ScreenCoordinate::default(), WrapMode::Wrapped).unwrap(),
             map.lat_lng_for_pixel(
                 &ScreenCoordinate::new(f64::from(size.width), f64::from(size.height)),
                 WrapMode::Wrapped,
-            ),
+            )
+            .unwrap(),
         )
     };
 
     let camera = test.map().get_camera_options(None);
 
-    assert_eq!(bounds, test.map().lat_lng_bounds_for_camera(&camera));
+    assert_eq!(bounds, test.map().lat_lng_bounds_for_camera(&camera).unwrap());
 
     // Map::cameraForLatLngBounds only sets zoom and center.
-    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None);
+    let virtual_camera = test.map().camera_for_lat_lng_bounds(&bounds, &EdgeInsets::default(), None, None).unwrap();
     assert_near(camera.zoom.unwrap(), virtual_camera.zoom.unwrap(), 1e-7);
     assert_near(camera.center.unwrap().latitude(), virtual_camera.center.unwrap().latitude(), 1e-7);
     assert_near(camera.center.unwrap().longitude(), virtual_camera.center.unwrap().longitude(), 1e-7);
@@ -378,7 +385,8 @@ fn camera_to_lat_lng_bounds_unwrapped_with_rotation() {
     for point in corners_and_center(size) {
         assert!(
             map.lat_lng_bounds_for_camera_unwrapped(&camera)
-                .contains(&map.lat_lng_for_pixel(&point, WrapMode::Wrapped)),
+                .unwrap()
+                .contains(&map.lat_lng_for_pixel(&point, WrapMode::Wrapped).unwrap()),
             "{point:?}"
         );
     }
@@ -400,16 +408,18 @@ fn camera_to_lat_lng_bounds_unwrapped_cross_date_line() {
     for point in &points[..4] {
         assert!(
             map.lat_lng_bounds_for_camera_unwrapped(&camera)
-                .contains_with_mode(&map.lat_lng_for_pixel(point, WrapMode::Wrapped), WrapMode::Wrapped),
+                .unwrap()
+                .contains_with_mode(&map.lat_lng_for_pixel(point, WrapMode::Wrapped).unwrap(), WrapMode::Wrapped),
             "{point:?}"
         );
     }
     assert!(
         map.lat_lng_bounds_for_camera_unwrapped(&camera)
-            .contains(&map.lat_lng_for_pixel(&points[4], WrapMode::Wrapped))
+            .unwrap()
+            .contains(&map.lat_lng_for_pixel(&points[4], WrapMode::Wrapped).unwrap())
     );
 
-    assert!(map.lat_lng_bounds_for_camera_unwrapped(&camera).crosses_antimeridian());
+    assert!(map.lat_lng_bounds_for_camera_unwrapped(&camera).unwrap().crosses_antimeridian());
 }
 
 // gtest: Map.PixelForLatLngWithTheCenterPastTheAntimeridian
@@ -441,7 +451,9 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
 
     let degree = 512.0 * 16.0 / 360.0;
     test.map().set_gesture_in_progress(true);
-    test.map().move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(Duration::from_secs(10)));
+    test.map()
+        .move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(Duration::from_secs(10)))
+        .unwrap();
     let center = test.map().get_camera_options(None).center.unwrap().longitude();
     assert!(center < -180.0, "{center}");
 
@@ -463,30 +475,33 @@ fn lat_lng_for_pixel_unwrapped() {
     let right_pixel = ScreenCoordinate::new(2048.0, 256.0);
 
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
-    let left = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped);
-    let right = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped);
+    let left = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped).unwrap();
+    let right = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).unwrap();
     assert_near(-720.0, left.longitude(), 1e-4);
     assert_near(720.0, right.longitude(), 1e-4);
-    assert_near(0.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).longitude(), 1e-4);
-    assert_near(0.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).longitude(), 1e-4);
+    assert_near(0.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
+    assert_near(0.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
 
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 180.0))).with_zoom(Some(4.0)));
-    let west = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped);
-    let east = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped);
+    let west = test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Unwrapped).unwrap();
+    let east = test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).unwrap();
     assert_near(-225.0, west.longitude(), 1e-4);
     assert_near(-135.0, east.longitude(), 1e-4);
-    assert_near(135.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).longitude(), 1e-4);
-    assert_near(-135.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).longitude(), 1e-4);
+    assert_near(135.0, test.map().lat_lng_for_pixel(&left_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
+    assert_near(-135.0, test.map().lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
     assert_near(90.0, east.longitude() - west.longitude(), 1e-4);
 
-    let both = test.map().lat_lngs_for_pixels(&[left_pixel, right_pixel], WrapMode::Unwrapped);
+    let both = test.map().lat_lngs_for_pixels(&[left_pixel, right_pixel], WrapMode::Unwrapped).unwrap();
     assert_eq!(2, both.len());
     assert_double_eq(west.longitude(), both[0].longitude());
     assert_double_eq(east.longitude(), both[1].longitude());
 
     let projection = MapProjection::new(&test.map());
-    assert_double_eq(east.longitude(), projection.lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).longitude());
-    assert_near(-135.0, projection.lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).longitude(), 1e-4);
+    assert_double_eq(
+        east.longitude(),
+        projection.lat_lng_for_pixel(&right_pixel, WrapMode::Unwrapped).unwrap().longitude(),
+    );
+    assert_near(-135.0, projection.lat_lng_for_pixel(&right_pixel, WrapMode::Wrapped).unwrap().longitude(), 1e-4);
 }
 
 // A zoom around a point keeps the place under it. Across the antimeridian the
@@ -500,7 +515,7 @@ fn pixel_for_lat_lng_after_zoom_around_a_point_across_the_antimeridian() {
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.9))).with_zoom(Some(5.0)));
 
     let anchor = ScreenCoordinate::new(230.0, 128.0);
-    let place = test.map().lat_lng_for_pixel(&anchor, WrapMode::Wrapped);
+    let place = test.map().lat_lng_for_pixel(&anchor, WrapMode::Wrapped).unwrap();
     test.map().jump_to(&cam().with_zoom(Some(6.0)).with_anchor(Some(anchor)));
 
     assert!(test.map().get_camera_options(None).center.unwrap().longitude().abs() <= 180.0);
@@ -720,7 +735,7 @@ fn set_style_invalid_json() {
 
     // C++: "Failed to parse style: Invalid value. at offset 0" (rapidjson);
     // the port parses with serde_json, so the message after the prefix is
-    // serde_json's (DEVIATIONS.md "[style] JSON syntax errors").
+    // serde_json's.
     let serde_error = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
     assert_eq!(
         1,
@@ -1672,7 +1687,7 @@ fn expired_sprite_sheet() {
         .with_map_mode(MapMode::Continuous)
         .with_size(frontend.frontend.get_size())
         .with_pixel_ratio(1.0);
-    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, observer.clone(), file_source, options)));
+    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, observer.clone(), file_source, options).unwrap()));
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
     // what it serves.
@@ -2258,7 +2273,8 @@ fn globe_hand_off_keeps_tiles() {
             &ClientOptions::default(),
         )),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
-    );
+    )
+    .unwrap();
 
     map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     map.get_style_mut()
@@ -2406,7 +2422,9 @@ fn globe_bounds_for_camera() {
             .with_bearing(Some(c.bearing))
             .with_pitch(Some(c.pitch));
         let map = test.map();
-        for bounds in [map.lat_lng_bounds_for_camera(&camera), map.lat_lng_bounds_for_camera_unwrapped(&camera)] {
+        for bounds in
+            [map.lat_lng_bounds_for_camera(&camera).unwrap(), map.lat_lng_bounds_for_camera_unwrapped(&camera).unwrap()]
+        {
             assert_near(c.west, bounds.west(), 1e-5);
             assert_near(c.south, bounds.south(), 1e-5);
             assert_near(c.east, bounds.east(), 1e-5);
@@ -2425,7 +2443,7 @@ fn globe_sky_pixel_snaps_to_the_horizon_ahead() {
     test.map().jump_to(
         &cam().with_center(Some(ll(84.5, 0.0))).with_zoom(Some(5.0)).with_bearing(Some(180.0)).with_pitch(Some(84.0)),
     );
-    let top = test.map().lat_lng_for_pixel(&ScreenCoordinate::new(256.0, 0.0), WrapMode::Wrapped);
+    let top = test.map().lat_lng_for_pixel(&ScreenCoordinate::new(256.0, 0.0), WrapMode::Wrapped).unwrap();
     assert_near(81.42454063588696, top.latitude(), 1e-6);
     assert_near(0.0, top.longitude(), 1e-6);
 }
@@ -2472,7 +2490,8 @@ fn globe_bounded_source_loads_finer_tiles() {
             &ClientOptions::default(),
         )),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
-    );
+    )
+    .unwrap();
 
     // The same tile answers every request, so the cover alone decides what loads.
     map.get_style_mut().load_json(
@@ -2500,7 +2519,7 @@ fn globe_bounded_source_loads_finer_tiles() {
 
 // gtest: Map.LineLayerDepthDistribution
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2509"]
+#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
 fn line_layer_depth_distribution() {
     let test = MapTest::new();
 
@@ -2516,7 +2535,7 @@ fn line_layer_depth_distribution() {
     let colors = [Color::red(), Color::green(), Color::blue()];
     let bounds = {
         let map = test.map();
-        map.lat_lng_bounds_for_camera(&map.get_camera_options(None))
+        map.lat_lng_bounds_for_camera(&map.get_camera_options(None)).unwrap()
     };
 
     let get_source = |index: u32| {
@@ -2548,7 +2567,7 @@ fn line_layer_depth_distribution() {
 
 // gtest: Map.SetFrustumOffset
 #[test]
-#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes; DEVIATIONS.md [render] Layers without a source); see map.test.cpp:2560"]
+#[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn as a drawable inside the frustum-offset scissor; the port has no annotation layer, so the background becomes the clear color, which fills the whole frame (measured on `after`: 0.628662109375 > 0.0006; `before` passes); see map.test.cpp:2560"]
 fn set_frustum_offset() {
     let test = MapTest::new();
 
@@ -2770,7 +2789,8 @@ fn tile_selection_options_publish_updates() {
         observer,
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Continuous),
-    );
+    )
+    .unwrap();
     map.get_style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert!(frontend.parameters.borrow().is_some());
 
@@ -2795,4 +2815,21 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
     check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
     check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+}
+
+// Port-only: the C++ Map constructor throws for an empty size; the Rust one
+// returns the error.
+#[test]
+fn empty_size_is_an_error() {
+    let _loop = RunLoop::new();
+    let frontend = CapturingFrontend::default();
+    for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
+        let result = Map::with_file_source(
+            &frontend,
+            Rc::new(StubMapObserver::default()),
+            Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+            MapOptions::new().with_size(size),
+        );
+        assert_eq!(result.err().as_deref(), Some("failed to resize: size is empty"));
+    }
 }

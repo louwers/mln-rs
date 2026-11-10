@@ -45,7 +45,8 @@ fn prefetch_tiles() {
         observer.clone(),
         file_source.clone(),
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
-    );
+    )
+    .unwrap();
 
     let tiles: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
 

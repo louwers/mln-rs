@@ -5,7 +5,7 @@
 // src/mlt/geometry_vector.cpp and the checks of src/mlt/decoder.cpp).
 //
 // The wire format is decoded by the `mlt-core` crate, not by a port of the
-// C++ decoder (decision for M4, PLAN.md). This module turns mlt-core's
+// C++ decoder (about 70k lines), and is assumed correct. This module turns mlt-core's
 // columnar result into the C++ model, with the C++ behaviour that
 // VectorMLTTileData can observe:
 //
@@ -32,7 +32,7 @@
 //   (std::unordered_map::insert).
 //
 // Where mlt-core rejects a tile that the C++ decoder reads (or the other way
-// round), the tile fails here too; DEVIATIONS.md lists those cases.
+// round), the tile fails here too.
 
 use std::collections::HashMap;
 use std::fmt;

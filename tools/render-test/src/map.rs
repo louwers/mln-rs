@@ -11,11 +11,14 @@ use mln_actor::RunLoop;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_map::{BoundOptions, Map, MapLoadError, MapObserver, MapOptions, ProjectionMode, RenderMode};
 use mln_platform_default::HeadlessFrontend;
+use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType};
 use mln_util::image::PremultipliedImage;
 
 use crate::metadata::{MapMode, TestMetadata};
-use crate::runner::{CameraOptions, ImplFactory, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl};
+use crate::runner::{
+    CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
+};
 use crate::style_ops;
 
 /// `TestRunnerMapObserver` (runner.hpp).
@@ -74,8 +77,13 @@ pub struct Impl {
 }
 
 impl Impl {
-    /// `TestRunner::Impl::Impl(metadata, resourceOptions, clientOptions)`.
-    pub fn new(metadata: &TestMetadata, resource_options: &ResourceOptions) -> Result<Impl, String> {
+    /// `TestRunner::Impl::Impl(metadata, resourceOptions, clientOptions)`,
+    /// plus the port's options (`ImplOptions`).
+    pub fn new(
+        metadata: &TestMetadata,
+        resource_options: &ResourceOptions,
+        impl_options: &ImplOptions,
+    ) -> Result<Impl, String> {
         let client_options = ClientOptions::default();
         let resource_options = mln_storage::ResourceOptions::default()
             .with_cache_path(resource_options.cache_path.clone())
@@ -88,6 +96,11 @@ impl Impl {
             ContextMode::Unique,
             true,
         );
+        if impl_options.tile_worker_codec > 0 {
+            let count = impl_options.tile_worker_codec;
+            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)));
+            frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
+        }
         let file_source = FileSourceManager::get().get_file_source(
             FileSourceType::ResourceLoader,
             &resource_options,
@@ -103,7 +116,7 @@ impl Impl {
                 .with_cross_source_collisions(metadata.cross_source_collisions),
             &resource_options,
             &client_options,
-        );
+        )?;
         if let Some(max_pitch) = metadata.max_pitch {
             map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch)))?;
         }
@@ -137,6 +150,11 @@ impl TestRunnerImpl for Impl {
         self.frontend.render(&mut self.map).map(|result| result.image)
     }
 
+    fn dump_debug_logs(&self) {
+        self.map.dump_debug_logs();
+        self.frontend.with_renderer(|renderer| renderer.dump_debug_logs());
+    }
+
     // query: tile mode.
     fn default_camera(&mut self) -> Result<CameraOptions, MapError> {
         let camera = style_ops::default_camera(&self.map.get_style());
@@ -162,7 +180,7 @@ impl TestRunnerImpl for Impl {
             .with_bearing(camera.bearing)
             .with_pitch(camera.pitch)
             .with_roll(camera.roll);
-        let bounds = self.map.lat_lng_bounds_for_camera(&camera);
+        let bounds = self.map.lat_lng_bounds_for_camera(&camera).map_err(MapError::Exception)?;
         Ok(mln_renderer::util::tile_cover::tile_cover_bounds(&bounds, zoom)
             .into_iter()
             .map(|id| crate::runner::TileId { z: id.canonical.z, x: id.canonical.x, y: id.canonical.y, wrap: id.wrap })
@@ -305,12 +323,14 @@ impl TestRunnerImpl for Impl {
             None => None,
         };
         let options = mln_renderer::query::RenderedQueryOptions::new(options.layer_ids.clone(), filter);
-        Ok(self.frontend.with_renderer(|renderer| match geometry {
-            QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),
-            QueryGeometry::Box(screen_box) => {
-                renderer.query_rendered_features_in_box(&screen_box.min, &screen_box.max, &options)
-            }
-        }))
+        self.frontend
+            .with_renderer(|renderer| match geometry {
+                QueryGeometry::Point(point) => renderer.query_rendered_features_at_point(point, &options),
+                QueryGeometry::Box(screen_box) => {
+                    renderer.query_rendered_features_in_box(&screen_box.min, &screen_box.max, &options)
+                }
+            })
+            .map_err(|e| MapError::Exception(e.to_string()))
     }
 
     // conformance: setTileLod* (Map::setTileLod*, glfw ported them).
@@ -433,8 +453,8 @@ impl TestRunnerImpl for Impl {
 /// `util::RunLoop` first, as `runRenderTests` does, and keeps it alive.
 pub fn factory() -> ImplFactory {
     let run_loop = RunLoop::new();
-    Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions| {
+    Box::new(move |metadata: &TestMetadata, resource_options: &ResourceOptions, impl_options: &ImplOptions| {
         let _ = &run_loop;
-        Ok(Box::new(Impl::new(metadata, resource_options)?) as Box<dyn TestRunnerImpl>)
+        Ok(Box::new(Impl::new(metadata, resource_options, impl_options)?) as Box<dyn TestRunnerImpl>)
     })
 }

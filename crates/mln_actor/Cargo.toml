@@ -28,5 +28,11 @@ mln_util.workspace = true
 name = "mln_actor_gtest"
 path = "tests/gtest/main.rs"
 
+# Port-only: a cooperative scheduler installed for the whole process
+# (tests/cooperative.rs), so apart from the tests that start threads.
+[[test]]
+name = "mln_actor_cooperative"
+path = "tests/cooperative.rs"
+
 [lints]
 workspace = true

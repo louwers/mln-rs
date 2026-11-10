@@ -36,8 +36,11 @@ use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::mat3::{Mat3, matrix as mat3};
+use mln_util::serialization::payload::pod;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_util::sync::RwLockExt;
 use mln_util::vectors::Vec3f;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
@@ -82,12 +85,15 @@ impl std::fmt::Display for GeometryTooLongException {
 
 impl std::error::Error for GeometryTooLongException {}
 
+#[derive(Serialize, Deserialize)]
 pub struct FillExtrusionBucket {
     pub base: BucketBase,
     pub layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
+    #[serde(with = "pod")]
     pub vertices: Vec<FillExtrusionLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
+    #[serde(with = "pod")]
     pub triangles: Vec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
     pub subdivision_granularity: SubdivisionGranularitySetting,
@@ -375,7 +381,7 @@ impl Bucket for FillExtrusionBucket {
 
         let length = self.vertices.len();
         for (id, binders) in self.paint_property_binders.iter_mut() {
-            binders.get_mut().unwrap_or_else(|e| e.into_inner()).populate_vertex_vectors(
+            binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,
                 index,
@@ -417,7 +423,7 @@ impl Bucket for FillExtrusionBucket {
         image_positions: &ImagePositions,
     ) {
         if let Some(binders) = self.paint_property_binders.get(layer_id) {
-            binders.write().unwrap_or_else(|e| e.into_inner()).update_vertex_vectors(states, layer, image_positions);
+            binders.write_unpoisoned().update_vertex_vectors(states, layer, image_positions);
             self.base.uploaded.store(false, Ordering::SeqCst);
 
             // sharedVertices->updateModified()

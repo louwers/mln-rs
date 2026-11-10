@@ -10,6 +10,7 @@ use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 
 use crate::renderer_impl::RendererImpl;
 use crate::renderer_observer::RendererObserver;
+use crate::tile::tile_worker_transport::TileWorkerTransport;
 use crate::update_parameters::UpdateParameters;
 
 pub struct Renderer {
@@ -38,6 +39,13 @@ impl Renderer {
         self.impl_mut().orchestrator.mark_context_lost();
     }
 
+    /// Port-only: the transport that creates the tile workers of tiles
+    /// created from now on (by default on the map's thread pool). Set it
+    /// before the first render so that every tile uses it.
+    pub fn set_tile_worker_transport(&mut self, transport: Rc<dyn TileWorkerTransport>) {
+        self.impl_mut().orchestrator.set_tile_worker_transport(transport);
+    }
+
     pub fn set_observer(&mut self, observer: Option<Weak<dyn RendererObserver>>) {
         let impl_ = self.impl_mut();
         impl_.set_observer(observer.clone());
@@ -59,13 +67,14 @@ impl Renderer {
         }
     }
 
-    // query
+    // query: `Err` is the exception C++ throws out of the query (a
+    // malformed tile).
     /// `queryRenderedFeatures(const ScreenLineString&, const RenderedQueryOptions&)`.
     pub fn query_rendered_features(
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         self.impl_ref().orchestrator.query_rendered_features(geometry, options)
     }
 
@@ -74,7 +83,7 @@ impl Renderer {
         &self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         self.impl_ref().orchestrator.query_rendered_features(&[*point], options)
     }
 
@@ -84,7 +93,7 @@ impl Renderer {
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         use mln_util::geo::ScreenCoordinate;
         self.impl_ref().orchestrator.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
@@ -97,7 +106,7 @@ impl Renderer {
         &self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         self.impl_ref().orchestrator.query_source_features(source_id, options)
     }
 
@@ -106,8 +115,14 @@ impl Renderer {
         self.impl_ref().orchestrator.get_placed_symbols_data()
     }
 
+    /// `dumpDebugLogs()`: logs every render source's tiles and the image
+    /// manager's state.
+    pub fn dump_debug_logs(&self) {
+        self.impl_ref().orchestrator.dump_debug_logs();
+    }
+
     // TODO(port): queryPointAnnotations, queryShapeAnnotations,
-    // queryFeatureExtensions, dumpDebugLogs.
+    // queryFeatureExtensions.
 
     // layers: feature state
     /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.

@@ -17,7 +17,7 @@
 //! ordering and key comparison work on bytes, as in C++) and converts to
 //! Rust `String`s, which must be UTF-8, with `String::from_utf8_lossy` where
 //! they leave the crate (`get_name`, `layer_names`, property keys and string
-//! values). See DEVIATIONS.md.
+//! values).
 
 pub mod config;
 mod error;

@@ -22,6 +22,7 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::context::Context;
@@ -144,6 +145,13 @@ impl HeadlessBackend {
                 return backend;
             }
         };
+
+        // C++ sets no uncaptured-error callback, and Dawn logs the error
+        // and invalidates the object. wgpu's default handler panics; log as
+        // the surface backend does (Dawn's logUncapturedError).
+        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
+            Log::error(Event::Render, format!("WebGPU validation error: {error}"));
+        }));
 
         // Store device, queue, and instance in base class
         let backend_impl = backend.renderer_backend.backend_impl();

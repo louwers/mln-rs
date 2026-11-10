@@ -94,6 +94,10 @@ pub trait TestRunnerImpl {
     /// `frontend.render(map).image`; `Err` carries the exception message.
     fn render(&mut self) -> Result<PremultipliedImage, String>;
 
+    /// Port-only: `map.dumpDebugLogs()` and the renderer's, for a test that
+    /// timed out (watchdog.rs): which tiles never loaded or completed.
+    fn dump_debug_logs(&self) {}
+
     /// `map.jumpTo(camera)`.
     fn jump_to(&mut self, _camera: &CameraOptions) -> Result<(), MapError> {
         not_ported("Map::jumpTo")
@@ -268,7 +272,17 @@ pub enum QueryGeometry {
 /// `Map(frontend, observer, MapOptions().withMapMode(..).withSize(..)
 /// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
 /// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
-pub type ImplFactory = Box<dyn Fn(&TestMetadata, &ResourceOptions) -> Result<Box<dyn TestRunnerImpl>, String>>;
+pub type ImplFactory =
+    Box<dyn Fn(&TestMetadata, &ResourceOptions, &ImplOptions) -> Result<Box<dyn TestRunnerImpl>, String>>;
+
+/// Port-only: how the runner's options that C++ does not have set up a map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ImplOptions {
+    /// `--tileWorkerCodec=<n>`: the map's tile workers are in n worker
+    /// instances, reached through the worker codec (0: on the map's thread
+    /// pool, as in C++).
+    pub tile_worker_codec: usize,
+}
 
 /// `TestContext` (metadata.hpp).
 pub struct TestContext<'a> {
@@ -352,6 +366,8 @@ pub struct TestRunner {
     output_path: PathBuf,
     /// The per-test wall-clock limit (watchdog.rs).
     watchdog: Option<crate::watchdog::Watchdog>,
+    /// What the factory sets up the maps with.
+    impl_options: ImplOptions,
 }
 
 impl TestRunner {
@@ -363,7 +379,21 @@ impl TestRunner {
         output_path: PathBuf,
     ) -> Self {
         crate::file_source::register_proxy_file_source();
-        TestRunner { maps: HashMap::new(), manifest, update_results, factory, self_check, output_path, watchdog: None }
+        TestRunner {
+            maps: HashMap::new(),
+            manifest,
+            update_results,
+            factory,
+            self_check,
+            output_path,
+            watchdog: None,
+            impl_options: ImplOptions::default(),
+        }
+    }
+
+    /// Sets what the factory sets up the maps with from now on.
+    pub fn set_impl_options(&mut self, options: ImplOptions) {
+        self.impl_options = options;
     }
 
     /// Errors a test that runs longer than `limit` (`None`: no limit).
@@ -932,7 +962,8 @@ impl TestRunner {
                     cache_path: self.manifest.get_cache_path().to_string(),
                     api_key: self.manifest.get_api_key().to_string(),
                 };
-                let created = catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options)));
+                let created =
+                    catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options, &self.impl_options)));
                 match created {
                     Ok(Ok(runner_impl)) => {
                         self.maps.insert(key.clone(), runner_impl);
@@ -963,7 +994,7 @@ impl TestRunner {
                     ctx.runner_impl = None;
                     ctx.metadata.error_message = panic_error_message("Rendering panicked", &panic);
                     ctx.metadata.render_errored += 1;
-                    self.maps.remove(&key);
+                    drop_map(&mut self.maps, &key, &panic);
                     return;
                 }
             }
@@ -1012,7 +1043,7 @@ impl TestRunner {
                     ctx.runner_impl = None;
                     ctx.metadata.error_message = panic_error_message("Query panicked", &panic);
                     ctx.metadata.render_errored += 1;
-                    self.maps.remove(&key);
+                    drop_map(&mut self.maps, &key, &panic);
                     return;
                 }
             }
@@ -1294,13 +1325,43 @@ fn self_check_image(metadata: &TestMetadata) -> PremultipliedImage {
     ))
 }
 
-/// The error of a test that panicked: the timeout message for a
-/// `TestTimedOut` (watchdog.rs), else `"<what>: <panic message>"`.
+/// Drops the map a test panicked in, which may be inconsistent. If the test
+/// timed out, it first logs the map's state (`dumpDebugLogs`), so the output
+/// says whether a tile never loaded or the frame never drew.
+fn drop_map(maps: &mut HashMap<String, Box<dyn TestRunnerImpl>>, key: &str, panic: &Box<dyn std::any::Any + Send>) {
+    let Some(map) = maps.remove(key) else {
+        return;
+    };
+    if panic.downcast_ref::<crate::watchdog::TestTimedOut>().is_some() {
+        // The dump reads a map that a panic left; it must not end the run.
+        let _ = catch_unwind(AssertUnwindSafe(|| map.dump_debug_logs()));
+    }
+}
+
+/// The error of a test that panicked: for a `TestTimedOut` (watchdog.rs),
+/// the timeout message and what the test was waiting for, else
+/// `"<what>: <panic message>"`.
 fn panic_error_message(what: &str, panic: &Box<dyn std::any::Any + Send>) -> String {
     match panic.downcast_ref::<crate::watchdog::TestTimedOut>() {
-        Some(timed_out) => timed_out.message(),
+        Some(timed_out) => format!("{}; {}", timed_out.message(), waiting_for(&ProxyFileSource::pending_requests())),
         None => format!("{what}: {}", panic_message(panic)),
     }
+}
+
+/// The requests a test that timed out was still waiting for, or that it
+/// waited for none, which points at the map itself.
+pub(crate) fn waiting_for(pending: &[(String, std::time::Duration)]) -> String {
+    const SHOWN: usize = 5;
+    if pending.is_empty() {
+        return "no resource request was outstanding".to_string();
+    }
+    let mut list: Vec<String> =
+        pending.iter().take(SHOWN).map(|(url, age)| format!("{url} ({:.1} s)", age.as_secs_f64())).collect();
+    if pending.len() > SHOWN {
+        list.push(format!("and {} more", pending.len() - SHOWN));
+    }
+    let plural = if pending.len() == 1 { "" } else { "s" };
+    format!("waiting for {} request{plural}: {}", pending.len(), list.join(", "))
 }
 
 fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {

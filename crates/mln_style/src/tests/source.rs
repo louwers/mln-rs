@@ -113,8 +113,7 @@ fn loading_corrupt() {
 
     run_loop.run();
     // C++ expects rapidjson's "Invalid value. at offset 0"; JSON syntax
-    // errors carry serde_json's message in the port (DEVIATIONS.md, "[style]
-    // JSON syntax errors").
+    // errors carry serde_json's message in the port.
     let message = failed.borrow().clone().expect("source error");
     assert_eq!("expected value at line 1 column 1", message);
 }

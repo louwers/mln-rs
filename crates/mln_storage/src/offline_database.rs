@@ -103,6 +103,13 @@ impl std::fmt::Display for DatabaseError {
 
 type DbResult<T> = Result<T, DatabaseError>;
 
+/// The tile data of a tile resource. C++ dereferences `resource.tileData`
+/// unchecked; a tile resource without it (built by hand) is stored and found
+/// by its URL here, as other resources are.
+fn tile_data(resource: &Resource) -> Option<&TileData> {
+    resource.tile_data.as_ref().filter(|_| resource.kind == Kind::Tile)
+}
+
 /// `util::deleteFile` (src/mln/util/io.cpp).
 fn delete_file(filename: &str) -> DbResult<()> {
     match std::fs::remove_file(filename) {
@@ -504,21 +511,11 @@ impl OfflineDatabase {
     }
 
     fn get_internal(&mut self, resource: &Resource) -> DbResult<Option<(Response, u64)>> {
-        if resource.kind == Kind::Tile {
-            let tile_data = resource.tile_data.as_ref().expect("tile resource without tile data");
-            self.get_tile(tile_data)
-        } else {
-            self.get_resource(resource)
-        }
+        if let Some(tile_data) = tile_data(resource) { self.get_tile(tile_data) } else { self.get_resource(resource) }
     }
 
     fn has_internal(&mut self, resource: &Resource) -> DbResult<Option<i64>> {
-        if resource.kind == Kind::Tile {
-            let tile_data = resource.tile_data.as_ref().expect("tile resource without tile data");
-            self.has_tile(tile_data)
-        } else {
-            self.has_resource(resource)
-        }
+        if let Some(tile_data) = tile_data(resource) { self.has_tile(tile_data) } else { self.has_resource(resource) }
     }
 
     /// `put(const Resource&, const Response&)`: (inserted, stored size).
@@ -582,8 +579,7 @@ impl OfflineDatabase {
             b""
         };
 
-        let inserted = if resource.kind == Kind::Tile {
-            let tile_data = resource.tile_data.as_ref().expect("tile resource without tile data");
+        let inserted = if let Some(tile_data) = tile_data(resource) {
             self.put_tile(tile_data, response, data, compressed)?
         } else {
             self.put_resource(resource, response, data, compressed)?
@@ -1333,8 +1329,7 @@ impl OfflineDatabase {
     fn mark_used(&mut self, region_id: i64, resource: &Resource) -> DbResult<bool> {
         self.check_flags()?;
 
-        if resource.kind == Kind::Tile {
-            let tile = resource.tile_data.as_ref().expect("tile resource without tile data");
+        if let Some(tile) = tile_data(resource) {
             let changes = self.execute(
                 "INSERT OR IGNORE INTO region_tiles (region_id, tile_id) \
                  SELECT                              ?1,        tiles.id \

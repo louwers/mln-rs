@@ -7,8 +7,10 @@
 // itself: runs in visual order, RTL runs reversed by code point with each
 // character replaced by its Bidi_Mirroring_Glyph (ICU's `u_charMirror`
 // data, crate::icu::ubidi_props), BiDi controls (ZWNJ, ZWJ, LRM, RLM,
-// LRE..RLO, LRI..PDI) removed. The measured differences to ICU are in
-// DEVIATIONS.md [shaping]. Arabic letter shaping (`applyArabicShaping`,
+// LRE..RLO, LRI..PDI) removed. Known differences to ICU: ICU treats CR LF
+// as one paragraph separator, unicode-bidi splits after each; line-level L1
+// handling, bracket pairs and the Bidi_Class of code points new in Unicode
+// 17 may differ. Arabic letter shaping (`applyArabicShaping`,
 // ICU's u_shapeArabic) is a port of ICU's ushape.cpp (crate::icu::ushape).
 //
 // Where the C++ throws std::runtime_error, these return Err with the same

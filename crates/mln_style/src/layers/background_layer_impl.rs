@@ -3,11 +3,13 @@
 // `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
 // background_layer.rs.
 
+use serde::{Deserialize, Serialize};
+
 use crate::layer::{self, ImplBase, LayerTypeInfo};
 use crate::layers::background_layer_properties::BackgroundPaintProperties;
 
 /// `BackgroundLayer::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
     pub paint: BackgroundPaintProperties::Transitionable,

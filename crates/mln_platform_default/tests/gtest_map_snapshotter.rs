@@ -27,7 +27,7 @@ const GREEN_BACKGROUND: &str = r#"{
 
 /// `MapSnapshotter snapshotter(size, 1.0f, ResourceOptions())`.
 fn snapshotter(size: Size) -> MapSnapshotter {
-    MapSnapshotter::new(size, 1.0, &ResourceOptions::default(), &ClientOptions::default())
+    MapSnapshotter::new(size, 1.0, &ResourceOptions::default(), &ClientOptions::default()).unwrap()
 }
 
 /// A snapshot callback that expects an image of `size`, then stops the run
@@ -119,13 +119,16 @@ fn runtime_styling() {
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let observer = Rc::new(SnapshotterObserver::default());
-    let snapshotter = Rc::new(MapSnapshotter::with_observer(
-        Size::new(256, 128),
-        1.0,
-        &ResourceOptions::default(),
-        &ClientOptions::default(),
-        observer.clone(),
-    ));
+    let snapshotter = Rc::new(
+        MapSnapshotter::with_observer(
+            Size::new(256, 128),
+            1.0,
+            &ResourceOptions::default(),
+            &ClientOptions::default(),
+            observer.clone(),
+        )
+        .unwrap(),
+    );
     snapshotter.set_style_url(&server.url("/online/style.json"));
 
     let weak: Weak<MapSnapshotter> = Rc::downgrade(&snapshotter);

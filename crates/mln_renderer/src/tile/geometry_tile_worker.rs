@@ -1,54 +1,62 @@
 // Ports src/mln/tile/geometry_tile_worker.hpp and
 // src/mln/tile/geometry_tile_worker.cpp.
 //
-// The worker is a pool actor (mln_actor::actor::Actor) on the map's thread
-// pool, as in C++. Its parent GeometryTile lives on the render thread and
-// is reached through a mailbox (`ActorRef<GeometryTileInner>`). When the
-// source asks for synchronous updates, C++ uses an `OptionalActor` that
-// calls the worker and the tile directly; `OptionalActorRef` below is that
-// choice for the worker's references.
+// The in-process transport makes the worker a pool actor
+// (mln_actor::actor::Actor) on the map's thread pool, as in C++. Its parent
+// GeometryTile lives on the render thread and is reached through a mailbox
+// (`ActorRef<GeometryTileInner>`). When the source asks for synchronous
+// updates, C++ uses an `OptionalActor` that calls the worker and the tile
+// directly; the worker's `parent` is then the tile itself and `SelfRef`
+// is `None`.
 //
 // C++ wraps each message handler in `try { ... } catch (...)` and reports
-// the exception to the tile (`GeometryTile::onError`). Rust code that would
-// throw panics (e.g. malformed MVT data in mln_tile, a failing wagyu
-// fixup), so the handlers catch the panic and report its message.
+// the exception to the tile (`GeometryTile::onError`). The port returns the
+// exceptions as `Err` (malformed tiles, a failing wagyu fixup, a too long
+// geometry) and reports those; a panic is a bug and is not caught
+// (`catch_unwind` can't catch it with `panic = "abort"` or on wasm).
+//
+// Port-only: the messages between the tile and its worker are data
+// (`WorkerMessage`, `TileMessage`) instead of member function calls bound
+// into closures, and they travel through a `TileWorkerTransport`
+// (tile_worker_transport.rs), so that a worker can also run in another
+// wasm instance.
 //
 // TODO(port): the ErrorScope for symbol errors, `setObserver`, font faces
 // (HarfBuzz shaping results for complex scripts).
 
-use std::cell::RefCell;
 use std::collections::{BTreeSet, HashMap};
-use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::rc::Weak;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::actor::PoolActorRef;
-use mln_actor::{ActorRef, LocalObject};
 use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
+use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, shared_image_map};
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileData;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
-use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas};
+use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, ImageAtlas, TextureAtlas};
 use crate::group_by_layout::group_layers;
+use crate::image_manager::ImageRequestPair;
 use crate::layermanager;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::LayerRenderData;
 use crate::text::glyph_manager::HBShapeResults;
-use crate::tile::geometry_tile::{GeometryTileInner, LayoutResult};
+use crate::tile::geometry_tile::LayoutResult;
+use crate::tile::tile_worker_transport::TileEndpoint;
+use crate::tile::worker_codec::fields;
 
 /// The tile data the worker parses (C++ `std::unique_ptr<const
 /// GeometryTileData>`, shared here with the feature index instead of
@@ -66,38 +74,76 @@ enum State {
     NeedsSymbolLayout,
 }
 
-/// The message of a caught panic (C++: the caught exception).
-fn panic_to_exception(payload: Box<dyn std::any::Any + Send>) -> ExceptionPtr {
-    let message = if let Some(s) = payload.downcast_ref::<&str>() {
-        (*s).to_owned()
-    } else if let Some(s) = payload.downcast_ref::<String>() {
-        s.clone()
-    } else {
-        "unknown error".to_owned()
-    };
-    RuntimeError::ptr(message)
+/// The messages a `GeometryTile` sends its `GeometryTileWorker`: the
+/// worker's public member functions. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
+pub enum WorkerMessage {
+    /// `setData(data, availableImages, correlationID)`.
+    SetData {
+        #[serde(with = "fields::tile_data")]
+        data: Option<SharedTileData>,
+        available_images: Immutable<BTreeSet<String>>,
+        correlation_id: u64,
+    },
+    /// `setLayers(layers, globalState, availableImages,
+    /// subdivisionGranularity, correlationID)`.
+    SetLayers {
+        #[serde(with = "fields::layers")]
+        layers: Vec<Immutable<dyn LayerProperties>>,
+        global_state: Option<Arc<GlobalStateMap>>,
+        available_images: Immutable<BTreeSet<String>>,
+        subdivision_granularity: SubdivisionGranularitySetting,
+        correlation_id: u64,
+    },
+    /// `reset(correlationID)`.
+    Reset { correlation_id: u64 },
+    /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
+    SetShowCollisionBoxes { show_collision_boxes: bool, correlation_id: u64 },
+    /// `onGlyphsAvailable(newGlyphMap, results)`.
+    GlyphsAvailable { glyph_map: GlyphMap, results: HBShapeResults },
+    /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
+    ImagesAvailable {
+        #[serde(with = "shared_image_map")]
+        icon_map: ImageMap,
+        #[serde(with = "shared_image_map")]
+        pattern_map: ImageMap,
+        version_map: ImageVersionMap,
+        image_correlation_id: u64,
+    },
 }
 
-/// `OptionalActorRef<GeometryTile>`: the tile's mailbox, or (synchronous
-/// updates) the tile itself on the render thread.
-pub enum ParentRef {
-    Actor(ActorRef<GeometryTileInner>),
-    Sync(LocalObject<RefCell<Weak<GeometryTileInner>>>),
-}
-
-impl ParentRef {
-    /// `invoke(fn, args...)`: a direct call for the synchronous reference.
-    pub fn invoke(&self, f: impl FnOnce(&GeometryTileInner) + Send + 'static) {
+impl WorkerMessage {
+    /// The message's correlation id, or 0 for the glyph and image replies,
+    /// which have none.
+    pub fn correlation_id(&self) -> u64 {
         match self {
-            ParentRef::Actor(actor_ref) => actor_ref.invoke(f),
-            ParentRef::Sync(object) => {
-                let tile = object.get().and_then(|weak| weak.borrow().upgrade());
-                if let Some(tile) = tile {
-                    f(&tile);
-                }
-            }
+            WorkerMessage::SetData { correlation_id, .. }
+            | WorkerMessage::SetLayers { correlation_id, .. }
+            | WorkerMessage::Reset { correlation_id }
+            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
+            WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
         }
     }
+}
+
+/// The messages a `GeometryTileWorker` sends its `GeometryTile`: the tile's
+/// member functions the worker calls. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
+pub enum TileMessage {
+    /// `onLayout(result, correlationID)`.
+    Layout { result: LayoutResult, correlation_id: u64 },
+    /// `onError(error, correlationID)`.
+    Error {
+        #[serde(with = "fields::exception")]
+        error: ExceptionPtr,
+        correlation_id: u64,
+    },
+    /// `getGlyphs(glyphDependencies)`.
+    GetGlyphs(GlyphDependencies),
+    /// `getImages(pair)`.
+    GetImages(ImageRequestPair),
 }
 
 /// `OptionalActorRef<GeometryTileWorker>` (the worker's `self`): `None` for
@@ -107,7 +153,7 @@ pub type SelfRef = Option<PoolActorRef<GeometryTileWorker>>;
 /// `GeometryTileWorker`.
 pub struct GeometryTileWorker {
     self_ref: SelfRef,
-    parent: ParentRef,
+    parent: Box<dyn TileEndpoint>,
 
     id: OverscaledTileID,
     source_id: String,
@@ -157,7 +203,7 @@ impl GeometryTileWorker {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         self_ref: SelfRef,
-        parent: ParentRef,
+        parent: Box<dyn TileEndpoint>,
         id: OverscaledTileID,
         source_id: String,
         obsolete: Arc<AtomicBool>,
@@ -205,18 +251,37 @@ impl GeometryTileWorker {
         self.obsolete.load(Ordering::SeqCst)
     }
 
+    /// Runs the member function a message stands for.
+    pub fn handle(&mut self, message: WorkerMessage) {
+        match message {
+            WorkerMessage::SetData { data, available_images, correlation_id } => {
+                self.set_data(data, available_images, correlation_id)
+            }
+            WorkerMessage::SetLayers {
+                layers,
+                global_state,
+                available_images,
+                subdivision_granularity,
+                correlation_id,
+            } => self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id),
+            WorkerMessage::Reset { correlation_id } => self.reset(correlation_id),
+            WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
+                self.set_show_collision_boxes(show_collision_boxes, correlation_id)
+            }
+            WorkerMessage::GlyphsAvailable { glyph_map, results } => self.on_glyphs_available(glyph_map, results),
+            WorkerMessage::ImagesAvailable { icon_map, pattern_map, version_map, image_correlation_id } => {
+                self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id)
+            }
+        }
+    }
+
     /// Runs `f` as the C++ `try { f } catch (...) { parent.invoke(
-    /// &GeometryTile::onError, std::current_exception(), correlationID); }`:
-    /// both an `Err` (an exception the port returns) and a panic (one it
-    /// does not) are reported.
+    /// &GeometryTile::onError, std::current_exception(), correlationID); }`.
     fn guarded(&mut self, f: impl FnOnce(&mut Self) -> Result<(), ExceptionPtr>) {
-        let error = match catch_unwind(AssertUnwindSafe(|| f(self))) {
-            Ok(Ok(())) => return,
-            Ok(Err(error)) => error,
-            Err(payload) => panic_to_exception(payload),
+        let Err(error) = f(self) else {
+            return;
         };
-        let correlation_id = self.correlation_id;
-        self.parent.invoke(move |tile: &GeometryTileInner| tile.on_error(error, correlation_id));
+        self.parent.send(TileMessage::Error { error, correlation_id: self.correlation_id });
     }
 
     /*
@@ -274,7 +339,8 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `setLayers(layers, globalState, availableImages, correlationID)`.
+    /// `setLayers(layers, globalState, availableImages,
+    /// subdivisionGranularity, correlationID)`.
     pub fn set_layers(
         &mut self,
         layers: Vec<Immutable<dyn LayerProperties>>,
@@ -486,8 +552,7 @@ impl GeometryTileWorker {
             }
         }
         if !self.pending_glyph_dependencies.glyphs.is_empty() {
-            let dependencies = self.pending_glyph_dependencies.clone();
-            self.parent.invoke(move |tile: &GeometryTileInner| tile.get_glyphs(dependencies));
+            self.parent.send(TileMessage::GetGlyphs(self.pending_glyph_dependencies.clone()));
         }
     }
 
@@ -516,7 +581,7 @@ impl GeometryTileWorker {
         if !self.pending_image_dependencies.is_empty() {
             self.image_correlation_id += 1;
             let pair = (self.pending_image_dependencies.clone(), self.image_correlation_id);
-            self.parent.invoke(move |tile: &GeometryTileInner| tile.get_images(pair));
+            self.parent.send(TileMessage::GetImages(pair));
         }
     }
 
@@ -565,7 +630,7 @@ impl GeometryTileWorker {
                 subdivision_granularity: self.subdivision_granularity,
             };
 
-            let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer) else {
+            let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer)? else {
                 continue;
             };
             drop(geometry_layer);
@@ -593,7 +658,7 @@ impl GeometryTileWorker {
                     },
                     SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
                     group,
-                );
+                )?;
                 let Some(mut layout) = layout else {
                     continue;
                 };
@@ -615,26 +680,31 @@ impl GeometryTileWorker {
                 let Some(mut bucket) = layermanager::create_bucket(&parameters, group) else {
                     continue;
                 };
-                let geometry_layer = data.get_layer(source_layer_id).expect("layer");
+                let Some(geometry_layer) = data.get_layer(source_layer_id)? else {
+                    continue;
+                };
 
                 bucket.set_retain_features_by_id(self.capture_rendered_features);
                 bucket.reserve_features(geometry_layer.feature_count());
 
                 let mut i = 0;
                 while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
-                    let feature = geometry_layer.get_feature(i);
+                    let feature = geometry_layer.get_feature(i)?;
 
                     let effective_z = f32::from(self.id.overscaled_z);
-                    if !filter.evaluate(
+                    let passes = filter.evaluate(
                         &EvaluationContext::with_zoom_feature(effective_z, Some(&*feature))
                             .with_canonical_tile_id(Some(&self.id.canonical))
                             .with_global_state(self.global_state.as_deref()),
-                    ) {
+                    );
+                    feature.check()?;
+                    if !passes {
                         i += 1;
                         continue;
                     }
 
                     let geometries = feature.get_geometries();
+                    feature.check()?;
                     bucket.add_feature(
                         &*feature,
                         geometries,
@@ -643,6 +713,7 @@ impl GeometryTileWorker {
                         i,
                         &self.id.canonical,
                     )?;
+                    feature.check()?;
                     feature_index.insert(geometries, i, source_layer_id, &leader_impl.id);
                     i += 1;
                 }
@@ -743,10 +814,9 @@ impl GeometryTileWorker {
             Arc::from(self.feature_index.take().expect("feature index")),
             glyph_atlas,
             image_atlas,
-            self.dynamic_texture_atlas.clone(),
+            self.dynamic_texture_atlas.clone().map(|atlas| atlas as Arc<dyn TextureAtlas>),
         );
-        let correlation_id = self.correlation_id;
-        self.parent.invoke(move |tile: &GeometryTileInner| tile.on_layout(layout_result, correlation_id));
+        self.parent.send(TileMessage::Layout { result: layout_result, correlation_id: self.correlation_id });
         Ok(())
     }
 

@@ -14,7 +14,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
 use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
-use mln_util::exception::ExceptionPtr;
+use mln_util::exception::{ExceptionPtr, RuntimeError};
 
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
@@ -33,10 +33,12 @@ impl SourceLayer {
         SourceLayer { data, name: name.into() }
     }
 
-    /// The layer (`data->getLayer(name)`; the worker only creates layouts
-    /// for layers the data has).
-    pub fn layer(&self) -> Box<dyn GeometryTileLayer + '_> {
-        self.data.get_layer(&self.name).expect("SourceLayer: the tile data has the layer")
+    /// The layer (`data->getLayer(name)`). The worker only creates layouts
+    /// for layers the data has, so neither error is expected.
+    pub fn layer(&self) -> Result<Box<dyn GeometryTileLayer + '_>, ExceptionPtr> {
+        self.data
+            .get_layer(&self.name)?
+            .ok_or_else(|| RuntimeError::ptr(format!("SourceLayer: the tile data has no layer {:?}", self.name)))
     }
 }
 

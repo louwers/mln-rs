@@ -24,5 +24,8 @@ protozero.workspace = true
 vector_tile.workspace = true
 wagyu.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true

@@ -5,34 +5,28 @@
 // mlt-core crate) where C++ calls `mlt::Decoder(fastPFOREnabled).decode`.
 //
 // Exceptions: reading a property can throw (`PresentProperties::getProperty`,
-// "Missing property value", on malformed tiles). The mln_tile_id traits have
-// no error channel, so `try_get_value`/`try_get_properties` return
-// `Result<_, mlt::Error>` and the trait methods panic with the `what()` text
-// where the C++ exception would escape, as VectorMVTTileFeature does (the
-// GeometryTileWorker port catches it like C++ `catch (...)`). See
-// DEVIATIONS.md.
+// "Missing property value", on malformed tiles). `try_get_value` and
+// `try_get_properties` return `Result<_, mlt::Error>`; the trait methods
+// return null or empty and keep the exception for
+// `GeometryTileFeature::error`, as VectorMVTTileFeature does.
 
 use std::cell::OnceCell;
 use std::sync::{Arc, Mutex};
 
 use feature::{Identifier, PropertyMap, Value};
 use mln_tile_id::{
-    GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData, GeometryTileFeature,
-    GeometryTileLayer,
+    EncodedTileData, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData,
+    GeometryTileFeature, GeometryTileLayer,
 };
 use mln_util::constants::EXTENT;
+use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
+use mln_util::sync::MutexExt;
 
 use crate::mlt::{self, Coordinate, MapLibreTile, Property, Shape};
 
-fn unwrap_or_throw<T>(r: Result<T, mlt::Error>) -> T {
-    match r {
-        Ok(v) => v,
-        // An uncaught C++ exception; see the file comment.
-        Err(e) => panic!("{e}"),
-    }
-}
+static EMPTY_PROPERTIES: PropertyMap = PropertyMap::new();
 
 /// `PropertyVisitor`: the `mln::Value` of an MLT property (32-bit integers
 /// widen to `int64_t`/`uint64_t`, `float` to `double`).
@@ -71,11 +65,25 @@ pub struct VectorMLTTileFeature<'l> {
     // lazy init
     lines: OnceCell<GeometryCollection>,
     properties: OnceCell<PropertyMap>,
+    /// The first exception of an accessor (`GeometryTileFeature::error`).
+    error: OnceCell<ExceptionPtr>,
 }
 
 impl<'l> VectorMLTTileFeature<'l> {
     pub fn new(layer: &'l mlt::Layer, feature: &'l mlt::Feature, extent: u32) -> Self {
-        VectorMLTTileFeature { layer, feature, extent, lines: OnceCell::new(), properties: OnceCell::new() }
+        VectorMLTTileFeature {
+            layer,
+            feature,
+            extent,
+            lines: OnceCell::new(),
+            properties: OnceCell::new(),
+            error: OnceCell::new(),
+        }
+    }
+
+    /// Keeps the first exception a trait accessor would have thrown.
+    fn keep_error(&self, error: mlt::Error) {
+        let _ = self.error.set(Arc::new(error));
     }
 
     /// The `mlt::Feature` (for the difftest).
@@ -122,11 +130,24 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
     }
 
     fn get_value(&self, key: &str) -> Option<Value> {
-        unwrap_or_throw(self.try_get_value(key))
+        self.try_get_value(key).unwrap_or_else(|e| {
+            self.keep_error(e);
+            None
+        })
     }
 
     fn get_properties(&self) -> &PropertyMap {
-        unwrap_or_throw(self.try_get_properties())
+        match self.try_get_properties() {
+            Ok(properties) => properties,
+            Err(e) => {
+                self.keep_error(e);
+                &EMPTY_PROPERTIES
+            }
+        }
+    }
+
+    fn error(&self) -> Option<ExceptionPtr> {
+        self.error.get().cloned()
     }
 
     fn get_id(&self) -> Identifier {
@@ -194,8 +215,8 @@ impl GeometryTileLayer for VectorMLTTileLayer {
         self.layer().get_features().len()
     }
 
-    fn get_feature(&self, index: usize) -> Box<dyn GeometryTileFeature + '_> {
-        Box::new(self.feature(index))
+    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr> {
+        Ok(Box::new(self.feature(index)))
     }
 
     fn get_name(&self) -> String {
@@ -226,7 +247,7 @@ impl VectorMLTTileData {
     /// The decoded tile (`Impl::getLayer`'s decoding step): decodes once,
     /// then drops the raw data.
     pub fn tile(&self) -> Option<Arc<MapLibreTile>> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
         if let Some(data) = &state.data
             && state.tile.is_none()
         {
@@ -250,10 +271,10 @@ impl VectorMLTTileData {
     /// `layerNames()`: in tile order (MVT: sorted), duplicates included.
     pub fn layer_names(&self) -> Vec<String> {
         let decode = {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock_unpoisoned();
             state.data.as_ref().is_some_and(|data| !data.is_empty()) && state.tile.is_none()
         };
-        let tile = if decode { self.tile() } else { self.state.lock().unwrap().tile.clone() };
+        let tile = if decode { self.tile() } else { self.state.lock_unpoisoned().tile.clone() };
         match tile {
             Some(tile) => tile.get_layers().iter().map(|layer| layer.get_name().to_string()).collect(),
             None => Vec::new(),
@@ -265,7 +286,7 @@ impl Clone for VectorMLTTileData {
     /// The C++ copy constructor: shares the data and the decoded tile.
     fn clone(&self) -> Self {
         VectorMLTTileData {
-            state: Mutex::new(self.state.lock().unwrap().clone()),
+            state: Mutex::new(self.state.lock_unpoisoned().clone()),
             fast_pfor_enabled: self.fast_pfor_enabled,
         }
     }
@@ -276,7 +297,14 @@ impl GeometryTileData for VectorMLTTileData {
         Box::new(self.clone())
     }
 
-    fn get_layer(&self, name: &str) -> Option<Box<dyn GeometryTileLayer + '_>> {
-        self.get_mlt_layer(name).map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>)
+    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
+        Ok(self.get_mlt_layer(name).map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>))
+    }
+
+    /// The raw data, until the first decoding drops it (a tile sends its
+    /// data to its worker before anything decodes it).
+    fn encoded(&self) -> Option<EncodedTileData> {
+        let data = self.state.lock_unpoisoned().data.clone()?;
+        Some(EncodedTileData::Mlt { data, fast_pfor_enabled: self.fast_pfor_enabled })
     }
 }

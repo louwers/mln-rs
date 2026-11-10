@@ -11,13 +11,17 @@
 //   flavour) and the GSUB/GPOS FeatureVariations (HB_NO_VAR); and user
 //   features `frac=0`, `numr=0`, `dnom=0` (HB_NO_OT_SHAPE_FRACTIONS:
 //   HB_TINY never adds the automatic fraction features).
-// HB_TINY options HarfRust cannot turn off are listed in DEVIATIONS.md.
+// HarfRust has no switch for some HB_TINY options (HB_NO_OT_SHAPE_FALLBACK,
+// HB_NO_OT_SHAPER_VOWEL_CONSTRAINTS, HB_NO_UCD_UNASSIGNED), so a few texts
+// shape differently: fallback mark positioning, an inserted U+25CC, and
+// Unicode 18.0 instead of 15.0 properties.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use harfrust::font::{Blob, Font, TableFunction};
 use harfrust::{Buffer, Direction, Feature, Language, Script, ShapeOptions, ShapePlan, ShaperFont, Tag};
+use mln_util::sync::MutexExt;
 
 use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
 use crate::glyph::{Glyph, GlyphID, GlyphIDType};
@@ -112,7 +116,7 @@ impl Impl {
     }
 
     fn plan(&self, font: &Font, script: [u8; 4], language: &Language, features: &[Feature]) -> Arc<ShapePlan> {
-        let mut plans = self.plans.lock().unwrap_or_else(|e| e.into_inner());
+        let mut plans = self.plans.lock_unpoisoned();
         plans
             .entry(script)
             .or_insert_with(|| {

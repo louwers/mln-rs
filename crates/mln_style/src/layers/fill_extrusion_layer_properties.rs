@@ -93,7 +93,7 @@ crate::paint_properties!(
 );
 
 /// `FillExtrusionLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FillExtrusionLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

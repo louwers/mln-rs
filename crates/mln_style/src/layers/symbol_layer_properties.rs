@@ -494,7 +494,7 @@ crate::paint_properties!(
 );
 
 /// `SymbolLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SymbolLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

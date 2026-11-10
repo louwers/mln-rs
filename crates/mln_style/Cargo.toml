@@ -30,11 +30,13 @@ mln_text.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 rapidjson.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 supercluster.workspace = true
 
 [dev-dependencies]
 mln_tile = { package = "mln-rs-tile", path = "../mln_tile" }
+postcard.workspace = true
 
 [lints]
 workspace = true

@@ -22,8 +22,10 @@ use mln_style_types::TranslateAnchorType;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
+use mln_util::exception::ExceptionPtr;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
+use serde::{Deserialize, Serialize};
 
 use crate::query::RenderedQueryOptions;
 use crate::render_layer::RenderLayer;
@@ -50,7 +52,7 @@ pub struct RefIndexedSubfeature {
 
 /// This version of an indexed feature has copies of the necessary strings,
 /// so that it can be used outside the index.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct IndexedSubfeature {
     pub index: usize,
     pub source_layer_name: String,
@@ -226,9 +228,9 @@ impl FeatureIndex {
         layers: &QueryLayers<'_>,
         additional_query_padding: f32,
         source_feature_state: &SourceFeatureState,
-    ) {
+    ) -> Result<(), ExceptionPtr> {
         if self.tile_data.is_none() {
-            return;
+            return Ok(());
         }
 
         // Determine query radius
@@ -241,7 +243,7 @@ impl FeatureIndex {
 
         // Query the grid index
         let Some((min, max)) = envelope(query_geometry.iter().copied()) else {
-            return;
+            return Ok(());
         };
         // `box.min - additionalPadding` is Point<int16_t> arithmetic.
         let query_box = BBox::new(
@@ -279,8 +281,9 @@ impl FeatureIndex {
                 pixels_to_tile_units,
                 projector,
                 Some(source_feature_state),
-            );
+            )?;
         }
+        Ok(())
     }
 
     /// `lookupSymbolFeatures(symbolFeatures, options, globalState, layers,
@@ -293,10 +296,10 @@ impl FeatureIndex {
         layers: &QueryLayers<'_>,
         tile_id: &OverscaledTileID,
         feature_sort_order: &FeatureSortOrder,
-    ) -> QueryResults {
+    ) -> Result<QueryResults, ExceptionPtr> {
         let mut result = QueryResults::new();
         if self.tile_data.is_none() {
-            return result;
+            return Ok(result);
         }
         let mut sorted_features: Vec<&IndexedSubfeature> = symbol_features.iter().collect();
 
@@ -341,9 +344,9 @@ impl FeatureIndex {
                 0.0,
                 &unused_projector,
                 None,
-            );
+            )?;
         }
-        result
+        Ok(result)
     }
 
     /// `addFeature(result, indexedFeature, options, globalState, tileID,
@@ -365,27 +368,27 @@ impl FeatureIndex {
         pixels_to_tile_units: f32,
         projector: &TileProjector<'_>,
         source_feature_state: Option<&SourceFeatureState>,
-    ) {
+    ) -> Result<(), ExceptionPtr> {
         let Some(tile_data) = &self.tile_data else {
-            return;
+            return Ok(());
         };
         // C++ `bucketLayerIDs.at(..)` throws for an unknown leader.
         let Some(layer_ids) = self.bucket_layer_ids.get(bucket_leader_id) else {
             debug_assert!(false, "unknown bucket leader {bucket_leader_id}");
-            return;
+            return Ok(());
         };
 
         // C++ fetches the source layer, the feature and its state lazily, at
         // the first of the bucket's layers that is queried; they are the
         // same for every layer.
         if !layer_ids.iter().any(|layer_id| layers.contains_key(layer_id)) {
-            return;
+            return Ok(());
         }
-        let Some(source_layer) = tile_data.get_layer(source_layer_name) else {
+        let Some(source_layer) = tile_data.get_layer(source_layer_name)? else {
             debug_assert!(false, "source layer {source_layer_name} missing");
-            return;
+            return Ok(());
         };
-        let feature = source_layer.get_feature(index);
+        let feature = source_layer.get_feature(index)?;
         let source_layer_id = source_layer.get_name();
         let mut state = FeatureState::default();
         if let Some(source_feature_state) = source_feature_state {
@@ -401,8 +404,8 @@ impl FeatureIndex {
 
             let needs_cross_tile_index = render_layer.base().base_impl.get_type_info().cross_tile_index
                 == layer_type_info::CrossTileIndex::Required;
-            if !needs_cross_tile_index
-                && !render_layer.query_intersects_feature(
+            let intersects = needs_cross_tile_index
+                || render_layer.query_intersects_feature(
                     query_geometry,
                     &*feature,
                     f32::from(tile_id.z),
@@ -410,29 +413,34 @@ impl FeatureIndex {
                     pixels_to_tile_units,
                     projector,
                     &state,
-                )
-            {
+                );
+            feature.check()?;
+            if !intersects {
                 continue;
             }
 
             if let Some(filter) = &options.filter {
                 let context = EvaluationContext::with_zoom_feature(f32::from(tile_id.z), Some(&*feature))
                     .with_global_state(global_state);
-                if !filter.evaluate(&context) {
+                let passes = filter.evaluate(&context);
+                feature.check()?;
+                if !passes {
                     continue;
                 }
             }
 
-            // C++ `convertFeature` throws on malformed geometry (uncaught).
-            let Ok(converted) = mln_tile::geometry_tile_data::convert_feature(&*feature, tile_id) else {
-                continue;
-            };
+            // C++ throws out of the query for a malformed geometry (from
+            // `convertFeature`) or value.
+            let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, tile_id)
+                .map_err(|e| Arc::new(e) as ExceptionPtr)?;
+            feature.check()?;
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().base_impl.source.clone();
             converted.source_layer = source_layer_id.clone();
             converted.state = state.clone();
             result.entry(layer_id.clone()).or_default().push(converted);
         }
+        Ok(())
     }
 
     /// `translateQueryGeometry(queryGeometry, translate, anchorType, bearing,
@@ -473,6 +481,120 @@ impl FeatureIndex {
     /// The bucket leaders and their layer ids (sorted, for inspection).
     pub fn bucket_layer_ids(&self) -> BTreeMap<String, Vec<String>> {
         self.bucket_layer_ids.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
+    }
+}
+
+/// Port-only: a `FeatureIndex` as serde writes it, for a tile worker in
+/// another wasm instance (tile/worker_codec): the grid's boxes in insertion
+/// order, which `insert` puts in an empty grid again, with their strings once
+/// each, and the tile data by key (the side that gets the index has the data
+/// it sent). A derive would write the grid's cells too, and every element's
+/// strings. Only symbol layouts insert circles, which a worker never does.
+#[derive(Serialize, Deserialize)]
+struct FeatureIndexParts {
+    grid: Grid,
+    #[serde(with = "crate::tile::worker_codec::fields::tile_data")]
+    tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Grid {
+    sort_index: usize,
+    strings: Vec<String>,
+    bucket_layer_ids: BTreeMap<String, Vec<String>>,
+    elements: Vec<Element>,
+}
+
+/// A box of the grid: its `RefIndexedSubfeature`, with indices into
+/// `strings`, and min x, min y, max x, max y.
+#[derive(Serialize, Deserialize)]
+struct Element {
+    index: usize,
+    sort_index: usize,
+    source_layer_name: u32,
+    bucket_leader_id: u32,
+    bucket_instance_id: u32,
+    collision_group_id: u16,
+    bbox: [f32; 4],
+}
+
+impl FeatureIndex {
+    fn serde_grid(&self) -> Result<Grid, &'static str> {
+        if self.grid.has_circles() {
+            return Err("a feature index with circles");
+        }
+        let mut strings: Vec<String> = Vec::new();
+        let mut string_ids: HashMap<*const u8, u32> = HashMap::new();
+        let mut intern = |s: &Arc<str>| -> u32 {
+            *string_ids.entry(s.as_ptr()).or_insert_with(|| {
+                strings.push(s.to_string());
+                (strings.len() - 1) as u32
+            })
+        };
+        let elements = self
+            .grid
+            .box_elements()
+            .iter()
+            .map(|(element, bbox)| Element {
+                index: element.index,
+                sort_index: element.sort_index,
+                source_layer_name: intern(&element.source_layer_name),
+                bucket_leader_id: intern(&element.bucket_leader_id),
+                bucket_instance_id: element.bucket_instance_id,
+                collision_group_id: element.collision_group_id,
+                bbox: [bbox.min.x, bbox.min.y, bbox.max.x, bbox.max.y],
+            })
+            .collect();
+        Ok(Grid { sort_index: self.sort_index, strings, bucket_layer_ids: self.bucket_layer_ids(), elements })
+    }
+
+    /// The index as serde writes it, without its tile data.
+    #[cfg(test)]
+    pub(crate) fn encode_grid(&self) -> Vec<u8> {
+        postcard::to_allocvec(&self.serde_grid().unwrap()).unwrap()
+    }
+}
+
+impl Serialize for FeatureIndex {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let grid = self.serde_grid().map_err(serde::ser::Error::custom)?;
+        FeatureIndexParts { grid, tile_data: self.tile_data.clone() }.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FeatureIndex {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let FeatureIndexParts { grid: parts, tile_data } = FeatureIndexParts::deserialize(deserializer)?;
+        let mut index = FeatureIndex::new(tile_data);
+        let strings: Vec<Arc<str>> = parts.strings.iter().map(|string| index.intern_layer_name(string)).collect();
+        let string = |id: u32| {
+            strings
+                .get(id as usize)
+                .cloned()
+                .ok_or_else(|| serde::de::Error::custom("feature index string out of range"))
+        };
+        for (leader, layer_ids) in &parts.bucket_layer_ids {
+            index.set_bucket_layer_ids(leader, layer_ids);
+        }
+        for element in parts.elements {
+            // The leaders share the strings of `bucket_layer_ids`, as `insert`
+            // interns them.
+            let bucket_leader_id = index.intern_leader_id(&string(element.bucket_leader_id)?);
+            let [min_x, min_y, max_x, max_y] = element.bbox;
+            index.grid.insert(
+                RefIndexedSubfeature {
+                    index: element.index,
+                    sort_index: element.sort_index,
+                    source_layer_name: string(element.source_layer_name)?,
+                    bucket_leader_id,
+                    bucket_instance_id: element.bucket_instance_id,
+                    collision_group_id: element.collision_group_id,
+                },
+                &BBox::new(Point::new(min_x, min_y), Point::new(max_x, max_y)),
+            );
+        }
+        index.sort_index = parts.sort_index;
+        Ok(index)
     }
 }
 

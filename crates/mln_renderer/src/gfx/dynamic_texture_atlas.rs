@@ -16,14 +16,39 @@ use mln_style_types::image::{ImageMap, ImagePosition, ImagePositions, ImageType,
 use mln_text::glyph::{Glyph, GlyphMap, GlyphPosition, GlyphPositions};
 use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::immutable::Immutable;
+use mln_util::serialization::sorted;
 use mln_util::size::Size;
+use mln_util::sync::MutexExt;
+use serde::{Deserialize, Serialize};
 
 use super::dynamic_texture::{DynamicTexture, DynamicTexturePtr, TextureHandle};
+use crate::tile::worker_codec::fields;
 
 /// `ImageVersionMap`.
 pub type ImageVersionMap = HashMap<String, u32>;
 
 pub type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
+
+/// Port-only: what a `LayoutResult`'s atlases release their bins to. In
+/// C++ that is always the map's `DynamicTextureAtlas`; for a tile worker in
+/// another wasm instance it is the map side's mirror of that instance's
+/// atlas (tile/worker_codec), which sends the releases on.
+pub trait TextureAtlas: Send + Sync {
+    /// `removeTextures(textureHandles, dynamicTexture)`.
+    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>);
+    /// `removeUnusedDynamicTextures()` (render thread).
+    fn remove_unused_dynamic_textures(&self);
+}
+
+impl TextureAtlas for DynamicTextureAtlas {
+    fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>) {
+        DynamicTextureAtlas::remove_textures(self, texture_handles, dynamic_texture);
+    }
+
+    fn remove_unused_dynamic_textures(&self) {
+        DynamicTextureAtlas::remove_unused_dynamic_textures(self);
+    }
+}
 
 const EXTRA_PADDING: u16 = 1;
 const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;
@@ -39,20 +64,26 @@ fn rect_without_extra_padding(rect: &RectU16) -> RectU16 {
     }
 }
 
-/// `gfx::GlyphAtlas`.
-#[derive(Clone, Default)]
+/// `gfx::GlyphAtlas`. Port-only: serde writes the texture by key, as the
+/// worker instance's (tile/worker_codec).
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct GlyphAtlas {
     pub glyph_positions: GlyphPositions,
     pub texture_handles: Vec<TextureHandle>,
+    #[serde(with = "fields::texture")]
     pub dynamic_texture: Option<DynamicTexturePtr>,
 }
 
-/// `gfx::ImageAtlas`.
-#[derive(Clone, Default)]
+/// `gfx::ImageAtlas`. Port-only: serde writes the texture by key, as the
+/// worker instance's (tile/worker_codec).
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ImageAtlas {
+    #[serde(with = "sorted::map")]
     pub icon_positions: ImagePositions,
+    #[serde(with = "sorted::map")]
     pub pattern_positions: ImagePositions,
     pub texture_handles: Vec<TextureHandle>,
+    #[serde(with = "fields::texture")]
     pub dynamic_texture: Option<DynamicTexturePtr>,
 }
 
@@ -97,7 +128,7 @@ impl Drop for DynamicTextureAtlas {
     /// Frees the GPU textures with the atlas (render thread): textures still
     /// referenced elsewhere must not keep the map's device alive.
     fn drop(&mut self) {
-        let state = self.state.get_mut().unwrap_or_else(|e| e.into_inner());
+        let state = self.state.get_mut_unpoisoned();
         for texture in state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()) {
             texture.release_gpu_texture();
         }
@@ -121,7 +152,7 @@ impl DynamicTextureAtlas {
 
     /// `uploadGlyphs(const GlyphMap&)`.
     pub fn upload_glyphs(&self, glyphs: &GlyphMap) -> GlyphAtlas {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
 
         let mut glyph_atlas = GlyphAtlas::default();
         if glyphs.is_empty() {
@@ -229,7 +260,7 @@ impl DynamicTextureAtlas {
         patterns: &ImageMap,
         version_map: &ImageVersionMap,
     ) -> ImageAtlas {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
 
         let mut image_atlas = ImageAtlas::default();
         if icons.is_empty() && patterns.is_empty() {
@@ -444,16 +475,24 @@ impl DynamicTextureAtlas {
             return;
         };
 
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
 
         for tex_handle in texture_handles {
             Self::release_texture(&mut state, dynamic_texture, tex_handle);
         }
     }
 
+    /// Port-only: the textures of the atlas, the dummy ones included, for
+    /// the map side's mirror of a tile worker's atlas in another wasm
+    /// instance (tile/worker_codec).
+    pub fn textures(&self) -> Vec<DynamicTexturePtr> {
+        let state = self.state.lock_unpoisoned();
+        state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()
+    }
+
     /// `removeUnusedDynamicTextures()` (render thread).
     pub fn remove_unused_dynamic_textures(&self) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
 
         // release textures not referenced elsewhere (by an atlas still alive
         // on a worker thread), so the last reference is always dropped on

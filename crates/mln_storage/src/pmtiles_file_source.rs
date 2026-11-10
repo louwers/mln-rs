@@ -25,6 +25,7 @@ use mln_actor::{ActorRef, Thread};
 use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
+use mln_util::sync::MutexExt;
 use pmtiles::{EntryV3, HeaderV3};
 use serde_json::Value as Json;
 
@@ -92,8 +93,8 @@ impl State {
         let mut file_source = self.file_source.borrow_mut();
         file_source
             .get_or_insert_with(|| {
-                let resource_options = self.resource_options.lock().unwrap().clone();
-                let client_options = self.client_options.lock().unwrap().clone();
+                let resource_options = self.resource_options.lock_unpoisoned().clone();
+                let client_options = self.client_options.lock_unpoisoned().clone();
                 FileSourceManager::get()
                     .get_file_source(FileSourceType::ResourceLoader, &resource_options, &client_options)
                     .expect("ResourceLoader file source")
@@ -265,7 +266,7 @@ impl State {
                     resource.loading_method = LoadingMethod::All;
                     resource.data_range = Some((
                         header.json_metadata_offset,
-                        header.json_metadata_offset + header.json_metadata_bytes - 1,
+                        header.json_metadata_offset.wrapping_add(header.json_metadata_bytes).wrapping_sub(1),
                     ));
 
                     let callback = callback.clone();
@@ -286,7 +287,10 @@ impl State {
                                 format!(
                                     "PMTiles metadata response has no data (range={}-{})",
                                     header.json_metadata_offset,
-                                    header.json_metadata_offset + header.json_metadata_bytes - 1
+                                    header
+                                        .json_metadata_offset
+                                        .wrapping_add(header.json_metadata_bytes)
+                                        .wrapping_sub(1)
                                 ),
                             ));
                             return;
@@ -524,7 +528,13 @@ impl PMTilesFileSourceThread {
     /// Load data for specific tile
     pub fn request_tile(&self, req: u64, resource: &Resource, r: &ActorRef<FileSourceRequestState>) {
         let url = extract_url(&resource.url);
-        let tile_data = resource.tile_data.clone().expect("tile resource without tile data");
+        // C++ dereferences `resource.tileData` unchecked.
+        let Some(tile_data) = resource.tile_data.clone() else {
+            let mut response = Response::new();
+            response.error = Some(Box::new(Error::new(Reason::Other, "tile resource without tile data")));
+            send(r, response);
+            return;
+        };
 
         let (this, r, url2) = (self.state.clone(), r.clone(), url.clone());
         self.state.get_header(
@@ -711,18 +721,18 @@ impl FileSource for PMTilesFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
+        *self.client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
+        self.client_options.lock_unpoisoned().clone()
     }
 }

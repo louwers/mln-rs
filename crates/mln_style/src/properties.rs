@@ -26,6 +26,7 @@ use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, ValueConverter};
 use crate::property_value::PropertyValue;
@@ -164,7 +165,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
 }
 
 /// `Transitionable<Value>`.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Transitionable<V> {
     pub value: V,
     pub options: TransitionOptions,
@@ -342,7 +343,7 @@ macro_rules! paint_properties {
             #[allow(unused_imports)]
             use $crate::properties::{Field, Property, PropertyValueLike};
 
-            #[derive(Clone, Debug, Default, PartialEq)]
+            #[derive(Clone, Debug, Default, PartialEq, ::serde::Serialize, ::serde::Deserialize)]
             pub struct Transitionable {
                 $(pub $field: $crate::properties::Transitionable<<$prop as Property>::Value>,)+
             }
@@ -352,7 +353,7 @@ macro_rules! paint_properties {
                 $(pub $field: $crate::properties::Transitioning<<$prop as Property>::Value>,)+
             }
 
-            #[derive(Clone, Debug, Default)]
+            #[derive(Clone, Debug, Default, ::serde::Serialize, ::serde::Deserialize)]
             pub struct PossiblyEvaluated {
                 $(pub $field: <$prop as Property>::PossiblyEvaluatedType,)+
             }

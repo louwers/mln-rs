@@ -41,6 +41,9 @@ regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+postcard.workspace = true
+
 # Each test's report and actual/diff images go to target/tmp/<test name>.
 #
 # The whole shared render suite with each test's expected image as the
@@ -53,6 +56,11 @@ path = "tests/self_check.rs"
 [[test]]
 name = "render_tests"
 path = "tests/render_tests.rs"
+
+# Every test style's layers cross through serde as they went in.
+[[test]]
+name = "layer_round_trip"
+path = "tests/layer_round_trip.rs"
 
 # --jobs against a run in one process.
 [[test]]

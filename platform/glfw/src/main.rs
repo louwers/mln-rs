@@ -238,7 +238,11 @@ fn main() {
         MapOptions::new().with_size(view.get_size()).with_pixel_ratio(view.get_pixel_ratio()),
         &resource_options,
         &client_options,
-    );
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("{e}");
+        std::process::exit(1);
+    });
 
     if let Err(e) = map.set_bounds(&BoundOptions::default().with_max_pitch(settings.max_pitch)) {
         Log::warning(Event::Setup, e);

@@ -7,14 +7,16 @@
 use std::collections::BTreeSet;
 
 use mln_util::immutable::Immutable;
+use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
 use crate::layer::Impl;
 use crate::util::AsAny;
 
 /// The data members of `LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LayerPropertiesBase {
+    #[serde(with = "crate::serialization::shared_layer")]
     pub base_impl: Immutable<dyn Impl>,
     /// Contains render passes used by the renderer, see `mln::RenderPass`.
     pub render_passes: u8,

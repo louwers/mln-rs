@@ -9,11 +9,13 @@ use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::expression::{
     Dependency, EvaluationContext, Expression, GlobalStateMap, Type, ValueConverter, ZoomCurvePtr,
     collect_global_state_refs, find_zoom_curve_checked,
 };
+use crate::serialization::shared_expression;
 
 fn check_gpu_capable(expression: &dyn Expression, zoom_curve: &ZoomCurvePtr<'_>) -> bool {
     expression.dependencies() == Dependency::ZOOM
@@ -175,8 +177,40 @@ impl PropertyExpressionBase {
     }
 }
 
+/// Port-only: serde writes the expression (shared, see
+/// serialization.rs) and what was set on it; the flags are
+/// derived from the expression again.
+#[derive(Serialize, Deserialize)]
+struct PropertyExpressionParts {
+    #[serde(with = "shared_expression")]
+    expression: Arc<dyn Expression>,
+    captured_global_state: Option<Arc<GlobalStateMap>>,
+    use_integer_zoom: bool,
+}
+
+impl Serialize for PropertyExpressionBase {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        PropertyExpressionParts {
+            expression: self.expression.clone(),
+            captured_global_state: self.captured_global_state.clone(),
+            use_integer_zoom: self.use_integer_zoom,
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PropertyExpressionBase {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let parts = PropertyExpressionParts::deserialize(deserializer)?;
+        let mut base = PropertyExpressionBase::new(parts.expression);
+        base.captured_global_state = parts.captured_global_state;
+        base.use_integer_zoom = parts.use_integer_zoom;
+        Ok(base)
+    }
+}
+
 /// `PropertyExpression<T>`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PropertyExpression<T> {
     base: PropertyExpressionBase,
     default_value: Option<T>,

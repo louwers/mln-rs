@@ -12,6 +12,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
 use crate::image_manager::ImageManager;
 use crate::text::glyph_manager::GlyphManager;
+use crate::tile::tile_worker_transport::TileWorkerTransport;
 
 /// `TileParameters`.
 // TODO(port): annotationManager.
@@ -36,4 +37,6 @@ pub struct TileParameters<'a> {
     pub image_manager: Rc<ImageManager>,
     pub glyph_manager: Rc<GlyphManager>,
     pub dynamic_texture_atlas: DynamicTextureAtlasPtr,
+    /// Port-only: creates the tiles' workers (tile_worker_transport.rs).
+    pub tile_worker_transport: Rc<dyn TileWorkerTransport>,
 }

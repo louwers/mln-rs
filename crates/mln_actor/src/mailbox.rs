@@ -20,6 +20,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex, Weak};
 
 use mln_util::identity::SimpleIdentity;
+use mln_util::sync::MutexExt;
 
 use crate::local_object;
 use crate::scheduler::{Scheduler, WeakScheduler};
@@ -63,7 +64,7 @@ impl Mailbox {
     /// `open(Scheduler&)`, binding `object` (on the calling thread) as the
     /// target of the messages.
     pub fn open(&self, scheduler: &Arc<dyn Scheduler + Send + Sync>, object: Rc<dyn Any>) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
         assert!(state.scheduler.is_none());
         if state.closed {
             return;
@@ -77,7 +78,7 @@ impl Mailbox {
 
     /// `open(const TaggedScheduler&)`.
     pub fn open_tagged(&self, scheduler: &Arc<dyn Scheduler + Send + Sync>, tag: SimpleIdentity, object: Rc<dyn Any>) {
-        self.state.lock().unwrap().scheduler_tag = Some(tag);
+        self.state.lock_unpoisoned().scheduler_tag = Some(tag);
         self.open(scheduler, object);
     }
 
@@ -85,7 +86,7 @@ impl Mailbox {
     /// thread (it unregisters the target there).
     pub fn close(&self) {
         let object = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock_unpoisoned();
             state.closed = true;
             state.scheduler = None;
             local_object::remove(self.id)
@@ -97,13 +98,13 @@ impl Mailbox {
 
     /// `isOpen()`.
     pub fn is_open(&self) -> bool {
-        let state = self.state.lock().unwrap();
+        let state = self.state.lock_unpoisoned();
         !state.closed && state.scheduler.as_ref().is_some_and(|s| s.strong_count() > 0)
     }
 
     /// `push(std::unique_ptr<Message>)`.
     pub fn push(&self, message: Message) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
         if state.closed {
             return;
         }
@@ -118,7 +119,7 @@ impl Mailbox {
     /// `receive()`: runs the first message, and schedules the next one.
     pub fn receive(&self) {
         let (message, was_empty) = {
-            let mut state = self.state.lock().unwrap();
+            let mut state = self.state.lock_unpoisoned();
             if state.closed {
                 return;
             }
@@ -137,7 +138,7 @@ impl Mailbox {
         // If there are more messages in the queue and the scheduler is still
         // active, create a new task to handle the next one.
         if !was_empty {
-            let state = self.state.lock().unwrap();
+            let state = self.state.lock_unpoisoned();
             if !state.closed {
                 self.schedule_to_receive(&state, None);
             }

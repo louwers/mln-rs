@@ -169,7 +169,7 @@ pub fn emit(layer: &LayerSpec) -> String {
 
     let pe = format!("{t}PaintProperties::PossiblyEvaluated");
     w.line(&format!("/// `{t}LayerProperties final : public LayerProperties`."));
-    w.line("#[derive(Clone, Debug)]");
+    w.line("#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]");
     w.line(&format!("pub struct {t}LayerProperties {{"));
     w.line("    pub base: LayerPropertiesBase,");
     w.line("    // Data members.");

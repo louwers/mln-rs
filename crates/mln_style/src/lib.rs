@@ -3,7 +3,9 @@
 //! Impl idiom, the property system and the typed `style/conversion`
 //! converters. Also holds cut-point copies of a few renderer/map headers that
 //! style/properties.hpp includes (`renderer`, `map`) and the style half of
-//! the layer manager (`layermanager`); see COORDINATION.md.
+//! the layer manager (`layermanager`). The C++ modules include each other in
+//! one cycle, which crates can't; these cut points are where the port breaks
+//! it.
 //!
 //! Path guide (C++ -> Rust):
 //! - `style::Style`, `Style::Impl` -> `style::Style`, `style::Impl`
@@ -26,6 +28,7 @@ pub mod conversion;
 pub mod conversion_impl;
 pub mod expression;
 pub mod filter;
+pub mod format_section_override;
 pub mod image;
 pub mod layer;
 pub mod layer_impl;
@@ -46,6 +49,7 @@ pub mod properties;
 pub mod property_expression;
 pub mod property_value;
 pub mod renderer;
+pub mod serialization;
 #[rustfmt::skip]
 pub mod sky;
 pub mod sky_impl;

@@ -16,6 +16,7 @@ use mln_expression::format_expression::{FormatExpression, FormatExpressionSectio
 use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
+use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression, Formatted, FormattedSection, Kind, Literal, Type, downcast};
 use crate::layer::{self, FontStack, ImplBase, LayerTypeInfo};
@@ -177,12 +178,13 @@ impl SymbolLayerPaintPropertyOverrides {
 }
 
 /// `SymbolLayer::Impl`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Impl {
     pub base: ImplBase,
     pub layout: SymbolLayoutProperties::Unevaluated,
     pub paint: SymbolPaintProperties::Transitionable,
     /// `mutable std::optional<bool> hasFormatSectionOverrides_`.
+    #[serde(skip)]
     has_format_section_overrides_: OnceLock<bool>,
 }
 

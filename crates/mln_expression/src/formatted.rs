@@ -5,6 +5,7 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_util::Color;
+use serde::{Deserialize, Serialize};
 
 use crate::image::Image;
 
@@ -23,7 +24,7 @@ pub fn font_stack_to_string(font_stack: &FontStack) -> String {
 }
 
 /// `expression::FormattedSection`.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct FormattedSection {
     pub text: String,
     pub image: Option<Image>,
@@ -48,7 +49,7 @@ impl FormattedSection {
 }
 
 /// `expression::Formatted`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Formatted {
     pub sections: Vec<FormattedSection>,
 }

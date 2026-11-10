@@ -209,7 +209,7 @@ fn json_loading_corrupted() {
     let error = expect_error(&test);
     test.run();
     // C++: "Failed to parse JSON: Invalid value. at offset 0" (rapidjson's
-    // message; DEVIATIONS.md).
+    // message).
     let error = error.borrow().clone().expect("error");
     assert!(error.starts_with("Failed to parse JSON: "), "{error}");
 }

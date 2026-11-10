@@ -36,8 +36,7 @@ pub fn compound(op: &str, args: Vec<Box<dyn Expression>>) -> Box<dyn Expression>
 
 /// `dsl::createExpression(const char*)`: parses JSON text.
 pub fn create_expression_from_str(expr: &str) -> Option<Box<dyn Expression>> {
-    // TODO(port): rapidjson `Parse<0>`; serde_json accepts the same JSON
-    // (see DEVIATIONS.md for number parsing).
+    // TODO(port): rapidjson `Parse<0>`; serde_json accepts the same JSON.
     let document: serde_json::Value = serde_json::from_str(expr).ok()?;
     let mut ctx = ParsingContext::new();
     ctx.parse_expression(&Convertible::from(&document), None)

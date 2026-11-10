@@ -3,7 +3,6 @@
 
 use std::any::Any;
 use std::rc::Rc;
-use std::time::Instant;
 
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
 use mln_gfx::debug_group::DebugGroupTarget;
@@ -14,6 +13,7 @@ use mln_gfx::upload_pass;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_gfx::vertex_buffer::{self, UniqueVertexBufferResource};
 use mln_gfx::vertex_vector::{VertexBufferBase, VertexVectorBasePtr};
+use mln_util::time::Instant;
 
 use crate::buffer_resource::BufferResource;
 use crate::command_encoder::CommandEncoder;

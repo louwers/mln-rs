@@ -2,7 +2,7 @@
 // src/mln/text/glyph_manager_observer.hpp.
 //
 // In mln_renderer rather than mln_text: it requests through mln_storage
-// (mln_text stays free of it; see COORDINATION.md [symbols]).
+// (mln_text stays free of it).
 //
 // The manager lives on the render thread (orchestrator-owned, shared with
 // the tiles as `Rc`); its state is in a `RefCell` instead of behind the C++
@@ -33,9 +33,10 @@ use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::font_stack::FontStack;
 use mln_util::immutable::Immutable;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
+use serde::{Deserialize, Serialize};
 
 /// `HBShapeResult`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct HBShapeResult {
     pub str_: Vec<u16>,
     pub adjusts: Arc<Vec<mln_text::HBShapeAdjust>>,

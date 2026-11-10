@@ -22,10 +22,12 @@ use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_style_types::image::RectU16;
 use mln_util::size::Size;
+use mln_util::sync::MutexExt;
+use serde::{Deserialize, Serialize};
 use shelf_pack::{ShelfPack, ShelfPackOptions};
 
 /// `TextureHandle`: a bin of a dynamic texture.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct TextureHandle {
     id: i32,
     rectangle: RectU16,
@@ -131,7 +133,7 @@ impl DynamicTexture {
     /// `getTexture()`: the GPU texture, once `upload_deferred_images` created
     /// it (render thread).
     pub fn get_texture(&self) -> Option<Texture2DPtr> {
-        let gpu_texture = self.gpu_texture.lock().unwrap();
+        let gpu_texture = self.gpu_texture.lock_unpoisoned();
         gpu_texture.as_ref().and_then(|t| t.get()).and_then(|t| t.borrow().clone())
     }
 
@@ -140,12 +142,12 @@ impl DynamicTexture {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.lock().unwrap().num_textures == 0
+        self.inner.lock_unpoisoned().num_textures == 0
     }
 
     /// `reserveSize(size, uniqueId)`.
     pub fn reserve_size(&self, size: Size, unique_id: i32) -> Option<TextureHandle> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let bin_ref = inner.shelf_pack.pack_one(unique_id, size.width as i32, size.height as i32)?;
         let bin = *inner.shelf_pack.bin(bin_ref);
         if bin.refcount() == 1 {
@@ -166,7 +168,7 @@ impl DynamicTexture {
     /// `uploadImage(pixelData, texHandle)` (webgpu: queue the pixels of the
     /// handle's rectangle for the next upload pass).
     pub fn upload_image(&self, pixel_data: &[u8], tex_handle: &mut TextureHandle) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let rect = tex_handle.rectangle;
         let byte_size = rect.w as usize * rect.h as usize * pixel_stride(self.pixel_format);
         let image_data = pixel_data[..byte_size].to_vec();
@@ -177,7 +179,7 @@ impl DynamicTexture {
     /// `uploadDeferredImages(UploadPass&)`: creates the texture on first use
     /// and uploads the queued images (render thread).
     pub fn upload_deferred_images(&self, context: &dyn Context) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let texture = match self.get_texture() {
             Some(texture) => texture,
             None => {
@@ -194,7 +196,7 @@ impl DynamicTexture {
                     });
                     t.create();
                 }
-                *self.gpu_texture.lock().unwrap() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
+                *self.gpu_texture.lock_unpoisoned() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
                 texture
             }
         };
@@ -205,9 +207,37 @@ impl DynamicTexture {
         inner.images_to_upload.clear();
     }
 
+    /// Port-only: takes the queued images (handle id, rectangle, pixels),
+    /// in handle order, for a mirror of this texture in another wasm
+    /// instance (tile/worker_codec), which uploads them instead.
+    pub fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
+        let mut inner = self.inner.lock_unpoisoned();
+        let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
+        uploads.sort_by_key(|(id, _, _)| *id);
+        uploads
+    }
+
+    /// Port-only: queues pixels for a bin that the texture this one mirrors
+    /// reserved (`take_uploads`). They replace whatever is still queued for
+    /// the bin or for the space it takes: the mirrored texture reserved that
+    /// space again only after freeing it, so pixels queued there before
+    /// belong to a bin that is gone, and would otherwise be uploaded over
+    /// these in whatever order the queue is drained.
+    pub fn queue_upload(&self, id: i32, rect: RectU16, data: Vec<u8>) {
+        let span = |start: u16, length: u16| u32::from(start)..u32::from(start) + u32::from(length);
+        let intersect = |a: std::ops::Range<u32>, b: std::ops::Range<u32>| a.start < b.end && b.start < a.end;
+        let overlaps = |other: &RectU16| {
+            intersect(span(other.x, other.w), span(rect.x, rect.w))
+                && intersect(span(other.y, other.h), span(rect.y, rect.h))
+        };
+        let mut inner = self.inner.lock_unpoisoned();
+        inner.images_to_upload.retain(|_, (queued, _)| !overlaps(queued));
+        inner.images_to_upload.insert(id, (rect, data));
+    }
+
     /// `removeTexture(texHandle)`: true when the bin's last reference went.
     pub fn remove_texture(&self, tex_handle: &TextureHandle) -> bool {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock_unpoisoned();
         let Some(bin) = inner.shelf_pack.get_bin(tex_handle.id) else {
             return false;
         };
@@ -223,11 +253,29 @@ impl DynamicTexture {
     /// Drops the render-thread GPU texture (render thread; a no-op
     /// elsewhere).
     pub(crate) fn release_gpu_texture(&self) {
-        let gpu_texture = self.gpu_texture.lock().unwrap().take();
+        let gpu_texture = self.gpu_texture.lock_unpoisoned().take();
         if let Some(gpu_texture) = gpu_texture {
             if let Some(cell) = gpu_texture.get() {
                 cell.borrow_mut().take();
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pixels queued for a bin of a mirrored texture replace those still
+    /// queued for a freed bin in the same space.
+    #[test]
+    fn queued_uploads_replace_the_space_they_take() {
+        let texture = DynamicTexture::new(Size::new(64, 64), TexturePixelType::Alpha);
+        let rect = |x, y, w, h| RectU16 { x, y, w, h };
+        texture.queue_upload(1, rect(0, 0, 8, 8), vec![1; 64]);
+        texture.queue_upload(2, rect(8, 0, 8, 8), vec![2; 64]);
+        texture.queue_upload(3, rect(4, 4, 2, 2), vec![3; 4]);
+        let uploads: Vec<(i32, RectU16)> = texture.take_uploads().into_iter().map(|(id, rect, _)| (id, rect)).collect();
+        assert_eq!(uploads, vec![(2, rect(8, 0, 8, 8)), (3, rect(4, 4, 2, 2))]);
     }
 }

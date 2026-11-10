@@ -19,6 +19,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, G
 use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use mln_util::sync::RwLockExt;
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;
@@ -60,7 +61,7 @@ impl CircleLayout {
         parameters: &BucketParameters,
         group: &[Immutable<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
-    ) -> Self {
+    ) -> Result<Self, ExceptionPtr> {
         debug_assert!(!group.is_empty());
         let zoom = parameters.tile_id.overscaled_z as f32;
         let leader_layer_properties = (*group[0])
@@ -85,12 +86,14 @@ impl CircleLayout {
         let mut features: Vec<CircleFeature> = Vec::new();
         let feature_count = source_layer.feature_count();
         for i in 0..feature_count {
-            let feature = source_layer.get_feature(i);
-            if !leader_impl.filter.evaluate(
+            let feature = source_layer.get_feature(i)?;
+            let passes = leader_impl.filter.evaluate(
                 &EvaluationContext::with_zoom_feature(zoom, Some(&*feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
                     .with_global_state(parameters.global_state.as_deref()),
-            ) {
+            );
+            feature.check()?;
+            if !passes {
                 continue;
             }
 
@@ -101,13 +104,14 @@ impl CircleLayout {
 
             let sort_key_property = layout.get::<CircleSortKey>();
             let sort_key = sort_key_property.evaluate_feature(&*feature, zoom, CircleSortKey::default_value());
+            feature.check()?;
             let circle_feature = CircleFeature { i, sort_key };
             // std::lower_bound: the first feature whose key is not less.
             let sort_position = features.partition_point(|f| f.sort_key < sort_key);
             features.insert(sort_position, circle_feature);
         }
 
-        CircleLayout {
+        Ok(CircleLayout {
             layer_properties_map,
             bucket_leader_id,
             features,
@@ -116,7 +120,7 @@ impl CircleLayout {
             source_layer_id,
             retain_features_by_id: parameters.retain_features_by_id,
             source_layer: None,
-        }
+        })
     }
 
     /// `CircleLayout(parameters, group, std::move(sourceLayer))` as the
@@ -125,10 +129,10 @@ impl CircleLayout {
         parameters: &BucketParameters,
         group: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
-    ) -> Self {
-        let mut layout = CircleLayout::new(parameters, group, &*source_layer.layer());
+    ) -> Result<Self, ExceptionPtr> {
+        let mut layout = CircleLayout::new(parameters, group, &*source_layer.layer()?)?;
         layout.source_layer = Some(source_layer);
-        layout
+        Ok(layout)
     }
 
     /// `hasDependencies()`.
@@ -152,11 +156,13 @@ impl CircleLayout {
 
         for circle_feature in &self.features {
             let i = circle_feature.i;
-            let feature = source_layer.get_feature(i);
+            let feature = source_layer.get_feature(i)?;
             let geometries = feature.get_geometries();
+            feature.check()?;
             let vertex_offset = bucket.vertices.len();
 
             Self::add_circle(&mut bucket, self.mode, &*feature, geometries, i, circle_feature.sort_key, canonical);
+            feature.check()?;
 
             if self.retain_features_by_id {
                 let vertex_count = bucket.vertices.len() - vertex_offset;
@@ -257,7 +263,7 @@ impl CircleLayout {
 
         let length = bucket.vertices.len();
         for binders in bucket.paint_property_binders.values_mut() {
-            binders.get_mut().unwrap().populate_vertex_vectors(
+            binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,
@@ -285,7 +291,7 @@ impl Layout for CircleLayout {
         canonical: &CanonicalTileID,
     ) -> Result<(), ExceptionPtr> {
         let source_layer = self.source_layer.clone().expect("CircleLayout: source layer");
-        let layer = source_layer.layer();
+        let layer = source_layer.layer()?;
         self.create_bucket_with(
             &*layer,
             &mut |geometries, i, source_layer_id, bucket_leader_id| {

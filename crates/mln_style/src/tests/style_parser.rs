@@ -264,3 +264,23 @@ fn zoom_curve() {
     let expr2 = interpolate(linear(), zoom(), vec![(0.0, literal(Value::Number(0.0))), (0.0, zoom_interp())]);
     assert!(find_zoom_curve_checked(expr2.as_ref()).is_null());
 }
+
+// Port-only: C++ cuts `unicode-range` strings by bytes (`substr(2)`), also
+// inside a multibyte character; the range is then invalid, not a panic.
+#[test]
+fn font_face_unicode_range_with_multibyte_character() {
+    let mut parser = Parser::default();
+    parser
+        .parse(
+            r#"{
+        "version": 8,
+        "font-faces": {
+            "Face": [{ "url": "face.ttf", "unicode-range": ["Ué0-FF", "U+0-FF"] }]
+        }
+    }"#,
+        )
+        .unwrap();
+    let faces = parser.font_faces.unwrap();
+    assert_eq!(faces.len(), 1);
+    assert_eq!(faces[0].ranges, vec![(0, 0xFF)]);
+}

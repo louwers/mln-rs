@@ -6,9 +6,9 @@
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
-use std::time::Instant;
 
 use mln_gfx::vertex_buffer;
+use mln_util::time::Instant;
 
 use crate::buffer_resource::BufferResource;
 

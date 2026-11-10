@@ -41,12 +41,15 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
+use mln_util::serialization::payload;
+use mln_util::sync::MutexExt;
+use serde::{Deserialize, Serialize};
 
 use crate::layout::pattern_layout::PatternDependency;
 use crate::paint_property_statistics::{PaintPropertyStatistics, StatisticValue};
 
 /// Maps vertex range to feature index.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FeatureVertexRange {
     pub feature_index: usize,
     pub start: usize,
@@ -59,11 +62,12 @@ pub type FeatureVertexRangeMap = BTreeMap<String, Vec<FeatureVertexRange>>;
 /// `InterleavedVertexBuffer`: the data-driven attribute values of all the
 /// binders of one `PaintPropertyBinders`, one interleaved vertex per layout
 /// vertex.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct InterleavedVertexBuffer {
     pub stride: usize,
     pub vertex_count: usize,
     /// `gfx::VertexVectorPtr<uint8_t> sharedVertexVector`.
+    #[serde(with = "payload::bytes")]
     pub shared_vertex_vector: Vec<u8>,
 }
 
@@ -149,7 +153,7 @@ fn floats_to_bytes(values: &[f32]) -> Vec<u8> {
 }
 
 /// The data of a `PaintPropertyBinder` subclass.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum PaintPropertyBinderKind<T> {
     /// `ConstantPaintPropertyBinder<T, A>`
     Constant { constant: T },
@@ -165,7 +169,7 @@ pub enum PaintPropertyBinderKind<T> {
 }
 
 /// `PaintPropertyBinder<T, T, PossiblyEvaluatedPropertyValue<T>, A>`.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PaintPropertyBinder<T> {
     pub kind: PaintPropertyBinderKind<T>,
     pub statistics: PaintPropertyStatistics<T>,
@@ -330,7 +334,12 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 continue;
             };
             for pos in positions {
-                let feature = layer.get_feature(pos.feature_index);
+                // The worker got the feature from the same data. A value
+                // that C++ throws for (out of the render call) reads as
+                // missing here.
+                let Ok(feature) = layer.get_feature(pos.feature_index) else {
+                    continue;
+                };
                 self.update_vertex_vector(buffer, pos.start, pos.end, &*feature, state);
             }
         }
@@ -457,7 +466,7 @@ pub struct CrossFadedState {
 }
 
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub enum CrossFadedPaintPropertyBinderKind<T> {
     /// `ConstantCrossFadedPaintPropertyBinder<T, A1, A2>`
     Constant { constant: Faded<T> },
@@ -467,8 +476,10 @@ pub enum CrossFadedPaintPropertyBinderKind<T> {
         default_value: T,
         zoom_range: Range<f32>,
         /// `gfx::VertexVector<Vertex2> zoomInVertexVector` (ushort4).
+        #[serde(with = "payload::pod")]
         zoom_in_vertex_vector: Vec<[u16; 4]>,
         /// `zoomOutVertexVector`.
+        #[serde(with = "payload::pod")]
         zoom_out_vertex_vector: Vec<[u16; 4]>,
     },
 }
@@ -476,10 +487,11 @@ pub enum CrossFadedPaintPropertyBinderKind<T> {
 /// `PaintPropertyBinder<T, std::array<uint16_t, 4>,
 /// PossiblyEvaluatedPropertyValue<Faded<T>>, A1, A2>` (the `*-pattern`
 /// properties; `A1`/`A2` are `ushort4` attributes).
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CrossFadedPaintPropertyBinder<T> {
     pub kind: CrossFadedPaintPropertyBinderKind<T>,
     /// `PaintPropertyStatistics<T>`: always empty for images.
+    #[serde(skip)]
     pub state: Mutex<CrossFadedState>,
     pub has_interleaved_buffer: bool,
     pub vertex_offset: usize,
@@ -592,7 +604,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
         pos_b: Option<&ImagePosition>,
         crossfade: &CrossfadeParameters,
     ) {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.lock_unpoisoned();
         match &self.kind {
             CrossFadedPaintPropertyBinderKind::Constant { .. } => {
                 let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) else {
@@ -614,7 +626,9 @@ impl CrossFadedPaintPropertyBinder<Image> {
     /// `uniformValue(...)`.
     pub fn uniform_value(&self, _current_value: &PossiblyEvaluatedFadedPropertyValue<Image>) -> ([u16; 4], [u16; 4]) {
         match &self.kind {
-            CrossFadedPaintPropertyBinderKind::Constant { .. } => self.state.lock().unwrap().constant_pattern_positions,
+            CrossFadedPaintPropertyBinderKind::Constant { .. } => {
+                self.state.lock_unpoisoned().constant_pattern_positions
+            }
             // Uniform values for vertex attribute arrays are unused.
             CrossFadedPaintPropertyBinderKind::Composite { .. } => ([0; 4], [0; 4]),
         }
@@ -626,7 +640,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
             CrossFadedPaintPropertyBinderKind::Constant { .. } => ([0; 8], [0; 8]),
             CrossFadedPaintPropertyBinderKind::Composite { zoom_in_vertex_vector, zoom_out_vertex_vector, .. } => {
                 let pattern: Vec<u16> = bytemuck::pod_collect_to_vec(buffer.get(index, self.vertex_offset, 8));
-                let zoom_value = if self.state.lock().unwrap().crossfade.from_scale == 2.0 {
+                let zoom_value = if self.state.lock_unpoisoned().crossfade.from_scale == 2.0 {
                     zoom_in_vertex_vector[index]
                 } else {
                     zoom_out_vertex_vector[index]
@@ -828,7 +842,7 @@ macro_rules! paint_property_binders {
         }
     ) => {
         $(#[$meta])*
-        #[derive(Debug)]
+        #[derive(Debug, ::serde::Serialize, ::serde::Deserialize)]
         pub struct $name {
             pub interleaved_vertex_buffer: $crate::paint_property_binder::InterleavedVertexBuffer,
             $(pub $field: $binder,)+

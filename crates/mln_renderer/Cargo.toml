@@ -36,6 +36,8 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 nunicode.workspace = true
 polylabel.workspace = true
+postcard.workspace = true
+serde.workspace = true
 shelf_pack.workspace = true
 
 # test/util/tile_cover.test.cpp: needs mln_map's Transform, which is above
@@ -56,11 +58,6 @@ path = "tests/source_test.rs"
 
 # Ports test/gl/bucket.test.cpp (circle, fill, line; on the WebGPU headless
 # backend) and test/renderer/fill_bucket.test.cpp.
-# gtests-data: the test/style/** gtests that need FormatSectionOverride.
-[[test]]
-name = "format_section_override_test"
-path = "tests/format_section_override_test.rs"
-
 [[test]]
 name = "bucket_test"
 path = "tests/bucket_test.rs"
@@ -118,6 +115,11 @@ path = "tests/gtest_style_diff.rs"
 name = "gtest_dynamic_texture_atlas"
 path = "tests/gtest_dynamic_texture_atlas.rs"
 
+# Port-only: malformed vector tiles become tile errors, not panics.
+[[test]]
+name = "malformed_tile_test"
+path = "tests/malformed_tile_test.rs"
+
 # Ports test/util/tile_range.test.cpp (marker `// gtest: Group.Name`).
 [[test]]
 name = "gtest_tile_range"
@@ -150,6 +152,7 @@ mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
+proptest.workspace = true
 serde_json.workspace = true
 
 [lints]

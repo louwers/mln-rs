@@ -1,7 +1,9 @@
 // Ports include/mln/map/mode.hpp
 
+use serde::{Deserialize, Serialize};
+
 /// `mln::MapMode`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[repr(u32)]
 pub enum MapMode {
     /// continually updating map

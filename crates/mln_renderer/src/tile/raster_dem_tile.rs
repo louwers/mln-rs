@@ -3,14 +3,16 @@
 // src/mln/tile/raster_dem_tile_worker.cpp.
 //
 // Same structure as raster_tile.rs: the state the worker's replies change
-// is `RasterDEMTileInner`, the target of the tile's mailbox.
+// is `RasterDEMTileInner`, the target of the tile's mailbox, and the tile
+// and its worker exchange only `RasterDEMWorkerMessage`s and
+// `RasterDEMTileMessage`s through the `TileWorkerTransport` of the
+// TileParameters (tile_worker_transport.rs).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
@@ -18,13 +20,17 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::immutable::Immutable;
+use mln_util::serialization::payload::shared_bytes;
 use mln_util::tileset::{RasterEncoding, Tileset};
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::buckets::hillshade_bucket::HillshadeBucket;
 use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
+use crate::tile::tile_worker_transport::{TileEndpoint, WorkerEndpoint};
+use crate::tile::worker_codec::fields;
 use crate::tile_mask::TileMask;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
@@ -65,17 +71,60 @@ impl std::ops::BitAnd for DEMTileNeighbors {
     }
 }
 
+/// The messages a `RasterDEMTile` sends its `RasterDEMTileWorker`: the
+/// worker's public member functions. Port-only: serde writes them for a
+/// worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
+pub enum RasterDEMWorkerMessage {
+    /// `parse(data, correlationID, encoding)`.
+    Parse {
+        #[serde(with = "shared_bytes::option")]
+        data: Option<Data>,
+        correlation_id: u64,
+        encoding: RasterEncoding,
+    },
+}
+
+/// The messages a `RasterDEMTileWorker` sends its `RasterDEMTile`: the
+/// tile's member functions the worker calls. Port-only: serde writes them
+/// for a worker in another wasm instance (tile/worker_codec).
+#[derive(Serialize, Deserialize)]
+pub enum RasterDEMTileMessage {
+    /// `onParsed(std::move(bucket), correlationID)`.
+    Parsed { bucket: Option<Arc<HillshadeBucket>>, correlation_id: u64 },
+    /// `onError(std::current_exception(), correlationID)`.
+    Error {
+        #[serde(with = "fields::exception")]
+        error: ExceptionPtr,
+        correlation_id: u64,
+    },
+}
+
 /// `RasterDEMTileWorker`.
 pub struct RasterDEMTileWorker {
-    parent: ActorRef<RasterDEMTileInner>,
+    parent: Box<dyn TileEndpoint<RasterDEMTileMessage>>,
 }
 
 impl RasterDEMTileWorker {
+    /// `RasterDEMTileWorker(ActorRef<RasterDEMTileWorker>, ActorRef<RasterDEMTile>)`.
+    pub fn new(parent: Box<dyn TileEndpoint<RasterDEMTileMessage>>) -> Self {
+        RasterDEMTileWorker { parent }
+    }
+
+    /// Runs the member function a tile's message stands for.
+    pub fn handle(&mut self, message: RasterDEMWorkerMessage) {
+        match message {
+            RasterDEMWorkerMessage::Parse { data, correlation_id, encoding } => {
+                self.parse(data, correlation_id, encoding)
+            }
+        }
+    }
+
     /// `parse(data, correlationID, encoding)`.
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64, encoding: RasterEncoding) {
         let Some(data) = data else {
             // No data; empty tile.
-            self.parent.invoke(move |tile: &RasterDEMTileInner| tile.on_parsed(None, correlation_id));
+            self.parent.send(RasterDEMTileMessage::Parsed { bucket: None, correlation_id });
             return;
         };
 
@@ -83,12 +132,10 @@ impl RasterDEMTileWorker {
             mln_platform_default_image::decode_image(&data).and_then(|image| HillshadeBucket::new(image, encoding));
         match result {
             Ok(bucket) => {
-                let bucket = Arc::new(bucket);
-                self.parent.invoke(move |tile: &RasterDEMTileInner| tile.on_parsed(Some(bucket), correlation_id));
+                self.parent.send(RasterDEMTileMessage::Parsed { bucket: Some(Arc::new(bucket)), correlation_id });
             }
             Err(error) => {
-                let error = RuntimeError::ptr(error);
-                self.parent.invoke(move |tile: &RasterDEMTileInner| tile.on_error(error, correlation_id));
+                self.parent.send(RasterDEMTileMessage::Error { error: RuntimeError::ptr(error), correlation_id });
             }
         }
     }
@@ -107,11 +154,20 @@ pub struct RasterDEMTileInner {
     /// backfilled; there are max 8 possible neighboring tiles, so each bit
     /// represents one neighbor
     pub neighboring_tiles: Cell<DEMTileNeighbors>,
-    worker: PoolActorRef<RasterDEMTileWorker>,
+    /// `Actor<RasterDEMTileWorker> worker`, behind its transport.
+    worker: Box<dyn WorkerEndpoint<RasterDEMWorkerMessage>>,
     mailbox: Arc<Mailbox>,
 }
 
 impl RasterDEMTileInner {
+    /// Runs the member function a worker's message stands for.
+    pub fn handle_worker_message(&self, message: RasterDEMTileMessage) {
+        match message {
+            RasterDEMTileMessage::Parsed { bucket, correlation_id } => self.on_parsed(bucket, correlation_id),
+            RasterDEMTileMessage::Error { error, correlation_id } => self.on_error(error, correlation_id),
+        }
+    }
+
     /// `onParsed(std::unique_ptr<HillshadeBucket>, correlationID)`.
     pub fn on_parsed(&self, result: Option<Arc<HillshadeBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
@@ -180,7 +236,7 @@ impl LoaderTile for RasterDEMTileInner {
             self.base.pending.set(true);
             let correlation_id = self.correlation_id.get();
             let encoding = self.encoding;
-            self.worker.invoke(move |worker: &mut RasterDEMTileWorker| worker.parse(data, correlation_id, encoding));
+            self.worker.send(RasterDEMWorkerMessage::Parse { data, correlation_id, encoding });
         }
     }
 }
@@ -189,7 +245,6 @@ impl LoaderTile for RasterDEMTileInner {
 pub struct RasterDEMTile {
     inner: Rc<RasterDEMTileInner>,
     loader: Option<TileLoader>,
-    _worker: Actor<RasterDEMTileWorker>,
 }
 
 impl RasterDEMTile {
@@ -203,7 +258,7 @@ impl RasterDEMTile {
     ) -> Self {
         let mailbox = Mailbox::new();
         let parent: ActorRef<RasterDEMTileInner> = ActorRef::new(&mailbox);
-        let worker = Actor::new_tagged(&parameters.thread_pool, move |_self_ref| RasterDEMTileWorker { parent });
+        let worker = parameters.tile_worker_transport.create_raster_dem(Box::new(parent));
 
         let encoding = tileset.raster_encoding.unwrap_or(RasterEncoding::Mapbox);
         let mut neighboring_tiles = DEMTileNeighbors::EMPTY;
@@ -226,13 +281,13 @@ impl RasterDEMTile {
             encoding,
             bucket: RefCell::new(None),
             neighboring_tiles: Cell::new(neighboring_tiles),
-            worker: worker.self_ref(),
+            worker,
             mailbox: mailbox.clone(),
         });
         mailbox.open(&scheduler::get_current(), inner.clone() as Rc<dyn Any>);
         let weak: std::rc::Weak<RasterDEMTileInner> = Rc::downgrade(&inner);
         let loader = TileLoader::new(weak, VectorTileEncoding::Mvt, &id, parameters, tileset);
-        RasterDEMTile { inner, loader: Some(loader), _worker: worker }
+        RasterDEMTile { inner, loader: Some(loader) }
     }
 
     pub fn inner(&self) -> &Rc<RasterDEMTileInner> {

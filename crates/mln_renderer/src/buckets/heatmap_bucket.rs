@@ -20,6 +20,9 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, Ge
 use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use mln_util::serialization::payload::pod;
+use mln_util::sync::RwLockExt;
+use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
 use crate::bucket_parameters::BucketParameters;
@@ -45,10 +48,13 @@ pub struct HeatmapLayoutVertex {
 
 pub type HeatmapTextureLayoutVertex = HeatmapLayoutVertex;
 
+#[derive(Serialize, Deserialize)]
 pub struct HeatmapBucket {
     pub base: BucketBase,
+    #[serde(with = "pod")]
     pub vertices: Vec<HeatmapLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
+    #[serde(with = "pod")]
     pub triangles: Vec<u16>,
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s like the other buckets' binders (the bucket is
@@ -169,7 +175,7 @@ impl Bucket for HeatmapBucket {
 
         let length = self.vertices.len();
         for binders in self.paint_property_binders.values_mut() {
-            binders.get_mut().unwrap().populate_vertex_vectors(
+            binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,
                 feature_index,

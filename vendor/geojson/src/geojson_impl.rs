@@ -2,7 +2,7 @@
 //
 // `convert*` take a `serde_json::Value` where the C++ takes a
 // `rapidjson_value` (mapbox/geojson/rapidjson.hpp). Differences that come
-// from the JSON values themselves (see DEVIATIONS.md): serde_json keeps the
+// from the JSON values themselves: serde_json keeps the
 // last of duplicate object keys (rapidjson's `FindMember` finds the first,
 // and `convert<prop_map>` emplaces the first); the literal `-0` is the double
 // -0.0 (rapidjson: unsigned 0); `parse` rounds long decimals correctly
@@ -353,7 +353,7 @@ pub fn parse_feature_collection(json: &str) -> Result<FeatureCollection<f64>> {
 // call that fails (a NaN or infinite double), leaving the output truncated;
 // the writers below return `false` at the same points. Object members come
 // in the order the C++ adds them; property maps in key order (C++:
-// `std::unordered_map` order, see DEVIATIONS.md).
+// `std::unordered_map` order).
 
 /// `to_type`
 fn geometry_type(geometry: &Geometry<f64>) -> &'static str {

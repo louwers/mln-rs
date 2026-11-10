@@ -8,7 +8,7 @@ use std::io::Write;
 ///
 /// flate2's Rust backend (miniz_oxide) produces a valid zlib stream that
 /// decompresses to the same bytes, but not necessarily the same compressed
-/// bytes as zlib (see DEVIATIONS.md).
+/// bytes as zlib.
 pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
     encoder.write_all(raw).map_err(|_| "failed to deflate".to_string())?;

@@ -1,8 +1,10 @@
 // Ports include/mln/util/subdivision_granularity.hpp.
 
+use serde::{Deserialize, Serialize};
+
 /// How finely tile geometry is split so the vertex shader can bend it onto
 /// the globe; port of GL JS `subdivision_granularity_settings.ts`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubdivisionGranularityExpression {
     base_zoom_granularity: u32,
     min_granularity: u32,
@@ -23,7 +25,7 @@ impl SubdivisionGranularityExpression {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SubdivisionGranularitySetting {
     pub fill: SubdivisionGranularityExpression,
     pub line: SubdivisionGranularityExpression,

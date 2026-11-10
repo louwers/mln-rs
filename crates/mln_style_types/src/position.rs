@@ -4,6 +4,7 @@
 // rule).
 
 use mln_util::interpolate::Interpolate;
+use serde::{Deserialize, Serialize};
 
 // TODO(port): use mln_math's deg2radf (math/angles.hpp) once it exists.
 fn deg2radf(deg: f32) -> f32 {
@@ -12,7 +13,7 @@ fn deg2radf(deg: f32) -> f32 {
 
 /// `mln::style::Position`: a spherical position (radial, azimuthal, polar)
 /// with its cached cartesian form.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Position {
     radial: f32,
     azimuthal: f32,

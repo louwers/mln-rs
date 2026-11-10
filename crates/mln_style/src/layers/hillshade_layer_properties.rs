@@ -77,7 +77,7 @@ crate::paint_properties!(
 );
 
 /// `HillshadeLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct HillshadeLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

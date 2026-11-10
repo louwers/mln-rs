@@ -426,6 +426,13 @@ impl Drop for GLFWView {
     }
 }
 
+/// Logs a camera change's error (a NaN pan from the input).
+fn log_error(result: Result<(), String>) {
+    if let Err(e) = result {
+        Log::error(Event::General, &e);
+    }
+}
+
 fn animation_ms(ms: i64) -> AnimationOptions {
     AnimationOptions::new(Duration::from_millis(ms))
 }
@@ -763,11 +770,11 @@ impl ViewState {
             let dy = y - self.last_y;
             if dx != 0.0 || dy != 0.0 {
                 self.with_map(|map| {
-                    map.move_by_with_anchor(
+                    log_error(map.move_by_with_anchor(
                         &ScreenCoordinate::new(dx, dy),
                         Some(ScreenCoordinate::new(x, y)),
                         &AnimationOptions::default(),
-                    )
+                    ))
                 });
             }
         } else if self.rotating {
@@ -802,7 +809,7 @@ impl ViewState {
         // camera movement.
         if let Some(dx) = std::env::var("MLN_GLFW_PAN_PX").ok().and_then(|v| v.parse::<f64>().ok()) {
             let dx = if (self.glfw.get_time() / 2.0) as i64 % 2 == 0 { dx } else { -dx };
-            self.with_map(|map| map.move_by(&ScreenCoordinate::new(dx, 0.0), &AnimationOptions::default()));
+            self.with_map(|map| log_error(map.move_by(&ScreenCoordinate::new(dx, 0.0), &AnimationOptions::default())));
             shared.invalidate();
         }
         if shared.dirty.get()

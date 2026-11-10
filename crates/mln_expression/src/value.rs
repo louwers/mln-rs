@@ -22,7 +22,7 @@ use crate::type_::{self, Type};
 
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
-// dependent; a BTreeMap iterates in key order (see DEVIATIONS.md).
+// dependent; a BTreeMap iterates in key order.
 pub type ObjectType = BTreeMap<String, Value>;
 
 /// `expression::Value`, same variant order as the C++ variant.

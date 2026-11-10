@@ -16,7 +16,6 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Instant;
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -40,6 +39,7 @@ use mln_style_types::RasterResamplingType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
+use mln_util::time::Instant;
 
 use super::raster_layer_tweaker::RasterLayerTweaker;
 use super::{TileDrawables, drawable_has_layer_tweaker, shared_vertices};

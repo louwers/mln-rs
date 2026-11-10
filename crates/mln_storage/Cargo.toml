@@ -26,9 +26,9 @@ rapidjson.workspace = true
 rusqlite.workspace = true
 serde_json.workspace = true
 
-# ureq's TLS (rustls, ring) doesn't build for Emscripten, where the
-# storage fetches through the browser instead.
-[target.'cfg(not(target_os = "emscripten"))'.dependencies]
+# ureq's TLS (rustls, ring) doesn't build for wasm (the browser), where the
+# host supplies the HTTP transport instead.
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
 ureq.workspace = true
 
 # Ports test/util/http_timeout.test.cpp (marker `// gtest: Group.Name`).

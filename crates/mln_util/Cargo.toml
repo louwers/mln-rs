@@ -16,11 +16,14 @@ name = "mln_util"
 doctest = false
 
 [dependencies]
+bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 csscolorparser.workspace = true
 feature.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
 rapidjson.workspace = true
+serde.workspace = true
+web-time.workspace = true
 
 # Ported C++ gtests of test/util (markers `// gtest: Group.Name`), for
 # mln_util and the low crates next to it.
@@ -40,6 +43,7 @@ mln_style = { package = "mln-rs-style", path = "../mln_style" }
 mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
 nunicode = { package = "mln-rs-nunicode", path = "../../vendor/nunicode" }
+postcard.workspace = true
 serde_json.workspace = true
 
 [lints]

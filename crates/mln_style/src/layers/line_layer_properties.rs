@@ -152,7 +152,7 @@ crate::paint_properties!(
 );
 
 /// `LineLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct LineLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

@@ -468,13 +468,13 @@ impl TilePyramid {
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
         feature_state: &crate::source_state::SourceFeatureState,
-    ) -> crate::geometry::feature_index::QueryResults {
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::exception::ExceptionPtr> {
         use mln_map_types::tile_coordinate::TileCoordinate;
         use mln_util::constants;
 
         let mut result = crate::geometry::feature_index::QueryResults::new();
         if self.rendered_tiles.is_empty() || geometry.is_empty() {
-            return result;
+            return Ok(result);
         }
 
         let height = f64::from(transform_state.get_size().height);
@@ -670,7 +670,7 @@ impl TilePyramid {
                         global_state,
                         proj_matrix,
                         feature_state,
-                    );
+                    )?;
                     continue;
                 }
 
@@ -684,7 +684,7 @@ impl TilePyramid {
                     global_state,
                     proj_matrix,
                     feature_state,
-                );
+                )?;
                 for (layer_id, features) in found {
                     let start = canonical_tile_start.get(&layer_id).copied().unwrap_or(0);
                     let layer_result = result.entry(layer_id).or_default();
@@ -704,7 +704,7 @@ impl TilePyramid {
             }
         }
 
-        result
+        Ok(result)
     }
 
     /// `querySourceFeatures(options, globalState)`.
@@ -712,14 +712,14 @@ impl TilePyramid {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Vec<mln_util::feature::Feature> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         let mut result = Vec::new();
 
         for tile in self.tiles.values() {
-            tile.query_source_features(&mut result, options, global_state);
+            tile.query_source_features(&mut result, options, global_state)?;
         }
 
-        result
+        Ok(result)
     }
 
     /// `getRenderedTile(tileID)`.

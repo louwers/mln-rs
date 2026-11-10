@@ -9,6 +9,8 @@ resolver = "3"
 members = [
     "crates/*",
     "platform/glfw",
+    "platform/web",
+    "tools/bench",
     "tools/expression-test",
     "tools/render-test",
     "tools/style-codegen",
@@ -76,8 +78,7 @@ vector_tile = { package = "mln-rs-vector-tile", path = "vendor/vector-tile", ver
 wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.11" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
-# add a crate when nothing in the C++ core has to be ported for it (see
-# PLAN.md, "Dependency map").
+# add a crate when nothing in the C++ core has to be ported for it.
 #
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
@@ -99,6 +100,8 @@ harfrust = { version = "0.15.0" }
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.
 image-webp = { version = "0.2.4" }
+# tools/bench: the process's CPU time (clock_gettime), which std lacks.
+libc = { version = "0.2.191" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
 # porting the C++ decoder (vendor/maplibre-tile-spec/cpp). Assumed correct
 # (user decision, 2026-11-04); the differential test against the C++ decoder
@@ -106,13 +109,21 @@ image-webp = { version = "0.2.4" }
 mlt-core = { version = "0.22.1" }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
+# The messages between a tile and its worker in another wasm instance
+# (mln_renderer's tile/worker_codec), and the tests of the types they carry:
+# a compact serde format.
+postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 # The difftests' property tests.
 proptest = { version = "1.12.0" }
 regex = { version = "1.13.1" }
-# tools/render-test's JSON (with serde_json).
-serde = { version = "1.0.229", features = ["derive"] }
+# tools/render-test's JSON (with serde_json), and the types that cross to a
+# tile worker in another wasm instance (rc: the values behind their `Arc`s).
+serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it.
 rusqlite = { version = "0.41.1", features = ["bundled"] }
+# rusqlite's SQLite on wasm32-unknown-unknown; platform/web turns on its host
+# functions (clock, randomness) through wasm-bindgen.
+sqlite-wasm-rs = { version = "0.6.2", features = ["wasm-bindgen"] }
 # preserve_order: rapidjson iterates object members in document order, and
 # the C++ relies on that (style parser, expression error order).
 # float_roundtrip: correctly rounded float parsing, like rapidjson's full
@@ -124,17 +135,26 @@ skrifa = { version = "0.49.0" }
 unicode-bidi = { version = "0.3.18" }
 # HTTP for the online file source (the C++ default platform uses curl).
 ureq = { version = "3.5.1" }
+# platform/web: the browser's API through wasm-bindgen (whose CLI must be
+# this exact version).
+js-sys = { version = "0.3.107" }
+wasm-bindgen = { version = "=0.2.130" }
+wasm-bindgen-futures = { version = "0.4.80" }
+web-sys = { version = "0.3.107", features = ["Headers", "OffscreenCanvas", "Request", "RequestInit", "Response", "console"] }
+# std::time's clocks, which panic on wasm32-unknown-unknown (mln_util::time):
+# performance.now() and Date.now() there, std::time everywhere else.
+web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
-# wgpu-native) onto the Rust implementation of the same API. The default
-# features are off here because Emscripten builds (mln-rs-web) go without
-# them; the crates turn them on for every other target.
-wgpu = { version = "30.0.1", default-features = false }
+# wgpu-native) onto the Rust implementation of the same API. Its default
+# features hold the native backends, and on wasm32-unknown-unknown the
+# browser's WebGPU (platform/web).
+wgpu = { version = "30.0.1" }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
 # with warnings denied in CI (the `lint` job), except the lints whose fix
 # would make the port read or behave less like the C++ it mirrors.
 [workspace.lints.rust]
-# PORTING.md: no `unsafe` outside FFI. The FFI modules allow it.
+# No `unsafe` outside FFI. The FFI modules allow it.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]

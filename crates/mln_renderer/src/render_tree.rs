@@ -133,7 +133,7 @@ pub struct RenderTree {
     layers_following_placement: Vec<crate::render_layer::RenderLayerPtr>,
     placement: Option<std::rc::Rc<crate::text::placement::Placement>>,
     update_symbol_opacities: bool,
-    start_time: std::time::Instant,
+    start_time: mln_util::time::Instant,
 }
 
 impl RenderTree {
@@ -141,7 +141,7 @@ impl RenderTree {
         parameters: Box<RenderTreeParameters>,
         layer_render_items: BTreeMap<u32, LayerRenderItem>,
         source_render_items: Vec<Box<dyn RenderItem>>,
-        start_time: std::time::Instant,
+        start_time: mln_util::time::Instant,
     ) -> Self {
         RenderTree {
             parameters,

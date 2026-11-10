@@ -8,7 +8,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
+
+use mln_util::time::Instant;
 
 use crate::gfx_types::AttributeDataType;
 use crate::shaders::shader_defines::MAX_ATTRIBUTE_COUNT_PER_SHADER;

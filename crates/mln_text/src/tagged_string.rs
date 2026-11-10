@@ -45,7 +45,7 @@ fn hash_bytes(data: &[u8], seed: u64) -> u64 {
 
 /// `FontStackHasher` (util/font_stack.cpp): `util::hash_combine` of
 /// `std::hash<std::string>` of each font name.
-// TODO(port): belongs in mln_util::font_stack (requested in COORDINATION.md).
+// TODO(port): belongs in mln_util::font_stack.
 pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
     let mut seed: u64 = 0;
     for font in font_stack {

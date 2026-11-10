@@ -7,6 +7,7 @@
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
+use serde::{Deserialize, Serialize};
 
 /// https://www.mapbox.com/help/access-elevation-data/#mapbox-terrain-rgb
 const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
@@ -18,12 +19,31 @@ pub fn get_unpack_vector(encoding: RasterEncoding) -> &'static [f32; 4] {
     if encoding == RasterEncoding::Terrarium { &UNPACK_TERRARIUM } else { &UNPACK_MAPBOX }
 }
 
-#[derive(Clone, Debug)]
+/// Port-only: serde reads back only what `new` can make (`from_parts`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(try_from = "DEMDataParts")]
 pub struct DEMData {
     pub dim: i32,
     pub stride: i32,
     pub encoding: RasterEncoding,
     image: PremultipliedImage,
+}
+
+/// What `DEMData` is read from.
+#[derive(Deserialize)]
+struct DEMDataParts {
+    dim: i32,
+    stride: i32,
+    encoding: RasterEncoding,
+    image: PremultipliedImage,
+}
+
+impl TryFrom<DEMDataParts> for DEMData {
+    type Error = String;
+
+    fn try_from(parts: DEMDataParts) -> Result<Self, String> {
+        DEMData::from_parts(parts.dim, parts.stride, parts.encoding, parts.image)
+    }
 }
 
 /// A 4-byte pixel at pixel index `i`.
@@ -83,6 +103,29 @@ impl DEMData {
         Ok(DEMData { dim, stride, encoding, image: out })
     }
 
+    /// Port-only: a DEM as another `DEMData` was (its members), as serde
+    /// reads it. Fails unless the image is `stride` by `stride` pixels with
+    /// `stride == dim + 2` and `dim >= 0`, as `new` makes them. The sizes are
+    /// checked without overflow: on wasm32 `Image::bytes` would wrap for a
+    /// large stride.
+    fn from_parts(dim: i32, stride: i32, encoding: RasterEncoding, image: PremultipliedImage) -> Result<Self, String> {
+        let side = u32::try_from(stride).map_err(|_| format!("a DEM stride of {stride}"))?;
+        let bytes = u64::from(side).checked_mul(u64::from(side)).and_then(|n| n.checked_mul(4));
+        if dim < 0
+            || dim.checked_add(2) != Some(stride)
+            || image.size != Size::new(side, side)
+            || bytes != Some(image.data.len() as u64)
+        {
+            return Err(format!(
+                "a {}x{} DEM image of {} bytes for dim {dim}, stride {stride}",
+                image.size.width,
+                image.size.height,
+                image.data.len()
+            ));
+        }
+        Ok(DEMData { dim, stride, encoding, image })
+    }
+
     /// `idx(x, y)`.
     fn idx(&self, x: i32, y: i32) -> usize {
         debug_assert!(x >= -1);
@@ -102,7 +145,12 @@ impl DEMData {
         let o = border_tile_data;
 
         // Tiles from the same source should always be of the same dimensions.
-        debug_assert!(self.dim == o.dim);
+        // C++ asserts it and reads out of bounds when they aren't (tiles of
+        // different sizes, or an empty one from a corrupt image); the port
+        // leaves the border as it is.
+        if self.dim != o.dim || self.dim == 0 {
+            return;
+        }
 
         // We determine the pixel range to backfill based which corner/edge
         // `borderTileData` represents. For example, dx = -1, dy = -1
@@ -289,5 +337,21 @@ mod tests {
 
         dem0.backfill_border(&dem1, 1, -1);
         assert_eq!(dem0.get(4, -1), dem1.get(0, 3));
+    }
+
+    // Port-only: C++ reads out of bounds for neighbours of another size.
+    #[test]
+    fn backfill_border_of_another_size() {
+        let mut dem = DEMData::new(&fake_image(Size::new(4, 4)), RasterEncoding::Mapbox).unwrap();
+        let border = dem.get(-1, -1);
+        let larger = DEMData::new(&fake_image(Size::new(8, 8)), RasterEncoding::Mapbox).unwrap();
+        let empty = DEMData::new(&PremultipliedImage::default(), RasterEncoding::Mapbox).unwrap();
+        for (dx, dy) in [(-1, -1), (0, 1), (1, 0)] {
+            dem.backfill_border(&larger, dx, dy);
+            dem.backfill_border(&empty, dx, dy);
+        }
+        assert_eq!(dem.get(-1, -1), border);
+        let mut empty = empty;
+        empty.backfill_border(&empty.clone(), -1, -1);
     }
 }

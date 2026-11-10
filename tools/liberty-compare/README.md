@@ -95,7 +95,6 @@ Everything generated goes to `$LIBERTY_COMPARE_DIR` (default
   `mbgl-render` is C++ **Vulkan**, which draws fill outlines as 1px line
   primitives; the port follows the C++ **WebGPU** backend, which (like
   Metal) triangulates fill outlines, and those thin out under pitch
-  (coordinator decision; see COORDINATION.md and the platform-macos
-  expectations in the render-test manifest).
+  (see the platform-macos expectations in the render-test manifest).
 - Bright, Positron, Dark, Fiord (Amsterdam z13, NYC z14, Europe z4.5,
   Tokyo z15 pitch 45, Paris @2x): **20 of 20 pass**.

@@ -231,6 +231,7 @@ pub trait RenderSource {
     // query
     /// `queryRenderedFeatures(geometry, transformState, layers, options,
     /// globalState, projMatrix)`; sources without features return nothing.
+    /// `Err`: the exception C++ throws out of the query (a malformed tile).
     #[allow(clippy::too_many_arguments)]
     fn query_rendered_features(
         &self,
@@ -240,8 +241,8 @@ pub trait RenderSource {
         _options: &crate::query::RenderedQueryOptions,
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
         _proj_matrix: &mln_util::mat4::Mat4,
-    ) -> crate::geometry::feature_index::QueryResults {
-        Default::default()
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::exception::ExceptionPtr> {
+        Ok(Default::default())
     }
 
     /// `querySourceFeatures(options, globalState)`.
@@ -249,8 +250,8 @@ pub trait RenderSource {
         &self,
         _options: &crate::query::SourceQueryOptions,
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Vec<mln_util::feature::Feature> {
-        Vec::new()
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+        Ok(Vec::new())
     }
 
     fn set_cache_enabled(&mut self, _enable: bool) {}

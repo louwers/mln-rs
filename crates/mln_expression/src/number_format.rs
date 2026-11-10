@@ -20,8 +20,7 @@ const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
 // root/en locales only: the shortest round-trip decimal of the double, rounded
 // half-even to maxFractionDigits and padded to minFractionDigits, ',' grouping
 // and '.' decimal separator; with a currency, ICU's currency precision and an
-// en-US symbol for a few common currencies. The locale is ignored (see
-// DEVIATIONS.md).
+// en-US symbol for a few common currencies. The locale is ignored.
 fn format_number(
     number: f64,
     _locale_id: &str,

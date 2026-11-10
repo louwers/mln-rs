@@ -135,7 +135,23 @@ impl Expression for Literal {
     }
 
     fn serialize(&self) -> MbglValue {
-        if self.get_type().is_array() || *self.get_type() == Type::Object {
+        // Port-only: C++ writes an image as `Image::toValue()`, an object
+        // that doesn't parse back. The legacy property functions make
+        // literal images (zoom functions of `*-pattern` and `icon-image`),
+        // where an image is expected, so they serialize as the image's
+        // name, which parses back as the implicit coercion to an image.
+        // Like the literal, and unlike an "image" expression, that is
+        // runtime constant, so the property evaluates the same.
+        if let Value::Image(image) = &self.value {
+            return MbglValue::String(image.id().to_owned());
+        }
+        // Port-only: C++ writes a collection as a bare array (`["top", [0,
+        // 1]]`), which parses as an expression with an unknown operator. As
+        // a literal, it converts back to the collection.
+        if self.get_type().is_array()
+            || *self.get_type() == Type::Object
+            || *self.get_type() == Type::VariableAnchorOffsetCollection
+        {
             MbglValue::Array(vec![MbglValue::String(self.get_operator()), to_mbgl_value(&self.value)])
         } else {
             to_mbgl_value(&self.value)

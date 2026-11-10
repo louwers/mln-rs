@@ -7,7 +7,6 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use mln_gfx::attribute::AttributeBindingArray;
@@ -31,6 +30,7 @@ use mln_gfx::upload_pass::UploadPass as _;
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::{IndexBuffer as GfxIndexBuffer, UniqueVertexBufferResource};
+use mln_util::time::Instant;
 
 use crate::context::Context;
 use crate::render_pass::RenderPass;
@@ -150,9 +150,12 @@ impl IndexBufferBase for IndexBuffer {
 
 struct BindGroupRecord {
     slot: u32,
-    #[allow(dead_code)]
     group: u32,
     handle: wgpu::BindGroup,
+    /// What `handle` was created from. A later draw that binds the same
+    /// layout and resources reuses it instead of creating a bind group.
+    layout: wgpu::BindGroupLayout,
+    resources: Vec<(u32, EntryResource)>,
 }
 
 /// `webgpu::Drawable::Impl`
@@ -168,6 +171,8 @@ struct DrawableImpl {
     dummy_vertex_buffers: Vec<UniqueVertexBufferResource>,
     uniform_buffers: UniformBufferArray,
     ubo_index_uniform: Option<UniformBufferPtr>,
+    /// The `ubo_index` last written to `ubo_index_uniform`.
+    ubo_index_written: Option<u32>,
     depth_mode: DepthMode,
     stencil_mode: StencilMode,
     #[allow(dead_code)]
@@ -191,6 +196,8 @@ thread_local! {
 }
 
 /// Owned resources of a bind group entry (the wgpu entries borrow them).
+/// wgpu handles compare by identity.
+#[derive(PartialEq)]
 enum EntryResource {
     Buffer(wgpu::Buffer, u64),
     Sampler(wgpu::Sampler),
@@ -212,6 +219,7 @@ impl Drawable {
                 dummy_vertex_buffers: Vec::new(),
                 uniform_buffers: UniformBufferArray::new(),
                 ubo_index_uniform: None,
+                ubo_index_written: None,
                 depth_mode: DepthMode::disabled(),
                 stencil_mode: StencilMode::default(),
                 cull_face_mode: CullFaceMode::disabled(),
@@ -377,8 +385,15 @@ impl Drawable {
 
     /// Build the bind groups for this draw from the shader's metadata.
     /// Returns false when the draw must be skipped (C++ `return`).
+    ///
+    /// C++ creates every bind group on every draw, and writes the
+    /// `GlobalUBOIndex` buffer every time. The port keeps the previous draw's
+    /// bind groups and reuses each one whose layout and bound buffers,
+    /// samplers and texture views (compared by identity) are unchanged, and
+    /// writes the index only when it changes. A replaced resource stays alive
+    /// until the drawable's next draw or its drop.
     fn build_bind_groups(&mut self, context: &Context, render_pass: &RenderPass, shader: &ShaderProgram) -> bool {
-        self.impl_.bind_groups.clear();
+        let mut previous = std::mem::take(&mut self.impl_.bind_groups);
         let Some(device) = context.get_backend().get_device() else {
             return true;
         };
@@ -419,12 +434,19 @@ impl Drawable {
                     BindingType::UniformBuffer | BindingType::ReadOnlyStorageBuffer | BindingType::StorageBuffer => {
                         let mut buffer = self.impl_.uniform_buffers.get(binding_info.binding as usize).cloned();
                         if binding_info.binding as usize == ID_GLOBAL_UBO_INDEX {
-                            let index_data = GlobalUBOIndexData { value: self.base.ubo_index, pad: [0; 3] };
-                            context.emplace_or_update_uniform_buffer(
-                                &mut self.impl_.ubo_index_uniform,
-                                bytemuck::bytes_of(&index_data),
-                                false,
-                            );
+                            // Written only when it changes: the buffer
+                            // belongs to this drawable.
+                            if self.impl_.ubo_index_uniform.is_none()
+                                || self.impl_.ubo_index_written != Some(self.base.ubo_index)
+                            {
+                                let index_data = GlobalUBOIndexData { value: self.base.ubo_index, pad: [0; 3] };
+                                context.emplace_or_update_uniform_buffer(
+                                    &mut self.impl_.ubo_index_uniform,
+                                    bytemuck::bytes_of(&index_data),
+                                    false,
+                                );
+                                self.impl_.ubo_index_written = Some(self.base.ubo_index);
+                            }
                             if let Some(ubo) = self.impl_.ubo_index_uniform.clone() {
                                 self.impl_.uniform_buffers.set(binding_info.binding as usize, Some(ubo.clone()));
                                 buffer = Some(ubo);
@@ -457,8 +479,11 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        resources
-                            .push((binding_info.binding, EntryResource::Buffer(gpu_buffer, buffer.get_size() as u64)));
+                        // The whole (256-byte aligned) buffer, as C++ binds
+                        // `getSize()`: some UBOs hold less data than their
+                        // shader struct.
+                        let size = gpu_buffer.size();
+                        resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, size)));
                     }
                     BindingType::Sampler => {
                         let Some(texture) = find_texture_for_binding(binding_info.binding, true) else {
@@ -507,6 +532,16 @@ impl Drawable {
                 return false;
             }
 
+            if let Some(index) = previous
+                .iter()
+                .position(|record| record.group == group && record.layout == *layout && record.resources == resources)
+            {
+                let mut record = previous.swap_remove(index);
+                record.slot = slot as u32;
+                self.impl_.bind_groups.push(record);
+                continue;
+            }
+
             let entries: Vec<wgpu::BindGroupEntry<'_>> = resources
                 .iter()
                 .map(|(binding, resource)| wgpu::BindGroupEntry {
@@ -525,7 +560,13 @@ impl Drawable {
             let label = format!("{} bind-group {group}", self.base.name);
             let bind_group =
                 device.create_bind_group(&wgpu::BindGroupDescriptor { label: Some(&label), layout, entries: &entries });
-            self.impl_.bind_groups.push(BindGroupRecord { slot: slot as u32, group, handle: bind_group });
+            self.impl_.bind_groups.push(BindGroupRecord {
+                slot: slot as u32,
+                group,
+                handle: bind_group,
+                layout: layout.clone(),
+                resources,
+            });
         }
         true
     }

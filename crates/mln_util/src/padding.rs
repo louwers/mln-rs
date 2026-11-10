@@ -2,9 +2,10 @@
 // Interpolator<Padding> specialization is in interpolate.rs.
 
 use feature::Value;
+use serde::{Deserialize, Serialize};
 
 /// A set of four numbers representing padding around a box.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Padding {
     pub top: f32,
     pub right: f32,

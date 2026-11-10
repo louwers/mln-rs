@@ -1,12 +1,14 @@
 // Ports src/mln/text/harfbuzz.hpp and src/mln/text/harfbuzz.cpp (the
 // MLN_TEXT_SHAPING_HARFBUZZ build).
 
+use serde::{Deserialize, Serialize};
+
 use crate::freetype::FreeTypeLibrary;
 use crate::glyph::{Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz_impl::Impl;
 
 /// `HBShapeAdjust`: the HarfBuzz position of a glyph in pixels at 24 px.
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub struct HBShapeAdjust {
     pub x_offset: f32,
     pub y_offset: f32,

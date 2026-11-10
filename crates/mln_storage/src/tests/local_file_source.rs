@@ -157,6 +157,23 @@ fn partial_file() {
     assert_eq!(b"ent is he", data(&res));
 }
 
+// Port-only: a range past the end is zero-padded, as C++; one too large to
+// allocate (a corrupt PMTiles header) is a read error (C++ throws
+// std::length_error out of the request, uncaught).
+#[test]
+fn ranges_past_the_end() {
+    let fs = local_file_source();
+    let mut resource = Resource::new(Kind::Unknown, to_absolute_url("nonempty"));
+    resource.data_range = Some((12, 20));
+    let res = request(&fs, resource.clone());
+    assert_eq!(None, res.error);
+    assert_eq!(b"ere\n\0\0\0\0\0", data(&res));
+
+    resource.data_range = Some((4, u64::MAX - 1));
+    let res = request(&fs, resource);
+    assert_eq!(Reason::Other, res.error.as_ref().expect("error").reason);
+}
+
 // gtest: LocalFileSource.NonExistentFile
 #[test]
 fn non_existent_file() {

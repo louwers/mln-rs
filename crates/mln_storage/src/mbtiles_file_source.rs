@@ -25,6 +25,7 @@ use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::chrono::Timestamp;
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::MBTILES_PROTOCOL;
+use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
 use rapidjson::Writer;
 use serde_json::Value as Json;
@@ -318,7 +319,8 @@ impl MBTilesFileSourceThread {
         let base_path = url_to_path(&resource.url);
         let path = db_path(&base_path).to_vec();
 
-        let tile_data = resource.tile_data.as_ref().expect("tile resource without tile data");
+        // C++ dereferences `resource.tileData` unchecked.
+        let tile_data = resource.tile_data.as_ref().ok_or("tile resource without tile data")?;
         let iy = tile_data.y;
         let iz = i32::from(tile_data.z as u8);
 
@@ -435,19 +437,19 @@ impl FileSource for MBTilesFileSource {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        *self.resource_options.lock().unwrap() = options;
+        *self.resource_options.lock_unpoisoned() = options;
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.resource_options.lock().unwrap().clone()
+        self.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
+        *self.client_options.lock_unpoisoned() = options;
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
+        self.client_options.lock_unpoisoned().clone()
     }
 }
 

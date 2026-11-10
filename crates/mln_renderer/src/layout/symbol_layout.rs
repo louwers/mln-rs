@@ -37,6 +37,7 @@ use mln_util::geometry::FeatureType;
 use mln_util::i18n;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
+use mln_util::sync::RwLockExt;
 
 use crate::bucket::{Bucket, BucketPtr, get_retain_feature_id};
 use crate::bucket_parameters::BucketParameters;
@@ -266,7 +267,7 @@ impl SymbolLayout {
         layers: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
         layout_parameters: &mut LayoutParameters<'_>,
-    ) -> Self {
+    ) -> Result<Self, ExceptionPtr> {
         let leader = layers[0]
             .base_impl
             .downcast_ref::<mln_style::layers::symbol_layer_impl::Impl>()
@@ -326,7 +327,7 @@ impl SymbolLayout {
         let has_icon = has_icon_image(&layout);
 
         if !has_text && !has_icon {
-            return this;
+            return Ok(this);
         }
 
         let has_symbol_sort_key = !leader.layout.get::<SymbolSortKey>().is_undefined();
@@ -361,20 +362,26 @@ impl SymbolLayout {
 
         // Determine glyph dependencies
         let source_layer = this.source_layer.clone();
-        let geometry_layer = source_layer.layer();
+        let geometry_layer = source_layer.layer()?;
         let feature_count = geometry_layer.feature_count();
         let canonical_id = this.canonical_id;
         for i in 0..feature_count {
-            let feature = geometry_layer.get_feature(i);
-            if !leader.filter.evaluate(
+            let feature = geometry_layer.get_feature(i)?;
+            let passes = leader.filter.evaluate(
                 &EvaluationContext::with_zoom_feature(this.zoom, Some(&*feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
                     .with_global_state(parameters.global_state.as_deref()),
-            ) {
+            );
+            feature.check()?;
+            if !passes {
                 continue;
             }
 
+            // C++ keeps the feature and reads its values lazily; the copy
+            // reads all of them, so a malformed one is an error here even if
+            // nothing reads it.
             let mut ft = SymbolFeature::new(&*feature);
+            feature.check()?;
             drop(feature);
 
             ft.index = i;
@@ -538,7 +545,7 @@ impl SymbolLayout {
             merge_lines(&mut this.features);
         }
 
-        this
+        Ok(this)
     }
 
     /// `evaluateVariableOffset(anchor, textOffset)`.
@@ -955,7 +962,7 @@ impl SymbolLayout {
             section_options_to_value(feature.formatted_text.as_ref().expect("text").section_at(section_index));
         let length = state.text.attribute_data.len();
         for binders in bucket.paint_properties.values() {
-            let mut binders = binders.write().unwrap_or_else(|e| e.into_inner());
+            let mut binders = binders.write_unpoisoned();
             binders.text_binders.populate_vertex_vectors(
                 feature,
                 length,
@@ -1721,7 +1728,7 @@ impl Layout for SymbolLayout {
                     let length =
                         if sdf { state.sdf_icon.attribute_data.len() } else { state.icon.attribute_data.len() };
                     for binders in bucket_ref.paint_properties.values() {
-                        let mut binders = binders.write().unwrap_or_else(|e| e.into_inner());
+                        let mut binders = binders.write_unpoisoned();
                         binders.icon_binders.populate_vertex_vectors(
                             feature,
                             length,

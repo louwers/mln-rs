@@ -53,7 +53,7 @@ crate::paint_properties!(
 );
 
 /// `HeatmapLayerProperties final : public LayerProperties`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct HeatmapLayerProperties {
     pub base: LayerPropertiesBase,
     // Data members.

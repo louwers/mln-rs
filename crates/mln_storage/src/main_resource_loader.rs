@@ -16,6 +16,7 @@ use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::client_options::ClientOptions;
+use mln_util::sync::MutexExt;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};
@@ -344,7 +345,7 @@ impl FileSource for MainResourceLoader {
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
-        let mut resource_options = self.impl_.resource_options.lock().unwrap();
+        let mut resource_options = self.impl_.resource_options.lock_unpoisoned();
         *resource_options = options.clone();
         for fs in self.impl_.in_member_order().into_iter().flatten() {
             fs.set_resource_options(options.clone());
@@ -352,11 +353,11 @@ impl FileSource for MainResourceLoader {
     }
 
     fn get_resource_options(&self) -> ResourceOptions {
-        self.impl_.resource_options.lock().unwrap().clone()
+        self.impl_.resource_options.lock_unpoisoned().clone()
     }
 
     fn set_client_options(&self, options: ClientOptions) {
-        let mut client_options = self.impl_.client_options.lock().unwrap();
+        let mut client_options = self.impl_.client_options.lock_unpoisoned();
         *client_options = options.clone();
         for fs in self.impl_.in_member_order().into_iter().flatten() {
             fs.set_client_options(options.clone());
@@ -364,6 +365,6 @@ impl FileSource for MainResourceLoader {
     }
 
     fn get_client_options(&self) -> ClientOptions {
-        self.impl_.client_options.lock().unwrap().clone()
+        self.impl_.client_options.lock_unpoisoned().clone()
     }
 }

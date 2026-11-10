@@ -1,7 +1,9 @@
 // Ports include/mln/util/size.hpp
 
+use serde::{Deserialize, Serialize};
+
 /// A width/height pair in (logical or physical) pixels.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Size {
     pub width: u32,
     pub height: u32,

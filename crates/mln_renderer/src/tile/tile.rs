@@ -267,7 +267,8 @@ pub trait Tile {
         _global_state: Option<&GlobalStateMap>,
         _proj_matrix: &mln_util::mat4::Mat4,
         _feature_state: &crate::source_state::SourceFeatureState,
-    ) {
+    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+        Ok(())
     }
 
     /// `querySourceFeatures(result, options, globalState)`.
@@ -276,7 +277,8 @@ pub trait Tile {
         _result: &mut Vec<mln_util::feature::Feature>,
         _options: &crate::query::SourceQueryOptions,
         _global_state: Option<&GlobalStateMap>,
-    ) {
+    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+        Ok(())
     }
 
     /// `getQueryPadding(layers)`.

@@ -45,7 +45,8 @@ impl MapSnapshotterObserver for NullMapSnapshotterObserver {}
 /// `MapSnapshotter::PointForFn`.
 pub type PointForFn = Box<dyn Fn(&LatLng) -> ScreenCoordinate>;
 /// `MapSnapshotter::LatLngForFn`.
-pub type LatLngForFn = Box<dyn Fn(&ScreenCoordinate) -> LatLng>;
+/// `Err`: the std::domain_error of the C++ LatLng constructor.
+pub type LatLngForFn = Box<dyn Fn(&ScreenCoordinate) -> Result<LatLng, String>>;
 /// `MapSnapshotter::Attributions`.
 pub type Attributions = Vec<String>;
 /// `MapSnapshotter::Callback` (a `std::function`: `snapshot` may call it
@@ -251,7 +252,7 @@ impl MapSnapshotter {
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
         observer: Rc<dyn MapSnapshotterObserver>,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let frontend = SnapshotterRendererFrontend::new(size, pixel_ratio);
         let map = Rc::new(RefCell::new(Map::with_resource_options(
             &frontend,
@@ -259,7 +260,7 @@ impl MapSnapshotter {
             MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
             resource_options,
             client_options,
-        )));
+        )?));
 
         let render_still_callback: Rc<RefCell<Option<Callback>>> = Rc::new(RefCell::new(None));
         let still_image_result: Rc<RefCell<Option<Option<ExceptionPtr>>>> = Rc::new(RefCell::new(None));
@@ -315,7 +316,7 @@ impl MapSnapshotter {
             })
         };
 
-        MapSnapshotter {
+        Ok(MapSnapshotter {
             render_still_callback,
             still_image_result,
             deliver,
@@ -323,16 +324,17 @@ impl MapSnapshotter {
             map,
             region: LatLngBounds::empty(),
             region_insets: EdgeInsets::default(),
-        }
+        })
     }
 
     /// `MapSnapshotter(size, pixelRatio, resourceOptions, clientOptions)`.
+    /// `Err` where the C++ Map constructor throws (an empty size).
     pub fn new(
         size: Size,
         pixel_ratio: f32,
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
-    ) -> Self {
+    ) -> Result<Self, String> {
         Self::with_observer(size, pixel_ratio, resource_options, client_options, Rc::new(NullMapSnapshotterObserver))
     }
 
@@ -382,31 +384,36 @@ impl MapSnapshotter {
         self.map.borrow().get_camera_options(None)
     }
 
-    pub fn set_region(&mut self, region: &LatLngBounds) {
+    /// `Err`: as `Map::camera_for_lat_lngs`.
+    pub fn set_region(&mut self, region: &LatLngBounds) -> Result<(), String> {
         self.region = *region;
-        self.jump_to_region();
+        self.jump_to_region()
     }
 
-    pub fn get_region(&self) -> LatLngBounds {
+    /// `Err`: as `Map::lat_lng_bounds_for_camera`.
+    pub fn get_region(&self) -> Result<LatLngBounds, String> {
         let map = self.map.borrow();
         map.lat_lng_bounds_for_camera(&map.get_camera_options(Some(self.get_padding())))
     }
 
-    pub fn set_padding(&mut self, insets: &EdgeInsets) {
+    /// `Err`: as `Map::camera_for_lat_lngs`.
+    pub fn set_padding(&mut self, insets: &EdgeInsets) -> Result<(), String> {
         self.region_insets = *insets;
         if !self.region.is_empty() {
-            self.jump_to_region();
+            self.jump_to_region()?;
         }
+        Ok(())
     }
 
     pub fn get_padding(&self) -> EdgeInsets {
         self.region_insets
     }
 
-    fn jump_to_region(&self) {
+    fn jump_to_region(&self) -> Result<(), String> {
         let lat_lngs = [self.region.southwest(), self.region.northeast()];
-        let camera = self.map.borrow().camera_for_lat_lngs(&lat_lngs, &self.region_insets, None, None);
+        let camera = self.map.borrow().camera_for_lat_lngs(&lat_lngs, &self.region_insets, None, None)?;
         self.map().jump_to(&camera);
+        Ok(())
     }
 
     /// `snapshot(callback)`: renders a still image of the map and calls
@@ -418,7 +425,7 @@ impl MapSnapshotter {
                 PremultipliedImage::new(Size::default()),
                 Vec::new(),
                 Box::new(|_| ScreenCoordinate::default()),
-                Box::new(|_| LatLng::default()),
+                Box::new(|_| Ok(LatLng::default())),
             );
             // C++ goes on to replace the current snapshot's callback with
             // this one, which is then called again with the result.

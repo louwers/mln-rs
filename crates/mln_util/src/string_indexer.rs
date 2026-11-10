@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
+use crate::sync::RwLockExt;
+
 pub type StringIdentity = usize;
 
 #[derive(Default)]
@@ -40,14 +42,14 @@ impl StringIndexer {
     /// `get(std::string_view)`: the identity of `string`, added if new.
     pub fn get(&self, string: &str) -> StringIdentity {
         {
-            let inner = self.inner.read().unwrap();
+            let inner = self.inner.read_unpoisoned();
             debug_assert!(inner.string_to_identity.len() == inner.identity_to_string.len());
             if let Some(&id) = inner.string_to_identity.get(string) {
                 return id;
             }
         }
 
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self.inner.write_unpoisoned();
         debug_assert!(inner.string_to_identity.len() == inner.identity_to_string.len());
         if let Some(&id) = inner.string_to_identity.get(string) {
             // another writer inserted into the map
@@ -63,14 +65,14 @@ impl StringIndexer {
     /// `get(StringIdentity)`: asserts that `id` is known (debug builds), and
     /// returns an empty string for an unknown one.
     pub fn get_string(&self, id: StringIdentity) -> String {
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read_unpoisoned();
         debug_assert!(id < inner.identity_to_string.len(), "id < identityToString.size()");
         inner.identity_to_string.get(id).cloned().unwrap_or_default()
     }
 
     /// `size()`.
     pub fn size(&self) -> usize {
-        let inner = self.inner.read().unwrap();
+        let inner = self.inner.read_unpoisoned();
         debug_assert!(inner.string_to_identity.len() == inner.identity_to_string.len());
         inner.identity_to_string.len()
     }

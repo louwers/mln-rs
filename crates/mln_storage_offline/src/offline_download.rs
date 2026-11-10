@@ -677,6 +677,11 @@ impl Inner {
     }
 
     fn queue_tiles(&self, type_: SourceType, tile_size: u16, tileset: &Tileset) {
+        // C++ reads `tileset.tiles[0]` unchecked; a source without tiles has
+        // none to download.
+        let Some(url_template) = tileset.tiles.first() else {
+            return;
+        };
         tile_cover(&self.definition, type_, tile_size, &tileset.zoom_range, |tile: CanonicalTileID| {
             {
                 let mut status = self.status.borrow_mut();
@@ -685,7 +690,7 @@ impl Inner {
             }
 
             let mut tile_resource = Resource::tile(
-                &tileset.tiles[0],
+                url_template,
                 self.definition.pixel_ratio(),
                 tile.x as i32,
                 tile.y as i32,

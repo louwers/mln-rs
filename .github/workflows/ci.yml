@@ -15,10 +15,11 @@ permissions:
 
 jobs:
   # Every test (`just ci-coverage`): the libraries' tests and the shared
-  # render, query and expression suites, on Linux (wgpu renders through
-  # Vulkan/lavapipe) and macOS (through Metal), with their line coverage
-  # uploaded to Codecov (codecov.yml). The differential tests against the C++
-  # core are in louwers/mln-rs-difftests.
+  # render, query and expression suites (the render and query suites twice:
+  # also with the tile workers behind the worker codec), on Linux (wgpu
+  # renders through Vulkan/lavapipe) and macOS (through Metal), with their
+  # line coverage uploaded to Codecov (codecov.yml). The differential tests
+  # against the C++ core are in louwers/mln-rs-difftests.
   test:
     strategy:
       fail-fast: false
@@ -61,14 +62,17 @@ jobs:
       - name: Test
         run: just ci-coverage
 
-      # The render suite's report and actual/diff images (cargo-llvm-cov
-      # builds in target/llvm-cov-target).
+      # The render suite's reports and actual/diff images, from the run with
+      # the tile workers in process and the one through the worker codec
+      # (cargo-llvm-cov builds in target/llvm-cov-target).
       - name: Upload the render test results
         if: failure()
         uses: actions/upload-artifact@v7
         with:
           name: render-tests-${{ runner.os }}
-          path: target/llvm-cov-target/tmp/render_tests
+          path: |
+            target/llvm-cov-target/tmp/render_tests
+            target/llvm-cov-target/tmp/render_tests_through_the_codec
           if-no-files-found: ignore
 
       - name: Upload the coverage to Codecov
@@ -110,9 +114,12 @@ jobs:
           rustup default stable
           just ci-package
 
-  # Formatting (`just fmt`, every Rust file), clippy with the workspace's
-  # lints (Cargo.toml) and the API docs as docs.rs builds them, all with
-  # warnings as errors (the justfile denies them in CI).
+  # Formatting (`just fmt`, every Rust file), the panic and TODO(port)
+  # ratchet (`just ratchet`, tools/ratchet), clippy with the workspace's
+  # lints (Cargo.toml), the API docs as docs.rs builds them, and clippy on
+  # the libraries and platform/web for wasm32-unknown-unknown (`just
+  # check-wasm`, the browser build), all with warnings as errors (the
+  # justfile denies them in CI).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -137,7 +144,7 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt --no-self-update
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown --no-self-update
           rustup default stable
 
       - name: Lint
@@ -170,10 +177,74 @@ jobs:
       - name: Check
         run: just ci-test-msrv
 
+  # The browser build in headless Chromium (`just profile=release web-check`,
+  # platform/web/README.md): views of the render suite, served offline from
+  # its cache database to the page with its tile workers in Web Workers, each
+  # frame compared with the native runner's render of the same view
+  # (lavapipe). The Chromium is Playwright's build, pinned, and runs WebGPU on
+  # the SwiftShader it bundles.
+  web:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
+          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: web-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: web-${{ runner.os }}-
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.61.1-chromium
+
+      - uses: taiki-e/install-action@v2
+        with: { tool: 'just,wasm-bindgen@0.2.130' }
+
+      # wasm-opt, which `just profile=release web` runs.
+      - name: Install binaryen
+        run: |
+          curl -fsSL https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz |
+            tar -xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_130/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown --no-self-update
+          rustup default stable
+
+      # The Chromium that check.mjs uses. The runner's own Chrome brings the
+      # system libraries it needs.
+      - name: Install Chromium
+        run: npx -y playwright@1.61.1 install chromium
+
+      - name: Check
+        run: just profile=release web-check --out "$RUNNER_TEMP/web-check"
+
+      # Each view's style, the page's frame (expected.png) and the native
+      # render and diff (results/).
+      - name: Upload the frames and diffs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: web-check
+          path: ${{ runner.temp }}/web-check
+          if-no-files-found: ignore
+
   # The one check for branch protection to require: it fails when a job above
   # failed or was cancelled.
   ci-passed:
-    needs: [test, release-crate, lint, msrv]
+    needs: [test, release-crate, lint, msrv, web]
     if: always()
     runs-on: ubuntu-26.04
     permissions: {}

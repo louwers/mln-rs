@@ -16,8 +16,8 @@ cpp := justfile_directory() / '..' / 'maplibre-native'
 # The Cargo profile `just glfw` builds the app with, e.g. `just profile=release glfw`
 profile := 'dev'
 
-# On NixOS, the tests and the apps build and run inside the C++ repo's #linux dev shell, which has the libraries they link
-# and load (GLFW, the Vulkan loader, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
+# On NixOS, the tests and the apps build and run inside the C++ repo's #linux dev shell, extended by nix/flake.nix, which has the
+# libraries they link and load (GLFW, the Vulkan loader, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
 nixos := path_exists('/etc/NIXOS')
 dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
 
@@ -31,6 +31,18 @@ export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'
 @_default:
     {{just}} --list
 
+# Run the benchmarks (tools/bench/README.md), e.g. `just bench --filter Frame`
+bench *args:  bench-fixtures _dev-shell
+    {{dev_shell}} cargo run --release -q -p mln-rs-bench -- run {{args}}
+
+# Compare the benchmarks of this checkout, uncommitted changes included, against a Git ref (tools/bench/README.md)
+bench-compare base='main' *args:  bench-fixtures _dev-shell
+    {{dev_shell}} cargo run --release -q -p mln-rs-bench -- compare {{quote(base)}} {{args}}
+
+# Download the benchmarks' basemap fixture into target/bench-fixtures, once (tools/bench/fixtures.py)
+bench-fixtures:
+    python3 -I tools/bench/fixtures.py target/bench-fixtures
+
 # Build every package and test target
 build:  _dev-shell
     {{dev_shell}} cargo build --workspace --all-targets
@@ -39,13 +51,20 @@ build:  _dev-shell
 check:
     cargo check --workspace --all-targets
 
+# The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
+# needs the target: `rustup target add wasm32-unknown-unknown`. SQLite builds through sqlite-wasm-rs, which needs a clang
+# that targets wasm32. Clippy, so that platform/web, which only builds there, is linted too.
+[doc('Check that the libraries and platform/web build for wasm32-unknown-unknown, as CI does')]
+check-wasm:
+    cargo clippy --target wasm32-unknown-unknown -p {{main_crate}} -p mln-rs-web
+
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
     rm -rf {{quote(parent_directory(coverage_lcov))}}
     mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
-# Run the checks of CI's lint job: formatting, clippy and the API docs, warnings as errors
-ci-lint:  env-info test-fmt clippy test-doc && assert-git-is-clean
+# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy, the API docs and the wasm32-unknown-unknown build, warnings as errors
+ci-lint:  env-info test-fmt ratchet clippy test-doc check-wasm && assert-git-is-clean
 
 # Package every crate and compile every Cargo test target, as CI's release-crate job does
 ci-package:  env-info package && assert-git-is-clean
@@ -124,22 +143,56 @@ get-crate-field field package=main_crate:  (assert-cmd 'jq')
 # Get the minimum supported Rust version (MSRV) for the crate
 get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 
-# It builds with the Cargo profile in `profile`: `just profile=release glfw` runs an optimized build.
+# It builds with the Cargo profile in `profile`: `just profile=release glfw` runs an optimized build. Outside NixOS it needs the
+# system packages CI installs (.github/workflows/ci.yml, "Install system packages").
 [doc('Run the GLFW app: OpenFreeMap Liberty in a window (needs a display and the system GLFW). Arguments go to the app')]
 [positional-arguments]
 glfw *args:  _dev-shell
     {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-glfw --bin mln-glfw -- "$@"
+
+# wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
+# Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
+# The release build also gets fat LTO, one codegen unit and opt-level "s", and binaryen's wasm-opt (version 130, e.g.
+# `mise use -g aqua:WebAssembly/binaryen@130`) strips its names and other custom sections. Only stripping: wasm-opt's -O
+# levels made the module both bigger after brotli and slower to load (platform/web/README.md). Serve platform/web/web over
+# HTTP, e.g. `python3 -m http.server -d platform/web/web`, and open it in a browser with WebGPU.
+[doc('Build the browser build (the map and its tile workers in Web Workers) into platform/web/web/pkg')]
+web:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ {{quote(profile)}} == release ]]; then
+      # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
+      export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+    fi
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web
+    target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
+    pkg=platform/web/web/pkg
+    wasm-bindgen --target web --out-dir "$pkg" "$target/mln_web.wasm"
+    if [[ {{quote(profile)}} != dev ]]; then
+      command -v wasm-opt > /dev/null ||
+        { echo "error: wasm-opt not found: put binaryen 130 on the PATH (platform/web/README.md)" >&2; exit 1; }
+      wasm-opt --strip-debug --strip-producers --strip-target-features "$pkg/mln_web_bg.wasm" -o "$pkg/mln_web_bg.wasm"
+    fi
+
+# Offline, from the render suite's cache database. Needs Node 24, Playwright's Chromium (`npx playwright@1.61.1 install chromium`)
+# and lavapipe (VK_DRIVER_FILES); builds the native render-test runner. CI's web job runs `just profile=release web-check`.
+# Arguments go to platform/web/check/check.mjs, e.g. `just profile=release web-check --filter real-world`.
+[doc('Load render-suite views in headless Chromium and compare the frames with native renders (platform/web/README.md)')]
+[positional-arguments]
+web-check *args:  web
+    cargo build -p mln-rs-render-test --bin render-test
+    node platform/web/check/check.mjs "$@"
 
 # Report which C++ gtests have Rust ports (`// gtest: Group.Name` markers), e.g. `just gtest-parity --missing util`
 [positional-arguments]
 gtest-parity *args:
     python3 -I tools/gtest-parity/gtest_parity.py --cpp {{quote(cpp)}} "$@"
 
-# List which C++ files include which headers across selected module edges (PLAN.md, "Include cycles")
+# List which C++ files include which headers across selected module edges (tools/cycles)
 include-back-edges:
     python3 -I tools/cycles/back_edges.py {{quote(cpp)}}
 
-# Print the C++ core's module-level include graph and its cycles (PLAN.md, "Include cycles")
+# Print the C++ core's module-level include graph and its cycles (tools/cycles)
 include-graph:
     python3 -I tools/cycles/include_graph.py {{quote(cpp)}}
 
@@ -228,10 +281,19 @@ liberty-references filter='.':  _dev-shell
     done
 
 # The GLFW app is never released, and its tools/ binary is outside the packaged files.
+# The verify step serves the packaged crates to each other from a local registry, and Cargo
+# treats a registry crate's name and version as immutable: it keeps the source it unpacked
+# into CARGO_HOME and the build in target/ from the last run. Delete both, or a branch is
+# verified against an older branch's copy of the in-repo crates at the same version.
 [doc('Package every crate from its packaged sources as the release does (RELEASING.md), and compile every test target')]
 package:
+    rm -rf "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/mln-rs-* "${CARGO_TARGET_DIR:-target}"/debug/.fingerprint/mln-rs-*
     cargo package --workspace --locked --exclude mln-rs-glfw
     cargo test --workspace --locked --no-run
+
+# Fail when a file has more library panic sites or TODO(port) comments than tools/ratchet/baseline.toml; `--update` lowers it
+ratchet *args:
+    python3 -I tools/ratchet/ratchet.py {{args}}
 
 # Run the release workflow on main: publish the crates at the version in Cargo.toml (RELEASING.md)
 release:
@@ -265,7 +327,8 @@ update:
     cargo update
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
-[doc("Refresh the copies of maplibre-native's files in the packages' testdata/ (PORTING.md) from a checkout of it")]
+# The copies are from johncarmack1984/maplibre-native's maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe branch of maplibre/maplibre-native#4533 (phased/12h), with louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the sky branch of maplibre/maplibre-native#4534 merged in.
+[doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -301,16 +364,20 @@ _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
     {{dev_shell}} cargo llvm-cov --no-report --workspace
     cargo llvm-cov report --workspace {{report_args}}
 
-# The C++ repo's dev shell flake, used from a copy in .nix-shell: `nix develop path:<repo>` would copy the whole C++ working tree into the
-# store on every call. Nothing to do outside NixOS.
+# The dev shell flake (nix/flake.nix, which wraps the C++ repo's), used from a copy in .nix-shell: `nix develop path:<repo>` would copy
+# the whole working tree into the store on every call. Nothing to do outside NixOS.
 _dev-shell:
     #!/usr/bin/env bash
     set -euo pipefail
     [[ "{{nixos}}" == true ]] || exit 0
-    mkdir -p .nix-shell
-    for f in flake.nix flake.lock; do
-        cmp -s {{quote(cpp)}}/"$f" ".nix-shell/$f" || cp {{quote(cpp)}}/"$f" ".nix-shell/$f"
-    done
+    mkdir -p .nix-shell/cpp
+    cmp -s nix/flake.nix .nix-shell/flake.nix || cp nix/flake.nix .nix-shell/flake.nix
+    cmp -s {{quote(cpp)}}/flake.nix .nix-shell/cpp/flake.nix || cp {{quote(cpp)}}/flake.nix .nix-shell/cpp/flake.nix
+    # The wrapper's lock holds a copy of the C++ lock's nixpkgs: relock when that changes.
+    if ! cmp -s {{quote(cpp)}}/flake.lock .nix-shell/cpp/flake.lock; then
+        cp {{quote(cpp)}}/flake.lock .nix-shell/cpp/flake.lock
+        rm -f .nix-shell/flake.lock
+    fi
 
 # Ensure that a certain command is available
 [private]

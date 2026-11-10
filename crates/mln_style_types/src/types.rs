@@ -5,9 +5,10 @@
 // is an alias of `SymbolAnchorType` as in C++.
 
 use mln_util::define_enum;
+use serde::{Deserialize, Serialize};
 
 // TODO: should be in public source.hpp header
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SourceType {
     Vector,
@@ -21,7 +22,7 @@ pub enum SourceType {
     CustomMVTVector,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum VisibilityType {
     #[default]
@@ -29,7 +30,7 @@ pub enum VisibilityType {
     None,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum LineCapType {
     #[default]
@@ -38,7 +39,7 @@ pub enum LineCapType {
     Square,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum LineJoinType {
     #[default]
@@ -50,7 +51,7 @@ pub enum LineJoinType {
     FlipBevel,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum RasterResamplingType {
     #[default]
@@ -58,7 +59,7 @@ pub enum RasterResamplingType {
     Nearest,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum HillshadeIlluminationAnchorType {
     #[default]
@@ -66,7 +67,7 @@ pub enum HillshadeIlluminationAnchorType {
     Viewport,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum HillshadeMethodType {
     #[default]
@@ -77,7 +78,7 @@ pub enum HillshadeMethodType {
     Basic,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TranslateAnchorType {
     #[default]
@@ -85,7 +86,7 @@ pub enum TranslateAnchorType {
     Viewport,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum RotateAnchorType {
     #[default]
@@ -93,7 +94,7 @@ pub enum RotateAnchorType {
     Viewport,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum CirclePitchScaleType {
     #[default]
@@ -101,7 +102,7 @@ pub enum CirclePitchScaleType {
     Viewport,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SymbolPlacementType {
     #[default]
@@ -110,7 +111,7 @@ pub enum SymbolPlacementType {
     LineCenter,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SymbolZOrderType {
     #[default]
@@ -119,7 +120,7 @@ pub enum SymbolZOrderType {
     Source,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum AlignmentType {
     #[default]
@@ -128,7 +129,7 @@ pub enum AlignmentType {
     Auto,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TextJustifyType {
     #[default]
@@ -138,7 +139,7 @@ pub enum TextJustifyType {
     Right,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SymbolAnchorType {
     #[default]
@@ -155,7 +156,7 @@ pub enum SymbolAnchorType {
 
 pub type TextVariableAnchorType = SymbolAnchorType;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TextTransformType {
     #[default]
@@ -164,7 +165,7 @@ pub enum TextTransformType {
     Lowercase,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum IconTextFitType {
     #[default]
@@ -174,7 +175,7 @@ pub enum IconTextFitType {
     Height,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum TextWritingModeType {
     #[default]
@@ -182,7 +183,7 @@ pub enum TextWritingModeType {
     Vertical,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum LightAnchorType {
     #[default]

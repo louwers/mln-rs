@@ -29,6 +29,8 @@ use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 
+use mln_util::sync::{CondvarExt, MutexExt};
+
 use crate::scheduler::{self, Scheduler};
 use crate::timer::TimerHandle;
 
@@ -77,7 +79,7 @@ impl Core {
 
     fn push(&self, priority: Priority, task: Task) {
         {
-            let mut queues = self.queues.lock().unwrap();
+            let mut queues = self.queues.lock_unpoisoned();
             match priority {
                 Priority::High => queues.high_priority_queue.push_back(task),
                 Priority::Default => queues.default_queue.push_back(task),
@@ -91,33 +93,33 @@ impl Core {
     /// Wakes a blocking `run()` (what `uv_async_send` does for libuv).
     pub(crate) fn wake(&self) {
         {
-            let mut signalled = self.signal.lock().unwrap();
+            let mut signalled = self.signal.lock_unpoisoned();
             *signalled = true;
             self.condvar.notify_all();
         }
-        let waker = self.waker.lock().unwrap().clone();
+        let waker = self.waker.lock_unpoisoned().clone();
         if let Some(waker) = waker {
             waker();
         }
     }
 
     fn wait(&self) {
-        let mut signalled = self.signal.lock().unwrap();
+        let mut signalled = self.signal.lock_unpoisoned();
         while !*signalled {
-            signalled = self.condvar.wait(signalled).unwrap();
+            signalled = self.condvar.wait_unpoisoned(signalled);
         }
         *signalled = false;
     }
 
     /// `wait`, but returns at `deadline` at the latest.
-    fn wait_until(&self, deadline: std::time::Instant) {
-        let mut signalled = self.signal.lock().unwrap();
+    fn wait_until(&self, deadline: mln_util::time::Instant) {
+        let mut signalled = self.signal.lock_unpoisoned();
         while !*signalled {
-            let now = std::time::Instant::now();
+            let now = mln_util::time::Instant::now();
             if now >= deadline {
                 return;
             }
-            signalled = self.condvar.wait_timeout(signalled, deadline - now).unwrap().0;
+            signalled = self.condvar.wait_timeout_unpoisoned(signalled, deadline - now).0;
         }
         *signalled = false;
     }
@@ -125,7 +127,7 @@ impl Core {
     fn process(&self) {
         loop {
             let task = {
-                let mut queues = self.queues.lock().unwrap();
+                let mut queues = self.queues.lock_unpoisoned();
                 if let Some(task) = queues.high_priority_queue.pop_front() {
                     task
                 } else if let Some(task) = queues.default_queue.pop_front() {
@@ -139,7 +141,7 @@ impl Core {
     }
 
     fn remaining(&self) -> usize {
-        let queues = self.queues.lock().unwrap();
+        let queues = self.queues.lock_unpoisoned();
         queues.default_queue.len() + queues.high_priority_queue.len()
     }
 }
@@ -232,7 +234,7 @@ impl RunLoop {
     /// the loop with `run_once` on its own thread knows to run it. Timers
     /// don't wake: such a host runs the loop at least once a frame.
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
-        *self.inner.core.waker.lock().unwrap() = waker;
+        *self.inner.core.waker.lock_unpoisoned() = waker;
     }
 
     /// `uv_run(loop, UV_RUN_NOWAIT)`.
@@ -254,7 +256,9 @@ impl RunLoop {
         }
     }
 
-    /// `run()`: `uv_run(loop, UV_RUN_DEFAULT)` until `stop()`.
+    /// `run()`: `uv_run(loop, UV_RUN_DEFAULT)` until `stop()`. It blocks, so
+    /// a host that runs on the browser's event loop doesn't call it: it
+    /// drives the loop with `run_once` instead (see `set_waker`).
     pub fn run(&self) {
         let core = &self.inner.core;
         core.stopped.store(false, Ordering::SeqCst);
@@ -273,7 +277,7 @@ impl RunLoop {
     /// `uv__run_timers`: runs the timers that are due, earliest first (ties
     /// in start order). A callback may stop, restart or drop any timer.
     fn run_timers(&self) {
-        let now = std::time::Instant::now();
+        let now = mln_util::time::Instant::now();
         let mut due: Vec<Rc<TimerHandle>> = {
             let mut timers = self.inner.timers.borrow_mut();
             timers.retain(|t| t.strong_count() > 0);
@@ -289,7 +293,7 @@ impl RunLoop {
     }
 
     /// The earliest due time of this loop's running timers.
-    fn next_timer_due(&self) -> Option<std::time::Instant> {
+    fn next_timer_due(&self) -> Option<mln_util::time::Instant> {
         self.inner.timers.borrow().iter().filter_map(Weak::upgrade).filter_map(|t| t.due.get()).min()
     }
 

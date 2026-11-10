@@ -170,8 +170,7 @@ fn is_string_in_supported_script(input: &str) -> bool {
 
 /// `platform::uppercase` / `platform::lowercase` (platform/default
 /// string_stdlib.cpp, nunicode case mapping). nunicode writes invalid UTF-8
-/// for some 4-byte results; a Rust String holds U+FFFD there (see
-/// DEVIATIONS.md).
+/// for some 4-byte results; a Rust String holds U+FFFD there.
 fn uppercase(s: &str) -> String {
     nunicode::uppercase(s)
 }
@@ -675,6 +674,11 @@ impl Expression for CompoundExpression {
     }
 
     fn possible_outputs(&self) -> Vec<Option<Value>> {
+        // Port-only: "error" never outputs a value, as the `Error` it
+        // serializes from says.
+        if self.signature.name == "error" {
+            return Vec::new();
+        }
         vec![None]
     }
 

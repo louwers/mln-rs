@@ -104,6 +104,18 @@ impl<T: Clone> GridIndex<T> {
         self.estimated_elements_per_cell = value;
     }
 
+    /// Port-only: the inserted boxes, in insertion order. Inserting them
+    /// again into an empty index of the same size rebuilds this one.
+    pub fn box_elements(&self) -> &[(T, BBox)] {
+        &self.box_elements
+    }
+
+    /// Port-only: whether circles were inserted (`box_elements` doesn't
+    /// list them).
+    pub fn has_circles(&self) -> bool {
+        !self.circle_elements.is_empty()
+    }
+
     /// `insert(T&&, const BBox&)`.
     pub fn insert(&mut self, t: T, bbox: &BBox) {
         debug_assert!(self.box_elements.len() < u32::MAX as usize);

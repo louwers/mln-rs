@@ -17,6 +17,7 @@ use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style::layers::symbol_layer_impl::Impl as SymbolLayerImpl;
+use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
@@ -127,49 +128,49 @@ pub fn create_layout(
     parameters: &mut LayoutParameters<'_>,
     tile_layer: SourceLayer,
     layers: &[Immutable<dyn LayerProperties>],
-) -> Option<Box<dyn Layout>> {
+) -> Result<Option<Box<dyn Layout>>, ExceptionPtr> {
     debug_assert!(!layers.is_empty());
     debug_assert!(parameters.bucket_parameters.layer_type.layout == layer_type_info::Layout::Required);
     let type_info = parameters.bucket_parameters.layer_type;
     if std::ptr::eq(type_info, CircleLayerImpl::static_type_info()) {
         // CircleLayerFactory::createLayout
-        return Some(Box::new(CircleLayout::with_source_layer(parameters.bucket_parameters, layers, tile_layer)));
+        return Ok(Some(Box::new(CircleLayout::with_source_layer(parameters.bucket_parameters, layers, tile_layer)?)));
     }
     if std::ptr::eq(type_info, FillLayerImpl::static_type_info()) {
         // FillLayerFactory::createLayout: the FillSortKey instantiation
         // unless the leader's sort key is undefined.
         let sorted = fill_layout_is_sorted(&layers[0]);
-        return Some(Box::new(PatternLayout::<FillLayoutSpec>::with_source_layer(
+        return Ok(Some(Box::new(PatternLayout::<FillLayoutSpec>::with_source_layer(
             parameters, layers, tile_layer, sorted,
-        )));
+        )?)));
     }
     if std::ptr::eq(type_info, LineLayerImpl::static_type_info()) {
         // LineLayerFactory::createLayout
         let sorted = line_layout_is_sorted(&layers[0]);
-        return Some(Box::new(PatternLayout::<LineLayoutSpec>::with_source_layer(
+        return Ok(Some(Box::new(PatternLayout::<LineLayoutSpec>::with_source_layer(
             parameters, layers, tile_layer, sorted,
-        )));
+        )?)));
     }
     if std::ptr::eq(type_info, FillExtrusionLayerImpl::static_type_info()) {
         // conformance: FillExtrusionLayerFactory::createLayout (no sort key)
-        return Some(Box::new(PatternLayout::<FillExtrusionLayoutSpec>::with_source_layer(
+        return Ok(Some(Box::new(PatternLayout::<FillExtrusionLayoutSpec>::with_source_layer(
             parameters, layers, tile_layer, false,
-        )));
+        )?)));
     }
     if std::ptr::eq(type_info, SymbolLayerImpl::static_type_info()) {
         // symbols: SymbolLayerFactory::createLayout
         let bucket_parameters = parameters.bucket_parameters;
-        return Some(Box::new(crate::layout::symbol_layout::SymbolLayout::new(
+        return Ok(Some(Box::new(crate::layout::symbol_layout::SymbolLayout::new(
             bucket_parameters,
             layers,
             tile_layer,
             parameters,
-        )));
+        )?)));
     }
     let _ = tile_layer;
     Log::error(
         Event::Render,
         format!("TODO(port): no layout for layer type '{}'", parameters.bucket_parameters.layer_type.type_),
     );
-    None
+    Ok(None)
 }
