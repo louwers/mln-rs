@@ -1,5 +1,4 @@
-// Ports src/mln/renderer/possibly_evaluated_property_value.hpp (a cut point;
-// see PLAN.md, "Crate map").
+// Ports src/mln/renderer/possibly_evaluated_property_value.hpp (a cut point of the C++ include cycle).
 
 use std::collections::BTreeSet;
 

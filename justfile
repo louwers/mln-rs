@@ -188,11 +188,11 @@ web-check *args:  web
 gtest-parity *args:
     python3 -I tools/gtest-parity/gtest_parity.py --cpp {{quote(cpp)}} "$@"
 
-# List which C++ files include which headers across selected module edges (PLAN.md, "Include cycles")
+# List which C++ files include which headers across selected module edges (tools/cycles)
 include-back-edges:
     python3 -I tools/cycles/back_edges.py {{quote(cpp)}}
 
-# Print the C++ core's module-level include graph and its cycles (PLAN.md, "Include cycles")
+# Print the C++ core's module-level include graph and its cycles (tools/cycles)
 include-graph:
     python3 -I tools/cycles/include_graph.py {{quote(cpp)}}
 
@@ -327,6 +327,7 @@ update:
     cargo update
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
+# The copies are from louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs).
 [doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
     #!/usr/bin/env bash

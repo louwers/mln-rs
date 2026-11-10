@@ -1,5 +1,5 @@
 //! Cut-point copies of src/mln/map headers that the property system needs
-//! (see PLAN.md, "Crate map").
+//! (cut points of the C++ include cycle).
 
 pub mod camera;
 pub mod zoom_history;

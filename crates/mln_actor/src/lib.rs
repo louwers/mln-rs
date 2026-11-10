@@ -1,6 +1,5 @@
 //! Ports `src/mln/actor` and `util/{run_loop,async_task,thread,thread_pool}`
-//! (default platform). Std threads and channels, no async runtime (see
-//! PLAN.md).
+//! (default platform). Std threads and channels, no async runtime.
 //!
 //! Port-only: a host with one thread (the browser) installs a
 //! [`CooperativeScheduler`] at startup

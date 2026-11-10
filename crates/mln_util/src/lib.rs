@@ -1,7 +1,7 @@
 //! Ports `src/mln/util` + `include/mln/util`.
 //!
-//! Module-per-file, mirroring the C++ tree. Files not yet ported are listed
-//! in PLAN.md phase 0/3 and arrive with their first users.
+//! Module-per-file, mirroring the C++ tree. Files not yet ported arrive with
+//! their first users.
 
 pub mod color;
 pub mod constants;

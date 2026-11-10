@@ -257,7 +257,7 @@ pub fn parse_arguments(args: &[String]) -> Result<Arguments, i32> {
         log::error(
             Event::General,
             "TODO(port): --update is not supported: the port never writes baselines into \
-             ../maplibre-native (add alternate expectations by hand, see PLAN.md)",
+             ../maplibre-native (add an alternate expectation by hand for a justified difference)",
         );
         return Err(1);
     }

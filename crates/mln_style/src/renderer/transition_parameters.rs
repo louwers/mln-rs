@@ -1,5 +1,4 @@
-// Ports src/mln/renderer/transition_parameters.hpp (a cut point; see
-// PLAN.md, "Crate map").
+// Ports src/mln/renderer/transition_parameters.hpp (a cut point of the C++ include cycle).
 
 use mln_util::chrono::TimePoint;
 

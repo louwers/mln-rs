@@ -1,5 +1,5 @@
-//! Ports the `src/mln/util` files that belong to the renderer (PLAN.md:
-//! `util/tile_cover` lives in mln_renderer).
+//! Ports the `src/mln/util` files that belong to the renderer
+//! (`util/tile_cover`).
 
 pub mod tile_cover;
 pub mod tile_cover_impl;

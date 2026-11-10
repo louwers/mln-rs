@@ -1,6 +1,5 @@
 // Ports src/mln/renderer/property_evaluation_parameters.hpp. It lives in
-// mln_style because style/properties.hpp needs it (a cut point; see
-// PLAN.md, "Crate map").
+// mln_style because style/properties.hpp needs it (a cut point of the C++ include cycle).
 
 use std::collections::BTreeSet;
 use std::sync::Arc;

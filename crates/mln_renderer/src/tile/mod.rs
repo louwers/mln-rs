@@ -1,5 +1,5 @@
-//! Ports the high files of `src/mln/tile` (PLAN.md, M3: they include the
-//! renderer, so they live here; `mln_tile` holds the tile data decoding).
+//! Ports the high files of `src/mln/tile` (they include the renderer, so
+//! they live here; `mln_tile` holds the tile data decoding).
 //!
 //! TODO(port): raster-dem tiles, custom geometry tiles.
 

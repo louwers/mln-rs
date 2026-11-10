@@ -1,5 +1,4 @@
-// Ports src/mln/renderer/data_driven_property_evaluator.hpp (a cut point;
-// see PLAN.md, "Crate map").
+// Ports src/mln/renderer/data_driven_property_evaluator.hpp (a cut point of the C++ include cycle).
 
 use crate::expression::{Dependency, EvaluationContext, ValueConverter};
 use crate::property_expression::PropertyExpression;

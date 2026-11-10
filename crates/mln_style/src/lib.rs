@@ -3,7 +3,9 @@
 //! Impl idiom, the property system and the typed `style/conversion`
 //! converters. Also holds cut-point copies of a few renderer/map headers that
 //! style/properties.hpp includes (`renderer`, `map`) and the style half of
-//! the layer manager (`layermanager`); see PLAN.md, "Crate map".
+//! the layer manager (`layermanager`). The C++ modules include each other in
+//! one cycle, which crates can't; these cut points are where the port breaks
+//! it.
 //!
 //! Path guide (C++ -> Rust):
 //! - `style::Style`, `Style::Impl` -> `style::Style`, `style::Impl`

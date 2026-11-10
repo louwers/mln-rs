@@ -78,8 +78,7 @@ vector_tile = { package = "mln-rs-vector-tile", path = "vendor/vector-tile", ver
 wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.10" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
-# add a crate when nothing in the C++ core has to be ported for it (see
-# PLAN.md, "Dependency map").
+# add a crate when nothing in the C++ core has to be ported for it.
 #
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }

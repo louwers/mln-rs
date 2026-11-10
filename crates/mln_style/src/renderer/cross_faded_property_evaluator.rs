@@ -1,5 +1,4 @@
-// Ports src/mln/renderer/cross_faded_property_evaluator.hpp + .cpp (a cut
-// point; see PLAN.md, "Crate map").
+// Ports src/mln/renderer/cross_faded_property_evaluator.hpp + .cpp (a cut point of the C++ include cycle).
 
 use mln_util::interpolate::Interpolate;
 use serde::{Deserialize, Serialize};
