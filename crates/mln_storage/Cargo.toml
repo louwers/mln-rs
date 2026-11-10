@@ -36,10 +36,16 @@ default = ["sqlite"]
 # C++ MainResourceLoader without them).
 sqlite = ["dep:rusqlite"]
 
-# ureq's TLS (rustls, ring) doesn't build for wasm (the browser), where the
-# host supplies the HTTP transport instead.
+# ureq's TLS (rustls, ring) doesn't build for wasm, where the browser's fetch
+# is the transport.
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 ureq.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys.workspace = true
 
 # Ports test/util/http_timeout.test.cpp (marker `// gtest: Group.Name`).
 [[test]]

@@ -1,15 +1,10 @@
 // Port-only: the map's image decoding, behind a decoder that a host can set.
 //
-// C++ links one `decodeImage` per platform (platform/default's libpng,
-// libjpeg and libwebp readers, darwin's CoreGraphics, android's
-// BitmapFactory) and calls it where an image arrives, synchronously: in the
-// raster and raster-dem tile workers, the sprite parser and image sources.
-// Here those call `decode`, which hands the bytes to the decoder that
-// `set_decoder` set, or else decodes them with `decode_image` (image.rs) on
-// the calling thread before it returns. A host whose decoder answers later
-// sets one: the browser's (`createImageBitmap`, platform/web), which keeps
-// the Rust decoders out of its wasm module and answers from its event loop,
-// on the thread that asked.
+// C++ links one `decodeImage` per platform and calls it synchronously where
+// an image arrives. Here those places call `decode`, which hands the bytes to
+// the platform's decoder: `decode_image` on the calling thread natively, and
+// the browser's on wasm, which answers later from the event loop, on the
+// thread that asked.
 
 use std::sync::{Arc, Mutex};
 
@@ -36,15 +31,14 @@ pub trait ImageDecoder: Send + Sync {
 static DECODER: Mutex<Option<Arc<dyn ImageDecoder>>> = Mutex::new(None);
 
 /// Sets the decoder `decode` uses from now on, instead of the default
-/// (`decode_image` on the calling thread): for a host with decoders of its
-/// own, such as a browser's.
+/// (`decode_image` natively, the browser's on wasm): for a host with decoders
+/// of its own.
 pub fn set_decoder(decoder: Arc<dyn ImageDecoder>) {
     *DECODER.lock_unpoisoned() = Some(decoder);
 }
 
-/// `decodeImage(data)`, handing the result to `done`: before returning,
-/// with the default decoder, or later on the calling thread, with a
-/// decoder that `set_decoder` set. Data of no type `decode_image`
+/// `decodeImage(data)`, handing the result to `done`: before returning, or
+/// later on the calling thread. Data of no type `decode_image`
 /// recognizes fails before returning, with its error.
 pub fn decode(data: &[u8], done: impl FnOnce(DecodeResult) + 'static) {
     let Some(kind) = image_type(data) else {
@@ -63,11 +57,9 @@ fn default_decode(data: &[u8], _kind: ImageType, done: impl FnOnce(DecodeResult)
     done(crate::image::decode_image(data));
 }
 
-/// The Rust decoders stay out of a wasm module that doesn't call
-/// `decode_image` itself, so images fail until a host sets a decoder.
 #[cfg(target_family = "wasm")]
-fn default_decode(_data: &[u8], kind: ImageType, done: impl FnOnce(DecodeResult)) {
-    done(Err(format!("no image decoder for {kind:?} (see decoder::set_decoder)")));
+fn default_decode(data: &[u8], kind: ImageType, done: impl FnOnce(DecodeResult) + 'static) {
+    crate::browser_decoder::BrowserDecoder.decode(data, kind, Box::new(done));
 }
 
 #[cfg(test)]

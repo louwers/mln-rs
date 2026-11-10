@@ -1,11 +1,11 @@
-//! HTTP through the browser's fetch (the map worker's): the
-//! `HttpTransport` of the map's file sources. The browser's cache does the
-//! caching.
+//! The browser's `fetch` as the `HttpTransport`. The browser's HTTP cache does
+//! the caching.
 
-use mln_storage::http_file_source::{self, HttpTransport, Transfer, TransferRequest};
-use mln_storage::response::{Error, Reason};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+use crate::http_file_source::{self, HttpTransport, Transfer, TransferRequest};
+use crate::response::{Error, Reason};
 
 #[wasm_bindgen]
 extern "C" {
@@ -14,7 +14,7 @@ extern "C" {
     fn global_fetch(request: &web_sys::Request) -> js_sys::Promise;
 }
 
-pub struct FetchTransport;
+pub(crate) struct FetchTransport;
 
 impl HttpTransport for FetchTransport {
     fn start(&self, request: TransferRequest) {

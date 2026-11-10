@@ -1374,8 +1374,12 @@ version = "0.0.10"
 dependencies = [
  "flate2",
  "image-webp",
+ "js-sys",
  "mln-rs-util",
  "png",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -1533,6 +1537,7 @@ dependencies = [
 name = "mln-rs-storage"
 version = "0.0.10"
 dependencies = [
+ "js-sys",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-geojson",
@@ -1546,6 +1551,9 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -1733,7 +1741,6 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-gestures",
  "mln-rs-gfx",
- "mln-rs-image",
  "mln-rs-map",
  "mln-rs-renderer",
  "mln-rs-storage",

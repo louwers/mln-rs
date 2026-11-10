@@ -14,14 +14,13 @@ use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
-use mln_storage::{ClientOptions, ResourceOptions, http_file_source};
+use mln_storage::{ClientOptions, ResourceOptions};
 use mln_util::LatLng;
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
 use mln_webgpu::SurfaceBackend;
 use wasm_bindgen::prelude::*;
 
-use crate::fetch::FetchTransport;
 use crate::shaper::{self, ShaperModuleEngine};
 use crate::{cooperative_scheduler, deadline, js_error};
 
@@ -179,7 +178,6 @@ impl WebMap {
             return Err(js_error("the map needs at least one tile worker"));
         }
         let scheduler = cooperative_scheduler();
-        http_file_source::set_transport(Arc::new(FetchTransport));
         shaper::set_loader(load_shaper);
         font_face_engine::set_font_face_engine(Arc::new(ShaperModuleEngine));
 

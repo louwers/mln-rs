@@ -6,7 +6,7 @@
 > instead: it re-exports this crate as `mln_rs::mln_image`.
 
 The image codecs (`decodeImage`, `encodePNG`), ported from C++'s `platform/default`, and `decoder`, through which
-the map decodes images and a host (the browser) can set a decoder of its own.
+the map decodes images: with the Rust decoders natively and the browser's on wasm.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)

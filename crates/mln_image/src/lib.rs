@@ -8,6 +8,8 @@
 //! Port-only: `decoder::decode` is how the map's code decodes images, with
 //! `decode_image` unless the host sets a decoder of its own (the browser's).
 
+#[cfg(target_family = "wasm")]
+mod browser_decoder;
 pub mod decoder;
 pub mod image;
 pub mod png_reader;

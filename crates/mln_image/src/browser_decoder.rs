@@ -1,26 +1,22 @@
-//! Images through the browser's decoders: the decoder of
-//! mln_image's `decoder` in every instance (`start`), so
-//! that the Rust PNG and WebP decoders stay out of the wasm module. The
-//! map's Web Worker decodes sprites and image sources with it, and the tile
-//! workers' Web Workers their raster and raster-dem tiles.
+//! The browser's decoders as the `ImageDecoder`, so that the Rust PNG and
+//! WebP decoders stay out of the wasm module.
 //!
-//! `createImageBitmap` decodes without premultiplying or converting colours
-//! (as libpng and libwebp decode for C++: no gamma, sRGB or ICC profile
-//! conversions), and its straight RGBA8 texels are read back through a
-//! `VideoFrame` or a canvas (`read_bitmap`), then premultiplied as the Rust
-//! decoders premultiply them (`util::premultiply`). The decoding and the
-//! readback are Orbis's (github.com/sargunv/orbis, crates/orb-web's host:
-//! `decode_bitmap`, `read_bitmap`, `readFrame` and `read_canvas`).
+//! `createImageBitmap` decodes without premultiplying or converting colours,
+//! as libpng and libwebp decode for C++, and its straight RGBA8 texels are
+//! read back through a `VideoFrame` or a canvas (`read_bitmap`), then
+//! premultiplied as the Rust decoders premultiply them. The decoding and the
+//! readback are Orbis's (github.com/sargunv/orbis, crates/orb-web's host).
 
 use js_sys::{Reflect, Uint8Array};
-use mln_image::decoder::{DecodeDone, ImageDecoder};
-use mln_image::image::ImageType;
 use mln_util::image::{PremultipliedImage, UnassociatedImage};
 use mln_util::logging::{Event, Log};
 use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+use crate::decoder::{DecodeDone, ImageDecoder};
+use crate::image::ImageType;
 
 #[wasm_bindgen]
 extern "C" {
@@ -29,7 +25,7 @@ extern "C" {
     fn create_image_bitmap(image: &web_sys::Blob, options: &js_sys::Object) -> Result<js_sys::Promise, JsValue>;
 }
 
-pub struct BrowserDecoder;
+pub(crate) struct BrowserDecoder;
 
 impl ImageDecoder for BrowserDecoder {
     fn decode(&self, data: &[u8], kind: ImageType, done: DecodeDone) {

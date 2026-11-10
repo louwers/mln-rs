@@ -19,5 +19,11 @@ image-webp.workspace = true
 mln_util.workspace = true
 png.workspace = true
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys.workspace = true
+
 [lints]
 workspace = true

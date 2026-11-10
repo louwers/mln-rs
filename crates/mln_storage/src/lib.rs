@@ -15,6 +15,8 @@ pub mod asset_file_source;
 pub mod async_request;
 #[cfg(feature = "sqlite")]
 pub mod database_file_source;
+#[cfg(target_family = "wasm")]
+mod fetch_transport;
 pub mod file_source;
 pub mod file_source_manager;
 pub mod file_source_request;

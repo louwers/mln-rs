@@ -5,7 +5,7 @@
 //!
 //! - In the map's Web Worker, `WebMap` (map.rs): the map, its renderer
 //!   (wgpu's WebGPU backend, into the page's canvas as an OffscreenCanvas)
-//!   and its file sources (fetch, fetch.rs). Each animation frame runs the
+//!   and its file sources. Each animation frame runs the
 //!   RunLoop, draws, and runs the cooperative scheduler's tasks until the
 //!   frame's budget is spent; between frames, the RunLoop and the scheduler
 //!   wake the worker to run what arrives (`WebMap::tick`).
@@ -19,8 +19,6 @@
 //!   (shaper.rs). Only the map's Web Worker loads it, and maps without font
 //!   faces never do.
 //!
-//! Every instance decodes images with the browser's decoders (image.rs).
-//!
 //! The page's thread runs no wasm: it only starts the Web Workers and
 //! forwards to the map's.
 //!
@@ -32,8 +30,6 @@
 
 #![cfg(target_arch = "wasm32")]
 
-mod fetch;
-mod image;
 mod map;
 mod shaper;
 mod worker;
@@ -44,7 +40,6 @@ use std::time::Duration;
 pub use map::WebMap;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_actor::scheduler;
-use mln_image::decoder;
 use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::time::Instant;
@@ -58,7 +53,6 @@ fn start() {
     std::panic::set_hook(Box::new(|info| web_sys::console::error_1(&JsValue::from_str(&info.to_string()))));
     Log::set_observer(Box::new(ConsoleLog));
     scheduler::install_cooperative(Arc::new(CooperativeScheduler::new()));
-    decoder::set_decoder(Arc::new(image::BrowserDecoder));
 }
 
 /// The scheduler `start` installed.
