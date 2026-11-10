@@ -2,9 +2,11 @@
 
 use mln_map::{MomentumDecay, MomentumSnap};
 
-/// How the recognizer turns input into camera moves. The defaults are GL JS's
-/// handlers' rates and thresholds, and maplibre-native-ffi's momentum
-/// defaults.
+/// How the recognizer turns input into camera moves. The defaults are
+/// maplibre-native-ffi's browser demo's rates where it has the gesture, GL
+/// JS's handlers' rates and thresholds where it doesn't, and ffi's C API
+/// momentum defaults. The crate's README compares each with ffi, Orbis,
+/// Compose and GL JS.
 ///
 /// Distances are in logical pixels and times in milliseconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -15,7 +17,8 @@ pub struct GestureOptions {
     /// between them. A two-finger tap's fingers may move this far.
     pub tap_tolerance: f64,
     pub tap_interval: f64,
-    /// Degrees of bearing per pixel of a sideways rotate drag.
+    /// Degrees of bearing per pixel of a sideways rotate drag: ffi's demo's
+    /// 0.5 (GL JS, Compose and Orbis turn 0.8).
     pub drag_rotate: f64,
     /// Degrees of pitch per pixel of an upward rotate drag or two-finger
     /// drag.
@@ -26,10 +29,12 @@ pub struct GestureOptions {
     pub pinch_zoom_threshold: f64,
     /// Pixels along the fingers' circle a twist travels before it rotates.
     pub rotate_threshold: f64,
-    /// Wheel zoom rates per pixel of delta: for a mouse wheel's large steps,
-    /// and for trackpads and small steps.
-    pub wheel_zoom_rate: f64,
-    pub trackpad_zoom_rate: f64,
+    /// Zoom levels per pixel of scroll, toward the user zooming in: ffi's
+    /// demo's and Compose's 1/300.
+    pub scroll_zoom_rate: f64,
+    /// The same with Ctrl held, as a trackpad pinch sends: ffi's demo's
+    /// 1/100.
+    pub pinch_zoom_rate: f64,
     /// Keyboard steps: pixels of pan, degrees of bearing, degrees of pitch.
     pub key_pan: f64,
     pub key_bearing: f64,
@@ -56,13 +61,13 @@ impl GestureOptions {
         click_tolerance: 3.0,
         tap_tolerance: 30.0,
         tap_interval: 500.0,
-        drag_rotate: 0.8,
+        drag_rotate: 0.5,
         drag_pitch: 0.5,
         tap_drag_zoom: 1.0 / 128.0,
         pinch_zoom_threshold: 0.1,
         rotate_threshold: 25.0,
-        wheel_zoom_rate: 1.0 / 450.0,
-        trackpad_zoom_rate: 1.0 / 100.0,
+        scroll_zoom_rate: 1.0 / 300.0,
+        pinch_zoom_rate: 1.0 / 100.0,
         key_pan: 100.0,
         key_bearing: 15.0,
         key_pitch: 10.0,

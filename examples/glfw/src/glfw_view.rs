@@ -430,8 +430,10 @@ fn log_error(result: Result<(), String>) {
     }
 }
 
-/// A wheel notch in pixels (see `on_scroll`): 25 of GL JS's wheel steps.
-const WHEEL_NOTCH_PX: f64 = 25.0 * 4.000_244_140_625;
+/// A wheel notch in pixels (see `on_scroll`): what Chrome reports for one on
+/// Linux and Windows, which zooms maplibre-native-ffi's browser demo, and the
+/// recognizer, a third of a level.
+const WHEEL_NOTCH_PX: f64 = 100.0;
 
 /// The recognizer's modifiers for GLFW's.
 fn modifiers(mods: glfw::Modifiers) -> Modifiers {
@@ -728,11 +730,10 @@ impl ViewState {
 
     /// `onScroll`
     fn on_scroll(&mut self, x_offset: f64, y_offset: f64, time: f64) {
-        // Port: the recognizer tells wheels from trackpads as GL JS does. A
-        // wheel notch is a whole offset (1.0): sent as 100 px, a multiple of
-        // GL JS's wheel step, so it reads as a wheel, as a browser's notch
-        // does. Fractional offsets are a trackpad or a smooth wheel, which
-        // GLFW scales to a tenth of a pixel (Cocoa, Wayland).
+        // Port: the recognizer zooms by a scroll's pixels. A wheel notch is a
+        // whole offset (1.0): sent as a browser's notch, 100 px. Fractional
+        // offsets are a trackpad or a smooth wheel, which GLFW scales to a
+        // tenth of a pixel (Cocoa, Wayland).
         let scale = |offset: f64| {
             if offset.fract() == 0.0 { offset * WHEEL_NOTCH_PX } else { offset * 10.0 }
         };

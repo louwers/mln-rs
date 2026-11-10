@@ -160,12 +160,14 @@ fn dragging_pans_and_glides_on() {
     rig.up(1, 500.0, 300.0);
     assert!(!rig.camera.is_gesture_in_progress());
     let frames = rig.settle();
-    // 10 px every 32 ms is 312.5 px/s; the pan friction (half-life 140 ms,
-    // stopping at 10 px/s) glides (312.5 − 10) / (ln 2 / 0.14 s) = 61.1 px
-    // over ln(31.25) / (ln 2 / 0.14 s) = 695 ms.
-    assert!((42..=45).contains(&frames), "momentum runs for a while: {frames}");
+    // 10 px every 32 ms, released a frame after the last move: the window
+    // starts at the move 112 ms before the release, 30 px back, so
+    // 267.9 px/s, as ffi's demo averages it. The pan friction (half-life
+    // 140 ms, stopping at 10 px/s) glides (267.9 − 10) / (ln 2 / 0.14 s) =
+    // 52.1 px over ln(26.79) / (ln 2 / 0.14 s) = 664 ms.
+    assert!((40..=43).contains(&frames), "momentum runs for a while: {frames}");
     let after = rig.project(ground);
-    let glide = 302.5 / (std::f64::consts::LN_2 / 0.14);
+    let glide = (30.0 / 0.112 - 10.0) / (std::f64::consts::LN_2 / 0.14);
     assert!((after.x - 500.0 - glide).abs() < 0.01, "and carries on in the same direction: {after:?}");
     assert!((after.y - 300.0).abs() < 1e-6);
     assert!(rig.input.take_events().is_empty(), "a drag isn't a click");
@@ -293,59 +295,49 @@ fn tap_and_drag_zooms() {
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
 }
 
+fn scroll(at: ScreenCoordinate, y: f64, unit: WheelUnit, modifiers: Modifiers) -> Input {
+    Input::Wheel { position: at, delta: p(0.0, y), unit, modifiers }
+}
+
 #[test]
-fn wheels_zoom_smoothly_and_trackpads_at_once() {
+fn scrolling_zooms_at_once_at_a_fixed_rate() {
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     let at = p(100.0, 100.0);
     let ground = rig.unproject(at);
-    // One notch of a mouse wheel, toward the user: zoom in.
-    let wheel = |y: f64| Input::Wheel {
-        position: at,
-        delta: p(0.0, y),
-        unit: WheelUnit::Pixel,
-        modifiers: Modifiers::default(),
-    };
-    rig.send(wheel(-25.0 * WHEEL_STEP));
-    assert_eq!(rig.zoom(), zoom, "eased, not immediate");
-    let frames = rig.settle();
-    assert!((11..=13).contains(&frames), "200 ms: {frames}");
-    assert!(rig.zoom() > zoom + 0.1);
+    // A mouse wheel's notch toward the user, 100 px: a third of a level
+    // in, at once, around the pointer.
+    rig.send(scroll(at, -100.0, WheelUnit::Pixel, Modifiers::default()));
+    assert!((rig.zoom() - (zoom + 1.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
     let under = rig.project(ground);
     assert!(distance(under, at) < 1e-6, "{under:?}");
-
-    // A trackpad's small deltas apply at once and hold the gesture until
-    // they stop.
-    let before = rig.zoom();
-    rig.now += 1000.0;
-    rig.send(wheel(2.0));
-    assert!(rig.zoom() < before);
+    // The scroll holds the gesture until it stops.
     assert!(rig.camera.is_gesture_in_progress());
     assert!(rig.frame());
-    assert!(rig.camera.is_gesture_in_progress());
     rig.settle();
     assert!(!rig.camera.is_gesture_in_progress());
+
+    // Three lines are 120 px; a pinch (Ctrl) zooms three times as fast.
+    let zoom = rig.zoom();
+    rig.send(scroll(at, 3.0, WheelUnit::Line, Modifiers::default()));
+    assert!((rig.zoom() - (zoom - 0.4)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+    let zoom = rig.zoom();
+    rig.send(scroll(at, -10.0, WheelUnit::Pixel, ctrl));
+    assert!((rig.zoom() - (zoom + 0.1)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
 #[test]
-fn wheel_steps_add_to_the_zoom_they_ease_to() {
+fn a_slow_trackpad_scroll_zooms_by_its_pixels() {
+    // GL JS's scroll zoom read small, slow deltas as a trackpad and zoomed
+    // them at 2σ(px / 100), about 0.0072 levels a pixel: twice ffi's demo.
     let mut rig = Rig::new();
     let zoom = rig.zoom();
-    let wheel = Input::Wheel {
-        position: p(400.0, 300.0),
-        delta: p(0.0, -25.0 * WHEEL_STEP),
-        unit: WheelUnit::Pixel,
-        modifiers: Modifiers::default(),
-    };
-    rig.send(wheel);
-    rig.settle();
-    let one = rig.zoom() - zoom;
-    rig.now += 1000.0;
-    rig.send(wheel);
-    rig.frame();
-    rig.send(wheel);
-    rig.settle();
-    assert!((rig.zoom() - (zoom + 3.0 * one)).abs() < 1e-9, "{} vs {}", rig.zoom() - zoom, 3.0 * one);
+    for _ in 0..10 {
+        rig.now += 16.0;
+        rig.send(scroll(p(400.0, 300.0), -2.0, WheelUnit::Pixel, Modifiers::default()));
+    }
+    assert!((rig.zoom() - (zoom + 20.0 / 300.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
 #[test]
@@ -381,33 +373,73 @@ fn input_interrupts_animations() {
     assert!(rig.camera.in_transition());
 }
 
+/// The pan friction's glide from `speed` px/s: (v − 10 px/s) / (ln 2 / 140 ms).
+fn glide(speed: f64) -> f64 {
+    (speed - 10.0) / (std::f64::consts::LN_2 / 0.14)
+}
+
 #[test]
-fn flinging_a_glide_again_adds_its_speed() {
+fn flinging_a_glide_again_starts_from_the_release() {
     let mut rig = Rig::new();
     let alone = rig.fling(100.0, 10.0);
-    // 10 px per 16 ms is 625 px/s: (625 − 10) / (ln 2 / 0.14 s) = 124 px.
-    assert!((alone - 615.0 / (std::f64::consts::LN_2 / 0.14)).abs() < 0.01, "{alone}");
+    // 10 px per 16 ms is 625 px/s.
+    assert!((alone - glide(625.0)).abs() < 0.01, "{alone}");
 
-    // Caught 100 ms into a glide and flung again the same way, the second
-    // glide starts with what the first had left.
+    // Caught 100 ms into each glide and flung again the same way, four
+    // times, the last glide is still the release's own: Compose and Orbis
+    // added the caught speed, so repeated flicks compounded it.
     let mut rig = Rig::new();
+    for _ in 0..4 {
+        rig.down(1, PointerKind::Mouse, 100.0, 300.0);
+        for i in 1..=8 {
+            rig.now += 16.0;
+            rig.to(1, 100.0 + 10.0 * f64::from(i), 300.0);
+        }
+        rig.up(1, 180.0, 300.0);
+        for _ in 0..6 {
+            rig.frame();
+        }
+    }
+    let again = rig.fling(300.0, 10.0);
+    assert!((again - alone).abs() < 0.01, "{again} vs {alone}");
+}
+
+#[test]
+fn braking_before_the_release_still_glides_forward() {
+    // 50 px in 16 ms, then 2 px more 8 ms later, released 1 ms after. A
+    // least-squares quadratic read that as −2750 px/s, a glide backwards;
+    // the average is 52 px in 25 ms.
+    let mut rig = Rig::new();
+    let ground = rig.unproject(p(100.0, 300.0));
     rig.down(1, PointerKind::Mouse, 100.0, 300.0);
-    for i in 1..=8 {
-        rig.now += 16.0;
-        rig.to(1, 100.0 + 10.0 * f64::from(i), 300.0);
-    }
-    rig.up(1, 180.0, 300.0);
-    for _ in 0..6 {
-        rig.frame();
-    }
-    let boosted = rig.fling(300.0, 10.0);
-    assert!(boosted > alone * 1.5, "{boosted} vs {alone}");
+    rig.now += 16.0;
+    rig.to(1, 150.0, 300.0);
+    rig.now += 8.0;
+    rig.to(1, 152.0, 300.0);
+    rig.now += 1.0;
+    rig.up(1, 152.0, 300.0);
+    rig.settle();
+    let moved = rig.project(ground).x - 152.0;
+    assert!((moved - glide(52.0 / 0.025)).abs() < 0.01, "{moved}");
+}
 
-    // Flung back the other way, it starts from rest.
+#[test]
+fn a_short_flick_glides_at_its_average_speed() {
+    // Speeding up, x = t² / 60 px over 60 ms: 60 px in 60 ms is 1000 px/s,
+    // though the final slope is 2000 px/s, which a least-squares quadratic
+    // reads.
     let mut rig = Rig::new();
-    rig.fling(100.0, 10.0);
-    let back = rig.fling(600.0, -10.0);
-    assert!((back + alone).abs() < 0.01, "{back}");
+    let ground = rig.unproject(p(100.0, 300.0));
+    rig.down(1, PointerKind::Mouse, 100.0, 300.0);
+    for i in 1..=6 {
+        let t = 10.0 * f64::from(i);
+        rig.now += 10.0;
+        rig.to(1, 100.0 + t * t / 60.0, 300.0);
+    }
+    rig.up(1, 160.0, 300.0);
+    rig.settle();
+    let moved = rig.project(ground).x - 160.0;
+    assert!((moved - glide(1000.0)).abs() < 0.01, "{moved}");
 }
 
 #[test]

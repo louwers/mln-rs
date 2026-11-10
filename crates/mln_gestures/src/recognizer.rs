@@ -1,11 +1,9 @@
 //! The gesture recognizers for one map, ported from Orbis's orb-camera
 //! `input/mod.rs` onto MapLibre Native's camera commands.
 
-use std::cell::Cell;
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
-use std::rc::Rc;
 
-use mln_map::{AnimationOptions, CameraMomentum, CameraOptions, MomentumDecay, MomentumVelocity};
+use mln_map::{AnimationOptions, CameraMomentum, CameraOptions, MomentumDecay};
 use mln_util::UnitBezier;
 use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
@@ -15,12 +13,11 @@ use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PointerKind, Whe
 use crate::options::GestureOptions;
 use crate::velocity::VelocityTracker;
 
-/// GL JS's mouse-wheel step, which trackpads never produce exactly.
-const WHEEL_STEP: f64 = 4.000_244_140_625;
-/// Trackpad zoom stays one gesture until this long after its last event.
-const TRACKPAD_END: f64 = 200.0;
-/// GL JS's eases: a wheel step, a double-click or key step, a box zoom.
-const WHEEL_EASE: i64 = 200;
+/// Scroll zoom stays one gesture until this long after its last event
+/// (Compose's `ScrollBinding.idleDuration`).
+const SCROLL_END: f64 = 200.0;
+/// The eases of a double-click or key step (GL JS and ffi's demo) and of a
+/// box zoom (GL JS).
 const STEP_EASE: i64 = 300;
 const BOX_EASE: i64 = 500;
 /// GL JS's `defaultEasing` and `easeOut`.
@@ -195,16 +192,14 @@ struct Tracking {
     bearing_anchor: Option<V2>,
     /// The gesture turned the map, so the bearing may settle.
     rotated: bool,
-    /// How fast a momentum this gesture caught still moved.
-    boost: Option<MomentumVelocity>,
     /// A pinch's release, staged when it continued as a one-finger pan,
     /// and when.
     staged: Option<(f64, Release)>,
 }
 
 impl Tracking {
-    fn reset(&mut self, now: f64, boost: Option<MomentumVelocity>) {
-        *self = Self { boost, ..Self::default() };
+    fn reset(&mut self, now: f64) {
+        *self = Self::default();
         self.record(now, Step::default());
     }
 
@@ -276,29 +271,21 @@ impl Tracking {
         }
     }
 
-    /// The momentum a release continues with: the options' decays, a caught
-    /// momentum added to each part going its way, and the bearing settling
-    /// if the gesture turned the map (Compose's `resolveGestureMomentum`).
-    /// `None` when nothing moves or settles.
+    /// The momentum a release continues with: the options' decays, and the
+    /// bearing settling if the gesture turned the map. `None` when nothing
+    /// moves or settles.
+    ///
+    /// A glide the press caught adds nothing: ffi's demo and GL JS start
+    /// each release from its own speed. Compose and Orbis add the caught
+    /// glide's speed to a release going its way, which repeated flicks
+    /// compound up to the pan's 10 000 px/s cap.
     fn momentum(&self, release: Release, glide: bool, options: &GestureOptions) -> Option<CameraMomentum> {
         let release = if glide { release } else { Release::default() };
-        let boost = self.boost.unwrap_or_default();
-        let boost_pan = V2::from(boost.pan);
-        let pan = release.pan.and_then(|mut v| {
-            if v.x.is_nan() || v.y.is_nan() || v.length() < options.pan_decay.min_speed {
-                return None;
-            }
-            if v.dot(boost_pan) > 0.0 {
-                v += boost_pan;
-            }
-            Some(v)
-        });
-        let speed = |v: Option<f64>, decay: &MomentumDecay, boost: f64| {
-            v.filter(|v| v.abs() >= decay.min_speed).map(|v| if v.signum() == boost.signum() { v + boost } else { v })
-        };
-        let zoom = speed(release.zoom, &options.zoom_decay, boost.zoom);
-        let bearing = speed(release.bearing, &options.bearing_decay, boost.bearing);
-        let pitch = speed(release.pitch, &options.pitch_decay, boost.pitch);
+        let pan = release.pan.filter(|v| !v.x.is_nan() && !v.y.is_nan() && v.length() >= options.pan_decay.min_speed);
+        let speed = |v: Option<f64>, decay: &MomentumDecay| v.filter(|v| v.abs() >= decay.min_speed);
+        let zoom = speed(release.zoom, &options.zoom_decay);
+        let bearing = speed(release.bearing, &options.bearing_decay);
+        let pitch = speed(release.pitch, &options.pitch_decay);
         let bearing_snap = options.bearing_snap.filter(|_| self.rotated);
         if pan.is_none() && zoom.is_none() && bearing.is_none() && pitch.is_none() && bearing_snap.is_none() {
             return None;
@@ -331,15 +318,10 @@ enum End {
     Glide,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WheelKind {
-    Wheel,
-    Trackpad,
-}
-
 /// The gesture recognizers for one map: MapLibre Compose's gesture set, with
-/// GL JS's rates and thresholds, and Compose's releases continued by the
-/// map's momentum.
+/// maplibre-native-ffi's browser demo's rates and releases where it has the
+/// gesture and GL JS's elsewhere, continued by the map's momentum. The
+/// crate's README says where each comes from.
 ///
 /// - Drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag to zoom
 ///   to a box.
@@ -350,9 +332,9 @@ enum WheelKind {
 /// - The arrow keys pan, Shift-arrows rotate and tilt, and `+`/`=` and `-`
 ///   zoom.
 ///
-/// A release continues with the velocity of its last 100 ms, slowed by the
-/// options' decays. A glide the press caught adds to a release going the same
-/// way, and a gesture that turned the map settles its bearing.
+/// A release continues with the average velocity of its last 100 ms, slowed
+/// by the options' decays, and a gesture that turned the map settles its
+/// bearing.
 ///
 /// Hosts feed it [`Input`]s with their timestamps, in milliseconds on any
 /// clock that only goes forward, and call [`frame`](Self::frame) once a
@@ -367,17 +349,9 @@ pub struct GestureRecognizer {
     held: bool,
     /// The last tap, for double taps: where and when.
     last_tap: Option<(V2, f64, PointerKind)>,
-    wheel_kind: Option<WheelKind>,
-    last_wheel: f64,
-    /// A mouse wheel's zoom target and when its ease ends, which the next
-    /// step adds to.
-    wheel_target: Option<(f64, f64)>,
-    /// Trackpad zoom holds the camera until then.
+    /// Scroll zoom holds the camera until then.
     wheel_hold_until: Option<f64>,
     events: Vec<GestureEvent>,
-    /// The speed of the momentum the recognizer started, when a command or
-    /// a cancel stops it.
-    caught: Rc<Cell<Option<MomentumVelocity>>>,
 }
 
 impl Default for GestureRecognizer {
@@ -395,12 +369,8 @@ impl GestureRecognizer {
             tracking: Tracking::default(),
             held: false,
             last_tap: None,
-            wheel_kind: None,
-            last_wheel: f64::NEG_INFINITY,
-            wheel_target: None,
             wheel_hold_until: None,
             events: Vec::new(),
-            caught: Rc::new(Cell::new(None)),
         }
     }
 
@@ -482,21 +452,17 @@ impl GestureRecognizer {
     }
 
     /// A gesture takes the camera: it stops the camera's animations (or the
-    /// recognizer's own), and returns how fast the recognizer's momentum
-    /// still moved.
-    fn hold(&mut self, camera: &mut dyn GestureCamera) -> Option<MomentumVelocity> {
-        self.caught.set(None);
+    /// recognizer's own).
+    fn hold(&mut self, camera: &mut dyn GestureCamera) {
         if self.options.interrupt_animations {
             camera.cancel_transitions();
         } else {
             camera.cancel_transitions_with_id(self.options.transition_id);
         }
-        self.wheel_target = None;
         if !self.held {
             self.held = true;
             camera.set_gesture_in_progress(true);
         }
-        self.caught.take()
     }
 
     fn release(&mut self, camera: &mut dyn GestureCamera) {
@@ -524,7 +490,7 @@ impl GestureRecognizer {
             return false;
         }
         self.pointers.push(Pointer { id, kind, position, down: position, down_at: now });
-        let caught = self.hold(camera);
+        self.hold(camera);
         match (self.mode, self.pointers.len()) {
             (Mode::Idle, 1) => {
                 self.mode = if touch && self.follows_tap(kind, position, now) {
@@ -536,7 +502,7 @@ impl GestureRecognizer {
                         shift: modifiers.shift && !touch,
                     }
                 };
-                self.tracking.reset(now, caught);
+                self.tracking.reset(now);
             }
             (Mode::Pressed { .. } | Mode::Pan | Mode::TapDrag { .. }, 2) if touch => {
                 let [a, b] = [self.pointers[0].position, self.pointers[1].position];
@@ -801,9 +767,7 @@ impl GestureRecognizer {
         self.mode = Mode::Idle;
         if end != End::Cancel {
             let release = self.tracking.release(now);
-            if let Some(mut momentum) = self.tracking.momentum(release, end == End::Glide, &self.options) {
-                let caught = self.caught.clone();
-                momentum.finish_fn = Some(Rc::new(move |end| caught.set(Some(end.velocity))));
+            if let Some(momentum) = self.tracking.momentum(release, end == End::Glide, &self.options) {
                 let animation =
                     AnimationOptions { transition_id: Some(self.options.transition_id), ..AnimationOptions::default() };
                 camera.start_momentum(&momentum, &animation);
@@ -846,8 +810,12 @@ impl GestureRecognizer {
         camera.ease_to(&CameraOptions::default().with_zoom(Some(target)).with_anchor(Some(at.into())), &animation);
     }
 
-    /// GL JS's `ScrollZoomHandler`: mouse wheels zoom smoothly to a target;
-    /// trackpads zoom as they scroll.
+    /// Scroll zoom, as ffi's browser demo does it: each event zooms at once
+    /// by its pixels at a fixed rate, faster with Ctrl, which a trackpad
+    /// pinch holds. Compose scrolls at the same rate without the Ctrl one;
+    /// GL JS tells wheels from trackpads and eases wheel steps, which read a
+    /// slow start of a trackpad scroll as one and zoomed it about twice as
+    /// fast.
     fn wheel(
         &mut self,
         camera: &mut dyn GestureCamera,
@@ -857,65 +825,20 @@ impl GestureRecognizer {
         modifiers: Modifiers,
         now: f64,
     ) -> bool {
-        let mut value = match unit {
+        let pixels = match unit {
             WheelUnit::Pixel => delta.y,
             WheelUnit::Line => delta.y * 40.0,
             WheelUnit::Page => delta.y * camera.viewport().y,
         };
-        if value == 0.0 {
+        if pixels == 0.0 {
             return true;
         }
-        let since = now - self.last_wheel;
-        self.last_wheel = now;
-        if value % WHEEL_STEP == 0.0 {
-            self.wheel_kind = Some(WheelKind::Wheel);
-        } else if value.abs() < 4.0 || modifiers.ctrl {
-            // Pinching a trackpad sends Ctrl-wheel events.
-            self.wheel_kind = Some(WheelKind::Trackpad);
-        } else if since > 400.0 {
-            // A new scroll of unknown kind: GL JS waits 40 ms to see; take
-            // it as a wheel, which its timeout decides for a lone event.
-            self.wheel_kind = None;
-        } else if self.wheel_kind.is_none() {
-            self.wheel_kind = Some(if (since * value).abs() < 200.0 { WheelKind::Trackpad } else { WheelKind::Wheel });
+        let rate = if modifiers.ctrl { self.options.pinch_zoom_rate } else { self.options.scroll_zoom_rate };
+        if !self.held {
+            self.hold(camera);
         }
-        if modifiers.shift {
-            value /= 4.0;
-        }
-        let kind = self.wheel_kind.unwrap_or(WheelKind::Wheel);
-        let rate = if kind == WheelKind::Wheel && value.abs() > WHEEL_STEP {
-            self.options.wheel_zoom_rate
-        } else {
-            self.options.trackpad_zoom_rate
-        };
-        let mut scale = 2.0 / (1.0 + (-(value * rate).abs()).exp());
-        if value > 0.0 {
-            scale = 1.0 / scale;
-        }
-        let zoom = scale.log2();
-        match kind {
-            WheelKind::Trackpad => {
-                if !self.held {
-                    self.hold(camera);
-                }
-                zoom_by(camera, position, zoom);
-                self.wheel_hold_until = Some(now + TRACKPAD_END);
-            }
-            WheelKind::Wheel => {
-                // Each step adds to the zoom the last one was easing to.
-                let base = match self.wheel_target {
-                    Some((target, until)) if now < until => target,
-                    _ => zoom_of(camera),
-                };
-                let target = clamp_zoom(camera, base + zoom);
-                self.wheel_target = Some((target, now + WHEEL_EASE as f64));
-                let animation = self.animation(WHEEL_EASE, EASE);
-                camera.ease_to(
-                    &CameraOptions::default().with_zoom(Some(target)).with_anchor(Some(position.into())),
-                    &animation,
-                );
-            }
-        }
+        zoom_by(camera, position, -pixels * rate);
+        self.wheel_hold_until = Some(now + SCROLL_END);
         true
     }
 
