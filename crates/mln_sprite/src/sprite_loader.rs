@@ -18,7 +18,7 @@ use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::sprite_loader_observer::{NullSpriteLoaderObserver, SpriteLoaderObserver};
 use crate::sprite_parser::parse_sprite_images;

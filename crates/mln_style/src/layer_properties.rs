@@ -5,7 +5,7 @@
 // is the `LayerProperties` trait. `dyn LayerProperties` derefs to its base.
 
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;

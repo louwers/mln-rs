@@ -6,7 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, get_json_type};
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::assertion::Assertion;
 use crate::at::At;

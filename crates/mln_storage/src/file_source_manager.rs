@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, OnceLock, Weak};
 use mln_util::client_options::ClientOptions;
 use mln_util::string::to_string_u64;
 use mln_util::sync::MutexExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::asset_file_source::AssetFileSource;
 #[cfg(feature = "sqlite")]

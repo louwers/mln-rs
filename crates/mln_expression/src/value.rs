@@ -21,7 +21,7 @@ use crate::type_::{self, Type};
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
 // dependent; a VecMap iterates in key order.
-pub type ObjectType = feature::VecMap<String, Value>;
+pub type ObjectType = mln_vec_map::VecMap<String, Value>;
 
 /// `expression::Value`, same variant order as the C++ variant.
 #[derive(Clone, Debug, Default, PartialEq)]

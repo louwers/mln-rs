@@ -19,6 +19,7 @@ geometry.workspace = true
 libstdcxx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+mln_vec_map.workspace = true
 mlt-core.workspace = true
 protozero.workspace = true
 vector_tile.workspace = true

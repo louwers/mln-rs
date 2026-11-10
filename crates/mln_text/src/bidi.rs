@@ -18,7 +18,7 @@
 
 use std::ops::Range;
 
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use unicode_bidi::ParagraphInfo;
 use unicode_bidi::utf16::BidiInfo;
 

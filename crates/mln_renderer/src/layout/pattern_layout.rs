@@ -28,7 +28,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::{VecMap, VecSet};
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;

@@ -44,7 +44,7 @@ use mln_util::constants::{DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, TILE_SIZE_I};
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
 use mln_util::tileset::Tileset;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::mapbox::{canonicalize_glyph_url, canonicalize_source_url, canonicalize_sprite_url, canonicalize_tileset};
 

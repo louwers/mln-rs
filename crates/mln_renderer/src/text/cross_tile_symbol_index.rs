@@ -17,8 +17,8 @@ use geometry::Point;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::EXTENT;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::vec_map::{VecMap, VecSet};
 use mln_util::vectors::Vec4;
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use feature::Value;
 use mln_conversion::Convertible;
 use mln_util::Color;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use super::util::parse_json;
 use crate::color_ramp_property_value::ColorRampPropertyValue;

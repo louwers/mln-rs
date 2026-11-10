@@ -28,7 +28,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_util::exception::RuntimeError;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use super::envelope::{About, Encoded, MessageKind};
 use super::worker_side::{WorkerAction, WorkerCodec};

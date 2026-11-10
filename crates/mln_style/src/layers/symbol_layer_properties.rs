@@ -15,7 +15,7 @@ use mln_style_types::{
 };
 use mln_util::{Color, Padding};
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::layout_property!(
     /// `struct IconAllowOverlap : LayoutProperty<bool>`:

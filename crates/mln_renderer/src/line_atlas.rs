@@ -11,7 +11,7 @@ use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 /// `LinePatternPos`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

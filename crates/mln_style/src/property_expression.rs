@@ -8,7 +8,7 @@ use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::expression::{

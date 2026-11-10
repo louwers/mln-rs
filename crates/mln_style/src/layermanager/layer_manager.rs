@@ -6,7 +6,7 @@
 use std::sync::OnceLock;
 
 use mln_conversion::{Convertible, Error};
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use super::background_layer_factory::BackgroundLayerFactory;
 use super::circle_layer_factory::CircleLayerFactory;

@@ -9,7 +9,7 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::color_ramp_property!(
     /// `struct ColorReliefColor : ColorRampProperty {};`

@@ -23,7 +23,7 @@ use mln_util::font_stack::FontStack;
 use mln_util::i18n;
 use mln_util::image::AlphaImage;
 use mln_util::size::Size;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use super::glyph_manager_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};

@@ -12,7 +12,7 @@ use mln_conversion::Convertible;
 use mln_expression::type_::{self, Type};
 use mln_expression::{Expression, ParsingContext, is_feature_constant, is_zoom_constant};
 use mln_tile_id::CanonicalTileID;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 pub struct Input {
     pub zoom: Option<f32>,

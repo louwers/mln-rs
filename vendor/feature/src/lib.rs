@@ -9,8 +9,6 @@
 
 mod feature;
 mod value;
-pub mod vec_map;
 
 pub use feature::{Feature, Identifier, PropertyMap};
 pub use value::{Value, ValueObject};
-pub use vec_map::{VecMap, VecSet};

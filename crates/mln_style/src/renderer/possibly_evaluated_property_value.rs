@@ -4,7 +4,7 @@ use mln_expression::expression::FeatureState;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::interpolate::Interpolate;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, ValueConverter};

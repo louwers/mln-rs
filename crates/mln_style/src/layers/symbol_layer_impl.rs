@@ -15,7 +15,7 @@ use mln_expression::format_expression::{FormatExpression, FormatExpressionSectio
 use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression, Formatted, FormattedSection, Kind, Literal, Type, downcast};

@@ -20,6 +20,7 @@ bytemuck.workspace = true
 mln_gfx.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+mln_vec_map.workspace = true
 pollster.workspace = true
 wgpu.workspace = true
 

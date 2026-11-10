@@ -67,6 +67,7 @@ mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.
 mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.10" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.10" }
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.10" }
+mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.10" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.10" }
 nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=0.0.10" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.10" }
@@ -240,6 +241,7 @@ mln_text.workspace = true
 mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+mln_vec_map.workspace = true
 mln_webgpu.workspace = true
 nunicode.workspace = true
 pmtiles.workspace = true

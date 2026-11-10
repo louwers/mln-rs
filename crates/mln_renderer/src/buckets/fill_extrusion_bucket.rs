@@ -37,8 +37,8 @@ use mln_util::logging::{Event, Log};
 use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::serialization::payload::pod;
 use mln_util::sync::RwLockExt;
-use mln_util::vec_map::VecMap;
 use mln_util::vectors::Vec3f;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};

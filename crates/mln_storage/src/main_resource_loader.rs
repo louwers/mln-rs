@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use mln_actor::{ActorRef, Thread};
 use mln_util::client_options::ClientOptions;
 use mln_util::sync::MutexExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};

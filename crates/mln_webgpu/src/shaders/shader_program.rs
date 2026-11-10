@@ -28,7 +28,7 @@ use mln_gfx::types::{
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::context::Context;
 use crate::shaders::shader_source::{AttributeInfo, TextureInfo, prelude};

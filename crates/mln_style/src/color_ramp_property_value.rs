@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use mln_expression::value::from_expression_value;
 use mln_util::Color;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, EvaluationContext, Expression, GlobalStateMap, collect_global_state_refs};

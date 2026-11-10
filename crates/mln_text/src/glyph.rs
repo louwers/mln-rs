@@ -9,7 +9,7 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
 use mln_util::immutable::Immutable;
 use mln_util::sync::MutexExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;

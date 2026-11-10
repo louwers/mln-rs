@@ -18,7 +18,7 @@ use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use vector_tile::{Error, GeomType};
 
 use crate::geometry_tile_data::fixup_polygons;

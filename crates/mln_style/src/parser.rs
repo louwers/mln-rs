@@ -13,7 +13,7 @@ use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use crate::conversion::layer::{convert_layer, set_paint_properties};
 use crate::conversion::{Converter, convert, convert_source};

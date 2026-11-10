@@ -42,7 +42,7 @@ use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::sync::MutexExt;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
-use mln_util::vec_map::{VecMap, VecSet};
+use mln_vec_map::{VecMap, VecSet};
 use serde::{Deserialize, Serialize};
 
 use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};

@@ -11,7 +11,7 @@ use crate::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::paint_property!(
     /// `struct HillshadeAccentColor : PaintProperty<Color>`:

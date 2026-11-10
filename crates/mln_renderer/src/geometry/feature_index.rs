@@ -26,7 +26,7 @@ use mln_util::exception::ExceptionPtr;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::mat4::Mat4;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::query::RenderedQueryOptions;

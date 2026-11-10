@@ -1,6 +1,6 @@
 // Ports include/mln/style/property_value.hpp.
 
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;

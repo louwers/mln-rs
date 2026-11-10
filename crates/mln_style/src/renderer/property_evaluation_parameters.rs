@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use mln_util::chrono::{Duration, TimePoint};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::GlobalStateMap;

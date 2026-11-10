@@ -26,7 +26,7 @@ use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use mln_webgpu::headless_backend::HeadlessBackend;
 
 /// `StubGeometryTileFeature(id, type, geometry, properties)`.

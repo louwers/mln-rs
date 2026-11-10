@@ -26,7 +26,7 @@ use mln_util::client_options::ClientOptions;
 use mln_util::constants::MBTILES_PROTOCOL;
 use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use serde_json::Value as Json;
 
 use crate::async_request::AsyncRequest;

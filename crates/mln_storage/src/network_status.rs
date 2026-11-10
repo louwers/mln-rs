@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use mln_actor::AsyncTaskSender;
 use mln_util::sync::MutexExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 /// `NetworkStatus::Status`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

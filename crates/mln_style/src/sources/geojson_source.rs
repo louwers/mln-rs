@@ -18,7 +18,7 @@ use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;

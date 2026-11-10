@@ -3,7 +3,7 @@
 
 use std::cell::OnceCell;
 
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::backend::Type as BackendType;
 use crate::shaders::shader_source::BuiltIn;

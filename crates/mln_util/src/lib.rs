@@ -55,7 +55,3 @@ pub mod tiny_unordered_map;
 pub mod token;
 pub mod url;
 pub mod vectors;
-/// The sorted-vector maps and sets that stand in for the small `BTreeMap`s
-/// and `BTreeSet`s (vendor/feature's `vec_map`, below this crate so that
-/// `feature::ValueObject` can use them).
-pub use ::feature::vec_map;

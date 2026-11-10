@@ -25,7 +25,7 @@ use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::sync::MutexExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use pmtiles::{EntryV3, HeaderV3};
 use serde_json::Value as Json;
 

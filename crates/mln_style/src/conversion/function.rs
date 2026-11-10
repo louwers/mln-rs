@@ -14,8 +14,8 @@ use mln_expression::formatted::Formatted;
 use mln_expression::image_expression::ImageExpression;
 use mln_expression::match_::{Match, MatchLabel};
 use mln_style_types::VariableAnchorOffsetCollection;
-use mln_util::vec_map::VecMap;
 use mln_util::{Color, ColorSpace, Padding};
+use mln_vec_map::VecMap;
 
 use super::{Converter, Convertible, Error, convert};
 use crate::expression::{

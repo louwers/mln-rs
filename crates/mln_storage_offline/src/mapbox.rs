@@ -12,7 +12,7 @@ use mln_util::mapbox::is_canonical_url;
 use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Tileset;
 use mln_util::url::{Path, URL};
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use regex::Regex;
 
 fn ends_with(s: &str, search: &str) -> bool {

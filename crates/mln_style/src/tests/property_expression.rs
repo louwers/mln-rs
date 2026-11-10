@@ -6,7 +6,7 @@ use mln_expression::dsl::create_expression_from_str;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::geometry::FeatureType;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
 use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};

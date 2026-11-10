@@ -11,7 +11,7 @@ use crate::layers::circle_layer_impl::Impl as CircleLayerImpl;
 use mln_style_types::{AlignmentType, CirclePitchScaleType, TranslateAnchorType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::data_driven_layout_property!(
     /// `struct CircleSortKey : DataDrivenLayoutProperty<float>`:

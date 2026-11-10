@@ -43,7 +43,7 @@ use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::{

@@ -21,7 +21,7 @@ use mln_util::chrono::TimePoint;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::range::Range;
 use mln_util::size::Size;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::line_atlas::LineAtlas;
 use crate::pattern_atlas::PatternAtlas;

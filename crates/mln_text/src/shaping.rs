@@ -9,8 +9,8 @@
 use mln_style_types::image::{ImagePosition, ImagePositions, RectU16, TextFit};
 use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType};
 use mln_util::constants::ONE_EM;
-use mln_util::vec_map::VecSet;
 use mln_util::{Padding, i18n};
+use mln_vec_map::VecSet;
 
 use crate::bidi::{BiDi, StyledText};
 use crate::glyph::{

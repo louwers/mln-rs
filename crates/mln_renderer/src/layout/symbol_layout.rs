@@ -40,7 +40,7 @@ use mln_util::i18n;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::sync::RwLockExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr, get_retain_feature_id};
 use crate::bucket_parameters::BucketParameters;

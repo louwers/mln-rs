@@ -10,7 +10,7 @@ use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase
 use crate::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style_types::RasterResamplingType;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::paint_property!(
     /// `struct RasterBrightnessMax : PaintProperty<float>`:

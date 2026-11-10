@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::check_subtype::check_subtype;
 use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};

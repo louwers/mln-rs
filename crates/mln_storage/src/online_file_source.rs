@@ -34,7 +34,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::mapbox;
 use mln_util::sync::MutexExt;
 use mln_util::tile_server_options::TileServerOptions;
-use mln_util::vec_map::{VecMap, VecSet};
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};

@@ -29,7 +29,7 @@ use mln_style::transition_options::TransitionOptions;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::geometry::FeatureType;
-use mln_util::vec_map::{VecMap, VecSet};
+use mln_vec_map::{VecMap, VecSet};
 
 /// test/include/mln/test/stub_geometry_tile_feature.hpp (the property-map
 /// constructor).

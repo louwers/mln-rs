@@ -228,7 +228,7 @@ pub enum ImageType {
 /// atlas space in iteration order, and a `HashMap`'s order changes from
 /// process to process, which moved icons in the atlas and changed rendered
 /// pixels between runs (sargunv/mln-rs#2).
-pub type ImageMap = mln_util::vec_map::VecMap<String, Immutable<Impl>>;
+pub type ImageMap = mln_vec_map::VecMap<String, Immutable<Impl>>;
 /// `ImageDependencies = mln::unordered_map<std::string, ImageType>`.
 pub type ImageDependencies = std::collections::HashMap<String, ImageType>;
 

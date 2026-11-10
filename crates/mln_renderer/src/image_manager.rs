@@ -17,7 +17,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as Ima
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::{VecMap, VecSet};
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 

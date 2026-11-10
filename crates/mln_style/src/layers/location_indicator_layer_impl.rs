@@ -3,7 +3,7 @@
 // `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
 // location_indicator_layer.rs.
 
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;

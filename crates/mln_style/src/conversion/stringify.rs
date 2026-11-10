@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use feature::{Identifier, Value, VecMap};
+use feature::{Identifier, Value};
 use mln_style_types::{
     AlignmentType, IconTextFitType, LineCapType, LineJoinType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextTransformType, TextWritingModeType, VariableAnchorOffsetCollection, VisibilityType,
@@ -16,6 +16,7 @@ use mln_style_types::{
 use mln_util::enum_::Enum;
 use mln_util::geometry::FeatureType;
 use mln_util::{Color, Padding};
+use mln_vec_map::VecMap;
 pub use rapidjson::Writer;
 
 use crate::expression::{Formatted, Image, Value as ExpressionValue, ValueConverter};

@@ -21,6 +21,7 @@ path = "src/main.rs"
 
 [dependencies]
 csscolorparser.workspace = true
+mln_vec_map.workspace = true
 serde_json.workspace = true
 
 # The C++ repo's `generate.py --check` for plugins, for the style code:

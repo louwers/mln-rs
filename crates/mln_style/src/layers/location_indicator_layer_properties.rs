@@ -11,7 +11,7 @@ use crate::layers::location_indicator_layer_impl::Impl as LocationIndicatorLayer
 use mln_style_types::Rotation;
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::layout_property!(
     /// `struct BearingImage : LayoutProperty<expression::Image>`:

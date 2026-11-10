@@ -14,7 +14,7 @@ use mln_text::glyph::FontFaces;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::{FeatureType, to_feature_type};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use crate::compound_expression::CompoundExpression;
 use crate::literal::Literal;

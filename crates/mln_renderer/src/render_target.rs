@@ -19,7 +19,7 @@ use mln_gfx::types::TextureChannelDataType;
 use mln_gfx::{Context, LayerGroupBasePtr, UploadPass};
 use mln_util::Color;
 use mln_util::size::Size;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
@@ -65,12 +65,12 @@ impl RenderTarget {
     pub fn add_layer_group(&mut self, layer_group: LayerGroupBasePtr, replace: bool) -> bool {
         let index = layer_group.borrow().get_layer_index();
         match self.layer_groups_by_layer_index.entry(index) {
-            mln_util::vec_map::Entry::Vacant(entry) => {
+            mln_vec_map::Entry::Vacant(entry) => {
                 // added
                 entry.insert(layer_group);
                 true
             }
-            mln_util::vec_map::Entry::Occupied(mut entry) => {
+            mln_vec_map::Entry::Occupied(mut entry) => {
                 // not added
                 if replace {
                     entry.insert(layer_group);

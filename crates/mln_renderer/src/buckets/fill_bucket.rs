@@ -21,7 +21,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::serialization::payload::pod;
 use mln_util::serialization::sorted;
 use mln_util::sync::RwLockExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};

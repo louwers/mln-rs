@@ -151,7 +151,7 @@ pub fn emit(layer: &LayerSpec) -> String {
         imports.push("crate::renderer::property_evaluation_parameters::CrossfadeParameters".into());
     }
     imports.push("mln_util::immutable::Immutable".into());
-    imports.push("mln_util::vec_map::VecSet".into());
+    imports.push("mln_vec_map::VecSet".into());
     w.imports(imports);
     w.blank();
 

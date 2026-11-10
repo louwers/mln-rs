@@ -15,7 +15,7 @@ use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
 use mln_util::exception::{ExceptionPtr, RuntimeError};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;

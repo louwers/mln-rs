@@ -25,7 +25,7 @@ use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, ValueConverter};
@@ -438,7 +438,7 @@ macro_rules! paint_properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut mln_util::vec_map::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_value().get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -456,7 +456,7 @@ macro_rules! paint_properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut mln_util::vec_map::VecSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = <$prop as Property>::possibly_evaluated_global_state_refs(&self.$field) {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -555,7 +555,7 @@ macro_rules! __possibly_evaluated_feature_methods {
             &self,
             z: f32,
             feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-            available_images: &mln_util::vec_map::VecSet<String>,
+            available_images: &mln_vec_map::VecSet<String>,
         ) -> <P as $crate::properties::Property>::Type
         where
             P: $crate::properties::Property,
@@ -575,7 +575,7 @@ macro_rules! __possibly_evaluated_feature_methods {
             &self,
             z: f32,
             feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-            available_images: &mln_util::vec_map::VecSet<String>,
+            available_images: &mln_vec_map::VecSet<String>,
             canonical: &mln_tile_id::CanonicalTileID,
         ) -> <P as $crate::properties::Property>::Type
         where

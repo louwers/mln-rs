@@ -42,7 +42,7 @@ use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
 use mln_util::serialization::payload;
 use mln_util::sync::MutexExt;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::layout::pattern_layout::PatternDependency;

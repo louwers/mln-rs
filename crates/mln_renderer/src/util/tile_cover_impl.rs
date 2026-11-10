@@ -14,7 +14,7 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::geo::LatLng;
 use mln_util::geometry::{FeatureType, Geometry, MultiPoint, Polygon, to_feature_type};
 use mln_util::projection::Projection;
-use mln_util::vec_map::{self, VecMap};
+use mln_vec_map::VecMap;
 
 use crate::util::tile_cover::std_sort;
 
@@ -369,7 +369,7 @@ pub struct Impl {
 
     /// `boundsMap` together with the `currentBounds` iterator into it: the
     /// entries not yet moved into `active_bounds`, in key order.
-    current_bounds: Peekable<vec_map::IntoIter<u32, Bounds>>,
+    current_bounds: Peekable<mln_vec_map::IntoIter<u32, Bounds>>,
     /// List of bounds that begin at or before `tileY`
     active_bounds: Bounds,
 

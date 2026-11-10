@@ -33,7 +33,7 @@ use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-use mln_util::vec_map::{VecMap, VecSet};
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};

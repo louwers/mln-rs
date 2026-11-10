@@ -12,7 +12,7 @@ use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::layout_property!(
     /// `struct LineCap : LayoutProperty<LineCapType>`:

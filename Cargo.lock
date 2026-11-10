@@ -1162,6 +1162,7 @@ dependencies = [
  "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "mln-rs-vector-tile",
  "mln-rs-wagyu",
  "mln-rs-webgpu",
@@ -1244,6 +1245,7 @@ dependencies = [
  "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "serde",
  "serde_json",
 ]
@@ -1260,6 +1262,7 @@ dependencies = [
  "mln-rs-style",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "serde_json",
 ]
 
@@ -1268,6 +1271,7 @@ name = "mln-rs-feature"
 version = "0.0.10"
 dependencies = [
  "mln-rs-geometry",
+ "mln-rs-vec-map",
  "serde",
 ]
 
@@ -1308,6 +1312,7 @@ dependencies = [
  "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "serde",
 ]
 
@@ -1488,6 +1493,7 @@ dependencies = [
  "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "mln-rs-webgpu",
  "postcard",
  "proptest",
@@ -1509,6 +1515,7 @@ dependencies = [
  "mln-rs-storage",
  "mln-rs-style-types",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "serde_json",
 ]
 
@@ -1526,6 +1533,7 @@ dependencies = [
  "mln-rs-rapidjson",
  "mln-rs-test-server",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "rusqlite",
  "serde_json",
  "ureq",
@@ -1548,6 +1556,7 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "regex",
 ]
 
@@ -1573,6 +1582,7 @@ dependencies = [
  "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "postcard",
  "serde",
  "serde_json",
@@ -1583,6 +1593,7 @@ name = "mln-rs-style-codegen"
 version = "0.0.10"
 dependencies = [
  "mln-rs-csscolorparser",
+ "mln-rs-vec-map",
  "serde_json",
 ]
 
@@ -1594,6 +1605,7 @@ dependencies = [
  "mln-rs-math",
  "mln-rs-rapidjson",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "serde",
 ]
 
@@ -1625,6 +1637,7 @@ dependencies = [
  "mln-rs-protozero",
  "mln-rs-style-types",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "serde",
  "skrifa",
  "unicode-bidi",
@@ -1640,6 +1653,7 @@ dependencies = [
  "mln-rs-protozero",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "mln-rs-vector-tile",
  "mln-rs-wagyu",
  "mlt-core",
@@ -1676,6 +1690,13 @@ dependencies = [
  "serde",
  "serde_json",
  "web-time",
+]
+
+[[package]]
+name = "mln-rs-vec-map"
+version = "0.0.10"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -1734,6 +1755,7 @@ dependencies = [
  "mln-rs-platform-default-image",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vec-map",
  "pollster",
  "wgpu",
 ]

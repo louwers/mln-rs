@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression};

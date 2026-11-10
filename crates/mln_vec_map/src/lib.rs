@@ -1,9 +1,9 @@
 //! [`VecMap`] and [`VecSet`]: ordered maps and sets kept as sorted vectors,
-//! for the port's small maps. Not a port of a C++ type.
+//! for small maps.
 //!
 //! They iterate in key order, as [`BTreeMap`](std::collections::BTreeMap)
 //! and [`BTreeSet`](std::collections::BTreeSet) do, and have the part of
-//! their API the port uses. A `BTreeMap` is a lot of code for each key and
+//! their API mln-rs uses. A `BTreeMap` is a lot of code for each key and
 //! value type it is used with; these are a binary search over a slice and a
 //! `Vec` insert or remove. The keys are a vector of their own, so the search
 //! is one function for each key type, whatever the values. Insert and remove

@@ -11,7 +11,7 @@ use crate::layers::background_layer_impl::Impl as BackgroundLayerImpl;
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 crate::paint_property!(
     /// `struct BackgroundColor : PaintProperty<Color>`:

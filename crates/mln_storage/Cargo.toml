@@ -21,6 +21,7 @@ geojson.workspace = true
 mln_actor.workspace = true
 mln_platform_default_image.workspace = true
 mln_util.workspace = true
+mln_vec_map.workspace = true
 pmtiles.workspace = true
 rapidjson.workspace = true
 rusqlite = { workspace = true, optional = true }

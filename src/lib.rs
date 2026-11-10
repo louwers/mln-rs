@@ -32,6 +32,7 @@ pub use mln_text;
 pub use mln_tile;
 pub use mln_tile_id;
 pub use mln_util;
+pub use mln_vec_map;
 pub use mln_webgpu;
 pub use nunicode;
 pub use pmtiles;

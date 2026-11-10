@@ -11,7 +11,7 @@ use mln_style::collection::ImmutableVector;
 use mln_style::{image, layer, source};
 use mln_util::immutable::Immutable;
 use mln_util::longest_common_subsequence::longest_common_subsequence;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 #[derive(Clone, Debug)]
 pub struct StyleChange<T: ?Sized> {

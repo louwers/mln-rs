@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log};
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
 use crate::layer::FontStack;

@@ -13,7 +13,7 @@ use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
 use mln_map_types::{MapDebugOptions, MapMode, TransformState};
 use mln_util::Color;
 use mln_util::chrono::TimePoint;
-use mln_util::vec_map::VecMap;
+use mln_vec_map::VecMap;
 
 use crate::layer_tweaker::LayerTweaker; // layers: debug
 use crate::paint_parameters::{PaintParameters, TransformParameters};

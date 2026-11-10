@@ -17,7 +17,7 @@ use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::immutable::Immutable;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use super::envelope::{self, Request};
 use super::fields;

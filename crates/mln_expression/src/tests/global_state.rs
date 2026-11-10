@@ -4,7 +4,7 @@
 
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
-use mln_util::vec_map::VecSet;
+use mln_vec_map::VecSet;
 
 use crate::expression::{
     Dependency, EvaluationContext, Expression, GlobalStateMap, Kind, collect_global_state_refs,
