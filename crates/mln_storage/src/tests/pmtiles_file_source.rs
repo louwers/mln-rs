@@ -69,7 +69,7 @@ fn non_existent_file() {
     let res = request(&pmtiles, Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
-    assert!(error.message.contains("path not found"), "{}", error.message);
+    assert!(error.message.contains("Cannot find file"), "{}", error.message);
     assert!(res.data.is_none());
 }
 
