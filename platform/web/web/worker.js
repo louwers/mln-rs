@@ -2,7 +2,8 @@
 // with its own memory. It talks to the map's Web Worker over the
 // MessageChannel port the page gave it: requests are the map's bytes, and
 // the replies go back in batches, each its bytes and its payloads (pixels,
-// vertices, indices), all transferred.
+// vertices, indices), all transferred. A raster tile's reply comes once the
+// browser has decoded its image, outside a run: the instance asks for one.
 
 import init, { TileWorker } from './pkg/mln_web.js';
 
@@ -53,7 +54,7 @@ onmessage = async ({ data }) => {
     }
   };
   await init({ module_or_path: data.module });
-  worker = new TileWorker();
+  worker = new TileWorker(schedule);
   for (const request of early.splice(0)) call(() => worker.handle(request));
   schedule();
 };

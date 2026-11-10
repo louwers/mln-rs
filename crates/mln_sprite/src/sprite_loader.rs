@@ -12,6 +12,8 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::TaggedScheduler;
+use mln_actor::scheduler::Respond;
+use mln_platform_default_image::decoder;
 use mln_storage::{AsyncRequest, Data, FileSource, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
@@ -19,7 +21,7 @@ use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::immutable::Immutable;
 
 use crate::sprite_loader_observer::{NullSpriteLoaderObserver, SpriteLoaderObserver};
-use crate::sprite_parser::parse_sprite;
+use crate::sprite_parser::parse_sprite_images;
 
 /// `SpriteLoader::Data`.
 #[derive(Default)]
@@ -100,13 +102,20 @@ impl Inner {
 
         let parse_sprite_copy = sprite.clone();
         let factory: Weak<Inner> = Rc::downgrade(self);
-        self.thread_pool.schedule_and_reply_value(
+        // `parseSprite`, whose image decodes through the `decoder`, which
+        // may answer after the closure returns (the browser's).
+        self.thread_pool.schedule_and_reply_later(
             /* parseClosure */
-            move || -> ParseResult {
-                match parse_sprite(&parse_sprite_copy.id, &image, &json) {
-                    Ok(images) => ParseResult { images, error: None },
-                    Err(error) => ParseResult { images: Vec::new(), error: Some(error) },
-                }
+            move |respond: Respond<ParseResult>| {
+                decoder::decode(&image, move |raster| {
+                    let parsed = raster
+                        .map_err(RuntimeError::ptr)
+                        .and_then(|raster| parse_sprite_images(&parse_sprite_copy.id, &raster, &json));
+                    respond(match parsed {
+                        Ok(images) => ParseResult { images, error: None },
+                        Err(error) => ParseResult { images: Vec::new(), error: Some(error) },
+                    });
+                });
             },
             /* resultClosure */
             move |result: ParseResult| {

@@ -31,6 +31,22 @@ forwards to it.
   the Web Worker transfers, and which the map copies once, into the
   arrays its buckets keep.
 
+## Images decode in the browser
+
+Every instance decodes images (sprites and image sources in the map's Web
+Worker, raster and raster-dem tiles in the tile workers' Web Workers) with
+the browser's decoders (src/image.rs), so the module carries no PNG or WebP
+decoder: `createImageBitmap` without premultiplication or colour
+conversion, read back through a `VideoFrame` where a probe image reads back
+exactly through one, and through a canvas elsewhere, as Orbis does. A
+canvas's `getImageData` isn't exact: it loses precision at translucent
+texels, and fingerprinting-resistant browsers (Brave) perturb it. The
+texels then go through `util::premultiply`, as the Rust decoders' do, and
+come out the same bytes as theirs (natively, mln_platform_default_image
+still decodes). The decoder answers later, from the event loop: a tile
+worker's reply comes outside `TileWorker::run`, so it wakes web/worker.js
+for a run. JPEG, which the Rust decoders don't port, decodes too.
+
 ## Build and run
 
 `wasm-bindgen-cli` must be the version in Cargo.lock, and a release build

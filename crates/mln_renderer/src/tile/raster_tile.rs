@@ -13,6 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
+use mln_platform_default_image::decoder;
 use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
@@ -25,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
 use crate::buckets::raster_bucket::RasterBucket;
+use crate::tile::ordered_replies::OrderedReplies;
 use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
@@ -64,13 +66,15 @@ pub enum RasterTileMessage {
 
 /// `RasterTileWorker`.
 pub struct RasterTileWorker {
-    parent: Box<dyn TileEndpoint<RasterTileMessage>>,
+    /// The tile, which gets the replies in the order of their parses
+    /// although images may decode asynchronously (ordered_replies.rs).
+    parent: OrderedReplies<RasterTileMessage>,
 }
 
 impl RasterTileWorker {
     /// `RasterTileWorker(ActorRef<RasterTileWorker>, ActorRef<RasterTile>)`.
     pub fn new(parent: Box<dyn TileEndpoint<RasterTileMessage>>) -> Self {
-        RasterTileWorker { parent }
+        RasterTileWorker { parent: OrderedReplies::new(parent) }
     }
 
     /// Runs the member function a tile's message stands for.
@@ -80,23 +84,26 @@ impl RasterTileWorker {
         }
     }
 
-    /// `parse(data, correlationID)`.
+    /// `parse(data, correlationID)`. The reply goes once the image has
+    /// decoded, which may be after this returns (decoder.rs in
+    /// mln_platform_default_image).
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64) {
+        let parent = self.parent.slot();
         let Some(data) = data else {
             // No data; empty tile.
-            self.parent.send(RasterTileMessage::Parsed { bucket: None, correlation_id });
+            parent.send(RasterTileMessage::Parsed { bucket: None, correlation_id });
             return;
         };
 
-        match mln_platform_default_image::decode_image(&data) {
+        decoder::decode(&data, move |result| match result {
             Ok(image) => {
                 let bucket = Arc::new(RasterBucket::new(image));
-                self.parent.send(RasterTileMessage::Parsed { bucket: Some(bucket), correlation_id });
+                parent.send(RasterTileMessage::Parsed { bucket: Some(bucket), correlation_id });
             }
             Err(error) => {
-                self.parent.send(RasterTileMessage::Error { error: RuntimeError::ptr(error), correlation_id });
+                parent.send(RasterTileMessage::Error { error: RuntimeError::ptr(error), correlation_id });
             }
-        }
+        });
     }
 }
 

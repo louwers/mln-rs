@@ -6,10 +6,11 @@
 // (see source.rs); the image request callback holds a `Weak` to it.
 
 use std::any::Any;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
+use mln_platform_default_image::decoder;
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::LatLng;
@@ -73,6 +74,10 @@ struct Inner {
     base: SourceBase,
     url: RefCell<Option<String>>,
     req: RefCell<Option<Box<dyn AsyncRequest>>>,
+    /// Port-only: counts the URLs and images set, so that an image that
+    /// decodes after another was set (a decoder that answers later, see
+    /// `on_image_response`) is dropped, as a cancelled request's response.
+    generation: Cell<u64>,
 }
 
 /// `style::ImageSource`.
@@ -95,7 +100,12 @@ impl ImageSource {
     pub fn new(id: impl Into<String>, coords: [LatLng; 4]) -> Self {
         let impl_: Immutable<dyn source_impl::Impl> = Arc::new(Impl::new(id.into(), coords));
         ImageSource {
-            inner: Rc::new(Inner { base: SourceBase::new(impl_), url: RefCell::new(None), req: RefCell::new(None) }),
+            inner: Rc::new(Inner {
+                base: SourceBase::new(impl_),
+                url: RefCell::new(None),
+                req: RefCell::new(None),
+                generation: Cell::new(0),
+            }),
         }
     }
 
@@ -118,6 +128,7 @@ impl ImageSource {
     /// `setURL(const std::string&)`.
     pub fn set_url(&self, url: &str) {
         *self.inner.url.borrow_mut() = Some(url.to_owned());
+        self.inner.generation.set(self.inner.generation.get() + 1);
         // Signal that the source description needs a reload
         if self.inner.base.loaded() || self.inner.req.borrow().is_some() {
             self.inner.base.set_loaded(false);
@@ -129,6 +140,7 @@ impl ImageSource {
     /// `setImage(PremultipliedImage&&)`.
     pub fn set_image(&self, image: PremultipliedImage) {
         *self.inner.url.borrow_mut() = None;
+        self.inner.generation.set(self.inner.generation.get() + 1);
         *self.inner.req.borrow_mut() = None;
         self.inner.base.set_loaded(true);
         let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_image(&self.impl_(), image));
@@ -141,7 +153,10 @@ impl ImageSource {
     }
 }
 
-/// `loadDescription`'s response handler.
+/// `loadDescription`'s response handler. The image decodes through
+/// mln_platform_default_image's `decoder`, whose answer may come after this
+/// returns (the browser's); it's dropped if the source is gone or got
+/// another URL or image by then.
 fn on_image_response(weak: &Weak<Inner>, res: Response) {
     let Some(inner) = weak.upgrade() else {
         return;
@@ -156,18 +171,27 @@ fn on_image_response(weak: &Weak<Inner>, res: Response) {
         observer.on_source_error(&this, RuntimeError::ptr("unexpectedly empty image url"));
     } else {
         let data = res.data.clone().unwrap_or_default();
-        match mln_platform_default_image::decode_image(&data) {
-            Ok(image) => {
-                let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_image(&this.impl_(), image));
-                this.inner.base.set_base_impl(new_impl);
+        let weak = weak.clone();
+        let generation = this.inner.generation.get();
+        decoder::decode(&data, move |result| {
+            let Some(inner) = weak.upgrade().filter(|inner| inner.generation.get() == generation) else {
+                return;
+            };
+            let this = ImageSource { inner };
+            let observer = this.inner.base.observer();
+            match result {
+                Ok(image) => {
+                    let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_image(&this.impl_(), image));
+                    this.inner.base.set_base_impl(new_impl);
+                }
+                Err(message) => {
+                    let error: ExceptionPtr = RuntimeError::ptr(message);
+                    observer.on_source_error(&this, error);
+                }
             }
-            Err(message) => {
-                let error: ExceptionPtr = RuntimeError::ptr(message);
-                observer.on_source_error(&this, error);
-            }
-        }
-        this.inner.base.set_loaded(true);
-        observer.on_source_loaded(&this);
+            this.inner.base.set_loaded(true);
+            observer.on_source_loaded(&this);
+        });
     }
 }
 

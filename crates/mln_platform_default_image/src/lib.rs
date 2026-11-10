@@ -5,8 +5,12 @@
 //!
 //! C++ throws `std::runtime_error`; here the functions return
 //! `Err(message)` with the same message.
+//!
+//! Port-only: `decoder::decode` is how the map's code decodes images, with
+//! `decode_image` unless the host sets a decoder of its own (the browser's).
 
 pub mod compression;
+pub mod decoder;
 pub mod image;
 pub mod png_reader;
 pub mod png_writer;

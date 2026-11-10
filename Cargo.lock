@@ -1789,6 +1789,7 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-gfx",
  "mln-rs-map",
+ "mln-rs-platform-default-image",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-util",

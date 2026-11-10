@@ -2,8 +2,17 @@
 
 use mln_util::image::PremultipliedImage;
 
-/// `mln::decodeImage(const std::string&)`: dispatches on the magic bytes.
-pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, String> {
+/// The image formats `decode_image` recognizes, by their magic bytes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageType {
+    Png,
+    Webp,
+    Jpeg,
+}
+
+/// The magic-byte dispatch of `mln::decodeImage`: the type of the image in
+/// `data`, if it is one of the three.
+pub fn image_type(data: &[u8]) -> Option<ImageType> {
     let read_uint = |offset: usize| -> u32 {
         let ptr = &data[offset..offset + 4];
         (u32::from(ptr[0]) << 24) | (u32::from(ptr[1]) << 16) | (u32::from(ptr[2]) << 8) | u32::from(ptr[3])
@@ -16,26 +25,39 @@ pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, String> {
         let magic2 = read_uint(0x8);
         // RIFF <xxxx = file size> WEBP
         if magic1 == 0x52494646 && magic2 == 0x57454250 {
-            return Ok(crate::webp_reader::decode_webp(data));
+            return Some(ImageType::Webp);
         }
     }
 
     if size >= 4 {
         let magic = read_uint(0x0);
         if magic == 0x89504E47 {
-            return crate::png_reader::decode_png(data);
+            return Some(ImageType::Png);
         }
     }
 
     if size >= 2 {
         let magic = ((u16::from(data[0]) << 8) | u16::from(data[1])) & 0xffff;
         if magic == 0xFFD8 {
-            // TODO(port): decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp).
-            return Err("TODO(port): JPEG decoding is not ported".to_string());
+            return Some(ImageType::Jpeg);
         }
     }
 
-    Err("unsupported image type".to_string())
+    None
+}
+
+/// The error `mln::decodeImage` throws for data it doesn't recognize.
+pub const UNSUPPORTED: &str = "unsupported image type";
+
+/// `mln::decodeImage(const std::string&)`: dispatches on the magic bytes.
+pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, String> {
+    match image_type(data) {
+        Some(ImageType::Webp) => Ok(crate::webp_reader::decode_webp(data)),
+        Some(ImageType::Png) => crate::png_reader::decode_png(data),
+        // TODO(port): decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp).
+        Some(ImageType::Jpeg) => Err("TODO(port): JPEG decoding is not ported".to_string()),
+        None => Err(UNSUPPORTED.to_string()),
+    }
 }
 
 #[cfg(test)]

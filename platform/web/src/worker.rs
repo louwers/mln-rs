@@ -3,6 +3,7 @@
 //! raster tiles' images and raster-dem tiles' DEMs). web/worker.js passes it
 //! the map's requests and posts its replies back.
 
+use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
 
 use mln_actor::TaggedScheduler;
@@ -12,6 +13,26 @@ use mln_util::identity::SimpleIdentity;
 use wasm_bindgen::prelude::*;
 
 use crate::{cooperative_scheduler, deadline};
+
+thread_local! {
+    /// The Web Worker's `wake` (see `TileWorker::new`).
+    static WAKE: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
+    /// Whether `TileWorker::run` is running, which takes the replies it
+    /// makes itself.
+    static RUNNING: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Tells the Web Worker to `run`, for a reply made outside it: a raster or
+/// raster-dem tile's, once the browser has decoded its image (image.rs).
+fn wake_host() {
+    if !RUNNING.get() {
+        WAKE.with(|wake| {
+            if let Some(wake) = wake.borrow().as_ref() {
+                let _ = wake.call0(&JsValue::NULL);
+            }
+        });
+    }
+}
 
 /// The worker side: the tile workers of one Web Worker's wasm instance.
 #[wasm_bindgen]
@@ -25,14 +46,19 @@ pub struct TileWorker {
 
 #[wasm_bindgen]
 impl TileWorker {
-    /// The instance's tile workers, on its cooperative scheduler.
+    /// The instance's tile workers, on its cooperative scheduler. `wake()`
+    /// asks the Web Worker to `run` soon: when a reply comes outside `run`.
     #[wasm_bindgen(constructor)]
-    pub fn new() -> TileWorker {
+    pub fn new(wake: js_sys::Function) -> TileWorker {
+        WAKE.with(|w| *w.borrow_mut() = Some(wake));
         let scheduler = cooperative_scheduler();
         let replies = Arc::new(Mutex::new(Vec::new()));
         let workers = TaggedScheduler::new(scheduler.clone(), SimpleIdentity::new());
         let sink = replies.clone();
-        let host = TileWorkerHost::new(workers, move |reply| sink.lock().unwrap().push(reply));
+        let host = TileWorkerHost::new(workers, move |reply| {
+            sink.lock().unwrap().push(reply);
+            wake_host();
+        });
         TileWorker { scheduler, host, replies }
     }
 
@@ -46,7 +72,9 @@ impl TileWorker {
     /// `WebMap::receive`: each an array of `Uint8Array`s, its bytes and then
     /// its payloads (pixels, vertices, indices), which worker.js transfers.
     pub fn run(&self, budget_ms: f64) -> js_sys::Array {
+        RUNNING.set(true);
         self.scheduler.run_until(Some(deadline(budget_ms)));
+        RUNNING.set(false);
         let replies = std::mem::take(&mut *self.replies.lock().unwrap());
         replies
             .into_iter()
@@ -62,11 +90,5 @@ impl TileWorker {
     /// Whether tasks are waiting for `run`.
     pub fn has_tasks(&self) -> bool {
         self.scheduler.has_tasks()
-    }
-}
-
-impl Default for TileWorker {
-    fn default() -> Self {
-        Self::new()
     }
 }
