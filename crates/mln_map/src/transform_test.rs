@@ -13,6 +13,7 @@
 use std::cell::{Cell, RefCell};
 
 use mln_map_types::util_camera::Camera as UtilCamera;
+use mln_util::UnitBezier;
 use mln_util::chrono::{milliseconds, seconds};
 use mln_util::constants::{LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM};
 use mln_util::quaternion::Quaternion;
@@ -164,7 +165,7 @@ fn invalid_zoom() {
         &AnimationOptions::default(),
         false,
     );
-    let now = transform.get_transition_start() + transform.get_transition_duration();
+    let now = transform.get_latest_transition_start() + transform.get_latest_transition_duration();
     transform.update_transitions(now);
     assert_double_eq(transform.get_zoom(), transform.get_state().get_max_zoom());
 
@@ -177,7 +178,7 @@ fn invalid_zoom() {
         &AnimationOptions::default(),
         false,
     );
-    let now = transform.get_transition_start() + transform.get_transition_duration();
+    let now = transform.get_latest_transition_start() + transform.get_latest_transition_duration();
     transform.update_transitions(now);
 
     assert!(transform.get_state().valid());
@@ -707,13 +708,13 @@ fn camera() {
     transform.ease_to(&camera_options1, &ease_options);
     check_ease(&transform);
     assert!(transform.in_transition());
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
     check_ease(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(500));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
     check_ease(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(750));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
     check_ease(&transform);
-    transform.update_transitions(transform.get_transition_start() + transform.get_transition_duration());
+    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
     check_ease(&transform);
     assert!(!transform.in_transition());
 
@@ -737,13 +738,13 @@ fn camera() {
     transform.fly_to(&camera_options2, &fly_options, false);
     check_fly(&transform);
     assert!(transform.in_transition());
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
     check_fly(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(500));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
     check_fly(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(750));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
     check_fly(&transform);
-    transform.update_transitions(transform.get_transition_start() + transform.get_transition_duration());
+    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
     check_fly(&transform);
     assert!(!transform.in_transition());
 
@@ -753,10 +754,10 @@ fn camera() {
     camera.anchor = Some(sc(0.0, 0.0)); // top-left
     camera.zoom = Some(transform.get_state().get_max_zoom());
     transform.ease_to(&camera, &AnimationOptions::new(seconds(1)));
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
-    transform.update_transitions(transform.get_transition_start() + milliseconds(500));
-    transform.update_transitions(transform.get_transition_start() + milliseconds(750));
-    transform.update_transitions(transform.get_transition_start() + transform.get_transition_duration());
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
+    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 0.0);
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 0.0);
 }
@@ -791,13 +792,13 @@ fn is_panning() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.ease_to(&cam().with_center(Some(ll(0.0, 360.0))), &ease_options);
     check(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
     check(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(500));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
     check(&transform);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(750));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
     check(&transform);
-    transform.update_transitions(transform.get_transition_start() + transform.get_transition_duration());
+    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
     check(&transform);
 }
 
@@ -878,7 +879,7 @@ fn default_transform() {
     let ease_options = AnimationOptions::new(seconds(1));
     transform.ease_to(&cam().with_center(Some(ll(56.0, 11.0))).with_zoom(Some(1.0)), &ease_options);
     assert!(transform.in_transition());
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
 
     // Rotate the screen during a transition (resize it)
     transform.resize(Size::new(500, 1000)).unwrap();
@@ -1012,15 +1013,15 @@ fn lat_lng_bounds() {
     transform.move_by(&sc(-500.0, -500.0), &ease_options).unwrap();
     check_swipe(&transform, 120.0);
 
-    transform.update_transitions(transform.get_transition_start() + milliseconds(0));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(0));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(500));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(750));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_transition_start() + transform.get_transition_duration());
+    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
     check_swipe(&transform, 120.0);
 
     // Constrain to the right edge.
@@ -1031,15 +1032,15 @@ fn lat_lng_bounds() {
     transform.move_by(&sc(500.0, 500.0), &ease_options).unwrap();
     check_swipe(&transform, -120.0);
 
-    transform.update_transitions(transform.get_transition_start() + milliseconds(0));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(0));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(250));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(500));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_transition_start() + milliseconds(750));
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_transition_start() + transform.get_transition_duration());
+    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
     check_swipe(&transform, -120.0);
 
     //    -1   |   0   |  +1
@@ -1579,4 +1580,205 @@ fn nan_screen_coordinates_are_errors() {
     transform.jump_to(&CameraOptions { anchor: Some(nan), zoom: Some(2.0), ..cam() });
     assert_eq!(transform.get_zoom(), 2.0);
     assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
+}
+
+// The tests below port maplibre-native-ffi's patch 0015 (independent camera
+// animations).
+
+const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
+
+/// A finish callback that counts its calls.
+fn counting_finish(options: &mut AnimationOptions) -> Rc<Cell<u32>> {
+    let count = Rc::new(Cell::new(0));
+    let finished = count.clone();
+    options.transition_finish_fn = Some(Rc::new(move || finished.set(finished.get() + 1)));
+    count
+}
+
+fn bearing_degrees(transform: &Transform) -> f64 {
+    mln_math::rad2deg(-transform.get_bearing())
+}
+
+// gtest: Transform.IndependentCameraTracks
+#[test]
+fn independent_camera_tracks() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)).with_center_altitude(Some(120.0)));
+    let mut zoom = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(2)) };
+    let zoom_finished = counting_finish(&mut zoom);
+    transform.ease_to(&cam().with_zoom(Some(12.0)), &zoom);
+    let zoom_start = transform.get_latest_transition_start();
+    transform.update_transitions(zoom_start + milliseconds(500));
+    assert_near(transform.get_zoom(), 9.0, 1e-5);
+
+    let mut center = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(8)) };
+    let center_finished = counting_finish(&mut center);
+    transform.ease_to(&cam().with_center(Some(ll(20.0, 30.0))), &center);
+    let center_start = transform.get_latest_transition_start();
+    assert_eq!(zoom_finished.get(), 0);
+    transform.update_transitions(zoom_start + seconds(2));
+    assert_near(transform.get_zoom(), 12.0, 1e-5);
+    assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() > 0.0);
+    assert!(transform.get_lat_lng(WrapMode::Wrapped).longitude() < 30.0);
+    assert_near(transform.get_state().get_center_altitude(), 120.0, 1e-5);
+    assert_eq!(zoom_finished.get(), 1);
+    assert_eq!(center_finished.get(), 0);
+    assert!(transform.is_panning());
+    assert!(!transform.is_scaling());
+    assert!(transform.in_transition());
+    transform.update_transitions(center_start + seconds(8));
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
+    assert_near(transform.get_zoom(), 12.0, 1e-5);
+    assert_eq!(center_finished.get(), 1);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.PartialReplacementKeepsCommandAndTiming
+#[test]
+fn partial_replacement_keeps_command_and_timing() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let mut animation = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
+    let finished = counting_finish(&mut animation);
+    transform.ease_to(&cam().with_zoom(Some(12.0)).with_bearing(Some(80.0)), &animation);
+    let start = transform.get_latest_transition_start();
+    transform.update_transitions(start + seconds(1));
+    assert_near(transform.get_zoom(), 9.0, 1e-5);
+    assert_near(bearing_degrees(&transform), 20.0, 1e-5);
+    transform.jump_to(&cam().with_zoom(Some(10.0)));
+    assert_eq!(finished.get(), 0);
+    assert!(transform.is_rotating());
+    assert!(!transform.is_scaling());
+    transform.update_transitions(start + seconds(2));
+    assert_near(transform.get_zoom(), 10.0, 1e-5);
+    assert_near(bearing_degrees(&transform), 40.0, 1e-5);
+    transform.update_transitions(start + seconds(4));
+    assert_eq!(finished.get(), 1);
+    assert_near(bearing_degrees(&transform), 80.0, 1e-5);
+    transform.cancel_transitions();
+    assert_eq!(finished.get(), 1);
+}
+
+// gtest: Transform.FlightAndAnchorCoupleCenterWithTheirProperties
+#[test]
+fn flight_and_anchor_couple_center_with_their_properties() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let mut flight = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
+    let flight_finished = counting_finish(&mut flight);
+    transform.fly_to(
+        &cam().with_center(Some(ll(20.0, 30.0))).with_zoom(Some(12.0)).with_roll(Some(20.0)),
+        &flight,
+        false,
+    );
+    let start = transform.get_latest_transition_start();
+    transform.update_transitions(start + seconds(1));
+    assert_near(mln_math::rad2deg(transform.get_roll()), 5.0, 1e-5);
+    let center = transform.get_lat_lng(WrapMode::Wrapped);
+    transform.jump_to(&cam().with_zoom(Some(10.0)));
+    assert_eq!(flight_finished.get(), 0); // Roll remains after the coupled flight ends.
+    transform.update_transitions(start + seconds(4));
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), center.latitude(), 1e-5);
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), center.longitude(), 1e-5);
+    assert_near(transform.get_zoom(), 10.0, 1e-5);
+    assert_near(mln_math::rad2deg(transform.get_roll()), 20.0, 1e-5);
+    assert_eq!(flight_finished.get(), 1);
+
+    let mut anchor_animation = AnimationOptions::new(seconds(4));
+    let anchor_finished = counting_finish(&mut anchor_animation);
+    let anchor = sc(200.0, 300.0);
+    let fixed = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped).unwrap();
+    transform.ease_to(&cam().with_zoom(Some(12.0)).with_anchor(Some(anchor)), &anchor_animation);
+    transform.update_transitions(transform.get_latest_transition_start() + seconds(1));
+    let pixel = transform.lat_lng_to_screen_coordinate(&fixed);
+    assert_near(pixel.x, anchor.x, 1e-5);
+    assert_near(pixel.y, anchor.y, 1e-5);
+    transform.jump_to(&cam().with_bearing(Some(70.0)));
+    let rotated_pixel = transform.lat_lng_to_screen_coordinate(&fixed);
+    assert_near(rotated_pixel.x, anchor.x, 1e-5);
+    assert_near(rotated_pixel.y, anchor.y, 1e-5);
+    assert_eq!(anchor_finished.get(), 0);
+    transform.jump_to(&cam().with_center(Some(ll(10.0, 15.0))));
+    assert_eq!(anchor_finished.get(), 1);
+    assert!(!transform.in_transition());
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 10.0, 1e-5);
+
+    transform.ease_to(&cam().with_center(Some(ll(20.0, 30.0))).with_anchor(Some(anchor)), &anchor_animation);
+    transform.ease_to(&cam().with_zoom(Some(14.0)), &AnimationOptions::new(seconds(2)));
+    assert_eq!(anchor_finished.get(), 1); // Explicit center ignores the anchor.
+    transform.cancel_transitions();
+    assert_eq!(anchor_finished.get(), 2);
+}
+
+// gtest: Transform.ComposePaddingPitchAndFieldOfView
+#[test]
+fn compose_padding_pitch_and_field_of_view() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let animation = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
+    transform.ease_to(&cam().with_padding(Some(insets(300.0, 20.0, 0.0, 0.0))), &animation);
+    transform.ease_to(&cam().with_pitch(Some(60.0)).with_fov(Some(45.0)), &animation);
+    let end = transform.get_latest_transition_start() + seconds(4);
+    transform.update_transitions(end);
+    assert_eq!(transform.get_state().get_edge_insets(), insets(300.0, 20.0, 0.0, 0.0));
+    assert_near(mln_math::rad2deg(transform.get_field_of_view()), 45.0, 1e-5);
+    let max_pitch =
+        transform.get_state().get_max_pitch() + deg2rad(45.0) / 2.0 - (1.3 * (deg2rad(45.0) / 2.0).tan()).atan();
+    assert!(max_pitch < deg2rad(60.0));
+    assert_near(transform.get_pitch(), max_pitch, 1e-5);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.CameraCallbacksCanReplaceAndCancelTransitions has no
+// port: its callbacks cancel and start commands on the Transform that is
+// calling them, which the Rust callbacks can't borrow (see transform.rs).
+
+#[derive(Default)]
+struct EventObserver {
+    /// 0 for each did-change notification, and what the tests push.
+    events: RefCell<Vec<i32>>,
+}
+
+impl TransformObserver for EventObserver {
+    fn on_camera_did_change(&self, _mode: CameraChangeMode) {
+        self.events.borrow_mut().push(0);
+    }
+}
+
+// gtest: Transform.PartialCameraCommandsFinishTogetherForStillImage
+#[test]
+fn partial_camera_commands_finish_together_for_still_image() {
+    let observer = Rc::new(EventObserver::default());
+    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(512, 512)).unwrap();
+    let push = |event: i32| {
+        let observer = observer.clone();
+        Some(Rc::new(move || observer.events.borrow_mut().push(event)) as Rc<dyn Fn()>)
+    };
+    let position = AnimationOptions { transition_finish_fn: push(1), ..AnimationOptions::new(seconds(5)) };
+    let bearing = AnimationOptions { transition_finish_fn: push(2), ..AnimationOptions::new(seconds(10)) };
+    transform.ease_to(&cam().with_center(Some(ll(20.0, 30.0))).with_zoom(Some(12.0)), &position);
+    transform.ease_to(&cam().with_bearing(Some(60.0)), &bearing);
+    observer.events.borrow_mut().clear();
+    transform.jump_to(&cam().with_zoom(Some(10.0)));
+    assert_eq!(*observer.events.borrow(), [0]);
+
+    // Static maps advance to the maximum time point for a still image. Each
+    // command finishes before its own did-change notification, even when
+    // another command has replaced one of its properties.
+    observer.events.borrow_mut().clear();
+    transform.update_transitions(TimePoint::max());
+    assert_eq!(*observer.events.borrow(), [1, 0, 2, 0]);
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
+    assert_near(transform.get_zoom(), 10.0, 1e-5);
+    assert_near(bearing_degrees(&transform), 60.0, 1e-5);
+    assert!(!transform.in_transition());
+    transform.cancel_transitions();
+    assert_eq!(*observer.events.borrow(), [1, 0, 2, 0]);
 }

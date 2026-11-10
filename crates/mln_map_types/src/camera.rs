@@ -8,8 +8,13 @@ use mln_util::geo::{EdgeInsets, LatLng, ScreenCoordinate};
 use mln_util::vectors::{Vec3, Vec4};
 
 /// Various options for describing the viewpoint of a map. All fields are
-/// optional. Anchor and center points are mutually exclusive, with
-/// preference for the center point when both are set.
+/// optional.
+/// A partial command replaces animations of its specified fields. Omitted
+/// fields keep their original animation timing. Flights couple center and
+/// zoom; anchored commands couple center with their specified fields.
+/// Replacing any member of a coupled group stops that group.
+/// Anchor and center points are mutually exclusive, with preference for the
+/// center point when both are set.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct CameraOptions {
     /// Coordinate at the center of the map.
@@ -97,8 +102,9 @@ pub struct AnimationOptions {
     /// a screen update, except on the last frame. The first parameter
     /// indicates the elapsed time as a percentage of the duration.
     pub transition_frame_fn: Option<std::rc::Rc<dyn Fn(f64)>>,
-    /// A function that is called once on the last frame of the transition,
-    /// just before the corresponding screen update.
+    /// Called once when all properties of the command have completed or been
+    /// superseded, including explicit cancellation. Other commands may still
+    /// be animating when this callback runs.
     pub transition_finish_fn: Option<std::rc::Rc<dyn Fn()>>,
 }
 
