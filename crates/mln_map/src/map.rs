@@ -717,12 +717,6 @@ fn std_max(a: f64, b: f64) -> f64 {
     if a < b { b } else { a }
 }
 
-/// `LatLng{lat, lon}`: C++ constructs it directly, which throws
-/// std::domain_error; nothing catches it here.
-fn lat_lng(lat: f64, lon: f64) -> LatLng {
-    LatLng::new(lat, lon).unwrap_or_else(|e| panic!("{e}"))
-}
-
 /// GL JS `solveVectorScale`: how much to scale the globe for a surface point
 /// to land on `target` along one clip axis, or nothing when the equation
 /// degenerates. Zooming out also moves the camera along `to_center`, so the
@@ -817,14 +811,14 @@ fn camera_for_lat_lngs_on_globe(
     let mid_longitude = west + VerticalPerspectiveProjection::difference_of_angles_degrees(west, east) * 0.5;
     let mid_latitude = north + VerticalPerspectiveProjection::difference_of_angles_degrees(north, south) * 0.5;
     let samples = [
-        lat_lng(north, west),
-        lat_lng(north, east),
-        lat_lng(south, west),
-        lat_lng(south, east),
-        lat_lng(mid_latitude, east),
-        lat_lng(mid_latitude, west),
-        lat_lng(north, mid_longitude),
-        lat_lng(south, mid_longitude),
+        LatLng::new(north, west)?,
+        LatLng::new(north, east)?,
+        LatLng::new(south, west)?,
+        LatLng::new(south, east)?,
+        LatLng::new(mid_latitude, east)?,
+        LatLng::new(mid_latitude, west)?,
+        LatLng::new(north, mid_longitude)?,
+        LatLng::new(south, mid_longitude)?,
     ];
     let to_center = VerticalPerspectiveProjection::surface_vector(&fit_center);
 
@@ -909,15 +903,15 @@ fn globe_bounds(transform: &crate::transform::Transform) -> Result<LatLngBounds,
             && point.y > 0.0
             && point.y < height
     };
-    if on_screen(&lat_lng(90.0, 0.0)) {
+    if on_screen(&LatLng::new(90.0, 0.0)?) {
         north = 90.0;
         west = -180.0;
         east = 180.0;
     }
-    if on_screen(&lat_lng(-90.0, 0.0)) {
+    if on_screen(&LatLng::new(-90.0, 0.0)?) {
         south = -90.0;
         west = -180.0;
         east = 180.0;
     }
-    Ok(LatLngBounds::hull(lat_lng(south, west), lat_lng(north, east)))
+    Ok(LatLngBounds::hull(LatLng::new(south, west)?, LatLng::new(north, east)?))
 }
