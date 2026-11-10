@@ -1,6 +1,6 @@
 // Ports src/mln/map/transform.hpp and src/mln/map/transform.cpp, with
-// maplibre-native-ffi's patch 0015 (independent camera animations,
-// maplibre/maplibre-native#4637).
+// maplibre-native-ffi's patches 0015 (independent camera animations,
+// maplibre/maplibre-native#4637) and 0043 (cancel transitions by id).
 //
 // The C++ transition lambdas capture `this`. Here a command's frame function
 // takes the state as an argument and returns the camera at its progress,
@@ -1053,6 +1053,22 @@ impl Transform {
         let finished = std::mem::take(&mut self.transitions);
         self.update_movement_flags();
         self.finish_transitions(&finished);
+    }
+
+    /// `cancelTransitions(uint64_t transitionId)`: cancels the commands whose
+    /// [`AnimationOptions::transition_id`] equals `transition_id`, leaves the
+    /// others running, and returns whether any command ended.
+    pub fn cancel_transitions_with_id(&mut self, transition_id: u64) -> bool {
+        let (finished, running): (Vec<_>, Vec<_>) = std::mem::take(&mut self.transitions)
+            .into_iter()
+            .partition(|transition| transition.animation.transition_id == Some(transition_id));
+        self.transitions = running;
+        if finished.is_empty() {
+            return false;
+        }
+        self.update_movement_flags();
+        self.finish_transitions(&finished);
+        true
     }
 
     // MARK: - Gesture

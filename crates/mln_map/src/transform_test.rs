@@ -1582,8 +1582,8 @@ fn nan_screen_coordinates_are_errors() {
     assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
 }
 
-// The tests below port maplibre-native-ffi's patch 0015 (independent camera
-// animations).
+// The tests below port maplibre-native-ffi's patches 0015 (independent
+// camera animations) and 0043 (cancel transitions by id).
 
 const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
 
@@ -1742,11 +1742,13 @@ fn compose_padding_pitch_and_field_of_view() {
 struct EventObserver {
     /// 0 for each did-change notification, and what the tests push.
     events: RefCell<Vec<i32>>,
+    changes: Cell<u32>,
 }
 
 impl TransformObserver for EventObserver {
     fn on_camera_did_change(&self, _mode: CameraChangeMode) {
         self.events.borrow_mut().push(0);
+        self.changes.set(self.changes.get() + 1);
     }
 }
 
@@ -1781,4 +1783,48 @@ fn partial_camera_commands_finish_together_for_still_image() {
     assert!(!transform.in_transition());
     transform.cancel_transitions();
     assert_eq!(*observer.events.borrow(), [1, 0, 2, 0]);
+}
+
+// gtest: Transform.CancelTransitionsByIdLeavesOthersRunning
+#[test]
+fn cancel_transitions_by_id_leaves_others_running() {
+    let observer = Rc::new(EventObserver::default());
+    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let mut zoom = AnimationOptions { transition_id: Some(1), ..AnimationOptions::new(seconds(4)) };
+    let zoom_finished = counting_finish(&mut zoom);
+    let mut bearing = AnimationOptions { transition_id: Some(2), ..AnimationOptions::new(seconds(4)) };
+    let bearing_finished = counting_finish(&mut bearing);
+    transform.ease_to(&cam().with_zoom(Some(12.0)), &zoom);
+    transform.ease_to(&cam().with_bearing(Some(80.0)), &bearing);
+    let start = transform.get_latest_transition_start();
+    transform.update_transitions(start + seconds(1));
+    let zoom_at_cancel = transform.get_zoom();
+    observer.changes.set(0);
+
+    // Only the command with the identity finishes, once, and the other keeps
+    // animating.
+    assert!(transform.cancel_transitions_with_id(1));
+    assert_eq!(zoom_finished.get(), 1);
+    assert_eq!(bearing_finished.get(), 0);
+    assert_eq!(observer.changes.get(), 1);
+    assert!(transform.in_transition());
+    assert!(!transform.is_scaling());
+    assert!(transform.is_rotating());
+
+    // An identity that no running command carries finishes nothing and
+    // reports no change.
+    assert!(!transform.cancel_transitions_with_id(1));
+    assert!(!transform.cancel_transitions_with_id(3));
+    assert_eq!(zoom_finished.get(), 1);
+    assert_eq!(observer.changes.get(), 1);
+    assert!(transform.in_transition());
+
+    transform.update_transitions(start + seconds(4));
+    assert_near(transform.get_zoom(), zoom_at_cancel, 1e-5);
+    assert_near(bearing_degrees(&transform), 80.0, 1e-5);
+    assert_eq!(zoom_finished.get(), 1);
+    assert_eq!(bearing_finished.get(), 1);
+    assert!(!transform.in_transition());
 }

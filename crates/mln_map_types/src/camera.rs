@@ -106,6 +106,10 @@ pub struct AnimationOptions {
     /// superseded, including explicit cancellation. Other commands may still
     /// be animating when this callback runs.
     pub transition_finish_fn: Option<std::rc::Rc<dyn Fn()>>,
+    /// Caller-chosen identity of the command, which
+    /// `Map::cancel_transitions_with_id` matches. Several commands may share
+    /// one.
+    pub transition_id: Option<u64>,
 }
 
 impl AnimationOptions {
