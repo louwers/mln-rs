@@ -32,6 +32,8 @@ use mln_storage::{
     ClientOptions, FileSource, FileSourceManager, FileSourceType, Kind, LoadingMethod, MainResourceLoader,
     OnlineFileSource, Resource, ResourceOptions, Response, StoragePolicy,
 };
+use mln_style::conversion::layer::convert_layer;
+use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
@@ -2369,6 +2371,118 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
     check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
     check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+}
+
+/// `ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange`
+/// for a layer type: "line", "heatmap" or "color-relief".
+fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
+    let ramp_property = if type_ == "line" { "line-gradient".to_owned() } else { format!("{type_}-color") };
+    let ramp = |color: &str| {
+        let input = match type_ {
+            "line" => r#"["line-progress"], 0, "#,
+            "heatmap" => r#"["heatmap-density"], 0, "#,
+            _ => r#"["elevation"], -20000, "#,
+        };
+        let end = if type_ == "color-relief" { ", 20000, " } else { ", 1, " };
+        format!(r#"["interpolate", ["linear"], {input}{color}{end}{color}]"#)
+    };
+    let state_color = r#"["global-state", "color"]"#;
+
+    let test = MapTest::new();
+    test.file_source.set_response(Kind::Tile, |_: &Resource| {
+        // Opaque black decodes to an elevation of -10000 m.
+        let mut dem = PremultipliedImage::new(Size::new(256, 256));
+        for i in (3..dem.bytes()).step_by(4) {
+            dem.data[i] = 255;
+        }
+        let mut response = Response::new();
+        response.data = Some(Arc::new(mln_platform_default_image::encode_png(&dem)));
+        Some(response)
+    });
+    test.load_json(
+        r#"{
+        "version": 8,
+        "state": {"color": {"default": "red"}, "unrelated": {"default": 0}},
+        "sources": {
+            "line": {
+                "type": "geojson",
+                "lineMetrics": true,
+                "data": {"type": "LineString", "coordinates": [[-20, 0], [20, 0]]}
+            },
+            "heatmap": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}},
+            "color-relief": {"type": "raster-dem", "tiles": ["https://example.com/{z}/{x}/{y}.png"]}
+        },
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}}]
+    }"#,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(2.0)));
+    test.render();
+
+    let expect_center = |expected: Color| {
+        let pixel = center_pixel(&test.render().image);
+        assert_near(f64::from(pixel[0]), f64::from(expected.r) * 255.0, 2.0);
+        assert_near(f64::from(pixel[1]), f64::from(expected.g) * 255.0, 2.0);
+        assert_near(f64::from(pixel[2]), f64::from(expected.b) * 255.0, 2.0);
+    };
+    let set_ramp = |color: &str| {
+        let value: serde_json::Value = serde_json::from_str(&ramp(color)).unwrap();
+        let mut map = test.map();
+        let mut style = map.get_style_mut();
+        let mut layer = style.get_layer_mut("ramp").unwrap();
+        assert!(layer.set_property(&ramp_property, &Convertible::from(&value), None).is_none());
+    };
+    let set_state = |name: &str, value: Value| {
+        test.map().get_style_mut().set_global_state_property(name, &value).unwrap();
+    };
+
+    let extra_paint = match type_ {
+        "line" => r#", "line-width": 16"#,
+        "heatmap" => r#", "heatmap-radius": 64"#,
+        _ => "",
+    };
+    let layer_json = format!(
+        r#"{{"id": "ramp", "type": "{type_}", "source": "{type_}", "paint": {{"{ramp_property}": {}{extra_paint}}}}}"#,
+        ramp(state_color)
+    );
+    let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
+
+    // The layer joins the render tree in the same update as a write to a key its ramp does not read.
+    set_state("unrelated", Value::Double(1.0));
+    test.map().get_style_mut().add_layer(layer, None).unwrap();
+    expect_center(Color::red());
+
+    // While the ramp reads no state, the layer skips evaluation for state changes.
+    set_ramp(r#""lime""#);
+    expect_center(Color::new(0.0, 1.0, 0.0, 1.0));
+    set_state("color", Value::String("blue".to_owned()));
+    expect_center(Color::new(0.0, 1.0, 0.0, 1.0));
+
+    // The ramp reads the state again in the same update as another unrelated write.
+    set_state("unrelated", Value::Double(2.0));
+    set_ramp(state_color);
+    expect_center(Color::blue());
+}
+
+// INSTANTIATE_TEST_SUITE_P(Rendering, ColorRampGlobalStateTest, testing::Values("line", "heatmap", "color-relief"))
+// gtest: ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange
+#[test]
+fn color_ramp_renders_current_state_after_unrelated_state_change_line() {
+    color_ramp_renders_current_state_after_unrelated_state_change("line");
+}
+
+// gtest: ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange
+#[test]
+fn color_ramp_renders_current_state_after_unrelated_state_change_heatmap() {
+    color_ramp_renders_current_state_after_unrelated_state_change("heatmap");
+}
+
+// gtest: ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange
+#[test]
+fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() {
+    color_ramp_renders_current_state_after_unrelated_state_change("color-relief");
 }
 
 // Port-only: the C++ Map constructor throws for an empty size; the Rust one

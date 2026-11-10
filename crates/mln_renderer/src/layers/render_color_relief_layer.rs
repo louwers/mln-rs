@@ -261,26 +261,28 @@ impl RenderLayer for RenderColorReliefLayer {
         let prior = std::mem::take(&mut self.unevaluated);
         self.unevaluated = impl_cast(&self.base.base_impl).paint.transitioned(parameters, prior);
         self.base.style_dependencies = self.unevaluated.get_dependencies();
-        self.update_color_ramp();
     }
 
     fn evaluate(&mut self, parameters: &PropertyEvaluationParameters) {
+        // Build the ramp here rather than in transition(), which has no global
+        // state. A new or changed layer always needs one; otherwise only a
+        // change to a state key that the ramp reads does.
         let global_state_differs = match (&self.color_ramp_global_state, &parameters.global_state) {
             (None, None) => false,
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
             _ => true,
         };
-        if global_state_differs {
-            let ramp_value = self.unevaluated.get::<ColorReliefColor>().get_value();
-            let ramp_affected = ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+        let ramp_value = self.unevaluated.get::<ColorReliefColor>().get_value();
+        let ramp_affected = parameters.layer_changed
+            || (global_state_differs
+                && ramp_value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
                 && global_state_refs_intersect(
                     ramp_value.get_global_state_refs(),
                     parameters.changed_global_state_keys.as_deref(),
-                );
-            self.color_ramp_global_state = parameters.global_state.clone();
-            if ramp_affected {
-                self.update_color_ramp();
-            }
+                ));
+        self.color_ramp_global_state = parameters.global_state.clone();
+        if ramp_affected {
+            self.update_color_ramp();
         }
 
         let previous_evaluated = get_evaluated::<ColorReliefLayerProperties>(&self.base.evaluated_properties).clone();
