@@ -160,15 +160,8 @@ pub fn get_projection_data(
         let translate = RenderTile::tile_unit_translation(tile_id, translation, anchor, parameters.state);
         data.translate = [f64::from(translate[0]), f64::from(translate[1])];
     }
-    // MLN_GLOBE_DEPTH_OFFSET_IN_SHADER (every backend but OpenGL): the same
-    // per-layer shift `multiplyWithProjectionMatrix` bakes into the Mercator
-    // matrix.
-    if !drawable.get_is_3d() && drawable.get_enable_depth() {
-        let steps = (1u32.wrapping_add(parameters.current_layer))
-            .wrapping_mul(PaintParameters::NUM_SUBLAYERS as u32)
-            .wrapping_sub(drawable.get_sub_layer_index() as u32);
-        data.depth_offset = f64::from(steps as f32 * PaintParameters::DEPTH_EPSILON);
-    }
+    // MLN_GLOBE_DEPTH_OFFSET_IN_SHADER is off, as on OpenGL: a drawable's
+    // depth range keeps the layers apart, so the shader's depth shift stays 0.
     data
 }
 
