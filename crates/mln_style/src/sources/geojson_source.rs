@@ -108,7 +108,7 @@ pub type TileFeatures = Vec<Feature<i16>>;
 pub type Features = Vec<Feature<f64>>;
 
 /// `style::GeoJSONData`.
-pub trait GeoJSONData: Send + Sync + std::fmt::Debug {
+pub trait GeoJSONData: Send + Sync {
     /// `getTile(id, fn, runSynchronously)`: `callback` runs on the calling
     /// thread, either right away or later from its RunLoop.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
@@ -321,5 +321,13 @@ impl Source for GeoJSONSource {
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
         Box::new((*self.impl_()).clone())
+    }
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn GeoJSONData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeoJSONData").finish_non_exhaustive()
     }
 }

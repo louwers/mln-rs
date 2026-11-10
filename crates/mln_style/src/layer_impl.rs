@@ -73,7 +73,7 @@ impl ImplBase {
 }
 
 /// The virtual interface of `Layer::Impl`.
-pub trait Impl: AsAny + std::fmt::Debug {
+pub trait Impl: AsAny {
     fn base(&self) -> &ImplBase;
     fn base_mut(&mut self) -> &mut ImplBase;
 
@@ -130,5 +130,16 @@ pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Immutable<
     match impl_.clone().into_any_arc().downcast::<T>() {
         Ok(typed) => typed,
         Err(_) => panic!("static_immutable_cast: layer impl type mismatch"),
+    }
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn Impl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Layer::Impl")
+            .field("id", &self.base().id)
+            .field("type", &self.get_type_info().type_)
+            .finish_non_exhaustive()
     }
 }

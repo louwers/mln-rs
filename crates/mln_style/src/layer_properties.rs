@@ -29,7 +29,7 @@ impl LayerPropertiesBase {
 }
 
 /// An interface, wrapping evaluated layer properties.
-pub trait LayerProperties: AsAny + std::fmt::Debug {
+pub trait LayerProperties: AsAny {
     fn base(&self) -> &LayerPropertiesBase;
     fn base_mut(&mut self) -> &mut LayerPropertiesBase;
 
@@ -94,4 +94,16 @@ pub trait HasEvaluated: LayerProperties {
 /// properties hold one (background, fill, line, fill-extrusion).
 pub trait HasCrossfade: LayerProperties {
     fn crossfade(&self) -> &crate::renderer::property_evaluation_parameters::CrossfadeParameters;
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn LayerProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let base_impl = &self.base().base_impl;
+        f.debug_struct("LayerProperties")
+            .field("id", &base_impl.base().id)
+            .field("type", &base_impl.get_type_info().type_)
+            .finish_non_exhaustive()
+    }
 }

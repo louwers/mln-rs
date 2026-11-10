@@ -87,7 +87,7 @@ impl ImplBase {
 }
 
 /// The virtual interface of `Source::Impl`.
-pub trait Impl: AsAny + std::fmt::Debug {
+pub trait Impl: AsAny {
     fn base(&self) -> &ImplBase;
     fn base_mut(&mut self) -> &mut ImplBase;
 
@@ -109,4 +109,13 @@ impl std::ops::Deref for dyn Impl {
 /// panics on a type mismatch.
 pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Arc<T> {
     impl_.clone().into_any_arc().downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn Impl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let base = self.base();
+        f.debug_struct("Source::Impl").field("id", &base.id).field("type", &base.type_).finish_non_exhaustive()
+    }
 }

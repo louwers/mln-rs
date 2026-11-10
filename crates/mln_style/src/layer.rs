@@ -115,7 +115,7 @@ pub enum PropertyScope {
 }
 
 /// The runtime representation of a layer from the MapLibre Style Spec.
-pub trait Layer: AsAny + std::fmt::Debug {
+pub trait Layer: AsAny {
     // --- virtual / protected members ---
 
     /// The `baseImpl` member.
@@ -431,5 +431,16 @@ fn set_visibility_value(layer: &mut (impl Layer + ?Sized), value: &Convertible<'
             None
         }
         None => Some(error),
+    }
+}
+
+// Debug is not a supertrait of this trait, nor of the other layer and source
+// traits that have a `dyn` Debug impl like this one: through the vtable it
+// would keep every implementation's derived Debug (and those of everything it
+// holds) in the binary. Each prints what tells its values apart instead.
+impl std::fmt::Debug for dyn Layer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let base = self.base_impl();
+        f.debug_struct("Layer").field("id", &base.id).field("type", &base.get_type_info().type_).finish_non_exhaustive()
     }
 }
