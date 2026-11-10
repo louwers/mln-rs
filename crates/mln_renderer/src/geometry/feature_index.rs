@@ -404,11 +404,14 @@ impl FeatureIndex {
 
             let needs_cross_tile_index = render_layer.base().base_impl.get_type_info().cross_tile_index
                 == layer_type_info::CrossTileIndex::Required;
+            // we use the float camera zoom here, not the integer tile ID zoom,
+            // because for the query we take into account the actual rendered
+            // size of the geometry (#2781)
             let intersects = needs_cross_tile_index
                 || render_layer.query_intersects_feature(
                     query_geometry,
                     &*feature,
-                    f32::from(tile_id.z),
+                    transform_state.get_zoom() as f32,
                     transform_state,
                     pixels_to_tile_units,
                     pos_matrix,

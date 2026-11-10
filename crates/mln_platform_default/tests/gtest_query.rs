@@ -233,6 +233,66 @@ fn query_rendered_features_line_offset_endpoint() {
     }
 }
 
+// gtest: Query.QueryRenderedFeaturesCompositePaintZoom
+#[test]
+fn query_rendered_features_composite_paint_zoom() {
+    // (property, inside, outside)
+    let cases: [(&str, f64, f64); 4] = [
+        ("line-width", 8.0, 14.0),
+        ("line-gap-width", 14.0, 20.0),
+        ("circle-radius", 15.0, 26.0),
+        ("circle-stroke-width", 24.0, 32.0),
+    ];
+
+    // Exercise fractional zoom both below and above the default GeoJSON maxzoom (18).
+    for zoom in [16.5f64, 20.5] {
+        for (property, inside_offset, outside_offset) in cases {
+            let trace = format!("{property} at zoom {zoom}");
+            let test = QueryTest::new();
+            let circle = property.starts_with("circle-");
+            let geometry = if circle {
+                r#"{"type":"Point","coordinates":[1.003,1]}"#
+            } else {
+                r#"{"type":"LineString","coordinates":[[0.993,1],[1.013,1]]}"#
+            };
+            let paint = if property == "circle-stroke-width" {
+                r#""circle-radius":6,"#
+            } else if circle || property == "line-width" {
+                ""
+            } else {
+                r#""line-width":6,"#
+            };
+            let layer_type = if circle { "circle" } else { "line" };
+            // std::to_string(int).
+            let lower_zoom = zoom as i32;
+            let upper_zoom = zoom as i32 + 1;
+            test.map().get_style_mut().load_json(&format!(
+                r#"{{"version":8,"sources":{{"source":{{"type":"geojson","data":{{
+                    "type":"Feature","properties":{{"small":4,"large":40}},"geometry":{geometry}
+                }}}}}},"layers":[{{"id":"layer","type":"{layer_type}","source":"source","paint":{{{paint}
+                    "{property}":["interpolate",["linear"],["zoom"],{lower_zoom},["get","small"],
+                    {upper_zoom},["get","large"]]}}}}]}}"#
+            ));
+            test.map().jump_to(&CameraOptions::default().with_center(Some(ll(1.0, 1.003))).with_zoom(Some(zoom)));
+            let rendered_result = test.render();
+            let center = test.map().pixel_for_lat_lng(&ll(1.0, 1.003));
+            let inside = ScreenCoordinate::new(center.x, center.y + inside_offset);
+            let outside = ScreenCoordinate::new(center.x, center.y + outside_offset);
+
+            // At the camera zoom the composite value is 22; at canonical tile zoom it is 4.
+            // Check actual painted pixels as well as query results, away from antialiased edges.
+            let alpha_at = |point: &ScreenCoordinate| {
+                let image = &rendered_result.image;
+                image.data[4 * ((point.y as u32 * image.size.width + point.x as u32) as usize) + 3]
+            };
+            assert!(alpha_at(&inside) > 0, "{trace}");
+            assert_eq!(alpha_at(&outside), 0, "{trace}");
+            assert_eq!(test.query_rendered_features(&inside, &rendered(layers(&["layer"]), None)).len(), 1, "{trace}");
+            assert!(test.query_rendered_features(&outside, &rendered(layers(&["layer"]), None)).is_empty(), "{trace}");
+        }
+    }
+}
+
 // gtest: Query.QuerySourceFeatures
 #[test]
 fn query_source_features() {
