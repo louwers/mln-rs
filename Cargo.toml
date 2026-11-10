@@ -148,10 +148,11 @@ web-sys = { version = "0.3.107", features = [
 # performance.now() and Date.now() there, std::time everywhere else.
 web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
-# wgpu-native) onto the Rust implementation of the same API. Its default
-# features hold the native backends, and on wasm32-unknown-unknown the
-# browser's WebGPU (platform/web).
-wgpu = { version = "30.0.1" }
+# wgpu-native) onto the Rust implementation of the same API: Vulkan, Metal
+# and DX12 natively (wgpu builds each only where it runs), and on
+# wasm32-unknown-unknown the browser's WebGPU (platform/web). Not its
+# default GLES backend, which nothing selects.
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
 # with warnings denied in CI (the `lint` job), except the lints whose fix
