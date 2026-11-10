@@ -30,18 +30,17 @@ mod fetch;
 mod map;
 mod worker;
 
-pub use map::WebMap;
-pub use worker::TileWorker;
-
 use std::sync::Arc;
 use std::time::Duration;
 
+pub use map::WebMap;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_actor::scheduler;
 use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::time::Instant;
 use wasm_bindgen::prelude::*;
+pub use worker::TileWorker;
 
 /// Runs when an instance starts, in each Web Worker, before any
 /// map or file source exists (they would start threads otherwise).

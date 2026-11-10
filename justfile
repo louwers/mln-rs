@@ -52,7 +52,7 @@ check:
     cargo check --workspace --all-targets
 
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
-# needs the target: `rustup target add wasm32-unknown-unknown`. SQLite builds through sqlite-wasm-rs, which needs a clang
+# needs the target, which rust-toolchain.toml installs. SQLite builds through sqlite-wasm-rs, which needs a clang
 # that targets wasm32. Clippy, so that platform/web, which only builds there, is linted too.
 [doc('Check that the libraries and platform/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
@@ -98,9 +98,13 @@ env-info:
     @echo "CARGO_BUILD_WARNINGS='$CARGO_BUILD_WARNINGS'"
     @echo "RUST_BACKTRACE='$RUST_BACKTRACE'"
 
+# The nightly whose rustfmt `just fmt` (and CI's `test-fmt`) runs: its import options, imports_granularity and group_imports,
+# are unstable. Pinned so every machine formats alike. Bump it on purpose, then run `just fmt`.
+fmt_toolchain := 'nightly-2026-11-04'
+
 # Generated files (their first lines say "Do not edit" or "@generated") stay as their generators write them: they are not passed to
 # rustfmt, and their `mod` declarations carry #[rustfmt::skip], so formatting the module that declares them leaves them alone too.
-[doc('Reformat every Rust file with rustfmt. If nightly is available, use it for better results')]
+[doc('Reformat every Rust file with the pinned nightly rustfmt, installing it if needed')]
 fmt *args:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -108,13 +112,10 @@ fmt *args:
     while IFS= read -r -d '' file; do
         head -n 5 "$file" | grep -q -e 'Do not edit' -e '@generated' || files+=("$file")
     done < <(git ls-files -z '*.rs')
-    if (rustup toolchain list | grep nightly && rustup component list --toolchain nightly --installed | grep rustfmt) &> /dev/null; then
-        echo 'Reformatting Rust code using nightly Rust fmt to sort imports'
-        rustfmt +nightly --config imports_granularity=Module,group_imports=StdExternalCrate {{args}} "${files[@]}"
-    else
-        echo 'Reformatting Rust with the stable rustfmt.  Install nightly with `rustup install nightly` for better results'
-        rustfmt {{args}} "${files[@]}"
+    if ! rustup component list --toolchain {{fmt_toolchain}} --installed 2> /dev/null | grep -q '^rustfmt'; then
+        rustup toolchain install {{fmt_toolchain}} --profile minimal --component rustfmt --no-self-update
     fi
+    rustfmt +{{fmt_toolchain}} --config imports_granularity=Module,group_imports=StdExternalCrate {{args}} "${files[@]}"
 
 # Regenerate the HarfBuzz Unicode tables (crates/mln_text's, and a difftest's) from the C++ core's HarfBuzz
 generate-hb-ucd-tables:

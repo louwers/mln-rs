@@ -1,0 +1,9 @@
+# The Rust that builds, lints and tests the workspace, locally and in CI. Bump
+# it on purpose, so a new release's lints and formatting land in their own
+# change. The msrv job checks the oldest Rust separately (`rust-version` in
+# Cargo.toml), and `just fmt` runs the nightly rustfmt pinned in the justfile.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

@@ -20,10 +20,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mln_util::identity::SimpleIdentity;
+use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
 
 use crate::scheduler::{ExceptionHandler, Scheduler, Task};
-use mln_util::sync::MutexExt;
 
 /// A scheduler whose tasks the host runs on its own thread.
 pub struct CooperativeScheduler {
