@@ -64,7 +64,7 @@ pub struct Context {
     clip_mask_renderable: Cell<Option<usize>>,
     clip_mask_pipeline_hash: Cell<Option<u64>>,
     clip_mask_uniform_buffers: RefCell<Vec<wgpu::Buffer>>,
-    // Port-only: the placeholder vertex buffers of
+    // `defaultVertexBuffers`: the default attribute buffers of
     // UploadPass::build_attribute_bindings, one per attribute type, with the
     // vertex count each covers.
     dummy_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>>,

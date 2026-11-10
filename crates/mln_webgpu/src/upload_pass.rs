@@ -99,14 +99,12 @@ impl UploadPass {
         None
     }
 
-    /// A buffer of at least `vertex_count` default values of `data_type`
-    /// for an attribute the drawable doesn't provide: white for colors
-    /// (Float4), full opacity (Float2), zeros otherwise.
-    ///
-    /// Port-only: C++ creates one for each drawable whenever it rebuilds its
-    /// attribute bindings, which symbol drawables do on most frames. The
-    /// context keeps one per type instead, grown to the largest count. In the
-    /// browser the per-rebuild buffers were tens of megabytes a second.
+    /// `Context::getDefaultVertexBuffer(type, size)`: a shared buffer of at
+    /// least `vertex_count` default values of `data_type` for an attribute
+    /// the drawable doesn't provide: white for colors (Float4), full opacity
+    /// (Float2), zeros otherwise. The context keeps one per type, grown
+    /// geometrically. Each binding holds the buffer it was given, so a
+    /// replaced smaller one lives until no binding points at it.
     fn dummy_vertex_buffer(&self, data_type: AttributeDataType, vertex_count: usize) -> UniqueVertexBufferResource {
         let mut cache = self.context.dummy_vertex_buffers().borrow_mut();
         let cached_count = cache.get(&data_type).map_or(0, |(count, _)| *count);
