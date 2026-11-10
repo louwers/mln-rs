@@ -153,8 +153,8 @@ glfw *args:  _dev-shell
 
 # wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
 # Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
-# The release build also gets fat LTO, one codegen unit and opt-level "s", and binaryen's wasm-opt (version 130, e.g.
-# `mise use -g aqua:WebAssembly/binaryen@130`) strips its names and other custom sections. Only stripping: wasm-opt's -O
+# The release build also gets fat LTO, one codegen unit and opt-level "s", and binaryen's wasm-opt (its latest release, e.g.
+# `mise use -g aqua:WebAssembly/binaryen@latest`) strips its names and other custom sections. Only stripping: wasm-opt's -O
 # levels made the module both bigger after brotli and slower to load (platform/web/README.md). Serve platform/web/web over
 # HTTP, e.g. `python3 -m http.server -d platform/web/web`, and open it in a browser with WebGPU.
 [doc('Build the browser build (the map and its tile workers in Web Workers) into platform/web/web/pkg')]
@@ -171,7 +171,7 @@ web:
     wasm-bindgen --target web --out-dir "$pkg" "$target/mln_web.wasm"
     if [[ {{quote(profile)}} != dev ]]; then
       command -v wasm-opt > /dev/null ||
-        { echo "error: wasm-opt not found: put binaryen 130 on the PATH (platform/web/README.md)" >&2; exit 1; }
+        { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (platform/web/README.md)" >&2; exit 1; }
       wasm-opt --strip-debug --strip-producers --strip-target-features "$pkg/mln_web_bg.wasm" -o "$pkg/mln_web_bg.wasm"
     fi
 

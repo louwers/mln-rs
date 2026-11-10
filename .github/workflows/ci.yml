@@ -208,12 +208,15 @@ jobs:
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,wasm-bindgen@0.2.130' }
 
-      # wasm-opt, which `just profile=release web` runs.
+      # wasm-opt, which `just profile=release web` runs, from binaryen's
+      # latest release.
       - name: Install binaryen
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          curl -fsSL https://github.com/WebAssembly/binaryen/releases/download/version_130/binaryen-version_130-x86_64-linux.tar.gz |
+          gh release download --repo WebAssembly/binaryen --pattern 'binaryen-*-x86_64-linux.tar.gz' --output - |
             tar -xz -C "$RUNNER_TEMP"
-          echo "$RUNNER_TEMP/binaryen-version_130/bin" >> "$GITHUB_PATH"
+          echo "$(echo "$RUNNER_TEMP"/binaryen-version_*)/bin" >> "$GITHUB_PATH"
 
       - name: Install Rust
         run: |
