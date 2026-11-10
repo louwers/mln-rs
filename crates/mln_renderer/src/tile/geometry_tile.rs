@@ -742,7 +742,7 @@ impl Tile for GeometryTile {
             2f64.powf(transform_state.get_zoom() - f64::from(id.overscaled_z)),
             options,
             global_state,
-            &id.to_unwrapped(),
+            &id,
             layers,
             query_padding * transform_state.max_pitch_scale_factor(),
             feature_state,

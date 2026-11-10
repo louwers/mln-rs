@@ -19,8 +19,8 @@ use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style_types::TranslateAnchorType;
+use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData};
-use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::exception::ExceptionPtr;
 use mln_util::feature::{Feature, feature_id_to_string};
@@ -225,7 +225,7 @@ impl FeatureIndex {
         scale: f64,
         query_options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
-        tile_id: &UnwrappedTileID,
+        tile_id: &OverscaledTileID,
         layers: &QueryLayers<'_>,
         additional_query_padding: f32,
         source_feature_state: &SourceFeatureState,
@@ -275,7 +275,7 @@ impl FeatureIndex {
                 &indexed_feature.bucket_leader_id,
                 query_options,
                 global_state,
-                &tile_id.canonical,
+                tile_id,
                 layers,
                 query_geometry,
                 transform_state,
@@ -337,7 +337,7 @@ impl FeatureIndex {
                 &symbol_feature.bucket_leader_id,
                 query_options,
                 global_state,
-                &tile_id.canonical,
+                tile_id,
                 layers,
                 &GeometryCoordinates::new(),
                 &transform_state,
@@ -361,7 +361,7 @@ impl FeatureIndex {
         bucket_leader_id: &str,
         options: &RenderedQueryOptions,
         global_state: Option<&GlobalStateMap>,
-        tile_id: &CanonicalTileID,
+        tile_id: &OverscaledTileID,
         layers: &QueryLayers<'_>,
         query_geometry: &GeometryCoordinates,
         transform_state: &TransformState,
@@ -422,8 +422,9 @@ impl FeatureIndex {
                 continue;
             }
 
+            // Match layer filters and source queries, including overzoomed tiles.
             if let Some(filter) = &options.filter {
-                let context = EvaluationContext::with_zoom_feature(f32::from(tile_id.z), Some(&*feature))
+                let context = EvaluationContext::with_zoom_feature(f32::from(tile_id.overscaled_z), Some(&*feature))
                     .with_global_state(global_state);
                 let passes = filter.evaluate(&context);
                 feature.check()?;
@@ -434,7 +435,7 @@ impl FeatureIndex {
 
             // C++ throws out of the query for a malformed geometry (from
             // `convertFeature`) or value.
-            let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, tile_id)
+            let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, &tile_id.canonical)
                 .map_err(|e| Arc::new(e) as ExceptionPtr)?;
             feature.check()?;
             let mut converted = Feature::from(converted);
