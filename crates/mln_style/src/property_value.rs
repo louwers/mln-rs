@@ -10,12 +10,40 @@ use crate::renderer::property_evaluator::Evaluator;
 
 /// `PropertyValue<T>`: `variant<Undefined, T, PropertyExpression<T>>`, in
 /// that order (the default is `Undefined`).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub enum PropertyValue<T> {
     #[default]
     Undefined,
     Constant(T),
     Expression(PropertyExpression<T>),
+}
+
+// Clone and PartialEq are written out rather than derived so that they can be
+// `#[inline(never)]`: each generated layer property's setter, `mutable_impl`
+// and transition code clone and compare these, and a derive inlined there
+// copies the match into every one of them, which costs code size (the browser
+// build's wasm most) for no speed that style mutation needs.
+impl<T: Clone> Clone for PropertyValue<T> {
+    #[inline(never)]
+    fn clone(&self) -> Self {
+        match self {
+            PropertyValue::Undefined => PropertyValue::Undefined,
+            PropertyValue::Constant(v) => PropertyValue::Constant(v.clone()),
+            PropertyValue::Expression(e) => PropertyValue::Expression(e.clone()),
+        }
+    }
+}
+
+impl<T: PartialEq> PartialEq for PropertyValue<T> {
+    #[inline(never)]
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (PropertyValue::Undefined, PropertyValue::Undefined) => true,
+            (PropertyValue::Constant(a), PropertyValue::Constant(b)) => a == b,
+            (PropertyValue::Expression(a), PropertyValue::Expression(b)) => a == b,
+            _ => false,
+        }
+    }
 }
 
 impl<T> From<PropertyExpression<T>> for PropertyValue<T> {
