@@ -7,7 +7,7 @@
 use std::rc::Rc;
 
 use mln_map::transform::{NullTransformObserver, Transform};
-use mln_map::{ConstrainMode, ViewportMode};
+use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
 use mln_util::LatLng;
 use mln_util::chrono::{TimePoint, milliseconds};
 use mln_util::size::Size;
@@ -507,4 +507,53 @@ fn shift_drag_zooms_to_a_box() {
     rig.up(1, 300.0, 300.0);
     rig.settle();
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
+}
+
+/// Pinches out by about 0.93 levels and tilts by about 5° with two fingers,
+/// holds still so nothing glides, and lifts both; returns the zoom and pitch
+/// once everything settles.
+fn pinch_and_tilt(options: GestureOptions) -> (f64, f64) {
+    let mut rig = Rig::with(options);
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.down(2, PointerKind::Touch, 500.0, 300.0);
+    for i in 1..=20 {
+        let half = 100.0 * (1.0 + f64::from(i) / 20.0);
+        rig.now += 16.0;
+        rig.to(1, 400.0 - half, 300.0);
+        rig.to(2, 400.0 + half, 300.0);
+        rig.frame();
+    }
+    rig.now += 100.0;
+    rig.up(1, 200.0, 300.0);
+    rig.up(2, 600.0, 300.0);
+    rig.settle();
+    rig.down(1, PointerKind::Touch, 300.0, 400.0);
+    rig.down(2, PointerKind::Touch, 500.0, 400.0);
+    for i in 1..=10 {
+        rig.now += 16.0;
+        let y = 400.0 - f64::from(i);
+        rig.to(1, 300.0, y);
+        rig.to(2, 500.0, y);
+    }
+    rig.now += 100.0;
+    rig.up(1, 300.0, 390.0);
+    rig.up(2, 500.0, 390.0);
+    rig.settle();
+    (rig.zoom(), rig.pitch())
+}
+
+#[test]
+fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
+    // Compose's defaults: zoom and pitch stay where the gesture left them.
+    let (zoom, pitch) = pinch_and_tilt(GestureOptions::DEFAULT);
+    assert!((zoom - zoom.round()).abs() > 0.05, "{zoom}");
+    assert!(pitch > 1.0, "{pitch}");
+    // ffi's C API defaults: a whole level, and flat within 7°.
+    let (zoom, pitch) = pinch_and_tilt(GestureOptions {
+        zoom_snap: Some(MomentumSnap::ZOOM),
+        pitch_snap: Some(MomentumSnap::PITCH),
+        ..GestureOptions::DEFAULT
+    });
+    assert!((zoom - zoom.round()).abs() < 1e-6, "{zoom}");
+    assert!(pitch.abs() < 1e-6, "{pitch}");
 }

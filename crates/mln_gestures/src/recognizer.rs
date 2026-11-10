@@ -190,8 +190,10 @@ struct Tracking {
     trackers: [VelocityTracker; 5],
     zoom_anchor: Option<V2>,
     bearing_anchor: Option<V2>,
-    /// The gesture turned the map, so the bearing may settle.
+    /// The parts the gesture changed, which may settle.
+    zoomed: bool,
     rotated: bool,
+    pitched: bool,
     /// A pinch's release, staged when it continued as a one-finger pan,
     /// and when.
     staged: Option<(f64, Release)>,
@@ -212,6 +214,10 @@ impl Tracking {
         self.pitch += step.pitch;
         if step.zoom != 0.0 {
             self.zoom_anchor = step.around;
+            self.zoomed = true;
+        }
+        if step.pitch != 0.0 {
+            self.pitched = true;
         }
         if step.bearing != 0.0 {
             self.bearing_anchor = step.around;
@@ -272,7 +278,7 @@ impl Tracking {
     }
 
     /// The momentum a release continues with: the options' decays, and the
-    /// bearing settling if the gesture turned the map. `None` when nothing
+    /// snaps of the parts the gesture changed. `None` when nothing
     /// moves or settles.
     ///
     /// A glide the press caught adds nothing: ffi's demo and GL JS start
@@ -286,8 +292,11 @@ impl Tracking {
         let zoom = speed(release.zoom, &options.zoom_decay);
         let bearing = speed(release.bearing, &options.bearing_decay);
         let pitch = speed(release.pitch, &options.pitch_decay);
+        let zoom_snap = options.zoom_snap.filter(|_| self.zoomed);
         let bearing_snap = options.bearing_snap.filter(|_| self.rotated);
-        if pan.is_none() && zoom.is_none() && bearing.is_none() && pitch.is_none() && bearing_snap.is_none() {
+        let pitch_snap = options.pitch_snap.filter(|_| self.pitched);
+        let snaps = zoom_snap.is_some() || bearing_snap.is_some() || pitch_snap.is_some();
+        if pan.is_none() && zoom.is_none() && bearing.is_none() && pitch.is_none() && !snaps {
             return None;
         }
         Some(CameraMomentum {
@@ -295,13 +304,18 @@ impl Tracking {
             pan_decay: options.pan_decay,
             zoom_velocity: zoom,
             zoom_decay: options.zoom_decay,
-            zoom_anchor: zoom.and(release.zoom_anchor).map(ScreenCoordinate::from),
+            zoom_anchor: (zoom.is_some() || zoom_snap.is_some())
+                .then_some(release.zoom_anchor)
+                .flatten()
+                .map(ScreenCoordinate::from),
+            zoom_snap,
             bearing_velocity: bearing,
             bearing_decay: options.bearing_decay,
             bearing_anchor: bearing.and(release.bearing_anchor).map(ScreenCoordinate::from),
             bearing_snap,
             pitch_velocity: pitch,
             pitch_decay: options.pitch_decay,
+            pitch_snap,
             ..CameraMomentum::default()
         })
     }

@@ -45,8 +45,15 @@ pub struct GestureOptions {
     pub zoom_decay: MomentumDecay,
     pub bearing_decay: MomentumDecay,
     pub pitch_decay: MomentumDecay,
-    /// Where the bearing settles after a gesture that turned the map.
+    /// Where each part settles after a gesture that changed it, as
+    /// maplibre-native-ffi's `mln_anchored_momentum::snap` and Compose's
+    /// `snapping` set it. The defaults are Compose's: the bearing settles on
+    /// north within 7°, and zoom and pitch stay where the gesture leaves
+    /// them ([`MomentumSnap::ZOOM`] and [`MomentumSnap::PITCH`] are ffi's
+    /// C API defaults, which settle them on a whole level and flat).
+    pub zoom_snap: Option<MomentumSnap>,
     pub bearing_snap: Option<MomentumSnap>,
+    pub pitch_snap: Option<MomentumSnap>,
 
     /// Whether a press stops every camera animation, as GL JS and the
     /// MapLibre Native SDKs do, or only the recognizer's own.
@@ -75,7 +82,9 @@ impl GestureOptions {
         zoom_decay: MomentumDecay::ZOOM,
         bearing_decay: MomentumDecay::BEARING,
         pitch_decay: MomentumDecay::PITCH,
+        zoom_snap: None,
         bearing_snap: Some(MomentumSnap::BEARING),
+        pitch_snap: None,
         interrupt_animations: true,
         // "gestures" in ASCII.
         transition_id: 0x6765_7374_7572_6573,
