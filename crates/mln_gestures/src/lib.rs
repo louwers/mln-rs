@@ -19,6 +19,6 @@ mod recognizer;
 mod velocity;
 
 pub use camera::GestureCamera;
-pub use input::{Button, GestureEvent, Input, Key, Modifiers, PointerKind, WheelUnit};
+pub use input::{Button, GestureEvent, Input, Key, Modifiers, PointerKind, WheelDelta};
 pub use options::GestureOptions;
 pub use recognizer::GestureRecognizer;

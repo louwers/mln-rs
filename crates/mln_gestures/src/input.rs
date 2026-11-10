@@ -42,12 +42,21 @@ pub enum Key {
     Escape,
 }
 
-/// The unit of a wheel delta, as DOM `deltaMode` gives it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum WheelUnit {
-    Pixel,
-    Line,
-    Page,
+/// How far a scroll went, as its host classifies it. Positive scrolls down,
+/// as the DOM's `deltaY` does, which zooms out.
+///
+/// The host knows which device scrolled (macOS's `hasPreciseScrollingDeltas`,
+/// winit's line and pixel deltas, the DOM's `deltaMode`), so the recognizer
+/// doesn't guess from the deltas' sizes and timing, which GL JS does and
+/// which read a slow trackpad start as a wheel.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WheelDelta {
+    /// Detents of a mouse wheel, fractional for high-resolution wheels: each
+    /// zooms by a fixed amount, eased.
+    Notches(f64),
+    /// Continuous scrolling, as trackpads and precise wheels send, in logical
+    /// pixels: zooms at once, as the platform already smoothed it.
+    Pixels(f64),
 }
 
 /// One input, in logical pixels from the viewport's top-left corner.
@@ -73,11 +82,11 @@ pub enum Input {
     PointerCancel {
         id: u32,
     },
-    /// Positive `delta.y` scrolls down, which zooms out.
+    /// A scroll at `position`. With Ctrl, which browsers add to a trackpad
+    /// pinch, pixels zoom at the pinch rate.
     Wheel {
         position: ScreenCoordinate,
-        delta: ScreenCoordinate,
-        unit: WheelUnit,
+        delta: WheelDelta,
         modifiers: Modifiers,
     },
     Key {

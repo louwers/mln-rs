@@ -14,19 +14,18 @@ use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
 
 use crate::camera::GestureCamera;
-use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PointerKind, WheelUnit};
+use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PointerKind, WheelDelta};
 use crate::options::GestureOptions;
 use crate::velocity::VelocityTracker;
 
-/// Scroll zoom stays one gesture until this long after its last event
-/// (Compose's `ScrollBinding.idleDuration`).
-const SCROLL_END: f64 = 200.0;
 /// The eases of a double-click or key step (GL JS and ffi's demo) and of a
 /// box zoom (GL JS).
 const STEP_EASE: i64 = 300;
 const BOX_EASE: i64 = 500;
 /// GL JS's `defaultEasing` and `easeOut`.
-const EASE: UnitBezier = UnitBezier::new(0.25, 0.1, 0.25, 1.0);
+const EASE_X1: f64 = 0.25;
+const EASE_Y1: f64 = 0.1;
+const EASE: UnitBezier = UnitBezier::new(EASE_X1, EASE_Y1, 0.25, 1.0);
 const EASE_OUT: UnitBezier = UnitBezier::new(0.0, 0.0, 0.58, 1.0);
 /// A pinch whose last finger lifted this long ago still lends its release
 /// its motion; until then the remaining finger's motion doesn't count, as it
@@ -324,6 +323,55 @@ impl Tracking {
     }
 }
 
+/// A scroll under way: one gesture from its first event until it idles.
+#[derive(Clone, Copy, Debug)]
+struct Scroll {
+    /// Where the latest event was: the zoom holds the ground there, so that
+    /// moving the pointer while scrolling zooms around where it is now (GL JS
+    /// keeps the burst's first point; Apple and Google Maps follow the
+    /// cursor).
+    anchor: V2,
+    /// The gesture ends after this: 200 ms after its last event and after its
+    /// last ease, as GL JS's zoom ends 200 ms after its last frame.
+    idle_until: f64,
+    ease: Option<NotchEase>,
+}
+
+/// The eased zoom of a train of wheel notches.
+#[derive(Clone, Copy, Debug)]
+struct NotchEase {
+    start: f64,
+    /// Levels to zoom from the ease's start, and how many it has zoomed.
+    distance: f64,
+    applied: f64,
+    /// The first control point of its curve; the second is (0.25, 1).
+    x1: f64,
+    y1: f64,
+}
+
+impl NotchEase {
+    fn curve(&self) -> UnitBezier {
+        UnitBezier::new(self.x1, self.y1, 0.25, 1.0)
+    }
+
+    /// The share of the ease's time elapsed at `now`.
+    fn progress(&self, now: f64, duration: f64) -> f64 {
+        ((now - self.start) / duration).clamp(0.0, 1.0)
+    }
+
+    /// Levels zoomed by `now`.
+    fn value(&self, now: f64, duration: f64) -> f64 {
+        let t = self.progress(now, duration);
+        self.distance * if t >= 1.0 { 1.0 } else { self.curve().solve(t, 1e-6) }
+    }
+
+    /// Levels per millisecond at `now`.
+    fn speed(&self, now: f64, duration: f64) -> f64 {
+        let dt = 1.0;
+        (self.value(now + dt, duration) - self.value(now, duration)) / dt
+    }
+}
+
 /// How a gesture ended.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum End {
@@ -377,8 +425,7 @@ pub struct GestureRecognizer {
     boost: Option<CameraVelocity>,
     /// The last tap, for double taps: where and when.
     last_tap: Option<(V2, f64, PointerKind)>,
-    /// Scroll zoom holds the gesture until then.
-    wheel_hold_until: Option<f64>,
+    scroll: Option<Scroll>,
     events: Vec<GestureEvent>,
 }
 
@@ -399,7 +446,7 @@ impl GestureRecognizer {
             caught: Rc::default(),
             boost: None,
             last_tap: None,
-            wheel_hold_until: None,
+            scroll: None,
             events: Vec::new(),
         }
     }
@@ -415,7 +462,7 @@ impl GestureRecognizer {
 
     /// A gesture is under way: hosts keep pointer capture and scrolling off.
     pub fn is_active(&self) -> bool {
-        !matches!(self.mode, Mode::Idle) || self.wheel_hold_until.is_some()
+        !matches!(self.mode, Mode::Idle) || self.scroll.is_some()
     }
 
     /// The box a Shift-drag zooms to, corner to corner in logical pixels,
@@ -432,19 +479,37 @@ impl GestureRecognizer {
         std::mem::take(&mut self.events)
     }
 
-    /// Ends gestures that time out. Call once a display frame with the
-    /// time; returns whether it needs more frames to do so.
+    /// Steps the eased zoom of wheel notches, and ends a scroll once it
+    /// idles. Call once a display frame with the frame's time, on the
+    /// inputs' clock; returns whether it needs more frames.
     pub fn frame(&mut self, camera: &mut dyn GestureCamera, now: f64) -> bool {
-        if let Some(until) = self.wheel_hold_until {
-            if now < until {
-                return true;
+        let Some(mut scroll) = self.scroll else {
+            return false;
+        };
+        let duration = self.options.notch_duration;
+        if let Some(mut ease) = scroll.ease {
+            let target = ease.value(now, duration);
+            let max = self.options.max_scroll_zoom;
+            let step = (target - ease.applied).clamp(-max, max);
+            if step != 0.0 {
+                ease.applied += step;
+                self.zoom(camera, step, scroll.anchor);
             }
-            self.wheel_hold_until = None;
+            let done = ease.progress(now, duration) >= 1.0 && ease.applied == ease.distance;
+            scroll.ease = (!done).then_some(ease);
+            if done {
+                scroll.idle_until = scroll.idle_until.max(now + self.options.scroll_idle);
+            }
+        }
+        if scroll.ease.is_none() && now >= scroll.idle_until {
+            self.scroll = None;
             if matches!(self.mode, Mode::Idle) {
                 self.end(camera, None);
             }
+            return false;
         }
-        false
+        self.scroll = Some(scroll);
+        true
     }
 
     /// Handles one input at host time `now`, in milliseconds. Returns whether
@@ -457,14 +522,12 @@ impl GestureRecognizer {
             Input::PointerMove { id, position } => self.moved(camera, id, position.into(), now),
             Input::PointerUp { id, position } => self.up(camera, id, Some(position.into()), now),
             Input::PointerCancel { id } => self.up(camera, id, None, now),
-            Input::Wheel { position, delta, unit, modifiers } => {
-                self.wheel(camera, position.into(), delta.into(), unit, modifiers, now)
-            }
+            Input::Wheel { position, delta, modifiers } => self.wheel(camera, position.into(), delta, modifiers, now),
             Input::Key { key, modifiers } => self.key(camera, key, modifiers),
             Input::Blur => {
                 self.pointers.clear();
                 self.mode = Mode::Idle;
-                self.wheel_hold_until = None;
+                self.scroll = None;
                 self.end(camera, None);
                 true
             }
@@ -578,6 +641,8 @@ impl GestureRecognizer {
             return false;
         }
         self.pointers.push(Pointer { id, kind, position, down: position, down_at: now });
+        // A press takes over from a scroll, and stops its easing.
+        self.scroll = None;
         self.begin(camera);
         match (self.mode, self.pointers.len()) {
             (Mode::Idle, 1) => {
@@ -865,7 +930,7 @@ impl GestureRecognizer {
     /// speed its last moves had, and settles what it changed.
     fn finish(&mut self, camera: &mut dyn GestureCamera, now: f64, end: End) {
         self.mode = Mode::Idle;
-        self.wheel_hold_until = None;
+        self.scroll = None;
         let boost = self.boost.take();
         match end {
             End::Cancel => self.cancel(camera),
@@ -915,34 +980,66 @@ impl GestureRecognizer {
         self.eased_step(camera, step);
     }
 
-    /// Scroll zoom, as ffi's browser demo does it: each event zooms at once
-    /// by its pixels at a fixed rate, faster with Ctrl, which a trackpad
-    /// pinch holds. A scroll is one gesture until it stops.
+    /// A scroll zooms: a wheel's notches by a fixed amount each, eased, and
+    /// continuous pixels by their distance at a fixed rate, faster with
+    /// Ctrl, which browsers add to a trackpad pinch, at once. A scroll is one
+    /// gesture until it idles.
+    ///
+    /// A notch that arrives while earlier ones still ease retargets the ease
+    /// to the sum, starting at the zoom's current speed, so a quick train of
+    /// notches speeds up without a stutter. GL JS's `_smoothOutEasing`
+    /// approximates that speed from the previous curve's shape; this matches
+    /// it in levels per second.
     fn wheel(
         &mut self,
         camera: &mut dyn GestureCamera,
         position: V2,
-        delta: V2,
-        unit: WheelUnit,
+        delta: WheelDelta,
         modifiers: Modifiers,
         now: f64,
     ) -> bool {
-        let pixels = match unit {
-            WheelUnit::Pixel => delta.y,
-            WheelUnit::Line => delta.y * 40.0,
-            WheelUnit::Page => delta.y * camera.viewport().y,
-        };
-        if pixels == 0.0 {
-            return true;
+        let options = self.options;
+        let mut scroll = self.scroll.unwrap_or(Scroll { anchor: position, idle_until: now, ease: None });
+        scroll.anchor = position;
+        scroll.idle_until = now + options.scroll_idle;
+        self.begin(camera);
+        match delta {
+            WheelDelta::Pixels(pixels) => {
+                let rate = if modifiers.ctrl { options.pinch_zoom_rate } else { options.scroll_zoom_rate };
+                let zoom = (-pixels * rate).clamp(-options.max_scroll_zoom, options.max_scroll_zoom);
+                if zoom != 0.0 {
+                    self.zoom(camera, zoom, position);
+                }
+            }
+            WheelDelta::Notches(notches) => {
+                let step = -notches * options.notch_zoom;
+                let duration = options.notch_duration;
+                let (distance, (x1, y1)) = match scroll.ease {
+                    Some(ease) if ease.progress(now, duration) < 1.0 => {
+                        // Whatever the ease hasn't applied yet carries over.
+                        let distance = ease.distance - ease.applied + step;
+                        // The new curve's starting slope, dy/dx = y1/x1,
+                        // times distance / duration is the current speed;
+                        // its first control point stays 0.27 from the
+                        // origin, as GL JS's does.
+                        let slope = if distance != 0.0 { ease.speed(now, duration) * duration / distance } else { 0.0 };
+                        let x1 = 0.27 / (1.0 + slope * slope).sqrt();
+                        (distance, (x1, slope * x1))
+                    }
+                    Some(ease) => (ease.distance - ease.applied + step, (EASE_X1, EASE_Y1)),
+                    None => (step, (EASE_X1, EASE_Y1)),
+                };
+                scroll.ease = Some(NotchEase { start: now, distance, applied: 0.0, x1, y1 });
+            }
         }
-        let rate = if modifiers.ctrl { self.options.pinch_zoom_rate } else { self.options.scroll_zoom_rate };
-        let zoom = -pixels * rate;
-        self.update(
-            camera,
-            CameraDelta { scale: Some(zoom.exp2()), anchor: Some(position.into()), ..CameraDelta::default() },
-        );
-        self.wheel_hold_until = Some(now + SCROLL_END);
+        self.scroll = Some(scroll);
         true
+    }
+
+    /// Zooms by `levels` at once, holding the ground under `at`.
+    fn zoom(&mut self, camera: &mut dyn GestureCamera, levels: f64, at: V2) {
+        let delta = CameraDelta { scale: Some(levels.exp2()), anchor: Some(at.into()), ..CameraDelta::default() };
+        self.update(camera, delta);
     }
 
     /// GL JS's `KeyboardHandler`: arrows pan, Shift-arrows rotate and tilt,

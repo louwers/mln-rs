@@ -35,7 +35,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use mln_actor::{RunLoop, Timer};
-use mln_gestures::{Button, GestureRecognizer, Input, Modifiers, PointerKind, WheelUnit};
+use mln_gestures::{Button, GestureRecognizer, Input, Modifiers, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, Map, MapDebugOptions, MapObserver, NorthOrientation,
@@ -430,11 +430,6 @@ fn log_error(result: Result<(), String>) {
     }
 }
 
-/// A wheel notch in pixels (see `on_scroll`): what Chrome reports for one on
-/// Linux and Windows, which zooms maplibre-native-ffi's browser demo, and the
-/// recognizer, a third of a level.
-const WHEEL_NOTCH_PX: f64 = 100.0;
-
 /// The recognizer's modifiers for GLFW's.
 fn modifiers(mods: glfw::Modifiers) -> Modifiers {
     Modifiers {
@@ -730,18 +725,16 @@ impl ViewState {
 
     /// `onScroll`
     fn on_scroll(&mut self, x_offset: f64, y_offset: f64, time: f64) {
-        // Port: the recognizer zooms by a scroll's pixels. A wheel notch is a
-        // whole offset (1.0): sent as a browser's notch, 100 px. Fractional
-        // offsets are a trackpad or a smooth wheel, which GLFW scales to a
-        // tenth of a pixel (Cocoa, Wayland).
-        let scale = |offset: f64| {
-            if offset.fract() == 0.0 { offset * WHEEL_NOTCH_PX } else { offset * 10.0 }
-        };
+        // Port: the recognizer zooms by notches or by pixels. A wheel notch is
+        // a whole offset (1.0). Fractional offsets are a trackpad or a smooth
+        // wheel, which GLFW scales to a tenth of a pixel (Cocoa, Wayland).
         // GLFW's positive y scrolls up, which zooms in.
-        let delta = ScreenCoordinate::new(-scale(x_offset), -scale(y_offset));
+        let _ = x_offset;
+        let delta =
+            if y_offset.fract() == 0.0 { WheelDelta::Notches(-y_offset) } else { WheelDelta::Pixels(-y_offset * 10.0) };
         let position = ScreenCoordinate::new(self.last_x, self.last_y);
         let modifiers = self.held_modifiers();
-        self.gesture(Input::Wheel { position, delta, unit: WheelUnit::Pixel, modifiers }, time);
+        self.gesture(Input::Wheel { position, delta, modifiers }, time);
     }
 
     /// The modifier keys held now, for the events GLFW reports without them.

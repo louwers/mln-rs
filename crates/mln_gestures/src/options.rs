@@ -29,12 +29,24 @@ pub struct GestureOptions {
     pub pinch_zoom_threshold: f64,
     /// Pixels along the fingers' circle a twist travels before it rotates.
     pub rotate_threshold: f64,
-    /// Zoom levels per pixel of scroll, toward the user zooming in: ffi's
-    /// demo's and Compose's 1/300.
+    /// Zoom levels per wheel notch, toward the user zooming in, and how long
+    /// a notch eases: ffi's demo's and Compose's 100 px at 1/300 per px (⅓),
+    /// over GL JS's 200 ms. Provisional: unlike glides, no one has measured
+    /// the native map apps' notches yet (see the README).
+    pub notch_zoom: f64,
+    pub notch_duration: f64,
+    /// Zoom levels per pixel of continuous scroll, toward the user zooming
+    /// in: ffi's demo's and Compose's 1/300. Provisional, as `notch_zoom`.
     pub scroll_zoom_rate: f64,
-    /// The same with Ctrl held, as a trackpad pinch sends: ffi's demo's
-    /// 1/100.
+    /// The same with Ctrl held, as a browser's trackpad pinch sends: ffi's
+    /// demo's 1/100.
     pub pinch_zoom_rate: f64,
+    /// The most a scroll zooms in one step, in levels: GL JS's
+    /// `maxScalePerFrame` of 2. A notch carries the rest to later frames.
+    pub max_scroll_zoom: f64,
+    /// A scroll is one gesture until this long after its last event and its
+    /// eases (Compose's and GL JS's 200 ms).
+    pub scroll_idle: f64,
     /// Keyboard steps: pixels of pan, degrees of bearing, degrees of pitch.
     pub key_pan: f64,
     pub key_bearing: f64,
@@ -80,8 +92,12 @@ impl GestureOptions {
         tap_drag_zoom: 1.0 / 128.0,
         pinch_zoom_threshold: 0.1,
         rotate_threshold: 25.0,
+        notch_zoom: 1.0 / 3.0,
+        notch_duration: 200.0,
         scroll_zoom_rate: 1.0 / 300.0,
         pinch_zoom_rate: 1.0 / 100.0,
+        max_scroll_zoom: 1.0,
+        scroll_idle: 200.0,
         key_pan: 100.0,
         key_bearing: 15.0,
         key_pitch: 10.0,

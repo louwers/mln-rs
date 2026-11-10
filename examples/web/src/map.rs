@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
-use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelUnit};
+use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
 use mln_renderer::text::font_face_engine;
@@ -369,17 +369,15 @@ impl WebMap {
     /// A DOM `wheel` event: its position, deltas and `deltaMode` (0 pixels,
     /// 1 lines, 2 pages).
     pub fn wheel(&mut self, x: f64, y: f64, dx: f64, dy: f64, delta_mode: u32, modifiers: u32, time: f64) -> bool {
-        let unit = match delta_mode {
-            1 => WheelUnit::Line,
-            2 => WheelUnit::Page,
-            _ => WheelUnit::Pixel,
+        let _ = dx;
+        // Lines and pages come from wheels: Firefox scrolls 3 lines a notch.
+        let delta = match delta_mode {
+            1 => WheelDelta::Notches(dy / 3.0),
+            2 => WheelDelta::Notches(dy),
+            _ => WheelDelta::Pixels(dy),
         };
-        let input = Input::Wheel {
-            position: ScreenCoordinate::new(x, y),
-            delta: ScreenCoordinate::new(dx, dy),
-            unit,
-            modifiers: modifiers_from_bits(modifiers),
-        };
+        let input =
+            Input::Wheel { position: ScreenCoordinate::new(x, y), delta, modifiers: modifiers_from_bits(modifiers) };
         self.gestures.handle(&mut self.map, input, time)
     }
 

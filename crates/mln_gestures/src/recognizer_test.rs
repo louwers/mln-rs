@@ -298,49 +298,119 @@ fn tap_and_drag_zooms() {
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9);
 }
 
-fn scroll(at: ScreenCoordinate, y: f64, unit: WheelUnit, modifiers: Modifiers) -> Input {
-    Input::Wheel { position: at, delta: p(0.0, y), unit, modifiers }
+fn notches(at: ScreenCoordinate, n: f64) -> Input {
+    Input::Wheel { position: at, delta: WheelDelta::Notches(n), modifiers: Modifiers::default() }
+}
+
+fn pixels(at: ScreenCoordinate, px: f64, modifiers: Modifiers) -> Input {
+    Input::Wheel { position: at, delta: WheelDelta::Pixels(px), modifiers }
 }
 
 #[test]
-fn scrolling_zooms_at_once_at_a_fixed_rate() {
+fn a_wheel_notch_eases_a_third_of_a_level_around_the_pointer() {
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     let at = p(100.0, 100.0);
     let ground = rig.unproject(at);
-    // A mouse wheel's notch toward the user, 100 px: a third of a level
-    // in, at once, around the pointer.
-    rig.send(scroll(at, -100.0, WheelUnit::Pixel, Modifiers::default()));
+    // A notch toward the user zooms in.
+    rig.send(notches(at, -1.0));
+    assert_eq!(rig.zoom(), zoom, "the notch eases from the next frame");
+    let mut steps = Vec::new();
+    let mut last = zoom;
+    for _ in 0..13 {
+        rig.frame();
+        steps.push(rig.zoom() - last);
+        last = rig.zoom();
+        // Each step holds the anchor to within rounding, which adds up.
+        let under = rig.project(ground);
+        assert!(distance(under, at) < 1e-5, "{under:?}");
+    }
+    // 200 ms: at 13 frames of 16 ms it has arrived.
     assert!((rig.zoom() - (zoom + 1.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
-    let under = rig.project(ground);
-    assert!(distance(under, at) < 1e-6, "{under:?}");
-    // The scroll holds the gesture until it stops.
+    assert!(steps.iter().all(|&step| step >= 0.0), "{steps:?}");
+    assert!(steps[0] < 1.0 / 6.0, "it eases in: {steps:?}");
+    // The scroll is one gesture until 200 ms after its last event and ease.
     assert!(rig.camera.is_gesture_in_progress());
-    assert!(rig.frame());
     rig.settle();
     assert!(!rig.camera.is_gesture_in_progress());
-
-    // Three lines are 120 px; a pinch (Ctrl) zooms three times as fast.
-    let zoom = rig.zoom();
-    rig.send(scroll(at, 3.0, WheelUnit::Line, Modifiers::default()));
-    assert!((rig.zoom() - (zoom - 0.4)).abs() < 1e-9, "{}", rig.zoom() - zoom);
-    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
-    let zoom = rig.zoom();
-    rig.send(scroll(at, -10.0, WheelUnit::Pixel, ctrl));
-    assert!((rig.zoom() - (zoom + 0.1)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
 #[test]
-fn a_slow_trackpad_scroll_zooms_by_its_pixels() {
-    // GL JS's scroll zoom read small, slow deltas as a trackpad and zoomed
-    // them at 2σ(px / 100), about 0.0072 levels a pixel: twice ffi's demo.
+fn a_notch_mid_ease_adds_up_without_slowing_the_zoom() {
+    let mut rig = Rig::new();
+    let zoom = rig.zoom();
+    let at = p(400.0, 300.0);
+    rig.send(notches(at, -1.0));
+    let mut last = zoom;
+    let mut speed = 0.0;
+    for _ in 0..6 {
+        rig.frame();
+        speed = rig.zoom() - last;
+        last = rig.zoom();
+    }
+    // A second notch 96 ms in: the zoom keeps going at least as fast.
+    rig.send(notches(at, -1.0));
+    rig.frame();
+    let after = rig.zoom() - last;
+    assert!(after >= speed - 1e-9, "{after} after {speed}");
+    rig.settle();
+    assert!((rig.zoom() - (zoom + 2.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+}
+
+#[test]
+fn pixels_zoom_at_once_and_a_pinch_three_times_as_fast() {
+    let mut rig = Rig::new();
+    let at = p(100.0, 100.0);
+    let zoom = rig.zoom();
+    rig.send(pixels(at, -30.0, Modifiers::default()));
+    assert!((rig.zoom() - (zoom + 0.1)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+    let ctrl = Modifiers { ctrl: true, ..Modifiers::default() };
+    let zoom = rig.zoom();
+    rig.send(pixels(at, 10.0, ctrl));
+    assert!((rig.zoom() - (zoom - 0.1)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+    // One huge delta zooms at most a level.
+    let zoom = rig.zoom();
+    rig.send(pixels(at, -10_000.0, Modifiers::default()));
+    assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+}
+
+#[test]
+fn a_slow_trackpad_start_doesnt_change_how_a_notch_zooms() {
+    // GL JS classified a scroll by its first deltas, for 400 ms: a slow
+    // trackpad start read as a trackpad and zoomed twice as fast. Here each
+    // event is what its host says.
     let mut rig = Rig::new();
     let zoom = rig.zoom();
     for _ in 0..10 {
         rig.now += 16.0;
-        rig.send(scroll(p(400.0, 300.0), -2.0, WheelUnit::Pixel, Modifiers::default()));
+        rig.send(pixels(p(400.0, 300.0), -2.0, Modifiers::default()));
     }
     assert!((rig.zoom() - (zoom + 20.0 / 300.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+    let zoom = rig.zoom();
+    rig.send(notches(p(400.0, 300.0), -1.0));
+    assert_eq!(rig.zoom(), zoom, "eased");
+    rig.settle();
+    assert!((rig.zoom() - (zoom + 1.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+}
+
+#[test]
+fn the_scroll_zooms_around_where_the_pointer_is_now() {
+    let mut rig = Rig::new();
+    rig.send(pixels(p(100.0, 100.0), -30.0, Modifiers::default()));
+    let at = p(600.0, 400.0);
+    let ground = rig.unproject(at);
+    rig.send(pixels(at, -30.0, Modifiers::default()));
+    let under = rig.project(ground);
+    assert!(distance(under, at) < 1e-6, "{under:?}");
+}
+
+#[test]
+fn a_scroll_stops_the_cameras_animations() {
+    let mut rig = Rig::new();
+    rig.camera.ease_to(&CameraOptions::default().with_bearing(Some(45.0)), &AnimationOptions::new(milliseconds(500)));
+    rig.send(notches(p(400.0, 300.0), 1.0));
+    assert!(!rig.camera.in_transition());
+    assert!(rig.camera.is_gesture_in_progress());
 }
 
 #[test]
