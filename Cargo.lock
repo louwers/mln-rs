@@ -1137,6 +1137,7 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-geojson-vt",
  "mln-rs-geometry",
+ "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-kdbush",
  "mln-rs-libstdcxx",
@@ -1297,6 +1298,14 @@ name = "mln-rs-geometry"
 version = "0.0.10"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "mln-rs-gestures"
+version = "0.0.10"
+dependencies = [
+ "mln-rs-map",
+ "mln-rs-util",
 ]
 
 [[package]]

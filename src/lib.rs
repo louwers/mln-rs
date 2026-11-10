@@ -16,6 +16,7 @@ pub use libstdcxx;
 pub use mln_actor;
 pub use mln_conversion;
 pub use mln_expression;
+pub use mln_gestures;
 pub use mln_gfx;
 pub use mln_map;
 pub use mln_map_types;

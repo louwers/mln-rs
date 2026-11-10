@@ -47,6 +47,7 @@ libstdcxx = { package = "mln-rs-libstdcxx", path = "vendor/libstdcxx", version =
 mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.10" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.10" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.10" }
+mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.10" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.10" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.10" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.10" }
@@ -221,6 +222,7 @@ libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_conversion.workspace = true
 mln_expression.workspace = true
+mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true

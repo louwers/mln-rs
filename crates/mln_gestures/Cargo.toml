@@ -1,0 +1,21 @@
+[package]
+name = "mln-rs-gestures"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_gestures"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+mln_map.workspace = true
+mln_util.workspace = true
+
+[lints]
+workspace = true
