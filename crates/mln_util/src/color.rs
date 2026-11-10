@@ -257,7 +257,7 @@ impl Color {
         }
     }
 
-    /// Un-premultiplied `[r*255, g*255, b*255, round(a, 2 decimals)]`.
+    /// Un-premultiplied `[r*255, g*255, b*255, a]`.
     pub fn to_array(&self) -> [f64; 4] {
         if self.a == 0.0 {
             [0.0, 0.0, 0.0, 0.0]
@@ -267,9 +267,7 @@ impl Color {
                 (self.r * 255.0f32 / self.a) as f64,
                 (self.g * 255.0f32 / self.a) as f64,
                 (self.b * 255.0f32 / self.a) as f64,
-                // floor(a * 100 + .5) / 100: `a * 100` is a float product,
-                // `+ .5` promotes to double.
-                ((self.a * 100.0f32) as f64 + 0.5).floor() / 100.0, // round to 2 decimal places
+                self.a as f64,
             ]
         }
     }
@@ -299,12 +297,14 @@ impl Color {
     }
 
     pub fn stringify(&self) -> String {
+        // Match GL JS's Color.toString: whole channels, alpha as is.
         let array = self.to_array();
+        let channel = |value: f64| to_string_double((value + 0.5).floor());
         format!(
             "rgba({},{},{},{})",
-            to_string_double(array[0]),
-            to_string_double(array[1]),
-            to_string_double(array[2]),
+            channel(array[0]),
+            channel(array[1]),
+            channel(array[2]),
             to_string_double(array[3])
         )
     }
@@ -314,10 +314,10 @@ impl Color {
     ///
     /// Port-only: when the C++ values (`to_array`) don't make this color
     /// again (the "rgba" expression premultiplies them back), it writes
-    /// values that do. `to_array` rounds alpha to two decimals and divides
-    /// in float, so a serialized layer could parse back to slightly other
-    /// colors, and a tile worker in another wasm instance, which gets its
-    /// layers that way, would write other colors into its buckets.
+    /// values that do. `to_array` divides in float, so a serialized layer
+    /// could parse back to slightly other colors, and a tile worker in
+    /// another wasm instance, which gets its layers that way, would write
+    /// other colors into its buckets.
     pub fn serialize(&self) -> Value {
         let mut array = self.to_array();
         if !self.is_made_by(array) {

@@ -2,7 +2,7 @@
 
 use mln_util::color::{Color, ColorSpace};
 
-use crate::{assert_float_eq, assert_near};
+use crate::{assert_double_eq, assert_float_eq, assert_near};
 
 fn test_cases() -> Vec<(&'static str, Option<Color>)> {
     vec![
@@ -136,4 +136,21 @@ fn rgb_is_the_existing_interpolation() {
     let red = Color::parse("rgba(255,0,0,0.5)").unwrap();
     let mixed = Color::interpolate(&red, &Color::blue(), 0.5, ColorSpace::Rgb);
     expect_color(mixed, 0.25, 0.0, 0.5, 0.75);
+}
+
+// gtest: Color.ToArrayKeepsAlpha
+#[test]
+fn to_array_keeps_alpha() {
+    let color = Color::parse("#ff000080");
+    assert!(color.is_some());
+    assert_double_eq(f64::from(128.0f32 / 255.0), color.unwrap().to_array()[3]);
+}
+
+// Expected strings come from GL JS's Color.toString (maplibre-gl-style-spec).
+// gtest: Color.Stringify
+#[test]
+fn stringify() {
+    assert_eq!("rgba(255,0,0,0.125)", Color::parse("rgba(255,0,0,0.125)").unwrap().stringify());
+    assert_eq!("rgba(128,0,0,1)", Color::new(0.5, 0.0, 0.0, 1.0).stringify());
+    assert_eq!("rgba(0,0,0,0)", Color::new(0.0, 0.0, 0.0, 0.0).stringify());
 }
