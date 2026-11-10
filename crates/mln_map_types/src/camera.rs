@@ -102,14 +102,63 @@ pub struct AnimationOptions {
     /// a screen update, except on the last frame. The first parameter
     /// indicates the elapsed time as a percentage of the duration.
     pub transition_frame_fn: Option<std::rc::Rc<dyn Fn(f64)>>,
-    /// Called once when all properties of the command have completed or been
-    /// superseded, including explicit cancellation. Other commands may still
-    /// be animating when this callback runs.
-    pub transition_finish_fn: Option<std::rc::Rc<dyn Fn()>>,
+    /// Called once when every field of the command has ended, with how it
+    /// ended: completed, cancelled, replaced by later commands, or closed with
+    /// the map. Other commands may still be animating when this callback runs.
+    /// It replaces C++'s `transitionFinishFn`, which can't tell those apart;
+    /// maplibre-native-ffi's C API reports the same outcomes.
+    pub transition_end_fn: Option<std::rc::Rc<dyn Fn(&TransitionEnd)>>,
     /// Caller-chosen identity of the command, which
     /// `Map::cancel_transitions_with_id` matches. Several commands may share
     /// one.
     pub transition_id: Option<u64>,
+}
+
+/// How a camera command ended, as maplibre-native-ffi's
+/// `mln_camera_transition_outcome` reports it. A command that ended in more
+/// than one way reports [`Cancelled`](Self::Cancelled) if any of it was
+/// cancelled, and otherwise [`Replaced`](Self::Replaced) if any of it was
+/// replaced.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum TransitionOutcome {
+    /// The camera finished the change.
+    #[default]
+    Completed,
+    /// `cancel_transitions` or `cancel_transitions_with_id`, a gesture's
+    /// begin or cancel phase, free camera options, or a resize that moved the
+    /// camera back inside its bounds stopped it. A command that fails before
+    /// it moves the camera also reports this.
+    Cancelled,
+    /// A later command took every field that the command (or a momentum part)
+    /// was still animating, so it stopped. A later command that takes only
+    /// some of them leaves it animating the rest.
+    Replaced,
+    /// The map closed before the change ended.
+    Closed,
+}
+
+/// How fast each part of a camera change moves, in its own unit per second.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CameraVelocity {
+    /// Logical pixels per second that the map's content moves on screen.
+    pub pan: ScreenCoordinate,
+    /// Zoom levels per second.
+    pub zoom: f64,
+    /// Degrees per second.
+    pub bearing: f64,
+    /// Degrees per second.
+    pub pitch: f64,
+}
+
+/// The end of a camera command
+/// ([`AnimationOptions::transition_end_fn`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct TransitionEnd {
+    pub outcome: TransitionOutcome,
+    /// How fast a momentum still moved when it was cancelled, as of the last
+    /// frame that moved the camera, which the next gesture can add to its own
+    /// release. Zero for every other end.
+    pub velocity: CameraVelocity,
 }
 
 impl AnimationOptions {
