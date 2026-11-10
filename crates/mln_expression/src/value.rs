@@ -2,8 +2,6 @@
 // src/mln/style/expression/value.cpp, plus the parts of
 // src/mln/style/conversion/stringify.hpp that `stringify` uses.
 
-use std::collections::BTreeMap;
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
@@ -22,8 +20,8 @@ use crate::type_::{self, Type};
 
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
-// dependent; a BTreeMap iterates in key order.
-pub type ObjectType = BTreeMap<String, Value>;
+// dependent; a VecMap iterates in key order.
+pub type ObjectType = feature::VecMap<String, Value>;
 
 /// `expression::Value`, same variant order as the C++ variant.
 #[derive(Clone, Debug, Default, PartialEq)]

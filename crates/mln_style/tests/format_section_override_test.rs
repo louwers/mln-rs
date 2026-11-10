@@ -17,7 +17,7 @@ use mln_expression::formatted::{Formatted, FormattedSection};
 use mln_expression::match_::Match;
 use mln_expression::parsing_context::ParsingContext;
 use mln_expression::type_::Type;
-use mln_expression::value::Value;
+use mln_expression::value::{ObjectType, Value};
 use mln_style::format_section_override::{FormatSectionOverride, set_overrides};
 use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides as MockOverrides;
 use mln_style::layers::symbol_layer_properties::{TextColor, TextField};
@@ -82,7 +82,7 @@ fn format_section_override() {
     let one_double = StubGeometryTileFeature::new(&[("property", MbglValue::Double(1.0))]);
     let one_color = StubGeometryTileFeature::new(&[("color", MbglValue::String("red".to_owned()))]);
 
-    let formatted_section = Value::Object(BTreeMap::from([("text-color".to_owned(), Value::Color(Color::blue()))]));
+    let formatted_section = Value::Object(ObjectType::from([("text-color".to_owned(), Value::Color(Color::blue()))]));
     let ctx = EvaluationContext::from_feature(Some(&one_double)).with_formatted_section(Some(&formatted_section));
     let constant_value_red = PossiblyEvaluatedPropertyValue::Constant(Color::red());
     let constant_value_green = PossiblyEvaluatedPropertyValue::Constant(Color::green());

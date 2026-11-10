@@ -6,9 +6,9 @@
 // Nothing in the C++ core calls it except `Properties<...>::stringify`
 // (`stringifyLayout`), whose only callers are tests.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use feature::{Identifier, Value};
+use feature::{Identifier, Value, VecMap};
 use mln_style_types::{
     AlignmentType, IconTextFitType, LineCapType, LineJoinType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
     TextJustifyType, TextTransformType, TextWritingModeType, VariableAnchorOffsetCollection, VisibilityType,
@@ -193,8 +193,8 @@ impl<T: Stringify> Stringify for HashMap<String, T> {
     }
 }
 
-/// `mapbox::base::ValueObject` is a `BTreeMap` in the port (key order).
-impl<T: Stringify> Stringify for BTreeMap<String, T> {
+/// `mapbox::base::ValueObject` is a `VecMap` in the port (key order).
+impl<T: Stringify> Stringify for VecMap<String, T> {
     fn stringify(&self, writer: &mut Writer) {
         writer.start_object();
         for (key, value) in self {
