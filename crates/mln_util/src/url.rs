@@ -28,6 +28,15 @@ fn to_lower_hex(c: u8) -> u8 {
     b'0' + c + if c > 9 { 39 } else { 0 }
 }
 
+fn hex_value(c: u8) -> Option<u8> {
+    match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        b'A'..=b'F' => Some(c - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// `std::string::find(c, pos)`.
 fn find(s: &[u8], c: u8, pos: usize) -> usize {
     if pos >= s.len() {
@@ -72,28 +81,18 @@ pub fn percent_encode(input: &str) -> String {
 pub fn percent_decode(input: &str) -> Vec<u8> {
     let bytes = input.as_bytes();
     let mut decoded = Vec::new();
-    let mut it = 0;
-    let end = bytes.len();
-    while it != end {
-        let cur = bytes[it..].iter().position(|&b| b == b'%').map_or(end, |i| it + i);
-        decoded.extend_from_slice(&bytes[it..cur]);
-        it = cur;
-        if cur != end {
-            // `input.copy(hex, 2, cur + 1)` copies up to two characters.
-            let copied = &bytes[(cur + 1).min(end)..(cur + 3).min(end)];
-            let mut hex = *b"00";
-            hex[..copied.len()].copy_from_slice(copied);
-            it += copied.len() + 1;
-            // std::strtoul(hex, nullptr, 16): the longest hex prefix.
-            let mut value: u32 = 0;
-            for &h in &hex {
-                match (h as char).to_digit(16) {
-                    Some(d) => value = value * 16 + d,
-                    None => break,
-                }
-            }
-            decoded.push(value as u8);
+    let mut i = 0;
+    while i < bytes.len() {
+        // A % that does not start two hex digits stays literal, as in the WHATWG URL Standard.
+        let high = if bytes[i] == b'%' && i + 2 < bytes.len() { hex_value(bytes[i + 1]) } else { None };
+        let low = high.and_then(|_| hex_value(bytes[i + 2]));
+        if let (Some(high), Some(low)) = (high, low) {
+            decoded.push(high * 16 + low);
+            i += 2;
+        } else {
+            decoded.push(bytes[i]);
         }
+        i += 1;
     }
     decoded
 }
@@ -263,6 +262,9 @@ mod tests {
     #[test]
     fn percent_decode_test() {
         assert_eq!("\"éncøðing\"".as_bytes(), percent_decode("%22%C3%A9nc%C3%B8%C3%B0ing%22"));
+        assert_eq!(b"100%", percent_decode("100%").as_slice());
+        assert_eq!(b"%//x", percent_decode("%//x").as_slice());
+        assert_eq!(b"A%4", percent_decode("%41%4").as_slice());
     }
 
     // gtest: URL.Scheme
