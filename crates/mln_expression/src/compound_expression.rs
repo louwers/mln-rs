@@ -182,20 +182,6 @@ fn lowercase(s: &str) -> String {
 // a string to a string one. One signature takes either, rather than an
 // overload for each, because parsing tries every overload of an arity on each
 // argument.
-fn compare_legacy_filter_value(
-    lhs: &Value,
-    as_double: impl FnOnce() -> Option<f64>,
-    as_string: impl FnOnce() -> Option<String>,
-    compare_double: fn(&f64, &f64) -> bool,
-    compare_string: fn(&str, &str) -> bool,
-) -> bool {
-    match lhs {
-        Value::Number(value) => as_double().is_some_and(|rhs| compare_double(&rhs, value)),
-        Value::String(value) => as_string().is_some_and(|rhs| compare_string(&rhs, value)),
-        _ => false,
-    }
-}
-
 fn filter_property(
     params: &EvaluationContext<'_>,
     args: &[Box<dyn Expression>],
@@ -204,13 +190,11 @@ fn filter_property(
 ) -> EvaluationResult {
     let a = eval_args(params, args)?;
     let key = string(&a[0]);
-    Ok(Value::Bool(compare_legacy_filter_value(
-        &a[1],
-        || feature_property_as_double(params, key),
-        || feature_property_as_string(params, key),
-        compare_double,
-        compare_string,
-    )))
+    Ok(Value::Bool(match &a[1] {
+        Value::Number(value) => feature_property_as_double(params, key).is_some_and(|rhs| compare_double(&rhs, value)),
+        Value::String(value) => feature_property_as_string(params, key).is_some_and(|rhs| compare_string(&rhs, value)),
+        _ => false,
+    }))
 }
 
 fn filter_id(
@@ -220,13 +204,11 @@ fn filter_id(
     compare_string: fn(&str, &str) -> bool,
 ) -> EvaluationResult {
     let a = eval_args(params, args)?;
-    Ok(Value::Bool(compare_legacy_filter_value(
-        &a[0],
-        || feature_id_as_double(params),
-        || feature_id_as_string(params),
-        compare_double,
-        compare_string,
-    )))
+    Ok(Value::Bool(match &a[0] {
+        Value::Number(value) => feature_id_as_double(params).is_some_and(|rhs| compare_double(&rhs, value)),
+        Value::String(value) => feature_id_as_string(params).is_some_and(|rhs| compare_string(&rhs, value)),
+        _ => false,
+    }))
 }
 
 fn math1(params: &EvaluationContext<'_>, args: &[Box<dyn Expression>], f: fn(f64) -> f64) -> EvaluationResult {
