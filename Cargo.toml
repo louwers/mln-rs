@@ -250,3 +250,9 @@ wagyu.workspace = true
 
 [lints]
 workspace = true
+
+# Fat LTO with one codegen unit: smaller release binaries, for a longer
+# build. The browser build adds opt-level "s" (`just web`).
+[profile.release]
+lto = "fat"
+codegen-units = 1

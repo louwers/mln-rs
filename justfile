@@ -153,7 +153,7 @@ glfw *args:  _dev-shell
 
 # wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
 # Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
-# The release build also gets fat LTO, one codegen unit and opt-level "s", and binaryen's wasm-opt (its latest release, e.g.
+# The release build also gets the release profile's fat LTO and one codegen unit, opt-level "s", and binaryen's wasm-opt (its latest release, e.g.
 # `mise use -g aqua:WebAssembly/binaryen@latest`) strips its names and other custom sections. Only stripping: wasm-opt's -O
 # levels made the module both bigger after brotli and slower to load (platform/web/README.md). Serve platform/web/web over
 # HTTP, e.g. `python3 -m http.server -d platform/web/web`, and open it in a browser with WebGPU.
@@ -163,7 +163,7 @@ web:
     set -euo pipefail
     if [[ {{quote(profile)}} == release ]]; then
       # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
-      export CARGO_PROFILE_RELEASE_LTO=fat CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 CARGO_PROFILE_RELEASE_OPT_LEVEL=s
+      export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
     fi
     cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web
     target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
