@@ -91,6 +91,13 @@ fn write_reverse_mirrored(src: &[u16], out: &mut Vec<u16>) {
     }
 }
 
+/// `BiDiRun`: a run of text in one direction, in logical order.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BiDiRun {
+    pub text: Vec<u16>,
+    pub rtl: bool,
+}
+
 /// `BiDi`.
 #[derive(Default)]
 pub struct BiDi {}
@@ -220,6 +227,34 @@ impl BiDi {
         Ok(lines)
     }
 
+    /// `visualRuns`: splits text in logical order into runs of one
+    /// direction each, and returns the runs in visual order. Each run keeps
+    /// its logical order, so a shaper such as HarfBuzz can lay it out in its
+    /// direction.
+    pub fn visual_runs(&mut self, input: &[u16]) -> Vec<BiDiRun> {
+        let mut runs = Vec::new();
+        if input.is_empty() {
+            return runs;
+        }
+
+        // ICU's ubidi_getVisualRun without ubidi_setLine: each paragraph's
+        // runs in visual order, the paragraphs in logical order.
+        let info = BidiInfo::new(input, None);
+        for para in &info.paragraphs {
+            for (rtl, run) in visual_runs(&info, para, para.range.clone()) {
+                if run.is_empty() {
+                    continue;
+                }
+                runs.push(BiDiRun { text: input[run].to_vec(), rtl });
+            }
+        }
+
+        if runs.is_empty() {
+            runs.push(BiDiRun { text: input.to_vec(), rtl: false });
+        }
+        runs
+    }
+
     /// `getLine`: the line in visual order, mirrored, BiDi controls
     /// removed.
     fn get_line(info: &BidiInfo<'_>, start: usize, end: usize) -> Result<Vec<u16>, String> {
@@ -338,5 +373,30 @@ mod bidi_test {
         }
 
         assert_eq!(bidi.process_styled_text(&input, set(&[5, 18, 30])).unwrap(), expected);
+    }
+
+    // gtest: BiDi.VisualRuns
+    #[test]
+    fn visual_runs() {
+        let mut bidi = BiDi::new();
+        let runs = bidi.visual_runs(&u("Erbil هەولێر"));
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, u("Erbil "));
+        assert!(!runs[0].rtl);
+        assert_eq!(runs[1].text, u("هەولێر"));
+        assert!(runs[1].rtl);
+    }
+
+    // gtest: BiDi.VisualRunsRightToLeftParagraph
+    #[test]
+    fn visual_runs_right_to_left_paragraph() {
+        let mut bidi = BiDi::new();
+        // The runs come in visual order, left to right, each in logical order.
+        let runs = bidi.visual_runs(&u("هەولێر Erbil"));
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0].text, u("Erbil"));
+        assert!(!runs[0].rtl);
+        assert_eq!(runs[1].text, u("هەولێر "));
+        assert!(runs[1].rtl);
     }
 }

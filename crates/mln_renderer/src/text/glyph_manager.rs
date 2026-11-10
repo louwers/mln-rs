@@ -414,17 +414,18 @@ impl GlyphManager {
         true
     }
 
-    /// `hbShaping(text, font, type, glyphIDs, adjusts)`.
+    /// `hbShaping(text, rtl, font, type, glyphIDs, adjusts)`.
     pub fn hb_shaping(
         &self,
         text: &[u16],
+        rtl: bool,
         font: &FontStack,
         type_: GlyphIDType,
         glyph_ids: &mut Vec<GlyphID>,
         adjusts: &mut Vec<HBShapeAdjust>,
     ) {
         if let Some(shaper) = self.get_hb_shaper(font, type_) {
-            shaper.create_complex_glyph_ids(text, glyph_ids, adjusts);
+            shaper.create_complex_glyph_ids(text, rtl, glyph_ids, adjusts);
         }
     }
 
