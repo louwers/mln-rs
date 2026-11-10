@@ -158,8 +158,10 @@ fn dragging_pans_and_glides_on() {
     let under = rig.project(ground);
     assert!(distance(under, p(500.0, 300.0)) < 1e-6, "{under:?}");
     rig.up(1, 500.0, 300.0);
-    assert!(!rig.camera.is_gesture_in_progress());
+    // The gesture lasts until its glide ends.
+    assert!(rig.camera.is_gesture_in_progress());
     let frames = rig.settle();
+    assert!(!rig.camera.is_gesture_in_progress());
     // 10 px every 32 ms, released a frame after the last move: the window
     // starts at the move 112 ms before the release, 30 px back, so
     // 267.9 px/s, as ffi's demo averages it. The pan friction (half-life
@@ -182,6 +184,7 @@ fn holding_still_before_release_stops_momentum() {
     rig.now += 300.0;
     rig.up(1, 450.0, 300.0);
     assert!(!rig.camera.in_transition());
+    assert!(!rig.camera.is_gesture_in_progress());
 }
 
 #[test]
@@ -378,30 +381,54 @@ fn glide(speed: f64) -> f64 {
     (speed - 10.0) / (std::f64::consts::LN_2 / 0.14)
 }
 
+/// Flings from `x` to the right at 10 px per 16 ms (625 px/s) and runs
+/// `frames` frames of its glide.
+fn fling_and_glide(rig: &mut Rig, x: f64, direction: f64, frames: u32) {
+    rig.down(1, PointerKind::Mouse, x, 300.0);
+    for i in 1..=8 {
+        rig.now += 16.0;
+        rig.to(1, x + direction * 10.0 * f64::from(i), 300.0);
+    }
+    rig.up(1, x + direction * 80.0, 300.0);
+    for _ in 0..frames {
+        rig.frame();
+    }
+}
+
 #[test]
-fn flinging_a_glide_again_starts_from_the_release() {
+fn a_flick_that_catches_a_glide_carries_its_speed() {
     let mut rig = Rig::new();
     let alone = rig.fling(100.0, 10.0);
     // 10 px per 16 ms is 625 px/s.
     assert!((alone - glide(625.0)).abs() < 0.01, "{alone}");
 
-    // Caught 100 ms into each glide and flung again the same way, four
-    // times, the last glide is still the release's own: Compose and Orbis
-    // added the caught speed, so repeated flicks compounded it.
+    // Caught 96 ms into its glide, which has slowed to 625 · 2^(−96/140)
+    // px/s, a flick the same way adds that speed, as Compose does.
     let mut rig = Rig::new();
-    for _ in 0..4 {
-        rig.down(1, PointerKind::Mouse, 100.0, 300.0);
-        for i in 1..=8 {
-            rig.now += 16.0;
-            rig.to(1, 100.0 + 10.0 * f64::from(i), 300.0);
-        }
-        rig.up(1, 180.0, 300.0);
-        for _ in 0..6 {
-            rig.frame();
-        }
-    }
+    fling_and_glide(&mut rig, 100.0, 1.0, 6);
     let again = rig.fling(300.0, 10.0);
-    assert!((again - alone).abs() < 0.01, "{again} vs {alone}");
+    let caught = 625.0 * (-0.096 / 0.14f64).exp2();
+    assert!((again - glide(625.0 + caught)).abs() < 0.01, "{again} vs {}", glide(625.0 + caught));
+
+    // A flick the other way adds nothing.
+    let mut rig = Rig::new();
+    fling_and_glide(&mut rig, 300.0, -1.0, 6);
+    let back = rig.fling(100.0, 10.0);
+    assert!((back - alone).abs() < 0.01, "{back} vs {alone}");
+
+    // Repeated flicks compound up to the pan's 10 000 px/s cap at most.
+    let mut rig = Rig::new();
+    for _ in 0..20 {
+        fling_and_glide(&mut rig, 100.0, 1.0, 1);
+    }
+    let compounded = rig.fling(300.0, 10.0);
+    assert!(compounded > again && compounded <= glide(10_000.0) + 0.01, "{compounded}");
+
+    // Off, each release glides at its own speed, as ffi's demo and GL JS do.
+    let mut rig = Rig::with(GestureOptions { carry_caught_glide: false, ..GestureOptions::DEFAULT });
+    fling_and_glide(&mut rig, 100.0, 1.0, 6);
+    let own = rig.fling(300.0, 10.0);
+    assert!((own - alone).abs() < 0.01, "{own} vs {alone}");
 }
 
 #[test]
@@ -556,4 +583,118 @@ fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
     });
     assert!((zoom - zoom.round()).abs() < 1e-6, "{zoom}");
     assert!(pitch.abs() < 1e-6, "{pitch}");
+}
+
+/// Records the source of each camera change that starts.
+#[derive(Default)]
+struct Sources(std::cell::RefCell<Vec<mln_map::CameraChangeSource>>);
+
+impl mln_map::transform::TransformObserver for Sources {
+    fn on_camera_will_change(&self, change: mln_map::CameraChange) {
+        self.0.borrow_mut().push(change.source);
+    }
+}
+
+#[test]
+fn gestures_and_their_steps_report_themselves_as_gestures() {
+    use mln_map::CameraChangeSource::{Gesture, Momentum};
+    let sources = Rc::new(Sources::default());
+    let mut rig = Rig::new();
+    rig.camera = Transform::new(sources.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    rig.camera.resize(Size::new(800, 600)).unwrap();
+    let take = || std::mem::take(&mut *sources.0.borrow_mut());
+    take();
+
+    // A drag and its glide.
+    rig.fling(100.0, 10.0);
+    let seen = take();
+    assert!(seen[..seen.len() - 1].iter().all(|&s| s == Gesture), "{seen:?}");
+    assert_eq!(seen.last(), Some(&Momentum));
+
+    // A key step and a double click: gestures, eased, that don't hold the
+    // gesture in progress.
+    rig.key(Key::ZoomIn, Modifiers::default());
+    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(rig.camera.in_transition());
+    rig.settle();
+    assert!(take().iter().all(|&s| s == Gesture));
+    for _ in 0..2 {
+        rig.down(1, PointerKind::Mouse, 400.0, 300.0);
+        rig.now += 50.0;
+        rig.up(1, 400.0, 300.0);
+        rig.now += 50.0;
+    }
+    assert!(!rig.camera.is_gesture_in_progress());
+    rig.settle();
+    assert!(take().iter().all(|&s| s == Gesture));
+}
+
+#[test]
+fn a_cancelled_pointer_stops_the_gesture_and_the_cameras_animations() {
+    let mut rig = Rig::new();
+    rig.down(1, PointerKind::Mouse, 400.0, 300.0);
+    rig.now += 16.0;
+    rig.to(1, 450.0, 300.0);
+    // An animation the app starts mid-gesture.
+    rig.camera.ease_to(&CameraOptions::default().with_bearing(Some(45.0)), &AnimationOptions::new(milliseconds(500)));
+    rig.send(Input::PointerCancel { id: 1 });
+    assert!(!rig.camera.is_gesture_in_progress());
+    assert!(!rig.camera.in_transition(), "no glide, and the animation stopped");
+}
+
+#[test]
+fn lifting_a_finger_out_of_a_pinch_doesnt_fling_the_map() {
+    // Two fingers pan right at 625 px/s; one lifts, and the other jerks
+    // 45 px down over the next 30 ms, then lifts. The jerk belongs to the
+    // lift (Compose ignores 100 ms of it), so the release is the pan's.
+    let mut rig = Rig::new();
+    let ground = rig.unproject(p(400.0, 300.0));
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.down(2, PointerKind::Touch, 500.0, 300.0);
+    for i in 1..=10 {
+        rig.now += 16.0;
+        let dx = 10.0 * f64::from(i);
+        rig.to(1, 300.0 + dx, 300.0);
+        rig.to(2, 500.0 + dx, 300.0);
+    }
+    rig.up(2, 600.0, 300.0);
+    for i in 1..=3 {
+        rig.now += 10.0;
+        rig.to(1, 400.0, 300.0 + 15.0 * f64::from(i));
+    }
+    rig.now += 10.0;
+    rig.up(1, 400.0, 345.0);
+    let lifted = rig.project(ground);
+    rig.settle();
+    let after = rig.project(ground);
+    let moved = p(after.x - lifted.x, after.y - lifted.y);
+    // The pan's 625 px/s glides right, and nothing down.
+    assert!((moved.x - glide(625.0)).abs() < 1.0 && moved.y.abs() < 1e-6, "{moved:?}");
+}
+
+#[test]
+fn a_key_step_during_a_drag_leaves_the_drag_going() {
+    let mut rig = Rig::new();
+    let zoom = rig.zoom();
+    rig.down(1, PointerKind::Mouse, 400.0, 300.0);
+    for i in 1..=4 {
+        rig.now += 16.0;
+        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
+    }
+    // A key mid-drag eases its step within the drag's gesture.
+    rig.key(Key::ZoomIn, Modifiers::default());
+    assert!(rig.camera.is_gesture_in_progress());
+    for i in 5..=8 {
+        rig.now += 16.0;
+        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
+        rig.frame();
+    }
+    assert!(rig.camera.is_gesture_in_progress());
+    // The release still glides, and the gesture lasts until it ends.
+    rig.up(1, 480.0, 300.0);
+    assert!(rig.camera.in_transition());
+    assert!(rig.camera.is_gesture_in_progress());
+    rig.settle();
+    assert!(!rig.camera.is_gesture_in_progress());
+    assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }

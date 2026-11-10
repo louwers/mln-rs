@@ -55,6 +55,13 @@ pub struct GestureOptions {
     pub bearing_snap: Option<MomentumSnap>,
     pub pitch_snap: Option<MomentumSnap>,
 
+    /// Whether a release that catches the recognizer's last glide (a flick
+    /// that interrupts a glide going its way) adds that glide's speed, as
+    /// UIScrollView, Android's scroll flywheel and Compose do. Each part's
+    /// decay still caps the speed. No map app measured in
+    /// maplibre-native-ffi#1705 does it (Apple Maps, Google Maps), nor do GL
+    /// JS and ffi's demo.
+    pub carry_caught_glide: bool,
     /// Whether a press stops every camera animation, as GL JS and the
     /// MapLibre Native SDKs do, or only the recognizer's own.
     pub interrupt_animations: bool,
@@ -85,6 +92,7 @@ impl GestureOptions {
         zoom_snap: None,
         bearing_snap: Some(MomentumSnap::BEARING),
         pitch_snap: None,
+        carry_caught_glide: true,
         interrupt_animations: true,
         // "gestures" in ASCII.
         transition_id: 0x6765_7374_7572_6573,

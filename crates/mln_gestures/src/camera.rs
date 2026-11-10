@@ -2,12 +2,13 @@
 //! tests, which need no renderer).
 
 use mln_map::transform::Transform;
-use mln_map::{AnimationOptions, CameraMomentum, CameraOptions, Map};
+use mln_map::{CameraDelta, CameraOptions, CameraUpdate, Map};
 use mln_util::LatLng;
 use mln_util::geo::{ScreenCoordinate, WrapMode};
 
-/// The camera moves the recognizer makes, which [`Map`] and [`Transform`]
-/// provide.
+/// What the recognizer needs from a camera: to read it, and
+/// maplibre-native-ffi's two camera calls, which carry each change's gesture
+/// phase. [`Map`] and [`Transform`] provide it.
 pub trait GestureCamera {
     /// The viewport's width and height, in logical pixels.
     fn viewport(&self) -> ScreenCoordinate;
@@ -15,12 +16,10 @@ pub trait GestureCamera {
     /// The least and greatest zoom the camera may take.
     fn zoom_range(&self) -> (f64, f64);
     fn lat_lng_for_pixel(&self, pixel: ScreenCoordinate) -> Option<LatLng>;
-    fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions);
-    fn move_by(&mut self, offset: ScreenCoordinate, animation: &AnimationOptions);
-    fn start_momentum(&mut self, momentum: &CameraMomentum, animation: &AnimationOptions);
-    fn cancel_transitions(&mut self);
+    /// [`Map::apply_camera_delta`]. The recognizer only sends valid deltas.
+    fn apply_camera_delta(&mut self, delta: &CameraDelta);
+    fn update_camera(&mut self, update: &CameraUpdate);
     fn cancel_transitions_with_id(&mut self, transition_id: u64);
-    fn set_gesture_in_progress(&mut self, in_progress: bool);
 }
 
 impl GestureCamera for Map {
@@ -42,29 +41,17 @@ impl GestureCamera for Map {
         Map::lat_lng_for_pixel(self, &pixel, WrapMode::Unwrapped).ok()
     }
 
-    fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) {
-        Map::ease_to(self, camera, animation);
+    fn apply_camera_delta(&mut self, delta: &CameraDelta) {
+        let applied = Map::apply_camera_delta(self, delta);
+        debug_assert!(applied.is_ok(), "{applied:?}");
     }
 
-    fn move_by(&mut self, offset: ScreenCoordinate, animation: &AnimationOptions) {
-        // Only a NaN or infinite offset fails, which no gesture produces.
-        let _ = Map::move_by(self, &offset, animation);
-    }
-
-    fn start_momentum(&mut self, momentum: &CameraMomentum, animation: &AnimationOptions) {
-        Map::start_momentum(self, momentum, animation);
-    }
-
-    fn cancel_transitions(&mut self) {
-        Map::cancel_transitions(self);
+    fn update_camera(&mut self, update: &CameraUpdate) {
+        Map::update_camera(self, update);
     }
 
     fn cancel_transitions_with_id(&mut self, transition_id: u64) {
         Map::cancel_transitions_with_id(self, transition_id);
-    }
-
-    fn set_gesture_in_progress(&mut self, in_progress: bool) {
-        Map::set_gesture_in_progress(self, in_progress);
     }
 }
 
@@ -86,27 +73,16 @@ impl GestureCamera for Transform {
         self.screen_coordinate_to_lat_lng(&pixel, WrapMode::Unwrapped).ok()
     }
 
-    fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) {
-        Transform::ease_to(self, camera, animation);
+    fn apply_camera_delta(&mut self, delta: &CameraDelta) {
+        let applied = Transform::apply_camera_delta(self, delta);
+        debug_assert!(applied.is_ok(), "{applied:?}");
     }
 
-    fn move_by(&mut self, offset: ScreenCoordinate, animation: &AnimationOptions) {
-        let _ = Transform::move_by(self, &offset, animation);
-    }
-
-    fn start_momentum(&mut self, momentum: &CameraMomentum, animation: &AnimationOptions) {
-        Transform::start_momentum(self, momentum, animation);
-    }
-
-    fn cancel_transitions(&mut self) {
-        Transform::cancel_transitions(self);
+    fn update_camera(&mut self, update: &CameraUpdate) {
+        Transform::update_camera(self, update);
     }
 
     fn cancel_transitions_with_id(&mut self, transition_id: u64) {
         Transform::cancel_transitions_with_id(self, transition_id);
-    }
-
-    fn set_gesture_in_progress(&mut self, in_progress: bool) {
-        Transform::set_gesture_in_progress(self, in_progress);
     }
 }
