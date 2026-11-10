@@ -401,6 +401,7 @@ pub struct OfflineRegion {
 
 impl OfflineRegion {
     /// The private constructor (`friend class OfflineDatabase`).
+    #[cfg(feature = "sqlite")]
     pub(crate) fn new(id: i64, definition: OfflineRegionDefinition, metadata: OfflineRegionMetadata) -> Self {
         OfflineRegion { id, definition, metadata }
     }

@@ -27,6 +27,9 @@ mln_gfx.workspace = true
 mln_map.workspace = true
 mln_platform_default.workspace = true
 mln_platform_default_image.workspace = true
+# Its `sqlite` feature (the ambient cache, as on native) comes through
+# render_test: naming it here would stop `mln-bench compare` building this
+# harness over commits from before mln_storage had the feature.
 mln_storage.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true

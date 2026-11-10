@@ -64,6 +64,8 @@ name = "gtest_memory"
 path = "tests/gtest_memory.rs"
 
 [dev-dependencies]
+# gtest_map's MainResourceLoader and Database file source tests.
+mln_storage = { workspace = true, features = ["sqlite"] }
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
 geojson = { package = "mln-rs-geojson", path = "../../vendor/geojson" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }

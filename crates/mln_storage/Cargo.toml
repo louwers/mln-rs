@@ -23,8 +23,18 @@ mln_platform_default_image.workspace = true
 mln_util.workspace = true
 pmtiles.workspace = true
 rapidjson.workspace = true
-rusqlite.workspace = true
+rusqlite = { workspace = true, optional = true }
 serde_json.workspace = true
+
+[features]
+default = ["sqlite"]
+# SQLite: OfflineDatabase, the Database file source (the ambient cache and
+# offline regions, under ResourceOptions::cache_path) and the MBTiles file
+# source. platform/web leaves it out and relies on the browser's HTTP cache,
+# like MapLibre GL JS. Without it, the ResourceLoader has neither file
+# source, so it serves no cache-only requests and no mbtiles:// URLs (as the
+# C++ MainResourceLoader without them).
+sqlite = ["dep:rusqlite"]
 
 # ureq's TLS (rustls, ring) doesn't build for wasm (the browser), where the
 # host supplies the HTTP transport instead.

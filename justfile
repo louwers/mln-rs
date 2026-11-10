@@ -52,11 +52,15 @@ check:
     cargo check --workspace --all-targets
 
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
-# needs the target, which rust-toolchain.toml installs. SQLite builds through sqlite-wasm-rs, which needs a clang
-# that targets wasm32. Clippy, so that platform/web, which only builds there, is linted too.
+# needs the target, which rust-toolchain.toml installs. Clippy, so that platform/web, which only builds there, is linted
+# too. Two runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
+# on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32), and platform/web, which
+# leaves SQLite out; the check fails if anything turns it back on there.
 [doc('Check that the libraries and platform/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
-    cargo clippy --target wasm32-unknown-unknown -p {{main_crate}} -p mln-rs-web
+    cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
+    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))

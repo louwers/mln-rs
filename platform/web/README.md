@@ -47,6 +47,19 @@ still decodes). The decoder answers later, from the event loop: a tile
 worker's reply comes outside `TileWorker::run`, so it wakes web/worker.js
 for a run. JPEG, which the Rust decoders don't port, decodes too.
 
+## Caching
+
+The browser's HTTP cache caches the map's resources, as in MapLibre GL
+JS: every request goes through `fetch` (src/fetch.rs), and the build
+leaves out SQLite (mln_storage's `sqlite` feature), so there is no
+ambient cache database (`ResourceOptions::cache_path`) and no offline
+packs. Without it the map's file source serves no cache-only requests,
+so the renderer doesn't load the optional tiles it would show from the
+cache while their parents load, as the C++ core built without a
+database, and `mbtiles://` URLs don't resolve (the browser has no files
+to open). TODO: offline packs on the web, which could run SQLite on OPFS
+in a storage worker loaded only when a page asks for them.
+
 ## Build and run
 
 `wasm-bindgen-cli` must be the version in Cargo.lock, and a release build

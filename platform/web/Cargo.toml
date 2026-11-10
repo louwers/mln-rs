@@ -29,7 +29,6 @@ mln_renderer.workspace = true
 mln_storage.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true
-sqlite-wasm-rs.workspace = true
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 web-sys.workspace = true

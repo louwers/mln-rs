@@ -33,7 +33,7 @@ use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};
 use crate::file_source_manager::FileSourceManager;
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
-use crate::mbtiles_file_source::{Document, strtol};
+use crate::json_document::{Document, strtol};
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Error, Reason, Response};

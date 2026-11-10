@@ -33,7 +33,8 @@ mln_map_types.workspace = true
 mln_platform_default.workspace = true
 mln_platform_default_image.workspace = true
 mln_renderer.workspace = true
-mln_storage.workspace = true
+# The ambient cache (cache_path) and mbtiles:// sources, as in C++.
+mln_storage = { workspace = true, features = ["sqlite"] }
 mln_style.workspace = true
 mln_util.workspace = true
 pixelmatch.workspace = true

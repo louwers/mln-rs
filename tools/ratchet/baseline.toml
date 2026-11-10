@@ -95,7 +95,8 @@
 "crates/mln_sprite/src/sprite_parser.rs" = 1
 "crates/mln_storage/src/database_file_source.rs" = 1
 "crates/mln_storage/src/http_file_source.rs" = 1
-"crates/mln_storage/src/mbtiles_file_source.rs" = 2
+"crates/mln_storage/src/json_document.rs" = 1
+"crates/mln_storage/src/mbtiles_file_source.rs" = 1
 "crates/mln_storage/src/offline.rs" = 1
 "crates/mln_storage/src/offline_database.rs" = 5
 "crates/mln_storage/src/pmtiles_file_source.rs" = 2
