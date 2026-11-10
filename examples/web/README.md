@@ -67,11 +67,17 @@ focus loss. `WebMap` feeds them to a gesture recognizer (crates/mln_gestures),
 which moves the camera and continues each release with the map's momentum.
 Each event's time travels as `performance.timeOrigin + timeStamp`, and the
 worker turns it into its own `performance.now()`, the clock it gives
-`WebMap::frame`. A ResizeObserver resizes the map with the canvas; the map
-keeps the pixel ratio it started with.
+`WebMap::frame`, which also puts the map's animations on the frame clock.
+The page tells a mouse wheel's notches, which the recognizer eases, from a
+trackpad's continuous pixels, which it applies at once, by how browsers
+report each (`wheelDelta` in web/main.js: Firefox's lines, Safari's
+4.000244 px steps, Chromium's legacy `wheelDeltaY`); those rules aren't
+checked on real hardware yet. A ResizeObserver resizes the map with the
+canvas; the map keeps the pixel ratio it started with.
 
 Controls: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
-to zoom to a box (Escape cancels it); the wheel or a trackpad to zoom;
+to zoom to a box (Escape cancels it); the wheel (a third of a level a
+notch, eased) or a trackpad to zoom, Ctrl or a trackpad pinch faster;
 double-click or double-tap to zoom in, Shift-double-click or a two-finger
 tap to zoom out, double-tap-and-drag to zoom; two fingers to pinch, twist
 and tilt; the arrow keys to pan (Shift: rotate and tilt) and `+`/`=` and

@@ -369,16 +369,12 @@ impl WebMap {
         self.gestures.handle(&mut self.map, Input::PointerCancel { id }, time)
     }
 
-    /// A DOM `wheel` event: its position, deltas and `deltaMode` (0 pixels,
-    /// 1 lines, 2 pages).
-    pub fn wheel(&mut self, x: f64, y: f64, dx: f64, dy: f64, delta_mode: u32, modifiers: u32, time: f64) -> bool {
-        let _ = dx;
-        // Lines and pages come from wheels: Firefox scrolls 3 lines a notch.
-        let delta = match delta_mode {
-            1 => WheelDelta::Notches(dy / 3.0),
-            2 => WheelDelta::Notches(dy),
-            _ => WheelDelta::Pixels(dy),
-        };
+    /// A DOM `wheel` event, as the page classifies it (web/main.js): at
+    /// (`x`, `y`), `amount` notches of a mouse wheel when `kind` is 1, or
+    /// `amount` pixels of continuous scrolling when it is 0; positive
+    /// scrolls down.
+    pub fn wheel(&mut self, x: f64, y: f64, kind: u32, amount: f64, modifiers: u32, time: f64) -> bool {
+        let delta = if kind == 1 { WheelDelta::Notches(amount) } else { WheelDelta::Pixels(amount) };
         let input =
             Input::Wheel { position: ScreenCoordinate::new(x, y), delta, modifiers: modifiers_from_bits(modifiers) };
         self.gestures.handle(&mut self.map, input, time)

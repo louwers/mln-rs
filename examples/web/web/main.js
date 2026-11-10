@@ -110,9 +110,31 @@ const moveEvent = 'onpointerrawupdate' in HTMLElement.prototype ? 'pointerrawupd
 canvas.addEventListener(moveEvent, (e) => send('pointer_move', e.pointerId, ...at(e), time(e)));
 canvas.addEventListener('pointerup', (e) => send('pointer_up', e.pointerId, ...at(e), time(e)));
 canvas.addEventListener('pointercancel', (e) => send('pointer_cancel', e.pointerId, time(e)));
+// A wheel event as the recognizer takes it: [1, notches] for a mouse wheel's
+// detents, which it eases, or [0, pixels] for continuous scrolling (a
+// trackpad, a precise wheel), which it applies at once. Positive scrolls
+// down. Browsers don't say which device scrolled, so this reads it from how
+// they report each:
+// - Firefox reports wheels in lines, 3 a notch, and pages.
+// - Safari reports a notch as a multiple of 4.000244140625 px (GL JS's test).
+// - Chromium's legacy wheelDeltaY is 120 a detent, and -3 × deltaY for
+//   precise scrolling.
+// Untested on real hardware; a misread zooms the same way by a similar
+// amount, with or without the easing.
+const SAFARI_NOTCH = 4.000244140625;
+function wheelDelta(e) {
+  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return [1, e.deltaY / 3];
+  if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return [1, e.deltaY];
+  if (e.deltaY !== 0 && e.deltaY % SAFARI_NOTCH === 0) return [1, Math.sign(e.deltaY)];
+  const legacy = e.wheelDeltaY;
+  if (typeof legacy === 'number' && legacy !== 0 && Math.abs(legacy + 3 * e.deltaY) >= 1 && legacy % 120 === 0) {
+    return [1, -legacy / 120];
+  }
+  return [0, e.deltaY];
+}
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  send('wheel', ...at(e), e.deltaX, e.deltaY, e.deltaMode, modifiers(e), time(e));
+  if (e.deltaY !== 0) send('wheel', ...at(e), ...wheelDelta(e), modifiers(e), time(e));
 }, { passive: false });
 canvas.addEventListener('keydown', (e) => {
   if (KEYS.has(e.key)) e.preventDefault();
