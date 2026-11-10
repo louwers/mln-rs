@@ -365,7 +365,7 @@ pub trait RenderLayer {
     /// Checks whether this layer can be rendered.
     fn supports_zoom(&self, zoom: f32) -> bool {
         // TODO: shall we use rounding or epsilon comparisons?
-        self.base().base_impl.min_zoom <= zoom && self.base().base_impl.max_zoom >= zoom
+        self.base().base_impl.min_zoom <= zoom && zoom < self.base().base_impl.max_zoom
     }
 
     fn is_layer_renderable(&self) -> bool {
