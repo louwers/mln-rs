@@ -415,7 +415,7 @@ pub trait RenderLayer {
         // A minimum of 0 is "no minimum": the globe zooms below 0 toward the
         // poles. (`std::max(zoom, 0.0f)`.)
         let zoom_or_zero = if zoom < 0.0 { 0.0 } else { zoom };
-        self.base().base_impl.min_zoom <= zoom_or_zero && self.base().base_impl.max_zoom >= zoom
+        self.base().base_impl.min_zoom <= zoom_or_zero && zoom < self.base().base_impl.max_zoom
     }
 
     fn is_layer_renderable(&self) -> bool {

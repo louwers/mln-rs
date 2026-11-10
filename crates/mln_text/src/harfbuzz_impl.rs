@@ -54,8 +54,9 @@ pub struct Impl {
     face: FreeTypeFace,
     /// `hb_font_t *font` (its face: the HB_TINY view of the tables).
     font: Option<Font>,
-    /// HarfBuzz caches shape plans per segment properties; so do we.
-    plans: Mutex<HashMap<[u8; 4], Arc<ShapePlan>>>,
+    /// HarfBuzz caches shape plans per segment properties (script and
+    /// direction); so do we.
+    plans: Mutex<HashMap<([u8; 4], bool), Arc<ShapePlan>>>,
 }
 
 /// The user features that stand in for HB_NO_OT_SHAPE_FRACTIONS.
@@ -115,18 +116,19 @@ impl Impl {
         &self.face
     }
 
-    fn plan(&self, font: &Font, script: [u8; 4], language: &Language, features: &[Feature]) -> Arc<ShapePlan> {
+    fn plan(
+        &self,
+        font: &Font,
+        script: [u8; 4],
+        rtl: bool,
+        language: &Language,
+        features: &[Feature],
+    ) -> Arc<ShapePlan> {
         let mut plans = self.plans.lock_unpoisoned();
         plans
-            .entry(script)
+            .entry((script, rtl))
             .or_insert_with(|| {
-                Arc::new(ShapePlan::new(
-                    font,
-                    Direction::LeftToRight,
-                    Some(to_script(script)),
-                    Some(language),
-                    features,
-                ))
+                Arc::new(ShapePlan::new(font, direction(rtl), Some(to_script(script)), Some(language), features))
             })
             .clone()
     }
@@ -135,6 +137,7 @@ impl Impl {
     pub fn create_complex_glyph_ids(
         &self,
         text: &[u16],
+        rtl: bool,
         glyph_ids: &mut Vec<GlyphID>,
         adjusts: &mut Vec<HBShapeAdjust>,
     ) {
@@ -152,20 +155,53 @@ impl Impl {
             script: [u8; 4],
         }
 
+        let is_neutral = |script: &[u8; 4]| matches!(script, b"Zyyy" | b"Zinh" | b"Zzzz");
+        // HB_SCRIPT_INVALID, for a part that holds no letters yet.
+        const INVALID: [u8; 4] = [0; 4];
+
         let mut text_parts: Vec<TextPart> = Vec::new();
-        text_parts.push(TextPart { text: vec![text[0]], script: get_unicode_script(text[0] as u32) });
-        for &ch in &text[1..] {
-            let script = get_unicode_script(ch as u32);
-            let last = text_parts.last_mut().expect("non-empty");
-            if last.script == script || script == *b"Zinh" {
-                last.text.push(ch);
-            } else {
-                text_parts.push(TextPart { text: vec![ch], script });
+        if rtl {
+            // A right-to-left run may hold more than one script, such as
+            // Hebrew and Arabic. Each script is shaped on its own, so the
+            // font applies that script's rules, such as Arabic joining.
+            // Spaces, punctuation, and marks belong to the letters before
+            // them, or to the first letters.
+            for &ch in text {
+                let script = get_unicode_script(ch as u32);
+                let part_script = if is_neutral(&script) { INVALID } else { script };
+                match text_parts.last_mut() {
+                    Some(last) if part_script == INVALID || last.script == script || last.script == INVALID => {
+                        if last.script == INVALID {
+                            last.script = part_script;
+                        }
+                        last.text.push(ch);
+                    }
+                    _ => text_parts.push(TextPart { text: vec![ch], script: part_script }),
+                }
+            }
+            for text_part in &mut text_parts {
+                if text_part.script == INVALID {
+                    text_part.script = *b"Arab";
+                }
+            }
+            // HarfBuzz returns each part's glyphs in visual order, and the
+            // run's later parts lie to the left of its earlier ones.
+            text_parts.reverse();
+        } else {
+            text_parts.push(TextPart { text: vec![text[0]], script: get_unicode_script(text[0] as u32) });
+            for &ch in &text[1..] {
+                let script = get_unicode_script(ch as u32);
+                let last = text_parts.last_mut().expect("non-empty");
+                if last.script == script || script == *b"Zinh" {
+                    last.text.push(ch);
+                } else {
+                    text_parts.push(TextPart { text: vec![ch], script });
+                }
             }
         }
 
         for text_part in &text_parts {
-            let Some(buffer) = self.shape_part(font, &text_part.text, text_part.script) else {
+            let Some(buffer) = self.shape_part(font, &text_part.text, text_part.script, rtl) else {
                 continue;
             };
 
@@ -188,7 +224,7 @@ impl Impl {
 
     /// One iteration of `createComplexGlyphIDs`' loop: `hb_buffer_reset`,
     /// direction, script, language, `hb_buffer_add_utf16`, `hb_shape`.
-    fn shape_part(&self, font: &Font, text: &[u16], script: [u8; 4]) -> Option<Buffer> {
+    fn shape_part(&self, font: &Font, text: &[u16], script: [u8; 4], rtl: bool) -> Option<Buffer> {
         let funcs = HbFtFont::new(&self.face);
         let (x_scale, y_scale) = HbFtFont::scale(&self.face);
         let shaper_font = ShaperFont::new(font).with_scale_separate(x_scale, y_scale).with_font_funcs(Some(&funcs));
@@ -197,13 +233,13 @@ impl Impl {
 
         // Setup harfbuzz
         let mut buffer = Buffer::new();
-        buffer.set_direction(Direction::LeftToRight);
+        buffer.set_direction(direction(rtl));
         buffer.set_script(Some(to_script(script)));
         buffer.set_language(Some(language.clone()));
         add_utf16(&mut buffer, text);
 
         // harfbuzz shaping
-        let plan = self.plan(font, script, &language, &features);
+        let plan = self.plan(font, script, rtl, &language, &features);
         let options = ShapeOptions::new().plan(Some(&plan)).features(&features);
         // hb_shape cannot fail on a valid buffer; HarfRust only fails on
         // plan/buffer mismatches, which cannot happen here.
@@ -211,11 +247,11 @@ impl Impl {
         Some(buffer)
     }
 
-    /// `shape_part` in HarfBuzz units, for tests: per glyph [glyph, cluster,
-    /// x_advance, y_advance, x_offset, y_offset].
+    /// `shape_part` left to right in HarfBuzz units, for tests: per glyph
+    /// [glyph, cluster, x_advance, y_advance, x_offset, y_offset].
     pub fn shape_part_raw(&self, text: &[u16], script: [u8; 4]) -> Vec<[i32; 6]> {
         let Some(font) = &self.font else { return Vec::new() };
-        let Some(buffer) = self.shape_part(font, text, script) else { return Vec::new() };
+        let Some(buffer) = self.shape_part(font, text, script, false) else { return Vec::new() };
         buffer
             .glyph_infos()
             .iter()
@@ -223,6 +259,11 @@ impl Impl {
             .map(|(i, p)| [i.glyph_id as i32, i.cluster as i32, p.x_advance, p.y_advance, p.x_offset, p.y_offset])
             .collect()
     }
+}
+
+/// `rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR`.
+fn direction(rtl: bool) -> Direction {
+    if rtl { Direction::RightToLeft } else { Direction::LeftToRight }
 }
 
 /// `hb_script_t` (a tag) as a HarfRust script.

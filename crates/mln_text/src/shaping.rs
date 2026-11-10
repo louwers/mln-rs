@@ -811,6 +811,51 @@ fn shape_lines(
     shaping.right = shaping.left + max_line_length;
 }
 
+/// `reorderShapedLines`: reorders lines that hold text HarfBuzz shaped,
+/// which come in logical order, into visual order. The bidi analysis covers
+/// the whole text, and sees each shaped section as characters of the
+/// section's direction, which it moves as a block without reversing them
+/// again.
+fn reorder_shaped_lines(
+    formatted_string: &TaggedString,
+    bidi: &mut BiDi,
+    lines: &mut Vec<TaggedString>,
+) -> Result<(), String> {
+    let sections = formatted_string.get_sections();
+    let styled_text = formatted_string.get_styled_text();
+
+    let mut bidi_text = styled_text.0.clone();
+    for (i, ch) in bidi_text.iter_mut().enumerate() {
+        let section = &sections[styled_text.1[i] as usize];
+        if section.type_ != GlyphIDType::FontPBF {
+            *ch = if section.rtl { 0x05D0 } else { 'a' as u16 };
+        }
+    }
+    let block_styles: Vec<bool> = sections.iter().map(|section| section.type_ != GlyphIDType::FontPBF).collect();
+
+    let mut line_breaks = BTreeSet::new();
+    let mut line_end = 0;
+    for line in lines.iter() {
+        line_end += line.length();
+        line_breaks.insert(line_end);
+    }
+
+    lines.clear();
+    for line in bidi.process_styled_text_with_blocks(styled_text, line_breaks, &bidi_text, &block_styles)? {
+        // A shaped section's adjustments start where its block now starts.
+        let mut line_sections = sections.to_vec();
+        for (i, line_section) in line_sections.iter_mut().enumerate() {
+            if !block_styles[i] {
+                continue;
+            }
+            let start = line.1.iter().position(|&style| style as usize == i).unwrap_or(line.1.len());
+            line_section.start_index = start as i32;
+        }
+        lines.push(TaggedString::from_styled_text(line, line_sections));
+    }
+    Ok(())
+}
+
 /// `getShaping`.
 #[allow(clippy::too_many_arguments)]
 pub fn get_shaping(
@@ -862,6 +907,12 @@ pub fn get_shaping(
                 section_type = formatted_sections[0].type_;
             }
 
+            // Text that HarfBuzz shaped is already in visual order, so bidi
+            // can't reorder it a character at a time. The loop below then
+            // only splits the text into lines, and the whole text is
+            // reordered after.
+            let has_shaped_sections = formatted_sections.iter().any(|section| section.type_ != GlyphIDType::FontPBF);
+
             let mut pend_strings: Vec<StyledText> = Vec::new();
 
             let process_aline = |line: StyledText,
@@ -903,20 +954,22 @@ pub fn get_shaping(
              -> Result<(), String> {
                 if !sub_string.0.is_empty() {
                     if GlyphIDType::FontPBF == section_type {
-                        let processed_lines = bidi.process_styled_text(
-                            sub_string,
-                            determine_line_breaks(
-                                &TaggedString::from_styled_text(
-                                    sub_string.clone(),
-                                    formatted_string.get_sections().to_vec(),
-                                ),
-                                spacing,
-                                max_width,
-                                glyph_map,
-                                image_positions,
-                                layout_text_size,
+                        let line_breaks = determine_line_breaks(
+                            &TaggedString::from_styled_text(
+                                sub_string.clone(),
+                                formatted_string.get_sections().to_vec(),
                             ),
-                        )?;
+                            spacing,
+                            max_width,
+                            glyph_map,
+                            image_positions,
+                            layout_text_size,
+                        );
+                        let processed_lines = if has_shaped_sections {
+                            bidi.split_styled_text(sub_string, line_breaks)?
+                        } else {
+                            bidi.process_styled_text(sub_string, line_breaks)?
+                        };
 
                         let mut last_char: u16 = 'x' as u16;
                         if !sub_string.0.is_empty() {
@@ -992,6 +1045,10 @@ pub fn get_shaping(
                 }
                 pend_strings.clear();
                 process_aline(combine, &mut formatted_sections, &mut reordered_lines);
+            }
+
+            if has_shaped_sections {
+                reorder_shaped_lines(formatted_string, bidi, &mut reordered_lines)?;
             }
         }
     }

@@ -7,11 +7,26 @@
 
 use std::sync::Arc;
 
-use mln_renderer::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, ImageAtlas, ImageVersionMap};
+use mln_renderer::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, GlyphAtlas, ImageAtlas, ImageVersionMap};
 use mln_style_types::image::{ImageMap, Impl as ImageImpl};
-use mln_util::image::PremultipliedImage;
+use mln_text::glyph::{Glyph, GlyphID, GlyphMap, GlyphMetrics, Glyphs};
+use mln_util::image::{AlphaImage, PremultipliedImage};
 use mln_util::immutable::Immutable;
 use mln_util::size::Size;
+
+/// `makeGlyph(code)`.
+fn make_glyph(code: char) -> Immutable<Glyph> {
+    Arc::new(Glyph {
+        id: GlyphID::new(code as u32),
+        bitmap: AlphaImage::new(Size::new(8, 8)),
+        metrics: GlyphMetrics { width: 8, height: 8, ..Default::default() },
+    })
+}
+
+/// `{{glyph->id, glyph}}`.
+fn glyphs(glyph: &Immutable<Glyph>) -> Glyphs {
+    Glyphs::from([(glyph.id, Some(glyph.clone()))])
+}
 
 /// `makeImage(id, sdf, size = {16, 16})`.
 fn make_image(id: &str, sdf: bool) -> Immutable<ImageImpl> {
@@ -41,11 +56,18 @@ fn image_map(image: &Immutable<ImageImpl>) -> ImageMap {
 struct DynamicTextureAtlasTest {
     atlas: DynamicTextureAtlas,
     atlases: Vec<ImageAtlas>,
+    glyph_atlases: Vec<GlyphAtlas>,
 }
 
 impl DynamicTextureAtlasTest {
     fn new() -> Self {
-        DynamicTextureAtlasTest { atlas: DynamicTextureAtlas::new(), atlases: Vec::new() }
+        DynamicTextureAtlasTest { atlas: DynamicTextureAtlas::new(), atlases: Vec::new(), glyph_atlases: Vec::new() }
+    }
+
+    fn upload_glyphs(&mut self, glyphs: &GlyphMap) -> &GlyphAtlas {
+        let glyph_atlas = self.atlas.upload_glyphs(glyphs);
+        self.glyph_atlases.push(glyph_atlas);
+        self.glyph_atlases.last().unwrap()
     }
 
     fn upload_pattern(&mut self, image: &Immutable<ImageImpl>) -> &ImageAtlas {
@@ -61,6 +83,9 @@ impl Drop for DynamicTextureAtlasTest {
     fn drop(&mut self) {
         for image_atlas in &self.atlases {
             self.atlas.remove_textures(&image_atlas.texture_handles, &image_atlas.dynamic_texture);
+        }
+        for glyph_atlas in &self.glyph_atlases {
+            self.atlas.remove_textures(&glyph_atlas.texture_handles, &glyph_atlas.dynamic_texture);
         }
     }
 }
@@ -118,4 +143,31 @@ fn released_revision_gets_fresh_allocation() {
 
     // The revision was forgotten on its last release, so it is packed and uploaded again under a new id.
     assert_ne!(released_id, test.upload_pattern(&image).texture_handles[0].get_id());
+}
+
+// gtest: DynamicTextureAtlasTest.GlyphsOfDifferentFontStacksGetTheirOwnAllocations
+#[test]
+fn glyphs_of_different_font_stacks_get_their_own_allocations() {
+    let mut test = DynamicTextureAtlasTest::new();
+    // These font stack hashes and code points once gave both glyphs the same
+    // bin, as a 32-bit build's hashes often did for Latin and CJK glyphs, so
+    // one drew the other.
+    let b = make_glyph('B');
+    let a = make_glyph('A');
+    let glyph_atlas = test.upload_glyphs(&GlyphMap::from([(0, glyphs(&b)), (4, glyphs(&a))]));
+
+    assert_eq!(glyph_atlas.texture_handles.len(), 2);
+    assert_ne!(glyph_atlas.texture_handles[0].get_rectangle(), glyph_atlas.texture_handles[1].get_rectangle());
+    assert_ne!(glyph_atlas.glyph_positions[&0][&b.id].rect, glyph_atlas.glyph_positions[&4][&a.id].rect);
+}
+
+// gtest: DynamicTextureAtlasTest.FontStacksShareTheAllocationOfTheSameGlyph
+#[test]
+fn font_stacks_share_the_allocation_of_the_same_glyph() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let glyph = make_glyph('A');
+    let glyph_atlas = test.upload_glyphs(&GlyphMap::from([(1, glyphs(&glyph)), (2, glyphs(&glyph))]));
+
+    assert_eq!(glyph_atlas.texture_handles.len(), 2);
+    assert_eq!(glyph_atlas.texture_handles[0].get_id(), glyph_atlas.texture_handles[1].get_id());
 }

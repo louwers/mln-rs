@@ -11,6 +11,7 @@ use std::collections::BTreeSet;
 use std::fmt;
 
 use feature::{Feature, Identifier as FeatureIdentifier, Value as MbglValue, ValueObject};
+use mln_text::glyph::FontFaces;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::{FeatureType, to_feature_type};
@@ -57,6 +58,9 @@ pub struct EvaluationContext<'a> {
     pub available_images: Option<&'a BTreeSet<String>>,
     pub canonical: Option<&'a CanonicalTileID>,
     pub global_state: Option<&'a GlobalStateMap>,
+    /// The style's font faces, which let "is-supported-script" accept the
+    /// scripts that they cover.
+    pub font_faces: Option<&'a FontFaces>,
 }
 
 impl<'a> EvaluationContext<'a> {
@@ -136,6 +140,11 @@ impl<'a> EvaluationContext<'a> {
 
     pub fn with_global_state(mut self, global_state: Option<&'a GlobalStateMap>) -> Self {
         self.global_state = global_state;
+        self
+    }
+
+    pub fn with_font_faces(mut self, font_faces: Option<&'a FontFaces>) -> Self {
+        self.font_faces = font_faces;
         self
     }
 }

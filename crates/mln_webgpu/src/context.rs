@@ -43,6 +43,7 @@ use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
 use mln_tile_id::CanonicalTileID;
+use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
@@ -83,7 +84,7 @@ pub struct Context {
     /// `globeClipMeshes`: per zoom, north pole row, south pole row and
     /// border.
     globe_clip_meshes: RefCell<BTreeMap<(u8, bool, bool, bool), GlobeClipMesh>>,
-    // Port-only: the placeholder vertex buffers of
+    // `defaultVertexBuffers`: the default attribute buffers of
     // UploadPass::build_attribute_bindings, one per attribute type, with the
     // vertex count each covers.
     dummy_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>>,
@@ -103,7 +104,7 @@ fn clip_mask_stencil_mode() -> StencilMode {
 
 /// `clipMaskDepthMode`
 fn clip_mask_depth_mode() -> DepthMode {
-    DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly }
+    DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly, range: Range::new(0.0, 1.0) }
 }
 
 impl Context {

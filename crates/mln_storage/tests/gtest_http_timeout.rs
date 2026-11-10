@@ -53,6 +53,9 @@ fn rate_limit() {
 
     // Default
     assert_eq!(seconds(5), error_retry_timeout(Reason::RateLimit, 1, None));
+
+    // A retry time that has already passed retries at once
+    assert_eq!(Duration::zero(), error_retry_timeout(Reason::RateLimit, 1, Some(now_plus(-1))));
 }
 
 // gtest: HttpRetry.ExpiredInitial

@@ -933,14 +933,14 @@ impl TransformState {
         lat_lng(mln_math::rad2deg(2.0 * (self.y / self.cc).exp().atan() - 0.5 * PI), -self.x / self.bc, wrap_mode)
     }
 
-    /// The world copy of a location nearest the center, which bounds can
-    /// keep past the antimeridian.
-    pub fn lat_lng_near_center(&self, lat_lng: &LatLng) -> LatLng {
+    /// `latLngNearCenter(latLng)`: the world copy of a location nearest the
+    /// center, which bounds can keep past the antimeridian.
+    pub fn lat_lng_near_center(&self, location: &LatLng) -> LatLng {
         let center = self.get_lat_lng(WrapMode::Unwrapped);
         let wrapped_center = center.wrapped();
-        let mut nearest = lat_lng.wrapped();
+        let mut nearest = location.wrapped();
         nearest.unwrap_for_shortest_path(&wrapped_center);
-        self::lat_lng(
+        lat_lng(
             nearest.latitude(),
             nearest.longitude() + center.longitude() - wrapped_center.longitude(),
             WrapMode::Unwrapped,

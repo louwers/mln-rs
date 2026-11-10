@@ -9,17 +9,19 @@ use mln_actor::RunLoop;
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
+use mln_style_types::SourceType;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::tileset::{Tileset, VectorEncoding};
+use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
+use crate::conversion::tileset::SourceOptions;
 use crate::observer::SourceObserver;
 use crate::source::Source;
 use crate::sources::geojson_source::GeoJSONSource;
 use crate::sources::image_source::ImageSource;
-use crate::sources::tile_source::{UrlOrTileset, VectorSource};
+use crate::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 
 /// `StubStyleObserver` (test/src/mln/test/stub_style_observer.hpp), the
 /// SourceObserver half.
@@ -230,6 +232,79 @@ fn vector_source_url_set_tiles() {
     source.load_description(&file_source);
     run_loop.run();
     assert_eq!(*count.borrow(), 2);
+}
+
+/// Loads `source`'s description from a TileJSON with `"minzoom": 4, "maxzoom": 12` and returns
+/// the tileset it has when it's loaded (the C++ tests read it in `sourceLoaded`).
+fn tileset_loaded_from_tilejson(source: &dyn Source) -> Tileset {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    file_source.set_response(Kind::Source, |resource| {
+        assert_eq!("url", resource.url);
+        let mut response = Response::new();
+        response.data =
+            Some(Arc::new(br#"{ "tilejson": "2.1.0", "tiles": [ "tiles" ], "minzoom": 4, "maxzoom": 12 }"#.to_vec()));
+        Some(response)
+    });
+
+    let tileset = Rc::new(RefCell::new(None));
+    let observer = Rc::new(StubStyleObserver::default());
+    {
+        let tileset = tileset.clone();
+        let handle = run_loop.handle();
+        *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
+            let impl_ = source.base_impl();
+            let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
+            *tileset.borrow_mut() = impl_.tileset.clone();
+            handle.stop();
+        }));
+    }
+
+    source.set_observer(Some(observer.clone()));
+    source.load_description(&file_source);
+    run_loop.run();
+    tileset.take().expect("a tileset")
+}
+
+// gtest: Source.RasterDEMInlineZoomOverridesTileJSON
+#[test]
+fn raster_dem_inline_zoom_overrides_tile_json() {
+    let source = RasterDEMSource::new(
+        "source",
+        UrlOrTileset::Url("url".to_owned()),
+        512,
+        Some(SourceOptions {
+            raster_encoding: Some(RasterEncoding::Terrarium),
+            maxzoom: Some(15),
+            ..Default::default()
+        }),
+    );
+    let tileset = tileset_loaded_from_tilejson(&source);
+    // The inline maxzoom wins over the TileJSON's; minzoom was not given inline, so the TileJSON
+    // value is kept.
+    assert_eq!(4, tileset.zoom_range.min);
+    assert_eq!(15, tileset.zoom_range.max);
+    assert_eq!(Some(RasterEncoding::Terrarium), tileset.raster_encoding);
+}
+
+// gtest: Source.RasterInlineZoomOverridesTileJSON
+#[test]
+fn raster_inline_zoom_overrides_tile_json() {
+    let source =
+        RasterSource::new("source", UrlOrTileset::Url("url".to_owned()), 512, SourceType::Raster, None, Some(16));
+    let tileset = tileset_loaded_from_tilejson(&source);
+    // The inline maxzoom wins; minzoom was not given inline, so the TileJSON's is kept.
+    assert_eq!(4, tileset.zoom_range.min);
+    assert_eq!(16, tileset.zoom_range.max);
+}
+
+// gtest: Source.RasterDEMTileJSONZoomKeptWithoutInlineOverride
+#[test]
+fn raster_dem_tile_json_zoom_kept_without_inline_override() {
+    let source = RasterDEMSource::new("source", UrlOrTileset::Url("url".to_owned()), 512, None);
+    let tileset = tileset_loaded_from_tilejson(&source);
+    assert_eq!(4, tileset.zoom_range.min);
+    assert_eq!(12, tileset.zoom_range.max);
 }
 
 // gtest: Source.ImageSourceImageUpdate

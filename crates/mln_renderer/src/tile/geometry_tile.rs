@@ -43,6 +43,7 @@ use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::VisibilityType;
 use mln_style_types::image::{ImageMap, ImagePosition};
+use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::exception::ExceptionPtr;
@@ -368,12 +369,23 @@ impl GlyphRequestor for GeometryTileInner {
     /// `onGlyphsAvailable(GlyphMap, HBShapeRequests)`.
     fn on_glyphs_available(&self, mut glyph_map: GlyphMap, requests: HBShapeRequests) {
         let mut results = HBShapeResults::new();
+        let mut bidi = BiDi::new();
         for (font_stack, font_types) in &requests {
             for (type_, strs) in font_types {
                 for str_ in strs {
                     let mut shaped_glyph_ids = Vec::new();
                     let mut shaped_adjusts = Vec::new();
-                    self.glyph_manager.hb_shaping(str_, font_stack, *type_, &mut shaped_glyph_ids, &mut shaped_adjusts);
+                    // Shapes each run in its own direction, in visual order.
+                    for run in bidi.visual_runs(str_) {
+                        self.glyph_manager.hb_shaping(
+                            &run.text,
+                            run.rtl,
+                            font_stack,
+                            *type_,
+                            &mut shaped_glyph_ids,
+                            &mut shaped_adjusts,
+                        );
+                    }
                     let mut shaped_str: Vec<u16> = Vec::with_capacity(shaped_glyph_ids.len());
                     for glyph_id in &shaped_glyph_ids {
                         shaped_str.push(glyph_id.code);
@@ -757,7 +769,7 @@ impl Tile for GeometryTile {
             2f64.powf(transform_state.get_zoom() - f64::from(id.overscaled_z)),
             options,
             global_state,
-            &id.to_unwrapped(),
+            &id,
             layers,
             query_padding * transform_state.max_pitch_scale_factor(),
             feature_state,

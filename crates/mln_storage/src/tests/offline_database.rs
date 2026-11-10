@@ -1217,6 +1217,26 @@ fn put_fails_when_eviction_insuffices() {
     check_log_empty(&log);
 }
 
+// gtest: OfflineDatabase.PutSkipsZeroSizeAmbientCache
+#[test]
+fn put_skips_zero_size_ambient_cache() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    db.set_maximum_ambient_cache_size(0);
+
+    // A region keeps the database enabled, so put() reaches the ambient cache.
+    let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, true);
+    db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
+
+    let mut response = Response::new();
+    response.data = Some(random_string(1024));
+
+    assert!(!db.put(&style("http://example.com/ambient"), &response).0);
+    assert!(db.get(&style("http://example.com/ambient")).is_none());
+
+    check_log_empty(&log);
+}
+
 // gtest: OfflineDatabase.GetRegionCompletedStatus
 #[test]
 fn get_region_completed_status() {

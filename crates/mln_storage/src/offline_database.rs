@@ -551,6 +551,11 @@ impl OfflineDatabase {
             return Ok((false, 0));
         }
 
+        // An ambient cache with no room can't store anything, so skip compressing.
+        if evict && self.maximum_ambient_cache_size == 0 {
+            return Ok((false, 0));
+        }
+
         let mut compressed_data = Vec::new();
         let mut compressed = false;
         let mut size = 0u64;

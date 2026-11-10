@@ -76,8 +76,10 @@ pub fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, d
     let not_found = matches!(&status, Err(e) if e.kind() == std::io::ErrorKind::NotFound);
     let is_directory = matches!(&status, Ok(metadata) if metadata.is_dir());
 
-    if not_found || is_directory {
-        response.error = Some(Box::new(Error::new(Reason::NotFound, "")));
+    if not_found {
+        response.error = Some(Box::new(Error::new(Reason::NotFound, format!("Cannot find file {path_display}"))));
+    } else if is_directory {
+        response.error = Some(Box::new(Error::new(Reason::NotFound, format!("Cannot read directory {path_display}"))));
     } else {
         match read_file(&path, data_range) {
             None => {

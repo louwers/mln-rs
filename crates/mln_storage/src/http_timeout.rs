@@ -33,7 +33,7 @@ pub fn error_retry_timeout(
             seconds(1i64 << failed_requests.wrapping_sub(1).min(31))
         }
         Reason::RateLimit => match retry_after {
-            Some(retry_after) => timestamp_diff(retry_after, now()),
+            Some(retry_after) => std::cmp::max(Duration::zero(), timestamp_diff(retry_after, now())),
             // Default
             None => seconds(i64::from(DEFAULT_RATE_LIMIT_TIMEOUT)),
         },

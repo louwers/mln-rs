@@ -1,0 +1,70 @@
+name: pages
+
+# Builds the browser build (`just profile=release web`, platform/web/README.md)
+# and deploys its page, platform/web/web, to GitHub Pages
+# (https://louwers.github.io/mln-rs/). It needs no COOP/COEP headers, so Pages
+# serves it as is. Publishing only: CI's web job checks the build.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One run at a time; a newer push replaces the one waiting, so the latest
+# commit deploys next. In-flight runs finish, so that pushes coming faster
+# than a build don't starve the deploys.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            target
+          key: pages-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: pages-${{ runner.os }}-
+
+      - uses: taiki-e/install-action@v2
+        with: { tool: 'just,wasm-bindgen@0.2.130' }
+
+      # wasm-opt, which `just profile=release web` runs, from binaryen's
+      # latest release.
+      - name: Install binaryen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download --repo WebAssembly/binaryen --pattern 'binaryen-*-x86_64-linux.tar.gz' --output - |
+            tar -xz -C "$RUNNER_TEMP"
+          echo "$(echo "$RUNNER_TEMP"/binaryen-version_*)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install --profile minimal --no-self-update
+
+      - name: Build
+        run: just profile=release web
+
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: platform/web/web
+      - id: deploy
+        uses: actions/deploy-pages@v5

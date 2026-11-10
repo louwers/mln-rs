@@ -34,12 +34,12 @@ forwards to it.
 ## Build and run
 
 `wasm-bindgen-cli` must be the version in Cargo.lock, and a release build
-also runs binaryen's `wasm-opt` (version 130), which strips the names and
+also runs binaryen's `wasm-opt` (its latest release), which strips the names and
 the other custom sections:
 
 ```sh
 cargo install wasm-bindgen-cli --version 0.2.130
-mise use -g aqua:WebAssembly/binaryen@130  # or binaryen's release, on the PATH
+mise use -g aqua:WebAssembly/binaryen@latest  # or binaryen's release, on the PATH
 just profile=release web
 python3 -m http.server -d platform/web/web
 ```

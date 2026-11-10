@@ -44,7 +44,22 @@ fn convert_raster_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
         }
     }
 
-    Some(Box::new(RasterSource::new(id, url_or_tileset, tile_size, SourceType::Raster)))
+    // Inline zooms win over the TileJSON's (RasterSource's setTilesetOverrides); an invalid one
+    // rejects the source, as for vector sources
+    let mut zooms = [None; 2];
+    for (zoom, name) in zooms.iter_mut().zip(["minzoom", "maxzoom"]) {
+        if let Some(zoom_value) = value.object_member(name) {
+            match zoom_value.to_number() {
+                Some(z) if !(z < 0.0 || z > f32::from(u8::MAX)) => *zoom = Some(z as u8),
+                _ => {
+                    error.message = format!("invalid {name}");
+                    return None;
+                }
+            }
+        }
+    }
+
+    Some(Box::new(RasterSource::new(id, url_or_tileset, tile_size, SourceType::Raster, zooms[0], zooms[1])))
 }
 
 // dem-heatmap
@@ -68,7 +83,16 @@ fn convert_raster_dem_source(id: &str, value: &Convertible<'_>, error: &mut Erro
     // style.json can contain TileJSON parameter overrides or non-TileJSON
     // spec parameters, a separate mechanism is needed. Ideally these two
     // pathways share parsing logic.
-    let options = crate::conversion::tileset::SourceOptions::convert(value, error);
+    //
+    // An invalid `encoding`, `minzoom` or `maxzoom` rejects the source, as for vector sources:
+    // building it without the options decoded a terrarium DEM as Mapbox, with wrong heights and
+    // nothing logged. No options at all is not an error.
+    let mut options_error = Error::default();
+    let options = crate::conversion::tileset::SourceOptions::convert(value, &mut options_error);
+    if options.is_none() && !options_error.message.is_empty() {
+        *error = options_error;
+        return None;
+    }
 
     Some(Box::new(crate::sources::tile_source::RasterDEMSource::new(id, url_or_tileset, tile_size, options)))
 }

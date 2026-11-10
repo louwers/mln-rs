@@ -33,15 +33,18 @@ impl HBShaper {
         HBShaper { impl_: Impl::new(type_, font_file_data, lib) }
     }
 
-    /// `createComplexGlyphIDs`: appends the glyphs of `text` (UTF-16) and
-    /// their positions.
+    /// `createComplexGlyphIDs`: appends the glyphs of `text` (UTF-16), one
+    /// run of one direction in logical order, and their positions. Glyphs
+    /// come back in visual order, so a right-to-left run's glyphs come back
+    /// reversed.
     pub fn create_complex_glyph_ids(
         &self,
         text: &[u16],
+        rtl: bool,
         glyph_ids: &mut Vec<GlyphID>,
         adjusts: &mut Vec<HBShapeAdjust>,
     ) {
-        self.impl_.create_complex_glyph_ids(text, glyph_ids, adjusts);
+        self.impl_.create_complex_glyph_ids(text, rtl, glyph_ids, adjusts);
     }
 
     /// `rasterizeGlyph`.

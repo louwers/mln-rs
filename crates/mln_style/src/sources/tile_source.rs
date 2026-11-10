@@ -93,7 +93,8 @@ struct Overrides {
     subclass: Subclass,
     /// `supportsLayerType`: the tile kind of the layers the source serves.
     tile_kind: TileKind,
-    /// VectorSource's `maxZoom` / `minZoom` (`setTilesetOverrides`).
+    /// VectorSource's `maxZoom` / `minZoom`, or RasterSource's `maxzoomOverride` /
+    /// `minzoomOverride` (`setTilesetOverrides`).
     max_zoom: Option<f32>,
     min_zoom: Option<f32>,
     // dem-heatmap: RasterDEMSource's `options->rasterEncoding`.
@@ -157,8 +158,8 @@ impl TileSource {
         self.impl_().get_tile_size()
     }
 
-    /// `setTilesetOverrides(Tileset&)`: VectorSource's zoom overrides; the
-    /// base class has none.
+    /// `setTilesetOverrides(Tileset&)`: VectorSource's and RasterSource's zoom
+    /// overrides; the base class has none.
     fn set_tileset_overrides(&self, tileset: &mut Tileset) {
         let overrides = &self.inner.overrides;
         if let Some(max_zoom) = overrides.max_zoom {
@@ -371,8 +372,17 @@ pub struct RasterSource {
 }
 
 impl RasterSource {
-    /// `RasterSource(id, urlOrTileset, tileSize, sourceType = Raster)`.
-    pub fn new(id: impl Into<String>, url_or_tileset: UrlOrTileset, tile_size: u16, source_type: SourceType) -> Self {
+    /// `RasterSource(id, urlOrTileset, tileSize, sourceType = Raster, minzoom, maxzoom)`.
+    /// `minzoom` / `maxzoom` are the style's inline values: they win over the TileJSON's, as in
+    /// maplibre-gl-js.
+    pub fn new(
+        id: impl Into<String>,
+        url_or_tileset: UrlOrTileset,
+        tile_size: u16,
+        source_type: SourceType,
+        minzoom: Option<u8>,
+        maxzoom: Option<u8>,
+    ) -> Self {
         RasterSource {
             tile_source: TileSource::new(
                 id.into(),
@@ -382,8 +392,8 @@ impl RasterSource {
                 Overrides {
                     subclass: Subclass::Raster,
                     tile_kind: TileKind::Raster,
-                    max_zoom: None,
-                    min_zoom: None,
+                    max_zoom: maxzoom.map(f32::from),
+                    min_zoom: minzoom.map(f32::from),
                     raster_encoding: None,
                 },
             ),
@@ -442,8 +452,8 @@ impl RasterDEMSource {
                 Overrides {
                     subclass: Subclass::RasterDEM,
                     tile_kind: TileKind::RasterDEM,
-                    max_zoom: None,
-                    min_zoom: None,
+                    max_zoom: options.and_then(|options| options.maxzoom).map(f32::from),
+                    min_zoom: options.and_then(|options| options.minzoom).map(f32::from),
                     raster_encoding: options.and_then(|options| options.raster_encoding),
                 },
             ),

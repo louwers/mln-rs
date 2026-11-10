@@ -104,6 +104,24 @@ struct ImageAllocation {
     bin_id: i32,
 }
 
+/// `GlyphAllocationKey`: (dynamic texture, glyph). A glyph's allocation is
+/// shared by the font stacks that hold the same immutable glyph, which have
+/// the same pixels.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+struct GlyphAllocationKey {
+    dynamic_texture: usize,
+    /// The glyph's address (an identity; the allocation keeps the glyph
+    /// alive).
+    glyph: usize,
+}
+
+struct GlyphAllocation {
+    // Keeps the glyph alive so its address can't be reused by another glyph
+    // while the bin exists.
+    _glyph: Immutable<Glyph>,
+    bin_id: i32,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct BinKey {
     dynamic_texture: usize,
@@ -116,6 +134,8 @@ struct State {
     dummy_dynamic_texture: HashMap<u8, DynamicTexturePtr>,
     image_allocations: HashMap<ImageAllocationKey, ImageAllocation>,
     image_allocation_keys: HashMap<BinKey, ImageAllocationKey>,
+    glyph_allocations: HashMap<GlyphAllocationKey, GlyphAllocation>,
+    glyph_allocation_keys: HashMap<BinKey, GlyphAllocationKey>,
 }
 
 /// `gfx::DynamicTextureAtlas`.
@@ -137,12 +157,6 @@ impl Drop for DynamicTextureAtlas {
 
 fn pixel_type_key(t: TexturePixelType) -> u8 {
     t as u8
-}
-
-/// `static_cast<int32_t>(double)` as clang on x86-64 converts (out of range
-/// gives INT_MIN): the glyph bin ids depend on it.
-fn to_i32(v: f64) -> i32 {
-    libstdcxx::cvt::f64_to_i32(v)
 }
 
 impl DynamicTextureAtlas {
@@ -199,12 +213,7 @@ impl DynamicTextureAtlas {
                     if !glyph.bitmap.valid() {
                         continue;
                     }
-                    let unique_id = to_i32((font_stack as f64).sqrt() / 2.0 + f64::from(glyph.id.hash()));
-                    let size = Size::new(
-                        glyph.bitmap.size.width + 2 * PADDING as u32,
-                        glyph.bitmap.size.height + 2 * PADDING as u32,
-                    );
-                    match texture.reserve_size(size, unique_id) {
+                    match Self::reserve_glyph(&mut state, &texture, glyph) {
                         Some(tex_handle) => glyphs_to_upload.push((tex_handle, glyph.clone(), font_stack)),
                         None => {
                             has_space = false;
@@ -214,7 +223,7 @@ impl DynamicTextureAtlas {
                 }
                 if !has_space {
                     for (tex_handle, _, _) in &glyphs_to_upload {
-                        texture.remove_texture(tex_handle);
+                        Self::release_texture(&mut state, &texture, tex_handle);
                     }
                     glyphs_to_upload.clear();
                     glyph_atlas.dynamic_texture = None;
@@ -455,17 +464,47 @@ impl DynamicTextureAtlas {
         tex_handle
     }
 
+    /// `reserveGlyph(dynamicTexture, glyph)`.
+    fn reserve_glyph(
+        state: &mut State,
+        dynamic_texture: &DynamicTexturePtr,
+        glyph: &Immutable<Glyph>,
+    ) -> Option<TextureHandle> {
+        let size =
+            Size::new(glyph.bitmap.size.width + 2 * PADDING as u32, glyph.bitmap.size.height + 2 * PADDING as u32);
+        let key = GlyphAllocationKey { dynamic_texture: dynamic_texture.id(), glyph: Arc::as_ptr(glyph) as usize };
+
+        // Reuse the bin of this exact glyph; otherwise let the shelf pack
+        // assign a fresh id.
+        let existing = state.glyph_allocations.get(&key).map(|a| a.bin_id);
+        let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
+        if let Some(tex_handle) = &tex_handle {
+            if existing.is_none() {
+                state
+                    .glyph_allocations
+                    .insert(key, GlyphAllocation { _glyph: glyph.clone(), bin_id: tex_handle.get_id() });
+                state
+                    .glyph_allocation_keys
+                    .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
+            }
+        }
+        tex_handle
+    }
+
     /// `releaseTexture(dynamicTexture, texHandle)`.
     fn release_texture(state: &mut State, dynamic_texture: &DynamicTexturePtr, tex_handle: &TextureHandle) {
         if !dynamic_texture.remove_texture(tex_handle) {
             return;
         }
 
-        // The last handle was released, so forget the revision; its bin may
-        // now be reused by other images.
+        // The last handle was released, so forget the image revision or
+        // glyph; its bin may now be reused.
         let bin_key = BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() };
         if let Some(key) = state.image_allocation_keys.remove(&bin_key) {
             state.image_allocations.remove(&key);
+        }
+        if let Some(key) = state.glyph_allocation_keys.remove(&bin_key) {
+            state.glyph_allocations.remove(&key);
         }
     }
 

@@ -3,9 +3,10 @@
 use std::path::PathBuf;
 
 use mln_conversion::Convertible;
+use mln_text::glyph::{FontFace, FontFaces};
 
 use crate::dsl;
-use crate::expression::{Expression, Kind};
+use crate::expression::{EvaluationContext, Expression, GlobalStateMap, Kind};
 use crate::is_expression::is_expression;
 use crate::parsing_context::ParsingContext;
 use crate::value::Value;
@@ -98,4 +99,27 @@ fn expression_equality() {
         .filter_map(|name| expression_equality_case(name).err())
         .collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+// gtest: Expression.IsSupportedScriptAcceptsScriptsThatFontFacesCover
+#[test]
+fn is_supported_script_accepts_scripts_that_font_faces_cover() {
+    // Port-only: the text comes from the global state, as it would from a
+    // feature, because a literal argument folds without font faces (see
+    // REQUIRED_PROPS).
+    let evaluate = |text: &str, font_faces: Option<&FontFaces>| {
+        let document = serde_json::json!(["is-supported-script", ["to-string", ["global-state", "text"]]]);
+        let mut ctx = ParsingContext::new();
+        let parsed = ctx.parse_expression(&Convertible::from(&document), None).expect("parsed");
+        let state: GlobalStateMap =
+            [("text".to_owned(), feature::Value::String(text.to_owned()))].into_iter().collect();
+        let context = EvaluationContext::default().with_font_faces(font_faces).with_global_state(Some(&state));
+        parsed.evaluate(&context) == Ok(Value::Bool(true))
+    };
+    let myanmar = vec![FontFace::new("Noto Sans Regular", "myanmar.ttf", vec![(0x1000, 0x109F)])];
+
+    assert!(!evaluate("မြန်မာ", None));
+    assert!(evaluate("မြန်မာ", Some(&myanmar)));
+    assert!(!evaluate("देवनागरी", Some(&myanmar)));
+    assert!(evaluate("Yangon", Some(&myanmar)));
 }

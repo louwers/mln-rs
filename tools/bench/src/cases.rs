@@ -90,6 +90,7 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Frame/Throughput", frame_throughput));
     cases.push(Case::new("Frame/Paced", frame_paced));
     cases.push(Case::new("Frame/Idle", frame_idle));
+    cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
@@ -297,6 +298,40 @@ fn frame_idle(cx: &Context) -> Metrics {
     let mut metrics = meter.finish();
     metrics.demote("time_ms");
     metrics.lead("frames_per_s", frames / (SLICE.as_secs_f64() * slices as f64));
+    metrics
+}
+
+/// From a camera nudge on the basemap with its symbol layers left out, which
+/// has nothing to place, until the map stops asking for frames: the frames
+/// drawn and the time. The nudge stays over the loaded tiles.
+fn frame_settle_without_symbols(cx: &Context) -> Metrics {
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    style["layers"].as_array_mut().expect("the style has layers").retain(|layer| layer["type"] != "symbol");
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::Driven);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    scene.load_json(&style.to_string());
+    // Until a frame after `before` finishes without asking for another.
+    let settle = |scene: &Scene, before: u64| {
+        let start = Instant::now();
+        while scene.frames() == before || !scene.is_settled() {
+            scene.run_for(REFRESH);
+            assert!(start.elapsed() < Duration::from_secs(60), "the basemap doesn't settle");
+        }
+    };
+    settle(&scene, 0);
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    for index in 0..cx.iterations(10) {
+        let before = scene.frames();
+        meter.start();
+        scene.jump(basemap_center(), BASEMAP_ZOOM + 0.001 * (index % 2) as f64);
+        settle(&scene, before);
+        meter.stop();
+        frames.push((scene.frames() - before) as f64);
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frames", median(&frames));
     metrics
 }
 

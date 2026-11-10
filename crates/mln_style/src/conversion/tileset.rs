@@ -12,34 +12,57 @@ use super::{Converter, Convertible, Error};
 pub struct SourceOptions {
     pub raster_encoding: Option<RasterEncoding>,
     pub vector_encoding: Option<VectorEncoding>,
+    /// The style's inline zoom range, which wins over a fetched TileJSON's, as in maplibre-gl-js:
+    /// <https://github.com/maplibre/maplibre-gl-js/blob/32e555b2c114d6b60da4acd824d272182c656bbe/src/source/load_tilejson.ts#L39>
+    pub minzoom: Option<u8>,
+    pub maxzoom: Option<u8>,
+}
+
+/// `zoomMember(value, name, error, invalid)`: `Err(())` is C++'s `invalid`.
+fn zoom_member(value: &Convertible<'_>, name: &str, error: &mut Error) -> Result<Option<u8>, ()> {
+    let Some(member) = value.object_member(name) else {
+        return Ok(None);
+    };
+    match member.to_number() {
+        Some(number) if !(number < 0.0 || number > f32::from(u8::MAX)) => Ok(Some(number as u8)),
+        _ => {
+            error.message = format!("invalid {name}");
+            Err(())
+        }
+    }
 }
 
 impl Converter for SourceOptions {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
+        let mut options = SourceOptions::default();
+        let mut any = false;
+
         if let Some(encoding_value) = value.object_member("encoding") {
-            let encoding = encoding_value.to_string();
-            return match encoding.as_deref() {
-                Some("terrarium") => {
-                    Some(SourceOptions { raster_encoding: Some(RasterEncoding::Terrarium), ..Default::default() })
-                }
-                Some("mapbox") => {
-                    Some(SourceOptions { raster_encoding: Some(RasterEncoding::Mapbox), ..Default::default() })
-                }
-                Some("mvt") => {
-                    Some(SourceOptions { vector_encoding: Some(VectorEncoding::Mapbox), ..Default::default() })
-                }
-                Some("mlt") => Some(SourceOptions { vector_encoding: Some(VectorEncoding::MLT), ..Default::default() }),
+            match encoding_value.to_string().as_deref() {
+                Some("terrarium") => options.raster_encoding = Some(RasterEncoding::Terrarium),
+                Some("mapbox") => options.raster_encoding = Some(RasterEncoding::Mapbox),
+                Some("mvt") => options.vector_encoding = Some(VectorEncoding::Mapbox),
+                Some("mlt") => options.vector_encoding = Some(VectorEncoding::MLT),
                 _ => {
                     error.message = "invalid encoding - valid types are 'mapbox' and 'terrarium' for raster \
                                      sources, 'mvt' and 'mlt' for vector sources"
                         .to_owned();
-                    None
+                    return None;
                 }
-            };
+            }
+            any = true;
         }
+
+        options.minzoom = zoom_member(value, "minzoom", error).ok()?;
+        options.maxzoom = zoom_member(value, "maxzoom", error).ok()?;
+        any = any || options.minzoom.is_some() || options.maxzoom.is_some();
+
         // gtests-data: C++ `return {};` is an empty optional, not a default
         // SourceOptions (SourceOptions.Basic). Both callers treat the two alike.
-        None
+        if !any {
+            return None;
+        }
+        Some(options)
     }
 }
 

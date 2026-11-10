@@ -1,0 +1,100 @@
+{
+  "version": 8,
+  "metadata": {
+    "test": {
+      "width": 256,
+      "height": 192
+    }
+  },
+  "center": [
+    0,
+    0
+  ],
+  "zoom": 14,
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "font-faces": {
+    "Open Sans Semibold": [
+      {
+        "url": "local://glyphs/Noto%20Sans%20Regular/devanagari.ttf",
+        "unicode-range": [
+          "U+0900-097F"
+        ]
+      }
+    ]
+  },
+  "sources": {
+    "labels": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": [
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "مرحبا नमस्ते"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0,
+                -0.0016
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "नमस्ते مرحبا"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0,
+                0.0
+              ]
+            }
+          },
+          {
+            "type": "Feature",
+            "properties": {
+              "name": "شارع नमस्ते 12"
+            },
+            "geometry": {
+              "type": "Point",
+              "coordinates": [
+                0,
+                0.0016
+              ]
+            }
+          }
+        ]
+      }
+    }
+  },
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "white"
+      }
+    },
+    {
+      "id": "labels",
+      "type": "symbol",
+      "source": "labels",
+      "layout": {
+        "text-field": [
+          "get",
+          "name"
+        ],
+        "text-font": [
+          "Open Sans Semibold",
+          "Arial Unicode MS Bold"
+        ],
+        "text-size": 20,
+        "text-allow-overlap": true
+      }
+    }
+  ]
+}

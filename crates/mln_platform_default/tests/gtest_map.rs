@@ -34,6 +34,8 @@ use mln_storage::{
     ClientOptions, FileSource, FileSourceManager, FileSourceType, Kind, LoadingMethod, MainResourceLoader,
     OnlineFileSource, Resource, ResourceOptions, Response, StoragePolicy,
 };
+use mln_style::conversion::layer::convert_layer;
+use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
@@ -422,49 +424,6 @@ fn camera_to_lat_lng_bounds_unwrapped_cross_date_line() {
     assert!(map.lat_lng_bounds_for_camera_unwrapped(&camera).unwrap().crosses_antimeridian());
 }
 
-// gtest: Map.PixelForLatLngWithTheCenterPastTheAntimeridian
-#[test]
-fn pixel_for_lat_lng_with_the_center_past_the_antimeridian() {
-    let test = MapTest::new();
-    test.map().set_size(Size::new(512, 512)).unwrap();
-    test.map()
-        .set_bounds(&BoundOptions::default().with_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))))
-        .unwrap();
-    test.map().jump_to(&cam().with_center(Some(ll(0.0, 181.0))).with_zoom(Some(4.0)));
-    assert_near(181.0, test.map().get_camera_options(None).center.unwrap().longitude(), 1e-9);
-
-    // A degree is 512 * 2^4 / 360 pixels at zoom 4.
-    let degree = 512.0 * 16.0 / 360.0;
-    let projection = MapProjection::new(&test.map());
-    for (longitude, x) in [(179.0, 256.0 - 2.0 * degree), (-179.5, 256.0 - 0.5 * degree)] {
-        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
-        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
-    }
-}
-
-// gtest: Map.PixelForLatLngDuringAFlingAcrossTheAntimeridian
-#[test]
-fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
-    let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.map().set_size(Size::new(512, 512)).unwrap();
-    test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(4.0)));
-
-    let degree = 512.0 * 16.0 / 360.0;
-    test.map().set_gesture_in_progress(true);
-    test.map()
-        .move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(Duration::from_secs(10)))
-        .unwrap();
-    let center = test.map().get_camera_options(None).center.unwrap().longitude();
-    assert!(center < -180.0, "{center}");
-
-    let projection = MapProjection::new(&test.map());
-    for (longitude, nearest) in [(179.5, -180.5), (-179.5, -179.5)] {
-        let x = 256.0 + (nearest - center) * degree;
-        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
-        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
-    }
-}
-
 // gtest: Map.LatLngForPixelUnwrapped
 #[test]
 fn lat_lng_for_pixel_unwrapped() {
@@ -525,6 +484,54 @@ fn pixel_for_lat_lng_after_zoom_around_a_point_across_the_antimeridian() {
     let projected = MapProjection::new(&test.map()).pixel_for_lat_lng(&place);
     assert_near(anchor.x, projected.x, 1e-6);
     assert_near(anchor.y, projected.y, 1e-6);
+}
+
+// gtest: Map.PixelForLatLngWithTheCenterPastTheAntimeridian
+#[test]
+fn pixel_for_lat_lng_with_the_center_past_the_antimeridian() {
+    let test = MapTest::new();
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map()
+        .set_bounds(&BoundOptions::default().with_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))))
+        .unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 181.0))).with_zoom(Some(4.0)));
+    assert_near(181.0, test.map().get_camera_options(None).center.unwrap().longitude(), 1e-9);
+
+    // A degree is 512 * 2^4 / 360 pixels at zoom 4.
+    let degree = 512.0 * 16.0 / 360.0;
+    let projection = MapProjection::new(&test.map());
+    for (longitude, x) in [(179.0, 256.0 - 2.0 * degree), (-179.5, 256.0 - 0.5 * degree)] {
+        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+    }
+}
+
+// https://github.com/maplibre/maplibre-native/issues/3580
+// iOS ends a pan with a moveBy that has a duration while the gesture is still
+// in progress. Across the antimeridian the move starts a world away, and
+// annotation views placed through pixelForLatLng vanished until the center
+// crossed.
+// gtest: Map.PixelForLatLngDuringAFlingAcrossTheAntimeridian
+#[test]
+fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(4.0)));
+
+    let degree = 512.0 * 16.0 / 360.0;
+    test.map().set_gesture_in_progress(true);
+    test.map()
+        .move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(mln_util::chrono::seconds(10)))
+        .unwrap();
+    let center = test.map().get_camera_options(None).center.unwrap().longitude();
+    assert!(center < -180.0, "{center}");
+
+    let projection = MapProjection::new(&test.map());
+    for (longitude, nearest) in [(179.5, -180.5), (-179.5, -179.5)] {
+        let x = 256.0 + (nearest - center) * degree;
+        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+    }
 }
 
 /// `MapTest<MainResourceLoader> test{cachePath, assetPath}`.
@@ -1513,7 +1520,34 @@ fn no_hang_on_missing_image() {
     test.render();
 }
 
-// gtest: Map.PrefetchDeltaOverride
+// gtest: Map.EmptyImageNameIsNoImage
+#[test]
+fn empty_image_name_is_no_image() {
+    let test = MapTest::new();
+    let missing = Rc::new(RefCell::new(Vec::<String>::new()));
+    {
+        let missing = missing.clone();
+        test.observer.on_style_image_missing_callback.set(move |id| missing.borrow_mut().push(id));
+    }
+
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "polygon": {"type": "geojson", "data": {"type": "Feature", "properties": {"image": ""},
+          "geometry": {"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}}}
+      },
+      "layers": [
+        {"id": "fill", "type": "fill", "source": "polygon", "paint": {"fill-pattern": ["get", "image"]}},
+        {"id": "symbol", "type": "symbol", "source": "polygon", "layout": {"icon-image": ["get", "image"]}}
+      ]
+    }"#,
+    );
+    test.render();
+
+    assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());
+}
+
 #[test]
 #[ignore = "TODO(port): CustomGeometrySource (the test counts tiles of a vector and a custom source); see map.test.cpp:1350"]
 fn prefetch_delta_override() {
@@ -2143,6 +2177,51 @@ fn observe_tile_lifecycle() {
     // (RequestedFromCache/Network, LoadFromCache/Network, StartParse,
     // EndParse, Cancelled) for the four z10 tiles around San Francisco and
     // the pre/post compile events of the fill and fill-outline shaders.
+}
+
+// gtest: Map.EmptyPlacementDoesNotRequestRepaint
+#[test]
+fn empty_placement_does_not_request_repaint() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let status = Rc::new(Cell::new(None));
+    {
+        let status = status.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |value| status.set(Some(value)));
+    }
+    test.load_json(
+        r#"{
+        "version": 8, "sources": {}, "transition": {"duration": 0},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}}]
+    }"#,
+    );
+    test.run_loop.run_once();
+
+    // Reuse the same update timestamp to stay within the placement interval.
+    for frame in 0..2 {
+        status.set(None);
+        test.frontend.render_frame();
+        let value = status.get().expect("rendered a frame");
+        assert!(!value.needs_repaint, "frame {frame}");
+    }
+
+    test.map().get_style_mut().set_transition_options(&TransitionOptions {
+        duration: Some(Duration::from_millis(300)),
+        ..TransitionOptions::default()
+    });
+    {
+        let mut map = test.map();
+        let mut style = map.get_style_mut();
+        let mut layer = style.get_layer_mut("background").expect("background");
+        layer
+            .downcast_mut::<BackgroundLayer>()
+            .expect("BackgroundLayer")
+            .set_background_color(&PropertyValue::Constant(Color::red()));
+    }
+    test.run_loop.run_once();
+    status.set(None);
+    test.frontend.render_frame();
+    let value = status.get().expect("rendered a frame");
+    assert!(value.needs_repaint);
 }
 
 // gtest: BackgroundLayer.ImmediateStyleReplacementRetainsColor
@@ -2815,6 +2894,118 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
     check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
     check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+}
+
+/// `ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange`
+/// for a layer type: "line", "heatmap" or "color-relief".
+fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
+    let ramp_property = if type_ == "line" { "line-gradient".to_owned() } else { format!("{type_}-color") };
+    let ramp = |color: &str| {
+        let input = match type_ {
+            "line" => r#"["line-progress"], 0, "#,
+            "heatmap" => r#"["heatmap-density"], 0, "#,
+            _ => r#"["elevation"], -20000, "#,
+        };
+        let end = if type_ == "color-relief" { ", 20000, " } else { ", 1, " };
+        format!(r#"["interpolate", ["linear"], {input}{color}{end}{color}]"#)
+    };
+    let state_color = r#"["global-state", "color"]"#;
+
+    let test = MapTest::new();
+    test.file_source.set_response(Kind::Tile, |_: &Resource| {
+        // Opaque black decodes to an elevation of -10000 m.
+        let mut dem = PremultipliedImage::new(Size::new(256, 256));
+        for i in (3..dem.bytes()).step_by(4) {
+            dem.data[i] = 255;
+        }
+        let mut response = Response::new();
+        response.data = Some(Arc::new(mln_platform_default_image::encode_png(&dem)));
+        Some(response)
+    });
+    test.load_json(
+        r#"{
+        "version": 8,
+        "state": {"color": {"default": "red"}, "unrelated": {"default": 0}},
+        "sources": {
+            "line": {
+                "type": "geojson",
+                "lineMetrics": true,
+                "data": {"type": "LineString", "coordinates": [[-20, 0], [20, 0]]}
+            },
+            "heatmap": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}},
+            "color-relief": {"type": "raster-dem", "tiles": ["https://example.com/{z}/{x}/{y}.png"]}
+        },
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}}]
+    }"#,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(2.0)));
+    test.render();
+
+    let expect_center = |expected: Color| {
+        let pixel = center_pixel(&test.render().image);
+        assert_near(f64::from(pixel[0]), f64::from(expected.r) * 255.0, 2.0);
+        assert_near(f64::from(pixel[1]), f64::from(expected.g) * 255.0, 2.0);
+        assert_near(f64::from(pixel[2]), f64::from(expected.b) * 255.0, 2.0);
+    };
+    let set_ramp = |color: &str| {
+        let value: serde_json::Value = serde_json::from_str(&ramp(color)).unwrap();
+        let mut map = test.map();
+        let mut style = map.get_style_mut();
+        let mut layer = style.get_layer_mut("ramp").unwrap();
+        assert!(layer.set_property(&ramp_property, &Convertible::from(&value), None).is_none());
+    };
+    let set_state = |name: &str, value: Value| {
+        test.map().get_style_mut().set_global_state_property(name, &value).unwrap();
+    };
+
+    let extra_paint = match type_ {
+        "line" => r#", "line-width": 16"#,
+        "heatmap" => r#", "heatmap-radius": 64"#,
+        _ => "",
+    };
+    let layer_json = format!(
+        r#"{{"id": "ramp", "type": "{type_}", "source": "{type_}", "paint": {{"{ramp_property}": {}{extra_paint}}}}}"#,
+        ramp(state_color)
+    );
+    let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
+
+    // The layer joins the render tree in the same update as a write to a key its ramp does not read.
+    set_state("unrelated", Value::Double(1.0));
+    test.map().get_style_mut().add_layer(layer, None).unwrap();
+    expect_center(Color::red());
+
+    // While the ramp reads no state, the layer skips evaluation for state changes.
+    set_ramp(r#""lime""#);
+    expect_center(Color::new(0.0, 1.0, 0.0, 1.0));
+    set_state("color", Value::String("blue".to_owned()));
+    expect_center(Color::new(0.0, 1.0, 0.0, 1.0));
+
+    // The ramp reads the state again in the same update as another unrelated write.
+    set_state("unrelated", Value::Double(2.0));
+    set_ramp(state_color);
+    expect_center(Color::blue());
+}
+
+// INSTANTIATE_TEST_SUITE_P(Rendering, ColorRampGlobalStateTest, testing::Values("line", "heatmap", "color-relief"))
+// gtest: ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange
+#[test]
+fn color_ramp_renders_current_state_after_unrelated_state_change_line() {
+    color_ramp_renders_current_state_after_unrelated_state_change("line");
+}
+
+// gtest: ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange
+#[test]
+fn color_ramp_renders_current_state_after_unrelated_state_change_heatmap() {
+    color_ramp_renders_current_state_after_unrelated_state_change("heatmap");
+}
+
+// gtest: ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange
+#[test]
+fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() {
+    color_ramp_renders_current_state_after_unrelated_state_change("color-relief");
 }
 
 // Port-only: the C++ Map constructor throws for an empty size; the Rust one

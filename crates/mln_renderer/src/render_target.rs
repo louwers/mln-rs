@@ -120,7 +120,7 @@ impl RenderTarget {
                 &RenderPassDescriptor {
                     renderable,
                     clear_color: Some(Color::new(0.0, 0.0, 0.0, 1.0)),
-                    clear_depth: None,
+                    clear_depth: Some(1.0),
                     clear_stencil: None,
                 },
             ));

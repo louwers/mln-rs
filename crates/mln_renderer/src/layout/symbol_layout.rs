@@ -18,7 +18,9 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_properties::*;
+use mln_style::properties::Property;
 use mln_style::property_value::PropertyValue;
+use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use mln_style_types::image::{ImageMap, ImagePositions, ImageType};
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
@@ -27,7 +29,7 @@ use mln_style_types::{
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphMap, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
-use mln_text::{BiDi, TaggedString, apply_arabic_shaping};
+use mln_text::{BiDi, TaggedString, apply_arabic_shaping, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
@@ -370,7 +372,8 @@ impl SymbolLayout {
             let passes = leader.filter.evaluate(
                 &EvaluationContext::with_zoom_feature(this.zoom, Some(&*feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
-                    .with_global_state(parameters.global_state.as_deref()),
+                    .with_global_state(parameters.global_state.as_deref())
+                    .with_font_faces(layout_parameters.font_faces.as_deref()),
             );
             feature.check()?;
             if !passes {
@@ -387,12 +390,16 @@ impl SymbolLayout {
             ft.index = i;
 
             if has_text {
-                let formatted = layout.evaluate_images_canonical::<TextField>(
-                    zoom,
-                    &ft,
-                    layout_parameters.available_images,
-                    &canonical_id,
-                );
+                let formatted = match layout.get::<TextField>() {
+                    PossiblyEvaluatedPropertyValue::Constant(constant) => constant.clone(),
+                    PossiblyEvaluatedPropertyValue::Expression(expression) => expression.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
+                            .with_available_images(Some(layout_parameters.available_images))
+                            .with_canonical_tile_id(Some(&canonical_id))
+                            .with_font_faces(layout_parameters.font_faces.as_deref()),
+                        TextField::default_value(),
+                    ),
+                };
                 let text_transform = layout.evaluate_canonical::<TextTransform>(zoom, &ft, &canonical_id);
                 let base_font_stack: Vec<String> = layout.evaluate_canonical::<TextFont>(zoom, &ft, &canonical_id);
 
@@ -412,7 +419,10 @@ impl SymbolLayout {
                         u8string = nunicode::lowercase(&u8string);
                     }
 
-                    let u16_string = apply_arabic_shaping(&u8string.encode_utf16().collect::<Vec<u16>>());
+                    // Only the sections that draw from glyph PBFs take ICU's
+                    // Arabic presentation forms. HarfBuzz needs the letters
+                    // themselves, to apply the font's own joining rules.
+                    let u16_string = u8string.encode_utf16().collect::<Vec<u16>>();
                     // `while (*u16Char)`: the text ends at the first NUL.
                     let end = u16_string.iter().position(|&c| c == 0).unwrap_or(u16_string.len());
                     let chars = &u16_string[..end];
@@ -429,31 +439,42 @@ impl SymbolLayout {
                         GlyphIDType::FontPBF,
                     );
 
+                    let mut add_sub_string =
+                        |sub_string: &mut Vec<u16>,
+                         sub_string_type: GlyphIDType,
+                         key_section: bool,
+                         formatted_text: &mut TaggedString| {
+                            if sub_string.is_empty() {
+                                return;
+                            }
+                            if sub_string_type == GlyphIDType::FontPBF {
+                                *sub_string = apply_arabic_shaping(sub_string);
+                            }
+                            formatted_text.add_text_section(
+                                sub_string,
+                                section_scale,
+                                &section_font_stack,
+                                sub_string_type,
+                                key_section,
+                                section.text_color,
+                            );
+                            section_table.insert(formatted_text.get_sections().len() - 1, section_index);
+                            if sub_string_type != GlyphIDType::FontPBF {
+                                layout_parameters
+                                    .glyph_dependencies
+                                    .shapes
+                                    .entry(section_font_stack.clone())
+                                    .or_default()
+                                    .entry(sub_string_type)
+                                    .or_default()
+                                    .insert(sub_string.clone());
+                            }
+                        };
+
                     for &ch in chars {
                         let ch_type = get_char_glyph_id_type(ch, &section_font_stack, font_faces, sub_string_type);
                         if ch_type != sub_string_type {
-                            if !sub_string.is_empty() {
-                                formatted_text.add_text_section(
-                                    &sub_string,
-                                    section_scale,
-                                    &section_font_stack,
-                                    sub_string_type,
-                                    false,
-                                    section.text_color,
-                                );
-                                section_table.insert(formatted_text.get_sections().len() - 1, section_index);
-                                if sub_string_type != GlyphIDType::FontPBF {
-                                    layout_parameters
-                                        .glyph_dependencies
-                                        .shapes
-                                        .entry(section_font_stack.clone())
-                                        .or_default()
-                                        .entry(sub_string_type)
-                                        .or_default()
-                                        .insert(sub_string.clone());
-                                }
-                            }
-
+                            add_sub_string(&mut sub_string, sub_string_type, false, &mut formatted_text);
                             sub_string.clear();
                             sub_string_type = ch_type;
                         }
@@ -461,27 +482,7 @@ impl SymbolLayout {
                         sub_string.push(ch);
                     }
 
-                    if !sub_string.is_empty() {
-                        formatted_text.add_text_section(
-                            &sub_string,
-                            section_scale,
-                            &section_font_stack,
-                            sub_string_type,
-                            true,
-                            section.text_color,
-                        );
-                        section_table.insert(formatted_text.get_sections().len() - 1, section_index);
-                        if sub_string_type != GlyphIDType::FontPBF {
-                            layout_parameters
-                                .glyph_dependencies
-                                .shapes
-                                .entry(section_font_stack.clone())
-                                .or_default()
-                                .entry(sub_string_type)
-                                .or_default()
-                                .insert(sub_string.clone());
-                        }
-                    }
+                    add_sub_string(&mut sub_string, sub_string_type, true, &mut formatted_text);
                 }
 
                 let can_verticalize_text = *layout.get::<TextRotationAlignment>() == AlignmentType::Map
@@ -1354,6 +1355,7 @@ impl Layout for SymbolLayout {
                         &section.font_stack,
                         section.type_,
                         &Some(result.adjusts.clone()),
+                        starts_right_to_left(sub_string),
                         section.key_section,
                         section.text_color,
                     );

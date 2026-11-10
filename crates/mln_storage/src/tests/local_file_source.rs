@@ -182,7 +182,8 @@ fn non_existent_file() {
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(res.data.is_none());
-    // Do not assert on platform-specific error message.
+    assert!(error.message.starts_with("Cannot find file "), "{}", error.message);
+    assert!(error.message.ends_with("does_not_exist"), "{}", error.message);
 }
 
 // gtest: LocalFileSource.InvalidURL
@@ -204,7 +205,8 @@ fn read_directory() {
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(res.data.is_none());
-    // Do not assert on platform-specific error message.
+    assert!(error.message.starts_with("Cannot read directory "), "{}", error.message);
+    assert!(error.message.ends_with("directory"), "{}", error.message);
 }
 
 // gtest: LocalFileSource.URLEncoding

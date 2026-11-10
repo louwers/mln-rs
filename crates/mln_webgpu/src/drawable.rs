@@ -47,14 +47,9 @@ struct GlobalUBOIndexData {
     pad: [u32; 3],
 }
 
+// Leaves out the reference, which draw() sets per draw rather than in the pipeline.
 fn hash_stencil_mode(mode: &StencilMode) -> u64 {
-    let mut h = hash(&[
-        mode.ref_ as i64 as u64,
-        u64::from(mode.mask),
-        mode.fail as u64,
-        mode.depth_fail as u64,
-        mode.pass as u64,
-    ]);
+    let mut h = hash(&[u64::from(mode.mask), mode.fail as u64, mode.depth_fail as u64, mode.pass as u64]);
     h = hash(&[h, mode.test.func() as u64]);
     if let Some(mask) = mode.test.masked() {
         h = hash(&[h, u64::from(mask)]);
@@ -245,7 +240,6 @@ impl Drawable {
         let m = &self.impl_.stencil_mode;
         if !self.impl_.stencil_mode_hash_valid
             || self.impl_.stencil_mode_hash != new_hash
-            || m.ref_ != value.ref_
             || m.mask != value.mask
             || m.fail != value.fail
             || m.depth_fail != value.depth_fail
@@ -815,6 +809,17 @@ impl drawable::Drawable for Drawable {
             return;
         };
         encoder.set_pipeline(pipeline);
+
+        let size = render_pass.get_renderable_size();
+        encoder.set_viewport(
+            0.0,
+            0.0,
+            size.width as f32,
+            size.height as f32,
+            depth_mode.range.min,
+            depth_mode.range.max,
+        );
+
         if self.base.enable_stencil {
             encoder.set_stencil_reference(stencil_mode.ref_ as u32);
         }
