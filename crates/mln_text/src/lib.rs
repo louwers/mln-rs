@@ -26,7 +26,7 @@ mod rasterize;
 #[cfg(test)]
 mod shaping_test;
 
-pub use bidi::{BiDi, StyledText, apply_arabic_shaping};
+pub use bidi::{BiDi, StyledText, apply_arabic_shaping, starts_right_to_left};
 pub use freetype::{FreeTypeFace, FreeTypeLibrary};
 pub use glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange, PositionedGlyph,

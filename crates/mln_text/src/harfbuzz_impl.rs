@@ -155,17 +155,38 @@ impl Impl {
             script: [u8; 4],
         }
 
+        let is_neutral = |script: &[u8; 4]| matches!(script, b"Zyyy" | b"Zinh" | b"Zzzz");
+        // HB_SCRIPT_INVALID, for a part that holds no letters yet.
+        const INVALID: [u8; 4] = [0; 4];
+
         let mut text_parts: Vec<TextPart> = Vec::new();
         if rtl {
-            // A right-to-left run is shaped as one buffer, so cursive joining
-            // sees every neighbor, and the glyphs come back in visual order.
-            // Its spaces and punctuation take the script of its letters.
-            let run_script = text
-                .iter()
-                .map(|&ch| get_unicode_script(ch as u32))
-                .find(|script| !matches!(script, b"Zyyy" | b"Zinh" | b"Zzzz"))
-                .unwrap_or(*b"Arab");
-            text_parts.push(TextPart { text: text.to_vec(), script: run_script });
+            // A right-to-left run may hold more than one script, such as
+            // Hebrew and Arabic. Each script is shaped on its own, so the
+            // font applies that script's rules, such as Arabic joining.
+            // Spaces, punctuation, and marks belong to the letters before
+            // them, or to the first letters.
+            for &ch in text {
+                let script = get_unicode_script(ch as u32);
+                let part_script = if is_neutral(&script) { INVALID } else { script };
+                match text_parts.last_mut() {
+                    Some(last) if part_script == INVALID || last.script == script || last.script == INVALID => {
+                        if last.script == INVALID {
+                            last.script = part_script;
+                        }
+                        last.text.push(ch);
+                    }
+                    _ => text_parts.push(TextPart { text: vec![ch], script: part_script }),
+                }
+            }
+            for text_part in &mut text_parts {
+                if text_part.script == INVALID {
+                    text_part.script = *b"Arab";
+                }
+            }
+            // HarfBuzz returns each part's glyphs in visual order, and the
+            // run's later parts lie to the left of its earlier ones.
+            text_parts.reverse();
         } else {
             text_parts.push(TextPart { text: vec![text[0]], script: get_unicode_script(text[0] as u32) });
             for &ch in &text[1..] {

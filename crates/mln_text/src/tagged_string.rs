@@ -65,6 +65,10 @@ pub struct SectionOptions {
     pub adjusts: Option<Arc<Vec<HBShapeAdjust>>>,
     pub start_index: i32,
     pub key_section: bool,
+    /// Whether a section of text that HarfBuzz shaped runs right to left.
+    /// Its glyphs are in visual order, so bidi reorders the section as one
+    /// block.
+    pub rtl: bool,
     pub image_id: Option<String>,
     pub text_color: Option<Color>,
 }
@@ -87,6 +91,7 @@ impl SectionOptions {
             adjusts: None,
             start_index: start_index as i32,
             key_section: true,
+            rtl: false,
             image_id: None,
             text_color,
         }
@@ -108,6 +113,7 @@ impl SectionOptions {
             adjusts: None,
             start_index: start_index as i32,
             key_section: true,
+            rtl: false,
             image_id: None,
             text_color,
         }
@@ -124,6 +130,7 @@ impl SectionOptions {
             adjusts: None,
             start_index: 0,
             key_section: true,
+            rtl: false,
             image_id: Some(image_id),
             text_color: None,
         }
@@ -217,8 +224,8 @@ impl TaggedString {
         self.sections.last_mut().unwrap().key_section = key_section;
     }
 
-    /// `addTextSection(text, scale, fontStack, type, adjusts, keySection,
-    /// textColor)`: `startIndex` is the length before the text.
+    /// `addTextSection(text, scale, fontStack, type, adjusts, rtl,
+    /// keySection, textColor)`: `startIndex` is the length before the text.
     #[allow(clippy::too_many_arguments)]
     pub fn add_text_section_with_adjusts(
         &mut self,
@@ -227,6 +234,7 @@ impl TaggedString {
         font_stack: &FontStack,
         type_: GlyphIDType,
         adjusts: &Option<Arc<Vec<HBShapeAdjust>>>,
+        rtl: bool,
         key_section: bool,
         text_color: Option<Color>,
     ) {
@@ -241,7 +249,9 @@ impl TaggedString {
         if let Some(adjusts) = adjusts {
             self.sections.last_mut().unwrap().adjusts = Some(adjusts.clone());
         }
-        self.sections.last_mut().unwrap().key_section = key_section;
+        let section = self.sections.last_mut().unwrap();
+        section.rtl = rtl;
+        section.key_section = key_section;
     }
 
     /// `addImageSection`.

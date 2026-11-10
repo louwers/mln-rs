@@ -29,7 +29,7 @@ use mln_style_types::{
 use mln_text::glyph::{GlyphID, GlyphIDType, GlyphMap, GlyphPositions, Shaping, WritingModeType};
 use mln_text::shaping::{PositionedIcon, get_anchor_justification, get_shaping};
 use mln_text::tagged_string::SectionOptions;
-use mln_text::{BiDi, TaggedString, apply_arabic_shaping};
+use mln_text::{BiDi, TaggedString, apply_arabic_shaping, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
@@ -1355,6 +1355,7 @@ impl Layout for SymbolLayout {
                         &section.font_stack,
                         section.type_,
                         &Some(result.adjusts.clone()),
+                        starts_right_to_left(sub_string),
                         section.key_section,
                         section.text_color,
                     );
