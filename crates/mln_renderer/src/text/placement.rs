@@ -397,6 +397,7 @@ impl PlacementContext {
 
 /// `PlacementController`.
 pub struct PlacementController {
+    empty_placement: Rc<Placement>,
     placement: Rc<Placement>,
     stale: bool,
 }
@@ -409,12 +410,20 @@ impl Default for PlacementController {
 
 impl PlacementController {
     pub fn new() -> Self {
-        PlacementController { placement: Rc::new(Placement::new_default()), stale: false }
+        let empty_placement = Rc::new(Placement::new_default());
+        PlacementController { placement: empty_placement.clone(), empty_placement, stale: false }
     }
 
     pub fn set_placement(&mut self, placement: Rc<Placement>) {
         self.placement = placement;
         self.stale = false;
+    }
+
+    /// `reset()`: returns whether a committed placement was discarded.
+    pub fn reset(&mut self) -> bool {
+        let changed = !Rc::ptr_eq(&self.placement, &self.empty_placement);
+        self.set_placement(self.empty_placement.clone());
+        changed
     }
 
     pub fn get_placement(&self) -> &Rc<Placement> {

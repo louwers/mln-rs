@@ -1974,6 +1974,51 @@ fn observe_tile_lifecycle() {
     // the pre/post compile events of the fill and fill-outline shaders.
 }
 
+// gtest: Map.EmptyPlacementDoesNotRequestRepaint
+#[test]
+fn empty_placement_does_not_request_repaint() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let status = Rc::new(Cell::new(None));
+    {
+        let status = status.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |value| status.set(Some(value)));
+    }
+    test.load_json(
+        r#"{
+        "version": 8, "sources": {}, "transition": {"duration": 0},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}}]
+    }"#,
+    );
+    test.run_loop.run_once();
+
+    // Reuse the same update timestamp to stay within the placement interval.
+    for frame in 0..2 {
+        status.set(None);
+        test.frontend.render_frame();
+        let value = status.get().expect("rendered a frame");
+        assert!(!value.needs_repaint, "frame {frame}");
+    }
+
+    test.map().get_style_mut().set_transition_options(&TransitionOptions {
+        duration: Some(Duration::from_millis(300)),
+        ..TransitionOptions::default()
+    });
+    {
+        let mut map = test.map();
+        let mut style = map.get_style_mut();
+        let mut layer = style.get_layer_mut("background").expect("background");
+        layer
+            .downcast_mut::<BackgroundLayer>()
+            .expect("BackgroundLayer")
+            .set_background_color(&PropertyValue::Constant(Color::red()));
+    }
+    test.run_loop.run_once();
+    status.set(None);
+    test.frontend.render_frame();
+    let value = status.get().expect("rendered a frame");
+    assert!(value.needs_repaint);
+}
+
 // gtest: BackgroundLayer.ImmediateStyleReplacementRetainsColor
 #[test]
 fn immediate_style_replacement_retains_color() {

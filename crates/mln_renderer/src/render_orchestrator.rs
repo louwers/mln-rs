@@ -749,7 +749,17 @@ impl RenderOrchestrator {
             }
         }
 
-        if is_map_mode_continuous {
+        if is_map_mode_continuous && layers_need_placement.is_empty() {
+            // Discard deferred placement and query data when no symbol buckets remain.
+            render_tree_parameters.placement_changed = self.placement_controller.reset();
+            self.cross_tile_symbol_index.reset();
+            // Source fades still need their placement bookkeeping to advance.
+            for source in self.render_sources.values_mut() {
+                source.update_fading_tiles();
+            }
+            render_tree_parameters.symbol_fade_change = 1.0;
+            render_tree_parameters.needs_repaint = self.has_transitions(update_parameters.time_point);
+        } else if is_map_mode_continuous {
             let tilted_view = update_parameters.transform_state.get_pitch() != 0.0;
             let mut placement_update_period_override: Option<Duration> = None;
             if symbol_buckets_added && !tilted_view {
