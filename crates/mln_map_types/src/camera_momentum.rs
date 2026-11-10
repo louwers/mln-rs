@@ -43,6 +43,12 @@ impl Default for MomentumEasing {
 ///
 /// Speeds and distances are in the part's unit: logical pixels for pan, zoom
 /// levels for zoom, and degrees for bearing and pitch.
+///
+/// maplibre-native-ffi's C API gives each setting a field bit, and a setting
+/// whose bit isn't set takes the part's default. In Rust that is struct
+/// update from the part's constant: UIScrollView's normal deceleration with
+/// the pan's other defaults is
+/// `MomentumDecay { half_life: Duration::from_millis(346), ..MomentumDecay::PAN }`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MomentumDecay {
     pub model: MomentumDecayModel,
@@ -166,7 +172,13 @@ impl Default for MomentumSnap {
 /// change the fields that the momentum leaves alone. A command that sets a
 /// field stops the parts that move it. On a tilted map, pan moves the map's
 /// content the same distance on screen in every direction.
-#[derive(Clone, Default)]
+///
+/// [`Default`] gives each part maplibre-native-ffi's C API default decay
+/// ([`MomentumDecay::PAN`], [`ZOOM`](MomentumDecay::ZOOM),
+/// [`BEARING`](MomentumDecay::BEARING) and [`PITCH`](MomentumDecay::PITCH)),
+/// and no velocities, anchors or snaps: a part moves only when its velocity
+/// is set, and settles only when its snap is.
+#[derive(Clone)]
 pub struct CameraMomentum {
     /// How fast the map's content moved on screen, in logical pixels per
     /// second.
@@ -197,4 +209,26 @@ pub struct CameraMomentum {
     /// Called once when the momentum ends, just before
     /// [`AnimationOptions::transition_finish_fn`](crate::AnimationOptions::transition_finish_fn).
     pub finish_fn: Option<Rc<dyn Fn(&MomentumEnd)>>,
+}
+
+impl Default for CameraMomentum {
+    fn default() -> Self {
+        CameraMomentum {
+            pan_velocity: None,
+            pan_decay: MomentumDecay::PAN,
+            zoom_velocity: None,
+            zoom_decay: MomentumDecay::ZOOM,
+            zoom_anchor: None,
+            zoom_snap: None,
+            bearing_velocity: None,
+            bearing_decay: MomentumDecay::BEARING,
+            bearing_anchor: None,
+            bearing_snap: None,
+            pitch_velocity: None,
+            pitch_decay: MomentumDecay::PITCH,
+            pitch_anchor: None,
+            pitch_snap: None,
+            finish_fn: None,
+        }
+    }
 }
