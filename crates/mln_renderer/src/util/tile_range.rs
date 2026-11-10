@@ -59,8 +59,16 @@ impl TileRange {
         let sw_proj = Projection::project_zoom(&sw, i32::from(max_zoom));
         let ne_proj = Projection::project_zoom(&ne, i32::from(max_zoom));
 
-        let west_column = sw_proj.x.floor();
-        let east_column = ne_proj.x.floor();
+        // Port-only, ahead of ffi patch 0076 (maplibre-native-ffi#1759): an
+        // east edge at 180° ends in the last column. Uncapped, it named the
+        // column past the last, which wrapped to column 0. A west edge just
+        // under 180° can round to 180° when projected, so it's capped too.
+        let west_column = sw_proj.x.floor().min(max_tile - 1.0);
+        let east_column = if west + width <= constants::LONGITUDE_MAX {
+            ne_proj.x.floor().min(max_tile - 1.0)
+        } else {
+            ne_proj.x.floor()
+        };
         let mut min_x = 0u32;
         let mut max_x = (max_tile - 1.0) as u32;
         // Bounds that reach every column cover the world. Otherwise, bounds

@@ -160,3 +160,32 @@ fn inverted_bounds_stay_in_the_world() {
     assert!(range.range.max.x < 4);
     assert!(!range.contains(&c(2, 0, 1)));
 }
+
+#[test]
+fn contains_bounds_ending_at_the_antimeridian() {
+    // Not a C++ test: the regression ffi patch 0076 has
+    // (maplibre-native-ffi#1759), bounds that end at 180° reaching column 0.
+    for bounds in
+        [LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 180.0)), LatLngBounds::hull(ll(-10.0, -190.0), ll(10.0, -180.0))]
+    {
+        let range = TileRange::from_lat_lng_bounds(&bounds, 2);
+        assert!(range.contains(&c(2, 3, 1)), "{bounds:?}");
+        assert!(!range.contains(&c(2, 0, 1)), "{bounds:?}");
+    }
+}
+
+#[test]
+fn contains_bounds_starting_just_under_the_antimeridian() {
+    // Not a C++ test: a west edge just under 180° projects to 180°, the
+    // column past the last.
+    let west = f64::from_bits(180.0f64.to_bits() - 1);
+    let bounds = LatLngBounds::hull(ll(-10.0, west), ll(10.0, 180.0));
+    let range = TileRange::from_lat_lng_bounds(&bounds, 2);
+    assert!(range.contains(&c(2, 3, 1)));
+    for x in 0..3 {
+        assert!(!range.contains(&c(2, x, 1)), "column {x}");
+    }
+    let range = TileRange::from_lat_lng_bounds_range(&bounds, 1, 2);
+    assert!(range.contains(&c(1, 1, 0)));
+    assert!(!range.contains(&c(1, 0, 0)));
+}
