@@ -31,6 +31,24 @@ forwards to it.
   the Web Worker transfers, and which the map copies once, into the
   arrays its buckets keep.
 
+The page forwards the canvas's input to the map's Web Worker: pointer
+events (mouse, pen and touch, with pointer capture; `pointerrawupdate`
+where the browser has it, so that a move reaches the worker without
+waiting for the page's next frame), wheel, the keys the map uses, and
+focus loss. `WebMap` feeds them to a gesture recognizer (crates/mln_gestures),
+which moves the camera and continues each release with the map's momentum.
+Each event's time travels as `performance.timeOrigin + timeStamp`, and the
+worker turns it into its own `performance.now()`, the clock it gives
+`WebMap::frame`. A ResizeObserver resizes the map with the canvas; the map
+keeps the pixel ratio it started with.
+
+Controls: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
+to zoom to a box (Escape cancels it); the wheel or a trackpad to zoom;
+double-click or double-tap to zoom in, Shift-double-click or a two-finger
+tap to zoom out, double-tap-and-drag to zoom; two fingers to pinch, twist
+and tilt; the arrow keys to pan (Shift: rotate and tilt) and `+`/`=` and
+`-` to zoom, once the map has focus.
+
 ## Images decode in the browser
 
 Every instance decodes images (sprites and image sources in the map's Web

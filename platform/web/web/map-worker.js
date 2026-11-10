@@ -5,9 +5,13 @@
 // go as bytes, and replies come back as bytes and payloads, transferred.
 //
 // From the page: first {module, canvas, ports, width, height, ratio, style,
-// camera}, then {readPixels}. To the page: {status}, {loaded: {loadedMs,
-// replies}} once the map is fully loaded, and {pixels: {width, height,
-// pixels}} for each readPixels.
+// camera}, then {readPixels}, {resize: [width, height]} in CSS pixels, and
+// {input, args}: a call of WebMap's input methods (pointer_down,
+// pointer_move, pointer_up, pointer_cancel, wheel, key, blur) whose last
+// argument is the event's time as performance.timeOrigin + timeStamp. To the
+// page: {status}, {loaded: {loadedMs, replies}} once the map is fully
+// loaded, {pixels: {width, height, pixels}} for each readPixels, and {box}
+// when a Shift-drag's box changes ([x0, y0, x1, y1], or null).
 
 import init, { WebMap } from './pkg/mln_web.js';
 
@@ -64,7 +68,7 @@ async function run({ module, canvas, ports, width, height, ratio, style, camera 
     });
   };
   function frame() {
-    map.frame(8);
+    map.frame(8, performance.now());
     if (loaded === null && map.is_fully_loaded()) {
       loaded = { loadedMs: performance.now() - started, replies: map.received() };
       postMessage({ loaded });
@@ -83,9 +87,23 @@ async function run({ module, canvas, ports, width, height, ratio, style, camera 
   }
   requestAnimationFrame(frame);
 
+  // The page's events, on this worker's clock: the one frames run on.
+  const INPUTS = new Set(['pointer_down', 'pointer_move', 'pointer_up', 'pointer_cancel', 'wheel', 'key', 'blur']);
+  let box = null;
   const handle = (data) => {
     if (data.readPixels) {
       if (readPixels++ === 0) map.request_pixels();
+    }
+    if (data.resize) map.resize(...data.resize);
+    if (INPUTS.has(data.input)) {
+      const args = data.args.slice();
+      args[args.length - 1] -= performance.timeOrigin;
+      map[data.input](...args);
+      const next = map.box_zoom() ?? null;
+      if (String(next) !== String(box)) {
+        box = next && Array.from(next);
+        postMessage({ box });
+      }
     }
   };
   for (const data of early.splice(0)) handle(data);

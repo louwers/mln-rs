@@ -1711,6 +1711,7 @@ version = "0.0.10"
 dependencies = [
  "js-sys",
  "mln-rs-actor",
+ "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-map",
  "mln-rs-platform-default-image",

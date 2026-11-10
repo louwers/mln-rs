@@ -22,6 +22,7 @@ crate-type = ["cdylib", "rlib"]
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 mln_actor.workspace = true
+mln_gestures.workspace = true
 mln_gfx.workspace = true
 mln_map.workspace = true
 mln_platform_default_image.workspace = true

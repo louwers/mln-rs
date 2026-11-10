@@ -1,5 +1,6 @@
 //! The map in a Web Worker of its own: a continuous map in the page's canvas
-//! (an OffscreenCanvas), its tile workers in other Web Workers.
+//! (an OffscreenCanvas), its tile workers in other Web Workers, moved by the
+//! page's input through a gesture recognizer (mln_gestures).
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -7,12 +8,14 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
+use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelUnit};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::{ClientOptions, ResourceOptions, http_file_source};
 use mln_util::LatLng;
+use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
 use mln_webgpu::SurfaceBackend;
 use wasm_bindgen::prelude::*;
@@ -144,6 +147,8 @@ pub struct WebMap {
     transport: Rc<SerializingTransport>,
     pixel_ratio: f64,
     received: Cell<u32>,
+    /// The page's pointer, wheel and key input, turned into camera moves.
+    gestures: GestureRecognizer,
 }
 
 #[wasm_bindgen]
@@ -231,7 +236,17 @@ impl WebMap {
             &ClientOptions::default(),
         )
         .map_err(js_error)?;
-        Ok(WebMap { map, frontend, observer, run_loop, scheduler, transport, pixel_ratio, received: Cell::new(0) })
+        Ok(WebMap {
+            map,
+            frontend,
+            observer,
+            run_loop,
+            scheduler,
+            transport,
+            pixel_ratio,
+            received: Cell::new(0),
+            gestures: GestureRecognizer::default(),
+        })
     }
 
     /// Loads a style from a URL.
@@ -273,11 +288,13 @@ impl WebMap {
         self.received.get()
     }
 
-    /// One animation frame: runs the RunLoop's tasks, draws the map's latest
-    /// update if it is new, then runs the cooperative scheduler's tasks
-    /// (sprites, glyphs, raster tiles) for up to
-    /// `budget_ms` and delivers their results. Returns whether it drew.
-    pub fn frame(&mut self, budget_ms: f64) -> bool {
+    /// One animation frame at `now` (milliseconds, the clock of the input
+    /// methods' `time`): ends the gestures that time out, runs the RunLoop's
+    /// tasks, draws the map's latest update if it is new, then runs the
+    /// cooperative scheduler's tasks (sprites, glyphs, raster tiles) for up
+    /// to `budget_ms` and delivers their results. Returns whether it drew.
+    pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
+        self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
         let drew = self.frontend.render();
         self.run_tasks(budget_ms);
@@ -291,6 +308,100 @@ impl WebMap {
     pub fn tick(&mut self, budget_ms: f64) -> bool {
         self.run_loop.run_once();
         self.run_tasks(budget_ms)
+    }
+
+    /// A pointer went down on the canvas, at `x`, `y` CSS pixels from its
+    /// top-left corner: `kind` is the DOM `pointerType` ("mouse", "touch" or
+    /// "pen"), `button` the DOM `button` (0 primary, 1 middle, 2 secondary)
+    /// and `modifiers` the bits of [`modifiers`]. `time` is in milliseconds
+    /// on the clock `frame` gets. Returns whether the map used it.
+    pub fn pointer_down(
+        &mut self,
+        id: u32,
+        kind: &str,
+        button: i32,
+        x: f64,
+        y: f64,
+        modifiers: u32,
+        time: f64,
+    ) -> bool {
+        let kind = match kind {
+            "touch" => PointerKind::Touch,
+            "pen" => PointerKind::Pen,
+            _ => PointerKind::Mouse,
+        };
+        let button = match button {
+            1 => Button::Middle,
+            2 => Button::Secondary,
+            _ => Button::Primary,
+        };
+        let input = Input::PointerDown {
+            id,
+            kind,
+            button,
+            position: ScreenCoordinate::new(x, y),
+            modifiers: modifiers_from_bits(modifiers),
+        };
+        self.gestures.handle(&mut self.map, input, time)
+    }
+
+    /// A pointer moved (see `pointer_down`).
+    pub fn pointer_move(&mut self, id: u32, x: f64, y: f64, time: f64) -> bool {
+        self.gestures.handle(&mut self.map, Input::PointerMove { id, position: ScreenCoordinate::new(x, y) }, time)
+    }
+
+    /// A pointer went up (see `pointer_down`).
+    pub fn pointer_up(&mut self, id: u32, x: f64, y: f64, time: f64) -> bool {
+        self.gestures.handle(&mut self.map, Input::PointerUp { id, position: ScreenCoordinate::new(x, y) }, time)
+    }
+
+    /// The browser took a pointer away (`pointercancel`).
+    pub fn pointer_cancel(&mut self, id: u32, time: f64) -> bool {
+        self.gestures.handle(&mut self.map, Input::PointerCancel { id }, time)
+    }
+
+    /// A DOM `wheel` event: its position, deltas and `deltaMode` (0 pixels,
+    /// 1 lines, 2 pages).
+    pub fn wheel(&mut self, x: f64, y: f64, dx: f64, dy: f64, delta_mode: u32, modifiers: u32, time: f64) -> bool {
+        let unit = match delta_mode {
+            1 => WheelUnit::Line,
+            2 => WheelUnit::Page,
+            _ => WheelUnit::Pixel,
+        };
+        let input = Input::Wheel {
+            position: ScreenCoordinate::new(x, y),
+            delta: ScreenCoordinate::new(dx, dy),
+            unit,
+            modifiers: modifiers_from_bits(modifiers),
+        };
+        self.gestures.handle(&mut self.map, input, time)
+    }
+
+    /// A DOM `keydown`, by its `key`: the arrows, `+`/`=`, `-`/`_` and
+    /// Escape; the map ignores the others and returns false.
+    pub fn key(&mut self, key: &str, modifiers: u32, time: f64) -> bool {
+        let key = match key {
+            "ArrowLeft" => Key::Left,
+            "ArrowRight" => Key::Right,
+            "ArrowUp" => Key::Up,
+            "ArrowDown" => Key::Down,
+            "+" | "=" => Key::ZoomIn,
+            "-" | "_" => Key::ZoomOut,
+            "Escape" => Key::Escape,
+            _ => return false,
+        };
+        self.gestures.handle(&mut self.map, Input::Key { key, modifiers: modifiers_from_bits(modifiers) }, time)
+    }
+
+    /// The canvas lost focus: every pointer is released.
+    pub fn blur(&mut self, time: f64) -> bool {
+        self.gestures.handle(&mut self.map, Input::Blur, time)
+    }
+
+    /// The box a Shift-drag zooms to while it is drawn, as `[x0, y0, x1,
+    /// y1]` in CSS pixels, for the page to show; otherwise undefined.
+    pub fn box_zoom(&self) -> Option<Vec<f64>> {
+        self.gestures.box_zoom().map(|[a, b]| vec![a.x, a.y, b.x, b.y])
     }
 
     /// Whether the style loaded and every tile and resource the map needs
@@ -311,6 +422,11 @@ impl WebMap {
     pub fn take_pixels(&self) -> Option<Vec<u8>> {
         self.frontend.0.backend.take_readback().map(|image| image.data.to_vec())
     }
+}
+
+/// The input methods' `modifiers`: Shift 1, Ctrl 2, Alt 4, Meta 8.
+fn modifiers_from_bits(bits: u32) -> Modifiers {
+    Modifiers { shift: bits & 1 != 0, ctrl: bits & 2 != 0, alt: bits & 4 != 0, meta: bits & 8 != 0 }
 }
 
 impl WebMap {
