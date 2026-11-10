@@ -568,6 +568,7 @@ impl Impl {
         if let Some(file_source) = &self.file_source {
             item.load_description(&**file_source);
         }
+        self.observer().on_update();
         Ok(())
     }
 
@@ -584,6 +585,7 @@ impl Impl {
 
         if let Some(source) = &source {
             source.set_observer(None);
+            self.observer().on_update();
         }
 
         source
@@ -703,6 +705,7 @@ impl Impl {
         };
         new_images.remove(found);
         self.shared.borrow_mut().images = Arc::new(new_images);
+        self.observer().on_update();
     }
 
     /// symbols: `getFontFaces()`.

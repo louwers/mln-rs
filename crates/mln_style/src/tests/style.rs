@@ -19,6 +19,7 @@ use crate::layer::Layer;
 use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
 use crate::layers::line_layer_properties::LineColor;
 use crate::observer::{Observer, SourceObserver};
+use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::tile_source::{UrlOrTileset, VectorSource};
 use crate::style::{Impl, Style};
 use crate::transition_options::TransitionOptions;
@@ -195,6 +196,43 @@ impl Observer for CountingObserver {
     fn on_update(&self) {
         self.updates.set(self.updates.get() + 1);
     }
+}
+
+// gtest: Style.SourceCollectionPublishesUpdates
+#[test]
+fn source_collection_publishes_updates() {
+    // The C++ observer takes the style's sources inside onUpdate; this counts the calls and reads
+    // the sources after each (see transition_options_publish_updates).
+    let mut style = stub_style();
+    style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    style.add_layer(Box::new(LineLayer::new("line", "late")), None).unwrap();
+    let observer = Rc::new(CountingObserver::default());
+    style.set_observer(Some(observer.clone()));
+
+    style.add_source(Box::new(GeoJSONSource::new("late", GeoJSONOptions::default_options()))).unwrap();
+    assert_eq!(1, observer.updates.get());
+    assert_eq!(1, style.get_source_impls().len());
+
+    style.remove_layer("line");
+    let updates = observer.updates.get();
+    assert!(style.remove_source("late").is_some());
+    assert_eq!(updates + 1, observer.updates.get());
+    assert!(style.get_source_impls().is_empty());
+}
+
+// gtest: Style.ImageRemovalPublishesUpdates
+#[test]
+fn image_removal_publishes_updates() {
+    let mut style = stub_style();
+    style.load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    style.add_image(make_image("image"));
+    let observer = Rc::new(CountingObserver::default());
+    style.set_observer(Some(observer.clone()));
+    assert_eq!(1, style.get_image_impls().len());
+
+    style.remove_image("image");
+    assert_eq!(1, observer.updates.get());
+    assert!(style.get_image_impls().is_empty());
 }
 
 // gtest: Style.TransitionOptionsPublishUpdates

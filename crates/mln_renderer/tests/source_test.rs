@@ -191,7 +191,7 @@ impl Tiled {
     /// `VectorSource("source", tileset)` with `tileset.tiles = {"tiles"}`.
     fn source(self, url_or_tileset: UrlOrTileset) -> Box<dyn Source> {
         match self {
-            Tiled::Raster => Box::new(RasterSource::new("source", url_or_tileset, 512, SourceType::Raster)),
+            Tiled::Raster => Box::new(RasterSource::new("source", url_or_tileset, 512, SourceType::Raster, None, None)),
             Tiled::RasterDEM => Box::new(RasterDEMSource::new("source", url_or_tileset, 512, None)),
             Tiled::Vector => Box::new(VectorSource::new("source", url_or_tileset, None, None, VectorEncoding::Mapbox)),
         }
