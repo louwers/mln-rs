@@ -20,13 +20,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::filesystem;
-use crate::jobs;
 use crate::log::{self, Event};
 use crate::manifest_parser::{Manifest, ManifestParser};
 use crate::metadata::{TestMetadata, TestPaths, TestStatistics};
 use crate::parser::{create_result_page, parse_test_metadata, serialize_json_value};
 use crate::runner::{ImplFactory, ImplOptions, TestRunner, UpdateResults};
+use crate::{filesystem, jobs};
 
 // SHOW_ANSI_COLORS is not defined in the C++ build either.
 const ANSI_COLOR_RED: &str = "";

@@ -56,8 +56,7 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --component llvm-tools-preview --no-self-update
-          rustup default stable
+          rustup toolchain install --profile minimal --component llvm-tools-preview --no-self-update
 
       - name: Test
         run: just ci-coverage
@@ -110,16 +109,15 @@ jobs:
 
       - name: Package
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
+          rustup toolchain install --profile minimal --no-self-update
           just ci-package
 
-  # Formatting (`just fmt`, every Rust file), the panic and TODO(port)
-  # ratchet (`just ratchet`, tools/ratchet), clippy with the workspace's
-  # lints (Cargo.toml), the API docs as docs.rs builds them, and clippy on
-  # the libraries and platform/web for wasm32-unknown-unknown (`just
-  # check-wasm`, the browser build), all with warnings as errors (the
-  # justfile denies them in CI).
+  # Formatting (`just fmt`, every Rust file, with the nightly rustfmt the
+  # justfile pins), the panic and TODO(port) ratchet (`just ratchet`,
+  # tools/ratchet), clippy with the workspace's lints (Cargo.toml), the API
+  # docs as docs.rs builds them, and clippy on the libraries and platform/web
+  # for wasm32-unknown-unknown (`just check-wasm`, the browser build), all
+  # with warnings as errors (the justfile denies them in CI).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -144,8 +142,7 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --component clippy,rustfmt --target wasm32-unknown-unknown --no-self-update
-          rustup default stable
+          rustup toolchain install --profile minimal --no-self-update
 
       - name: Lint
         run: just ci-lint
@@ -220,8 +217,7 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown --no-self-update
-          rustup default stable
+          rustup toolchain install --profile minimal --no-self-update
 
       # The Chromium that check.mjs uses. The runner's own Chrome brings the
       # system libraries it needs.
