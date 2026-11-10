@@ -12,6 +12,7 @@ use std::sync::LazyLock;
 use feature::{Identifier as FeatureIdentifier, Value as MbglValue};
 use mln_conversion::Convertible;
 use mln_util::geometry::FeatureType;
+use mln_util::i18n;
 
 use crate::check_subtype::check_subtype;
 use crate::collator::Collator;
@@ -154,18 +155,19 @@ fn feature_unavailable() -> EvaluationError {
 
 use mln_math::{fmax, fmin};
 
-/// `util::i18n::isStringInSupportedScript` (src/mln/util/i18n.cpp).
-fn is_string_in_supported_script(input: &str) -> bool {
-    fn char_in_supported_script(chr: u16) -> bool {
-        // These blocks cover common scripts that require complex text
-        // shaping, based on unicode script metadata.
-        !((0x0900..=0x0DFF).contains(&chr)
-            // Main blocks for Indic scripts and Sinhala
-            || (0x0F00..=0x109F).contains(&chr)
-            // Main blocks for Tibetan and Myanmar
-            || (0x1780..=0x17FF).contains(&chr)) // isInKhmer
-    }
-    input.encode_utf16().all(char_in_supported_script)
+/// "is-supported-script": a script that needs complex shaping is supported
+/// where a font face of the style covers it, since HarfBuzz shapes the text
+/// that font faces draw.
+fn is_supported_script(params: &EvaluationContext<'_>, x: &str) -> bool {
+    let Some(font_faces) = params.font_faces.filter(|faces| !faces.is_empty()) else {
+        return i18n::is_string_in_supported_script(x);
+    };
+    x.encode_utf16().all(|chr| {
+        i18n::char_in_supported_script(chr)
+            || font_faces
+                .iter()
+                .any(|face| face.ranges.iter().any(|range| u32::from(chr) >= range.0 && u32::from(chr) <= range.1))
+    })
 }
 
 /// `platform::uppercase` / `platform::lowercase` (platform/default
@@ -423,7 +425,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         }),
         sig("is-supported-script", T::Boolean, fixed(&[s.clone()]), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
-            Ok(Value::Bool(is_string_in_supported_script(string(&a[0]))))
+            Ok(Value::Bool(is_supported_script(p, string(&a[0]))))
         }),
         sig("upcase", s.clone(), fixed(&[s.clone()]), D::NONE, |p, args| {
             let a = eval_args(p, args)?;

@@ -235,6 +235,21 @@ fn image_removal_publishes_updates() {
     assert!(style.get_image_impls().is_empty());
 }
 
+#[test]
+fn is_supported_script_of_a_literal_in_a_layout_property() {
+    // Not a C++ test: ffi patch 0093 kept "is-supported-script" from folding,
+    // so this text-field wasn't a literal and property conversion rejected it
+    // (an assertion in debug builds). The port lets it fold (see
+    // REQUIRED_PROPS in mln_expression's parsing_context.rs).
+    let mut style = stub_style();
+    style.load_json(
+        r#"{"version":8,"sources":{"s":{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}},
+        "layers":[{"id":"symbol","type":"symbol","source":"s",
+        "layout":{"text-field":["case",["is-supported-script","မြန်မာ"],"local","fallback"]}}]}"#,
+    );
+    assert!(style.get_layer("symbol").is_some());
+}
+
 // gtest: Style.TransitionOptionsPublishUpdates
 #[test]
 fn transition_options_publish_updates() {

@@ -109,6 +109,12 @@ impl Default for ParsingContext {
     }
 }
 
+// Port-only: unlike ffi patch 0093, "is-supported-script" isn't listed, so
+// `["is-supported-script", "<literal>"]` still folds into a constant, without
+// font faces. Left unfolded, a feature-independent use in a layout property
+// such as text-field wasn't a literal, and property conversion rejected it.
+// The patch's render tests, like styles in practice, pass a feature property,
+// which keeps the expression from folding anyway.
 const REQUIRED_PROPS: [&str; 6] =
     ["zoom", "heatmap-density", "line-progress", "accumulated", "elevation", "global-state"];
 

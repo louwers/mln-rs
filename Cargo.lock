@@ -1326,6 +1326,7 @@ dependencies = [
  "mln-rs-nunicode",
  "mln-rs-rapidjson",
  "mln-rs-style-types",
+ "mln-rs-text",
  "mln-rs-tile",
  "mln-rs-tile-id",
  "mln-rs-util",

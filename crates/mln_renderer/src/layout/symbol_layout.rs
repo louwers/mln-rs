@@ -18,7 +18,9 @@ use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::symbol_layer_properties::*;
+use mln_style::properties::Property;
 use mln_style::property_value::PropertyValue;
+use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use mln_style_types::image::{ImageMap, ImagePositions, ImageType};
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, IconTextFitType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
@@ -370,7 +372,8 @@ impl SymbolLayout {
             let passes = leader.filter.evaluate(
                 &EvaluationContext::with_zoom_feature(this.zoom, Some(&*feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
-                    .with_global_state(parameters.global_state.as_deref()),
+                    .with_global_state(parameters.global_state.as_deref())
+                    .with_font_faces(layout_parameters.font_faces.as_deref()),
             );
             feature.check()?;
             if !passes {
@@ -387,12 +390,16 @@ impl SymbolLayout {
             ft.index = i;
 
             if has_text {
-                let formatted = layout.evaluate_images_canonical::<TextField>(
-                    zoom,
-                    &ft,
-                    layout_parameters.available_images,
-                    &canonical_id,
-                );
+                let formatted = match layout.get::<TextField>() {
+                    PossiblyEvaluatedPropertyValue::Constant(constant) => constant.clone(),
+                    PossiblyEvaluatedPropertyValue::Expression(expression) => expression.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(&ft))
+                            .with_available_images(Some(layout_parameters.available_images))
+                            .with_canonical_tile_id(Some(&canonical_id))
+                            .with_font_faces(layout_parameters.font_faces.as_deref()),
+                        TextField::default_value(),
+                    ),
+                };
                 let text_transform = layout.evaluate_canonical::<TextTransform>(zoom, &ft, &canonical_id);
                 let base_font_stack: Vec<String> = layout.evaluate_canonical::<TextFont>(zoom, &ft, &canonical_id);
 
