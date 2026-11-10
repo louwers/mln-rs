@@ -1,8 +1,8 @@
 //! The browser build's font-face shaper: mln_text's HBShaper in a wasm
-//! module of its own. The map's Web Worker (platform/web) imports it the
+//! module of its own. The map's Web Worker (examples/web) imports it the
 //! first time a style declares font faces, a second instance beside its own,
 //! and calls it through JavaScript as its map's `FontFaceEngine`
-//! (platform/web/src/shaper.rs). Maps without font faces never download
+//! (examples/web/src/shaper.rs). Maps without font faces never download
 //! it.
 
 #![cfg(target_arch = "wasm32")]

@@ -10,7 +10,7 @@ Worker and only forwards to it.
 
 - in the map's Web Worker (web/map-worker.js), `WebMap` (src/map.rs): the
   map, its renderer (wgpu's WebGPU backend, into the page's canvas as an
-  OffscreenCanvas) and its file sources (fetch, src/fetch.rs). The
+  OffscreenCanvas) and its file sources. The
   instance has no threads, so it installs a `CooperativeScheduler`. Each
   animation frame runs the RunLoop, draws, and runs the scheduler's tasks
   until the frame's budget is spent. Between frames the RunLoop and the
@@ -79,24 +79,15 @@ and tilt; the arrow keys to pan (Shift: rotate and tilt) and `+`/`=` and
 
 ## Images decode in the browser
 
-Every instance decodes images (sprites and image sources in the map's Web
-Worker, raster and raster-dem tiles in the tile workers' Web Workers) with
-the browser's decoders (src/image.rs), so the module carries no PNG or WebP
-decoder: `createImageBitmap` without premultiplication or colour
-conversion, read back through a `VideoFrame` where a probe image reads back
-exactly through one, and through a canvas elsewhere, as Orbis does. A
-canvas's `getImageData` isn't exact: it loses precision at translucent
-texels, and fingerprinting-resistant browsers (Brave) perturb it. The
-texels then go through `util::premultiply`, as the Rust decoders' do, and
-come out the same bytes as theirs (natively, mln_image
-still decodes). The decoder answers later, from the event loop: a tile
-worker's reply comes outside `TileWorker::run`, so it wakes web/worker.js
-for a run. JPEG, which the Rust decoders don't port, decodes too.
+Every instance decodes images with the browser's decoders (mln_image's
+default on wasm), so the module carries no PNG or WebP decoder. The decoder
+answers later, from the event loop, so a tile worker's reply can come
+outside `TileWorker::run`; it then wakes web/worker.js for a run.
 
 ## Caching
 
 The browser's HTTP cache caches the map's resources, as in MapLibre GL
-JS: every request goes through `fetch` (src/fetch.rs), and the build
+JS: every request goes through `fetch` (mln_storage's default on wasm), and the build
 leaves out SQLite (mln_storage's `sqlite` feature), so there is no
 ambient cache database (`ResourceOptions::cache_path`) and no offline
 packs. Without it the map's file source serves no cache-only requests,
@@ -116,7 +107,7 @@ also runs binaryen's `wasm-opt` (its latest release), which shrinks the code wit
 cargo install wasm-bindgen-cli --version 0.2.130
 mise use -g aqua:WebAssembly/binaryen@latest  # or binaryen's release, on the PATH
 just profile=release web
-python3 -m http.server -d platform/web/web
+python3 -m http.server -d examples/web/web
 ```
 
 `just web` (the dev profile) skips wasm-opt and keeps the names, for

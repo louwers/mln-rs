@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # GLFW for platform/glfw (glfw-sys finds it, X11 and Wayland through
+      # GLFW for examples/glfw (glfw-sys finds it, X11 and Wayland through
       # pkg-config), and lavapipe for the GPU tests on Linux.
       - name: Install system packages
         if: runner.os == 'Linux'
@@ -110,7 +110,7 @@ jobs:
   # Formatting (`just fmt`, every Rust file, with the nightly rustfmt the
   # justfile pins), the panic and TODO(port) ratchet (`just ratchet`,
   # tools/ratchet), clippy with the workspace's lints (Cargo.toml), the API
-  # docs as docs.rs builds them, and clippy on the libraries and platform/web
+  # docs as docs.rs builds them, and clippy on the libraries and examples/web
   # for wasm32-unknown-unknown (`just check-wasm`, the browser build), all
   # with warnings as errors (the justfile denies them in CI).
   lint:
@@ -166,7 +166,7 @@ jobs:
         run: just ci-test-msrv
 
   # The browser build in headless Chromium (`just profile=release web-check`,
-  # platform/web/README.md): views of the render suite, served offline from
+  # examples/web/README.md): views of the render suite, served offline from
   # its cache database to the page with its tile workers in Web Workers, each
   # frame compared with the native runner's render of the same view
   # (lavapipe). The Chromium is Playwright's build, pinned, and runs WebGPU on

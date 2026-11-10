@@ -8,8 +8,7 @@ resolver = "3"
 # The packages with `publish = false` are test helpers or unused by mln-rs.
 members = [
     "crates/*",
-    "platform/glfw",
-    "platform/web",
+    "examples/*",
     "tools/bench",
     "tools/expression-test",
     "tools/render-test",
@@ -59,7 +58,7 @@ mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.10", default-features = false }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.10" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
-# that platform/web leaves it out.
+# that examples/web leaves it out.
 mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.10", default-features = false }
 mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.10" }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.10" }
@@ -97,7 +96,7 @@ earcut_crate = { package = "earcut", version = "0.4.5" }
 # be byte-identical to the zlib the C++ links (offline database stored sizes
 # and ambient-cache accounting; OfflineDatabase.PutReturnsSize).
 flate2 = { version = "1.1.11", default-features = false, features = ["zlib"] }
-# platform/glfw: links the system GLFW (dynamic-link) instead of downloading
+# examples/glfw: links the system GLFW (dynamic-link) instead of downloading
 # prebuilt libraries in a build script; raw window handles give wgpu its
 # surface.
 glfw = { version = "0.63.0", default-features = false, features = ["dynamic-link", "raw-window-handle-v0-6", "wayland", "x11"] }
@@ -138,7 +137,7 @@ skrifa = { version = "0.49.0" }
 unicode-bidi = { version = "0.3.18" }
 # HTTP for the online file source (the C++ default platform uses curl).
 ureq = { version = "3.5.1" }
-# platform/web: the browser's API through wasm-bindgen (whose CLI must be
+# examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
 js-sys = { version = "0.3.107" }
 wasm-bindgen = { version = "=0.2.130" }
@@ -153,7 +152,7 @@ web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
 # wgpu-native) onto the Rust implementation of the same API: Vulkan, Metal
 # and DX12 natively (wgpu builds each only where it runs), and on
-# wasm32-unknown-unknown the browser's WebGPU (platform/web). Not its
+# wasm32-unknown-unknown the browser's WebGPU (examples/web). Not its
 # default GLES backend, which nothing selects.
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
 

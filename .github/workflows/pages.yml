@@ -1,7 +1,7 @@
 name: pages
 
-# Builds the browser build (`just profile=release web`, platform/web/README.md)
-# and deploys its page, platform/web/web, to GitHub Pages
+# Builds the browser build (`just profile=release web`, examples/web/README.md)
+# and deploys its page, examples/web/web, to GitHub Pages
 # (https://louwers.github.io/mln-rs/). It needs no COOP/COEP headers, so Pages
 # serves it as is. Publishing only: CI's web job checks the build.
 
@@ -59,6 +59,6 @@ jobs:
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
-          path: platform/web/web
+          path: examples/web/web
       - id: deploy
         uses: actions/deploy-pages@v5

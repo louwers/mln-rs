@@ -52,12 +52,12 @@ check:
     cargo check --workspace --all-targets
 
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
-# needs the target, which rust-toolchain.toml installs. Clippy, so that platform/web, which only builds there, is linted
+# needs the target, which rust-toolchain.toml installs. Clippy, so that examples/web, which only builds there, is linted
 # too. Two runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
 # on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32, and the in-process font-face
 # shaper), and the browser build's two modules as `just web` builds them, which leave both out; the check fails if
 # anything turns SQLite back on there.
-[doc('Check that the libraries and platform/web build for wasm32-unknown-unknown, as CI does')]
+[doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
     cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
@@ -161,11 +161,11 @@ glfw *args:  _dev-shell
 # The release build also gets the release profile's fat LTO and one codegen unit, opt-level "s", and binaryen's wasm-opt
 # (its latest release, e.g. `mise use -g aqua:WebAssembly/binaryen@latest`) shrinks it with -Oz and strips its names and
 # other custom sections. It inlines a function with one caller only when that function is small: binaryen's default
-# inlines them at any size, which made the module bigger after brotli and slower to start. Serve platform/web/web over
-# HTTP, e.g. `python3 -m http.server -d platform/web/web`, and open it in a browser with WebGPU. Two modules, from one cargo
-# run: the map and its tile workers (platform/web, mln_web), and the font-face shaper (crates/mln_web_shaper)
+# inlines them at any size, which made the module bigger after brotli and slower to start. Serve examples/web/web over
+# HTTP, e.g. `python3 -m http.server -d examples/web/web`, and open it in a browser with WebGPU. Two modules, from one cargo
+# run: the map and its tile workers (examples/web, mln_web), and the font-face shaper (crates/mln_web_shaper)
 # that the map's Web Worker loads the first time a style declares font faces.
-[doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) into platform/web/web/pkg')]
+[doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) into examples/web/web/pkg')]
 web:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -175,10 +175,10 @@ web:
     fi
     cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
     target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
-    pkg=platform/web/web/pkg
+    pkg=examples/web/web/pkg
     if [[ {{quote(profile)}} != dev ]]; then
       command -v wasm-opt > /dev/null ||
-        { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (platform/web/README.md)" >&2; exit 1; }
+        { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (examples/web/README.md)" >&2; exit 1; }
     fi
     for module in mln_web mln_web_shaper; do
       wasm-bindgen --target web --out-dir "$pkg" "$target/$module.wasm"
@@ -190,12 +190,12 @@ web:
 
 # Offline, from the render suite's cache database. Needs Node 24, Playwright's Chromium (`npx playwright@1.61.1 install chromium`)
 # and lavapipe (VK_DRIVER_FILES); builds the native render-test runner. CI's web job runs `just profile=release web-check`.
-# Arguments go to platform/web/check/check.mjs, e.g. `just profile=release web-check --filter real-world`.
-[doc('Load render-suite views in headless Chromium and compare the frames with native renders (platform/web/README.md)')]
+# Arguments go to examples/web/check/check.mjs, e.g. `just profile=release web-check --filter real-world`.
+[doc('Load render-suite views in headless Chromium and compare the frames with native renders (examples/web/README.md)')]
 [positional-arguments]
 web-check *args:  web
     cargo build -p mln-rs-render-test --bin render-test
-    node platform/web/check/check.mjs "$@"
+    node examples/web/check/check.mjs "$@"
 
 # Report which C++ gtests have Rust ports (`// gtest: Group.Name` markers), e.g. `just gtest-parity --missing util`
 [positional-arguments]

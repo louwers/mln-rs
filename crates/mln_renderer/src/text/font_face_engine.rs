@@ -4,7 +4,7 @@
 //
 // Natively, and for any build with the `font-face-shaper` feature, the
 // engine is mln_text's HBShaper in-process, ready at once. The browser build
-// (platform/web) turns the feature off, which leaves HarfRust, skrifa and
+// (examples/web) turns the feature off, which leaves HarfRust, skrifa and
 // the FreeType port out of its module, and sets an engine that loads them as
 // a second wasm module the first time a style declares font faces
 // (crates/mln_web_shaper).

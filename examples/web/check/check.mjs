@@ -7,7 +7,7 @@
 // an error, or when a view's tiles got no worker replies. CI runs it (the
 // `web` job); see ../README.md.
 //
-//   node platform/web/check/check.mjs [options]
+//   node examples/web/check/check.mjs [options]
 //
 //   --filter <regex>     the views of VIEWS to load, by id (default: all)
 //   --workers <n>        Web Workers for the tiles (default 2)

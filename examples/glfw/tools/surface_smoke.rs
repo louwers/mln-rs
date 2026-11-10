@@ -1,4 +1,4 @@
-// Window + surface smoke test for //platform/glfw (no C++ counterpart): opens
+// Window + surface smoke test for //examples/glfw (no C++ counterpart): opens
 // a GLFW window, creates the wgpu surface from its raw handles through
 // `GLFWWebGPUBackend`, clears it to a colour through the gfx path the
 // renderer uses (command encoder, render pass on the default renderable,

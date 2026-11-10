@@ -23,7 +23,7 @@ thread_local! {
 }
 
 /// Tells the Web Worker to `run`, for a reply made outside it: a raster or
-/// raster-dem tile's, once the browser has decoded its image (image.rs).
+/// raster-dem tile's, once the browser has decoded its image.
 fn wake_host() {
     if !RUNNING.get() {
         WAKE.with(|wake| {

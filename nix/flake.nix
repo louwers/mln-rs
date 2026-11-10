@@ -14,7 +14,7 @@
         in
         {
           linux = shells.linux.overrideAttrs (old: {
-            # glfw-sys's `wayland` feature (platform/glfw) asks pkg-config for
+            # glfw-sys's `wayland` feature (examples/glfw) asks pkg-config for
             # wayland-client.
             buildInputs = old.buildInputs ++ [ pkgs.wayland ];
             # rustc links with its own lld, past the Nix ld wrapper that would

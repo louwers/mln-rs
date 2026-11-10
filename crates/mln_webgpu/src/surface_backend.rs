@@ -2,7 +2,7 @@
 // platform/glfw/glfw_webgpu_backend_impl.ipp (the Linux, wgpu-native branch):
 // a `webgpu::RendererBackend` that is its own default `gfx::Renderable` and
 // presents to a `wgpu::Surface`. The GLFW specifics (window, raw handles,
-// framebuffer size queries) stay in //platform/glfw, which creates the
+// framebuffer size queries) stay in //examples/glfw, which creates the
 // surface and reports framebuffer resizes through `set_framebuffer_size`.
 //
 // Differences from C++, all structural:
@@ -563,7 +563,7 @@ impl SurfaceBackend {
 
     /// Port-only: a backend on a device and surface that the host created,
     /// as maplibre-native-ffi's `mln_map_attach_web_gpu_surface` passes them,
-    /// or the browser's WebGPU (wgpu's `webgpu` backend, platform/web).
+    /// or the browser's WebGPU (wgpu's `webgpu` backend, examples/web).
     /// There is no adapter: the surface is configured with `format`, for
     /// rendering, and for readback too if `usages` (what the surface
     /// supports) has COPY_SRC; it presents in FIFO order, which every
