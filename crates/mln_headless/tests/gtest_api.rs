@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use geojson::{GeoJSON, Geometry, Point};
 use mln_actor::RunLoop;
+use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapMode, MapOptions, NullMapObserver};
-use mln_platform_default::HeadlessFrontend;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
 use mln_style::layers::symbol_layer::SymbolLayer;

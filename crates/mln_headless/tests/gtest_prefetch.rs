@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
+use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapOptions};
-use mln_platform_default::HeadlessFrontend;
 use mln_storage::Resource;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::geo::LatLng;

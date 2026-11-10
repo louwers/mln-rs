@@ -8,7 +8,6 @@ use std::sync::{Arc, Mutex};
 
 use feature::Value;
 use mln_actor::{AsyncTask, LocalObject, RunLoop};
-use mln_platform_default_image::compression::compress;
 use mln_storage::file_source::MAX_CONCURRENT_REQUESTS_KEY;
 use mln_storage::offline::{
     OfflineRegion, OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
@@ -23,6 +22,7 @@ use mln_storage::{
     AsyncRequest, Callback, ClientOptions, FileSource, Kind, LoadingMethod, Resource, ResourceOptions, Response,
 };
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
+use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Scheme;

@@ -10,7 +10,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use mln_platform_default_image::decoder;
+use mln_image::decoder;
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::LatLng;
@@ -154,7 +154,7 @@ impl ImageSource {
 }
 
 /// `loadDescription`'s response handler. The image decodes through
-/// mln_platform_default_image's `decoder`, whose answer may come after this
+/// mln_image's `decoder`, whose answer may come after this
 /// returns (the browser's); it's dropped if the source is gone or got
 /// another URL or image by then.
 fn on_image_response(weak: &Weak<Inner>, res: Response) {

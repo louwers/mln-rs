@@ -91,7 +91,7 @@ pub fn png(width: u32, height: u32) -> mln_storage::Data {
     for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
         pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
     }
-    Arc::new(mln_platform_default_image::encode_png(&image))
+    Arc::new(mln_image::encode_png(&image))
 }
 
 /// Port-only: an observer that records the tiles' errors.

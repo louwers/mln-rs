@@ -14,7 +14,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
-use mln_platform_default_image::decoder;
+use mln_image::decoder;
 use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
@@ -126,7 +126,7 @@ impl RasterDEMTileWorker {
 
     /// `parse(data, correlationID, encoding)`. The reply goes once the
     /// image has decoded, which may be after this returns (decoder.rs in
-    /// mln_platform_default_image).
+    /// mln_image).
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64, encoding: RasterEncoding) {
         let parent = self.parent.slot();
         let Some(data) = data else {

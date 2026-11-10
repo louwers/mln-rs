@@ -1,5 +1,5 @@
 //! Images through the browser's decoders: the decoder of
-//! mln_platform_default_image's `decoder` in every instance (`start`), so
+//! mln_image's `decoder` in every instance (`start`), so
 //! that the Rust PNG and WebP decoders stay out of the wasm module. The
 //! map's Web Worker decodes sprites and image sources with it, and the tile
 //! workers' Web Workers their raster and raster-dem tiles.
@@ -13,8 +13,8 @@
 //! `decode_bitmap`, `read_bitmap`, `readFrame` and `read_canvas`).
 
 use js_sys::{Reflect, Uint8Array};
-use mln_platform_default_image::decoder::{DecodeDone, ImageDecoder};
-use mln_platform_default_image::image::ImageType;
+use mln_image::decoder::{DecodeDone, ImageDecoder};
+use mln_image::image::ImageType;
 use mln_util::image::{PremultipliedImage, UnassociatedImage};
 use mln_util::logging::{Event, Log};
 use mln_util::premultiply::premultiply;

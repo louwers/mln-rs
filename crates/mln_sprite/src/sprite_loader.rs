@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use mln_actor::TaggedScheduler;
 use mln_actor::scheduler::Respond;
-use mln_platform_default_image::decoder;
+use mln_image::decoder;
 use mln_storage::{AsyncRequest, Data, FileSource, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;

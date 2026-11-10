@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
 use mln_gfx::{ContextMode, SwapBehaviour};
+use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
-use mln_platform_default::HeadlessFrontend;
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
@@ -299,6 +299,6 @@ impl Scene {
 pub fn write_frame(dir: &Path, name: &str, image: &PremultipliedImage) {
     std::fs::create_dir_all(dir).expect("the frames directory");
     let path = dir.join(format!("{}.png", name.replace('/', "-")));
-    std::fs::write(&path, mln_platform_default_image::png_writer::encode_png(image))
+    std::fs::write(&path, mln_image::png_writer::encode_png(image))
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }

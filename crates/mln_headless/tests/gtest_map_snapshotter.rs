@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::{Rc, Weak};
 
 use mln_actor::{RunLoop, Timer};
-use mln_platform_default::map_snapshotter::{Callback, MapSnapshotter, MapSnapshotterObserver};
+use mln_headless::map_snapshotter::{Callback, MapSnapshotter, MapSnapshotterObserver};
 use mln_storage::{ClientOptions, ResourceOptions};
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::{Layer, PropertyValue};

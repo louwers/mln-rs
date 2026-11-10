@@ -1,5 +1,5 @@
-//! Ports `platform/default` (the headless frontend; the headless backend and
-//! file sources arrive with gfx and storage).
+//! Rendering without a window: `HeadlessFrontend` and `MapSnapshotter`,
+//! ported from C++'s `platform/default`.
 
 pub mod headless_frontend;
 pub mod map_snapshotter;

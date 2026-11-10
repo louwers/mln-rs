@@ -16,8 +16,8 @@
 
 use std::sync::Arc;
 
-use mln_platform_default_image::compression::{compress, decompress};
 use mln_util::chrono::{Timestamp, now};
+use mln_util::compression::{compress, decompress};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
 use mln_util::logging::{Event, EventSeverity, Log};
 use mln_util::mapbox::is_canonical_url;

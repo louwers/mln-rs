@@ -37,9 +37,8 @@ name = "offline_download_map_test"
 path = "tests/offline_download_map.rs"
 
 [dev-dependencies]
+mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
-mln_platform_default = { package = "mln-rs-platform-default", path = "../mln_platform_default" }
-mln_platform_default_image = { package = "mln-rs-platform-default-image", path = "../mln_platform_default_image" }
 
 [lints]
 workspace = true

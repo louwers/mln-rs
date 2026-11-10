@@ -1139,14 +1139,14 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-image",
  "mln-rs-kdbush",
  "mln-rs-libstdcxx",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-nunicode",
- "mln-rs-platform-default",
- "mln-rs-platform-default-image",
  "mln-rs-pmtiles",
  "mln-rs-polylabel",
  "mln-rs-protozero",
@@ -1184,10 +1184,10 @@ dependencies = [
  "libc",
  "mln-rs-actor",
  "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-image",
  "mln-rs-map",
  "mln-rs-pixelmatch",
- "mln-rs-platform-default",
- "mln-rs-platform-default-image",
  "mln-rs-render-test",
  "mln-rs-storage",
  "mln-rs-util",
@@ -1334,9 +1334,9 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-image",
  "mln-rs-map",
  "mln-rs-math",
- "mln-rs-platform-default-image",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
@@ -1344,6 +1344,38 @@ dependencies = [
  "mln-rs-webgpu",
  "serde_json",
  "wgpu",
+]
+
+[[package]]
+name = "mln-rs-headless"
+version = "0.0.10"
+dependencies = [
+ "mln-rs-actor",
+ "mln-rs-feature",
+ "mln-rs-geojson",
+ "mln-rs-gfx",
+ "mln-rs-image",
+ "mln-rs-map",
+ "mln-rs-map-types",
+ "mln-rs-math",
+ "mln-rs-pixelmatch",
+ "mln-rs-renderer",
+ "mln-rs-storage",
+ "mln-rs-style",
+ "mln-rs-test-server",
+ "mln-rs-util",
+ "mln-rs-webgpu",
+ "serde_json",
+]
+
+[[package]]
+name = "mln-rs-image"
+version = "0.0.10"
+dependencies = [
+ "flate2",
+ "image-webp",
+ "mln-rs-util",
+ "png",
 ]
 
 [[package]]
@@ -1395,38 +1427,6 @@ name = "mln-rs-pixelmatch"
 version = "0.0.10"
 
 [[package]]
-name = "mln-rs-platform-default"
-version = "0.0.10"
-dependencies = [
- "mln-rs-actor",
- "mln-rs-feature",
- "mln-rs-geojson",
- "mln-rs-gfx",
- "mln-rs-map",
- "mln-rs-map-types",
- "mln-rs-math",
- "mln-rs-pixelmatch",
- "mln-rs-platform-default-image",
- "mln-rs-renderer",
- "mln-rs-storage",
- "mln-rs-style",
- "mln-rs-test-server",
- "mln-rs-util",
- "mln-rs-webgpu",
- "serde_json",
-]
-
-[[package]]
-name = "mln-rs-platform-default-image"
-version = "0.0.10"
-dependencies = [
- "flate2",
- "image-webp",
- "mln-rs-util",
- "png",
-]
-
-[[package]]
 name = "mln-rs-pmtiles"
 version = "0.0.10"
 
@@ -1458,11 +1458,11 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
+ "mln-rs-headless",
+ "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-pixelmatch",
- "mln-rs-platform-default",
- "mln-rs-platform-default-image",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
@@ -1486,13 +1486,13 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
+ "mln-rs-image",
  "mln-rs-libstdcxx",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-nunicode",
  "mln-rs-pixelmatch",
- "mln-rs-platform-default-image",
  "mln-rs-polylabel",
  "mln-rs-shelf-pack",
  "mln-rs-sprite",
@@ -1521,7 +1521,7 @@ version = "0.0.10"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-geometry",
- "mln-rs-platform-default-image",
+ "mln-rs-image",
  "mln-rs-storage",
  "mln-rs-style-types",
  "mln-rs-util",
@@ -1536,9 +1536,8 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-geojson",
+ "mln-rs-headless",
  "mln-rs-map",
- "mln-rs-platform-default",
- "mln-rs-platform-default-image",
  "mln-rs-pmtiles",
  "mln-rs-rapidjson",
  "mln-rs-test-server",
@@ -1556,9 +1555,8 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
+ "mln-rs-headless",
  "mln-rs-map",
- "mln-rs-platform-default",
- "mln-rs-platform-default-image",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
@@ -1581,8 +1579,8 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-geojson-vt",
  "mln-rs-geometry",
+ "mln-rs-image",
  "mln-rs-map-types",
- "mln-rs-platform-default-image",
  "mln-rs-rapidjson",
  "mln-rs-sprite",
  "mln-rs-storage",
@@ -1685,6 +1683,7 @@ name = "mln-rs-util"
 version = "0.0.10"
 dependencies = [
  "bytemuck",
+ "flate2",
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
  "mln-rs-expression",
@@ -1734,8 +1733,8 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-image",
  "mln-rs-map",
- "mln-rs-platform-default-image",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-text",
@@ -1762,8 +1761,8 @@ version = "0.0.10"
 dependencies = [
  "bytemuck",
  "mln-rs-gfx",
+ "mln-rs-image",
  "mln-rs-pixelmatch",
- "mln-rs-platform-default-image",
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",

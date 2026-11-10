@@ -23,8 +23,8 @@ use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 
 use mln_actor::{LocalObject, RunLoop, Timer};
+use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus};
-use mln_platform_default::{HeadlessFrontend, RenderResult};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_util::image::PremultipliedImage;
@@ -49,7 +49,7 @@ pub fn read_file(path: &str) -> String {
 
 /// `decodeImage(util::read_file(path))`.
 pub fn decode_image(path: &str) -> PremultipliedImage {
-    mln_platform_default_image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
+    mln_image::decode_image(&read_bytes(path)).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
 /// A `Response` with `data` = the fixture's bytes.
@@ -64,7 +64,7 @@ pub fn file_response(path: &str) -> Response {
 fn write_output(base: &str, name: &str, image: &PremultipliedImage) {
     let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(base);
     if std::fs::create_dir_all(&dir).is_ok() {
-        let _ = std::fs::write(dir.join(name), mln_platform_default_image::encode_png(image));
+        let _ = std::fs::write(dir.join(name), mln_image::encode_png(image));
     }
 }
 

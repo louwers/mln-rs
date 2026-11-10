@@ -44,7 +44,7 @@ use std::time::Duration;
 pub use map::WebMap;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_actor::scheduler;
-use mln_platform_default_image::decoder;
+use mln_image::decoder;
 use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::time::Instant;

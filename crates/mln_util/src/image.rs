@@ -2,7 +2,7 @@
 //
 // `decodeImage` and `encodePNG`, declared in image.hpp, are implemented by the
 // platform (platform/default/src/mln/util/{image,png_reader,png_writer}.cpp);
-// their port lives in //crates/mln_platform_default_image so that this file
+// their port lives in //crates/mln_image so that this file
 // stays dependency-free.
 
 use std::fmt;

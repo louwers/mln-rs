@@ -916,7 +916,7 @@ impl ViewState {
         let Some(path) = self.readback_path.take() else {
             return;
         };
-        let png = mln_platform_default_image::encode_png(&image);
+        let png = mln_image::encode_png(&image);
         match std::fs::write(&path, png) {
             Ok(()) => Log::info(
                 Event::General,

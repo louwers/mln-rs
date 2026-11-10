@@ -4,7 +4,7 @@
 // C++ `RasterTileWorker::parse` and `RasterDEMTileWorker::parse` decode
 // their image synchronously, so a tile gets its worker's replies in the
 // order it sent its data. Here the image decodes through
-// `mln_platform_default_image::decoder`, whose decoder may answer later
+// `mln_image::decoder`, whose decoder may answer later
 // (the browser's), so two of a worker's images may finish in either order.
 // Each parse takes a `ReplySlot` as it starts, and a reply waits for those
 // of the slots taken before it. With a decoder that answers before

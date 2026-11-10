@@ -10,7 +10,7 @@ use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::render_pass::RenderPassDescriptor;
 use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::types::TextureChannelDataType;
-use mln_platform_default_image::decode_image;
+use mln_image::decode_image;
 use mln_util::Color;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;

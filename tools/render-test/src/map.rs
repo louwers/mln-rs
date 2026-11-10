@@ -1,7 +1,7 @@
 // Ports the map side of render-test/runner.{hpp,cpp}: `TestRunnerMapObserver`,
 // `TestRunner::Impl` (observer, HeadlessFrontend, Map), `swapBehavior`,
 // `resetContext` and the map/style calls of the operations, over mln_map and
-// mln_platform_default.
+// mln_headless.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_gfx::{ContextMode, SwapBehaviour};
+use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapLoadError, MapObserver, MapOptions, ProjectionMode, RenderMode};
-use mln_platform_default::HeadlessFrontend;
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType};
 use mln_util::image::PremultipliedImage;
@@ -407,7 +407,7 @@ impl TestRunnerImpl for Impl {
 
         // C++ `decodeImage` and the `style::Image` constructor throw (not
         // caught by the runner).
-        let image = mln_platform_default_image::decode_image(&bytes).map_err(MapError::Exception)?;
+        let image = mln_image::decode_image(&bytes).map_err(MapError::Exception)?;
         let image = mln_style::image::Impl::new(
             name.to_string(),
             image,

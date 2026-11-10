@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::rc::Rc;
 
 use mln_actor::RunLoop;
+use mln_headless::HeadlessFrontend;
+use mln_image::decode_image;
 use mln_map::{Map, MapMode, MapOptions, NullMapObserver};
-use mln_platform_default::HeadlessFrontend;
-use mln_platform_default_image::decode_image;
 use mln_util::size::Size;
 
 fn render_tests_dir() -> PathBuf {

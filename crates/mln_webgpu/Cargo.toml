@@ -54,7 +54,7 @@ name = "gtest_offscreen_texture"
 path = "tests/gtest_offscreen_texture.rs"
 
 [dev-dependencies]
-mln_platform_default_image = { package = "mln-rs-platform-default-image", path = "../mln_platform_default_image" }
+mln_image = { package = "mln-rs-image", path = "../mln_image" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 
 [lints]

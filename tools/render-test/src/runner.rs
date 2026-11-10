@@ -5,7 +5,7 @@
 // `FileSource` and `Map` of one map configuration, and the operations reach
 // them through `TestContext::getFrontend()` / `getMap()`. Here that pair is
 // the `TestRunnerImpl` trait: map.rs implements it over `mln_map::Map` +
-// `mln_platform_default::HeadlessFrontend`, the tests over a mock map, and
+// `mln_headless::HeadlessFrontend`, the tests over a mock map, and
 // `--self-check` replaces rendering with the test's expected image.
 
 use std::collections::HashMap;
@@ -15,7 +15,7 @@ use std::time::Duration;
 
 use feature::Value;
 use geometry::Point;
-use mln_platform_default_image::{decode_image, encode_png};
+use mln_image::{decode_image, encode_png};
 use mln_util::feature::Feature;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;

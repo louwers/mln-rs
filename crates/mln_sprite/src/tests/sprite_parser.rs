@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use mln_platform_default_image::decode_image;
+use mln_image::decode_image;
 use mln_style_types::image::{ImageContent, TextFit};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};

@@ -88,7 +88,7 @@ exactly through one, and through a canvas elsewhere, as Orbis does. A
 canvas's `getImageData` isn't exact: it loses precision at translucent
 texels, and fingerprinting-resistant browsers (Brave) perturb it. The
 texels then go through `util::premultiply`, as the Rust decoders' do, and
-come out the same bytes as theirs (natively, mln_platform_default_image
+come out the same bytes as theirs (natively, mln_image
 still decodes). The decoder answers later, from the event loop: a tile
 worker's reply comes outside `TileWorker::run`, so it wakes web/worker.js
 for a run. JPEG, which the Rust decoders don't port, decodes too.

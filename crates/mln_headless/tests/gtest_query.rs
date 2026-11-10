@@ -47,7 +47,7 @@ impl QueryTest {
         self.0.map()
     }
 
-    fn render(&self) -> mln_platform_default::RenderResult {
+    fn render(&self) -> mln_headless::RenderResult {
         self.0.render()
     }
 

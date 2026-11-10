@@ -19,11 +19,11 @@ use feature::Value;
 use geojson::{Feature, GeoJSON, Geometry, Point};
 use mln_actor::{RunLoop, Timer};
 use mln_gfx::{BackendScope, ScopeType};
+use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_platform_default::HeadlessFrontend;
 use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Error as ResponseError, Reason};
@@ -2484,7 +2484,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
             dem.data[i] = 255;
         }
         let mut response = Response::new();
-        response.data = Some(Arc::new(mln_platform_default_image::encode_png(&dem)));
+        response.data = Some(Arc::new(mln_image::encode_png(&dem)));
         Some(response)
     });
     test.load_json(

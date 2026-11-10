@@ -19,7 +19,6 @@ doctest = false
 feature.workspace = true
 geojson.workspace = true
 mln_actor.workspace = true
-mln_platform_default_image.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
 pmtiles.workspace = true
@@ -48,14 +47,14 @@ name = "gtest_http_timeout"
 path = "tests/gtest_http_timeout.rs"
 
 # test/storage/sync_file_source.test.cpp: needs a Map (mln_map,
-# mln_platform_default depend on this crate, so not in the unit tests).
+# mln_headless depend on this crate, so not in the unit tests).
 [[test]]
 name = "sync_file_source_test"
 path = "tests/sync_file_source.rs"
 
 [dev-dependencies]
+mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
-mln_platform_default = { package = "mln-rs-platform-default", path = "../mln_platform_default" }
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 
 [lints]

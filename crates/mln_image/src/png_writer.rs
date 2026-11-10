@@ -4,10 +4,9 @@
 // IDAT chunk with filter type 0 on every scanline, zlib-compressed by
 // `util::compress`.
 
+use mln_util::compression::compress;
 use mln_util::image::PremultipliedImage;
 use mln_util::premultiply::unpremultiply;
-
-use crate::compression::compress;
 
 fn network_byte_u32(value: u32) -> [u8; 4] {
     value.to_be_bytes()

@@ -19,6 +19,7 @@ doctest = false
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 csscolorparser.workspace = true
 feature.workspace = true
+flate2.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
 rapidjson.workspace = true

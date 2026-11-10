@@ -49,11 +49,11 @@ mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion"
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.10" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.10" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.10" }
+mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.10" }
+mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.10" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.10" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.10" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.10" }
-mln_platform_default = { package = "mln-rs-platform-default", path = "crates/mln_platform_default", version = "=0.0.10" }
-mln_platform_default_image = { package = "mln-rs-platform-default-image", path = "crates/mln_platform_default_image", version = "=0.0.10" }
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.10", default-features = false }
@@ -227,11 +227,11 @@ mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
+mln_headless.workspace = true
+mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_platform_default.workspace = true
-mln_platform_default_image.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.

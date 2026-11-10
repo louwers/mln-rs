@@ -1,5 +1,5 @@
 [package]
-name = "mln-rs-platform-default-image"
+name = "mln-rs-image"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 include.workspace = true
 
 [lib]
-name = "mln_platform_default_image"
+name = "mln_image"
 # The doc comments have no examples to run.
 doctest = false
 
