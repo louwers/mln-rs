@@ -119,10 +119,6 @@ impl LayerTweaker for RasterLayerTweaker {
                     multiply_with_projection_matrix(
                         /*in-out*/ &mut matrix,
                         parameters.transform_params,
-                        parameters.current_layer,
-                        drawable.get_is_3d(),
-                        drawable.get_enable_depth(),
-                        drawable.get_sub_layer_index(),
                         /*near_clipped*/ false,
                         /*aligned*/ true,
                     );

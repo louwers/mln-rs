@@ -89,13 +89,9 @@ pub fn get_tile_matrix(
         tile_id,
         parameters.state,
         parameters.transform_params,
-        parameters.current_layer,
         translation,
         anchor,
         drawable.get_origin(),
-        drawable.get_is_3d(),
-        drawable.get_enable_depth(),
-        drawable.get_sub_layer_index(),
         near_clipped,
         in_viewport_pixel_units,
         aligned,
@@ -109,13 +105,9 @@ pub fn get_tile_matrix_for(
     tile_id: &UnwrappedTileID,
     transform_state: &TransformState,
     transform_params: &TransformParameters,
-    current_layer_index: u32,
     translation: &[f32; 2],
     anchor: TranslateAnchorType,
     origin: Option<Point<f64>>,
-    is_3d: bool,
-    use_depth: bool,
-    sub_layer_index: i32,
     near_clipped: bool,
     in_viewport_pixel_units: bool,
     aligned: bool,
@@ -127,28 +119,14 @@ pub fn get_tile_matrix_for(
         let a = tile_matrix;
         matrix::translate(&mut tile_matrix, &a, origin.x, origin.y, 0.0);
     }
-    multiply_with_projection_matrix(
-        &mut tile_matrix,
-        transform_params,
-        current_layer_index,
-        is_3d,
-        use_depth,
-        sub_layer_index,
-        near_clipped,
-        aligned,
-    );
+    multiply_with_projection_matrix(&mut tile_matrix, transform_params, near_clipped, aligned);
     translate_vtx_matrix(tile_id, &tile_matrix, translation, anchor, transform_state, in_viewport_pixel_units)
 }
 
-/// `multiplyWithProjectionMatrix(mat4&, const TransformParameters&, ...)`.
-#[allow(clippy::too_many_arguments)]
+/// `multiplyWithProjectionMatrix(mat4&, const TransformParameters&, nearClipped, aligned)`.
 pub fn multiply_with_projection_matrix(
     matrix: &mut Mat4,
     transform_params: &TransformParameters,
-    current_layer_index: u32,
-    is_3d: bool,
-    use_depth: bool,
-    sub_layer_index: i32,
     near_clipped: bool,
     aligned: bool,
 ) {
@@ -161,26 +139,6 @@ pub fn multiply_with_projection_matrix(
     } else {
         &transform_params.proj_matrix
     };
-    // !MLN_RENDER_BACKEND_OPENGL: the port's backend is WebGPU.
-    // If this drawable is participating in depth testing, offset the
-    // projection matrix NDC depth range for the drawable's layer and
-    // sublayer.
-    if !is_3d && use_depth {
-        // copy and adjust the projection matrix
-        let mut proj_matrix = *proj_matrix_ref;
-        // C++: ((1 + currentLayerIndex) * numSublayers - subLayerIndex) *
-        // depthEpsilon, an int expression (uint32_t * int - int32_t, i.e.
-        // unsigned arithmetic) times a float, subtracted from a double.
-        let steps = (1u32.wrapping_add(current_layer_index))
-            .wrapping_mul(PaintParameters::NUM_SUBLAYERS as u32)
-            .wrapping_sub(sub_layer_index as u32);
-        proj_matrix[14] -= (steps as f32 * PaintParameters::DEPTH_EPSILON) as f64;
-        // multiply with the copy
-        let b = *matrix;
-        matrix::multiply(matrix, &proj_matrix, &b);
-        // early return
-        return;
-    }
     let b = *matrix;
     matrix::multiply(matrix, proj_matrix_ref, &b);
 }

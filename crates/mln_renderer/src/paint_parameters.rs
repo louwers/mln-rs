@@ -20,6 +20,7 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
 use mln_util::chrono::TimePoint;
 use mln_util::mat4::{Mat4, matrix};
+use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::line_atlas::LineAtlas;
@@ -112,8 +113,7 @@ pub struct PaintParameters<'a> {
 
 impl<'a> PaintParameters<'a> {
     pub const NUM_SUBLAYERS: i32 = 3;
-    /// `1.0f / (1 << 11)` (non-OpenGL backends).
-    pub const DEPTH_EPSILON: f32 = 1.0 / (1 << 11) as f32;
+    pub const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
     pub const MAX_STENCIL_VALUE: i32 = 255;
 
     #[allow(clippy::too_many_arguments)]
@@ -167,7 +167,7 @@ impl<'a> PaintParameters<'a> {
             // C++ leaves these uninitialized; the renderer sets them before
             // use.
             current_layer: 0,
-            depth_range_size: 0.0,
+            depth_range_size: 1.0,
             opaque_pass_cutoff: 0,
             symbol_fade_change: 0.0,
             frame_count,
@@ -193,15 +193,24 @@ impl<'a> PaintParameters<'a> {
         m
     }
 
-    pub fn depth_mode_for_sublayer(&self, _n: u8, mask: DepthMaskType) -> DepthMode {
+    pub fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         if self.current_layer < self.opaque_pass_cutoff {
             return DepthMode::disabled();
         }
-        DepthMode { func: DepthFunctionType::LessEqual, mask }
+
+        // C++: `((1 + currentLayer) * numSublayers + n)`, unsigned arithmetic, times a float.
+        let steps =
+            (1u32.wrapping_add(self.current_layer)).wrapping_mul(Self::NUM_SUBLAYERS as u32).wrapping_add(u32::from(n));
+        let depth = self.depth_range_size + steps as f32 * Self::DEPTH_EPSILON;
+        DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(depth, depth) }
     }
 
     pub fn depth_mode_for_3d(&self) -> DepthMode {
-        DepthMode { func: DepthFunctionType::LessEqual, mask: DepthMaskType::ReadWrite }
+        DepthMode {
+            func: DepthFunctionType::LessEqual,
+            mask: DepthMaskType::ReadWrite,
+            range: Range::new(0.0, self.depth_range_size),
+        }
     }
 
     pub fn color_mode_for_render_pass(&self) -> ColorMode {

@@ -37,6 +37,7 @@ use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUnifor
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
+use mln_util::range::Range;
 use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
@@ -84,7 +85,7 @@ fn clip_mask_stencil_mode() -> StencilMode {
 
 /// `clipMaskDepthMode`
 fn clip_mask_depth_mode() -> DepthMode {
-    DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly }
+    DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly, range: Range::new(0.0, 1.0) }
 }
 
 impl Context {

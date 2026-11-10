@@ -247,6 +247,9 @@ impl RendererImpl {
 
             // drawable3DPass: draw layer groups, 3D pass
             debug_assert!(parameters.pass == RenderPass::Pass3D);
+            // `depthModeFor3D` uses this, and the 3D pass runs before the opaque pass sets it
+            parameters.depth_range_size =
+                1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
             parameters.current_layer = (orchestrator.num_layer_groups() as u32).wrapping_sub(1);
             orchestrator.visit_layer_groups(|layer_group| {
                 layer_group.render(&mut parameters);

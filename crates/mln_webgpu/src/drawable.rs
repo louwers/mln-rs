@@ -809,6 +809,17 @@ impl drawable::Drawable for Drawable {
             return;
         };
         encoder.set_pipeline(pipeline);
+
+        let size = render_pass.get_renderable_size();
+        encoder.set_viewport(
+            0.0,
+            0.0,
+            size.width as f32,
+            size.height as f32,
+            depth_mode.range.min,
+            depth_mode.range.max,
+        );
+
         if self.base.enable_stencil {
             encoder.set_stencil_reference(stencil_mode.ref_ as u32);
         }

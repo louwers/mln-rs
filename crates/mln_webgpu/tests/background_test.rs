@@ -38,10 +38,17 @@ use mln_gfx::types::{DepthMaskType, StencilOpType};
 use mln_gfx::uniform_buffer::UniformBufferPtr;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
+use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_webgpu::HeadlessBackend;
 
 const EXTENT: i16 = 8192;
+
+/// `PaintParameters::numSublayers` and `depthEpsilon`.
+const NUM_SUBLAYERS: u32 = 3;
+const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
+/// `1 - (numLayerGroups() + 2) * numSublayers * depthEpsilon` for one layer group.
+const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
 
 /// The gfx-facing part of the renderer's PaintParameters, with the values
 /// `renderer_impl.cpp` uses for a plain 2D frame.
@@ -73,15 +80,21 @@ impl PaintParameters for TestPaintParameters<'_> {
     fn scissor_rect(&self) -> ScissorRect {
         self.scissor_rect
     }
-    /// paint_parameters.cpp, non-OpenGL branch
-    fn depth_mode_for_sublayer(&self, _n: u8, mask: DepthMaskType) -> DepthMode {
+    /// paint_parameters.cpp, with renderer_impl.cpp's `depthRangeSize` for
+    /// one layer group
+    fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         if self.current_layer < self.opaque_pass_cutoff {
             return DepthMode::disabled();
         }
-        DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask }
+        let depth = DEPTH_RANGE_SIZE + ((1 + self.current_layer) * NUM_SUBLAYERS + u32::from(n)) as f32 * DEPTH_EPSILON;
+        DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask, range: Range::new(depth, depth) }
     }
     fn depth_mode_for_3d(&self) -> DepthMode {
-        DepthMode { func: mln_gfx::types::DepthFunctionType::LessEqual, mask: DepthMaskType::ReadWrite }
+        DepthMode {
+            func: mln_gfx::types::DepthFunctionType::LessEqual,
+            mask: DepthMaskType::ReadWrite,
+            range: Range::new(0.0, DEPTH_RANGE_SIZE),
+        }
     }
     fn render_tile_clipping_masks(&mut self, _tile_ids: &[UnwrappedTileID]) -> bool {
         true
