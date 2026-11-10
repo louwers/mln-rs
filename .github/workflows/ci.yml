@@ -43,20 +43,18 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install glfw pkgconf
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: test-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: test-${{ runner.os }}-
-
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-llvm-cov' }
 
       - name: Install Rust
         run: |
           rustup toolchain install --profile minimal --component llvm-tools-preview --no-self-update
+
+      # Saves from main only, so pull requests restore main's dependencies
+      # rather than each filling the cache with its own.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Test
         run: just ci-coverage
@@ -95,22 +93,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libglfw3-dev libwayland-dev libx11-dev pkg-config
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          # Saved once per lockfile: the third-party crates dominate.
-          key: release-crate-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: release-crate-${{ runner.os }}-
-
       - uses: taiki-e/install-action@v2
         with: { tool: just }
 
-      - name: Package
+      - name: Install Rust
         run: |
           rustup toolchain install --profile minimal --no-self-update
-          just ci-package
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Package
+        run: just ci-package
 
   # Formatting (`just fmt`, every Rust file, with the nightly rustfmt the
   # justfile pins), the panic and TODO(port) ratchet (`just ratchet`,
@@ -129,20 +124,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libglfw3-dev libwayland-dev libx11-dev pkg-config
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: lint-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: lint-${{ runner.os }}-
-
       - uses: taiki-e/install-action@v2
         with: { tool: just }
 
       - name: Install Rust
         run: |
           rustup toolchain install --profile minimal --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Lint
         run: just ci-lint
@@ -160,16 +151,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libglfw3-dev libwayland-dev libx11-dev pkg-config
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: msrv-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: msrv-${{ runner.os }}-
-
       - uses: taiki-e/install-action@v2
         with: { tool: just }
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install --profile minimal --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Check
         run: just ci-test-msrv
@@ -194,14 +185,6 @@ jobs:
 
       - uses: actions/cache@v6
         with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: web-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: web-${{ runner.os }}-
-
-      - uses: actions/cache@v6
-        with:
           path: ~/.cache/ms-playwright
           key: playwright-1.61.1-chromium
 
@@ -221,6 +204,10 @@ jobs:
       - name: Install Rust
         run: |
           rustup toolchain install --profile minimal --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The Chromium that check.mjs uses. The runner's own Chrome brings the
       # system libraries it needs.

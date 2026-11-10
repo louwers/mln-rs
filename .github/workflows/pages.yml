@@ -34,14 +34,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            target
-          key: pages-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: pages-${{ runner.os }}-
-
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,wasm-bindgen@0.2.130' }
 
@@ -58,6 +50,8 @@ jobs:
       - name: Install Rust
         run: |
           rustup toolchain install --profile minimal --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build
         run: just profile=release web
