@@ -184,6 +184,13 @@ impl Map {
         self.impl_.transform.borrow().is_panning()
     }
 
+    /// Whether any camera command is still animating. A command's
+    /// `MapObserver::on_camera_did_change` ends that command only, so this
+    /// tells whether the camera stopped once the last one ended.
+    pub fn in_transition(&self) -> bool {
+        self.impl_.transform.borrow().in_transition()
+    }
+
     // MARK: - Camera
 
     pub fn get_camera_options(&self, padding: Option<EdgeInsets>) -> CameraOptions {
