@@ -13,11 +13,39 @@ pub enum MapLoadError {
     UnknownError,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum CameraChangeMode {
+    #[default]
     Immediate,
     Animated,
+}
+
+/// What moved the camera, as maplibre-native-ffi's
+/// `mln_camera_change_source` reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[repr(u32)]
+pub enum CameraChangeSource {
+    /// A camera command outside a gesture, or the map itself, as when a
+    /// resize keeps the camera within its bounds.
+    #[default]
+    Command,
+    /// A camera command that a gesture made.
+    Gesture,
+    /// The momentum, and the snaps, that a gesture's end started.
+    Momentum,
+}
+
+/// A camera change: whether it jumps or animates, and what made it.
+///
+/// `on_camera_will_change` reports the command that starts. Each
+/// `on_camera_did_change` ends one command and reports that command's
+/// source, so a frame that ends a command started by a gesture reports
+/// `Gesture` even while a momentum keeps moving the camera.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct CameraChange {
+    pub mode: CameraChangeMode,
+    pub source: CameraChangeSource,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,10 +67,14 @@ pub struct RenderFrameStatus {
 /// `MapObserver`. All methods have the C++ default (empty) bodies.
 // TODO(port): onSourceChanged(style::Source&), onRegisterShaders, shader
 // compile callbacks, glyph/tile/sprite request callbacks.
+///
+/// The camera callbacks take a [`CameraChange`], where C++ passes only its
+/// mode, so that observers can tell a gesture and its momentum from a
+/// command, as maplibre-native-ffi's camera events can.
 pub trait MapObserver {
-    fn on_camera_will_change(&self, _mode: CameraChangeMode) {}
+    fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}
-    fn on_camera_did_change(&self, _mode: CameraChangeMode) {}
+    fn on_camera_did_change(&self, _change: CameraChange) {}
     fn on_will_start_loading_map(&self) {}
     fn on_did_finish_loading_map(&self) {}
     fn on_did_fail_loading_map(&self, _error: MapLoadError, _what: &str) {}

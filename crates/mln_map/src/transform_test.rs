@@ -812,11 +812,11 @@ fn default_transform() {
     }
 
     impl TransformObserver for CountingObserver {
-        fn on_camera_will_change(&self, _mode: CameraChangeMode) {
+        fn on_camera_will_change(&self, _change: CameraChange) {
             self.camera_will_change_count.set(self.camera_will_change_count.get() + 1);
         }
 
-        fn on_camera_did_change(&self, _mode: CameraChangeMode) {
+        fn on_camera_did_change(&self, _change: CameraChange) {
             self.camera_did_change_count.set(self.camera_did_change_count.get() + 1);
         }
     }
@@ -1746,7 +1746,7 @@ struct EventObserver {
 }
 
 impl TransformObserver for EventObserver {
-    fn on_camera_did_change(&self, _mode: CameraChangeMode) {
+    fn on_camera_did_change(&self, _change: CameraChange) {
         self.events.borrow_mut().push(0);
         self.changes.set(self.changes.get() + 1);
     }
@@ -2289,4 +2289,59 @@ fn dropping_the_transform_closes_its_commands() {
     transform.ease_to(&cam().with_zoom(Some(10.0)), &AnimationOptions { duration: Some(seconds(1)), ..animation });
     drop(transform);
     assert_eq!(outcome(&ended), Some(TransitionOutcome::Closed));
+}
+
+/// Records each will-change ('w') and did-change ('d') with its change.
+#[derive(Default)]
+struct ChangeObserver {
+    changes: RefCell<Vec<(char, CameraChange)>>,
+}
+
+impl ChangeObserver {
+    fn take(&self) -> Vec<(char, CameraChange)> {
+        std::mem::take(&mut *self.changes.borrow_mut())
+    }
+}
+
+impl TransformObserver for ChangeObserver {
+    fn on_camera_will_change(&self, change: CameraChange) {
+        self.changes.borrow_mut().push(('w', change));
+    }
+    fn on_camera_did_change(&self, change: CameraChange) {
+        self.changes.borrow_mut().push(('d', change));
+    }
+}
+
+fn change(mode: CameraChangeMode, source: CameraChangeSource) -> CameraChange {
+    CameraChange { mode, source }
+}
+
+#[test]
+fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
+    use CameraChangeMode::{Animated, Immediate};
+    use CameraChangeSource::{Command, Momentum};
+    let observer = Rc::new(ChangeObserver::default());
+    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(8.0)));
+    observer.take();
+
+    // A jump starts and ends at once.
+    transform.jump_to(&cam().with_zoom(Some(9.0)));
+    assert_eq!(observer.take(), [('w', change(Immediate, Command)), ('d', change(Immediate, Command))]);
+
+    // An ease and a momentum run together; each change that ends one
+    // reports that one's source.
+    transform.ease_to(&cam().with_zoom(Some(10.0)), &AnimationOptions::new(seconds(1)));
+    let ease_start = transform.get_latest_transition_start();
+    transform.start_momentum(
+        // A 1.4 s glide, which outlasts the ease.
+        &CameraMomentum { pan_velocity: Some(sc(10_000.0, 0.0)), ..CameraMomentum::default() },
+        &AnimationOptions::default(),
+    );
+    assert_eq!(observer.take(), [('w', change(Animated, Command)), ('w', change(Animated, Momentum))]);
+    transform.update_transitions(ease_start + seconds(1));
+    assert_eq!(observer.take(), [('d', change(Animated, Command))]);
+    transform.update_transitions(TimePoint::max());
+    assert_eq!(observer.take(), [('d', change(Animated, Momentum))]);
 }

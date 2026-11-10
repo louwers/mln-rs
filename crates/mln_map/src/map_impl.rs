@@ -31,7 +31,7 @@ use mln_util::chrono::{Clock, TimePoint};
 use mln_util::exception::{NotFoundException, StyleLoadException, StyleParseException};
 use mln_util::identity::SimpleIdentity;
 
-use crate::map_observer::{CameraChangeMode, MapLoadError, MapObserver, RenderFrameStatus};
+use crate::map_observer::{CameraChange, MapLoadError, MapObserver, RenderFrameStatus};
 use crate::map_options::MapOptions;
 use crate::transform::{Transform, TransformObserver};
 
@@ -49,14 +49,14 @@ struct MapTransformObserver {
 }
 
 impl TransformObserver for MapTransformObserver {
-    fn on_camera_will_change(&self, mode: CameraChangeMode) {
-        self.observer.on_camera_will_change(mode);
+    fn on_camera_will_change(&self, change: CameraChange) {
+        self.observer.on_camera_will_change(change);
     }
     fn on_camera_is_changing(&self) {
         self.observer.on_camera_is_changing();
     }
-    fn on_camera_did_change(&self, mode: CameraChangeMode) {
-        self.observer.on_camera_did_change(mode);
+    fn on_camera_did_change(&self, change: CameraChange) {
+        self.observer.on_camera_did_change(change);
     }
 }
 

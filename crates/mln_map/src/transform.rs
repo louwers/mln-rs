@@ -31,7 +31,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 
-use crate::map_observer::CameraChangeMode;
+use crate::map_observer::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// `std::min`.
 fn std_min(a: f64, b: f64) -> f64 {
@@ -97,10 +97,12 @@ fn std_to_string(value: f64) -> String {
 }
 
 /// `TransformObserver` (src/mln/map/transform.hpp).
+///
+/// The camera callbacks take a [`CameraChange`] (see `MapObserver`).
 pub trait TransformObserver {
-    fn on_camera_will_change(&self, _mode: CameraChangeMode) {}
+    fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}
-    fn on_camera_did_change(&self, _mode: CameraChangeMode) {}
+    fn on_camera_did_change(&self, _change: CameraChange) {}
 }
 
 /// `TransformObserver::nullObserver()`.
@@ -160,6 +162,8 @@ struct Transition {
     /// cancellation, or later commands taking all its fields.
     cancelled: Cell<bool>,
     replaced: Cell<bool>,
+    /// What started the command, which the change that ends it reports.
+    source: CameraChangeSource,
 }
 
 impl Transition {
@@ -171,6 +175,7 @@ impl Transition {
         duration: Duration,
         animation: &AnimationOptions,
         frame: FrameFn,
+        source: CameraChangeSource,
     ) -> Transition {
         Transition {
             fields: Cell::new(fields),
@@ -185,7 +190,12 @@ impl Transition {
             momentum: None,
             cancelled: Cell::new(false),
             replaced: Cell::new(false),
+            source,
         }
+    }
+
+    fn mode(&self) -> CameraChangeMode {
+        if self.duration.get() != Duration::zero() { CameraChangeMode::Animated } else { CameraChangeMode::Immediate }
     }
 
     /// How the command ended, with a momentum's leftover speed. Cancellation
@@ -448,6 +458,9 @@ pub struct Transform {
     latest_transition_start: TimePoint,
     latest_transition_duration: Duration,
     transitions: Vec<Rc<Transition>>,
+    /// What the commands being started come from: a command unless a gesture
+    /// or a momentum starts them (see [`Self::with_source`]).
+    source: CameraChangeSource,
 }
 
 impl Transform {
@@ -462,6 +475,7 @@ impl Transform {
             latest_transition_start: TimePoint::default(),
             latest_transition_duration: Duration::zero(),
             transitions: Vec::new(),
+            source: CameraChangeSource::Command,
         }
     }
 
@@ -473,6 +487,7 @@ impl Transform {
             latest_transition_start: TimePoint::default(),
             latest_transition_duration: Duration::zero(),
             transitions: Vec::new(),
+            source: CameraChangeSource::Command,
         }
     }
 
@@ -487,7 +502,7 @@ impl Transform {
             return Ok(());
         }
 
-        self.observer.on_camera_will_change(CameraChangeMode::Immediate);
+        self.observer.on_camera_will_change(CameraChange::default());
         self.state.set_size(size);
         let mut scale = self.state.get_scale();
         let mut x = self.state.get_x();
@@ -510,7 +525,7 @@ impl Transform {
             // setLatLngZoom does.
             let zoom = self.state.scale_zoom(scale);
             self.state.set_lat_lng_zoom(&lat_lng(lat, lon), zoom);
-            self.observer.on_camera_did_change(CameraChangeMode::Immediate);
+            self.observer.on_camera_did_change(CameraChange::default());
 
             return Ok(());
         }
@@ -523,7 +538,7 @@ impl Transform {
                 .with_z(Some(z)),
         );
 
-        self.observer.on_camera_did_change(CameraChangeMode::Immediate);
+        self.observer.on_camera_did_change(CameraChange::default());
         Ok(())
     }
 
@@ -1123,7 +1138,7 @@ impl Transform {
         let transition = Rc::new(Transition {
             anchor,
             anchor_lat_lng,
-            ..Transition::new(fields, coupled_fields, moving_fields, start, duration, animation, frame)
+            ..Transition::new(fields, coupled_fields, moving_fields, start, duration, animation, frame, self.source)
         });
 
         let finished = self.release_fields(fields);
@@ -1132,11 +1147,7 @@ impl Transform {
         self.finish_transitions(&finished);
 
         let animated = duration != Duration::zero();
-        self.observer.on_camera_will_change(if animated {
-            CameraChangeMode::Animated
-        } else {
-            CameraChangeMode::Immediate
-        });
+        self.observer.on_camera_will_change(CameraChange { mode: transition.mode(), source: self.source });
 
         if !animated {
             self.apply_transitions(std::slice::from_ref(&transition), start);
@@ -1255,11 +1266,7 @@ impl Transform {
             }
             // This notification ends a command, not necessarily all camera
             // motion.
-            self.observer.on_camera_did_change(if transition.duration.get() != Duration::zero() {
-                CameraChangeMode::Animated
-            } else {
-                CameraChangeMode::Immediate
-            });
+            self.observer.on_camera_did_change(CameraChange { mode: transition.mode(), source: transition.source });
         }
     }
 
@@ -1336,6 +1343,11 @@ impl Transform {
     /// Continues a gesture with momentum. The momentum replaces the running
     /// animations of the fields that it moves, as a camera command does.
     pub fn start_momentum(&mut self, options: &CameraMomentum, animation: &AnimationOptions) {
+        self.with_source(CameraChangeSource::Momentum, |transform| transform.start_momentum_now(options, animation));
+    }
+
+    fn start_momentum_now(&mut self, options: &CameraMomentum, animation: &AnimationOptions) {
+        let momentum_change = |mode: CameraChangeMode| CameraChange { mode, source: CameraChangeSource::Momentum };
         let mut momentum = MomentumState {
             options: *options,
             pan_total: ScreenCoordinate::new(0.0, 0.0),
@@ -1400,7 +1412,7 @@ impl Transform {
                 let finished = self.release_fields(settling);
                 self.update_movement_flags();
                 self.finish_transitions(&finished);
-                self.observer.on_camera_will_change(CameraChangeMode::Immediate);
+                self.observer.on_camera_will_change(momentum_change(CameraChangeMode::Immediate));
                 for i in 0..momentum.scalars.len() {
                     let part = &mut momentum.scalars[i];
                     let Some(snap) = part.snap.filter(|_| part.snap_pending) else { continue };
@@ -1411,7 +1423,7 @@ impl Transform {
             }
             end_unstarted(animation, TransitionOutcome::Completed);
             if settling != 0 {
-                self.observer.on_camera_did_change(CameraChangeMode::Immediate);
+                self.observer.on_camera_did_change(momentum_change(CameraChangeMode::Immediate));
             }
             return;
         }
@@ -1419,7 +1431,16 @@ impl Transform {
         let fields = moving | settling;
         let transition = Rc::new(Transition {
             momentum: Some(RefCell::new(momentum)),
-            ..Transition::new(fields, 0, moving, start, motion, animation, Rc::new(|_, _| CameraOptions::default()))
+            ..Transition::new(
+                fields,
+                0,
+                moving,
+                start,
+                motion,
+                animation,
+                Rc::new(|_, _| CameraOptions::default()),
+                CameraChangeSource::Momentum,
+            )
         });
         let finished = self.release_fields(fields);
         self.transitions.push(transition);
@@ -1427,7 +1448,15 @@ impl Transform {
         self.finish_transitions(&finished);
         // C++ checks here that the finish callbacks didn't replace or cancel
         // the momentum, which they can't in Rust (see the top of the file).
-        self.observer.on_camera_will_change(CameraChangeMode::Animated);
+        self.observer.on_camera_will_change(momentum_change(CameraChangeMode::Animated));
+    }
+
+    /// Runs `start` with the commands it starts attributed to `source`.
+    fn with_source<R>(&mut self, source: CameraChangeSource, start: impl FnOnce(&mut Self) -> R) -> R {
+        let previous = std::mem::replace(&mut self.source, source);
+        let result = start(self);
+        self.source = previous;
+        result
     }
 
     /// Steps the zoom, bearing or pitch part of a momentum.

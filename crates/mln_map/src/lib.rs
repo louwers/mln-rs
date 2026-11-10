@@ -13,7 +13,10 @@ pub mod transform;
 
 pub use map::Map;
 pub use map_impl::{StillImageCallback, StyleMut};
-pub use map_observer::{CameraChangeMode, MapLoadError, MapObserver, NullMapObserver, RenderFrameStatus, RenderMode};
+pub use map_observer::{
+    CameraChange, CameraChangeMode, CameraChangeSource, MapLoadError, MapObserver, NullMapObserver, RenderFrameStatus,
+    RenderMode,
+};
 pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
 pub use mln_map_types::{
