@@ -191,6 +191,7 @@ pub struct StubMapObserver {
     pub did_finish_loading_style_callback: CallbackSlot<()>,
     pub did_finish_rendering_frame_callback: CallbackSlot<RenderFrameStatus>,
     pub did_become_idle_callback: CallbackSlot<()>,
+    pub on_style_image_missing_callback: CallbackSlot<String>,
 }
 
 impl MapObserver for StubMapObserver {
@@ -211,6 +212,9 @@ impl MapObserver for StubMapObserver {
     }
     fn on_did_become_idle(&self) {
         self.did_become_idle_callback.call(());
+    }
+    fn on_style_image_missing(&self, id: &str) {
+        self.on_style_image_missing_callback.call(id.to_owned());
     }
 }
 

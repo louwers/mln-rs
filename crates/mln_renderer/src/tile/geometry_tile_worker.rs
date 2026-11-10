@@ -565,6 +565,9 @@ impl GeometryTileWorker {
     /// `requestNewImages(imageDependencies)`.
     fn request_new_images(&mut self, image_dependencies: ImageDependencies) {
         self.pending_image_dependencies = image_dependencies;
+        // An empty image name means no image, as in the style spec, so don't
+        // request it.
+        self.pending_image_dependencies.remove("");
 
         if !self.pending_image_dependencies.is_empty() {
             self.image_correlation_id += 1;

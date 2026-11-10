@@ -1460,7 +1460,34 @@ fn no_hang_on_missing_image() {
     test.render();
 }
 
-// gtest: Map.PrefetchDeltaOverride
+// gtest: Map.EmptyImageNameIsNoImage
+#[test]
+fn empty_image_name_is_no_image() {
+    let test = MapTest::new();
+    let missing = Rc::new(RefCell::new(Vec::<String>::new()));
+    {
+        let missing = missing.clone();
+        test.observer.on_style_image_missing_callback.set(move |id| missing.borrow_mut().push(id));
+    }
+
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "polygon": {"type": "geojson", "data": {"type": "Feature", "properties": {"image": ""},
+          "geometry": {"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}}}
+      },
+      "layers": [
+        {"id": "fill", "type": "fill", "source": "polygon", "paint": {"fill-pattern": ["get", "image"]}},
+        {"id": "symbol", "type": "symbol", "source": "polygon", "layout": {"icon-image": ["get", "image"]}}
+      ]
+    }"#,
+    );
+    test.render();
+
+    assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());
+}
+
 #[test]
 #[ignore = "TODO(port): CustomGeometrySource (the test counts tiles of a vector and a custom source); see map.test.cpp:1261"]
 fn prefetch_delta_override() {
