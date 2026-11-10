@@ -153,9 +153,10 @@ glfw *args:  _dev-shell
 
 # wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
 # Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
-# The release build also gets the release profile's fat LTO and one codegen unit, opt-level "s", and binaryen's wasm-opt (its latest release, e.g.
-# `mise use -g aqua:WebAssembly/binaryen@latest`) strips its names and other custom sections. Only stripping: wasm-opt's -O
-# levels made the module both bigger after brotli and slower to load (platform/web/README.md). Serve platform/web/web over
+# The release build also gets the release profile's fat LTO and one codegen unit, opt-level "s", and binaryen's wasm-opt
+# (its latest release, e.g. `mise use -g aqua:WebAssembly/binaryen@latest`) shrinks it with -Oz and strips its names and
+# other custom sections. It inlines a function with one caller only when that function is small: binaryen's default
+# inlines them at any size, which made the module bigger after brotli and slower to start. Serve platform/web/web over
 # HTTP, e.g. `python3 -m http.server -d platform/web/web`, and open it in a browser with WebGPU.
 [doc('Build the browser build (the map and its tile workers in Web Workers) into platform/web/web/pkg')]
 web:
@@ -172,7 +173,8 @@ web:
     if [[ {{quote(profile)}} != dev ]]; then
       command -v wasm-opt > /dev/null ||
         { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (platform/web/README.md)" >&2; exit 1; }
-      wasm-opt --strip-debug --strip-producers --strip-target-features "$pkg/mln_web_bg.wasm" -o "$pkg/mln_web_bg.wasm"
+      wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
+        --strip-debug --strip-producers --strip-target-features "$pkg/mln_web_bg.wasm" -o "$pkg/mln_web_bg.wasm"
     fi
 
 # Offline, from the render suite's cache database. Needs Node 24, Playwright's Chromium (`npx playwright@1.61.1 install chromium`)
