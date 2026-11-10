@@ -1327,6 +1327,7 @@ dependencies = [
  "glfw",
  "mln-rs-actor",
  "mln-rs-feature",
+ "mln-rs-gestures",
  "mln-rs-gfx",
  "mln-rs-map",
  "mln-rs-math",

@@ -13,6 +13,11 @@
 //   window's event queue, in order, to the ported callbacks (C++ runs the
 //   callbacks inside `glfwPollEvents`).
 //
+// Mouse, wheel and arrow-key input goes to a `GestureRecognizer`
+// (mln_gestures), which replaces the C++ view's hand-rolled pan, zoom,
+// rotate and pitch handlers (`onMouseClick`, `onMouseMove`, `onScroll`) and
+// continues releases with the map's momentum.
+//
 // Key bindings: those that map onto ported APIs (see `on_key`); the others
 // (annotations, snapshots, queries, custom sources, extrusion/route/feature
 // state demos, render-test writer, free camera demo, location indicator,
@@ -30,6 +35,7 @@ use std::rc::Rc;
 use std::time::Instant;
 
 use mln_actor::{RunLoop, Timer};
+use mln_gestures::{Button, GestureRecognizer, Input, Modifiers, PointerKind, WheelUnit};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, Map, MapDebugOptions, MapObserver, NorthOrientation,
@@ -105,9 +111,7 @@ struct ViewState {
     glfw: glfw::Glfw,
 
     benchmark: bool,
-    tracking: bool,
-    rotating: bool,
-    pitching: bool,
+    gestures: GestureRecognizer,
 
     // Frame timer
     frames: i32,
@@ -120,7 +124,6 @@ struct ViewState {
 
     last_x: f64,
     last_y: f64,
-    last_click: f64,
 
     change_style_callback: Option<Callback>,
     pause_resume_callback: Option<Callback>,
@@ -161,15 +164,18 @@ const HELP: &str = "
 - Press `U` to toggle pitch bounds
 - Press `P` to pause tile requests
 - Press `+`/`-` to zoom in/out
+- Press the arrow keys to pan, `Shift` + left/right to rotate, `Shift` + up/down to tilt
 
-- Hold `Control` + mouse drag to rotate
-- Hold `Shift` + mouse drag to tilt
+- Mouse drag to pan; release while moving to glide
+- Right mouse drag, or `Control` + mouse drag, to rotate and tilt
+- Hold `Shift` + mouse drag to zoom to a box (the box isn't drawn)
+- Scroll to zoom; double click to zoom in, `Shift` + double click to zoom out
 
 - Press `Tab` to cycle through the map debug options
 - Press `F6` to cycle through Tile LOD modes
 - Press `F7` to lower the zoom level without changing the camera
 - Press `F8` to higher the zoom level without changing the camera
-- Press `Esc` to quit
+- Press `Esc` to quit (or to cancel a box zoom)
 
 (Not ported yet: annotations 1-0/K/L/W/M/C/Q, B, E, F, F1, G, H, I, J, R, T, Y.)
 
@@ -239,9 +245,7 @@ impl GLFWView {
                 events,
                 glfw,
                 benchmark,
-                tracking: false,
-                rotating: false,
-                pitching: false,
+                gestures: GestureRecognizer::default(),
                 frames: 0,
                 frame_time: 0.0,
                 last_reported: 0.0,
@@ -250,7 +254,6 @@ impl GLFWView {
                 pixel_ratio,
                 last_x: 0.0,
                 last_y: 0.0,
-                last_click: -1.0,
                 change_style_callback: None,
                 pause_resume_callback: None,
                 online_status_callback: None,
@@ -375,6 +378,7 @@ impl GLFWView {
 
             state.glfw.poll_events();
             state.process_events(&shared);
+            state.frame_gestures();
 
             state.render(&shared);
 
@@ -426,6 +430,19 @@ fn log_error(result: Result<(), String>) {
     }
 }
 
+/// A wheel notch in pixels (see `on_scroll`): 25 of GL JS's wheel steps.
+const WHEEL_NOTCH_PX: f64 = 25.0 * 4.000_244_140_625;
+
+/// The recognizer's modifiers for GLFW's.
+fn modifiers(mods: glfw::Modifiers) -> Modifiers {
+    Modifiers {
+        shift: mods.contains(glfw::Modifiers::Shift),
+        ctrl: mods.contains(glfw::Modifiers::Control),
+        alt: mods.contains(glfw::Modifiers::Alt),
+        meta: mods.contains(glfw::Modifiers::Super),
+    }
+}
+
 fn animation_ms(ms: i64) -> AnimationOptions {
     AnimationOptions::new(Duration::from_millis(ms))
 }
@@ -438,32 +455,76 @@ impl ViewState {
     }
 
     fn process_events(&mut self, shared: &ViewShared) {
-        let events: Vec<glfw::WindowEvent> = glfw::flush_messages(&self.events).map(|(_, e)| e).collect();
+        let events: Vec<(f64, glfw::WindowEvent)> = glfw::flush_messages(&self.events).collect();
         self.dispatch_events(events, shared);
     }
 
-    fn dispatch_events(&mut self, events: Vec<glfw::WindowEvent>, shared: &ViewShared) {
-        for event in events {
+    /// Dispatches events with the GLFW time (seconds) each happened at.
+    fn dispatch_events(&mut self, events: Vec<(f64, glfw::WindowEvent)>, shared: &ViewShared) {
+        for (time, event) in events {
+            let time = time * 1000.0;
             match event {
-                glfw::WindowEvent::Key(key, _, action, mods) => self.on_key(key, action, mods, shared),
-                glfw::WindowEvent::Scroll(x, y) => self.on_scroll(x, y),
+                glfw::WindowEvent::Key(key, _, action, mods) => self.on_key(key, action, mods, time, shared),
+                glfw::WindowEvent::Scroll(x, y) => self.on_scroll(x, y, time),
                 glfw::WindowEvent::Size(w, h) => self.on_window_resize(w, h),
                 glfw::WindowEvent::FramebufferSize(w, h) => self.on_framebuffer_resize(w, h, shared),
-                glfw::WindowEvent::MouseButton(button, action, mods) => self.on_mouse_click(button, action, mods),
-                glfw::WindowEvent::CursorPos(x, y) => self.on_mouse_move(x, y),
-                glfw::WindowEvent::Focus(focused) => self.on_window_focus(focused),
+                glfw::WindowEvent::MouseButton(button, action, mods) => self.on_mouse_click(button, action, mods, time),
+                glfw::WindowEvent::CursorPos(x, y) => self.on_mouse_move(x, y, time),
+                glfw::WindowEvent::Focus(focused) => self.on_window_focus(focused, time),
                 _ => {}
             }
         }
     }
 
+    /// Feeds one input to the gesture recognizer at `time` (milliseconds on
+    /// the GLFW clock).
+    fn gesture(&mut self, input: Input, time: f64) {
+        if let Some(map) = self.map.clone() {
+            self.gestures.handle(&mut *map.borrow_mut(), input, time);
+            // The app has no use for clicks.
+            self.gestures.take_events();
+        }
+    }
+
+    /// Lets the recognizer end gestures that time out (a trackpad zoom's
+    /// hold), once a frame tick.
+    fn frame_gestures(&mut self) {
+        if let Some(map) = self.map.clone() {
+            let now = self.glfw.get_time() * 1000.0;
+            self.gestures.frame(&mut *map.borrow_mut(), now);
+        }
+    }
+
     /// `onKey`
-    fn on_key(&mut self, key: glfw::Key, action: glfw::Action, mods: glfw::Modifiers, _shared: &ViewShared) {
+    fn on_key(&mut self, key: glfw::Key, action: glfw::Action, mods: glfw::Modifiers, time: f64, _shared: &ViewShared) {
         use glfw::Key;
+        // Port: the arrow keys go to the gesture recognizer, which pans,
+        // rotates and tilts with them (C++ binds none of them), and repeat
+        // while held. `+`, `-` and Escape keep the C++ bindings.
+        let arrow = match key {
+            Key::Left => Some(mln_gestures::Key::Left),
+            Key::Right => Some(mln_gestures::Key::Right),
+            Key::Up => Some(mln_gestures::Key::Up),
+            Key::Down => Some(mln_gestures::Key::Down),
+            _ => None,
+        };
+        if let Some(arrow) = arrow {
+            if action != glfw::Action::Release {
+                self.gesture(Input::Key { key: arrow, modifiers: modifiers(mods) }, time);
+            }
+            return;
+        }
         if action == glfw::Action::Release {
             let (last_x, last_y) = (self.last_x, self.last_y);
             match key {
-                Key::Escape => self.window.set_should_close(true),
+                // Port: Escape cancels a box zoom being drawn, else quits.
+                Key::Escape => {
+                    if self.gestures.box_zoom().is_some() {
+                        self.gesture(Input::Key { key: mln_gestures::Key::Escape, modifiers: modifiers(mods) }, time);
+                    } else {
+                        self.window.set_should_close(true)
+                    }
+                }
                 Key::Tab => self.cycle_debug_options(),
                 Key::KpAdd | Key::Equal => self
                     .with_map(|map| map.scale_by(1.1, Some(ScreenCoordinate::new(last_x, last_y)), &animation_ms(500))),
@@ -666,31 +727,32 @@ impl ViewState {
     }
 
     /// `onScroll`
-    fn on_scroll(&mut self, _x_offset: f64, y_offset: f64) {
-        let wheel_increment = 4.000244140625 / 40.0; // ?
-        let pressed = |k| self.window.get_key(k) == glfw::Action::Press;
-        let is_shift_active = pressed(glfw::Key::LeftShift) || pressed(glfw::Key::RightShift);
-        let is_ctrl_active = pressed(glfw::Key::LeftControl) || pressed(glfw::Key::RightControl);
-        let is_wheel = y_offset != 0.0 && y_offset % wheel_increment == 0.0;
-        let factor = (if is_wheel { 40.0 } else { 20.0 })
-            * if is_shift_active {
-                2.0
-            } else if is_ctrl_active {
-                0.1
-            } else {
-                1.0
-            };
-        let delta = y_offset * factor;
+    fn on_scroll(&mut self, x_offset: f64, y_offset: f64, time: f64) {
+        // Port: the recognizer tells wheels from trackpads as GL JS does. A
+        // wheel notch is a whole offset (1.0): sent as 100 px, a multiple of
+        // GL JS's wheel step, so it reads as a wheel, as a browser's notch
+        // does. Fractional offsets are a trackpad or a smooth wheel, which
+        // GLFW scales to a tenth of a pixel (Cocoa, Wayland).
+        let scale = |offset: f64| {
+            if offset.fract() == 0.0 { offset * WHEEL_NOTCH_PX } else { offset * 10.0 }
+        };
+        // GLFW's positive y scrolls up, which zooms in.
+        let delta = ScreenCoordinate::new(-scale(x_offset), -scale(y_offset));
+        let position = ScreenCoordinate::new(self.last_x, self.last_y);
+        let modifiers = self.held_modifiers();
+        self.gesture(Input::Wheel { position, delta, unit: WheelUnit::Pixel, modifiers }, time);
+    }
 
-        let mut scale_factor = 2.0 / (1.0 + (-delta.abs() / 100.0).exp());
-
-        // Zooming out.
-        if delta < 0.0 && scale_factor != 0.0 {
-            scale_factor = 1.0 / scale_factor;
+    /// The modifier keys held now, for the events GLFW reports without them.
+    fn held_modifiers(&self) -> Modifiers {
+        use glfw::Key;
+        let pressed = |keys: [Key; 2]| keys.iter().any(|&k| self.window.get_key(k) == glfw::Action::Press);
+        Modifiers {
+            shift: pressed([Key::LeftShift, Key::RightShift]),
+            ctrl: pressed([Key::LeftControl, Key::RightControl]),
+            alt: pressed([Key::LeftAlt, Key::RightAlt]),
+            meta: pressed([Key::LeftSuper, Key::RightSuper]),
         }
-
-        let anchor = ScreenCoordinate::new(self.last_x, self.last_y);
-        self.with_map(|map| map.scale_by(scale_factor, Some(anchor), &AnimationOptions::default()));
     }
 
     /// `onWindowResize`
@@ -717,60 +779,36 @@ impl ViewState {
         shared.invalidate();
     }
 
-    /// `onMouseClick`
-    fn on_mouse_click(&mut self, button: glfw::MouseButton, action: glfw::Action, modifiers: glfw::Modifiers) {
-        let pressed = action == glfw::Action::Press;
-        if button == glfw::MouseButton::Button2
-            || (button == glfw::MouseButton::Button1 && modifiers.contains(glfw::Modifiers::Control))
-        {
-            self.rotating = pressed;
-            self.with_map(|map| map.set_gesture_in_progress(pressed));
-        } else if button == glfw::MouseButton::Button1 && modifiers.contains(glfw::Modifiers::Shift) {
-            self.pitching = pressed;
-            self.with_map(|map| map.set_gesture_in_progress(pressed));
-        } else if button == glfw::MouseButton::Button1 {
-            self.tracking = pressed;
-            self.with_map(|map| map.set_gesture_in_progress(pressed));
-
-            if action == glfw::Action::Release {
-                let now = self.glfw.get_time();
-                if now - self.last_click < 0.4 {
-                    let anchor = Some(ScreenCoordinate::new(self.last_x, self.last_y));
-                    let scale = if modifiers.contains(glfw::Modifiers::Shift) { 0.5 } else { 2.0 };
-                    self.with_map(|map| map.scale_by(scale, anchor, &animation_ms(500)));
-                }
-                self.last_click = now;
-            }
-        }
+    /// `onMouseClick`: the mouse is pointer 0 of the recognizer.
+    fn on_mouse_click(&mut self, button: glfw::MouseButton, action: glfw::Action, mods: glfw::Modifiers, time: f64) {
+        let button = match button {
+            glfw::MouseButton::Button1 => Button::Primary,
+            glfw::MouseButton::Button2 => Button::Secondary,
+            glfw::MouseButton::Button3 => Button::Middle,
+            _ => return,
+        };
+        let position = ScreenCoordinate::new(self.last_x, self.last_y);
+        let input = if action == glfw::Action::Press {
+            Input::PointerDown { id: 0, kind: PointerKind::Mouse, button, position, modifiers: modifiers(mods) }
+        } else {
+            Input::PointerUp { id: 0, position }
+        };
+        self.gesture(input, time);
     }
 
     /// `onMouseMove`
-    fn on_mouse_move(&mut self, x: f64, y: f64) {
-        if self.tracking {
-            let dx = x - self.last_x;
-            let dy = y - self.last_y;
-            if dx != 0.0 || dy != 0.0 {
-                self.with_map(|map| {
-                    log_error(map.move_by(&ScreenCoordinate::new(dx, dy), &AnimationOptions::default()))
-                });
-            }
-        } else if self.rotating {
-            let (first, second) = (ScreenCoordinate::new(self.last_x, self.last_y), ScreenCoordinate::new(x, y));
-            self.with_map(|map| map.rotate_by(&first, &second, &AnimationOptions::default()));
-        } else if self.pitching {
-            let dy = y - self.last_y;
-            if dy != 0.0 {
-                self.with_map(|map| map.pitch_by(dy / 2.0, &AnimationOptions::default()));
-            }
-        }
+    fn on_mouse_move(&mut self, x: f64, y: f64, time: f64) {
         self.last_x = x;
         self.last_y = y;
+        self.gesture(Input::PointerMove { id: 0, position: ScreenCoordinate::new(x, y) }, time);
         // TODO(port): updatePuckLocation(); the "state-fills" feature-state hover.
     }
 
     /// `onWindowFocus`
-    fn on_window_focus(&mut self, focused: bool) {
+    fn on_window_focus(&mut self, focused: bool, time: f64) {
         if !focused {
+            // Port: a drag the window can't see the end of ends here.
+            self.gesture(Input::Blur, time);
             // Focus lost.
             if let Some(frontend) = &self.renderer_frontend {
                 frontend.with_renderer(|renderer| renderer.reduce_memory_use());
@@ -970,40 +1008,44 @@ impl ViewState {
 
         let (cx, cy) = (f64::from(self.width) / 2.0, f64::from(self.height) / 2.0);
         let none = Modifiers::empty();
-        let drag = |modifiers: Modifiers, dx: f64, dy: f64| {
-            let mut events = vec![
-                WindowEvent::CursorPos(cx, cy),
-                WindowEvent::MouseButton(MouseButton::Button1, Action::Press, modifiers),
-            ];
+        // Each step's events, 16 ms apart on the GLFW clock (the recognizer
+        // measures release velocities and double clicks with their times).
+        let drag = |button: MouseButton, modifiers: Modifiers, dx: f64, dy: f64| {
+            let mut events =
+                vec![WindowEvent::CursorPos(cx, cy), WindowEvent::MouseButton(button, Action::Press, modifiers)];
             for i in 1..=10 {
                 let t = f64::from(i) / 10.0;
                 events.push(WindowEvent::CursorPos(cx + dx * t, cy + dy * t));
             }
-            events.push(WindowEvent::MouseButton(MouseButton::Button1, Action::Release, modifiers));
+            events.push(WindowEvent::MouseButton(button, Action::Release, modifiers));
             events
         };
+        let left = MouseButton::Button1;
+        let key = |key: Key, action: Action, modifiers: Modifiers| WindowEvent::Key(key, 0, action, modifiers);
         let (name, events): (&str, Vec<WindowEvent>) = match step {
             0 => ("start", vec![]),
-            1 => ("drag (pan) by (200, 100)", drag(none, 200.0, 100.0)),
+            1 => ("drag (pan, then glide) by (200, 100)", drag(left, none, 200.0, 100.0)),
             2 => ("scroll up 5 wheel clicks", (0..5).map(|_| WindowEvent::Scroll(0.0, 1.0)).collect()),
             3 => ("scroll down 2 wheel clicks", (0..2).map(|_| WindowEvent::Scroll(0.0, -1.0)).collect()),
             4 => (
                 "double click (zoom in, animated)",
                 vec![
                     WindowEvent::CursorPos(cx, cy),
-                    WindowEvent::MouseButton(MouseButton::Button1, Action::Press, none),
-                    WindowEvent::MouseButton(MouseButton::Button1, Action::Release, none),
-                    WindowEvent::MouseButton(MouseButton::Button1, Action::Press, none),
-                    WindowEvent::MouseButton(MouseButton::Button1, Action::Release, none),
+                    WindowEvent::MouseButton(left, Action::Press, none),
+                    WindowEvent::MouseButton(left, Action::Release, none),
+                    WindowEvent::MouseButton(left, Action::Press, none),
+                    WindowEvent::MouseButton(left, Action::Release, none),
                 ],
             ),
-            5 => ("ctrl+drag (rotate)", drag(Modifiers::Control, 150.0, -150.0)),
-            6 => ("shift+drag (pitch)", drag(Modifiers::Shift, 0.0, -120.0)),
-            7 => ("key N (reset north, animated)", vec![WindowEvent::Key(Key::N, 0, Action::Release, none)]),
-            8 => ("key - (zoom out, animated)", vec![WindowEvent::Key(Key::Minus, 0, Action::Release, none)]),
-            9 => ("key Tab (debug: tile borders)", vec![WindowEvent::Key(Key::Tab, 0, Action::Release, none)]),
-            10 => ("key Tab (debug: parse status)", vec![WindowEvent::Key(Key::Tab, 0, Action::Release, none)]),
-            11 => ("window resize to 800x600", {
+            5 => ("ctrl+drag (rotate)", drag(left, Modifiers::Control, 150.0, 0.0)),
+            6 => ("right drag up (tilt)", drag(MouseButton::Button2, none, 0.0, -120.0)),
+            7 => ("shift+drag (box zoom)", drag(left, Modifiers::Shift, 200.0, 150.0)),
+            8 => ("key Right (pan, animated)", vec![key(Key::Right, Action::Press, none)]),
+            9 => ("key N (reset north, animated)", vec![key(Key::N, Action::Release, none)]),
+            10 => ("key - (zoom out, animated)", vec![key(Key::Minus, Action::Release, none)]),
+            11 => ("key Tab (debug: tile borders)", vec![key(Key::Tab, Action::Release, none)]),
+            12 => ("key Tab (debug: parse status)", vec![key(Key::Tab, Action::Release, none)]),
+            13 => ("window resize to 800x600", {
                 self.window.set_size(800, 600);
                 vec![]
             }),
@@ -1014,6 +1056,8 @@ impl ViewState {
                 return;
             }
         };
+        let start = self.glfw.get_time();
+        let events = events.into_iter().enumerate().map(|(i, e)| (start + 0.016 * i as f64, e)).collect();
         self.dispatch_events(events, shared);
         if let Some(map) = &self.map {
             let camera = map.borrow().get_camera_options(None);
