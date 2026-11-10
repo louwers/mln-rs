@@ -94,6 +94,10 @@ pub trait TestRunnerImpl {
     /// `frontend.render(map).image`; `Err` carries the exception message.
     fn render(&mut self) -> Result<PremultipliedImage, String>;
 
+    /// Port-only: `map.dumpDebugLogs()` and the renderer's, for a test that
+    /// timed out (watchdog.rs): which tiles never loaded or completed.
+    fn dump_debug_logs(&self) {}
+
     /// `map.jumpTo(camera)`.
     fn jump_to(&mut self, _camera: &CameraOptions) -> Result<(), MapError> {
         not_ported("Map::jumpTo")
@@ -990,7 +994,7 @@ impl TestRunner {
                     ctx.runner_impl = None;
                     ctx.metadata.error_message = panic_error_message("Rendering panicked", &panic);
                     ctx.metadata.render_errored += 1;
-                    self.maps.remove(&key);
+                    drop_map(&mut self.maps, &key, &panic);
                     return;
                 }
             }
@@ -1039,7 +1043,7 @@ impl TestRunner {
                     ctx.runner_impl = None;
                     ctx.metadata.error_message = panic_error_message("Query panicked", &panic);
                     ctx.metadata.render_errored += 1;
-                    self.maps.remove(&key);
+                    drop_map(&mut self.maps, &key, &panic);
                     return;
                 }
             }
@@ -1319,6 +1323,19 @@ fn self_check_image(metadata: &TestMetadata) -> PremultipliedImage {
         (metadata.size.width as f32 * metadata.pixel_ratio) as u32,
         (metadata.size.height as f32 * metadata.pixel_ratio) as u32,
     ))
+}
+
+/// Drops the map a test panicked in, which may be inconsistent. If the test
+/// timed out, it first logs the map's state (`dumpDebugLogs`), so the output
+/// says whether a tile never loaded or the frame never drew.
+fn drop_map(maps: &mut HashMap<String, Box<dyn TestRunnerImpl>>, key: &str, panic: &Box<dyn std::any::Any + Send>) {
+    let Some(map) = maps.remove(key) else {
+        return;
+    };
+    if panic.downcast_ref::<crate::watchdog::TestTimedOut>().is_some() {
+        // The dump reads a map that a panic left; it must not end the run.
+        let _ = catch_unwind(AssertUnwindSafe(|| map.dump_debug_logs()));
+    }
 }
 
 /// The error of a test that panicked: for a `TestTimedOut` (watchdog.rs),

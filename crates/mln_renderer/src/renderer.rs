@@ -115,8 +115,14 @@ impl Renderer {
         self.impl_ref().orchestrator.get_placed_symbols_data()
     }
 
+    /// `dumpDebugLogs()`: logs every render source's tiles and the image
+    /// manager's state.
+    pub fn dump_debug_logs(&self) {
+        self.impl_ref().orchestrator.dump_debug_logs();
+    }
+
     // TODO(port): queryPointAnnotations, queryShapeAnnotations,
-    // queryFeatureExtensions, dumpDebugLogs.
+    // queryFeatureExtensions.
 
     // layers: feature state
     /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.

@@ -1286,8 +1286,16 @@ impl RenderOrchestrator {
         source.query_source_features(options, self.global_state.as_deref())
     }
 
+    /// `dumpDebugLogs()`.
+    pub fn dump_debug_logs(&self) {
+        for source in self.render_sources.values() {
+            source.dump_debug_logs();
+        }
+        self.image_manager.dump_debug_logs();
+    }
+
     // TODO(port): queryShapeAnnotations, queryFeatureExtensions, debug layer
-    // groups, dumpDebugLogs and the glyph/tile observer callbacks.
+    // groups and the glyph/tile observer callbacks.
     // layers: feature state
     /// `setFeatureState(sourceID, sourceLayerID, featureID, state)`.
     pub fn set_feature_state(

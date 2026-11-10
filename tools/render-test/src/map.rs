@@ -150,6 +150,11 @@ impl TestRunnerImpl for Impl {
         self.frontend.render(&mut self.map).map(|result| result.image)
     }
 
+    fn dump_debug_logs(&self) {
+        self.map.dump_debug_logs();
+        self.frontend.with_renderer(|renderer| renderer.dump_debug_logs());
+    }
+
     // query: tile mode.
     fn default_camera(&mut self) -> Result<CameraOptions, MapError> {
         let camera = style_ops::default_camera(&self.map.get_style());

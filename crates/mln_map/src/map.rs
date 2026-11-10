@@ -573,6 +573,15 @@ impl Map {
     pub fn is_fully_loaded(&self) -> bool {
         self.impl_.style.borrow().impl_.is_loaded() && self.impl_.renderer_fully_loaded.get()
     }
+
+    /// `dumpDebugLogs()`: logs the style's sources and their state.
+    pub fn dump_debug_logs(&self) {
+        use mln_util::logging::{Event, Log};
+        let rule = "-".repeat(80);
+        Log::info(Event::General, &rule);
+        self.impl_.style.borrow().impl_.dump_debug_logs();
+        Log::info(Event::General, &rule);
+    }
 }
 
 fn misuse(message: &str) -> ExceptionPtr {
