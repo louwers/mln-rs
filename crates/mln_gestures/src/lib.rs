@@ -1,7 +1,8 @@
 //! A gesture recognizer for hosts that have none: pointer, touch, wheel and
-//! keyboard input turned into camera moves on a [`mln_map::Map`], and
-//! releases continued with the map's momentum
-//! ([`Map::start_momentum`](mln_map::Map::start_momentum)).
+//! keyboard input turned into camera moves on a [`mln_map::Map`], through
+//! maplibre-native-ffi's camera calls with their gesture phases
+//! ([`Map::apply_camera_delta`](mln_map::Map::apply_camera_delta)), and
+//! releases continued with the map's momentum.
 //!
 //! MapLibre Native has no counterpart: each of its platform SDKs recognizes
 //! gestures itself. This is ported from Orbis's orb-camera input, which has
