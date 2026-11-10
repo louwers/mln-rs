@@ -1,0 +1,35 @@
+# mln-rs
+
+A Rust port of MapLibre Native's map rendering core.
+
+## Project map
+
+- `src/`: the `mln-rs` facade crate.
+- `crates/`: the libraries, for native and the browser.
+- `vendor/`: ports of MapLibre Native's third-party dependencies.
+- `examples/`: apps that run mln-rs.
+- `tools/`: tools for developing mln-rs.
+
+## Dev tool commands
+
+`just --list` lists every recipe. The common ones:
+
+- `just test`: every test, including the render suite.
+- `just fmt`: format with the pinned nightly rustfmt.
+- `CI=true just ci-lint`: CI's lint job, warnings as errors.
+- `just bench-compare <ref>`: benchmarks against another commit.
+- `just web`, `just web-check`: build the browser build, and compare it with
+  native renders.
+
+## Documentation
+
+Describe the code as it is, for a reader who doesn't know its history.
+Markdown docs give a high-level overview, not a tour of every feature and
+change. Doc comments state contracts, and a code comment explains a
+non-obvious choice where it is made. Don't narrate the implementation. Change
+history, measurements and lists of callers go stale: put them in the commit
+message and PR description, not the code.
+
+## Pull requests
+
+Open a PR as a draft until it's ready to merge.
