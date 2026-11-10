@@ -22,7 +22,7 @@
 // range still in flight.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex};
 
@@ -42,6 +42,7 @@ use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::sync::MutexExt;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
+use mln_util::vec_map::{VecMap, VecSet};
 use serde::{Deserialize, Serialize};
 
 use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
@@ -55,7 +56,7 @@ pub struct HBShapeResult {
 
 /// `HBShapeResults = std::map<FontStack, std::map<GlyphIDType,
 /// std::map<std::u16string, HBShapeResult>>>`.
-pub type HBShapeResults = BTreeMap<FontStack, BTreeMap<GlyphIDType, BTreeMap<Vec<u16>, HBShapeResult>>>;
+pub type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<u16>, HBShapeResult>>>;
 
 /// `GlyphManagerObserver`.
 pub trait GlyphManagerObserver {
@@ -88,7 +89,7 @@ struct GlyphRequest {
 
 #[derive(Default)]
 struct Entry {
-    ranges: BTreeMap<GlyphRange, GlyphRequest>,
+    ranges: VecMap<GlyphRange, GlyphRequest>,
     glyphs: BTreeMap<GlyphID, Immutable<Glyph>>,
 }
 
@@ -131,7 +132,7 @@ pub struct GlyphManager {
     deferred_responses: RefCell<Vec<(Response, FontStack, GlyphRange)>>,
     /// Parses `deferred_responses` on this thread once the engine is ready.
     deferred_task: RefCell<Option<AsyncTask>>,
-    hb_shapers: RefCell<BTreeMap<FontStack, BTreeMap<GlyphIDType, Rc<dyn FontFaceShaper>>>>,
+    hb_shapers: RefCell<VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>>,
 }
 
 impl GlyphManager {
@@ -160,7 +161,7 @@ impl GlyphManager {
             engine_readiness: Arc::default(),
             deferred_responses: RefCell::new(Vec::new()),
             deferred_task: RefCell::new(None),
-            hb_shapers: RefCell::new(BTreeMap::new()),
+            hb_shapers: RefCell::new(VecMap::new()),
         })
     }
 
@@ -421,7 +422,7 @@ impl GlyphManager {
     }
 
     /// `evict(keep)`: remove glyphs for all but the supplied font stacks.
-    pub fn evict(&self, keep: &BTreeSet<FontStack>) {
+    pub fn evict(&self, keep: &VecSet<FontStack>) {
         self.entries.borrow_mut().retain(|font_stack, _| keep.contains(font_stack));
     }
 

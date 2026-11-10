@@ -6,11 +6,11 @@
 // `background_layer::Impl` holds an `ImplBase` and implements the trait.
 // `dyn Impl` derefs to its `ImplBase`, so `impl_.id` reads as in C++.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
 use mln_util::immutable::Immutable;
+use mln_util::vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression};
@@ -65,7 +65,7 @@ impl ImplBase {
     /// The base `Layer::Impl::collectLayoutGlobalStateRefs` (the filter's
     /// global-state refs), which overrides call as
     /// `Layer::Impl::collectLayoutGlobalStateRefs(refs)`.
-    pub fn collect_filter_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    pub fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
         if let Some(expression) = &self.filter.expression {
             crate::expression::collect_global_state_refs(expression.as_ref(), refs);
         }
@@ -90,7 +90,7 @@ pub trait Impl: AsAny {
     fn get_type_info(&self) -> &'static LayerTypeInfo;
 
     /// Populates the given `font_stack` with fonts being used by the layer.
-    fn populate_font_stack(&self, _font_stack: &mut BTreeSet<FontStack>) {}
+    fn populate_font_stack(&self, _font_stack: &mut VecSet<FontStack>) {}
 
     /// Collect the style dependencies for this layer
     fn get_dependencies(&self) -> Dependency {
@@ -105,7 +105,7 @@ pub trait Impl: AsAny {
 
     /// Collect the global-state properties referenced by expressions that
     /// affect tile layout, mirroring get_layout_dependencies().
-    fn collect_layout_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.base().collect_filter_global_state_refs(refs);
     }
 }

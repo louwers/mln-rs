@@ -9,12 +9,12 @@
 // thread the result is the same. If two threads create the same file source
 // at once, the first one registered wins and the other is dropped.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use mln_util::client_options::ClientOptions;
 use mln_util::string::to_string_u64;
 use mln_util::sync::MutexExt;
+use mln_util::vec_map::VecMap;
 
 use crate::asset_file_source::AssetFileSource;
 #[cfg(feature = "sqlite")]
@@ -40,7 +40,7 @@ struct FileSourceInfo {
 #[derive(Default)]
 struct Impl {
     file_sources: Vec<FileSourceInfo>,
-    file_source_factories: BTreeMap<FileSourceType, FileSourceFactory>,
+    file_source_factories: VecMap<FileSourceType, FileSourceFactory>,
 }
 
 /// `FileSourceManager`: a singleton (`get()`) that creates and shares file

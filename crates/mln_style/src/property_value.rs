@@ -1,7 +1,6 @@
 // Ports include/mln/style/property_value.hpp.
 
-use std::collections::BTreeSet;
-
+use mln_util::vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
@@ -125,7 +124,7 @@ impl<T> PropertyValue<T> {
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PropertyValue::Undefined | PropertyValue::Constant(_) => None,
             PropertyValue::Expression(ex) => ex.get_global_state_refs(),

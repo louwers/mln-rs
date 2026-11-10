@@ -7,7 +7,6 @@
 // observer may call back into the loader.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -19,6 +18,7 @@ use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::immutable::Immutable;
+use mln_util::vec_map::VecMap;
 
 use crate::sprite_loader_observer::{NullSpriteLoaderObserver, SpriteLoaderObserver};
 use crate::sprite_parser::parse_sprite_images;
@@ -33,7 +33,7 @@ struct SpriteData {
 }
 
 struct Inner {
-    data_map: RefCell<BTreeMap<String, SpriteData>>,
+    data_map: RefCell<VecMap<String, SpriteData>>,
     observer: RefCell<Rc<dyn SpriteLoaderObserver>>,
     thread_pool: TaggedScheduler,
 }
@@ -137,7 +137,7 @@ impl SpriteLoader {
         SpriteLoader {
             pixel_ratio,
             inner: Rc::new(Inner {
-                data_map: RefCell::new(BTreeMap::new()),
+                data_map: RefCell::new(VecMap::new()),
                 observer: RefCell::new(Rc::new(NullSpriteLoaderObserver)),
                 thread_pool,
             }),

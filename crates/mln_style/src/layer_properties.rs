@@ -4,9 +4,8 @@
 // `Layer::Impl`, the data is `LayerPropertiesBase` and the virtual interface
 // is the `LayerProperties` trait. `dyn LayerProperties` derefs to its base.
 
-use std::collections::BTreeSet;
-
 use mln_util::immutable::Immutable;
+use mln_util::vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
@@ -49,7 +48,7 @@ pub trait LayerProperties: AsAny {
 
     /// Collect the global-state properties referenced by the expressions
     /// retained in the evaluated properties.
-    fn collect_evaluated_global_state_refs(&self, _refs: &mut BTreeSet<String>) {}
+    fn collect_evaluated_global_state_refs(&self, _refs: &mut VecSet<String>) {}
 }
 
 impl std::ops::Deref for dyn LayerProperties {

@@ -23,7 +23,7 @@
 // is unused in C++ and left out.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
@@ -43,6 +43,7 @@ use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
 use mln_util::mat4::{Mat4, matrix};
+use mln_util::vec_map::VecMap;
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::{
@@ -180,14 +181,14 @@ pub type CollisionGroup = (u16, Option<CollisionGroupPredicate>);
 
 /// `CollisionGroups`.
 pub struct CollisionGroups {
-    collision_groups: BTreeMap<String, CollisionGroup>,
+    collision_groups: VecMap<String, CollisionGroup>,
     max_group_id: u16,
     cross_source_collisions: bool,
 }
 
 impl CollisionGroups {
     pub fn new(cross_source_collisions: bool) -> Self {
-        CollisionGroups { collision_groups: BTreeMap::new(), max_group_id: 0, cross_source_collisions }
+        CollisionGroups { collision_groups: VecMap::new(), max_group_id: 0, cross_source_collisions }
     }
 
     /// `get(sourceID)`.

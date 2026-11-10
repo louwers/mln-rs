@@ -1,7 +1,6 @@
 // Ports include/mln/style/property_expression.hpp +
 // src/mln/style/property_expression.cpp.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mln_expression::expression::FeatureState;
@@ -9,6 +8,7 @@ use mln_expression::range::Range;
 use mln_expression::value::from_expression_values;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
+use mln_util::vec_map::VecSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::expression::{
@@ -23,11 +23,11 @@ fn check_gpu_capable(expression: &dyn Expression, zoom_curve: &ZoomCurvePtr<'_>)
         && (*expression.get_type() == Type::Number || *expression.get_type() == Type::Color)
 }
 
-fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<BTreeSet<String>>> {
+fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<VecSet<String>>> {
     if !expression.has(Dependency::GLOBAL_STATE) {
         return None;
     }
-    let mut refs = BTreeSet::new();
+    let mut refs = VecSet::new();
     collect_global_state_refs(expression, &mut refs);
     Some(Arc::new(refs))
 }
@@ -43,7 +43,7 @@ fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<B
 pub struct PropertyExpressionBase {
     expression: Arc<dyn Expression>,
     captured_global_state: Option<Arc<GlobalStateMap>>,
-    global_state_refs: Option<Arc<BTreeSet<String>>>,
+    global_state_refs: Option<Arc<VecSet<String>>>,
     use_integer_zoom: bool,
     is_zoom_constant: bool,
     is_feature_constant: bool,
@@ -168,7 +168,7 @@ impl PropertyExpressionBase {
     }
 
     /// None if the expression does not reference the global state.
-    pub fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
     }
 
@@ -291,7 +291,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
     pub fn evaluate_feature_images(
         &self,
         feature: &dyn GeometryTileFeature,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         final_default_value: T,
     ) -> T {
         self.evaluate(
@@ -317,7 +317,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
     pub fn evaluate_feature_images_canonical(
         &self,
         feature: &dyn GeometryTileFeature,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         canonical: &CanonicalTileID,
         final_default_value: T,
     ) -> T {
@@ -339,7 +339,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         &self,
         zoom: f32,
         feature: &dyn GeometryTileFeature,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         final_default_value: T,
     ) -> T {
         self.evaluate(
@@ -353,7 +353,7 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
         &self,
         zoom: f32,
         feature: &dyn GeometryTileFeature,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         canonical: &CanonicalTileID,
         final_default_value: T,
     ) -> T {

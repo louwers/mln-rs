@@ -5,7 +5,6 @@
 // (test/style/expression/global_state.test.cpp) and Layer.SymbolLayerOverrides
 // (test/style/style_layer.test.cpp).
 
-use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use feature::{PropertyMap, Value as MbglValue};
@@ -30,6 +29,7 @@ use mln_style::transition_options::TransitionOptions;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::Color;
 use mln_util::geometry::FeatureType;
+use mln_util::vec_map::{VecMap, VecSet};
 
 /// test/include/mln/test/stub_geometry_tile_feature.hpp (the property-map
 /// constructor).
@@ -202,7 +202,7 @@ impl FormattedCase {
                 let mut second_paragraph = FormatExpressionSection::new(literal_str("second paragraph"));
                 second_paragraph.set_text_section_options(None, None, Some(to_color(literal_str("blue"), None)));
                 let formatted_expr2: Box<dyn Expression> = Box::new(FormatExpression::new(vec![second_paragraph]));
-                let mut branches: BTreeMap<String, Arc<dyn Expression>> = BTreeMap::new();
+                let mut branches: VecMap<String, Arc<dyn Expression>> = VecMap::new();
                 branches.insert("1st".to_owned(), Arc::from(formatted_expr1));
                 branches.insert("2nd".to_owned(), Arc::from(formatted_expr2));
                 Box::new(Match::<String>::new(Type::Formatted, literal_str("input"), branches, format_str("otherwise")))
@@ -327,7 +327,7 @@ fn symbol_layer_overrides() {
         let wrapped = paint.get::<TextColor>();
         assert!(!wrapped.is_constant());
         assert!(wrapped.get_dependencies().intersects(Dependency::GLOBAL_STATE));
-        assert_eq!(Some(&BTreeSet::from(["labelColor".to_owned()])), wrapped.get_global_state_refs());
+        assert_eq!(Some(&VecSet::from(["labelColor".to_owned()])), wrapped.get_global_state_refs());
 
         // A section without an override evaluates from the captured state.
         let feature = StubGeometryTileFeature::new(&[]);

@@ -17,7 +17,6 @@
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
@@ -27,6 +26,7 @@ use mln_util::client_options::ClientOptions;
 use mln_util::constants::MBTILES_PROTOCOL;
 use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
+use mln_util::vec_map::VecMap;
 use serde_json::Value as Json;
 
 use crate::async_request::AsyncRequest;
@@ -92,7 +92,7 @@ fn error_response(reason: Reason, message: impl Into<String>) -> Response {
 pub struct MBTilesFileSourceThread {
     // Multiple databases open simultaneously, to effectively support
     // multiple .mbtiles maps
-    db_cache: RefCell<BTreeMap<Vec<u8>, Database>>,
+    db_cache: RefCell<VecMap<Vec<u8>, Database>>,
 }
 
 impl MBTilesFileSourceThread {
@@ -113,7 +113,7 @@ impl MBTilesFileSourceThread {
 
         let mut doc = Document::default();
 
-        let mut values: BTreeMap<String, String> = BTreeMap::new();
+        let mut values: VecMap<String, String> = VecMap::new();
         let db =
             Database::open(path.to_str().ok_or("Invalid UTF-8 in path")?, OpenFlag::ReadOnly).map_err(|e| e.message)?;
         let conn = db.conn();
@@ -281,7 +281,7 @@ impl MBTilesFileSource {
     pub fn new(resource_options: &ResourceOptions, client_options: &ClientOptions) -> Self {
         MBTilesFileSource {
             thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
-                db_cache: RefCell::new(BTreeMap::new()),
+                db_cache: RefCell::new(VecMap::new()),
             }),
             resource_options: Mutex::new(resource_options.clone()),
             client_options: Mutex::new(client_options.clone()),

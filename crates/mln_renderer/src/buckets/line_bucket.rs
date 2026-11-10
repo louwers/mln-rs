@@ -1,6 +1,5 @@
 // Ports src/mln/renderer/buckets/line_bucket.hpp and line_bucket.cpp
 
-use std::collections::BTreeMap;
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -24,6 +23,7 @@ use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::payload::pod;
 use mln_util::sync::RwLockExt;
+use mln_util::vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -66,7 +66,7 @@ pub struct LineBucket {
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: BTreeMap<String, RwLock<LineBinders>>,
+    pub paint_property_binders: VecMap<String, RwLock<LineBinders>>,
     zoom: f32,
     overscaling: u32,
 }
@@ -84,11 +84,11 @@ impl LineBucket {
     /// `LineBucket(layout, layerPaintProperties, zoom, overscaling)`.
     pub fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self {
-        let mut paint_property_binders = BTreeMap::new();
+        let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
                 RwLock::new(LineBinders::new(get_evaluated::<LineLayerProperties>(properties), zoom))

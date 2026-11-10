@@ -5,7 +5,6 @@
 // Quirk kept: the conversion interpolates with ColorSpace::RGB; the legacy
 // "colorSpace" member is not read.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use mln_expression::Interpolator;
@@ -15,6 +14,7 @@ use mln_expression::formatted::Formatted;
 use mln_expression::image_expression::ImageExpression;
 use mln_expression::match_::{Match, MatchLabel};
 use mln_style_types::VariableAnchorOffsetCollection;
+use mln_util::vec_map::VecMap;
 use mln_util::{Color, ColorSpace, Padding};
 
 use super::{Converter, Convertible, Error, convert};
@@ -368,7 +368,7 @@ fn convert_branches<T: Ord>(
     value: &Convertible<'_>,
     error: &mut Error,
     convert_key: fn(&Convertible<'_>, &mut Error) -> Option<T>,
-) -> Option<BTreeMap<T, Box<dyn Expression>>> {
+) -> Option<VecMap<T, Box<dyn Expression>>> {
     let Some(stops_value) = value.object_member("stops") else {
         error.message = "function value must specify stops".to_owned();
         return None;
@@ -384,7 +384,7 @@ fn convert_branches<T: Ord>(
         return None;
     }
 
-    let mut stops = BTreeMap::new();
+    let mut stops = VecMap::new();
     for i in 0..stops_value.array_length() {
         let stop_value = stops_value.array_member(i);
 
@@ -441,10 +441,10 @@ fn interpolate(
 fn categorical<T: MatchLabel>(
     type_: Type,
     property: &str,
-    branches: BTreeMap<T, Box<dyn Expression>>,
+    branches: VecMap<T, Box<dyn Expression>>,
     def: Option<Box<dyn Expression>>,
 ) -> Box<dyn Expression> {
-    let converted_branches: BTreeMap<T, Arc<dyn Expression>> =
+    let converted_branches: VecMap<T, Arc<dyn Expression>> =
         branches.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
     Box::new(Match::<T>::new(
         type_,
@@ -458,7 +458,7 @@ fn categorical<T: MatchLabel>(
 fn categorical_bool(
     type_: Type,
     property: &str,
-    mut branches: BTreeMap<bool, Box<dyn Expression>>,
+    mut branches: VecMap<bool, Box<dyn Expression>>,
     def: Option<Box<dyn Expression>>,
 ) -> Box<dyn Expression> {
     let true_case = branches.remove(&true).unwrap_or_else(|| dsl::error("replaced with default"));
@@ -605,7 +605,7 @@ impl InnerStops for DoubleStops {
     }
 }
 
-impl<K: Ord> InnerStops for BTreeMap<K, Box<dyn Expression>> {
+impl<K: Ord> InnerStops for VecMap<K, Box<dyn Expression>> {
     type Key = K;
     fn emplace(&mut self, key: K, value: Box<dyn Expression>) {
         self.entry(key).or_insert(value);
@@ -852,7 +852,7 @@ pub fn convert_function_to_expression_for_type(
 
         if source_value.to_bool().is_some() {
             return match function_type {
-                FunctionType::Categorical => composite::<BTreeMap<bool, Box<dyn Expression>>>(
+                FunctionType::Categorical => composite::<VecMap<bool, Box<dyn Expression>>>(
                     type_.clone(),
                     value,
                     err,
@@ -889,7 +889,7 @@ pub fn convert_function_to_expression_for_type(
                         )
                     })
                 }
-                FunctionType::Categorical => composite::<BTreeMap<i64, Box<dyn Expression>>>(
+                FunctionType::Categorical => composite::<VecMap<i64, Box<dyn Expression>>>(
                     type_.clone(),
                     value,
                     err,
@@ -905,7 +905,7 @@ pub fn convert_function_to_expression_for_type(
 
         if source_value.to_string().is_some() {
             return match function_type {
-                FunctionType::Categorical => composite::<BTreeMap<String, Box<dyn Expression>>>(
+                FunctionType::Categorical => composite::<VecMap<String, Box<dyn Expression>>>(
                     type_.clone(),
                     value,
                     err,

@@ -13,7 +13,7 @@
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, ColorMode};
@@ -28,6 +28,7 @@ use mln_gfx::types::{
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
+use mln_util::vec_map::VecMap;
 
 use crate::context::Context;
 use crate::shaders::shader_source::{AttributeInfo, TextureInfo, prelude};
@@ -513,7 +514,7 @@ impl ShaderProgram {
             });
         }
 
-        let mut grouped: BTreeMap<u32, Vec<BindingInfo>> = BTreeMap::new();
+        let mut grouped: VecMap<u32, Vec<BindingInfo>> = VecMap::new();
         for info in &self.binding_infos {
             grouped.entry(info.group).or_default().push(*info);
         }

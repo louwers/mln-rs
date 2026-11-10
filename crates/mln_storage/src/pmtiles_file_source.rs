@@ -16,7 +16,6 @@
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -26,6 +25,7 @@ use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::sync::MutexExt;
+use mln_util::vec_map::VecMap;
 use pmtiles::{EntryV3, HeaderV3};
 use serde_json::Value as Json;
 
@@ -81,11 +81,11 @@ struct State {
     client_options: Arc<Mutex<ClientOptions>>,
 
     file_source: RefCell<Option<Arc<dyn FileSource>>>,
-    header_cache: RefCell<BTreeMap<String, HeaderV3>>,
-    metadata_cache: RefCell<BTreeMap<String, String>>,
-    directory_cache: RefCell<BTreeMap<String, BTreeMap<String, Vec<EntryV3>>>>,
-    directory_cache_control: RefCell<BTreeMap<String, Vec<String>>>,
-    tasks: RefCell<BTreeMap<u64, Box<dyn AsyncRequest>>>,
+    header_cache: RefCell<VecMap<String, HeaderV3>>,
+    metadata_cache: RefCell<VecMap<String, String>>,
+    directory_cache: RefCell<VecMap<String, VecMap<String, Vec<EntryV3>>>>,
+    directory_cache_control: RefCell<VecMap<String, Vec<String>>>,
+    tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
 impl State {
@@ -684,11 +684,11 @@ impl PMTilesFileSource {
                     resource_options: ro,
                     client_options: co,
                     file_source: RefCell::new(None),
-                    header_cache: RefCell::new(BTreeMap::new()),
-                    metadata_cache: RefCell::new(BTreeMap::new()),
-                    directory_cache: RefCell::new(BTreeMap::new()),
-                    directory_cache_control: RefCell::new(BTreeMap::new()),
-                    tasks: RefCell::new(BTreeMap::new()),
+                    header_cache: RefCell::new(VecMap::new()),
+                    metadata_cache: RefCell::new(VecMap::new()),
+                    directory_cache: RefCell::new(VecMap::new()),
+                    directory_cache_control: RefCell::new(VecMap::new()),
+                    tasks: RefCell::new(VecMap::new()),
                 }),
             }),
             resource_options,

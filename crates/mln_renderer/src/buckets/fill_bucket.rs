@@ -2,7 +2,7 @@
 // (`MLN_TRIANGULATE_FILL_OUTLINES` = 1, as for the WebGPU backend: the
 // outlines are generated both as triangulated lines and as line primitives).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 
@@ -21,6 +21,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::serialization::payload::pod;
 use mln_util::serialization::sorted;
 use mln_util::sync::RwLockExt;
+use mln_util::vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -73,7 +74,7 @@ pub struct FillBucket {
 
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: BTreeMap<String, RwLock<FillBinders>>,
+    pub paint_property_binders: VecMap<String, RwLock<FillBinders>>,
 
     #[serde(with = "sorted::map")]
     sdf_patterns: HashMap<String, bool>,
@@ -87,11 +88,11 @@ impl FillBucket {
     /// `FillBucket(layout, layerPaintProperties, zoom, overscaling)`.
     pub fn new(
         _layout: &FillLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {
-        let mut paint_property_binders = BTreeMap::new();
+        let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
                 RwLock::new(FillBinders::new(get_evaluated::<FillLayerProperties>(properties), zoom))

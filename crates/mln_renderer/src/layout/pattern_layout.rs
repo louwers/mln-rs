@@ -12,7 +12,7 @@
 // again in `create_bucket` (C++ keeps the `unique_ptr<GeometryTileFeature>`).
 // Getting a feature twice yields the same feature.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_style::PropertyEvaluationParameters;
@@ -28,6 +28,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use mln_util::vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;
@@ -89,7 +90,7 @@ pub trait PatternLayoutSpec: 'static {
     /// `std::make_shared<BucketType>(layout, layerPropertiesMap, zoom, overscaling)`.
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self::Bucket;
@@ -97,7 +98,7 @@ pub trait PatternLayoutSpec: 'static {
 
 /// `PatternLayout<...>`.
 pub struct PatternLayout<S: PatternLayoutSpec> {
-    pub layer_properties_map: BTreeMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>>,
     pub bucket_leader_id: String,
 
     pub features: Vec<PatternFeature>,
@@ -127,7 +128,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         group: &[Immutable<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
         image_dependencies: &mut ImageDependencies,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         sorted: bool,
     ) -> Result<Self, ExceptionPtr> {
         debug_assert!(!group.is_empty());
@@ -142,7 +143,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let bucket_leader_id = leader_impl.id.clone();
 
         let mut has_pattern = false;
-        let mut layer_properties_map: BTreeMap<String, Immutable<dyn LayerProperties>> = BTreeMap::new();
+        let mut layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             let pattern_property = S::pattern_property(layer_properties);
@@ -365,7 +366,7 @@ impl PatternLayoutSpec for FillLayoutSpec {
     }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillBucket {
@@ -404,7 +405,7 @@ impl PatternLayoutSpec for LineLayoutSpec {
     }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> LineBucket {

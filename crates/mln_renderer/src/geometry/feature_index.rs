@@ -10,7 +10,7 @@
 // RenderLayer*>`) is `QueryLayers`. `DynamicFeatureIndex` (filled only by
 // the location indicator layer) is TODO(port).
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use geometry::Point;
@@ -26,6 +26,7 @@ use mln_util::exception::ExceptionPtr;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
 use mln_util::mat4::Mat4;
+use mln_util::vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::query::RenderedQueryOptions;
@@ -483,7 +484,7 @@ impl FeatureIndex {
     }
 
     /// The bucket leaders and their layer ids (sorted, for inspection).
-    pub fn bucket_layer_ids(&self) -> BTreeMap<String, Vec<String>> {
+    pub fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
         self.bucket_layer_ids.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
     }
 }
@@ -505,7 +506,7 @@ struct FeatureIndexParts {
 struct Grid {
     sort_index: usize,
     strings: Vec<String>,
-    bucket_layer_ids: BTreeMap<String, Vec<String>>,
+    bucket_layer_ids: VecMap<String, Vec<String>>,
     elements: Vec<Element>,
 }
 

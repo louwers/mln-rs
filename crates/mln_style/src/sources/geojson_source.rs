@@ -5,7 +5,6 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
@@ -19,6 +18,7 @@ use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::vec_map::VecMap;
 
 use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
@@ -32,7 +32,7 @@ use crate::source_impl;
 /// `GeoJSONOptions::ClusterExpression`.
 pub type ClusterExpression = (Arc<dyn Expression>, Arc<dyn Expression>);
 /// `GeoJSONOptions::ClusterProperties` (`std::map`).
-pub type ClusterProperties = BTreeMap<String, ClusterExpression>;
+pub type ClusterProperties = VecMap<String, ClusterExpression>;
 
 /// `style::GeoJSONOptions`.
 #[derive(Clone)]

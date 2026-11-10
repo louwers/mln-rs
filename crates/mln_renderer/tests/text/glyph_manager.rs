@@ -1,7 +1,6 @@
 // Ports test/text/glyph_manager.test.cpp.
 
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -24,6 +23,7 @@ use mln_util::font_stack::FontStack;
 use mln_util::i18n;
 use mln_util::image::AlphaImage;
 use mln_util::size::Size;
+use mln_util::vec_map::VecMap;
 
 use super::glyph_manager_bitmaps::{SDF_BITMAP, STUB_BITMAP};
 use super::{SquelchLog, read_file};
@@ -160,7 +160,7 @@ fn test_stack() -> FontStack {
 /// `GlyphDependencies{.glyphs = {{{{"Test Stack"}}, {chars...}}}, .shapes = {}}`.
 fn dependencies(chars: &[char]) -> GlyphDependencies {
     let ids: GlyphIDs = chars.iter().map(|c| GlyphID::new(*c as u32)).collect();
-    GlyphDependencies { glyphs: BTreeMap::from([(test_stack(), ids)]), shapes: Default::default() }
+    GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: Default::default() }
 }
 
 fn gid(c: char) -> GlyphID {
@@ -579,7 +579,7 @@ fn request_font_face(test: &GlyphManagerTest) -> Rc<RefCell<Option<GlyphMap>>> {
         *a.borrow_mut() = Some(glyphs);
     }));
     let ids: GlyphIDs = [GlyphID::with_type(0, FONT_FACE)].into_iter().collect();
-    let dependencies = GlyphDependencies { glyphs: BTreeMap::from([(test_stack(), ids)]), shapes: Default::default() };
+    let dependencies = GlyphDependencies { glyphs: VecMap::from([(test_stack(), ids)]), shapes: Default::default() };
     test.glyph_manager.get_glyphs(&test.requestor(), dependencies, Some(&test.file_source()));
     available
 }

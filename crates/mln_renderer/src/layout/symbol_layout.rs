@@ -7,7 +7,7 @@
 // images across worker messages.
 //
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use geometry::{LinearRing, Point, Polygon};
@@ -40,6 +40,7 @@ use mln_util::i18n;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::sync::RwLockExt;
+use mln_util::vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr, get_retain_feature_id};
 use crate::bucket_parameters::BucketParameters;
@@ -216,12 +217,12 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
 
 /// `SymbolLayout`.
 pub struct SymbolLayout {
-    pub layer_paint_properties: BTreeMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_paint_properties: VecMap<String, Immutable<dyn LayerProperties>>,
     pub bucket_leader_id: String,
     pub symbol_instances: Vec<SymbolInstance>,
     pub sort_key_ranges: Vec<SortKeyRange>,
 
-    compare_text: BTreeMap<Vec<u16>, Vec<Anchor>>,
+    compare_text: VecMap<Vec<u16>, Vec<Anchor>>,
 
     // Stores the layer so that we can hold on to GeometryTileFeature
     // instances in SymbolFeature, which may reference data from this object.
@@ -281,11 +282,11 @@ impl SymbolLayout {
         let layout = Arc::new(create_layout(&leader.layout, zoom, parameters.global_state.clone()));
 
         let mut this = SymbolLayout {
-            layer_paint_properties: BTreeMap::new(),
+            layer_paint_properties: VecMap::new(),
             bucket_leader_id: layers[0].base_impl.id.clone(),
             symbol_instances: Vec::new(),
             sort_key_ranges: Vec::new(),
-            compare_text: BTreeMap::new(),
+            compare_text: VecMap::new(),
             source_layer,
             overscaling,
             zoom,
@@ -404,7 +405,7 @@ impl SymbolLayout {
                 let base_font_stack: Vec<String> = layout.evaluate_canonical::<TextFont>(zoom, &ft, &canonical_id);
 
                 let mut formatted_text = TaggedString::default();
-                let mut section_table: BTreeMap<usize, usize> = BTreeMap::new();
+                let mut section_table: VecMap<usize, usize> = VecMap::new();
 
                 for (section_index, section) in formatted.sections.iter().enumerate() {
                     if let Some(image) = &section.image {
