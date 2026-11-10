@@ -20,8 +20,8 @@ use geojson::{Feature, GeoJSON, Geometry, Point};
 use mln_actor::{RunLoop, Timer};
 use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
-    BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection, NorthOrientation,
-    ProjectionMode, RenderMode, TileLodMode, ViewportMode,
+    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
+    NorthOrientation, ProjectionMode, RenderMode, TileLodMode, ViewportMode,
 };
 use mln_platform_default::HeadlessFrontend;
 use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
@@ -477,6 +477,54 @@ fn pixel_for_lat_lng_after_zoom_around_a_point_across_the_antimeridian() {
     let projected = MapProjection::new(&test.map()).pixel_for_lat_lng(&place);
     assert_near(anchor.x, projected.x, 1e-6);
     assert_near(anchor.y, projected.y, 1e-6);
+}
+
+// gtest: Map.PixelForLatLngWithTheCenterPastTheAntimeridian
+#[test]
+fn pixel_for_lat_lng_with_the_center_past_the_antimeridian() {
+    let test = MapTest::new();
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map()
+        .set_bounds(&BoundOptions::default().with_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))))
+        .unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 181.0))).with_zoom(Some(4.0)));
+    assert_near(181.0, test.map().get_camera_options(None).center.unwrap().longitude(), 1e-9);
+
+    // A degree is 512 * 2^4 / 360 pixels at zoom 4.
+    let degree = 512.0 * 16.0 / 360.0;
+    let projection = MapProjection::new(&test.map());
+    for (longitude, x) in [(179.0, 256.0 - 2.0 * degree), (-179.5, 256.0 - 0.5 * degree)] {
+        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+    }
+}
+
+// https://github.com/maplibre/maplibre-native/issues/3580
+// iOS ends a pan with a moveBy that has a duration while the gesture is still
+// in progress. Across the antimeridian the move starts a world away, and
+// annotation views placed through pixelForLatLng vanished until the center
+// crossed.
+// gtest: Map.PixelForLatLngDuringAFlingAcrossTheAntimeridian
+#[test]
+fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(4.0)));
+
+    let degree = 512.0 * 16.0 / 360.0;
+    test.map().set_gesture_in_progress(true);
+    test.map()
+        .move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(mln_util::chrono::seconds(10)))
+        .unwrap();
+    let center = test.map().get_camera_options(None).center.unwrap().longitude();
+    assert!(center < -180.0, "{center}");
+
+    let projection = MapProjection::new(&test.map());
+    for (longitude, nearest) in [(179.5, -180.5), (-179.5, -179.5)] {
+        let x = 256.0 + (nearest - center) * degree;
+        assert_near(x, test.map().pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+        assert_near(x, projection.pixel_for_lat_lng(&ll(0.0, longitude)).x, 1e-6);
+    }
 }
 
 /// `MapTest<MainResourceLoader> test{cachePath, assetPath}`.

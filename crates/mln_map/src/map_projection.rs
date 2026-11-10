@@ -26,9 +26,7 @@ impl MapProjection {
 
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         // The implementation is just a copy from map.cpp
-        let mut unwrapped_lat_lng = lat_lng.wrapped();
-        unwrapped_lat_lng.unwrap_for_shortest_path(&self.transform.get_lat_lng(WrapMode::Wrapped));
-        self.transform.lat_lng_to_screen_coordinate(&unwrapped_lat_lng)
+        self.transform.lat_lng_to_screen_coordinate(&self.transform.get_state().lat_lng_near_center(lat_lng))
     }
 
     /// `Err`: the std::domain_error of the C++ LatLng constructor.

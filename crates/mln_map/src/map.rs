@@ -508,13 +508,8 @@ impl Map {
 
     /// `pixelForLatLng(latLng)`.
     pub fn pixel_for_lat_lng(&self, lat_lng: &LatLng) -> ScreenCoordinate {
-        // If the center and point longitudes are not in the same side of the
-        // antimeridian, we unwrap the point longitude so it would be seen if
-        // e.g. the next antimeridian side is visible.
         let transform = self.impl_.transform.borrow();
-        let mut unwrapped_lat_lng = lat_lng.wrapped();
-        unwrapped_lat_lng.unwrap_for_shortest_path(&transform.get_lat_lng(WrapMode::Wrapped));
-        transform.lat_lng_to_screen_coordinate(&unwrapped_lat_lng)
+        transform.lat_lng_to_screen_coordinate(&transform.get_state().lat_lng_near_center(lat_lng))
     }
 
     /// `latLngForPixel(pixel, wrapMode)`. `Err`: the std::domain_error of

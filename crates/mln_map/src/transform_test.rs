@@ -313,6 +313,27 @@ fn unwrapped_lat_lng() {
     assert_near(wrapped_leftwards.longitude(), -77.0, 1e-8);
 }
 
+// The copy unwrapForShortestPath finds for a wrapped center, a point 180
+// degrees away included, and that copy moved into the center's own world when
+// bounds keep the center past the antimeridian.
+// gtest: Transform.LatLngNearCenter
+#[test]
+fn lat_lng_near_center() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+
+    transform.jump_to(&cam().with_center(Some(ll(0.0, -10.0))).with_zoom(Some(4.0)));
+    assert_near(-181.0, transform.get_state().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
+    assert_near(170.0, transform.get_state().lat_lng_near_center(&ll(0.0, 170.0)).longitude(), 1e-9);
+
+    transform.set_lat_lng_bounds(LatLngBounds::hull(ll(-10.0, 170.0), ll(10.0, 190.0))).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 181.0))));
+    assert_near(181.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+    assert_near(179.0, transform.get_state().lat_lng_near_center(&ll(0.0, 179.0)).longitude(), 1e-9);
+    assert_near(180.2, transform.get_state().lat_lng_near_center(&ll(0.0, -179.8)).longitude(), 1e-9);
+    assert_near(350.0, transform.get_state().lat_lng_near_center(&ll(0.0, -10.0)).longitude(), 1e-9);
+}
+
 // gtest: Transform.ConstrainHeightOnly
 #[test]
 fn constrain_height_only() {
