@@ -178,44 +178,55 @@ fn lowercase(s: &str) -> String {
     nunicode::lowercase(s)
 }
 
-fn filter_property_number(
-    params: &EvaluationContext<'_>,
-    args: &[Box<dyn Expression>],
-    cmp: fn(f64, f64) -> bool,
-) -> EvaluationResult {
-    let a = eval_args(params, args)?;
-    let rhs = feature_property_as_double(params, string(&a[0]));
-    Ok(Value::Bool(rhs.is_some_and(|rhs| cmp(rhs, num(&a[1])))))
+// A legacy comparison filter compares a number to a numeric feature value and
+// a string to a string one. One signature takes either, rather than an
+// overload for each, because parsing tries every overload of an arity on each
+// argument.
+fn compare_legacy_filter_value(
+    lhs: &Value,
+    as_double: impl FnOnce() -> Option<f64>,
+    as_string: impl FnOnce() -> Option<String>,
+    compare_double: fn(&f64, &f64) -> bool,
+    compare_string: fn(&str, &str) -> bool,
+) -> bool {
+    match lhs {
+        Value::Number(value) => as_double().is_some_and(|rhs| compare_double(&rhs, value)),
+        Value::String(value) => as_string().is_some_and(|rhs| compare_string(&rhs, value)),
+        _ => false,
+    }
 }
 
-fn filter_property_string(
+fn filter_property(
     params: &EvaluationContext<'_>,
     args: &[Box<dyn Expression>],
-    cmp: fn(&str, &str) -> bool,
+    compare_double: fn(&f64, &f64) -> bool,
+    compare_string: fn(&str, &str) -> bool,
 ) -> EvaluationResult {
     let a = eval_args(params, args)?;
-    let rhs = feature_property_as_string(params, string(&a[0]));
-    Ok(Value::Bool(rhs.is_some_and(|rhs| cmp(&rhs, string(&a[1])))))
+    let key = string(&a[0]);
+    Ok(Value::Bool(compare_legacy_filter_value(
+        &a[1],
+        || feature_property_as_double(params, key),
+        || feature_property_as_string(params, key),
+        compare_double,
+        compare_string,
+    )))
 }
 
-fn filter_id_number(
+fn filter_id(
     params: &EvaluationContext<'_>,
     args: &[Box<dyn Expression>],
-    cmp: fn(f64, f64) -> bool,
+    compare_double: fn(&f64, &f64) -> bool,
+    compare_string: fn(&str, &str) -> bool,
 ) -> EvaluationResult {
     let a = eval_args(params, args)?;
-    let rhs = feature_id_as_double(params);
-    Ok(Value::Bool(rhs.is_some_and(|rhs| cmp(rhs, num(&a[0])))))
-}
-
-fn filter_id_string(
-    params: &EvaluationContext<'_>,
-    args: &[Box<dyn Expression>],
-    cmp: fn(&str, &str) -> bool,
-) -> EvaluationResult {
-    let a = eval_args(params, args)?;
-    let rhs = feature_id_as_string(params);
-    Ok(Value::Bool(rhs.is_some_and(|rhs| cmp(&rhs, string(&a[0])))))
+    Ok(Value::Bool(compare_legacy_filter_value(
+        &a[0],
+        || feature_id_as_double(params),
+        || feature_id_as_string(params),
+        compare_double,
+        compare_string,
+    )))
 }
 
 fn math1(params: &EvaluationContext<'_>, args: &[Box<dyn Expression>], f: fn(f64) -> f64) -> EvaluationResult {
@@ -532,53 +543,29 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             };
             Ok(Value::Bool(feature_type_as_string(feature.get_type()).as_deref() == Some(string(&a[0]))))
         }),
-        sig("filter-<", T::Boolean, fixed(&[s.clone(), n.clone()]), D::FEATURE, |p, args| {
-            filter_property_number(p, args, |a, b| a < b)
+        sig("filter-<", T::Boolean, fixed(&[s.clone(), T::Value]), D::FEATURE, |p, args| {
+            filter_property(p, args, PartialOrd::lt, PartialOrd::lt)
         }),
-        sig("filter-<", T::Boolean, fixed(&[s.clone(), s.clone()]), D::FEATURE, |p, args| {
-            filter_property_string(p, args, |a, b| a < b)
+        sig("filter-id-<", T::Boolean, fixed(&[T::Value]), D::FEATURE, |p, args| {
+            filter_id(p, args, PartialOrd::lt, PartialOrd::lt)
         }),
-        sig("filter-id-<", T::Boolean, fixed(&[n.clone()]), D::FEATURE, |p, args| {
-            filter_id_number(p, args, |a, b| a < b)
+        sig("filter->", T::Boolean, fixed(&[s.clone(), T::Value]), D::FEATURE, |p, args| {
+            filter_property(p, args, PartialOrd::gt, PartialOrd::gt)
         }),
-        sig("filter-id-<", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
-            filter_id_string(p, args, |a, b| a < b)
+        sig("filter-id->", T::Boolean, fixed(&[T::Value]), D::FEATURE, |p, args| {
+            filter_id(p, args, PartialOrd::gt, PartialOrd::gt)
         }),
-        sig("filter->", T::Boolean, fixed(&[s.clone(), n.clone()]), D::FEATURE, |p, args| {
-            filter_property_number(p, args, |a, b| a > b)
+        sig("filter-<=", T::Boolean, fixed(&[s.clone(), T::Value]), D::FEATURE, |p, args| {
+            filter_property(p, args, PartialOrd::le, PartialOrd::le)
         }),
-        sig("filter->", T::Boolean, fixed(&[s.clone(), s.clone()]), D::FEATURE, |p, args| {
-            filter_property_string(p, args, |a, b| a > b)
+        sig("filter-id-<=", T::Boolean, fixed(&[T::Value]), D::FEATURE, |p, args| {
+            filter_id(p, args, PartialOrd::le, PartialOrd::le)
         }),
-        sig("filter-id->", T::Boolean, fixed(&[n.clone()]), D::FEATURE, |p, args| {
-            filter_id_number(p, args, |a, b| a > b)
+        sig("filter->=", T::Boolean, fixed(&[s.clone(), T::Value]), D::FEATURE, |p, args| {
+            filter_property(p, args, PartialOrd::ge, PartialOrd::ge)
         }),
-        sig("filter-id->", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
-            filter_id_string(p, args, |a, b| a > b)
-        }),
-        sig("filter-<=", T::Boolean, fixed(&[s.clone(), n.clone()]), D::FEATURE, |p, args| {
-            filter_property_number(p, args, |a, b| a <= b)
-        }),
-        sig("filter-<=", T::Boolean, fixed(&[s.clone(), s.clone()]), D::FEATURE, |p, args| {
-            filter_property_string(p, args, |a, b| a <= b)
-        }),
-        sig("filter-id-<=", T::Boolean, fixed(&[n.clone()]), D::FEATURE, |p, args| {
-            filter_id_number(p, args, |a, b| a <= b)
-        }),
-        sig("filter-id-<=", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
-            filter_id_string(p, args, |a, b| a <= b)
-        }),
-        sig("filter->=", T::Boolean, fixed(&[s.clone(), n.clone()]), D::FEATURE, |p, args| {
-            filter_property_number(p, args, |a, b| a >= b)
-        }),
-        sig("filter->=", T::Boolean, fixed(&[s.clone(), s.clone()]), D::FEATURE, |p, args| {
-            filter_property_string(p, args, |a, b| a >= b)
-        }),
-        sig("filter-id->=", T::Boolean, fixed(&[n.clone()]), D::FEATURE, |p, args| {
-            filter_id_number(p, args, |a, b| a >= b)
-        }),
-        sig("filter-id->=", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
-            filter_id_string(p, args, |a, b| a >= b)
+        sig("filter-id->=", T::Boolean, fixed(&[T::Value]), D::FEATURE, |p, args| {
+            filter_id(p, args, PartialOrd::ge, PartialOrd::ge)
         }),
         sig("filter-has", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
             let a = eval_args(p, args)?;
@@ -785,12 +772,18 @@ pub fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx: &mut 
         return None;
     }
 
+    // Each failed overload parses its arguments, so two overloads of one arity
+    // would make parsing a nested chain of them exponential in its depth.
+    let mut overload_matched_arity = false;
     for signature in &definitions {
         let matches = match &signature.params {
             Params::Varargs(_) => true,
             Params::Fixed(p) => p.len() == length - 1,
         };
         if matches {
+            debug_assert!(!overload_matched_arity);
+            overload_matched_arity = true;
+
             // First parse all the args, potentially coercing to the types
             // expected by this overload.
             ctx.clear_errors();
@@ -821,8 +814,14 @@ pub fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx: &mut 
             }
         }
     }
-    // The args couldn't be coerced to any of the expected types. Parse the
-    // arguments again without expected types just for the error message
+    // The overload that takes this many arguments failed, and its errors say
+    // why. Parsing the arguments again would double the work at every level.
+    if overload_matched_arity {
+        return None;
+    }
+
+    // No overload takes this many arguments. Parse the arguments without
+    // expected types just for the error message
     ctx.clear_errors();
     let mut args = Vec::with_capacity(length - 1);
 
