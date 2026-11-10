@@ -768,3 +768,21 @@ fn a_key_step_during_a_drag_leaves_the_drag_going() {
     assert!(!rig.camera.is_gesture_in_progress());
     assert!((rig.zoom() - (zoom + 1.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
+
+#[test]
+fn a_key_step_during_a_scroll_leaves_the_scroll_going() {
+    let mut rig = Rig::new();
+    let zoom = rig.zoom();
+    let at = p(100.0, 100.0);
+    rig.send(notches(at, -1.0));
+    rig.frame();
+    // `+` mid-ease is an update of the scroll's gesture, not its end.
+    rig.key(Key::ZoomIn, Modifiers::default());
+    for _ in 0..3 {
+        rig.frame();
+        assert!(rig.camera.is_gesture_in_progress());
+    }
+    rig.settle();
+    assert!(!rig.camera.is_gesture_in_progress());
+    assert!((rig.zoom() - (zoom + 1.0 / 3.0 + 1.0)).abs() < 1e-6, "{}", rig.zoom() - zoom);
+}

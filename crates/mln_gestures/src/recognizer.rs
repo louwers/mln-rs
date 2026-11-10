@@ -613,9 +613,22 @@ impl GestureRecognizer {
     /// animations. Within the recognizer's running gesture (a key during a
     /// drag) it is an update of that gesture, so it doesn't end it: the drag
     /// keeps its phase, and its release its momentum.
+    ///
+    /// A step that zooms takes over a running notch ease, which would
+    /// otherwise take the zoom back on its next frame: the levels the ease
+    /// hasn't zoomed yet join the step's.
     fn eased_step(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) {
         let phase = self.step_phase();
-        camera.apply_camera_delta(&CameraDelta { phase, ..delta });
+        let scale = delta.scale.map(|scale| scale * self.stop_notch_ease().exp2());
+        camera.apply_camera_delta(&CameraDelta { phase, scale, ..delta });
+    }
+
+    /// Stops a running notch ease; returns the levels it hadn't zoomed yet.
+    fn stop_notch_ease(&mut self) -> f64 {
+        let Some(scroll) = self.scroll.as_mut() else {
+            return 0.0;
+        };
+        scroll.ease.take().map_or(0.0, |ease| ease.distance - ease.applied)
     }
 
     /// The phase of a discrete step: see [`Self::eased_step`].
@@ -962,6 +975,8 @@ impl GestureRecognizer {
         };
         let viewport = V2::from(camera.viewport());
         let zoom = (viewport.x / size.x).min(viewport.y / size.y).log2();
+        // The box is what the user sees now: a running notch ease stops.
+        self.stop_notch_ease();
         let target = clamp_zoom(camera, zoom_of(camera) + zoom);
         camera.update_camera(&CameraUpdate {
             mode: CameraUpdateMode::Ease,
