@@ -44,7 +44,9 @@ const metrics = path.join(repo, 'tools/render-test/testdata/metrics');
 // suite's cache database: the real-world styles (vector tiles with fills,
 // lines, icons and labels), raster tiles, raster-dem tiles (hillshade and
 // color relief, whose borders the map side backfills from the neighbouring
-// tiles), and raster with GeoJSON.
+// tiles), raster with GeoJSON, and labels in font faces (complex scripts
+// and right-to-left text, which the map shapes with the shaper module it
+// loads for them).
 //
 // THRESHOLD is the share of a view's pixels that may differ (pixelmatch,
 // with the render tests' per-pixel threshold), unless the view says
@@ -64,6 +66,10 @@ const VIEWS = [
   // SwiftShader and lavapipe antialias the edges of the z1 coastlines
   // differently: 0.5% of the pixels.
   { id: 'combinations/color-relief--hillshade--vector-fill--color-relief--hillshade', allowed: 0.01 },
+  { id: 'text-font/devanagari' },
+  { id: 'text-font/khmer' },
+  { id: 'text-font/font-faces-bidi' },
+  { id: 'is-supported-script/font-faces-layout' },
 ];
 
 // Playwright 1.61.1's Chromium (Chrome for Testing 149), as CI installs it.
@@ -204,6 +210,11 @@ function served(json) {
   if (typeof copy.sprite === 'string') copy.sprite = fixtureUrl(copy.sprite);
   if (Array.isArray(copy.sprite)) copy.sprite = copy.sprite.map((sprite) => ({ ...sprite, url: fixtureUrl(sprite.url) }));
   if (typeof copy.glyphs === 'string') copy.glyphs = fixtureUrl(copy.glyphs);
+  for (const [name, faces] of Object.entries(copy['font-faces'] ?? {})) {
+    copy['font-faces'][name] = typeof faces === 'string'
+      ? fixtureUrl(faces)
+      : faces.map((face) => ({ ...face, url: fixtureUrl(face.url) }));
+  }
   return copy;
 }
 

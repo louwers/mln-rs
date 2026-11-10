@@ -34,8 +34,15 @@ async function run({ module, canvas, ports, width, height, ratio, style, camera 
       ticks.port2.postMessage(null);
     }
   };
+  // A style's font faces are shaped by a second module, which only this
+  // worker loads, the first time a style declares them.
+  const loadShaper = async () => {
+    const shaper = await import('./pkg/mln_web_shaper.js');
+    await shaper.default();
+    return shaper;
+  };
   const map = await WebMap.create(canvas, width, height, ratio, ports.length,
-    (instance, bytes) => ports[instance].postMessage(bytes, [bytes.buffer]), wake);
+    (instance, bytes) => ports[instance].postMessage(bytes, [bytes.buffer]), wake, loadShaper);
 
   ticks.port1.onmessage = () => {
     tickScheduled = false;

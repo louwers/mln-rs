@@ -1706,12 +1706,22 @@ dependencies = [
  "mln-rs-platform-default-image",
  "mln-rs-renderer",
  "mln-rs-storage",
+ "mln-rs-text",
  "mln-rs-util",
  "mln-rs-webgpu",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
  "wgpu",
+]
+
+[[package]]
+name = "mln-rs-web-shaper"
+version = "0.0.10"
+dependencies = [
+ "js-sys",
+ "mln-rs-text",
+ "wasm-bindgen",
 ]
 
 [[package]]

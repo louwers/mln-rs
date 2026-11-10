@@ -12,15 +12,23 @@
 // port does the same with `Rc::strong_count`.
 //
 // Font faces (MLN_TEXT_SHAPING_HARFBUZZ): the style's "font-faces" are
-// fetched as font files (`Resource::fontFace`) and shaped with
-// mln_text's HBShaper (HarfRust).
+// fetched as font files (`Resource::fontFace`) and shaped with the
+// `FontFaceEngine` (font_face_engine.rs): mln_text's HBShaper (HarfRust)
+// natively, ready at once. An engine that needs time to get ready (the
+// browser build loads its shaper as a second wasm module) is asked to as soon
+// as the style has font faces; a font file that arrives before it is ready
+// waits, parsed when the engine reports back on this thread's RunLoop, and
+// the tiles that need it wait through their GlyphDependencies as for any
+// range still in flight.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
+use mln_actor::{AsyncTask, AsyncTaskSender};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
+use mln_text::HBShapeAdjust;
 use mln_text::glyph::{
     FontFaces, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphIDs, GlyphMap, GlyphRange, Glyphs, HBShapeRequests,
     get_glyph_range,
@@ -28,12 +36,15 @@ use mln_text::glyph::{
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::local_glyph_rasterizer::{DefaultLocalGlyphRasterizer, LocalGlyphRasterizer};
 use mln_text::tagged_string::font_stack_hash;
-use mln_text::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::font_stack::FontStack;
 use mln_util::immutable::Immutable;
+use mln_util::logging::{Event, Log};
+use mln_util::sync::MutexExt;
 use mln_util::tiny_sdf::transform_raster_to_sdf;
 use serde::{Deserialize, Serialize};
+
+use crate::text::font_face_engine::{self, FontFaceEngine, FontFaceShaper};
 
 /// `HBShapeResult`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -83,6 +94,25 @@ struct Entry {
 
 type Notification = (Weak<dyn GlyphRequestor>, GlyphMap, HBShapeRequests);
 
+/// What the font-face engine's `prepare` reported, and how to wake the
+/// manager when it does; shared with its `ready` callback, which may run on
+/// another thread.
+#[derive(Default)]
+struct EngineReadiness {
+    result: Mutex<Option<Result<(), String>>>,
+    waker: Mutex<Option<AsyncTaskSender>>,
+}
+
+impl EngineReadiness {
+    fn is_reported(&self) -> bool {
+        self.result.lock_unpoisoned().is_some()
+    }
+
+    fn is_ready(&self) -> bool {
+        matches!(*self.result.lock_unpoisoned(), Some(Ok(())))
+    }
+}
+
 /// `GlyphManager`.
 pub struct GlyphManager {
     self_weak: Weak<GlyphManager>,
@@ -93,13 +123,29 @@ pub struct GlyphManager {
 
     // Shaping objects
     font_faces: RefCell<Option<Arc<FontFaces>>>,
-    ft_library: FreeTypeLibrary,
-    hb_shapers: RefCell<BTreeMap<FontStack, BTreeMap<GlyphIDType, Rc<HBShaper>>>>,
+    engine: Arc<dyn FontFaceEngine>,
+    /// Whether `engine.prepare` was called.
+    engine_prepared: Cell<bool>,
+    engine_readiness: Arc<EngineReadiness>,
+    /// Font-face responses that arrived before the engine was ready.
+    deferred_responses: RefCell<Vec<(Response, FontStack, GlyphRange)>>,
+    /// Parses `deferred_responses` on this thread once the engine is ready.
+    deferred_task: RefCell<Option<AsyncTask>>,
+    hb_shapers: RefCell<BTreeMap<FontStack, BTreeMap<GlyphIDType, Rc<dyn FontFaceShaper>>>>,
 }
 
 impl GlyphManager {
     /// `GlyphManager(std::unique_ptr<LocalGlyphRasterizer>)`.
     pub fn new(local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>) -> Rc<GlyphManager> {
+        Self::with_font_face_engine(local_glyph_rasterizer, font_face_engine::font_face_engine())
+    }
+
+    /// A manager whose font faces load with `engine` instead of the one
+    /// `set_font_face_engine` set.
+    pub fn with_font_face_engine(
+        local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>,
+        engine: Arc<dyn FontFaceEngine>,
+    ) -> Rc<GlyphManager> {
         let local_glyph_rasterizer =
             local_glyph_rasterizer.unwrap_or_else(|| Box::new(DefaultLocalGlyphRasterizer::new(None)));
         Rc::new_cyclic(|self_weak| GlyphManager {
@@ -109,7 +155,11 @@ impl GlyphManager {
             observer: RefCell::new(Rc::new(NullObserver)),
             local_glyph_rasterizer,
             font_faces: RefCell::new(None),
-            ft_library: FreeTypeLibrary::new(),
+            engine,
+            engine_prepared: Cell::new(false),
+            engine_readiness: Arc::default(),
+            deferred_responses: RefCell::new(Vec::new()),
+            deferred_task: RefCell::new(None),
             hb_shapers: RefCell::new(BTreeMap::new()),
         })
     }
@@ -257,6 +307,13 @@ impl GlyphManager {
             return;
         }
 
+        if range.type_ != GlyphIDType::FontPBF
+            && !res.no_content
+            && self.defer_until_engine_ready(res, font_stack, range)
+        {
+            return;
+        }
+
         let mut notifications = Vec::new();
         {
             let mut entries = self.entries.borrow_mut();
@@ -378,7 +435,7 @@ impl GlyphManager {
 
         if glyph_id.type_ != GlyphIDType::FontPBF {
             if let Some(shaper) = self.get_hb_shaper(font_stack, glyph_id.type_) {
-                let mut glyph = shaper.rasterize_glyph(&glyph_id);
+                let mut glyph = shaper.rasterize(&glyph_id);
                 glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
                 let glyph = Arc::new(glyph);
                 entry.glyphs.insert(glyph_id, glyph.clone());
@@ -389,9 +446,67 @@ impl GlyphManager {
         Arc::new(Glyph::default())
     }
 
-    /// `setFontFaces(faces)`.
+    /// `setFontFaces(faces)`. Once a style has font faces, the engine gets
+    /// ready to load them while their files download.
     pub fn set_font_faces(&self, faces: Option<Arc<FontFaces>>) {
+        let has_faces = faces.as_ref().is_some_and(|faces| !faces.is_empty());
         *self.font_faces.borrow_mut() = faces;
+        if has_faces {
+            self.prepare_engine();
+        }
+    }
+
+    /// Asks the engine to get ready, once.
+    fn prepare_engine(&self) {
+        if self.engine_prepared.replace(true) {
+            return;
+        }
+        let readiness = self.engine_readiness.clone();
+        self.engine.prepare(Box::new(move |result| {
+            if let Err(error) = &result {
+                Log::error(Event::Glyph, format!("font faces can't be loaded: {error}"));
+            }
+            *readiness.result.lock_unpoisoned() = Some(result);
+            let waker = readiness.waker.lock_unpoisoned().take();
+            if let Some(waker) = waker {
+                waker.send();
+            }
+        }));
+    }
+
+    /// Whether `res`, a font file, has to wait for the engine: if so, keeps
+    /// it for `process_deferred_responses`, which runs once the engine
+    /// reports back.
+    fn defer_until_engine_ready(&self, res: &Response, font_stack: &FontStack, range: &GlyphRange) -> bool {
+        self.prepare_engine();
+        if self.engine_readiness.is_reported() {
+            return false;
+        }
+        self.deferred_responses.borrow_mut().push((res.clone(), font_stack.clone(), *range));
+        let mut task = self.deferred_task.borrow_mut();
+        let task = task.get_or_insert_with(|| {
+            let weak_self = self.self_weak.clone();
+            AsyncTask::new(move || {
+                if let Some(this) = weak_self.upgrade() {
+                    this.process_deferred_responses();
+                }
+            })
+        });
+        *self.engine_readiness.waker.lock_unpoisoned() = Some(task.sender());
+        // The engine may have reported back from another thread before the
+        // waker was set.
+        if self.engine_readiness.is_reported() {
+            task.send();
+        }
+        true
+    }
+
+    /// Parses the font files that waited for the engine.
+    fn process_deferred_responses(&self) {
+        let responses = std::mem::take(&mut *self.deferred_responses.borrow_mut());
+        for (res, font_stack, range) in responses {
+            self.process_response(&res, &font_stack, &range);
+        }
     }
 
     /// `getFontFaces()`.
@@ -400,17 +515,20 @@ impl GlyphManager {
     }
 
     /// `getHBShaper(fontStack, type)`.
-    pub fn get_hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<HBShaper>> {
+    pub fn get_hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType) -> Option<Rc<dyn FontFaceShaper>> {
         self.hb_shapers.borrow().get(font_stack).and_then(|shapers| shapers.get(&type_)).cloned()
     }
 
-    /// `loadHBShaper(fontStack, type, data)`.
+    /// `loadHBShaper(fontStack, type, data)`: false, as for an invalid
+    /// font, when the engine failed to get ready.
     fn load_hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType, data: &[u8]) -> bool {
-        let shaper = HBShaper::new(type_, data, &self.ft_library);
-        if !shaper.valid() {
+        if !self.engine_readiness.is_ready() {
             return false;
         }
-        self.hb_shapers.borrow_mut().entry(font_stack.clone()).or_default().insert(type_, Rc::new(shaper));
+        let Some(shaper) = self.engine.load(type_, data) else {
+            return false;
+        };
+        self.hb_shapers.borrow_mut().entry(font_stack.clone()).or_default().insert(type_, Rc::from(shaper));
         true
     }
 
@@ -425,7 +543,7 @@ impl GlyphManager {
         adjusts: &mut Vec<HBShapeAdjust>,
     ) {
         if let Some(shaper) = self.get_hb_shaper(font, type_) {
-            shaper.create_complex_glyph_ids(text, rtl, glyph_ids, adjusts);
+            shaper.shape(text, rtl, glyph_ids, adjusts);
         }
     }
 

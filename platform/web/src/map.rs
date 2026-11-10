@@ -9,6 +9,7 @@ use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
+use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::{ClientOptions, ResourceOptions, http_file_source};
@@ -18,6 +19,7 @@ use mln_webgpu::SurfaceBackend;
 use wasm_bindgen::prelude::*;
 
 use crate::fetch::FetchTransport;
+use crate::shaper::{self, ShaperModuleEngine};
 use crate::{cooperative_scheduler, deadline, js_error};
 
 /// The Web Workers that run the map's tile workers, reached through a
@@ -155,6 +157,9 @@ impl WebMap {
     /// `post(instance, bytes)`, whose replies go to `receive`. `wake()` is
     /// called whenever the map gets work between frames (a fetch finished, a
     /// reply arrived, a task was queued); the worker then calls `tick` soon.
+    /// `load_shaper()` returns a promise of the shaper module
+    /// (web/pkg/mln_web_shaper.js), initialized; the map calls it the first
+    /// time a style declares font faces.
     pub async fn create(
         canvas: web_sys::OffscreenCanvas,
         width: u32,
@@ -163,12 +168,15 @@ impl WebMap {
         workers: u32,
         post: js_sys::Function,
         wake: js_sys::Function,
+        load_shaper: js_sys::Function,
     ) -> Result<WebMap, JsValue> {
         if workers == 0 {
             return Err(js_error("the map needs at least one tile worker"));
         }
         let scheduler = cooperative_scheduler();
         http_file_source::set_transport(Arc::new(FetchTransport));
+        shaper::set_loader(load_shaper);
+        font_face_engine::set_font_face_engine(Arc::new(ShaperModuleEngine));
 
         let size = Size::new(width.max(1), height.max(1));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {

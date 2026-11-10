@@ -53,7 +53,9 @@ mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", v
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.10" }
 mln_platform_default = { package = "mln-rs-platform-default", path = "crates/mln_platform_default", version = "=0.0.10" }
 mln_platform_default_image = { package = "mln-rs-platform-default-image", path = "crates/mln_platform_default_image", version = "=0.0.10" }
-mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.10" }
+# Without its default feature, the in-process font-face shaper: the packages
+# that render turn it on (crates/mln_renderer/Cargo.toml).
+mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.10", default-features = false }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.10" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that platform/web leaves it out.
@@ -227,7 +229,7 @@ mln_map_types.workspace = true
 mln_math.workspace = true
 mln_platform_default.workspace = true
 mln_platform_default_image.workspace = true
-mln_renderer.workspace = true
+mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }

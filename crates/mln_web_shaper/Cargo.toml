@@ -1,0 +1,29 @@
+[package]
+name = "mln-rs-web-shaper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# The browser build's second module: a style's font faces shaped and
+# rasterized with mln_text's HBShaper (HarfRust, skrifa and the FreeType
+# port), which the map's Web Worker loads the first time a style declares
+# font faces, so the main module (platform/web) leaves them out. `just web`
+# builds it into platform/web/web/pkg beside it; never released.
+publish = false
+autotests = false
+
+[lib]
+name = "mln_web_shaper"
+crate-type = ["cdylib"]
+
+# Only the browser target has anything to build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+mln_text.workspace = true
+wasm-bindgen.workspace = true
+
+[lints]
+workspace = true

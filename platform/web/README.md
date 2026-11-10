@@ -3,9 +3,10 @@
 The browser build: the libraries built for wasm32-unknown-unknown (no
 atomics, no shared memory) and driven from JavaScript through wasm-bindgen.
 It needs no COOP/COEP headers. The page compiles one wasm module, and Web
-Workers instantiate it, each instance with its own memory. The page's
-thread runs no wasm: it hands its canvas to the map's Web Worker and only
-forwards to it.
+Workers instantiate it, each instance with its own memory; the map's Web
+Worker loads a second, the font-face shaper, only for styles with font
+faces. The page's thread runs no wasm: it hands its canvas to the map's Web
+Worker and only forwards to it.
 
 - in the map's Web Worker (web/map-worker.js), `WebMap` (src/map.rs): the
   map, its renderer (wgpu's WebGPU backend, into the page's canvas as an
@@ -30,6 +31,33 @@ forwards to it.
   vertices, indices) travel beside its bytes as their own buffers, which
   the Web Worker transfers, and which the map copies once, into the
   arrays its buckets keep.
+- in the map's Web Worker again, the first time a style declares font
+  faces (`"font-faces"`): the shaper module
+  ([crates/mln_web_shaper](../../crates/mln_web_shaper)), mln_text's
+  `HBShaper` (HarfRust, skrifa and the FreeType port), which shapes and
+  rasterizes them. See below.
+
+## Font faces in a second module
+
+The map shapes a style's font faces (complex scripts such as Devanagari,
+and right-to-left runs) as natively, with HarfRust, and rasterizes their
+glyphs with skrifa and the FreeType port. That code is a large share of
+the module, and most styles have no font faces, so it is in a module of its
+own: the main module is built without mln_renderer's `font-face-shaper`
+feature, and its map's `FontFaceEngine` (src/shaper.rs) imports
+web/pkg/mln_web_shaper.js the first time a style declares font faces
+(`GlyphManager::set_font_faces`), while their files download. A font file
+that arrives first waits in the `GlyphManager` until the module is ready,
+and the tiles that need it wait for it as for any glyph range in flight.
+Then the map calls the module synchronously, through JavaScript: it opens
+each font file there (a copy of it in that instance's memory), shapes the
+tiles' text and rasterizes glyphs, and turns the glyphs into SDFs itself.
+Tile workers never load it: the map shapes for them.
+
+A style with font faces downloads and compiles the shaper once more. A
+panic in the shaper traps its instance; each call from the map catches the
+trap as an error, so the map logs it and leaves the text out, rather than
+unwinding through its own state.
 
 ## Images decode in the browser
 
@@ -109,7 +137,9 @@ keep lavapipe for the native runner (`VK_DRIVER_FILES`).
 - The views are render tests of the suite whose operations the page can
   follow (check.mjs, `VIEWS`): five real-world styles (vector tiles with
   fills, lines, icons and labels), raster tiles, raster-dem tiles
-  (hillshade and color relief), and raster with GeoJSON. In the raster
+  (hillshade and color relief), raster with GeoJSON, and labels in font
+  faces (Devanagari, Khmer, and Arabic beside Devanagari), which load the
+  shaper module. In the raster
   and raster-dem views only the raster tiles' workers can reply, so their
   replies show that those tiles decode in the Web Workers.
 - A local server serves the page and every fixture from the suite's

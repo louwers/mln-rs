@@ -3,16 +3,19 @@
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use mln_actor::RunLoop;
+use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use mln_renderer::text::glyph_manager::{GlyphManager, GlyphManagerObserver, GlyphRequestor};
 use mln_storage::response::{Error, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
+use mln_text::HBShapeAdjust;
 use mln_text::glyph::{
-    GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID, GlyphIDType, GlyphIDs,
-    GlyphMap, GlyphMetrics, GlyphRange, HBShapeRequests, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
+    FontFace, GLYPH_RANGES_PER_FONT_STACK, GLYPHS_PER_GLYPH_RANGE, Glyph, GlyphDependencies, GlyphID, GlyphIDType,
+    GlyphIDs, GlyphMap, GlyphMetrics, GlyphRange, HBShapeRequests, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK,
 };
 use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
 use mln_text::tagged_string::font_stack_hash;
@@ -498,4 +501,137 @@ fn glyph_range_local_generation_count_matches_constant() {
         }
     }
     assert_eq!(GLYPH_RANGES_PER_FONT_STACK - locally_generated_ranges, NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK);
+}
+
+// Port-only: a font-face engine that gets ready later (the browser build's,
+// which loads its shaper as a second wasm module).
+
+/// An engine that is ready once the test calls back the `ready`s it holds.
+#[derive(Default)]
+struct DeferredEngine {
+    ready: Mutex<Vec<Box<dyn FnOnce(Result<(), String>) + Send>>>,
+    prepares: AtomicUsize,
+    loads: AtomicUsize,
+}
+
+impl DeferredEngine {
+    fn report(&self, result: Result<(), String>) {
+        let ready = std::mem::take(&mut *self.ready.lock().unwrap());
+        for ready in ready {
+            ready(result.clone());
+        }
+    }
+}
+
+impl FontFaceEngine for DeferredEngine {
+    fn prepare(&self, ready: Box<dyn FnOnce(Result<(), String>) + Send>) {
+        self.prepares.fetch_add(1, Ordering::SeqCst);
+        self.ready.lock().unwrap().push(ready);
+    }
+
+    fn load(&self, _type: GlyphIDType, data: &[u8]) -> Option<Box<dyn FontFaceShaper>> {
+        self.loads.fetch_add(1, Ordering::SeqCst);
+        (data == b"font").then(|| Box::new(FakeShaper) as Box<dyn FontFaceShaper>)
+    }
+}
+
+/// Shapes each code unit as the glyph of that index, 10 px wide.
+struct FakeShaper;
+
+impl FontFaceShaper for FakeShaper {
+    fn shape(&self, text: &[u16], _rtl: bool, glyph_ids: &mut Vec<GlyphID>, adjusts: &mut Vec<HBShapeAdjust>) {
+        for &unit in text {
+            glyph_ids.push(GlyphID::with_type(unit, FONT_FACE));
+            adjusts.push(HBShapeAdjust::new(0.0, 0.0, 10.0));
+        }
+    }
+
+    fn rasterize(&self, glyph: &GlyphID) -> Glyph {
+        stub_glyph(*glyph)
+    }
+}
+
+const FONT_FACE: GlyphIDType = GlyphIDType(7);
+
+/// A manager on `engine` with one font face, and a synchronous file source
+/// that answers its file with "font".
+fn font_face_test(engine: &Arc<DeferredEngine>) -> GlyphManagerTest {
+    let mut test = GlyphManagerTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
+    test.glyph_manager = GlyphManager::with_font_face_engine(Some(Box::new(StubLocalGlyphRasterizer)), engine.clone());
+    test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
+        assert_eq!(resource.url, "test://face.ttf");
+        let mut response = Response::new();
+        response.data = Some(Arc::new(b"font".to_vec()));
+        Some(response)
+    });
+    let face =
+        FontFace { type_: FONT_FACE, name: "Test Stack".to_owned(), url: "test://face.ttf".to_owned(), ranges: vec![] };
+    test.glyph_manager.set_font_faces(Some(Arc::new(vec![face])));
+    test._log = Some(SquelchLog::new());
+    test
+}
+
+/// Requests glyph 0 of the font face; returns what the requestor got.
+fn request_font_face(test: &GlyphManagerTest) -> Rc<RefCell<Option<GlyphMap>>> {
+    let available: Rc<RefCell<Option<GlyphMap>>> = Rc::default();
+    let a = available.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        *a.borrow_mut() = Some(glyphs);
+    }));
+    let ids: GlyphIDs = [GlyphID::with_type(0, FONT_FACE)].into_iter().collect();
+    let dependencies = GlyphDependencies { glyphs: BTreeMap::from([(test_stack(), ids)]), shapes: Default::default() };
+    test.glyph_manager.get_glyphs(&test.requestor(), dependencies, Some(&test.file_source()));
+    available
+}
+
+#[test]
+fn font_face_waits_for_the_engine() {
+    let engine = Arc::new(DeferredEngine::default());
+    let test = font_face_test(&engine);
+    // Asked to get ready by the font faces, before any file arrives.
+    assert_eq!(engine.prepares.load(Ordering::SeqCst), 1);
+
+    // The file arrived (synchronously), but the engine isn't ready: the
+    // requestor waits, and the file isn't parsed.
+    let available = request_font_face(&test);
+    test.run_loop.run_once();
+    assert!(available.borrow().is_none());
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
+    assert!(test.glyph_manager.get_hb_shaper(&test_stack(), FONT_FACE).is_none());
+
+    // Once it is, the RunLoop parses the file and notifies the requestor.
+    engine.report(Ok(()));
+    assert!(available.borrow().is_none());
+    test.run_loop.run_once();
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 1);
+    assert_eq!(engine.prepares.load(Ordering::SeqCst), 1);
+    let glyphs = available.borrow_mut().take().expect("notified");
+    assert!(glyphs[&font_stack_hash(&test_stack())][&GlyphID::with_type(0, FONT_FACE)].is_some());
+
+    // Shaping and rasterizing are synchronous from then on.
+    let (mut ids, mut adjusts) = (Vec::new(), Vec::new());
+    test.glyph_manager.hb_shaping(&[5, 6], false, &test_stack(), FONT_FACE, &mut ids, &mut adjusts);
+    assert_eq!(ids, vec![GlyphID::with_type(5, FONT_FACE), GlyphID::with_type(6, FONT_FACE)]);
+    assert_eq!(adjusts.len(), 2);
+    let glyph = test.glyph_manager.get_glyph(&test_stack(), GlyphID::with_type(5, FONT_FACE));
+    assert_eq!(glyph.id, GlyphID::with_type(5, FONT_FACE));
+    assert_eq!(glyph.metrics.width, 24);
+
+    // A later request is answered at once.
+    let available = request_font_face(&test);
+    assert!(available.borrow().is_some());
+}
+
+#[test]
+fn font_face_engine_failure_leaves_the_face_out() {
+    let engine = Arc::new(DeferredEngine::default());
+    let test = font_face_test(&engine);
+    let available = request_font_face(&test);
+    engine.report(Err("no shaper".to_owned()));
+    test.run_loop.run_once();
+    // Notified, as for a file that isn't a font: without the glyph.
+    assert_eq!(engine.loads.load(Ordering::SeqCst), 0);
+    let glyphs = available.borrow_mut().take().expect("notified");
+    assert!(glyphs[&font_stack_hash(&test_stack())][&GlyphID::with_type(0, FONT_FACE)].is_none());
+    assert!(test.glyph_manager.get_hb_shaper(&test_stack(), FONT_FACE).is_none());
 }

@@ -14,6 +14,10 @@
 //!   `SerializingTransport` puts each tile's worker (geometry, raster or
 //!   raster-dem) in one of them and talks to it only through bytes, over a
 //!   MessageChannel between the two Web Workers.
+//! - In the map's Web Worker again, once a style declares font faces: the
+//!   shaper module (crates/mln_web_shaper), which shapes and rasterizes them
+//!   (shaper.rs). Only the map's Web Worker loads it, and maps without font
+//!   faces never do.
 //!
 //! Every instance decodes images with the browser's decoders (image.rs).
 //!
@@ -31,6 +35,7 @@
 mod fetch;
 mod image;
 mod map;
+mod shaper;
 mod worker;
 
 use std::sync::Arc;

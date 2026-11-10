@@ -17,7 +17,8 @@ version:
   depend on them.
 
 The other `publish = false` packages (the GLFW app, the browser build in
-platform/web, the expression test runner) are not released.
+platform/web and crates/mln_web_shaper, the expression test runner) are not
+released.
 
 ## Cutting a release
 
