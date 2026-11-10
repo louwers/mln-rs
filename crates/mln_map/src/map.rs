@@ -12,6 +12,7 @@ use mln_map_types::{
 use mln_renderer::{ExceptionPtr, RendererFrontend};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::Style;
+use mln_util::chrono::TimePoint;
 use mln_util::exception::MisuseException;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
@@ -211,6 +212,21 @@ impl Map {
 
     pub fn is_panning(&self) -> bool {
         self.impl_.transform.borrow().is_panning()
+    }
+
+    /// Samples the camera's animations at the host's frame time, from now on,
+    /// and starts new ones from it: call it at the start of each frame with
+    /// `Clock::now()`, before rendering. One older than
+    /// [`STALE_FRAME_TIME`](crate::transform::STALE_FRAME_TIME) counts as
+    /// unset, so commands made while the host isn't drawing start now. If an
+    /// animation runs, the map updates for this frame at once. `None` goes back to sampling at
+    /// `Clock::now()` whenever the map updates. Still images ignore it. See
+    /// [`Transform::set_frame_time`](crate::transform::Transform::set_frame_time).
+    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+        self.impl_.transform.borrow_mut().set_frame_time(time);
+        if self.impl_.transform.borrow().in_transition() {
+            self.impl_.on_update();
+        }
     }
 
     /// Whether any camera command is still animating. A command's

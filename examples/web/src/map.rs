@@ -295,11 +295,14 @@ impl WebMap {
     }
 
     /// One animation frame at `now` (milliseconds, the clock of the input
-    /// methods' `time`): ends the gestures that time out, runs the RunLoop's
+    /// methods' `time`): samples the map's animations at this frame, steps
+    /// the gestures' eased zoom and ends those that time out, runs the RunLoop's
     /// tasks, draws the map's latest update if it is new, then runs the
     /// cooperative scheduler's tasks (sprites, glyphs, raster tiles) for up
     /// to `budget_ms` and delivers their results. Returns whether it drew.
     pub fn frame(&mut self, budget_ms: f64, now: f64) -> bool {
+        // The map samples its animations at this frame's time.
+        self.map.set_frame_time(Some(mln_util::chrono::Clock::now()));
         self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
         let drew = self.frontend.render();

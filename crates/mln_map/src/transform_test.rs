@@ -2596,3 +2596,54 @@ fn an_update_with_a_phase_reports_a_gesture_and_begin_cancels_animations() {
     assert!(transform.is_gesture_in_progress());
     assert_near(pitch_degrees(&transform), 10.0, 1e-9);
 }
+
+#[test]
+fn with_a_frame_time_commands_start_at_the_latest_frame() {
+    let mut transform = outcome_transform();
+    let frame = Clock::now();
+    transform.set_frame_time(Some(frame));
+    // Made between frames, the ease starts at the latest frame's time, so
+    // the next frame shows it one frame in.
+    let linear = UnitBezier::new(0.0, 0.0, 1.0, 1.0);
+    transform.ease_to(
+        &cam().with_zoom(Some(9.0)),
+        &AnimationOptions { duration: Some(milliseconds(160)), easing: Some(linear), ..AnimationOptions::default() },
+    );
+    assert_eq!(transform.get_latest_transition_start(), frame);
+    transform.update_transitions(frame + milliseconds(16));
+    assert_near(transform.get_zoom(), 8.1, 1e-4);
+
+    // A momentum starts there too.
+    transform.start_momentum(
+        &CameraMomentum { pan_velocity: Some(sc(1000.0, 0.0)), ..CameraMomentum::default() },
+        &AnimationOptions::default(),
+    );
+    assert_eq!(transform.get_latest_transition_start(), frame);
+
+    // Without one, commands start at Clock::now().
+    transform.set_frame_time(None);
+    let before = Clock::now();
+    transform.ease_to(&cam().with_bearing(Some(10.0)), &AnimationOptions::new(seconds(1)));
+    assert!(transform.get_latest_transition_start() >= before);
+}
+
+#[test]
+fn a_stale_frame_time_doesnt_start_commands_in_the_past() {
+    let mut transform = outcome_transform();
+    // The host set a frame time a second ago and has drawn no frame since.
+    transform.set_frame_time(Some(Clock::now() - seconds(1)));
+    assert_eq!(transform.frame_time(), None);
+    let before = Clock::now();
+    transform.ease_to(&cam().with_zoom(Some(9.0)), &AnimationOptions::new(milliseconds(300)));
+    let start = transform.get_latest_transition_start();
+    assert!(start >= before, "{start:?} before {before:?}");
+    // So the ease hasn't run its course by the next frame.
+    transform.update_transitions(start + milliseconds(16));
+    assert!(transform.in_transition());
+    assert!(transform.get_zoom() < 9.0);
+
+    // A fresh one is used, from a future frame too.
+    let fresh = Clock::now() + milliseconds(5);
+    transform.set_frame_time(Some(fresh));
+    assert_eq!(transform.frame_time(), Some(fresh));
+}

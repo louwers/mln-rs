@@ -41,7 +41,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, Map, MapDebugOptions, MapObserver, NorthOrientation,
     RenderFrameStatus, TileLodMode,
 };
-use mln_util::chrono::Duration;
+use mln_util::chrono::{Clock, Duration};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -483,12 +483,15 @@ impl ViewState {
         }
     }
 
-    /// Lets the recognizer end gestures that time out (a trackpad zoom's
-    /// hold), once a frame tick.
+    /// Starts a frame tick: the map samples its animations at this frame's
+    /// time, and the recognizer steps a wheel's eased zoom and ends gestures
+    /// that time out.
     fn frame_gestures(&mut self) {
         if let Some(map) = self.map.clone() {
+            let mut map = map.borrow_mut();
+            map.set_frame_time(Some(Clock::now()));
             let now = self.glfw.get_time() * 1000.0;
-            self.gestures.frame(&mut *map.borrow_mut(), now);
+            self.gestures.frame(&mut *map, now);
         }
     }
 

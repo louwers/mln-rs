@@ -34,6 +34,11 @@ use mln_util::size::Size;
 
 use crate::map_observer::{CameraChange, CameraChangeMode, CameraChangeSource};
 
+/// A frame time older than this is stale (see [`Transform::frame_time`]):
+/// longer than a frame at 10 fps, so any host that draws sets a fresh one
+/// first.
+pub const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
+
 /// `std::min`.
 fn std_min(a: f64, b: f64) -> f64 {
     if b < a { b } else { a }
@@ -467,6 +472,8 @@ pub struct Transform {
     /// or a momentum starts them (see [`Self::with_source`]).
     source: CameraChangeSource,
     gesture: GestureState,
+    /// The host's current frame time (see [`Self::set_frame_time`]).
+    frame_time: Option<TimePoint>,
 }
 
 /// The gesture that camera deltas and updates with a phase make, as
@@ -498,6 +505,7 @@ impl Transform {
             transitions: Vec::new(),
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
+            frame_time: None,
         }
     }
 
@@ -511,6 +519,7 @@ impl Transform {
             transitions: Vec::new(),
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
+            frame_time: None,
         }
     }
 
@@ -1154,7 +1163,7 @@ impl Transform {
             | (if scaling { ZOOM } else { 0 })
             | (if rotating { BEARING } else { 0 });
 
-        let start = Clock::now();
+        let start = self.now();
         let duration = if fields != 0 { duration } else { Duration::zero() };
         self.latest_transition_start = start;
         self.latest_transition_duration = duration;
@@ -1429,7 +1438,7 @@ impl Transform {
             }
         }
 
-        let start = Clock::now();
+        let start = self.now();
         self.latest_transition_start = start;
         self.latest_transition_duration = motion;
 
@@ -1675,6 +1684,40 @@ impl Transform {
         }
         self.hold_momentum_anchor(anchor);
         true
+    }
+
+    /// Puts the camera's animations on the host's frame clock: commands start
+    /// at the latest frame's time rather than at `Clock::now()` when they are
+    /// made, and the map samples them at it. Each frame then shows its
+    /// animations exactly one frame further on, whenever the input or the
+    /// map's update ran, and an animation started between frames moves by
+    /// that frame's interval on the next one: no frame repeats the
+    /// camera, and none skips ahead. `None` goes back to `Clock::now()`.
+    ///
+    /// Orbis starts animations on the first frame after the call, which
+    /// keeps the camera still for that frame; a glide that continues a drag
+    /// would pause there.
+    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+        self.frame_time = time;
+    }
+
+    /// The host's frame time, unless it is stale: older than
+    /// [`STALE_FRAME_TIME`], as when the host stopped drawing frames or
+    /// forgot to set it this frame. A stale frame time would start a command
+    /// in the past, which the next frame would show already under way or
+    /// over.
+    pub fn frame_time(&self) -> Option<TimePoint> {
+        self.fresh_frame_time(Clock::now())
+    }
+
+    fn fresh_frame_time(&self, now: TimePoint) -> Option<TimePoint> {
+        self.frame_time.filter(|&time| now - time <= STALE_FRAME_TIME)
+    }
+
+    /// When commands start: the frame time, or now.
+    fn now(&self) -> TimePoint {
+        let now = Clock::now();
+        self.fresh_frame_time(now).unwrap_or(now)
     }
 
     /// Timing of the most recently started command, even after it finishes.

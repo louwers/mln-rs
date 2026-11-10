@@ -277,7 +277,11 @@ impl MapImpl {
             return;
         }
 
-        let time_point = if self.mode == MapMode::Continuous { Clock::now() } else { TimePoint::max() };
+        let time_point = if self.mode == MapMode::Continuous {
+            self.transform.borrow().frame_time().unwrap_or_else(Clock::now)
+        } else {
+            TimePoint::max()
+        };
 
         self.transform.borrow_mut().update_transitions(time_point);
 
