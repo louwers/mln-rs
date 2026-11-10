@@ -1,5 +1,6 @@
 {
   "render-tests/fill-extrusion-color/function": "TODO(port): beyond M1",
+  "render-tests/fill-extrusion-pattern/tile-buffer": "C++ WebGPU ignores it too (metrics/ignores/platform-macos-webgpu.json, mapbox-gl-js#3327). With the layer depth range (maplibre-native#4868) its output depends on the Vulkan driver: upstream's expected-vulkan.png matches RADV but not CI's lavapipe",
   "render-tests/fill-outline-color/property-function": "C++ WebGPU fails it too (metrics/ignores/platform-macos-webgpu.json): data-driven fill outlines are 1px line primitives on WebGPU",
   "render-tests/fill-outline-color/zoom-and-property-function": "C++ WebGPU fails it too (metrics/ignores/platform-macos-webgpu.json): data-driven fill outlines are 1px line primitives on WebGPU",
   "render-tests/fill-pattern/uneven-pattern": "TODO(port): beyond M1",
