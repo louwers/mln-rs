@@ -1976,9 +1976,25 @@ fn invalid_utf8_in_tile() {
     }"#,
     );
 
+    // The map reports that it finished loading after the frame that
+    // finished it. When that frame already needs no repaint (the symbol
+    // fade ended before the last tile's placement, as on a slow or loaded
+    // machine), no frame follows, so the C++ test, which stops only on a
+    // later frame, waits forever: stop on that frame's status instead.
+    let last_needs_repaint = Rc::new(Cell::new(true));
+    {
+        let last_needs_repaint = last_needs_repaint.clone();
+        test.observer
+            .did_finish_rendering_frame_callback
+            .set(move |status| last_needs_repaint.set(status.needs_repaint));
+    }
     let observer = Rc::downgrade(&test.observer);
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_loading_map_callback.set(move |_| {
+        if !last_needs_repaint.get() {
+            run_loop.stop();
+            return;
+        }
         let Some(observer) = observer.upgrade() else {
             return;
         };
