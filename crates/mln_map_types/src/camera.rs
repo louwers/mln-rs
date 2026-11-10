@@ -185,3 +185,159 @@ pub struct FreeCameraOptions {
     /// w].
     pub orientation: Option<Vec4>,
 }
+
+/// Where a camera change stands in a gesture, as maplibre-native-ffi's
+/// `mln_gesture_phase` defines it. `Begin` and `Update` mark a gesture in
+/// progress, and `End` and `Cancel` end it; a gesture whose end starts
+/// momentum stays in progress until the momentum ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum GesturePhase {
+    /// The change isn't part of a gesture: a command.
+    #[default]
+    None,
+    /// The gesture starts. This cancels every running camera animation
+    /// before the change applies.
+    Begin,
+    /// The gesture continues. To start a gesture that keeps the running
+    /// animations, start it with this phase instead of `Begin`.
+    Update,
+    /// The gesture's last change, which may carry its momentum.
+    End,
+    /// The platform cancelled the gesture. This also cancels every running
+    /// camera animation after the change applies.
+    Cancel,
+}
+
+/// A change to the camera from where it is now, as a gesture makes it
+/// (maplibre-native-ffi's `mln_camera_delta`).
+///
+/// The pan and the anchored change are separate camera commands, because an
+/// explicit center overrides an anchor; the anchored change reads the camera
+/// after the pan. Both end through the one
+/// [`AnimationOptions::transition_end_fn`], once both have ended.
+#[derive(Clone, Default)]
+pub struct CameraDelta {
+    /// Moves the map's content this far on the screen, as a drag does.
+    pub offset: Option<ScreenCoordinate>,
+    /// Multiplies the map's scale: 2 zooms in by one level.
+    pub scale: Option<f64>,
+    /// Degrees to add to the bearing.
+    pub bearing: Option<f64>,
+    /// Degrees to add to the pitch.
+    pub pitch: Option<f64>,
+    /// The screen point that `scale`, `bearing` and `pitch` keep in place.
+    /// It needs one of them, and it combines with `offset` only in a delta
+    /// without a duration.
+    pub anchor: Option<ScreenCoordinate>,
+    /// How the gesture keeps moving after this delta, which only a delta in
+    /// the [`GesturePhase::End`] phase carries. Its parts' snaps apply only
+    /// to the parts the gesture changed. With momentum, `animation` may set
+    /// only its transition id and end function, and the command ends when
+    /// the momentum does.
+    pub momentum: Option<crate::CameraMomentum>,
+    pub animation: AnimationOptions,
+    pub phase: GesturePhase,
+}
+
+/// How [`CameraUpdate`] moves the camera.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum CameraUpdateMode {
+    /// At once; the animation's duration is ignored.
+    #[default]
+    Jump,
+    Ease,
+    Fly,
+}
+
+/// Moves the camera to absolute values, as maplibre-native-ffi's
+/// `mln_camera_update` does: the counterpart of [`CameraDelta`] for
+/// commands and gestures that know where the camera should go.
+#[derive(Clone, Default)]
+pub struct CameraUpdate {
+    pub mode: CameraUpdateMode,
+    pub camera: CameraOptions,
+    pub animation: AnimationOptions,
+    pub phase: GesturePhase,
+}
+
+/// Why a [`CameraDelta`] was rejected, as maplibre-native-ffi rejects it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CameraError {
+    /// An offset, anchor, bearing or pitch isn't finite.
+    NotFinite,
+    /// The scale isn't finite and positive.
+    InvalidScale,
+    /// An anchor needs a scale, bearing or pitch to hold in place.
+    AnchorWithoutChange,
+    /// Only a delta in the end phase carries momentum.
+    MomentumOutsideEnd,
+    /// A delta with momentum sets only its animation's transition id and end
+    /// function: the momentum, not an animation, moves the camera.
+    MomentumWithAnimation,
+    /// An anchor combines with an offset only in an immediate delta: an
+    /// anchored ease couples the center with its fields, so it would replace
+    /// an animated pan.
+    AnimatedAnchoredOffset,
+}
+
+impl std::fmt::Display for CameraError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            CameraError::NotFinite => "camera delta offset, anchor, bearing and pitch must be finite",
+            CameraError::InvalidScale => "camera delta scale must be finite and positive",
+            CameraError::AnchorWithoutChange => "a camera delta anchor requires scale, bearing, or pitch",
+            CameraError::MomentumOutsideEnd => "only a camera delta in the end phase carries momentum",
+            CameraError::MomentumWithAnimation => {
+                "a camera delta with momentum sets only the transition ID and end function of its animation"
+            }
+            CameraError::AnimatedAnchoredOffset => {
+                "a camera delta anchor combines with offset only in an immediate delta"
+            }
+        })
+    }
+}
+
+impl std::error::Error for CameraError {}
+
+impl CameraDelta {
+    /// Checks the delta as maplibre-native-ffi's `validate_camera_delta`
+    /// does.
+    pub fn validate(&self) -> Result<(), CameraError> {
+        let finite_point = |p: Option<ScreenCoordinate>| p.is_none_or(|p| p.x.is_finite() && p.y.is_finite());
+        if !finite_point(self.offset)
+            || !finite_point(self.anchor)
+            || !self.bearing.is_none_or(f64::is_finite)
+            || !self.pitch.is_none_or(f64::is_finite)
+        {
+            return Err(CameraError::NotFinite);
+        }
+        if self.scale.is_some_and(|scale| !scale.is_finite() || scale <= 0.0) {
+            return Err(CameraError::InvalidScale);
+        }
+        let anchored = self.scale.is_some() || self.bearing.is_some() || self.pitch.is_some();
+        if self.anchor.is_some() && !anchored {
+            return Err(CameraError::AnchorWithoutChange);
+        }
+        if self.momentum.is_some() {
+            if self.phase != GesturePhase::End {
+                return Err(CameraError::MomentumOutsideEnd);
+            }
+            let a = &self.animation;
+            if a.duration.is_some()
+                || a.velocity.is_some()
+                || a.min_zoom.is_some()
+                || a.easing.is_some()
+                || a.transition_frame_fn.is_some()
+            {
+                return Err(CameraError::MomentumWithAnimation);
+            }
+        }
+        if self.offset.is_some()
+            && self.anchor.is_some()
+            && self.animation.duration.is_some_and(|duration| duration > Duration::zero())
+        {
+            return Err(CameraError::AnimatedAnchoredOffset);
+        }
+        Ok(())
+    }
+}

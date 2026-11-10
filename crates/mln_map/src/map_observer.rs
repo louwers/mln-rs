@@ -30,7 +30,8 @@ pub enum CameraChangeSource {
     /// resize keeps the camera within its bounds.
     #[default]
     Command,
-    /// A camera command that a gesture made.
+    /// A camera command with a [`GesturePhase`](crate::GesturePhase) other
+    /// than `None`.
     Gesture,
     /// The momentum, and the snaps, that a gesture's end started.
     Momentum,

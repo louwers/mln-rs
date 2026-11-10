@@ -2345,3 +2345,254 @@ fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
     transform.update_transitions(TimePoint::max());
     assert_eq!(observer.take(), [('d', change(Animated, Momentum))]);
 }
+
+fn delta(phase: GesturePhase) -> CameraDelta {
+    CameraDelta { phase, ..CameraDelta::default() }
+}
+
+#[test]
+fn a_gesture_reports_gesture_then_momentum_and_lasts_until_its_glide_ends() {
+    use CameraChangeMode::{Animated, Immediate};
+    use CameraChangeSource::{Gesture, Momentum};
+    let observer = Rc::new(ChangeObserver::default());
+    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(8.0)));
+    observer.take();
+
+    let pan = |phase| CameraDelta { offset: Some(sc(10.0, 0.0)), ..delta(phase) };
+    transform.apply_camera_delta(&pan(GesturePhase::Begin)).unwrap();
+    assert!(transform.is_gesture_in_progress());
+    transform.apply_camera_delta(&pan(GesturePhase::Update)).unwrap();
+    assert_eq!(
+        observer.take(),
+        [
+            ('w', change(Immediate, Gesture)),
+            ('d', change(Immediate, Gesture)),
+            ('w', change(Immediate, Gesture)),
+            ('d', change(Immediate, Gesture)),
+        ]
+    );
+
+    let (animation, ended) = record_end();
+    transform
+        .apply_camera_delta(&CameraDelta {
+            momentum: Some(CameraMomentum { pan_velocity: Some(sc(2000.0, 0.0)), ..CameraMomentum::default() }),
+            animation,
+            ..delta(GesturePhase::End)
+        })
+        .unwrap();
+    assert_eq!(observer.take(), [('w', change(Animated, Momentum))]);
+    // The gesture's input ended, but it lasts until its momentum does.
+    assert!(transform.is_gesture_in_progress());
+    transform.update_transitions(TimePoint::max());
+    assert_eq!(observer.take(), [('d', change(Animated, Momentum))]);
+    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert!(!transform.is_gesture_in_progress());
+}
+
+#[test]
+fn a_new_gesture_catches_the_last_ones_glide_and_keeps_the_gesture_going() {
+    let mut transform = outcome_transform();
+    transform.apply_camera_delta(&CameraDelta { offset: Some(sc(10.0, 0.0)), ..delta(GesturePhase::Begin) }).unwrap();
+    let (animation, ended) = record_end();
+    transform
+        .apply_camera_delta(&CameraDelta {
+            momentum: Some(CameraMomentum { pan_velocity: Some(sc(2000.0, 0.0)), ..CameraMomentum::default() }),
+            animation,
+            ..delta(GesturePhase::End)
+        })
+        .unwrap();
+    let start = transform.get_latest_transition_start();
+    transform.update_transitions(start + milliseconds(100));
+
+    // A press mid-glide: the glide is cancelled, with its speed, and the new
+    // gesture is in progress.
+    transform.apply_camera_delta(&CameraDelta { offset: Some(sc(1.0, 0.0)), ..delta(GesturePhase::Begin) }).unwrap();
+    let end = ended.get().expect("the glide ended");
+    assert_eq!(end.outcome, TransitionOutcome::Cancelled);
+    assert!(end.velocity.pan.x > 500.0 && end.velocity.pan.x < 2000.0, "{:?}", end.velocity);
+    assert!(transform.is_gesture_in_progress());
+    assert!(!transform.in_transition());
+
+    // An earlier gesture's momentum can't end a later gesture: start a glide
+    // for the new one, then begin a third gesture with Update, which keeps
+    // the glide; the glide's end leaves the third gesture in progress.
+    transform
+        .apply_camera_delta(&CameraDelta {
+            momentum: Some(CameraMomentum { pan_velocity: Some(sc(2000.0, 0.0)), ..CameraMomentum::default() }),
+            ..delta(GesturePhase::End)
+        })
+        .unwrap();
+    transform.apply_camera_delta(&CameraDelta { scale: Some(1.01), ..delta(GesturePhase::Update) }).unwrap();
+    assert!(transform.in_transition());
+    transform.update_transitions(TimePoint::max());
+    assert!(!transform.in_transition());
+    assert!(transform.is_gesture_in_progress());
+    transform.apply_camera_delta(&delta(GesturePhase::End)).unwrap();
+    assert!(!transform.is_gesture_in_progress());
+}
+
+#[test]
+fn only_the_parts_a_gesture_changed_settle() {
+    let snaps = CameraMomentum {
+        zoom_snap: Some(MomentumSnap::ZOOM),
+        bearing_snap: Some(MomentumSnap { duration: Duration::zero(), ..MomentumSnap::BEARING }),
+        pitch_snap: Some(MomentumSnap::PITCH),
+        ..CameraMomentum::default()
+    };
+    let settled = |gesture: CameraDelta| {
+        let mut transform = outcome_transform();
+        transform.jump_to(&cam().with_zoom(Some(8.3)).with_bearing(Some(3.0)).with_pitch(Some(4.0)));
+        transform.apply_camera_delta(&CameraDelta { phase: GesturePhase::Begin, ..gesture }).unwrap();
+        transform.apply_camera_delta(&CameraDelta { momentum: Some(snaps), ..delta(GesturePhase::End) }).unwrap();
+        transform.update_transitions(TimePoint::max());
+        (transform.get_zoom(), bearing_degrees(&transform), pitch_degrees(&transform))
+    };
+
+    // A pan changes none of them: nothing settles.
+    let (zoom, bearing, pitch) = settled(CameraDelta { offset: Some(sc(10.0, 0.0)), ..CameraDelta::default() });
+    assert_near(zoom, 8.3, 1e-9);
+    assert_near(bearing, 3.0, 1e-9);
+    assert_near(pitch, 4.0, 1e-9);
+
+    // A turn settles the bearing alone.
+    let (zoom, bearing, pitch) = settled(CameraDelta { bearing: Some(1.0), ..CameraDelta::default() });
+    assert_near(zoom, 8.3, 1e-9);
+    assert_near(bearing, 0.0, 1e-9);
+    assert_near(pitch, 4.0, 1e-9);
+}
+
+#[test]
+fn a_delta_pans_and_zooms_around_its_anchor_and_ends_once() {
+    let mut transform = outcome_transform();
+    let anchor = sc(800.0, 300.0);
+    // The pan applies first and brings this ground under the anchor, which
+    // the zoom and turn then hold in place.
+    let ground =
+        transform.screen_coordinate_to_lat_lng(&sc(anchor.x + 50.0, anchor.y - 20.0), WrapMode::Unwrapped).unwrap();
+    let (animation, ended) = record_end();
+    transform
+        .apply_camera_delta(&CameraDelta {
+            offset: Some(sc(-50.0, 20.0)),
+            scale: Some(2.0),
+            bearing: Some(90.0),
+            anchor: Some(anchor),
+            animation,
+            ..CameraDelta::default()
+        })
+        .unwrap();
+    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+    assert_near(transform.get_zoom(), 9.0, 1e-9);
+    assert_near(bearing_degrees(&transform), 90.0, 1e-9);
+    let under = transform.lat_lng_to_screen_coordinate(&ground);
+    assert_near(under.x, anchor.x, 1e-6);
+    assert_near(under.y, anchor.y, 1e-6);
+
+    // Animated, both commands end the delta's one end function together.
+    let (animation, ended) = record_end();
+    transform
+        .apply_camera_delta(&CameraDelta {
+            offset: Some(sc(10.0, 0.0)),
+            scale: Some(2.0),
+            animation: AnimationOptions { duration: Some(seconds(1)), ..animation },
+            ..CameraDelta::default()
+        })
+        .unwrap();
+    let start = transform.get_latest_transition_start();
+    transform.update_transitions(start + milliseconds(500));
+    assert_eq!(outcome(&ended), None);
+    transform.update_transitions(start + seconds(1));
+    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+}
+
+#[test]
+fn a_turn_around_an_anchor_keeps_the_ground_under_it() {
+    let mut transform = outcome_transform();
+    let anchor = sc(700.0, 200.0);
+    let ground = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap();
+    transform
+        .apply_camera_delta(&CameraDelta { bearing: Some(90.0), anchor: Some(anchor), ..CameraDelta::default() })
+        .unwrap();
+    assert_near(bearing_degrees(&transform), 90.0, 1e-9);
+    let under = transform.lat_lng_to_screen_coordinate(&ground);
+    assert_near(under.x, anchor.x, 1e-6);
+    assert_near(under.y, anchor.y, 1e-6);
+}
+
+#[test]
+fn camera_deltas_are_validated_as_maplibre_native_ffi_validates_them() {
+    let mut transform = outcome_transform();
+    let mut check = |delta: CameraDelta| transform.apply_camera_delta(&delta);
+    assert_eq!(
+        check(CameraDelta { offset: Some(sc(f64::NAN, 0.0)), ..CameraDelta::default() }),
+        Err(CameraError::NotFinite)
+    );
+    assert_eq!(check(CameraDelta { scale: Some(0.0), ..CameraDelta::default() }), Err(CameraError::InvalidScale));
+    assert_eq!(
+        check(CameraDelta { bearing: Some(f64::INFINITY), ..CameraDelta::default() }),
+        Err(CameraError::NotFinite)
+    );
+    assert_eq!(
+        check(CameraDelta { anchor: Some(sc(1.0, 1.0)), offset: Some(sc(1.0, 0.0)), ..CameraDelta::default() }),
+        Err(CameraError::AnchorWithoutChange)
+    );
+    assert_eq!(
+        check(CameraDelta { momentum: Some(CameraMomentum::default()), ..delta(GesturePhase::Update) }),
+        Err(CameraError::MomentumOutsideEnd)
+    );
+    assert_eq!(
+        check(CameraDelta {
+            momentum: Some(CameraMomentum::default()),
+            animation: AnimationOptions::new(seconds(1)),
+            ..delta(GesturePhase::End)
+        }),
+        Err(CameraError::MomentumWithAnimation)
+    );
+    assert_eq!(
+        check(CameraDelta {
+            offset: Some(sc(1.0, 0.0)),
+            scale: Some(2.0),
+            anchor: Some(sc(1.0, 1.0)),
+            animation: AnimationOptions::new(seconds(1)),
+            ..CameraDelta::default()
+        }),
+        Err(CameraError::AnimatedAnchoredOffset)
+    );
+    // A rejected delta changes nothing; an empty one ends at once.
+    assert_near(transform.get_zoom(), 8.0, 1e-9);
+    let (animation, ended) = record_end();
+    transform.apply_camera_delta(&CameraDelta { animation, ..CameraDelta::default() }).unwrap();
+    assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+}
+
+#[test]
+fn an_update_with_a_phase_reports_a_gesture_and_begin_cancels_animations() {
+    use CameraChangeSource::Gesture;
+    let observer = Rc::new(ChangeObserver::default());
+    let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    let (animation, ended) = record_end();
+    transform.ease_to(&cam().with_zoom(Some(6.0)), &AnimationOptions { duration: Some(seconds(1)), ..animation });
+
+    // Update keeps the running animation.
+    transform.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: cam().with_bearing(Some(30.0)),
+        animation: AnimationOptions::new(milliseconds(300)),
+        phase: GesturePhase::End,
+    });
+    assert_eq!(outcome(&ended), None);
+    assert!(!transform.is_gesture_in_progress());
+    assert_eq!(observer.take().last().map(|(_, c)| c.source), Some(Gesture));
+
+    // Begin cancels it.
+    transform.update_camera(&CameraUpdate {
+        camera: cam().with_pitch(Some(10.0)),
+        phase: GesturePhase::Begin,
+        ..CameraUpdate::default()
+    });
+    assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
+    assert!(transform.is_gesture_in_progress());
+    assert_near(pitch_degrees(&transform), 10.0, 1e-9);
+}

@@ -5,8 +5,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraMomentum, CameraOptions, ConstrainMode, MapDebugOptions, MapMode,
-    NorthOrientation, ProjectionMode, TileLodMode, TransformState, ViewportMode,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
+    ConstrainMode, MapDebugOptions, MapMode, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
+    ViewportMode,
 };
 use mln_renderer::{ExceptionPtr, RendererFrontend};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
@@ -161,6 +162,26 @@ impl Map {
         if ended {
             self.impl_.on_update();
         }
+    }
+
+    /// Moves the camera relative to where it is, as a gesture does
+    /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
+    /// turn and tilt around an anchor, a gesture phase, and the momentum a
+    /// gesture's end continues with. See [`CameraDelta`].
+    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<(), CameraError> {
+        self.impl_.transform.borrow_mut().apply_camera_delta(delta)?;
+        self.impl_.camera_mutated.set(true);
+        self.impl_.on_update();
+        Ok(())
+    }
+
+    /// Moves the camera to absolute values, by a jump, an ease or a flight,
+    /// as a command or as part of a gesture (maplibre-native-ffi's
+    /// `mln_map_update_camera`). See [`CameraUpdate`].
+    pub fn update_camera(&mut self, update: &CameraUpdate) {
+        self.impl_.camera_mutated.set(true);
+        self.impl_.transform.borrow_mut().update_camera(update);
+        self.impl_.on_update();
     }
 
     /// Continues a gesture with momentum, which moves the camera on each
