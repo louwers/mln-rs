@@ -427,8 +427,8 @@ impl ImageManager {
     /// `notify(ImageRequestor&, const ImageRequestPair&)`: the maps for the
     /// requestor, delivered by `deliver`.
     fn notification(state: &State, requestor: &Weak<dyn ImageRequestor>, pair: &ImageRequestPair) -> Notification {
-        let mut icon_map = ImageMap::with_capacity(pair.0.len());
-        let mut pattern_map = ImageMap::with_capacity(pair.0.len());
+        let mut icon_map = ImageMap::new();
+        let mut pattern_map = ImageMap::new();
         let mut version_map = ImageVersionMap::with_capacity(pair.0.len());
 
         for (id, type_) in &pair.0 {
