@@ -1828,3 +1828,319 @@ fn cancel_transitions_by_id_leaves_others_running() {
     assert_eq!(bearing_finished.get(), 1);
     assert!(!transform.in_transition());
 }
+
+/// The friction decay rate per second for a half-life.
+fn friction_rate(half_life: Duration) -> f64 {
+    std::f64::consts::LN_2 / seconds_f64(half_life)
+}
+
+fn friction(half_life: Duration, stop_speed: f64) -> MomentumDecay {
+    MomentumDecay { half_life, stop_speed, ..MomentumDecay::default() }
+}
+
+/// A momentum's `finish_fn` that keeps how it ended.
+fn record_end(momentum: &mut CameraMomentum) -> Rc<Cell<Option<MomentumEnd>>> {
+    let ended = Rc::new(Cell::new(None));
+    let record = ended.clone();
+    momentum.finish_fn = Some(Rc::new(move |end: &MomentumEnd| record.set(Some(*end))));
+    ended
+}
+
+fn pitch_degrees(transform: &Transform) -> f64 {
+    mln_math::rad2deg(transform.get_pitch())
+}
+
+// gtest: Transform.MomentumSlowsEachPartByFriction
+#[test]
+fn momentum_slows_each_part_by_friction() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(8.0)).with_pitch(Some(10.0)));
+    let center = transform.get_lat_lng(WrapMode::Wrapped);
+
+    let mut momentum = CameraMomentum {
+        zoom_velocity: Some(1.0),
+        zoom_decay: friction(milliseconds(250), 0.01),
+        bearing_velocity: Some(-10.0),
+        pitch_velocity: Some(5.0),
+        ..Default::default()
+    };
+    let ended = record_end(&mut momentum);
+    let mut animation = AnimationOptions::default();
+    let finished = counting_finish(&mut animation);
+    transform.start_momentum(&momentum, &animation);
+    let start = transform.get_latest_transition_start();
+    assert!(transform.in_transition());
+
+    // A speed v that decays at rate k has moved (v / k)(1 - e^(-kt)).
+    let zoom_rate = friction_rate(milliseconds(250));
+    transform.update_transitions(start + milliseconds(500));
+    assert_near(transform.get_zoom(), 8.0 + 1.0 / zoom_rate * -(-zoom_rate * 0.5).exp_m1(), 1e-9);
+    assert_eq!(finished.get(), 0);
+
+    // Each part stops at its stop speed, so it moves (v - stop) / k.
+    let rate = friction_rate(milliseconds(140));
+    transform.update_transitions(start + seconds(3));
+    assert_near(transform.get_zoom(), 8.0 + (1.0 - 0.01) / zoom_rate, 1e-9);
+    assert_near(bearing_degrees(&transform), -(10.0 - 1.0) / rate, 1e-9);
+    assert_near(pitch_degrees(&transform), 10.0 + (5.0 - 1.0) / rate, 1e-9);
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), center.latitude(), 1e-9);
+    assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), center.longitude(), 1e-9);
+    assert_eq!(finished.get(), 1);
+    let ended = ended.get().expect("the momentum ended");
+    assert!(!ended.replaced);
+    assert_eq!(ended.velocity.zoom, 0.0);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.MomentumPansItsDistanceOnScreen
+#[test]
+fn momentum_pans_its_distance_on_screen() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(8.0)));
+    let center = transform.get_lat_lng(WrapMode::Wrapped);
+    let momentum = CameraMomentum { pan_velocity: Some(sc(1200.0, -500.0)), ..Default::default() };
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    let start = transform.get_latest_transition_start();
+    let rate = friction_rate(milliseconds(140));
+
+    transform.update_transitions(start + milliseconds(100));
+    let moved = -(-rate * 0.1).exp_m1() / rate;
+    let point = transform.lat_lng_to_screen_coordinate(&center);
+    assert_near(point.x, 500.0 + 1200.0 * moved, 1e-6);
+    assert_near(point.y, 500.0 - 500.0 * moved, 1e-6);
+
+    transform.update_transitions(start + seconds(3));
+    let distance = (1300.0 - 1.0) / rate;
+    let point = transform.lat_lng_to_screen_coordinate(&center);
+    assert_near(point.x, 500.0 + distance * 1200.0 / 1300.0, 1e-6);
+    assert_near(point.y, 500.0 - distance * 500.0 / 1300.0, 1e-6);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.MomentumFollowsAnEasedGlide. An eased glide follows its
+// curve, and its speed is the curve's slope. A straight curve moves at an
+// even speed.
+#[test]
+fn momentum_follows_an_eased_glide() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let mut momentum = CameraMomentum {
+        zoom_velocity: Some(-1.0),
+        zoom_decay: MomentumDecay {
+            model: MomentumDecayModel::Ease,
+            distance: 2.0,
+            duration: seconds(1),
+            easing: MomentumEasing { x1: 1.0 / 3.0, y1: 1.0 / 3.0, x2: 2.0 / 3.0, y2: 2.0 / 3.0 },
+            ..MomentumDecay::default()
+        },
+        ..Default::default()
+    };
+    let ended = record_end(&mut momentum);
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    assert_near(transform.get_zoom(), 8.0 - 0.5, 1e-6);
+    transform.cancel_transitions();
+    assert_near(ended.get().expect("the momentum ended").velocity.zoom, -2.0, 1e-6);
+
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    transform.update_transitions(transform.get_latest_transition_start() + seconds(1));
+    assert_near(transform.get_zoom(), 8.0 - 0.5 - 2.0, 1e-9);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.MomentumKeepsItsAnchorInPlace
+#[test]
+fn momentum_keeps_its_anchor_in_place() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(
+        &cam()
+            .with_center(Some(ll(10.0, 20.0)))
+            .with_zoom(Some(8.0))
+            .with_pitch(Some(20.0))
+            .with_center_altitude(Some(120.0)),
+    );
+    let anchor = sc(800.0, 300.0);
+    let ground = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped).unwrap();
+    let momentum = CameraMomentum { pitch_velocity: Some(20.0), pitch_anchor: Some(anchor), ..Default::default() };
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    transform.update_transitions(transform.get_latest_transition_start() + seconds(3));
+    assert!(pitch_degrees(&transform) > 20.0);
+    let point = transform.lat_lng_to_screen_coordinate(&ground);
+    // Restoring the altitude after the correction moves the view by far
+    // less than a pixel.
+    assert_near(point.x, anchor.x, 1e-4);
+    assert_near(point.y, anchor.y, 1e-4);
+    assert_near(transform.get_state().get_center_altitude(), 120.0, 1e-6);
+}
+
+// gtest: Transform.MomentumCapsItsDistance
+#[test]
+fn momentum_caps_its_distance() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let momentum = CameraMomentum {
+        zoom_velocity: Some(50.0),
+        zoom_decay: MomentumDecay { max_distance: 2.5, ..MomentumDecay::default() },
+        ..Default::default()
+    };
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    transform.update_transitions(transform.get_latest_transition_start() + seconds(3));
+    assert_near(transform.get_zoom(), 10.5, 1e-9);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.MomentumReportsItsSpeedWhenCancelled
+#[test]
+fn momentum_reports_its_speed_when_cancelled() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    let mut momentum = CameraMomentum {
+        pan_velocity: Some(sc(1000.0, 0.0)),
+        pan_decay: friction(seconds(1), 1.0),
+        zoom_velocity: Some(1.0),
+        zoom_decay: friction(seconds(1), 0.01),
+        ..Default::default()
+    };
+    let ended = record_end(&mut momentum);
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    transform.update_transitions(transform.get_latest_transition_start() + seconds(1));
+    transform.cancel_transitions();
+    let ended = ended.get().expect("the momentum ended");
+    assert!(!ended.replaced);
+    // After one half-life, each part moves at half its release speed.
+    assert_near(ended.velocity.pan.x, 500.0, 1e-9);
+    assert_eq!(ended.velocity.pan.y, 0.0);
+    assert_near(ended.velocity.zoom, 0.5, 1e-9);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.MomentumPartsGiveWayToCommands
+#[test]
+fn momentum_parts_give_way_to_commands() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_zoom(Some(8.0)));
+    let mut momentum = CameraMomentum {
+        pan_velocity: Some(sc(1000.0, 0.0)),
+        pan_decay: friction(seconds(1), 1.0),
+        zoom_velocity: Some(1.0),
+        zoom_decay: friction(seconds(1), 0.01),
+        ..Default::default()
+    };
+    let ended = record_end(&mut momentum);
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    let start = transform.get_latest_transition_start();
+    assert!(transform.is_panning());
+    assert!(transform.is_scaling());
+
+    transform.jump_to(&cam().with_zoom(Some(3.0)));
+    assert!(ended.get().is_none());
+    assert!(transform.is_panning());
+    assert!(!transform.is_scaling());
+    let before = transform.get_lat_lng(WrapMode::Wrapped);
+    transform.update_transitions(start + milliseconds(500));
+    assert_near(transform.get_zoom(), 3.0, 1e-9);
+    assert_ne!(transform.get_lat_lng(WrapMode::Wrapped).longitude(), before.longitude());
+
+    transform.jump_to(&cam().with_center(Some(ll(10.0, 20.0))));
+    assert!(ended.get().expect("the momentum ended").replaced);
+    assert!(!transform.in_transition());
+}
+
+// gtest: Transform.MomentumSettlesOnTargets
+#[test]
+fn momentum_settles_on_targets() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.jump_to(&cam().with_bearing(Some(84.0)));
+    let rate = friction_rate(milliseconds(140));
+    // Moves (v - 1) / k = 4 degrees, then settles on the nearest of every 90.
+    let momentum = CameraMomentum {
+        bearing_velocity: Some(1.0 + 4.0 * rate),
+        bearing_snap: Some(MomentumSnap { spacing: 90.0, tolerance: 7.0, duration: milliseconds(200), offset: 0.0 }),
+        ..Default::default()
+    };
+    let mut animation = AnimationOptions::default();
+    let finished = counting_finish(&mut animation);
+    transform.start_momentum(&momentum, &animation);
+    let start = transform.get_latest_transition_start();
+    transform.update_transitions(start + seconds(1));
+    assert_near(bearing_degrees(&transform), 88.0, 1e-9);
+    assert_eq!(finished.get(), 0);
+    assert!(transform.is_rotating());
+    transform.update_transitions(start + milliseconds(1200));
+    assert_near(bearing_degrees(&transform), 90.0, 1e-9);
+    assert_eq!(finished.get(), 1);
+
+    // Without motion, instant snaps settle at once: the bearing around the
+    // circle, and the zoom on the nearest whole level. A value outside the
+    // tolerance stays.
+    let snap_only = CameraMomentum {
+        bearing_snap: Some(MomentumSnap { spacing: 360.0, tolerance: 7.0, ..MomentumSnap::default() }),
+        zoom_snap: Some(MomentumSnap { spacing: 1.0, tolerance: 0.5, ..MomentumSnap::default() }),
+        pitch_snap: Some(MomentumSnap { spacing: 90.0, tolerance: 7.0, ..MomentumSnap::default() }),
+        ..Default::default()
+    };
+    transform.jump_to(&cam().with_bearing(Some(355.0)).with_zoom(Some(7.3)).with_pitch(Some(30.0)));
+    transform.start_momentum(&snap_only, &animation);
+    assert_eq!(finished.get(), 2);
+    assert_near(bearing_degrees(&transform), 0.0, 1e-9);
+    assert_near(transform.get_zoom(), 7.0, 1e-9);
+    assert_near(pitch_degrees(&transform), 30.0, 1e-9);
+    assert!(!transform.in_transition());
+
+    // A spacing that doesn't divide the circle still finds the nearest
+    // target around it: 270 is 1 degree from -89.
+    let uneven = CameraMomentum {
+        bearing_snap: Some(MomentumSnap { spacing: 270.0, tolerance: 7.0, ..MomentumSnap::default() }),
+        ..Default::default()
+    };
+    transform.jump_to(&cam().with_bearing(Some(-89.0)));
+    transform.start_momentum(&uneven, &animation);
+    assert_near(bearing_degrees(&transform), -90.0, 1e-9);
+}
+
+// gtest: Transform.MomentumStopsAPartThatLimitsHold
+#[test]
+fn momentum_stops_a_part_that_limits_hold() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(1000, 1000)).unwrap();
+    transform.set_max_zoom(10.0);
+    transform.jump_to(&cam().with_zoom(Some(10.0)).with_pitch(Some(0.0)));
+    let mut momentum = CameraMomentum {
+        zoom_velocity: Some(1.0),
+        zoom_decay: MomentumDecay { stop_speed: 0.01, ..MomentumDecay::default() },
+        pitch_velocity: Some(-20.0),
+        ..Default::default()
+    };
+    let ended = record_end(&mut momentum);
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(20));
+    assert!(!transform.in_transition());
+    assert_eq!(ended.get().expect("the momentum ended").velocity.zoom, 0.0);
+    assert_near(transform.get_zoom(), 10.0, 1e-9);
+}
+
+// From Orbis's orb-camera (momentum/tests.rs,
+// slow_releases_and_bad_decays_do_not_move): the release limits and the
+// decays that can't glide, which the gtests don't cover.
+#[test]
+fn momentum_ignores_slow_releases_and_bad_decays() {
+    let pan = MomentumDecay::PAN;
+    assert!(Glide::plan(150.0, &pan).is_none());
+    assert!(Glide::plan(f64::NAN, &pan).is_none());
+    assert!(Glide::plan(f64::INFINITY, &MomentumDecay::FRICTION).is_none());
+    assert!(Glide::plan(100.0, &friction(Duration::zero(), 1.0)).is_none());
+    assert!(Glide::plan(100.0, &friction(milliseconds(100), 0.0)).is_none());
+    // A release faster than the cap glides as the cap does.
+    let capped = Glide::plan(50_000.0, &pan).unwrap();
+    let max = Glide::plan(10_000.0, &pan).unwrap();
+    assert_eq!(capped.distance, max.distance);
+    assert_eq!(capped.duration, max.duration);
+    assert_near(max.distance, 9990.0 / friction_rate(milliseconds(140)), 1e-9);
+}

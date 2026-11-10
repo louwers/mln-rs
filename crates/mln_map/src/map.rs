@@ -5,8 +5,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, MapDebugOptions, MapMode, NorthOrientation,
-    ProjectionMode, TileLodMode, TransformState, ViewportMode,
+    AnimationOptions, BoundOptions, CameraMomentum, CameraOptions, ConstrainMode, MapDebugOptions, MapMode,
+    NorthOrientation, ProjectionMode, TileLodMode, TransformState, ViewportMode,
 };
 use mln_renderer::{ExceptionPtr, RendererFrontend};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
@@ -161,6 +161,14 @@ impl Map {
         if ended {
             self.impl_.on_update();
         }
+    }
+
+    /// Continues a gesture with momentum, which moves the camera on each
+    /// frame until its parts end. See [`CameraMomentum`].
+    pub fn start_momentum(&mut self, momentum: &CameraMomentum, animation: &AnimationOptions) {
+        self.impl_.camera_mutated.set(true);
+        self.impl_.transform.borrow_mut().start_momentum(momentum, animation);
+        self.impl_.on_update();
     }
 
     pub fn set_gesture_in_progress(&mut self, in_progress: bool) {

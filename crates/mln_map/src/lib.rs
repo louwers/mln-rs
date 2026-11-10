@@ -17,6 +17,7 @@ pub use map_observer::{CameraChangeMode, MapLoadError, MapObserver, NullMapObser
 pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
 pub use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, FreeCameraOptions, MapDebugOptions, MapMode,
+    AnimationOptions, BoundOptions, CameraMomentum, CameraOptions, ConstrainMode, FreeCameraOptions, MapDebugOptions,
+    MapMode, MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumEnd, MomentumSnap, MomentumVelocity,
     NorthOrientation, ProjectionMode, TileLodMode, TransformState, ViewportMode,
 };
