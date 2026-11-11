@@ -125,6 +125,10 @@ impl Context {
         self.weak_self.upgrade().expect("webgpu::Context used after drop")
     }
 
+    pub(crate) fn weak(&self) -> Weak<Context> {
+        self.weak_self.clone()
+    }
+
     /// `getBackend()`
     pub fn get_backend(&self) -> &Rc<BackendImpl> {
         &self.backend
@@ -132,6 +136,30 @@ impl Context {
 
     pub fn rendering_stats_mut(&self) -> RefMut<'_, RenderingStats> {
         GfxContext::rendering_stats(self)
+    }
+
+    /// Counts a new GPU buffer of `bytes` in the stats.
+    pub(crate) fn count_buffer_created(&self, bytes: u64) {
+        let mut stats = self.rendering_stats_mut();
+        stats.num_buffers += 1;
+        stats.total_buffers += 1;
+        stats.total_buffer_objs += 1;
+        stats.mem_buffers += bytes as i32;
+    }
+
+    /// Takes a released GPU buffer of `bytes` out of the stats.
+    pub(crate) fn count_buffer_released(&self, bytes: u64) {
+        let mut stats = self.rendering_stats_mut();
+        stats.num_buffers -= 1;
+        stats.mem_buffers -= bytes as i32;
+    }
+
+    /// Counts a write of `bytes` to a GPU buffer in the stats.
+    pub(crate) fn count_buffer_update(&self, bytes: usize) {
+        let mut stats = self.rendering_stats_mut();
+        stats.buffer_updates += 1;
+        stats.buffer_obj_updates += 1;
+        stats.buffer_update_bytes = stats.buffer_update_bytes.wrapping_add(bytes);
     }
 
     /// `createOffscreenTexture(size, type, depth, stencil)`
@@ -177,6 +205,7 @@ impl Context {
         let mut padded = data.to_vec();
         padded.resize(padded_size, 0);
         self.backend.write_buffer(&buffer, 0, &padded);
+        self.count_buffer_created(buffer.size());
         Some((buffer, data.len() as u64))
     }
 
@@ -292,7 +321,9 @@ impl Context {
 
         let ubo_size = std::mem::size_of::<ClipUBO>() as u64;
         let mut uniform_buffers = self.clip_mask_uniform_buffers.borrow_mut();
-        uniform_buffers.clear();
+        for buffer in uniform_buffers.drain(..) {
+            self.count_buffer_released(buffer.size());
+        }
         uniform_buffers.reserve(tile_ubos.len());
         for ubo in tile_ubos {
             let Some((buffer, _)) = self.create_raw_buffer(bytemuck::bytes_of(ubo), wgpu::BufferUsages::UNIFORM) else {

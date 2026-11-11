@@ -5,7 +5,7 @@
 // `gfx::UniformBufferArray` directly.
 
 use std::any::Any;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 use mln_gfx::uniform_buffer;
 
@@ -34,6 +34,9 @@ pub struct UniformBuffer {
     /// backend state rather than `Rc<Context>` avoids an Rc cycle through the
     /// context's global uniform buffer array.
     backend: Rc<BackendImpl>,
+    /// The context whose stats count this buffer. Weak for the same reason;
+    /// a buffer the context drops has no stats left to update.
+    context: Weak<Context>,
     buffer: Option<wgpu::Buffer>,
 }
 
@@ -41,10 +44,10 @@ impl UniformBuffer {
     /// `UniformBuffer(context, data, size)`; `data == None` is the C++ null
     /// pointer.
     pub fn new(context: &Context, data: Option<&[u8]>, size: usize) -> Self {
-        Self::with_backend(context.get_backend().clone(), data, size)
+        Self::with_backend(context.get_backend().clone(), context.weak(), data, size)
     }
 
-    fn with_backend(backend: Rc<BackendImpl>, data: Option<&[u8]>, size: usize) -> Self {
+    fn with_backend(backend: Rc<BackendImpl>, context: Weak<Context>, data: Option<&[u8]>, size: usize) -> Self {
         let aligned_size = aligned_uniform_size(size);
         let mut buffer = None;
         if let Some(device) = backend.get_device()
@@ -64,20 +67,37 @@ impl UniformBuffer {
                 padded[..size].copy_from_slice(&data[..size]);
                 backend.write_buffer(&b, 0, &padded);
             }
+            if let Some(context) = context.upgrade() {
+                context.count_buffer_created(b.size());
+                let mut stats = context.rendering_stats_mut();
+                stats.num_uniform_buffers += 1;
+                stats.mem_uniform_buffers += b.size() as i32;
+            }
             buffer = Some(b);
         }
-        UniformBuffer { size, backend, buffer }
+        UniformBuffer { size, backend, context, buffer }
     }
 
     /// `clone()`: a new buffer of the same size; contents are not copied
     /// (C++: "We can't directly copy buffer contents in WebGPU without a
     /// command encoder").
     pub fn clone_buffer(&self) -> Self {
-        UniformBuffer::with_backend(self.backend.clone(), None, self.size)
+        UniformBuffer::with_backend(self.backend.clone(), self.context.clone(), None, self.size)
     }
 
     pub fn get_buffer(&self) -> Option<&wgpu::Buffer> {
         self.buffer.as_ref()
+    }
+}
+
+impl Drop for UniformBuffer {
+    fn drop(&mut self) {
+        if let (Some(buffer), Some(context)) = (&self.buffer, self.context.upgrade()) {
+            context.count_buffer_released(buffer.size());
+            let mut stats = context.rendering_stats_mut();
+            stats.num_uniform_buffers -= 1;
+            stats.mem_uniform_buffers -= buffer.size() as i32;
+        }
     }
 }
 
@@ -88,6 +108,12 @@ impl uniform_buffer::UniformBuffer for UniformBuffer {
             && let Some(buffer) = &self.buffer
         {
             self.backend.write_buffer(buffer, 0, data);
+            if let Some(context) = self.context.upgrade() {
+                context.count_buffer_update(data.len());
+                let mut stats = context.rendering_stats_mut();
+                stats.num_uniform_updates += 1;
+                stats.uniform_update_bytes = stats.uniform_update_bytes.wrapping_add(data.len());
+            }
         }
     }
 

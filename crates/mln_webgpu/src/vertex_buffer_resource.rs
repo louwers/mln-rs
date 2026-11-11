@@ -19,10 +19,10 @@ pub struct VertexBufferResource {
 
 impl VertexBufferResource {
     pub fn new(buffer: BufferResource) -> Self {
-        if buffer.get_buffer().is_some() {
+        if buffer.is_valid() {
             let mut stats = buffer.get_context().rendering_stats_mut();
             stats.num_vertex_buffers += 1;
-            stats.mem_vertex_buffers += buffer.get_size_in_bytes() as i32;
+            stats.mem_vertex_buffers += buffer.get_allocated_size() as i32;
         }
         VertexBufferResource { buffer: RefCell::new(buffer), last_updated: Cell::new(None) }
     }
@@ -45,17 +45,22 @@ impl VertexBufferResource {
         self.last_updated.set(Some(time));
     }
     pub fn update(&self, data: &[u8]) {
-        self.buffer.borrow_mut().update(data, 0);
+        let mut buffer = self.buffer.borrow_mut();
+        buffer.update(data, 0);
+        if buffer.is_valid() {
+            let mut stats = buffer.get_context().rendering_stats_mut();
+            stats.vertex_update_bytes = stats.vertex_update_bytes.wrapping_add(data.len());
+        }
     }
 }
 
 impl Drop for VertexBufferResource {
     fn drop(&mut self) {
         let buffer = self.buffer.borrow();
-        if buffer.get_buffer().is_some() {
+        if buffer.is_valid() {
             let mut stats = buffer.get_context().rendering_stats_mut();
             stats.num_vertex_buffers -= 1;
-            stats.mem_vertex_buffers -= buffer.get_size_in_bytes() as i32;
+            stats.mem_vertex_buffers -= buffer.get_allocated_size() as i32;
         }
     }
 }
@@ -72,10 +77,10 @@ pub struct IndexBufferResource {
 
 impl IndexBufferResource {
     pub fn new(buffer: BufferResource) -> Self {
-        if buffer.get_buffer().is_some() {
+        if buffer.is_valid() {
             let mut stats = buffer.get_context().rendering_stats_mut();
             stats.num_index_buffers += 1;
-            stats.mem_index_buffers += buffer.get_size_in_bytes() as i32;
+            stats.mem_index_buffers += buffer.get_allocated_size() as i32;
         }
         IndexBufferResource { buffer: RefCell::new(buffer) }
     }
@@ -87,17 +92,22 @@ impl IndexBufferResource {
         self.buffer.borrow()
     }
     pub fn update(&self, data: &[u8]) {
-        self.buffer.borrow_mut().update(data, 0);
+        let mut buffer = self.buffer.borrow_mut();
+        buffer.update(data, 0);
+        if buffer.is_valid() {
+            let mut stats = buffer.get_context().rendering_stats_mut();
+            stats.index_update_bytes = stats.index_update_bytes.wrapping_add(data.len());
+        }
     }
 }
 
 impl Drop for IndexBufferResource {
     fn drop(&mut self) {
         let buffer = self.buffer.borrow();
-        if buffer.get_buffer().is_some() {
+        if buffer.is_valid() {
             let mut stats = buffer.get_context().rendering_stats_mut();
             stats.num_index_buffers -= 1;
-            stats.mem_index_buffers -= buffer.get_size_in_bytes() as i32;
+            stats.mem_index_buffers -= buffer.get_allocated_size() as i32;
         }
     }
 }
