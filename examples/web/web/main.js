@@ -56,6 +56,9 @@ const compiling = WebAssembly.compileStreaming(fetch('./pkg/mln_web_bg.wasm'));
 const count = number('workers', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)));
 const tileWorkers = Array.from({ length: count }, () => new Worker('./worker.js', { type: 'module' }));
 const map = new Worker('./map-worker.js', { type: 'module' });
+const style = new URL(params.get('style') ?? 'https://tiles.openfreemap.org/styles/liberty', location.href).href;
+// The map's Web Worker fetches the style and what it needs first meanwhile.
+map.postMessage({ preload: { style, ratio } });
 
 const module = await compiling;
 const ports = tileWorkers.map((worker) => {
@@ -72,7 +75,7 @@ map.postMessage({
   width: canvas.clientWidth,
   height: canvas.clientHeight,
   ratio,
-  style: new URL(params.get('style') ?? 'https://tiles.openfreemap.org/styles/liberty', location.href).href,
+  style,
   fallbackFontFaces: params.get('fallbackFontFaces'),
   camera: [number('lat', 52.37), number('lon', 4.89), number('zoom', 13), number('bearing', 0), number('pitch', 0)],
   localIdeographFontFamily: localFamily === '' || localFamily === 'false' ? undefined : localFamily,

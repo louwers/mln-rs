@@ -135,6 +135,15 @@ fn physical(size: Size, pixel_ratio: f64) -> Size {
     )
 }
 
+/// Hands this instance's fetches the responses its Web Worker fetched ahead
+/// (web/map-worker.js): `take(url)` returns a promise of the response
+/// fetched for exactly `url`, once, or undefined (mln_storage's
+/// `set_fetch_preloads`).
+#[wasm_bindgen]
+pub fn set_preloads(take: js_sys::Function) {
+    mln_storage::set_fetch_preloads(Some(take));
+}
+
 /// A continuous map in an OffscreenCanvas, in the Web Worker that runs it
 /// (web/map-worker.js).
 #[wasm_bindgen]

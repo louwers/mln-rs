@@ -37,7 +37,7 @@ mod worker;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use map::WebMap;
+pub use map::{WebMap, set_preloads};
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_actor::scheduler;
 use mln_util::enum_::Enum;

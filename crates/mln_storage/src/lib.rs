@@ -54,6 +54,8 @@ pub use asset_file_source::AssetFileSource;
 pub use async_request::AsyncRequest;
 #[cfg(feature = "sqlite")]
 pub use database_file_source::DatabaseFileSource;
+#[cfg(target_family = "wasm")]
+pub use fetch_transport::set_fetch_preloads;
 pub use file_source::{Callback, FileSource, FileSourceType, READ_ONLY_MODE_KEY};
 pub use file_source_manager::{FileSourceFactory, FileSourceManager};
 pub use file_source_request::{FileSourceRequest, FileSourceRequestState};

@@ -4,7 +4,8 @@
 // directly, each over a MessageChannel port the page connected: requests
 // go as bytes, and replies come back as bytes and payloads, transferred.
 //
-// From the page: first {module, canvas, ports, width, height, ratio, style,
+// From the page: first {preload: {style, ratio}} as soon as the page starts,
+// then {module, canvas, ports, width, height, ratio, style,
 // fallbackFontFaces, camera, localIdeographFontFamily}, then {readPixels},
 // {resize: [width, height]} in CSS pixels, and {input, args}: a call of
 // WebMap's input methods (pointer_down, pointer_move, pointer_up,
@@ -14,18 +15,72 @@
 // height, pixels}} for each readPixels, and {box} when a Shift-drag's box
 // changes ([x0, y0, x1, y1], or null).
 
-import init, { WebMap } from './pkg/mln_web.js';
+// Imported rather than a static import, so that the preloads below don't
+// wait for it.
+const bindings = import('./pkg/mln_web.js');
 
 let start = null;
 const early = []; // messages before the map exists
 onmessage = ({ data }) => {
-  if (data.module) start = run(data);
+  if (data.preload) preloadStyle(data.preload.style, data.preload.ratio);
+  else if (data.module) start = run(data);
   else if (start) start.then((handle) => handle(data));
   else early.push(data);
 };
 
+// What the map fetches first, fetched while the module downloads and
+// compiles: the style, then its sources' TileJSON and its sprite, at the
+// URLs the map asks for them by. The map's fetches take these responses
+// (mln_storage's `set_fetch_preloads`), each once, when they ask for the
+// same URL; one never asked for is dropped after a minute. Only absolute
+// http(s) URLs: the map's file source maps the others first.
+const preloads = new Map();
+
+function takePreload(url) {
+  const preloaded = preloads.get(url);
+  if (preloaded === undefined) return undefined;
+  preloads.delete(url);
+  clearTimeout(preloaded.expiry);
+  return preloaded.response;
+}
+
+function preload(url) {
+  if (typeof url !== 'string' || !/^https?:\/\//.test(url) || preloads.has(url)) return undefined;
+  const response = fetch(url);
+  // Unclaimed, a failure is quiet; claimed, the map fetches again.
+  response.catch(() => {});
+  const expiry = setTimeout(() => preloads.delete(url), 60_000);
+  preloads.set(url, { response, expiry });
+  return response;
+}
+
+function preloadStyle(url, ratio) {
+  // A clone to read: the map takes the original.
+  preload(url)
+    ?.then((response) => (response.ok ? response.clone().json() : undefined))
+    .then((style) => style && preloadParts(style, ratio))
+    .catch(() => {});
+}
+
+function preloadParts(style, ratio) {
+  for (const source of Object.values(style.sources ?? {})) preload(source?.url);
+  const sprites = typeof style.sprite === 'string' ? [style.sprite]
+    : Array.isArray(style.sprite) ? style.sprite.map((sprite) => sprite?.url) : [];
+  for (const sprite of sprites) {
+    // mln_storage's `Resource::sprite_json` and `sprite_image`.
+    if (typeof sprite !== 'string' || sprite.includes('#')) continue;
+    const query = sprite.includes('?') ? sprite.indexOf('?') : sprite.length;
+    const scale = ratio > 1 ? '@2x' : '';
+    for (const extension of ['.json', '.png']) {
+      preload(`${sprite.slice(0, query)}${scale}${extension}${sprite.slice(query)}`);
+    }
+  }
+}
+
 async function run({ module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily }) {
+  const { default: init, WebMap, set_preloads } = await bindings;
   await init({ module_or_path: module });
+  set_preloads(takePreload);
 
   // The map's work between frames (finished fetches, worker replies, queued
   // tasks) runs as soon as the map asks for it, in a task of its own, rather

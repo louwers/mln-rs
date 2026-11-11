@@ -105,7 +105,11 @@ its frames match the native renders.
 
 The page creates the Web Workers as soon as it starts the module's
 download and compile, so that their scripts load meanwhile, and posts
-them the module once it has compiled.
+them the module once it has compiled. Meanwhile the map's Web Worker
+fetches what the map asks for first: the style, then its sources'
+TileJSON and its sprite. The map's fetch transport takes each of those
+responses (mln_storage's `set_fetch_preloads`) when the map fetches the
+same URL, and fetches as before for any other.
 
 ## Caching
 
