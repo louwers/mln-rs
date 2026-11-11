@@ -14,6 +14,8 @@
 //   frame into the old-size swapchain texture with the new-size viewport
 //   (Dawn logs a validation error for it). The port also reconfigures
 //   before acquiring the next texture when a reconfigure is pending.
+// - The surface comes before the adapter, so the adapter is one that can
+//   present to it: one that can't would fail to configure the surface.
 // - Single-threaded (the renderer runs on the main thread): the spin lock,
 //   `frameInProgress` (never set in C++) and `isShuttingDown` atomics are
 //   plain cells, and `waitForFrame` always succeeds immediately as in C++.
@@ -521,12 +523,14 @@ pub struct SurfaceBackend {
 
 impl SurfaceBackend {
     /// The constructor of `GLFWWebGPUBackend(window, capFrameRate)` from the
-    /// instance on: adapter, device, surface (made by `create_surface` from
-    /// the window's handles), format selection and configuration.
+    /// instance on: surface (made by `create_surface` from the window's
+    /// handles), an adapter that can present to it, device, format selection
+    /// and configuration.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
-    /// WebGPU adapter, with [`ErrorKind::Native`](mln_util::ErrorKind) when
-    /// the adapter can't create a device, and with `create_surface`'s error.
+    /// WebGPU adapter that can present to the surface, with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the adapter can't
+    /// create a device, and with `create_surface`'s error.
     pub fn new(
         create_surface: impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'static>, Error>,
         framebuffer_size: Size,
@@ -537,12 +541,20 @@ impl SurfaceBackend {
         // Create the instance
         let instance = crate::headless_backend::create_instance(instance_backends());
 
-        // Request adapter
+        // Create surface for WebGPU
+        let surface = create_surface(&instance)?;
+
+        // Request an adapter that can present to the surface
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: Some(&surface),
             ..Default::default()
         }))
         .map_err(|e| Error::unsupported(format!("No WebGPU adapter found: {e}")))?;
+        let capabilities = surface.get_capabilities(&adapter);
+        if capabilities.formats.is_empty() {
+            return Err(Error::unsupported("The WebGPU adapter can't present to the surface"));
+        }
 
         // Log adapter info
         let adapter_info = adapter.get_info();
@@ -582,10 +594,6 @@ impl SurfaceBackend {
         // Process device events to ensure it's ready
         let _ = device.poll(wgpu::PollType::Poll);
 
-        // Create surface for WebGPU
-        let surface = create_surface(&instance)?;
-
-        let capabilities = surface.get_capabilities(&adapter);
         let (surface_usage, present_mode) = surface_options(&capabilities);
         let preferred_formats = [
             wgpu::TextureFormat::Bgra8Unorm,
