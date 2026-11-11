@@ -1,56 +1,51 @@
 // The map's Web Worker: its own instance of the page's module, rendering
 // into the page's canvas (an OffscreenCanvas), so that the map's work never
-// runs on the page's thread. Its tile workers (worker.js) talk to it
+// runs on the page's thread. Its tile workers (worker.ts) talk to it
 // directly, each over a MessageChannel port the page connected: requests
 // go as bytes, and replies come back as bytes and payloads, transferred.
 //
-// From the page: first {preload: {style, ratio, zoom}} as soon as the page
-// starts, then {module, canvas, ports, width, height, ratio, style,
-// fallbackFontFaces, camera, localIdeographFontFamily, panic}, then
-// {readPixels}, {resize: [width, height]} in CSS pixels, {style: url},
-// {jumpTo: camera}, {resetNorth}, {follow: camera} (another map's, which
-// this one follows), and {input, args}: a call of WebMap's input methods
-// (pointer_down, pointer_move, pointer_up, pointer_cancel, wheel, key, blur)
-// whose last argument is the event's time as performance.timeOrigin +
-// timeStamp. A camera is [lat, lon, zoom, bearing,
-// pitch]. To the page: {status}, {loaded: {loadedMs, replies}} once the map
-// is fully loaded, {pixels: {width, height, pixels}} for each readPixels,
-// {box} when a Shift-drag's box changes ([x0, y0, x1, y1], or null),
-// {camera} when the camera moves, {attribution: [html]} when the sources'
-// attributions change, {styleName} when the style's name does, and {fatal}
-// once the map stops.
+// The page sends a preload as soon as it starts, the start once the module
+// compiled, then the rest of ToMap (protocol.ts); this worker answers with
+// FromMap.
 //
 // A panic aborts the instance it happens in (wasm32-unknown-unknown can't
 // unwind), and nothing may call into it after that. When this instance or a
 // tile worker's panics, the map stops: no more frames, ticks or replies, and
-// {fatal: message} goes to the page, with the message the panic hook left
-// in `mlnPanic` (src/lib.rs) or a tile worker sent. `panic`, if given, is a
+// a fatal message goes to the page, with the message the panic hook left in
+// `mlnPanic` (src/lib.rs) or a tile worker sent. `panic`, if given, is a
 // message to panic with once the map exists (`panic_for_check`), for
 // check/check.mjs.
+
+import type { WebMap } from './pkg/mln_web.js';
+import type { Box, FromMap, FromTileWorker, Input, Loaded, Start, ToMap } from './protocol.ts';
 
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
 const bindings = import('./pkg/mln_web.js');
 
-let start = null;
-const early = []; // messages before the map exists
-onmessage = ({ data }) => {
-  if (data.preload) preloadStyle(data.preload.style, data.preload.ratio, data.preload.zoom);
-  else if (data.module) start = run(data).catch((error) => fatal('map', error));
+type Handle = (message: ToMap) => void;
+
+let start: Promise<Handle | undefined> | null = null;
+const early: ToMap[] = []; // messages before the map exists
+onmessage = ({ data }: MessageEvent<ToMap>) => {
+  if (data.type === 'preload') preloadStyle(data.style, data.ratio, data.zoom);
+  else if (data.type === 'start') start = run(data).catch((error: unknown) => fatal('map', error));
   else if (start) start.then((handle) => handle?.(data));
   else early.push(data);
 };
 
+const post = (message: FromMap, transfer: Transferable[] = []) => postMessage(message, transfer);
+
 let stopped = false;
 
-function fatal(where, error) {
+function fatal(where: string, error: unknown): undefined {
   if (stopped) return;
   stopped = true;
-  postMessage({ fatal: `${where}: ${self.mlnPanic ?? String(error)}` });
+  post({ type: 'fatal', message: `${where}: ${self.mlnPanic ?? String(error)}` });
 }
 
 // Calls into the instance, unless the map has stopped.
-function guard(f) {
+function guard(f: () => void) {
   if (stopped) return;
   try {
     f();
@@ -70,9 +65,9 @@ addEventListener('unhandledrejection', (event) => fatal('map', event.reason));
 // once, when they ask for the same URL; one never asked for is dropped
 // after a minute. Only absolute http(s) URLs: the map's file source maps
 // the others first.
-const preloads = new Map();
+const preloads = new Map<string, { response: Promise<Response>; expiry: ReturnType<typeof setTimeout> }>();
 
-function takePreload(url) {
+function takePreload(url: string): Promise<Response> | undefined {
   const preloaded = preloads.get(url);
   if (preloaded === undefined) return undefined;
   preloads.delete(url);
@@ -80,7 +75,7 @@ function takePreload(url) {
   return preloaded.response;
 }
 
-function preload(url) {
+function preload(url: unknown): Promise<Response> | undefined {
   if (typeof url !== 'string' || !/^https?:\/\//.test(url) || preloads.has(url)) return undefined;
   const response = fetch(url);
   // Unclaimed, a failure is quiet; claimed, the map fetches again.
@@ -90,18 +85,26 @@ function preload(url) {
   return response;
 }
 
-function preloadStyle(url, ratio, zoom) {
+function preloadStyle(url: string, ratio: number, zoom: number) {
   // A clone to read: the map takes the original.
   preload(url)
-    ?.then((response) => (response.ok ? response.clone().json() : undefined))
-    .then((style) => style && preloadParts(style, ratio, zoom))
+    ?.then((response): Promise<unknown> | undefined => (response.ok ? response.clone().json() : undefined))
+    .then((style) => {
+      if (isRecord(style)) preloadParts(style, ratio, zoom);
+    })
     .catch(() => {});
 }
 
-function preloadParts(style, ratio, zoom) {
-  for (const source of Object.values(style.sources ?? {})) preload(source?.url);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function preloadParts(style: Record<string, unknown>, ratio: number, zoom: number) {
+  for (const source of Object.values(isRecord(style.sources) ? style.sources : {})) {
+    if (isRecord(source)) preload(source.url);
+  }
   const sprites = typeof style.sprite === 'string' ? [style.sprite]
-    : Array.isArray(style.sprite) ? style.sprite.map((sprite) => sprite?.url) : [];
+    : Array.isArray(style.sprite) ? style.sprite.map((sprite: unknown) => (isRecord(sprite) ? sprite.url : undefined)) : [];
   for (const sprite of sprites) {
     // mln_storage's `Resource::sprite_json` and `sprite_image`.
     if (typeof sprite !== 'string' || sprite.includes('#')) continue;
@@ -111,10 +114,11 @@ function preloadParts(style, ratio, zoom) {
       preload(`${sprite.slice(0, query)}${scale}${extension}${sprite.slice(query)}`);
     }
   }
-  if (typeof style.glyphs === 'string') {
+  const glyphs = style.glyphs;
+  if (typeof glyphs === 'string') {
     for (const stack of firstFontStacks(style, zoom)) {
       // mln_storage's `Resource::glyphs`, for the first range.
-      preload(style.glyphs.replaceAll('{fontstack}', percentEncode(stack)).replaceAll('{range}', '0-255'));
+      preload(glyphs.replaceAll('{fontstack}', percentEncode(stack)).replaceAll('{range}', '0-255'));
     }
   }
 }
@@ -127,27 +131,27 @@ const STRING_EXPRESSIONS = new Set(['get', 'has', 'var', 'feature-state', 'globa
 // The font stacks, joined, of the symbol layers with text shown at `zoom`
 // whose `text-font` is a constant: the glyphs their tiles' labels ask for
 // first.
-function firstFontStacks(style, zoom) {
-  const stacks = new Set();
+function firstFontStacks(style: Record<string, unknown>, zoom: number): Set<string> {
+  const stacks = new Set<string>();
   for (const layer of Array.isArray(style.layers) ? style.layers : []) {
-    const layout = layer?.layout ?? {};
-    const shown = layer?.type === 'symbol' && layout.visibility !== 'none' &&
+    if (!isRecord(layer)) continue;
+    const layout = isRecord(layer.layout) ? layer.layout : {};
+    const shown = layer.type === 'symbol' && layout.visibility !== 'none' &&
       (typeof layer.minzoom !== 'number' || zoom >= layer.minzoom) &&
       (typeof layer.maxzoom !== 'number' || zoom < layer.maxzoom);
     if (!shown || layout['text-field'] === undefined || layout['text-field'] === '') continue;
     const font = layout['text-font'];
-    const fonts = font === undefined ? DEFAULT_FONT : Array.isArray(font) && font[0] === 'literal' ? font[1] : font;
-    if (Array.isArray(fonts) && fonts.length > 0 && !STRING_EXPRESSIONS.has(fonts[0]) &&
-      fonts.every((name) => typeof name === 'string')) {
-      stacks.add(fonts.join(','));
-    }
+    const fonts: unknown = font === undefined ? DEFAULT_FONT : Array.isArray(font) && font[0] === 'literal' ? font[1] : font;
+    if (!Array.isArray(fonts) || fonts.length === 0) continue;
+    const names = fonts.filter((name: unknown) => typeof name === 'string');
+    if (names.length === fonts.length && !STRING_EXPRESSIONS.has(names[0] ?? '')) stacks.add(names.join(','));
   }
   return stacks;
 }
 
 // mln_util's `percent_encode`: every UTF-8 byte but the unreserved ones, as
 // lowercase hex.
-function percentEncode(text) {
+function percentEncode(text: string): string {
   let encoded = '';
   for (const byte of new TextEncoder().encode(text)) {
     const char = String.fromCharCode(byte);
@@ -156,7 +160,9 @@ function percentEncode(text) {
   return encoded;
 }
 
-async function run({ module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }) {
+async function run(
+  { module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }: Start,
+): Promise<Handle> {
   const { default: init, WebMap, set_preloads, panic_for_check } = await bindings;
   await init({ module_or_path: module });
   set_preloads(takePreload);
@@ -180,10 +186,10 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
     await shaper.default();
     return shaper;
   };
-  const map = await WebMap.create(canvas, width, height, ratio, ports.length,
-    (instance, bytes) => {
-      if (!stopped) ports[instance].postMessage(bytes, [bytes.buffer]);
-    }, wake, loadShaper,
+  const toTileWorker = (instance: number, bytes: Uint8Array) => {
+    if (!stopped) ports[instance]?.postMessage(bytes, [bytes.buffer]);
+  };
+  const map = await WebMap.create(canvas, width, height, ratio, ports.length, toTileWorker, wake, loadShaper,
     localIdeographFontFamily);
 
   ticks.port1.onmessage = () => {
@@ -193,8 +199,8 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
     });
   };
   ports.forEach((port, instance) => {
-    port.onmessage = ({ data }) => {
-      if (data.fatal !== undefined) fatal(`tile worker ${instance}`, data.fatal);
+    port.onmessage = ({ data }: MessageEvent<FromTileWorker>) => {
+      if ('fatal' in data) fatal(`tile worker ${instance}`, data.fatal);
       else guard(() => data.forEach((reply) => map.receive(instance, reply)));
     };
   });
@@ -206,29 +212,30 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
   map.jump_to(...camera);
 
   let started = performance.now();
-  let loaded = null;
+  let loaded: Loaded | null = null;
   let readPixels = 0;
   let reported = 0;
   let attribution = '';
   let styleName = '';
-  const report = (force) => {
+  const report = (force: boolean) => {
     const now = performance.now();
     if (!force && now - reported < 250) return;
     reported = now;
-    postMessage({
-      status: `${ports.length} tile workers, ${map.received()} replies` +
+    post({
+      type: 'status',
+      text: `${ports.length} tile workers, ${map.received()} replies` +
         (loaded === null ? '' : `, loaded in ${Math.round(loaded.loadedMs)} ms`),
     });
     // A source's attribution can come later than its style, with its TileJSON.
     const next = map.attributions();
     if (next.join('\n') !== attribution) {
       attribution = next.join('\n');
-      postMessage({ attribution: next });
+      post({ type: 'attribution', attribution: next });
     }
     const name = map.style_name();
     if (name !== styleName) {
       styleName = name;
-      postMessage({ styleName });
+      post({ type: 'styleName', name });
     }
   };
   function frame() {
@@ -238,21 +245,22 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
   let shownCamera = '';
   function drawFrame() {
     map.frame(8, performance.now());
-    const next = map.camera();
-    if (next.join() !== shownCamera) {
-      shownCamera = next.join();
-      postMessage({ camera: Array.from(next) });
+    const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
+    const next = [lat, lon, zoom, bearing, pitch].join();
+    if (next !== shownCamera) {
+      shownCamera = next;
+      post({ type: 'camera', camera: [lat, lon, zoom, bearing, pitch] });
     }
     if (loaded === null && map.is_fully_loaded()) {
       loaded = { loadedMs: performance.now() - started, replies: map.received() };
-      postMessage({ loaded });
+      post({ type: 'loaded', loaded });
       report(true);
     }
     if (readPixels > 0) {
       const pixels = map.take_pixels();
       if (pixels !== undefined) {
         readPixels--;
-        postMessage({ pixels: { width: canvas.width, height: canvas.height, pixels } }, [pixels.buffer]);
+        post({ type: 'pixels', pixels: { width: canvas.width, height: canvas.height, pixels } }, [pixels.buffer]);
         if (readPixels > 0) map.request_pixels();
       }
     }
@@ -260,34 +268,79 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
   }
   requestAnimationFrame(frame);
 
-  // The page's events, on this worker's clock: the one frames run on.
-  const INPUTS = new Set(['pointer_down', 'pointer_move', 'pointer_up', 'pointer_cancel', 'wheel', 'key', 'blur']);
-  let box = null;
-  const handle = (data) => guard(() => {
-    if (data.readPixels) {
-      if (readPixels++ === 0) map.request_pixels();
-    }
-    if (data.resize) map.resize(...data.resize);
-    if (data.style) {
-      map.set_style_url(data.style);
-      started = performance.now();
-      loaded = null;
-      report(true);
-    }
-    if (data.jumpTo) map.jump_to(...data.jumpTo);
-    if (data.resetNorth) map.reset_north();
-    if (data.follow) map.follow(...data.follow);
-    if (INPUTS.has(data.input)) {
-      const args = data.args.slice();
-      args[args.length - 1] -= performance.timeOrigin;
-      map[data.input](...args);
-      const next = map.box_zoom() ?? null;
-      if (String(next) !== String(box)) {
-        box = next && Array.from(next);
-        postMessage({ box });
+  let box: Box | null = null;
+  const handle = (data: ToMap) => guard(() => {
+    switch (data.type) {
+      case 'readPixels':
+        if (readPixels++ === 0) map.request_pixels();
+        break;
+      case 'resize':
+        map.resize(data.width, data.height);
+        break;
+      case 'style':
+        map.set_style_url(data.url);
+        started = performance.now();
+        loaded = null;
+        // The page clears both for the new style, so they go again even
+        // when the new style's are the same.
+        attribution = '';
+        styleName = '';
+        report(true);
+        break;
+      case 'jumpTo':
+        map.jump_to(...data.camera);
+        break;
+      case 'resetNorth':
+        map.reset_north();
+        break;
+      case 'follow':
+        map.follow(...data.camera);
+        break;
+      case 'input': {
+        applyInput(map, data.input);
+        const [x0, y0, x1, y1] = map.box_zoom() ?? [];
+        const next: Box | null = x0 === undefined || y0 === undefined || x1 === undefined || y1 === undefined
+          ? null
+          : [x0, y0, x1, y1];
+        if (String(next) !== String(box)) {
+          box = next;
+          post({ type: 'box', box });
+        }
+        break;
       }
+      case 'preload':
+      case 'start':
+        break;
     }
   });
   for (const data of early.splice(0)) handle(data);
   return handle;
+}
+
+// The page's events, on this worker's clock: the one frames run on.
+function applyInput(map: WebMap, input: Input) {
+  const time = input.time - performance.timeOrigin;
+  switch (input.kind) {
+    case 'pointer_down':
+      map.pointer_down(input.id, input.pointerType, input.button, input.x, input.y, input.modifiers, time);
+      break;
+    case 'pointer_move':
+      map.pointer_move(input.id, input.x, input.y, time);
+      break;
+    case 'pointer_up':
+      map.pointer_up(input.id, input.x, input.y, time);
+      break;
+    case 'pointer_cancel':
+      map.pointer_cancel(input.id, time);
+      break;
+    case 'wheel':
+      map.wheel(input.x, input.y, input.wheel, input.amount, input.modifiers, time);
+      break;
+    case 'key':
+      map.key(input.key, input.modifiers, time);
+      break;
+    case 'blur':
+      map.blur(time);
+      break;
+  }
 }

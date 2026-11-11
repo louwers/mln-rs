@@ -1,0 +1,29 @@
+# https://mise.jdx.dev: the tools that build, run and check mln-rs. `mise
+# install` installs them; the justfile's recipes run with them on the PATH.
+
+min_version = "2026.10.0"
+
+[settings]
+experimental = true
+pin = true
+lockfile = true
+lockfile_mode = "merge"
+# Rust comes from rust-toolchain.toml, which rustup and CI also read; mise
+# installs that toolchain through rustup.
+idiomatic_version_file_enable_tools = ["rust"]
+
+[tools]
+"aqua:casey/just" = "1.59.0"
+# The browser build: wasm-bindgen must match the wasm-bindgen crate in
+# Cargo.lock, and binaryen's wasm-opt shrinks the release build.
+"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
+"aqua:WebAssembly/binaryen" = "133"
+# The browser build's page (examples/web) and its check.
+"core:node" = "24.22.2"
+"aqua:pnpm/pnpm" = "12.18.0"
+# The justfile's scripts that generate tables and fixtures.
+"core:python" = "3.15.2"
+
+[deps.pnpm]
+auto = true
+dir = "examples/web"

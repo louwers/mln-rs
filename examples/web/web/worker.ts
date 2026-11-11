@@ -13,19 +13,21 @@
 // (`panic_for_check`), for check/check.mjs.
 
 import init, { TileWorker, panic_for_check } from './pkg/mln_web.js';
+import type { FromTileWorker, StartTileWorker } from './protocol.ts';
 
-let worker = null;
-let port = null;
-const early = []; // requests that arrived before the instance was ready
+let worker: TileWorker | null = null;
+let port: MessagePort | null = null;
+const early: Uint8Array[] = []; // requests that arrived before the instance was ready
 let dead = false;
 
-function fatal(error) {
+function fatal(error: unknown) {
   if (dead) return;
   dead = true;
-  port?.postMessage({ fatal: self.mlnPanic ?? String(error) });
+  const message: FromTileWorker = { fatal: self.mlnPanic ?? String(error) };
+  port?.postMessage(message);
 }
 
-function call(f) {
+function call(f: () => void) {
   if (dead) return;
   try {
     f();
@@ -51,25 +53,31 @@ function schedule() {
 channel.port1.onmessage = () => {
   scheduled = false;
   call(() => {
-    const replies = worker.run(10);
+    if (!worker || !port) return;
+    const replies: Uint8Array[][] = worker.run(10);
     if (replies.length > 0) port.postMessage(replies, replies.flatMap((parts) => parts.map((part) => part.buffer)));
     if (worker.has_tasks()) schedule();
   });
 };
 
-onmessage = async ({ data }) => {
+onmessage = async ({ data }: MessageEvent<StartTileWorker>) => {
   port = data.port;
-  port.onmessage = (event) => {
+  port.onmessage = ({ data: request }: MessageEvent<Uint8Array>) => {
     if (worker) {
-      call(() => worker.handle(event.data));
+      const running = worker;
+      call(() => running.handle(request));
       schedule();
     } else {
-      early.push(event.data);
+      early.push(request);
     }
   };
   await init({ module_or_path: data.module });
-  worker = new TileWorker(schedule);
-  if (data.panic) call(() => panic_for_check(data.panic));
-  for (const request of early.splice(0)) call(() => worker.handle(request));
+  const started = new TileWorker(schedule);
+  worker = started;
+  if (data.panic) {
+    const panic = data.panic;
+    call(() => panic_for_check(panic));
+  }
+  for (const request of early.splice(0)) call(() => started.handle(request));
   schedule();
 };

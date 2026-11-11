@@ -1,32 +1,29 @@
 // The comparison with MapLibre GL JS: a GL JS map of the same style over the
 // page's canvas, clipped to the right of a divider, so that each side shows
-// one map and takes the input on its own side. GL JS loads from a CDN the
-// first time a comparison opens.
+// one map and takes the input on its own side. The page imports this module
+// the first time a comparison opens, so GL JS loads only then.
 //
 // The map that last took input leads, and the other jumps to its camera. A
 // follower's camera changes don't move the leader, so the maps don't echo
 // each other's moves.
 
-const VERSION = '6.16.0';
-const BASE = `https://cdn.jsdelivr.net/npm/maplibre-gl@${VERSION}/dist`;
+import { Map as GlMap, getVersion, setWorkerUrl } from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import workerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
 
-let loading = null;
+import type { Camera } from './protocol.ts';
 
-// GL JS, and its stylesheet. A page can't start a worker from another
-// origin, so GL JS's worker is a module of this origin's (a blob) that
-// imports the CDN's.
-function loadGlJs() {
-  loading ??= (async () => {
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = `${BASE}/maplibre-gl.css`;
-    document.head.append(css);
-    const gl = await import(`${BASE}/maplibre-gl.mjs`);
-    const worker = new Blob([`import '${BASE}/maplibre-gl-worker.mjs';`], { type: 'text/javascript' });
-    gl.setWorkerUrl(URL.createObjectURL(worker));
-    return gl;
-  })();
-  return loading;
+// The bundle moves GL JS away from its worker, so the page says where it is.
+setWorkerUrl(workerUrl);
+
+export interface Comparison {
+  /** Moves GL JS's map to the page's map's camera, if the page's map leads. */
+  cameraChanged(camera: Camera): void;
+  /** Makes the page's map lead without input on its canvas: its zoom buttons and compass. */
+  lead(): void;
+  setStyle(url: string): void;
+  /** Removes GL JS's map and the divider. */
+  remove(): void;
 }
 
 // Where the divider sits, as a fraction of the page's width. It stays when the
@@ -34,15 +31,14 @@ function loadGlJs() {
 let split = 0.5;
 
 /**
- * Opens a comparison over `canvas` (the page's map) with `style`, at `camera`
- * ([lat, lon, zoom, bearing, pitch]). `follow(camera)` moves the page's map
- * to GL JS's camera, and stops its own motion, while GL JS leads. Returns
- * `{ cameraChanged(camera), lead(), setStyle(url), remove() }`:
- * `cameraChanged` takes the page's map's camera, and `lead` makes the page's
- * map lead without input on its canvas (its zoom buttons and compass).
+ * Opens a comparison over `canvas` (the page's map) with `style`, at
+ * `camera`. `follow(camera)` moves the page's map to GL JS's camera, and
+ * stops its own motion, while GL JS leads.
  */
-export async function compare(canvas, { style, camera, follow }) {
-  const gl = await loadGlJs();
+export function compare(
+  canvas: HTMLCanvasElement,
+  { style, camera, follow }: { style: string; camera: Camera; follow: (camera: Camera) => void },
+): Comparison {
   const container = document.createElement('div');
   container.className = 'gl-map';
   const divider = document.createElement('div');
@@ -52,11 +48,11 @@ export async function compare(canvas, { style, camera, follow }) {
   divider.ariaLabel = 'Divider between the maps';
   divider.ariaValueMin = '0';
   divider.ariaValueMax = '100';
-  const labels = [label('compare-label mln', 'mln-rs'), label('compare-label gl', `GL JS ${gl.getVersion()}`)];
+  const labels = [label('compare-label mln', 'mln-rs'), label('compare-label gl', `GL JS ${getVersion()}`)];
   canvas.after(container, divider, ...labels);
 
   const [lat, lon, zoom, bearing, pitch] = camera;
-  const map = new gl.Map({
+  const map = new GlMap({
     container,
     style,
     center: [lon, lat],
@@ -68,7 +64,11 @@ export async function compare(canvas, { style, camera, follow }) {
   });
   map.on('error', ({ error }) => console.warn('MapLibre GL JS:', error));
 
-  let leader = 'mln';
+  let leader: 'mln' | 'gl' = 'mln';
+  const glCamera = (): Camera => {
+    const center = map.getCenter();
+    return [center.lat, center.lng, map.getZoom(), map.getBearing(), map.getPitch()];
+  };
   const listening = new AbortController();
   const { signal } = listening;
   // Input on a map makes it lead and stops the other's motion, such as the
@@ -84,10 +84,6 @@ export async function compare(canvas, { style, camera, follow }) {
       follow(glCamera());
     }, { capture: true, signal });
   }
-  const glCamera = () => {
-    const center = map.getCenter();
-    return [center.lat, center.lng, map.getZoom(), map.getBearing(), map.getPitch()];
-  };
   map.on('move', () => {
     if (leader === 'gl') follow(glCamera());
   });
@@ -98,7 +94,6 @@ export async function compare(canvas, { style, camera, follow }) {
     cameraChanged([lat, lon, zoom, bearing, pitch]) {
       if (leader === 'mln') map.jumpTo({ center: [lon, lat], zoom, bearing, pitch });
     },
-    // The page's own controls move the page's map, which then leads.
     lead() {
       leader = 'mln';
       map.stop();
@@ -114,14 +109,14 @@ export async function compare(canvas, { style, camera, follow }) {
   };
 }
 
-function setSplit(divider, fraction) {
+function setSplit(divider: HTMLElement, fraction: number) {
   split = Math.min(1, Math.max(0, fraction));
   document.documentElement.style.setProperty('--split', `${split * 100}%`);
   divider.ariaValueNow = String(Math.round(split * 100));
 }
 
 // A drag or the arrow keys move the divider.
-function addDividerHandlers(divider, signal) {
+function addDividerHandlers(divider: HTMLElement, signal: AbortSignal) {
   setSplit(divider, split);
   divider.addEventListener('pointerdown', (e) => divider.setPointerCapture(e.pointerId), { signal });
   divider.addEventListener('pointermove', (e) => {
@@ -129,14 +124,15 @@ function addDividerHandlers(divider, signal) {
   }, { signal });
   divider.addEventListener('keydown', (e) => {
     const step = e.shiftKey ? 0.1 : 0.02;
-    const next = { ArrowLeft: split - step, ArrowRight: split + step, Home: 0, End: 1 }[e.key];
+    const steps: Record<string, number> = { ArrowLeft: split - step, ArrowRight: split + step, Home: 0, End: 1 };
+    const next = steps[e.key];
     if (next === undefined) return;
     e.preventDefault();
     setSplit(divider, next);
   }, { signal });
 }
 
-function label(className, text) {
+function label(className: string, text: string): HTMLElement {
   const element = document.createElement('div');
   element.className = className;
   element.textContent = text;

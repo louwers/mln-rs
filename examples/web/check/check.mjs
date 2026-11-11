@@ -187,8 +187,9 @@ if (views.length === 0) throw new Error(`no view matches ${options.filter}`);
 
 // MARK: - The page, served from web/, and the fixtures
 
-const root = path.join(here, '../web');
-if (!existsSync(path.join(root, 'pkg/mln_web_bg.wasm'))) throw new Error('no web/pkg: run `just web` first');
+// The page as Vite builds it, as it deploys.
+const root = path.join(here, '../dist');
+if (!existsSync(path.join(root, 'index.html'))) throw new Error('no dist: run `just web` first');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.json': 'application/json' };
 
 // Every URL the page loads is on this server: `/fixtures/<scheme>/<rest>`

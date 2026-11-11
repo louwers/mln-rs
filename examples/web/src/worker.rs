@@ -1,6 +1,6 @@
 //! The tile workers of one Web Worker: its own wasm instance, with its own
 //! memory, running a `TileWorkerHost` (vector and GeoJSON tiles' layouts,
-//! raster tiles' images and raster-dem tiles' DEMs). web/worker.js passes it
+//! raster tiles' images and raster-dem tiles' DEMs). web/worker.ts passes it
 //! the map's requests and posts its replies back.
 
 use std::cell::{Cell, RefCell};
@@ -70,7 +70,7 @@ impl TileWorker {
     /// Runs the workers' waiting tasks until none are left or `budget_ms`
     /// has passed (checked after each task), and returns the replies for
     /// `WebMap::receive`: each an array of `Uint8Array`s, its bytes and then
-    /// its payloads (pixels, vertices, indices), which worker.js transfers.
+    /// its payloads (pixels, vertices, indices), which worker.ts transfers.
     pub fn run(&self, budget_ms: f64) -> js_sys::Array {
         RUNNING.set(true);
         self.scheduler.run_until(Some(deadline(budget_ms)));

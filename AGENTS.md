@@ -12,14 +12,16 @@ A Rust port of MapLibre Native's map rendering core.
 
 ## Dev tool commands
 
-`just --list` lists every recipe. The common ones:
+`mise install` installs the tools that mise.toml pins. `just --list` lists
+every recipe. The common ones:
 
 - `just test`: every test, including the render suite.
 - `just fmt`: format with the pinned nightly rustfmt.
 - `CI=true just ci-lint`: CI's lint job, warnings as errors.
 - `just bench-compare <ref>`: benchmarks against another commit.
-- `just web`, `just web-check`: build the browser build, and compare it with
-  native renders.
+- `just web`, `just web-check`: build the browser build and its page, and
+  compare it with native renders. `just web-dev` serves the page from its
+  sources.
 
 ## Documentation
 

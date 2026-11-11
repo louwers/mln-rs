@@ -1,12 +1,13 @@
 // The page: it runs no wasm itself. It compiles the module, gives its canvas
-// to the map's Web Worker (map-worker.js) as an OffscreenCanvas, and starts
-// the tile workers' Web Workers (worker.js) while the module compiles, each
-// connected to the map's by a MessageChannel, so that their requests and replies never pass through
-// this thread. Each Web Worker instantiates the same module with its own
-// memory, so nothing needs SharedArrayBuffer or COOP/COEP headers.
+// to the map's Web Worker (map-worker.ts) as an OffscreenCanvas, and starts
+// the tile workers' Web Workers (worker.ts) while the module compiles, each
+// connected to the map's by a MessageChannel, so that their requests and
+// replies never pass through this thread. Each Web Worker instantiates the
+// same module with its own memory, so nothing needs SharedArrayBuffer or
+// COOP/COEP headers.
 //
 // URL parameters:
-//   style=<key|url>        a style of styles.js, or any style's URL
+//   style=<key|url>        a style of styles.ts, or any style's URL
 //                          (default: OpenFreeMap Liberty)
 //   fallbackFontFaces=<json>
 //                          font files that every font stack falls back to, as
@@ -22,7 +23,7 @@
 //                          downloaded, as GL JS's option (default:
 //                          sans-serif); empty or `false` downloads them
 //   compare                MapLibre GL JS's map of the style beside this one
-//                          (compare.js)
+//                          (compare.ts)
 //   panic=<map|tile>       the map's instance or the first tile worker's
 //                          panics once it starts, for check/check.mjs
 //
@@ -35,11 +36,9 @@
 // to pan, right- or Ctrl-drag to rotate and tilt, Shift-drag to zoom to a
 // box, the wheel or a trackpad to zoom, double-click or double-tap to zoom
 // in (Shift: out), two fingers to pinch, twist and tilt, and the arrow,
-// +/= and - keys. Each event carries its time as performance.timeOrigin +
-// timeStamp, which the worker turns into its own performance.now() clock,
-// the one its frames run on. The canvas follows its size (ResizeObserver).
-// The zoom buttons send the + and - keys; the compass eases the bearing and
-// pitch back to zero.
+// +/= and - keys. The canvas follows its size (ResizeObserver). The zoom
+// buttons send the + and - keys; the compass eases the bearing and pitch
+// back to zero.
 //
 // `window.mln` is for scripts (check/check.mjs): `loaded` resolves with the
 // load time and the number of worker replies once the map is fully loaded,
@@ -48,18 +47,48 @@
 // instances stops the map: the page shows its message, `fatal` resolves
 // with it as an Error, and `loaded` and `readPixels()` reject with it.
 
-import { STYLES, styleFor } from './styles.js';
+import wasmUrl from './pkg/mln_web_bg.wasm?url';
+import type { Comparison } from './compare.ts';
+import {
+  type Box,
+  type Camera,
+  type FromMap,
+  type Input,
+  type Loaded,
+  type Pixels,
+  type StartTileWorker,
+  type ToMap,
+  WHEEL_NOTCHES,
+  WHEEL_PIXELS,
+} from './protocol.ts';
+import { STYLES, type Style, styleFor } from './styles.ts';
+
+declare global {
+  interface Window {
+    mln: {
+      loaded: Promise<Loaded>;
+      fatal: Promise<Error>;
+      readPixels(): Promise<Pixels>;
+    };
+  }
+}
+
+/** The element with `id`, which must be a `type`. */
+function element<T extends Element>(id: string, type: abstract new (...args: never[]) => T): T {
+  const found = document.getElementById(id);
+  if (!(found instanceof type)) throw new Error(`#${id} is not a ${type.name}`);
+  return found;
+}
 
 const params = new URLSearchParams(location.search);
-const number = (name, fallback) => (params.has(name) ? Number(params.get(name)) : fallback);
-const $ = (id) => document.getElementById(id);
-const status = $('status');
-const banner = $('error');
-const canvas = document.getElementById('map');
+const number = (name: string, fallback: number) => (params.has(name) ? Number(params.get(name)) : fallback);
+const status = element('status', HTMLElement);
+const banner = element('error', HTMLElement);
+const canvas = element('map', HTMLCanvasElement);
 
 if (params.has('width') && params.has('height')) {
-  canvas.style.width = `${number('width')}px`;
-  canvas.style.height = `${number('height')}px`;
+  canvas.style.width = `${number('width', 0)}px`;
+  canvas.style.height = `${number('height', 0)}px`;
 }
 const ratio = number('ratio', window.devicePixelRatio || 1);
 canvas.width = Math.round(canvas.clientWidth * ratio);
@@ -67,19 +96,21 @@ canvas.height = Math.round(canvas.clientHeight * ratio);
 
 const localFamily = params.get('localIdeographFontFamily') ?? 'sans-serif';
 
-const compiling = WebAssembly.compileStreaming(fetch('./pkg/mln_web_bg.wasm'));
+const compiling = WebAssembly.compileStreaming(fetch(wasmUrl));
 
 // The Web Workers load their scripts while the module downloads and
 // compiles, and get it once it has.
 const count = number('workers', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)));
-const tileWorkers = Array.from({ length: count }, () => new Worker('./worker.js', { type: 'module' }));
-const map = new Worker('./map-worker.js', { type: 'module' });
-const camera = cameraFromHash(location.hash) ??
+const tileWorkers = Array.from({ length: count },
+  () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }));
+const map = new Worker(new URL('./map-worker.ts', import.meta.url), { type: 'module' });
+const toMap = (message: ToMap, transfer: Transferable[] = []) => map.postMessage(message, transfer);
+const camera: Camera = cameraFromHash(location.hash) ??
   [number('lat', 52.37), number('lon', 4.89), number('zoom', 13), number('bearing', 0), number('pitch', 0)];
 let current = styleFor(params.get('style'));
 const style = current.url;
 // The map's Web Worker fetches the style and what it needs first meanwhile.
-map.postMessage({ preload: { style, ratio, zoom: camera[2] } });
+toMap({ type: 'preload', style, ratio, zoom: camera[2] });
 
 const panic = params.get('panic');
 const panicMessage = 'panic=<map|tile> asked for this panic';
@@ -89,13 +120,18 @@ const panicMessage = 'panic=<map|tile> asked for this panic';
 compiling.then((module) => {
   const ports = tileWorkers.map((worker, i) => {
     const channel = new MessageChannel();
-    worker.postMessage({ module, port: channel.port2, panic: panic === 'tile' && i === 0 ? panicMessage : undefined },
-      [channel.port2]);
+    const start: StartTileWorker = {
+      module,
+      port: channel.port2,
+      panic: panic === 'tile' && i === 0 ? panicMessage : undefined,
+    };
+    worker.postMessage(start, [channel.port2]);
     return channel.port1;
   });
 
   const offscreen = canvas.transferControlToOffscreen();
-  map.postMessage({
+  toMap({
+    type: 'start',
     module,
     canvas: offscreen,
     ports,
@@ -108,27 +144,31 @@ compiling.then((module) => {
     localIdeographFontFamily: localFamily === '' || localFamily === 'false' ? undefined : localFamily,
     panic: panic === 'map' ? panicMessage : undefined,
   }, [offscreen, ...ports]);
-}, (error) => stop(`the module didn't compile: ${error.message}`));
+}, (error: unknown) => stop(`the module didn't compile: ${error instanceof Error ? error.message : String(error)}`));
 
-function showBanner(text) {
+function showBanner(text: string) {
   banner.textContent = text;
   banner.hidden = false;
 }
-if (!navigator.gpu) {
-  showBanner('This browser has no WebGPU, which the map draws with. Try a recent Chrome, Edge or Safari, or Firefox 141 or later on Windows.');
+if (!('gpu' in navigator)) {
+  showBanner(
+    'This browser has no WebGPU, which the map draws with. Try a recent Chrome, Edge or Safari, or Firefox 141 or later on Windows.',
+  );
 }
 
-let markLoaded;
-let failLoaded;
-let markFatal;
-let fatal = null;
-const pixelRequests = [];
+let markLoaded: (loaded: Loaded) => void = () => {};
+let failLoaded: (error: Error) => void = () => {};
+let markFatal: (error: Error) => void = () => {};
+let fatal: Error | null = null;
+const pixelRequests: { resolve: (pixels: Pixels) => void; reject: (error: Error) => void }[] = [];
 window.mln = {
   loaded: new Promise((resolve, reject) => {
     markLoaded = resolve;
     failLoaded = reject;
   }),
-  fatal: new Promise((resolve) => { markFatal = resolve; }),
+  fatal: new Promise((resolve) => {
+    markFatal = resolve;
+  }),
   readPixels() {
     return new Promise((resolve, reject) => {
       if (fatal) {
@@ -136,53 +176,69 @@ window.mln = {
         return;
       }
       pixelRequests.push({ resolve, reject });
-      map.postMessage({ readPixels: true });
+      toMap({ type: 'readPixels' });
     });
   },
 };
 // Rejected on a panic, which the page reports itself.
 window.mln.loaded.catch(() => {});
 
-map.onmessage = ({ data }) => {
-  if (data.box !== undefined) showBox(data.box);
-  if (data.status !== undefined) status.textContent = data.status;
-  if (data.loaded) {
-    markLoaded(data.loaded);
-    loading = false;
-    showStyle();
-  }
-  if (data.pixels) pixelRequests.shift()?.resolve(data.pixels);
-  if (data.fatal !== undefined) stop(data.fatal);
-  if (data.camera) showCamera(data.camera);
-  if (data.attribution) showAttribution(data.attribution);
-  if (data.styleName !== undefined) {
-    styleName = data.styleName;
-    showStyle();
+map.onmessage = ({ data }: MessageEvent<FromMap>) => {
+  switch (data.type) {
+    case 'box':
+      showBox(data.box);
+      break;
+    case 'status':
+      status.textContent = data.text;
+      break;
+    case 'loaded':
+      markLoaded(data.loaded);
+      loading = false;
+      showStyle();
+      break;
+    case 'pixels':
+      pixelRequests.shift()?.resolve(data.pixels);
+      break;
+    case 'fatal':
+      stop(data.message);
+      break;
+    case 'camera':
+      showCamera(data.camera);
+      break;
+    case 'attribution':
+      showAttribution(data.attribution);
+      break;
+    case 'styleName':
+      styleName = data.name;
+      showStyle();
+      break;
   }
 };
 
-function stop(message) {
-  fatal = new Error(message);
+function stop(message: string) {
+  const error = new Error(message);
+  fatal = error;
   console.error(`the map stopped: ${message}`);
   showBanner(`The map stopped: ${message}`);
   status.textContent = 'stopped';
   showStyle();
-  failLoaded(fatal);
-  markFatal(fatal);
-  for (const request of pixelRequests.splice(0)) request.reject(fatal);
+  failLoaded(error);
+  markFatal(error);
+  for (const request of pixelRequests.splice(0)) request.reject(error);
 }
 
-// The map's input. Positions are CSS pixels from the canvas's top-left
-// corner; modifiers are bits: Shift 1, Ctrl 2, Alt 4, Meta 8.
-const send = (input, ...args) => map.postMessage({ input, args });
-const time = (e) => performance.timeOrigin + e.timeStamp;
-const modifiers = (e) => (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
+const send = (input: Input) => toMap({ type: 'input', input });
+// Each event's time, as performance.timeOrigin + timeStamp: the map's Web
+// Worker turns it into its own performance.now(), the clock its frames run on.
+const time = (e: Event) => performance.timeOrigin + e.timeStamp;
+const modifiers = (e: MouseEvent | KeyboardEvent) =>
+  (e.shiftKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.altKey ? 4 : 0) | (e.metaKey ? 8 : 0);
 // The keys the map uses; Escape only ends a box zoom, so its default stays.
 const KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '+', '=', '-', '_']);
 // Where the canvas is: read on each press and resize rather than on every
 // move, which would lay the page out again.
 let origin = canvas.getBoundingClientRect();
-const at = (e) => [e.clientX - origin.left, e.clientY - origin.top];
+const at = (e: MouseEvent) => ({ x: e.clientX - origin.left, y: e.clientY - origin.top });
 
 canvas.tabIndex = 0;
 canvas.style.touchAction = 'none';
@@ -190,7 +246,15 @@ canvas.style.outline = 'none';
 canvas.addEventListener('pointerdown', (e) => {
   canvas.focus({ preventScroll: true });
   origin = canvas.getBoundingClientRect();
-  send('pointer_down', e.pointerId, e.pointerType, e.button, ...at(e), modifiers(e), time(e));
+  send({
+    kind: 'pointer_down',
+    id: e.pointerId,
+    pointerType: e.pointerType,
+    button: e.button,
+    ...at(e),
+    modifiers: modifiers(e),
+    time: time(e),
+  });
   // The map drags with the primary and secondary buttons.
   if (e.button === 0 || e.button === 2) canvas.setPointerCapture(e.pointerId);
 });
@@ -198,14 +262,17 @@ canvas.addEventListener('pointerdown', (e) => {
 // comes when the browser has the move, pointermove only with the page's
 // next frame.
 const moveEvent = 'onpointerrawupdate' in HTMLElement.prototype ? 'pointerrawupdate' : 'pointermove';
-canvas.addEventListener(moveEvent, (e) => send('pointer_move', e.pointerId, ...at(e), time(e)));
-canvas.addEventListener('pointerup', (e) => send('pointer_up', e.pointerId, ...at(e), time(e)));
-canvas.addEventListener('pointercancel', (e) => send('pointer_cancel', e.pointerId, time(e)));
+canvas.addEventListener(moveEvent, (e) => {
+  if (e instanceof PointerEvent) send({ kind: 'pointer_move', id: e.pointerId, ...at(e), time: time(e) });
+});
+canvas.addEventListener('pointerup', (e) => send({ kind: 'pointer_up', id: e.pointerId, ...at(e), time: time(e) }));
+canvas.addEventListener('pointercancel', (e) => send({ kind: 'pointer_cancel', id: e.pointerId, time: time(e) }));
 // A wheel event as the recognizer takes it (WebMap::wheel's `kind`):
-// [WHEEL_NOTCHES, notches] for a mouse wheel's detents, which it eases, or
-// [WHEEL_PIXELS, pixels] for continuous scrolling (a trackpad, a precise
-// wheel), which it applies at once. Positive scrolls down. Browsers don't
-// say which device scrolled, so this reads it from how they report each:
+// WHEEL_NOTCHES and the notches for a mouse wheel's detents, which it eases,
+// or WHEEL_PIXELS and the pixels for continuous scrolling (a trackpad, a
+// precise wheel), which it applies at once. Positive scrolls down. Browsers
+// don't say which device scrolled, so this reads it from how they report
+// each:
 // - Firefox reports wheels in lines, 3 a notch, and pages.
 // - Safari reports a notch as 4.000244140625 px, and a faster turn as a
 //   whole multiple of it (GL JS's test): one notch per multiple.
@@ -213,34 +280,31 @@ canvas.addEventListener('pointercancel', (e) => send('pointer_cancel', e.pointer
 //   precise scrolling.
 // Untested on real hardware; a misread zooms the same way by a similar
 // amount, with or without the easing.
-const WHEEL_PIXELS = 0;
-const WHEEL_NOTCHES = 1;
 const SAFARI_NOTCH = 4.000244140625;
-function wheelDelta(e) {
-  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return [WHEEL_NOTCHES, e.deltaY / 3];
-  if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return [WHEEL_NOTCHES, e.deltaY];
-  if (e.deltaY !== 0 && e.deltaY % SAFARI_NOTCH === 0) return [WHEEL_NOTCHES, e.deltaY / SAFARI_NOTCH];
-  const legacy = e.wheelDeltaY;
+function wheelDelta(e: WheelEvent): { wheel: number; amount: number } {
+  if (e.deltaMode === WheelEvent.DOM_DELTA_LINE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY / 3 };
+  if (e.deltaMode === WheelEvent.DOM_DELTA_PAGE) return { wheel: WHEEL_NOTCHES, amount: e.deltaY };
+  if (e.deltaY !== 0 && e.deltaY % SAFARI_NOTCH === 0) return { wheel: WHEEL_NOTCHES, amount: e.deltaY / SAFARI_NOTCH };
+  const legacy = 'wheelDeltaY' in e ? e.wheelDeltaY : undefined;
   if (typeof legacy === 'number' && legacy !== 0 && Math.abs(legacy + 3 * e.deltaY) >= 1 && legacy % 120 === 0) {
-    return [WHEEL_NOTCHES, -legacy / 120];
+    return { wheel: WHEEL_NOTCHES, amount: -legacy / 120 };
   }
-  return [WHEEL_PIXELS, e.deltaY];
+  return { wheel: WHEEL_PIXELS, amount: e.deltaY };
 }
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  if (e.deltaY !== 0) send('wheel', ...at(e), ...wheelDelta(e), modifiers(e), time(e));
+  if (e.deltaY !== 0) send({ kind: 'wheel', ...at(e), ...wheelDelta(e), modifiers: modifiers(e), time: time(e) });
 }, { passive: false });
 canvas.addEventListener('keydown', (e) => {
   if (KEYS.has(e.key)) e.preventDefault();
-  if (KEYS.has(e.key) || e.key === 'Escape') send('key', e.key, modifiers(e), time(e));
+  if (KEYS.has(e.key) || e.key === 'Escape') send({ kind: 'key', key: e.key, modifiers: modifiers(e), time: time(e) });
 });
-canvas.addEventListener('blur', (e) => send('blur', time(e)));
+canvas.addEventListener('blur', (e) => send({ kind: 'blur', time: time(e) }));
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
-// A Shift-drag's box, which the worker reports as [x0, y0, x1, y1] while it
-// is drawn, or null.
-const box = $('box');
-function showBox(corners) {
+// A Shift-drag's box, which the worker reports while it is drawn.
+const box = element('box', HTMLElement);
+function showBox(corners: Box | null) {
   box.hidden = !corners;
   if (!corners) return;
   const [x0, y0, x1, y1] = corners;
@@ -260,22 +324,22 @@ new ResizeObserver(() => {
   const next = [canvas.clientWidth, canvas.clientHeight];
   if (next[0] === size[0] && next[1] === size[1]) return;
   size = next;
-  map.postMessage({ resize: size });
+  toMap({ type: 'resize', width: canvas.clientWidth, height: canvas.clientHeight });
 }).observe(canvas);
 
-// The camera in the hash, #zoom/lat/lon[/bearing/pitch], as a camera
-// ([lat, lon, zoom, bearing, pitch]), or null.
-function cameraFromHash(hash) {
+// The camera in the hash, #zoom/lat/lon[/bearing/pitch], or null.
+function cameraFromHash(hash: string): Camera | null {
   const parts = hash.slice(1).split('/').map(Number);
-  if (parts.length < 3 || parts.length > 5 || parts.some((part) => !Number.isFinite(part))) return null;
-  const [zoom, lat, lon, bearing = 0, pitch = 0] = parts;
+  if (parts.some((part) => !Number.isFinite(part))) return null;
+  const [zoom, lat, lon, bearing = 0, pitch = 0, ...rest] = parts;
+  if (zoom === undefined || lat === undefined || lon === undefined || rest.length > 0) return null;
   return [lat, lon, zoom, bearing, pitch];
 }
 
-function hashFromCamera([lat, lon, zoom, bearing, pitch]) {
+function hashFromCamera([lat, lon, zoom, bearing, pitch]: Camera): string {
   // Enough digits for a pixel at this zoom, as GL JS writes them.
   const digits = Math.max(0, Math.ceil(Math.log10(2 ** zoom * 512 / 360 / 0.5)));
-  const round = (value, places) => String(Number(value.toFixed(places)));
+  const round = (value: number, places: number) => String(Number(value.toFixed(places)));
   let hash = `#${round(zoom, 2)}/${round(lat, digits)}/${round(lon, digits)}`;
   if (Math.abs(bearing) >= 0.05 || Math.abs(pitch) >= 0.5) hash += `/${round(bearing, 1)}/${round(pitch, 0)}`;
   return hash;
@@ -284,10 +348,10 @@ function hashFromCamera([lat, lon, zoom, bearing, pitch]) {
 // The hash follows the camera, written at most every 300 ms (browsers limit
 // how often a page may replace its URL).
 let writtenHash = location.hash;
-let hashTimer = null;
+let hashTimer: ReturnType<typeof setTimeout> | null = null;
 let latestCamera = camera;
-const needle = $('needle');
-function showCamera(next) {
+const needle = element('needle', SVGElement);
+function showCamera(next: Camera) {
   latestCamera = next;
   const [, , , bearing, pitch] = next;
   needle.style.transform = `rotateX(${pitch}deg) rotateZ(${-bearing}deg)`;
@@ -301,62 +365,70 @@ function showCamera(next) {
 window.addEventListener('hashchange', () => {
   if (location.hash === writtenHash) return;
   const next = cameraFromHash(location.hash);
-  if (next) map.postMessage({ jumpTo: next });
+  if (next) toMap({ type: 'jumpTo', camera: next });
 });
 
 // Zoom and the compass.
-$('zoom-in').addEventListener('click', (e) => {
+element('zoom-in', HTMLButtonElement).addEventListener('click', (e) => {
   comparison?.lead();
-  send('key', '+', 0, time(e));
+  send({ kind: 'key', key: '+', modifiers: 0, time: time(e) });
 });
-$('zoom-out').addEventListener('click', (e) => {
+element('zoom-out', HTMLButtonElement).addEventListener('click', (e) => {
   comparison?.lead();
-  send('key', '-', 0, time(e));
+  send({ kind: 'key', key: '-', modifiers: 0, time: time(e) });
 });
-$('compass').addEventListener('click', () => {
+element('compass', HTMLButtonElement).addEventListener('click', () => {
   comparison?.lead();
-  map.postMessage({ resetNorth: true });
+  toMap({ type: 'resetNorth' });
 });
 
 // The style button and its list.
+const styleList = element('style-list', HTMLElement);
 let loading = true;
 let styleName = '';
 function showStyle() {
-  $('style-name').textContent = current.key === null ? styleName || current.name : current.name;
-  $('style-detail').textContent = fatal ? 'Stopped' : loading ? 'Loading…' : current.provider;
+  element('style-name', HTMLElement).textContent = current.key === null ? styleName || current.name : current.name;
+  element('style-detail', HTMLElement).textContent = fatal ? 'Stopped' : loading ? 'Loading…' : current.provider;
   document.documentElement.dataset.theme = current.dark ? 'dark' : 'light';
-  for (const option of $('style-list').querySelectorAll('.style-option')) {
+  for (const option of styleList.querySelectorAll<HTMLElement>('.style-option')) {
     option.setAttribute('aria-current', String(option.dataset.key === current.key));
   }
 }
-function pickStyle(next) {
-  $('styles').hidePopover();
+function pickStyle(next: Style) {
+  element('styles', HTMLElement).hidePopover();
   if (next.url === current.url) return;
   current = next;
   loading = true;
   styleName = '';
   showStyle();
   showAttribution([]);
-  map.postMessage({ style: next.url });
+  toMap({ type: 'style', url: next.url });
   comparison?.setStyle(next.url);
   setParam('style', next.key);
 }
 // Sets (or, for null, removes) a URL parameter, keeping the camera's hash.
-function setParam(name, value) {
+function setParam(name: string, value: string | null) {
   const url = new URL(location.href);
   if (value === null) url.searchParams.delete(name);
   else url.searchParams.set(name, value);
   url.hash = writtenHash;
   history.replaceState(history.state, '', url);
 }
-$('style-list').replaceChildren(...STYLES.map((option) => {
+styleList.replaceChildren(...STYLES.map((option) => {
+  const name = document.createElement('span');
+  name.className = 'style-name';
+  name.textContent = option.name;
+  const provider = document.createElement('span');
+  provider.className = 'style-detail';
+  provider.textContent = option.provider;
+  const text = document.createElement('span');
+  text.className = 'style-text';
+  text.append(name, provider);
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'style-option';
-  button.dataset.key = option.key;
-  button.innerHTML = '<span class="style-text"><span class="style-name"></span><span class="style-detail"></span></span>';
-  button.querySelector('.style-name').textContent = option.name;
-  button.querySelector('.style-detail').textContent = option.provider;
+  button.dataset.key = option.key ?? '';
+  button.append(text);
   button.addEventListener('click', () => pickStyle(option));
   const item = document.createElement('li');
   item.append(button);
@@ -365,51 +437,49 @@ $('style-list').replaceChildren(...STYLES.map((option) => {
 showStyle();
 
 // Attribution: the sources' HTML, kept to its text and its http(s) links.
-const attribution = $('attribution');
-const attributionToggle = $('attribution-toggle');
+const attribution = element('attribution', HTMLElement);
+const attributionToggle = element('attribution-toggle', HTMLButtonElement);
 attributionToggle.addEventListener('click', () => {
   const open = !attribution.classList.contains('open');
   attribution.classList.toggle('open', open);
   attributionToggle.setAttribute('aria-expanded', String(open));
 });
-function sanitize(node, into) {
+function sanitize(node: Node, into: HTMLElement) {
   for (const child of node.childNodes) {
-    if (child.nodeType === Node.TEXT_NODE) {
-      into.append(child.textContent);
-    } else if (child.nodeName === 'A' && /^https?:\/\//.test(child.getAttribute('href') ?? '')) {
+    if (child instanceof Text) {
+      into.append(child.data);
+    } else if (child instanceof HTMLAnchorElement && /^https?:\/\//.test(child.getAttribute('href') ?? '')) {
       const link = document.createElement('a');
-      link.href = child.getAttribute('href');
+      link.href = child.href;
       link.target = '_blank';
       link.rel = 'noopener';
       link.textContent = child.textContent;
       into.append(link);
-    } else if (child.nodeType === Node.ELEMENT_NODE) {
+    } else if (child instanceof Element) {
       sanitize(child, into);
     }
   }
 }
-function showAttribution(entries) {
-  const text = $('attribution-text');
+function showAttribution(entries: string[]) {
   const all = entries.map((entry) => {
     const part = document.createElement('span');
     sanitize(new DOMParser().parseFromString(entry, 'text/html').body, part);
-    return part;
+    return { part, text: part.textContent.trim() };
   });
   // Each credit once: an entry is left out when a longer one, or an equal
   // one before it, contains its text.
-  const texts = all.map((part) => part.textContent.trim());
-  const repeated = (i) => texts.some((other, j) =>
-    j !== i && other.includes(texts[i]) && (other.length > texts[i].length || j < i));
-  const parts = all.filter((_, i) => texts[i] && !repeated(i));
-  text.replaceChildren(...parts.flatMap((part, i) => (i ? [' ', part] : [part])));
+  const repeated = (i: number, text: string) => all.some((other, j) =>
+    j !== i && other.text.includes(text) && (other.text.length > text.length || j < i));
+  const parts = all.filter(({ text }, i) => text && !repeated(i, text)).map(({ part }) => part);
+  element('attribution-text', HTMLElement).replaceChildren(...parts.flatMap((part, i) => (i ? [' ', part] : [part])));
   attribution.hidden = parts.length === 0;
 }
 
-// The comparison with GL JS (compare.js), which loads when it first opens.
-let comparison = null;
+// The comparison with GL JS (compare.ts), which loads when it first opens.
+let comparison: Comparison | null = null;
 let comparing = false;
-const compareToggle = $('compare-toggle');
-async function setComparing(on) {
+const compareToggle = element('compare-toggle', HTMLInputElement);
+async function setComparing(on: boolean) {
   if (on === comparing) return;
   comparing = on;
   compareToggle.checked = on;
@@ -420,12 +490,12 @@ async function setComparing(on) {
     return;
   }
   try {
-    const { compare } = await import('./compare.js');
+    const { compare } = await import('./compare.ts');
     const style = current.url;
-    const opened = await compare(canvas, {
+    const opened = compare(canvas, {
       style,
       camera: latestCamera,
-      follow: (next) => map.postMessage({ follow: next }),
+      follow: (next) => toMap({ type: 'follow', camera: next }),
     });
     // Closed, or the style changed, while GL JS loaded.
     if (!comparing) {

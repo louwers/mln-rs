@@ -2,13 +2,24 @@
 // two tile schemas (OpenMapTiles and Shortbread). `dark` turns the page's
 // controls dark.
 
-export const STYLES = [
-  {
-    key: 'liberty',
-    name: 'Liberty',
-    provider: 'OpenFreeMap',
-    url: 'https://tiles.openfreemap.org/styles/liberty',
-  },
+/** A style the page can show; `key` is null for one from a URL. */
+export interface Style {
+  key: string | null;
+  name: string;
+  provider: string;
+  url: string;
+  dark?: boolean;
+}
+
+const LIBERTY: Style = {
+  key: 'liberty',
+  name: 'Liberty',
+  provider: 'OpenFreeMap',
+  url: 'https://tiles.openfreemap.org/styles/liberty',
+};
+
+export const STYLES: Style[] = [
+  LIBERTY,
   {
     key: 'bright',
     name: 'Bright',
@@ -45,8 +56,8 @@ export const STYLES = [
 
 // The style for `?style=`: a key of STYLES, or any style's URL, which the
 // page names by the style's own name once it loads.
-export function styleFor(param) {
-  if (param === null) return STYLES[0];
+export function styleFor(param: string | null): Style {
+  if (param === null) return LIBERTY;
   const known = STYLES.find((style) => style.key === param || style.url === param);
   if (known) return known;
   const url = new URL(param, location.href);

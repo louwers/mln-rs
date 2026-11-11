@@ -8,7 +8,7 @@ Worker loads a second, the font-face shaper, only for styles with font
 faces. The page's thread runs no wasm: it hands its canvas to the map's Web
 Worker and only forwards to it.
 
-- in the map's Web Worker (web/map-worker.js), `WebMap` (src/map.rs): the
+- in the map's Web Worker (web/map-worker.ts), `WebMap` (src/map.rs): the
   map, its renderer (wgpu's WebGPU backend, into the page's canvas as an
   OffscreenCanvas) and its file sources. The
   instance has no threads, so it installs a `CooperativeScheduler`. Each
@@ -18,7 +18,7 @@ Worker and only forwards to it.
   task of its own (`WebMap::tick`): a finished fetch or a worker's reply
   is handled at once, rather than at the next frame, so that a load's
   steps don't each wait for a frame.
-- in each tile worker's Web Worker (web/worker.js), `TileWorker`
+- in each tile worker's Web Worker (web/worker.ts), `TileWorker`
   (src/worker.rs): a `TileWorkerHost` on the instance's own
   `CooperativeScheduler`. The map's `SerializingTransport` gives each
   tile's worker to one of the Web Workers and sends every message between
@@ -73,7 +73,7 @@ worker turns it into its own `performance.now()`, the clock it gives
 `WebMap::frame`, which also puts the map's animations on the frame clock.
 The page tells a mouse wheel's notches, which the recognizer eases, from a
 trackpad's continuous pixels, which it applies at once, by how browsers
-report each (`wheelDelta` in web/main.js: Firefox's lines, Safari's
+report each (`wheelDelta` in web/main.ts: Firefox's lines, Safari's
 4.000244 px steps, Chromium's legacy `wheelDeltaY`); those rules aren't
 checked on real hardware yet. A ResizeObserver resizes the map with the
 canvas; the map keeps the pixel ratio it started with.
@@ -94,8 +94,8 @@ the sources' attributions back to the page as they change.
 
 `?compare`, or the switch in the panel, puts MapLibre GL JS's map of the
 same style over the canvas, clipped to the right of a divider you can drag
-(web/compare.js); GL JS loads from jsDelivr when the comparison first
-opens. Each side takes its own input: the map that last took input leads,
+(web/compare.ts); the page loads GL JS, a chunk of its own, when the
+comparison first opens. Each side takes its own input: the map that last took input leads,
 and the other jumps to its camera.
 
 ## Images decode in the browser
@@ -103,7 +103,7 @@ and the other jumps to its camera.
 Every instance decodes images with the browser's decoders (mln_image's
 default on wasm), so the module carries no PNG, WebP or JPEG decoder. The
 decoder answers later, from the event loop, so a tile worker's reply can come
-outside `TileWorker::run`; it then wakes web/worker.js for a run.
+outside `TileWorker::run`; it then wakes web/worker.ts for a run.
 
 ## CJK glyphs are drawn locally
 
@@ -143,24 +143,27 @@ in a storage worker loaded only when a page asks for them.
 
 ## Build and run
 
-`wasm-bindgen-cli` must be the version in Cargo.lock, and a release build
-also runs binaryen's `wasm-opt` (its latest release), which shrinks the code with
-`-Oz` and strips the names and the other custom sections:
+mise.toml pins the tools: wasm-bindgen-cli at the version in Cargo.lock,
+binaryen's `wasm-opt`, which shrinks a release build's code with `-Oz` and
+strips the names and the other custom sections, and Node and pnpm for the
+page. `just web` builds the modules into web/pkg, then Vite builds the page
+(web/, TypeScript) around them into dist/, every asset's name hashed by its
+content so that a browser never mixes two builds' files:
 
 ```sh
-cargo install wasm-bindgen-cli --version 0.2.130
-mise use -g aqua:WebAssembly/binaryen@latest  # or binaryen's release, on the PATH
-just profile=release web
-python3 -m http.server -d examples/web/web
+mise install
+just profile=release web  # into examples/web/dist, as Pages deploys it
+just web-dev              # or Vite's dev server, from the sources
 ```
 
 `just web` (the dev profile) skips wasm-opt and keeps the names, for
-debugging and profiling.
+debugging and profiling. `pnpm -C examples/web typecheck` checks the page's
+TypeScript, as CI does.
 
-Then open <http://localhost:8000/> in a browser with WebGPU. URL parameters
-(web/main.js):
+Serve dist/ over HTTP, or run `just web-dev`, and open the page in a
+browser with WebGPU. URL parameters (web/main.ts):
 
-- `style=<key|url>`: a style of web/styles.js by its key, or any style's
+- `style=<key|url>`: a style of web/styles.ts by its key, or any style's
   URL (default: OpenFreeMap Liberty);
 - `lat`, `lon`, `zoom`, `bearing`, `pitch`: the camera, unless the hash
   has one (`#zoom/lat/lon[/bearing/pitch]`, as GL JS writes it, which the
@@ -182,7 +185,7 @@ Then open <http://localhost:8000/> in a browser with WebGPU. URL parameters
 A panic is a bug. wasm32-unknown-unknown aborts on one, which traps the
 wasm instance it happens in, so nothing calls into that instance again.
 When the map's instance or a tile worker's traps, the map stops and the
-page shows the panic's message (`window.mln.fatal` in web/main.js).
+page shows the panic's message (`window.mln.fatal` in web/main.ts).
 
 ## Check
 

@@ -26,7 +26,7 @@
 //! before anything else runs, and the instance's tasks run when its Web
 //! Worker runs them.
 //!
-//! web/main.js, web/map-worker.js and web/worker.js are the JavaScript side.
+//! web/main.ts, web/map-worker.ts and web/worker.ts are the TypeScript side.
 
 #![cfg(target_arch = "wasm32")]
 

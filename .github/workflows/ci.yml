@@ -171,6 +171,14 @@ jobs:
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,wasm-bindgen@0.2.130' }
 
+      # pnpm, the version in examples/web/package.json, for the page's Vite
+      # build; the runner has Node.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: examples/web/package.json
+          cache: true
+          cache_dependency_path: examples/web/pnpm-lock.yaml
+
       # wasm-opt, which `just profile=release web` runs, from binaryen's
       # latest release.
       - name: Install binaryen
@@ -196,6 +204,11 @@ jobs:
 
       - name: Check
         run: just profile=release web-check --out "$RUNNER_TEMP/web-check"
+
+      # The page's TypeScript, against the modules' wasm-bindgen typings that
+      # the check's build wrote.
+      - name: Typecheck the page
+        run: pnpm -C examples/web typecheck
 
       # Each view's style, the page's frame (expected.png) and the native
       # render and diff (results/).

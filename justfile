@@ -156,16 +156,16 @@ get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 desktop *args:  _dev-shell
     {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-desktop --bin mln-desktop -- "$@"
 
-# wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
-# Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
-# The release build also gets the release profile's fat LTO and one codegen unit, opt-level "s", and binaryen's wasm-opt
-# (its latest release, e.g. `mise use -g aqua:WebAssembly/binaryen@latest`) shrinks it with -Oz and strips its names and
-# other custom sections. It inlines a function with one caller only when that function is small: binaryen's default
-# inlines them at any size, which made the module bigger after brotli and slower to start. Serve examples/web/web over
-# HTTP, e.g. `python3 -m http.server -d examples/web/web`, and open it in a browser with WebGPU. Two modules, from one cargo
-# run: the map and its tile workers (examples/web, mln_web), and the font-face shaper (crates/mln_web_shaper)
-# that the map's Web Worker loads the first time a style declares font faces.
-[doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) into examples/web/web/pkg')]
+# The tools are mise.toml's (`mise install`); wasm-bindgen-cli must be the version in Cargo.lock. It builds with the Cargo
+# profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept. The
+# release build also gets the release profile's fat LTO and one codegen unit, opt-level "s", and binaryen's wasm-opt
+# shrinks it with -Oz and strips its names and other custom sections. It inlines a function with one caller only when that
+# function is small: binaryen's default inlines them at any size, which made the module bigger after brotli and slower to
+# start. Two modules, from one cargo run: the map and its tile workers (examples/web, mln_web), and the font-face shaper
+# (crates/mln_web_shaper) that the map's Web Worker loads the first time a style declares font faces. wasm-bindgen writes
+# them into examples/web/web/pkg, and Vite builds the page around them into examples/web/dist, every asset's name hashed by
+# its content; serve that over HTTP, or run `just web-dev`.
+[doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) and its page into examples/web/dist')]
 web:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -187,6 +187,13 @@ web:
           --strip-debug --strip-producers --strip-target-features "$pkg/${module}_bg.wasm" -o "$pkg/${module}_bg.wasm"
       fi
     done
+    pnpm -C examples/web install --frozen-lockfile
+    pnpm -C examples/web build
+
+# Vite's dev server, which reloads the page's scripts as they change; `just web` again rebuilds the modules.
+[doc("Serve the browser build's page from its sources (examples/web/web) at http://localhost:5173/")]
+web-dev:  web
+    pnpm -C examples/web dev
 
 # Offline, from the render suite's cache database. Needs Node 24, Playwright's Chromium (`npx playwright@1.61.1 install chromium`)
 # and lavapipe (VK_DRIVER_FILES); builds the native render-test runner. CI's web job runs `just profile=release web-check`.
