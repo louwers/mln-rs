@@ -347,28 +347,41 @@ pub(crate) mod tests {
     }
 
     unsafe extern "C" fn send_status(user_data: *mut c_void, result: *const mln_completion_result) {
-        // SAFETY: the sender that `Waiter::new` leaked, and the library's
-        // result.
+        // SAFETY: the sender that `channel_completion` boxed, and the
+        // library's result.
         let sender = unsafe { &*user_data.cast::<std::sync::mpsc::Sender<mln_status>>() };
         // SAFETY: as above.
         let _ = sender.send(unsafe { (*result).status });
     }
 
-    unsafe extern "C" fn drop_sender(user_data: *mut c_void) {
-        // SAFETY: the sender that `Waiter::new` leaked, released once.
-        drop(unsafe { Box::from_raw(user_data.cast::<std::sync::mpsc::Sender<mln_status>>()) });
+    unsafe extern "C" fn drop_sender<T>(user_data: *mut c_void) {
+        // SAFETY: the sender that `channel_completion` boxed, released once.
+        drop(unsafe { Box::from_raw(user_data.cast::<std::sync::mpsc::Sender<T>>()) });
+    }
+
+    /// A completion whose `callback` sends to the returned channel through a
+    /// boxed `Sender<T>`, its user data. The library owns the sender until it
+    /// releases the user data after its last call, so the callback's `send`
+    /// can't outlive it. A sender on the test's stack could: once the
+    /// message is in, the test may return and free the channel while `send`
+    /// still wakes its receiver on the library's thread.
+    pub(crate) fn channel_completion<T>(
+        callback: unsafe extern "C" fn(*mut c_void, *const mln_completion_result),
+    ) -> (mln_completion, std::sync::mpsc::Receiver<T>) {
+        let (sender, receiver) = std::sync::mpsc::channel::<T>();
+        let completion = mln_completion {
+            size: size_of::<mln_completion>() as u32,
+            callback: Some(callback),
+            user_data: Box::into_raw(Box::new(sender)).cast(),
+            release_user_data: Some(drop_sender::<T>),
+            queue: 0,
+        };
+        (completion, receiver)
     }
 
     impl Waiter {
         pub(crate) fn new() -> Self {
-            let (sender, receiver) = std::sync::mpsc::channel();
-            let descriptor = mln_completion {
-                size: size_of::<mln_completion>() as u32,
-                callback: Some(send_status),
-                user_data: Box::into_raw(Box::new(sender)).cast(),
-                release_user_data: Some(drop_sender),
-                queue: 0,
-            };
+            let (descriptor, receiver) = channel_completion(send_status);
             Waiter { receiver, descriptor }
         }
 
@@ -381,9 +394,9 @@ pub(crate) mod tests {
         /// frees the user data.
         pub(crate) fn unused(self) {
             assert_eq!(self.receiver.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
-            // SAFETY: the sender that `new` leaked, which the library didn't
+            // SAFETY: the sender that `new` boxed, which the library didn't
             // release.
-            unsafe { drop_sender(self.descriptor.user_data) };
+            unsafe { drop_sender::<mln_status>(self.descriptor.user_data) };
         }
     }
 
@@ -413,7 +426,7 @@ pub(crate) mod tests {
             assert!(message(&out).contains("stale"), "{}", message(&out));
             assert_eq!(mln_runtime_dispose(runtime, NO_DIAGNOSTIC), MLN_STATUS_INVALID_STATE);
             // The rejected release left the user data with the caller.
-            drop_sender(waiter.descriptor.user_data);
+            drop_sender::<mln_status>(waiter.descriptor.user_data);
         }
     }
 

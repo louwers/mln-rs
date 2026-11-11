@@ -687,7 +687,7 @@ pub(crate) mod tests {
         MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_completion_result, mln_feature_id,
         mln_feature_id_data, mln_logical_extent,
     };
-    use crate::runtime::tests::{Waiter, create, release};
+    use crate::runtime::tests::{Waiter, channel_completion, create, release};
 
     const NO_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
 
@@ -741,8 +741,8 @@ pub(crate) mod tests {
     }
 
     unsafe extern "C" fn send_text(user_data: *mut c_void, result: *const mln_completion_result) {
-        // SAFETY: the sender that `read_state` passed, and the library's
-        // result with one lent text.
+        // SAFETY: the sender that `channel_completion` boxed, and the
+        // library's result with one lent text.
         unsafe {
             let sender = &*user_data.cast::<mpsc::Sender<String>>();
             let text = *(*result).value.cast::<mln_buffer_view>();
@@ -752,15 +752,9 @@ pub(crate) mod tests {
     }
 
     fn read_state(map: mln_map, selector: &mln_feature_state_selector) -> String {
-        let (sender, receiver) = mpsc::channel::<String>();
-        let completion = mln_completion {
-            size: size_of::<mln_completion>() as u32,
-            callback: Some(send_text),
-            user_data: core::ptr::from_ref(&sender).cast_mut().cast(),
-            release_user_data: None,
-            queue: 0,
-        };
-        // SAFETY: local arguments, which outlive the completion's call.
+        let (completion, receiver) = channel_completion::<String>(send_text);
+        // SAFETY: local arguments, and a completion whose sender the library
+        // releases after its call.
         assert_eq!(unsafe { mln_map_get_feature_state(map, selector, &completion, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         receiver.recv_timeout(std::time::Duration::from_secs(30)).unwrap()
     }

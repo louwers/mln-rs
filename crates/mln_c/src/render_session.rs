@@ -756,7 +756,7 @@ pub(crate) mod tests {
     use crate::map::{mln_map_dispose, mln_map_get_snapshot, mln_map_release, mln_map_set_style_json};
     use crate::offscreen::mln_map_attach_offscreen;
     use crate::runtime::mln_runtime_release;
-    use crate::runtime::tests::{Waiter, create, release};
+    use crate::runtime::tests::{Waiter, channel_completion, create, release};
     use crate::texture::mln_render_session_read_texture;
 
     const NO_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
@@ -809,8 +809,8 @@ pub(crate) mod tests {
     type Pixel = (mln_status, Option<(u32, u32, [u8; 4])>);
 
     unsafe extern "C" fn send_pixel(user_data: *mut c_void, result: *const mln_completion_result) {
-        // SAFETY: the sender that `read_pixel` passed, and the library's
-        // result, with one readback when it succeeded.
+        // SAFETY: the sender that `channel_completion` boxed, and the
+        // library's result, with one readback when it succeeded.
         unsafe {
             let sender = &*user_data.cast::<mpsc::Sender<Pixel>>();
             let result = &*result;
@@ -825,15 +825,9 @@ pub(crate) mod tests {
 
     /// The status of a readback, and the size and first pixel that it read.
     fn read_pixel(session: mln_render_session) -> Pixel {
-        let (sender, receiver) = mpsc::channel::<Pixel>();
-        let completion = mln_completion {
-            size: size_of::<mln_completion>() as u32,
-            callback: Some(send_pixel),
-            user_data: core::ptr::from_ref(&sender).cast_mut().cast(),
-            release_user_data: None,
-            queue: 0,
-        };
-        // SAFETY: local arguments, which outlive the completion's call.
+        let (completion, receiver) = channel_completion::<Pixel>(send_pixel);
+        // SAFETY: local arguments, and a completion whose sender the library
+        // releases after its call.
         assert_eq!(unsafe { mln_render_session_read_texture(session, &completion, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         receiver.recv_timeout(Duration::from_secs(30)).unwrap()
     }
