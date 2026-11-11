@@ -57,8 +57,11 @@ mod tests {
     use feature::Value;
     use mln_style::conversion::{Convertible, Error, convert};
     use mln_style::expression::{EvaluationContext, GlobalStateMap};
-    use mln_tile::VectorMVTTileData;
+    use mln_tile::{VectorMLTTileData, VectorMVTTileData};
     use mln_tile_id::geometry_tile_data::GeometryTileData;
+    use mlt_core::encoder::{EncoderConfig, Network, Profile};
+    use mlt_core::geo_types::Coord;
+    use mlt_core::{GeometryType, LayerWriter, PropKind};
 
     use super::*;
 
@@ -184,16 +187,57 @@ mod tests {
         convert::<Filter>(&Convertible::from(&json), &mut Error::default()).expect("filter")
     }
 
-    /// Filters select the same features in groups as one by one, at each
-    /// zoom; those that read more of a feature evaluate each feature.
+    /// Asserts that filters select the same features of `layer`, the source
+    /// layer `name`, in groups as one by one, at each zoom: the `grouped`
+    /// ones in groups, the `per_feature` ones (which read more of a feature)
+    /// one by one. Returns the groups.
+    fn check_selection(
+        name: &str,
+        layer: &dyn GeometryTileLayer,
+        grouped: &[&str],
+        per_feature: &[&str],
+    ) -> FilterGroups {
+        let mut global_state = GlobalStateMap::new();
+        global_state.insert("class".to_owned(), Value::String("primary".into()));
+        let mut groups = FilterGroups::default();
+        for (text, expect_grouped) in grouped.iter().map(|t| (t, true)).chain(per_feature.iter().map(|t| (t, false))) {
+            let filter = parse_filter(text);
+            for zoom in [10.0, 14.0] {
+                let passes = |feature: &dyn GeometryTileFeature| {
+                    filter.evaluate(
+                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_global_state(Some(&global_state)),
+                    )
+                };
+                let one_by_one: Vec<bool> =
+                    (0..layer.feature_count()).map(|i| passes(&*layer.get_feature(i).unwrap())).collect();
+                let selects_none = ["nothing", "within", "zoom"].iter().any(|t| text.contains(t));
+                assert!(one_by_one.contains(&true) || selects_none, "{text}");
+                let selected = groups.select(name, layer, &filter, passes);
+                if expect_grouped {
+                    assert_eq!(selected.as_ref(), Some(&one_by_one), "{text} at {zoom}");
+                } else {
+                    assert_eq!(selected, None, "{text}");
+                }
+            }
+        }
+        groups
+    }
+
+    /// The number of groups for `keys`, if the layer gave groups.
+    fn group_count(groups: &FilterGroups, keys: &[&str]) -> Option<usize> {
+        let (_, _, groups) = (groups.sets.iter())
+            .find(|(_, k, _)| k.iter().map(String::as_str).eq(keys.iter().copied()))
+            .expect("grouped");
+        groups.as_ref().map(|g| g.first.len())
+    }
+
+    /// Filters select the same features of an MVT layer in groups as one by
+    /// one; those that read more of a feature evaluate each feature.
     #[test]
     fn grouped_selection_matches_each_feature() {
         let data = VectorMVTTileData::new(Arc::new(roads()));
         let layer = data.get_layer("roads").unwrap().unwrap();
-        let layer = &*layer;
-        let mut global_state = GlobalStateMap::new();
-        global_state.insert("class".to_owned(), Value::String("primary".into()));
-        let mut groups = FilterGroups::default();
         let grouped = [
             r#"["==", ["get", "class"], "motorway"]"#,
             r#"["==", ["get", "class"], "ferry"]"#,
@@ -223,37 +267,116 @@ mod tests {
             r#"["==", ["get", "name"], "road 7"]"#,
             r#"["within", {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}]"#,
         ];
-        for (text, expect_grouped) in grouped.iter().map(|t| (t, true)).chain(per_feature.iter().map(|t| (t, false))) {
-            let filter = parse_filter(text);
-            for zoom in [10.0, 14.0] {
-                let passes = |feature: &dyn GeometryTileFeature| {
-                    filter.evaluate(
-                        &EvaluationContext::with_zoom_feature(zoom, Some(feature))
-                            .with_global_state(Some(&global_state)),
-                    )
-                };
-                let one_by_one: Vec<bool> =
-                    (0..layer.feature_count()).map(|i| passes(&*layer.get_feature(i).unwrap())).collect();
-                let selects_none = ["nothing", "within", "zoom"].iter().any(|t| text.contains(t));
-                assert!(one_by_one.contains(&true) || selects_none, "{text}");
-                let selected = groups.select("roads", layer, &filter, passes);
-                if expect_grouped {
-                    assert_eq!(selected.as_ref(), Some(&one_by_one), "{text} at {zoom}");
-                } else {
-                    assert_eq!(selected, None, "{text}");
-                }
-            }
-        }
-        let groups_of = |keys: &[&str]| {
-            let (_, _, groups) = (groups.sets.iter())
-                .find(|(_, k, _)| k.iter().map(String::as_str).eq(keys.iter().copied()))
-                .expect("grouped");
-            groups.as_ref().map(|g| g.first.len())
-        };
+        let groups = check_selection("roads", &*layer, &grouped, &per_feature);
         // 400 roads in about 4 classes by 4 geometry types, plus the few
         // values at a second index.
-        assert!(groups_of(&["class"]).is_some_and(|n| n < 50), "{:?}", groups_of(&["class"]));
+        let classes = group_count(&groups, &["class"]);
+        assert!(classes.is_some_and(|n| n < 50), "{classes:?}");
         // A key unique to each feature gives no groups.
-        assert_eq!(groups_of(&["name"]), None);
+        assert_eq!(group_count(&groups, &["name"]), None);
+    }
+
+    /// A road network as one MLT layer "roads", a column per key and type:
+    /// few distinct values over many features, keys some features lack, a
+    /// key unique to each feature, and every geometry type.
+    fn roads_mlt() -> Vec<u8> {
+        let classes = ["motorway", "primary", "minor", "path"];
+        let names: Vec<String> = (0..400).map(|i| format!("road {i}")).collect();
+        let mut layer = LayerWriter::new("roads", 4096).unwrap();
+        let class = layer.add_property("class", PropKind::Str).unwrap();
+        let level = layer.add_property("layer", PropKind::I32).unwrap();
+        let ramp = layer.add_property("ramp", PropKind::Bool).unwrap();
+        let width = layer.add_property("width", PropKind::F64).unwrap();
+        let height = layer.add_property("height", PropKind::F32).unwrap();
+        let osm_id = layer.add_property("osm_id", PropKind::I64).unwrap();
+        let rank = layer.add_property("rank", PropKind::U64).unwrap();
+        let admin = layer.add_property("admin", PropKind::U32).unwrap();
+        let name = layer.add_property("name", PropKind::Str).unwrap();
+        let prefix = layer.add_property("prefix", PropKind::Str).unwrap();
+        let brunnel = layer.add_property("brunnel", PropKind::Str).unwrap();
+        let types = [
+            GeometryType::LineString,
+            GeometryType::LineString,
+            GeometryType::MultiLineString,
+            GeometryType::Polygon,
+            GeometryType::Point,
+            GeometryType::MultiPoint,
+            GeometryType::MultiPolygon,
+        ];
+        for i in 0..400u32 {
+            let geometry_type = types[i as usize % types.len()];
+            let mut feature = layer.feature(geometry_type);
+            let x = (i % 64) as i32 * 64;
+            let line = [Coord { x, y: 0 }, Coord { x: x + 32, y: 32 }];
+            let ring = [Coord { x, y: 0 }, Coord { x: x + 32, y: 0 }, Coord { x: x + 32, y: 32 }];
+            match geometry_type {
+                GeometryType::Point => feature.points([line[0]]),
+                GeometryType::MultiPoint => feature.points(line),
+                GeometryType::LineString | GeometryType::MultiLineString => feature.line(line),
+                GeometryType::Polygon | GeometryType::MultiPolygon => feature.exterior_ring(ring),
+            }
+            .unwrap();
+            feature.id(Some(u64::from(i)));
+            if i % 17 != 0 {
+                feature.property(class, classes[i as usize % 4]).unwrap();
+            }
+            feature.property(level, i as i32 % 5 - 2).unwrap();
+            feature.property(ramp, i % 11 == 0).unwrap();
+            feature.property(width, f64::from(i % 3) + 1.5).unwrap();
+            feature.property(height, (i % 4) as f32 * 0.75 + 1.0).unwrap();
+            feature.property(osm_id, 4_000_000_000 + i64::from(i % 3)).unwrap();
+            feature.property(rank, u64::from(i % 7)).unwrap();
+            feature.property(admin, i % 4).unwrap();
+            feature.property(name, names[i as usize].as_str()).unwrap();
+            feature.property(prefix, "cl").unwrap();
+            if i % 3 == 0 {
+                feature.property(brunnel, "bridge").unwrap();
+            }
+            feature.finish().unwrap();
+        }
+        layer.encode(EncoderConfig::from_profile(Profile::Native(Network::Cellular4G))).unwrap()
+    }
+
+    /// Filters select the same features of an MLT layer in groups as one by
+    /// one; those that read more of a feature evaluate each feature.
+    #[test]
+    fn grouped_mlt_selection_matches_each_feature() {
+        let data = VectorMLTTileData::new(Arc::new(roads_mlt()), true);
+        let layer = data.get_layer("roads").unwrap().unwrap();
+        let grouped = [
+            r#"["==", ["get", "class"], "motorway"]"#,
+            r#"["!has", "class"]"#,
+            r#"["all", ["==", "$type", "LineString"], ["!=", "brunnel", "bridge"]]"#,
+            r#"["match", ["get", "class"], ["primary", "minor"], ["<", ["get", "layer"], 0], false]"#,
+            r#"["any", ["get", "ramp"], ["has", "brunnel"]]"#,
+            r#"["has", "nothing"]"#,
+            r#"["in", "class", "path", "minor"]"#,
+            r#"[">=", "layer", 0]"#,
+            r#"[">", ["get", "width"], 2]"#,
+            r#"["<", ["get", "height"], 2.5]"#,
+            r#"["==", ["get", "osm_id"], 4000000001]"#,
+            r#"["<", ["get", "rank"], 3]"#,
+            r#"["==", ["get", "admin"], 2]"#,
+            r#"["==", ["geometry-type"], "Polygon"]"#,
+            r#"["in", "$type", "Point", "Polygon"]"#,
+            r#"["==", ["get", ["concat", "cl", "ass"]], "path"]"#,
+            r#"["all", [">=", ["zoom"], 12], ["==", ["get", "class"], "path"]]"#,
+            r#"["step", ["zoom"], ["==", ["get", "class"], "minor"], 12, ["has", "brunnel"]]"#,
+            r#"["==", ["get", "class"], ["global-state", "class"]]"#,
+            r#"["let", "c", ["get", "class"], ["==", ["var", "c"], "minor"]]"#,
+        ];
+        let per_feature = [
+            r#"["<", ["id"], 30]"#,
+            r#"["has", "$id"]"#,
+            r#"["==", ["get", ["concat", ["get", "prefix"], "ass"]], "path"]"#,
+            r#"["==", ["get", "class", ["properties"]], "path"]"#,
+            r#"["==", ["get", "name"], "road 7"]"#,
+            r#"["within", {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}]"#,
+        ];
+        let groups = check_selection("roads", &*layer, &grouped, &per_feature);
+        // 400 roads in 4 classes or none, by 3 geometry types.
+        assert_eq!(group_count(&groups, &["class"]), Some(15));
+        // A key unique to each feature gives no groups.
+        assert_eq!(group_count(&groups, &["name"]), None);
     }
 }

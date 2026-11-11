@@ -1878,6 +1878,7 @@ dependencies = [
  "mln-rs-util",
  "mln-rs-vec-map",
  "mln-rs-webgpu",
+ "mlt-core",
  "postcard",
  "proptest",
  "serde",

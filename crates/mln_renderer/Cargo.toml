@@ -149,6 +149,7 @@ mln_conversion = { package = "mln-rs-conversion", path = "../mln_conversion" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
 mln_sprite = { package = "mln-rs-sprite", path = "../mln_sprite" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "../mln_webgpu" }
+mlt-core.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 proptest.workspace = true
 serde_json.workspace = true
