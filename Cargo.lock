@@ -2064,6 +2064,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-libstdcxx",
+ "mln-rs-math",
  "mln-rs-protozero",
  "mln-rs-tile-id",
  "mln-rs-util",

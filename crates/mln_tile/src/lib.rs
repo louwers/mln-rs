@@ -9,8 +9,8 @@
 //! - the free functions of `geometry_tile_data.cpp` →
 //!   [`geometry_tile_data`] (`classify_rings`, `limit_holes`,
 //!   `fixup_polygons` on `//vendor/wagyu`, `convert_geometry`,
-//!   `convert_feature`, `to_geometry_collection`); the interfaces are in
-//!   `mln_tile_id`.
+//!   `convert_feature`, `to_geometry_collection`, `round_polygon_corners`);
+//!   the interfaces are in `mln_tile_id`.
 //!
 //! This crate is deliberately low in the crate graph (no style, renderer or
 //! expression dependencies), so `mln_expression` and the buckets can use
@@ -25,7 +25,7 @@ pub mod vector_mvt_tile_data;
 
 pub use geometry_tile_data::{
     classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, fixup_polygons, limit_holes,
-    to_geometry_collection,
+    round_polygon_corners, to_geometry_collection,
 };
 pub use vector_mlt_tile_data::{VectorMLTTileData, VectorMLTTileFeature, VectorMLTTileLayer};
 pub use vector_mvt_tile_data::{VectorMVTTileData, VectorMVTTileFeature, VectorMVTTileLayer};

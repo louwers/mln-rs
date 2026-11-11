@@ -18,7 +18,7 @@ use mln_renderer::bucket::Bucket;
 use mln_renderer::bucket_geometry::{BucketGeometry, paint_vertices};
 use mln_renderer::buckets::raster_bucket::RasterLayoutVertex;
 use mln_renderer::buckets::symbol_bucket::SymbolBucket;
-use mln_renderer::buckets::{CircleBucket, FillBucket, LineBucket, RasterBucket};
+use mln_renderer::buckets::{CircleBucket, FillBucket, FillExtrusionBucket, LineBucket, RasterBucket};
 use mln_renderer::layout::pattern_layout::PatternLayerMap;
 use mln_renderer::tile_mask::TileMask;
 use mln_style::CrossfadeParameters;
@@ -26,6 +26,9 @@ use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::FillLayer;
+use mln_style::layers::fill_extrusion_layer_properties::{
+    FillExtrusionLayoutProperties, FillExtrusionRoundedCornerDistance,
+};
 use mln_style::layers::fill_layer_properties::{
     FillColor, FillLayerProperties, FillLayoutProperties, FillPaintProperties,
 };
@@ -144,6 +147,36 @@ fn fill_bucket() {
 
     with_upload_pass(|upload_pass| bucket.upload(upload_pass));
     assert!(!bucket.needs_upload());
+}
+
+/// The roof and wall vertices of a fill-extrusion bucket holding `polygon`
+/// extruded with `fill-extrusion-rounded-corner-distance` set to `distance`.
+fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> usize {
+    let mut layout = FillExtrusionLayoutProperties::PossiblyEvaluated::default();
+    *layout.get_mut::<FillExtrusionRoundedCornerDistance>() = distance;
+    let mut bucket = FillExtrusionBucket::new(layout, &VecMap::new(), 16.0, 1);
+    bucket
+        .add_feature(
+            &feature(FeatureType::Polygon, polygon),
+            polygon,
+            &ImagePositions::new(),
+            &PatternLayerMap::new(),
+            0,
+            &CanonicalTileID::new(0, 0, 0),
+        )
+        .unwrap();
+    assert!(bucket.has_data());
+    bucket.vertices.len()
+}
+
+#[test]
+fn fill_extrusion_bucket_rounds_corners() {
+    let square = collection(&[&[(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]]);
+
+    // A ring of n points has n roof vertices and 4 per wall.
+    assert_eq!(fill_extrusion_vertex_count(&square, 0.0), 5 + 4 * 4);
+    // Rounding replaces each of the 4 corners with 5 points.
+    assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21 + 4 * 20);
 }
 
 /// `StubIndexBuffer`: an index buffer that stands in for an upload.

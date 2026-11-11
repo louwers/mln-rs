@@ -216,7 +216,6 @@
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
 "crates/mln_renderer/src/bucket.rs" = 1
 "crates/mln_renderer/src/buckets/debug_bucket.rs" = 2
-"crates/mln_renderer/src/buckets/fill_extrusion_bucket.rs" = 2
 "crates/mln_renderer/src/geometry/feature_index.rs" = 1
 "crates/mln_renderer/src/gfx/fill_generator.rs" = 1
 "crates/mln_renderer/src/layermanager.rs" = 4
@@ -284,7 +283,6 @@
 "crates/mln_text/src/ft/face.rs" = 9
 "crates/mln_text/src/rasterize.rs" = 3
 "crates/mln_text/src/tagged_string.rs" = 1
-"crates/mln_tile/src/geometry_tile_data.rs" = 1
 "crates/mln_util/src/font_stack.rs" = 1
 "crates/mln_util/src/geo.rs" = 2
 "crates/mln_util/src/geometry.rs" = 1
