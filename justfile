@@ -56,12 +56,13 @@ check:
 # too. Two runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
 # on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32, and the in-process font-face
 # shaper), and the browser build's two modules as `just web` builds them, which leave both out; the check fails if
-# anything turns SQLite back on there.
+# anything turns SQLite back on there, or brings in a C build (`cc`) that would need that clang.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
     cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))

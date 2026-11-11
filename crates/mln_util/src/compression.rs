@@ -6,9 +6,9 @@ use std::io::Write;
 /// `util::compress(raw)`: a zlib stream (`windowBits = MAX_WBITS`) at
 /// `Z_DEFAULT_COMPRESSION` (level 6), `memLevel` 8, `Z_DEFAULT_STRATEGY`.
 ///
-/// flate2's Rust backend (miniz_oxide) produces a valid zlib stream that
-/// decompresses to the same bytes, but not necessarily the same compressed
-/// bytes as zlib.
+/// The stream decompresses to the same bytes as zlib's, but the compressed
+/// bytes (and so their length) can differ from those of the zlib the C++
+/// links.
 pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
     encoder.write_all(raw).map_err(|_| "failed to deflate".to_string())?;
