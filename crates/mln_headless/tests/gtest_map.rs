@@ -2545,6 +2545,7 @@ fn rendering_statistics_track_draws_across_frames() {
 
 // gtest: Map.LocationIndicatorWithoutImages
 #[test]
+#[ignore = "TODO(port): RenderLocationIndicatorLayer; until it draws, this passes without checking anything"]
 fn location_indicator_without_images() {
     let test = MapTest::new();
     test.load_json(
