@@ -111,6 +111,9 @@ fn temporary_error() {
 
     let start = Clock::now();
     let counter = Cell::new(0);
+    // The first response's time. The retry is late relative to it, so that
+    // the first request's own time doesn't count against the backoff.
+    let first = Cell::new(start);
 
     let stop = run_loop.clone();
     let _req = fs.request(
@@ -122,6 +125,7 @@ fn temporary_error() {
                 0 => {
                     let duration = seconds_since(start);
                     assert!(0.2 > duration, "Initial error request took too long");
+                    first.set(Clock::now());
                     let error = res.error.as_ref().expect("error");
                     assert_eq!(Reason::Server, error.reason);
                     assert_eq!("HTTP status code 500", error.message);
@@ -134,7 +138,7 @@ fn temporary_error() {
                 1 => {
                     let duration = seconds_since(start);
                     assert!(0.99 < duration, "Backoff timer didn't wait 1 second");
-                    assert!(1.2 > duration, "Backoff timer fired too late");
+                    assert!(1.2 > seconds_since(first.get()), "Backoff timer fired too late");
                     assert_eq!(None, res.error);
                     assert_eq!(b"Hello World!", data(&res));
                     assert!(res.expires.is_none());
@@ -161,6 +165,11 @@ fn connection_error() {
     let start = Clock::now();
     let counter = Cell::new(0);
     let wait = Cell::new(CONNECTION_TIMEOUT);
+    // The previous response and the backoff after it. A response is late
+    // relative to the previous one, so that a timer the OS wakes late counts
+    // once instead of in every later response.
+    let previous = Cell::new(start);
+    let backoff = Cell::new(CONNECTION_TIMEOUT);
 
     let req = req();
     let (r, stop) = (req.clone(), run_loop.clone());
@@ -169,7 +178,8 @@ fn connection_error() {
         Box::new(move |res: Response| {
             let duration = seconds_since(start);
             assert!(wait.get() - 0.01 < duration, "Backoff timer didn't wait 1 second");
-            assert!(wait.get() + 0.3 > duration, "Backoff timer fired too late");
+            assert!(backoff.get() + 0.3 > seconds_since(previous.get()), "Backoff timer fired too late");
+            previous.set(Clock::now());
             let error = res.error.as_ref().expect("error");
             assert_eq!(Reason::Connection, error.reason);
             assert!(res.data.is_none());
@@ -182,7 +192,8 @@ fn connection_error() {
                 r.borrow_mut().take();
                 stop.stop();
             }
-            wait.set(wait.get() + f64::from(1 << counter.get()) + CONNECTION_TIMEOUT);
+            backoff.set(f64::from(1 << counter.get()) + CONNECTION_TIMEOUT);
+            wait.set(wait.get() + backoff.get());
             counter.set(counter.get() + 1);
         }),
     ));
