@@ -7,14 +7,13 @@
 // `isNormalizedSourceURL`, `isNormalizedURL`), used for tilesets and offline
 // cache keys.
 //
-// The canonicalize* half matches as C++ std::regex (ECMAScript syntax) does
-// with regex-lite: the patterns are built from the tile server templates the
-// same way and mean the same in both. They use no Unicode classes, so
-// regex-lite rather than regex, which is larger in the browser build.
+// C++ builds std::regex (ECMAScript) patterns from the tile server
+// templates: literal text, where `.` matches any character, with tokens
+// replaced by `(.+)`. The canonicalize* half matches that shape with its own
+// backtracking matcher instead of a regex engine, which would add far more to
+// the browser build.
 
 use std::collections::BTreeMap;
-
-use regex_lite::Regex;
 
 use crate::constants::TILE_SIZE_I;
 use crate::logging::{Event, Log};
@@ -204,9 +203,148 @@ fn substr(s: &str, segment: (usize, usize)) -> &str {
     &s[start..end]
 }
 
-/// `std::regex_replace(urlTemplate, tokenPattern, "(.+)", match_any)`.
-fn replace_tokens(template: &str, token_pattern: &str) -> String {
-    Regex::new(token_pattern).expect("token pattern").replace_all(template, "(.+)").into_owned()
+/// One element of a pattern built from a tile server template: the part of
+/// ECMAScript regex syntax that the templates turn into.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Piece {
+    /// A literal character.
+    Char(char),
+    /// `.`
+    Any,
+    /// `(.+)`, captured.
+    Plus,
+    /// `(.*)`, not captured.
+    Star,
+}
+
+/// One match of a pattern: its char range and the ranges of its `(.+)`s.
+struct Match {
+    start: usize,
+    end: usize,
+    captures: Vec<(usize, usize)>,
+}
+
+/// `.` matches any character but these (ECMAScript line terminators).
+fn is_line_terminator(c: char) -> bool {
+    matches!(c, '\n' | '\r' | '\u{2028}' | '\u{2029}')
+}
+
+/// Appends `text` read as a regex of literal characters and `.`. `None` for
+/// any other regex syntax: such a template has no pattern, as one std::regex
+/// rejects or this port doesn't read.
+fn push_literal(pieces: &mut Vec<Piece>, text: &[char]) -> Option<()> {
+    for &c in text {
+        match c {
+            '.' => pieces.push(Piece::Any),
+            '\\' | '^' | '$' | '*' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '|' => return None,
+            c => pieces.push(Piece::Char(c)),
+        }
+    }
+    Some(())
+}
+
+/// The pattern of `template` with each of `groups` (char ranges, in order)
+/// replaced by `(.+)`, as `std::regex_replace(template, …, "(.+)")` builds it.
+fn pattern_with_groups(template: &[char], groups: &[(usize, usize)]) -> Option<Vec<Piece>> {
+    let mut pieces = Vec::new();
+    let mut prev = 0;
+    for &(start, end) in groups {
+        push_literal(&mut pieces, &template[prev..start])?;
+        pieces.push(Piece::Plus);
+        prev = end;
+    }
+    push_literal(&mut pieces, &template[prev..])?;
+    Some(pieces)
+}
+
+/// Matches `pieces` at `s[pos..]` as an ECMAScript backtracking matcher does:
+/// each `(.+)` and `(.*)` first takes as many characters as it can, then gives
+/// them back one at a time until the rest matches. With `to_end` the match
+/// must end at the end of `s`. Returns the match's end and pushes the ranges
+/// of its `(.+)`s onto `captures`.
+fn match_at(
+    pieces: &[Piece],
+    s: &[char],
+    pos: usize,
+    to_end: bool,
+    captures: &mut Vec<(usize, usize)>,
+) -> Option<usize> {
+    let Some((&piece, rest)) = pieces.split_first() else {
+        return (!to_end || pos == s.len()).then_some(pos);
+    };
+    match piece {
+        Piece::Char(c) => match s.get(pos) {
+            Some(&d) if d == c => match_at(rest, s, pos + 1, to_end, captures),
+            _ => None,
+        },
+        Piece::Any => match s.get(pos) {
+            Some(&d) if !is_line_terminator(d) => match_at(rest, s, pos + 1, to_end, captures),
+            _ => None,
+        },
+        Piece::Plus | Piece::Star => {
+            let min = usize::from(piece == Piece::Plus);
+            let max = s[pos..].iter().take_while(|&&c| !is_line_terminator(c)).count();
+            for len in (min..=max).rev() {
+                let mark = captures.len();
+                if piece == Piece::Plus {
+                    captures.push((pos, pos + len));
+                }
+                if let Some(end) = match_at(rest, s, pos + len, to_end, captures) {
+                    return Some(end);
+                }
+                captures.truncate(mark);
+            }
+            None
+        }
+    }
+}
+
+/// `std::regex_match`: whether `pieces` match all of `s`.
+fn full_match(pieces: &[Piece], s: &[char]) -> bool {
+    match_at(pieces, s, 0, true, &mut Vec::new()).is_some()
+}
+
+/// `std::sregex_iterator`: the successive leftmost matches of `pieces` in
+/// `s`, each search starting where the last match ended.
+fn find_iter(pieces: &[Piece], s: &[char]) -> Vec<Match> {
+    let mut matches = Vec::new();
+    let mut pos = 0;
+    while pos <= s.len() {
+        let found = (pos..=s.len()).find_map(|start| {
+            let mut captures = Vec::new();
+            match_at(pieces, s, start, false, &mut captures).map(|end| Match { start, end, captures })
+        });
+        let Some(m) = found else {
+            break;
+        };
+        pos = if m.end > m.start { m.end } else { m.end + 1 };
+        matches.push(m);
+    }
+    matches
+}
+
+/// The char ranges of `template`'s `{domain}`, `{path}`, `{directory}`,
+/// `{filename}` and `{extension}` tokens, in order (the matches of
+/// `\{(domain|path|directory|filename|extension)\}`).
+fn token_ranges(template: &[char]) -> Vec<(usize, usize)> {
+    const TOKENS: [&str; 5] = ["{domain}", "{path}", "{directory}", "{filename}", "{extension}"];
+    let mut ranges = Vec::new();
+    let mut pos = 0;
+    while pos < template.len() {
+        let token = TOKENS.iter().find(|token| {
+            let len = token.chars().count();
+            template.get(pos..pos + len).is_some_and(|text| text.iter().copied().eq(token.chars()))
+        });
+        match token {
+            Some(token) => {
+                let end = pos + token.chars().count();
+                ranges.push((pos, end));
+                pos = end;
+            }
+            None => pos += 1,
+        }
+    }
+    ranges
 }
 
 /// `createTokenMap(urlTemplate, url)`.
@@ -214,33 +352,26 @@ fn create_token_map(url_template: &str, url: &str) -> BTreeMap<String, String> {
     let parsed_url = URL::new(url);
 
     // e.g. tiles/satellite/tiles.json
-    let path = substr(url, parsed_url.path);
+    let path: Vec<char> = substr(url, parsed_url.path).chars().collect();
 
     // --- find tokens in the urlTemplate (such as {path}, ...)
-    let r = Regex::new(r"\{(domain|path|directory|filename|extension)\}").expect("token regex");
-    let mut token_list: Vec<(String, String)> = Vec::new();
-    for m in r.captures_iter(url_template) {
-        if let Some(group) = m.get(1)
-            && !group.as_str().is_empty()
-        {
-            token_list.push((group.as_str().to_owned(), String::new()));
-        }
-    }
+    let template: Vec<char> = url_template.chars().collect();
+    let tokens = token_ranges(&template);
+    let mut token_list: Vec<(String, String)> =
+        tokens.iter().map(|&(start, end)| (template[start + 1..end - 1].iter().collect(), String::new())).collect();
 
     // --- extract token values
     // /tiles{path}/tiles.json in tiles/satellite/tiles.json
     // e.g. path = /satellite
-    let template_pattern =
-        replace_tokens(url_template, r"\{domain\}|\{path\}|\{directory\}|\{filename\}|\{extension\}");
-    if let Ok(r2) = Regex::new(&template_pattern) {
+    // Each match of the template pattern gives the value of one token: its
+    // first group.
+    if let Some(pattern) = pattern_with_groups(&template, &tokens) {
         let mut idx = 0;
-        for m in r2.captures_iter(path) {
-            if let Some(group) = m.get(1)
-                && !group.as_str().is_empty()
-            {
+        for m in find_iter(&pattern, &path) {
+            if let Some(&(start, end)) = m.captures.first() {
                 // C++ indexes `tokenList[idx]` without a bounds check.
                 if let Some(token) = token_list.get_mut(idx) {
-                    token.1 = group.as_str().to_owned();
+                    token.1 = path[start..end].iter().collect();
                 }
                 idx += 1;
             }
@@ -255,17 +386,29 @@ fn create_token_map(url_template: &str, url: &str) -> BTreeMap<String, String> {
     token_map
 }
 
-/// `isNormalizedSourceURL(baseURL, urlTemplate, url)`.
+/// `isNormalizedSourceURL(baseURL, urlTemplate, url)`: whether `url` matches
+/// `^(?:` baseURL, the template with `\{.+\}` replaced by `(.+)`, `(.*))$`.
 fn is_normalized_source_url(base_url: &str, url_template: &str, url: &str) -> bool {
     if base_url.is_empty() || url_template.is_empty() {
         return false;
     }
 
-    let url_pattern = replace_tokens(url_template, r"\{.+\}") + "(.*)";
-    let pattern = format!("^(?:{base_url}{url_pattern})$");
+    let template: Vec<char> = url_template.chars().collect();
+    let braces = [Piece::Char('{'), Piece::Plus, Piece::Char('}')];
+    let groups: Vec<(usize, usize)> = find_iter(&braces, &template).iter().map(|m| (m.start, m.end)).collect();
 
-    // `std::regex_match`: the whole string.
-    Regex::new(&pattern).is_ok_and(|r| r.is_match(url))
+    let mut pattern = Vec::new();
+    let base_url: Vec<char> = base_url.chars().collect();
+    if push_literal(&mut pattern, &base_url).is_none() {
+        return false;
+    }
+    let Some(template_pattern) = pattern_with_groups(&template, &groups) else {
+        return false;
+    };
+    pattern.extend(template_pattern);
+    pattern.push(Piece::Star);
+
+    full_match(&pattern, &url.chars().collect::<Vec<_>>())
 }
 
 /// `isNormalizedURL(tileServerOptions, str)`.
@@ -490,5 +633,81 @@ mod tests {
             canonicalize_tile_url(&options, "https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=abc", false, 512)
         );
         assert_eq!(3, nth_occurrence_from_end("api.maptiler.com", ".", 2));
+    }
+
+    // The expected values are what JavaScript's RegExp, an ECMAScript
+    // engine, gives for the same patterns.
+
+    fn chars(s: &str) -> Vec<char> {
+        s.chars().collect()
+    }
+
+    fn pattern(template: &str) -> Vec<Piece> {
+        let template = chars(template);
+        pattern_with_groups(&template, &token_ranges(&template)).expect("a supported template")
+    }
+
+    /// The `(.+)` captures of a whole-string match of `pattern` on `s`.
+    fn full_captures(pattern: &[Piece], s: &str) -> Option<Vec<String>> {
+        let s = chars(s);
+        let mut captures = Vec::new();
+        match_at(pattern, &s, 0, true, &mut captures)?;
+        Some(captures.iter().map(|&(start, end)| s[start..end].iter().collect()).collect())
+    }
+
+    #[test]
+    fn first_group_is_greedy_over_repeated_literals() {
+        // /^(?:\/(.+)\/(.+))$/ on "/a/b/c"
+        assert_eq!(
+            Some(vec!["a/b".to_owned(), "c".to_owned()]),
+            full_captures(&pattern("/{path}/{filename}"), "/a/b/c")
+        );
+        // /^(?:(.+)x(.+))$/ on "axbxc"
+        let mut axb = vec![Piece::Plus, Piece::Char('x'), Piece::Plus];
+        assert_eq!(Some(vec!["axb".to_owned(), "c".to_owned()]), full_captures(&axb, "axbxc"));
+        axb.push(Piece::Char('x'));
+        assert_eq!(None, full_captures(&axb, "axbxc"));
+    }
+
+    #[test]
+    fn group_keeps_the_literal_that_follows_it() {
+        // /\/tiles(.+)\/tiles.json/ in "/tiles/a/tiles/b/tiles.json"
+        let token_map = create_token_map("/tiles{path}/tiles.json", "https://host/tiles/a/tiles/b/tiles.json");
+        assert_eq!(Some(&"/a/tiles/b".to_owned()), token_map.get("path"));
+    }
+
+    #[test]
+    fn dot_in_a_template_matches_any_character() {
+        let base = "https://api.mapbox.com";
+        assert!(is_normalized_source_url(base, "/{domain}.json", "https://apixmapbox.com/a.json"));
+        assert!(is_normalized_source_url(base, "/{domain}.json", "https://api.mapbox.com/v4/a.b.jsonx?k=1"));
+        assert!(!is_normalized_source_url(base, "/{domain}.json", "https://api.mapbox.com/.json"));
+    }
+
+    #[test]
+    fn braces_become_one_group_from_the_first_to_the_last() {
+        // "/font/{fontstack}/{start}-{end}.pbf".replace(/\{.+\}/g, "(.+)") is "/font/(.+).pbf".
+        let base = "https://demotiles.maplibre.org";
+        let template = "/font/{fontstack}/{start}-{end}.pbf";
+        assert!(is_normalized_source_url(base, template, "https://demotiles.maplibre.org/font/a/b.pbf"));
+        assert!(!is_normalized_source_url(base, template, "https://demotiles.maplibre.org/font/.pbf"));
+    }
+
+    #[test]
+    fn groups_stop_at_line_terminators() {
+        assert_eq!(None, full_captures(&pattern("a{path}b"), "a\nb"));
+        // [..."{a}\n{b}".matchAll(/\{(.+)\}/g)]
+        let braces = [Piece::Char('{'), Piece::Plus, Piece::Char('}')];
+        let matches = find_iter(&braces, &chars("{a}\n{b}"));
+        assert_eq!(vec![(0, 3), (4, 7)], matches.iter().map(|m| (m.start, m.end)).collect::<Vec<_>>());
+        assert_eq!(vec![(1, 2), (5, 6)], matches.iter().map(|m| m.captures[0]).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn other_regex_syntax_never_matches() {
+        let base = "https://api.mapbox.com";
+        assert!(!is_normalized_source_url(base, "/{domain}.json?x", "https://api.mapbox.com/a.json?x"));
+        assert!(!is_normalized_source_url("https://api.mapbox.com(", "/{domain}", "https://api.mapbox.com(/a"));
+        assert!(create_token_map("/{path}+", "https://host/a+").get("path").is_some_and(String::is_empty));
     }
 }
