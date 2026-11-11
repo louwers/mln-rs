@@ -93,6 +93,7 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Frame/Paced", frame_paced));
     cases.push(Case::new("Frame/Idle", frame_idle));
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
+    cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
@@ -233,6 +234,61 @@ fn frame_throughput(cx: &Context) -> Metrics {
             scene.pump();
             scene.render_frame()
         });
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Frames of Frame/Throughput over the basemap with its buildings and a
+/// street overlay colored by feature state, after every building and street
+/// of the loaded tiles was given a state; no state changes while it pans.
+fn frame_feature_state(cx: &Context) -> Metrics {
+    const LAP: usize = 240;
+    const SOURCE_LAYERS: [&str; 2] = ["buildings", "streets"];
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let selected =
+        |on: &str, off: &str| serde_json::json!(["case", ["boolean", ["feature-state", "selected"], false], on, off]);
+    let layers = style["layers"].as_array_mut().expect("the style has layers");
+    let buildings = layers.iter_mut().find(|layer| layer["id"] == "buildings").expect("the buildings layer");
+    buildings["paint"]["fill-color"] = selected("#c9a28f", "#d9d0c9");
+    let streets = layers.iter().position(|layer| layer["source-layer"] == "streets").expect("a streets layer");
+    layers.insert(
+        streets,
+        serde_json::json!({
+            "id": "selected-streets",
+            "type": "line",
+            "source": "basemap",
+            "source-layer": "streets",
+            "paint": {"line-color": selected("#e55e5e", "rgba(0, 0, 0, 0)"), "line-width": 6},
+        }),
+    );
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    for index in 0..LAP {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        scene.pump();
+        scene.render_frame();
+    }
+    for source_layer in SOURCE_LAYERS {
+        scene.select_every_feature("basemap", source_layer);
+    }
+    scene.settle();
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(100) {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/FeatureState", &scene.read_frame());
     }
     let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
     let mut metrics = meter.finish();

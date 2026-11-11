@@ -2,12 +2,13 @@
 //
 // `coalesceChanges(std::vector<RenderTile>&)` calls `tile.setFeatureState`
 // on every render tile; a Rust RenderTile has no reference to its Tile, so
-// `coalesce_changes` returns the states and the render source applies them
-// to the tiles of its pyramid (the same tiles).
+// `coalesce_changes` takes the tiles of the render source's pyramid (the same
+// tiles).
 
 use mln_style::expression::expression::FeatureState;
 
 use crate::bucket::{FeatureStates, LayerFeatureStates};
+use crate::tile::tile::Tile;
 
 /// `SourceFeatureState`.
 #[derive(Debug, Default)]
@@ -15,6 +16,8 @@ pub struct SourceFeatureState {
     current_states: LayerFeatureStates,
     state_changes: LayerFeatureStates,
     deleted_states: LayerFeatureStates,
+    /// Goes up in each `coalesce_changes` call that has changes.
+    version: u64,
 }
 
 impl SourceFeatureState {
@@ -57,14 +60,15 @@ impl SourceFeatureState {
     }
 
     /// `coalesceChanges(tiles)`: folds the queued changes and deletions into
-    /// the current states and returns what C++ passes to every tile's
-    /// `setFeatureState`, or `None` when it returns early (nothing to
-    /// apply).
-    pub fn coalesce_changes(&mut self) -> Option<LayerFeatureStates> {
+    /// the current states and brings each tile's buckets up to date. A tile
+    /// that holds the previous version gets this frame's changes; a tile with
+    /// new buckets, or one that was not rendered in a frame with changes,
+    /// gets the whole state; a tile that is up to date gets nothing.
+    pub fn coalesce_changes<'a>(&mut self, tiles: impl IntoIterator<Item = &'a dyn Tile>) {
         let mut changes: LayerFeatureStates = LayerFeatureStates::new();
         let state_changes = std::mem::take(&mut self.state_changes);
         for (source_layer, layer_state_changes) in &state_changes {
-            let mut layer_states = FeatureStates::new();
+            let layer_states = changes.entry(source_layer.clone()).or_default();
             for (feature_id, feature_state_changes) in layer_state_changes {
                 let current =
                     self.current_states.entry(source_layer.clone()).or_default().entry(feature_id.clone()).or_default();
@@ -73,22 +77,16 @@ impl SourceFeatureState {
                 }
                 layer_states.insert(feature_id.clone(), current.clone());
             }
-            changes.insert(source_layer.clone(), layer_states);
         }
 
         let deleted_states = std::mem::take(&mut self.deleted_states);
         for (source_layer, layer_deleted_states) in &deleted_states {
-            // `FeatureStates layerStates = {{}, {}};`: one entry with an
-            // empty id and an empty state.
-            let mut layer_states = FeatureStates::new();
-            layer_states.insert(String::new(), FeatureState::new());
-
+            let layer_states = changes.entry(source_layer.clone()).or_default();
             let current_layer = self.current_states.entry(source_layer.clone()).or_default();
             if layer_deleted_states.is_empty() {
-                let feature_ids: Vec<String> = current_layer.keys().cloned().collect();
-                for feature_id in feature_ids {
+                for (feature_id, current) in current_layer.iter_mut() {
                     layer_states.insert(feature_id.clone(), FeatureState::new());
-                    current_layer.insert(feature_id, FeatureState::new());
+                    *current = FeatureState::new();
                 }
             } else {
                 for (feature_id, deleted_keys) in layer_deleted_states {
@@ -104,19 +102,21 @@ impl SourceFeatureState {
                     layer_states.insert(feature_id.clone(), current.clone());
                 }
             }
-            changes.insert(source_layer.clone(), layer_states);
         }
 
-        // changes.insert(currentStates.begin(), currentStates.end()): keeps
-        // the entries already in `changes`.
-        for (source_layer, layer_states) in &self.current_states {
-            changes.entry(source_layer.clone()).or_insert_with(|| layer_states.clone());
+        if !changes.is_empty() {
+            self.version += 1;
         }
 
-        if changes.is_empty() {
-            return None;
+        for tile in tiles {
+            let tile_version = &tile.base().feature_state_version;
+            if tile_version.get() == self.version {
+                continue;
+            }
+            let previous = !changes.is_empty() && tile_version.get() != 0 && tile_version.get() + 1 == self.version;
+            tile.set_feature_state(if previous { &changes } else { &self.current_states });
+            tile_version.set(self.version);
         }
-        Some(changes)
     }
 
     /// `removeState(sourceLayerID, featureID, stateKey)`.
@@ -168,5 +168,131 @@ impl SourceFeatureState {
                 self.deleted_states.insert(source_layer, FeatureStates::new());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::any::Any;
+    use std::cell::RefCell;
+
+    use feature::Value;
+    use mln_style::layer_properties::LayerProperties;
+    use mln_tile_id::OverscaledTileID;
+    use mln_util::immutable::Immutable;
+
+    use super::*;
+    use crate::tile::tile::{Kind, TileBase};
+    use crate::tile_render_data::TileRenderData;
+
+    struct StubTile {
+        base: TileBase,
+        applied: RefCell<Vec<LayerFeatureStates>>,
+    }
+
+    impl StubTile {
+        fn new(x: u32) -> Self {
+            let base = TileBase::new(Kind::Geometry, OverscaledTileID::from_zxy(1, x, 0), "source".to_owned(), None);
+            StubTile { base, applied: RefCell::default() }
+        }
+
+        fn applied(&self, i: usize) -> LayerFeatureStates {
+            self.applied.borrow()[i].clone()
+        }
+
+        fn applied_count(&self) -> usize {
+            self.applied.borrow().len()
+        }
+    }
+
+    impl Tile for StubTile {
+        fn base(&self) -> &TileBase {
+            &self.base
+        }
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+        fn create_render_data(&self) -> Box<dyn TileRenderData> {
+            unreachable!()
+        }
+        fn cancel(&self) {}
+        fn layer_properties_updated(&self, _layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+            false
+        }
+        fn set_feature_state(&self, states: &LayerFeatureStates) {
+            self.applied.borrow_mut().push(states.clone());
+        }
+    }
+
+    fn hover() -> FeatureState {
+        let mut state = FeatureState::new();
+        state.insert("hover".to_owned(), Value::Bool(true));
+        state
+    }
+
+    fn render_frame(state: &mut SourceFeatureState, tiles: &[&StubTile]) {
+        state.coalesce_changes(tiles.iter().map(|tile| *tile as &dyn Tile));
+    }
+
+    // gtest: SourceFeatureState.CoalesceChanges
+    #[test]
+    fn coalesce_changes() {
+        let mut state = SourceFeatureState::new();
+        let a = StubTile::new(0);
+        let b = StubTile::new(1);
+        let layer = Some("layer");
+
+        state.update_state(layer, "1", &hover());
+        render_frame(&mut state, &[&a]);
+        assert_eq!(a.applied_count(), 1);
+        assert_eq!(a.applied(0)["layer"]["1"].get("hover"), Some(&Value::Bool(true)));
+
+        // Nothing changed: nothing is applied again.
+        render_frame(&mut state, &[&a]);
+        assert_eq!(a.applied_count(), 1);
+
+        // A tile rendered for the first time gets the stored state.
+        render_frame(&mut state, &[&a, &b]);
+        assert_eq!(b.applied_count(), 1);
+        assert_eq!(b.applied(0)["layer"]["1"].get("hover"), Some(&Value::Bool(true)));
+        assert_eq!(a.applied_count(), 1);
+
+        // A tile that is up to date gets only the change.
+        state.update_state(layer, "2", &hover());
+        render_frame(&mut state, &[&a]);
+        assert_eq!(a.applied_count(), 2);
+        assert_eq!(a.applied(1)["layer"].len(), 1);
+        assert_eq!(a.applied(1)["layer"]["2"].get("hover"), Some(&Value::Bool(true)));
+
+        // A tile that was not rendered when the state changed gets the whole
+        // state.
+        render_frame(&mut state, &[&a, &b]);
+        assert_eq!(a.applied_count(), 2);
+        assert_eq!(b.applied_count(), 2);
+        assert_eq!(b.applied(1)["layer"].len(), 2);
+
+        // A removal and a change in the same frame both reach the tile.
+        state.remove_state(layer, Some("1"), None);
+        state.update_state(layer, "3", &hover());
+        render_frame(&mut state, &[&a, &b]);
+        assert_eq!(a.applied_count(), 3);
+        assert!(a.applied(2)["layer"]["1"].is_empty());
+        assert_eq!(a.applied(2)["layer"]["3"].get("hover"), Some(&Value::Bool(true)));
+    }
+
+    // A re-laid-out tile has new buckets and gets the whole state again.
+    #[test]
+    fn coalesce_changes_after_relayout() {
+        let mut state = SourceFeatureState::new();
+        let a = StubTile::new(0);
+        let layer = Some("layer");
+
+        state.update_state(layer, "1", &hover());
+        render_frame(&mut state, &[&a]);
+        state.update_state(layer, "2", &hover());
+        a.base.feature_state_version.set(0);
+        render_frame(&mut state, &[&a]);
+        assert_eq!(a.applied_count(), 2);
+        assert_eq!(a.applied(1)["layer"].len(), 2);
     }
 }

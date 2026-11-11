@@ -549,11 +549,7 @@ impl RenderTileSource {
         // layers: feature state
         // featureState.coalesceChanges(*tiles): RenderTile::setFeatureState
         // is tile.setFeatureState, applied to the pyramid's tiles directly.
-        if let Some(changes) = self.feature_state.coalesce_changes() {
-            for (_, tile) in self.tile_pyramid.get_rendered_tiles() {
-                tile.set_feature_state(&changes);
-            }
-        }
+        self.feature_state.coalesce_changes(self.tile_pyramid.get_rendered_tiles().map(|(_, tile)| tile));
         self.render_tiles = Rc::new(tiles);
     }
 

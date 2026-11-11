@@ -4,17 +4,21 @@
 //! `fixtures.py` prepared. Nothing uses the network.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use feature::{Value, ValueObject};
 use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
+use mln_renderer::query::SourceQueryOptions;
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_util::feature::feature_id_to_string;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -282,6 +286,23 @@ impl Scene {
     /// memory warning: the next frames load and lay out again.
     pub fn clear_data(&self) {
         self.frontend.with_renderer(|renderer| renderer.clear_data());
+    }
+
+    /// Sets `selected` on every other feature of `source_layer` in the
+    /// loaded tiles, and `false` on the rest.
+    pub fn select_every_feature(&self, source: &str, source_layer: &str) {
+        self.frontend.with_renderer(|renderer| {
+            let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
+            let features = renderer.query_source_features(source, &options).expect("the source's features");
+            let ids: BTreeSet<String> =
+                features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
+            assert!(!ids.is_empty(), "{source_layer} has no features with ids");
+            for (index, id) in ids.iter().enumerate() {
+                let mut state = ValueObject::new();
+                state.insert("selected".to_string(), Value::Bool(index % 2 == 0));
+                renderer.set_feature_state(source, Some(source_layer), id, &state);
+            }
+        });
     }
 
     fn webgpu(&self) -> &mln_webgpu::HeadlessBackend {
