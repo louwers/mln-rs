@@ -1829,6 +1829,92 @@ fn cancel_transitions_by_id_leaves_others_running() {
     assert!(!transform.in_transition());
 }
 
+// gtest: Transform.FlyDurationRange
+/// maplibre-native-ffi's patch throws for a derived duration that Duration
+/// can't hold; the port jumps instead, as a flight past `max_duration` does.
+#[test]
+fn fly_duration_range() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+    let camera = cam().with_zoom(Some(1.0));
+    for velocity in [f64::from_bits(1), 1e-12] {
+        transform.jump_to(&cam().with_zoom(Some(0.0)));
+        let (animation, ended) = record_end();
+        let animation = AnimationOptions { velocity: Some(velocity), ..animation };
+        transform.fly_to(&camera, &animation, false);
+        assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+        assert_double_eq(transform.get_zoom(), 1.0);
+        assert!(!transform.in_transition());
+    }
+
+    transform.jump_to(&cam().with_zoom(Some(0.0)));
+    let animation = AnimationOptions { velocity: Some(1e-9), ..AnimationOptions::default() };
+    transform.fly_to(&camera, &animation, false);
+    assert!(transform.get_latest_transition_duration() > Duration::zero());
+    assert!(transform.in_transition());
+    transform.cancel_transitions();
+
+    transform.jump_to(&cam().with_zoom(Some(0.0)));
+    let animation = AnimationOptions {
+        velocity: Some(f64::from_bits(1)),
+        duration: Some(Duration::zero()),
+        ..AnimationOptions::default()
+    };
+    transform.fly_to(&camera, &animation, false);
+    assert_double_eq(transform.get_zoom(), 1.0);
+    assert!(!transform.in_transition());
+}
+
+/// GL JS's `maxDuration`: a flight longer than it, by a set or a derived
+/// duration, jumps; a shorter one flies as without it; an ease ignores it.
+#[test]
+fn fly_past_max_duration_jumps() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(512, 512)).unwrap();
+    let target = cam().with_center(Some(ll(40.0, -74.0))).with_zoom(Some(10.0));
+    let derived = || {
+        let mut transform = new_transform();
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.fly_to(&target, &AnimationOptions::default(), false);
+        transform.get_latest_transition_duration()
+    };
+    let natural = derived();
+    assert!(natural > seconds(1));
+
+    // Under the cap: the same flight.
+    let (animation, ended) = record_end();
+    let capped = AnimationOptions { max_duration: Some(natural + milliseconds(1)), ..animation };
+    transform.fly_to(&target, &capped, false);
+    assert_eq!(transform.get_latest_transition_duration(), natural);
+    assert!(transform.in_transition());
+    transform.cancel_transitions();
+    assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
+
+    // Over it, derived or set: a jump.
+    for animation in [
+        AnimationOptions { max_duration: Some(natural - milliseconds(1)), ..AnimationOptions::default() },
+        AnimationOptions { max_duration: Some(seconds(1)), ..AnimationOptions::new(seconds(2)) },
+    ] {
+        transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
+        let (end, ended) = record_end();
+        transform.fly_to(&target, &AnimationOptions { transition_end_fn: end.transition_end_fn, ..animation }, false);
+        assert!(!transform.in_transition());
+        assert_eq!(outcome(&ended), Some(TransitionOutcome::Completed));
+        assert_near(transform.get_zoom(), 10.0, 1e-9);
+        assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 40.0, 1e-9);
+        assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), -74.0, 1e-9);
+    }
+
+    // An ease that reuses the flight keeps its duration.
+    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
+    transform.ease_to(
+        &target,
+        &AnimationOptions { max_duration: Some(milliseconds(1)), ..AnimationOptions::new(seconds(2)) },
+    );
+    assert_eq!(transform.get_latest_transition_duration(), seconds(2));
+    assert!(transform.in_transition());
+}
+
 /// The friction decay rate per second for a half-life.
 fn friction_rate(half_life: Duration) -> f64 {
     std::f64::consts::LN_2 / seconds_f64(half_life)

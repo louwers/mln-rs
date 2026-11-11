@@ -367,6 +367,40 @@ fn geometry_to_camera() {
     assert!(test.map().camera_for_geometry(&bad, &EdgeInsets::default(), None, None).is_err());
 }
 
+/// A flight too slow for its duration to be held jumps, so the map goes idle
+/// rather than animating for centuries.
+#[test]
+fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(r##"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background"}]}"##);
+    let run_until_idle = || {
+        let idle = Rc::new(Cell::new(false));
+        let timeout = Timer::new();
+        {
+            let run_loop = test.run_loop.clone();
+            timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+        }
+        {
+            let idle = idle.clone();
+            let run_loop = test.run_loop.clone();
+            test.observer.did_become_idle_callback.set(move |_| {
+                idle.set(true);
+                run_loop.stop();
+            });
+        }
+        test.run_loop.run();
+        test.observer.did_become_idle_callback.clear();
+        idle.get()
+    };
+    assert!(run_until_idle());
+
+    let target = cam().with_center(Some(ll(40.0, -74.0))).with_zoom(Some(10.0));
+    test.map().fly_to(&target, &AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() });
+    assert!(!test.map().in_transition());
+    assert_near(test.map().get_camera_options(None).zoom.unwrap(), 10.0, 1e-9);
+    assert!(run_until_idle());
+}
+
 /// Free camera options place the camera, and cancel the running commands.
 #[test]
 fn free_camera_options_place_the_camera_and_cancel_commands() {

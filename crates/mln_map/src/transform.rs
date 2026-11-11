@@ -876,8 +876,20 @@ impl Transform {
             if let Some(v) = animation.velocity {
                 velocity = v / rho;
             }
-            // duration_cast<Duration>(duration<double>(S / velocity))
-            Duration::from_nanos((total_s / velocity * 1_000_000_000.0) as i64)
+            let seconds = total_s / velocity;
+            // A duration Duration can't hold jumps, as one past max_duration
+            // does, rather than saturating to a flight that never ends. The
+            // bound is exclusive: Duration::max() rounds up as a double.
+            if seconds.is_finite() && seconds >= 0.0 && seconds < Duration::max().count() as f64 / 1_000_000_000.0 {
+                // duration_cast<Duration>(duration<double>(S / velocity))
+                Duration::from_nanos((seconds * 1_000_000_000.0) as i64)
+            } else {
+                Duration::zero()
+            }
+        };
+        let duration = match animation.max_duration {
+            Some(max) if !linear_zoom_interpolation && duration > max => Duration::zero(),
+            _ => duration,
         };
         let start_scale = self.state.get_scale();
         let start_edge_insets = self.state.get_edge_insets();

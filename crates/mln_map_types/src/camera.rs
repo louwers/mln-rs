@@ -96,6 +96,12 @@ pub struct AnimationOptions {
     /// Zero-based zoom level at the peak of the flyTo() transition's flight
     /// path.
     pub min_zoom: Option<f64>,
+    /// The longest a flyTo() transition may take, as GL JS's `maxDuration`:
+    /// a flight whose duration, set or derived from the velocity, exceeds it
+    /// jumps instead. `None` caps nothing beyond what [`Duration`] holds: a
+    /// derived duration it can't hold jumps too. Other camera commands
+    /// ignore it.
+    pub max_duration: Option<Duration>,
     /// The easing timing curve of the transition.
     pub easing: Option<UnitBezier>,
     /// A function that is called on each frame of the transition, just before
@@ -326,6 +332,7 @@ impl CameraDelta {
             if a.duration.is_some()
                 || a.velocity.is_some()
                 || a.min_zoom.is_some()
+                || a.max_duration.is_some()
                 || a.easing.is_some()
                 || a.transition_frame_fn.is_some()
             {
