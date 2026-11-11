@@ -588,6 +588,41 @@ fn get_status_style_and_source_complete() {
     assert!(!status.complete());
 }
 
+// gtest: OfflineDownload.GetStatusInfiniteMaxZoom
+#[test]
+fn get_status_infinite_max_zoom() {
+    let test = OfflineTest::new();
+    let region = test.create_region().expect("region");
+    let download = OfflineDownload::new(
+        region.get_id(),
+        OfflineTilePyramidRegionDefinition::new(
+            STYLE_URL,
+            LatLngBounds::hull(LatLng::new(0.5, 0.5).unwrap(), LatLng::new(0.5001, 0.5001).unwrap()),
+            14.0,
+            f64::INFINITY,
+            1.0,
+            true,
+        )
+        .unwrap()
+        .into(),
+        test.db.clone(),
+        test.file_source.clone(),
+    );
+
+    let response = test.response("style.json");
+    test.db.borrow_mut().put_region_resource(1, &Resource::style(STYLE_URL), &response).unwrap();
+    let response = test.response("streets.json");
+    test.db
+        .borrow_mut()
+        .put_region_resource(1, &Resource::source("http://127.0.0.1:3000/streets.json"), &response)
+        .unwrap();
+
+    let status = download.get_status();
+
+    // One tile at z14 and one at the source's maxzoom, z15.
+    assert_eq!(2, status.required_tile_count);
+}
+
 fn connection_error() -> Response {
     let mut response = Response::new();
     response.error = Some(Box::new(Error::new(Reason::Connection, "connection error")));
