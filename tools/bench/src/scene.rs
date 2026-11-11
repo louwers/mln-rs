@@ -236,13 +236,13 @@ impl Scene {
     /// sleeps until there is work, rather than polling it, so the wait
     /// costs no CPU time.
     pub fn render_still(&mut self) -> PremultipliedImage {
-        let outcome: Rc<RefCell<Option<Option<String>>>> = Rc::default();
+        let outcome: Rc<RefCell<Option<Result<(), String>>>> = Rc::default();
         let done = outcome.clone();
-        self.map.render_still(Box::new(move |error| {
-            *done.borrow_mut() = Some(error.map(|error| error.to_string()));
+        self.map.render_still(Box::new(move |result| {
+            *done.borrow_mut() = Some(result.map_err(|error| error.to_string()));
         }));
         self.run_until(|| outcome.borrow().is_some());
-        if let Some(Some(error)) = outcome.take() {
+        if let Some(Err(error)) = outcome.take() {
             panic!("still: {error}");
         }
         self.frontend.read_still_image()

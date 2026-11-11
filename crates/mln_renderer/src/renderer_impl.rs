@@ -362,6 +362,11 @@ impl RendererImpl {
             mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
             needs_repaint: render_tree_parameters.needs_repaint,
             placement_changed: render_tree_parameters.placement_changed,
+            still_image_request_id: if update_parameters.still_image_request {
+                update_parameters.still_image_request_id
+            } else {
+                0
+            },
             stats,
         });
 

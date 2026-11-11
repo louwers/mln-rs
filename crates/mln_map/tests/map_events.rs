@@ -159,20 +159,33 @@ fn a_still_image_completes_with_a_full_frame() {
     map.get_style_mut().load_json(STYLE);
     let outcome = Rc::new(RefCell::new(None));
     let result = outcome.clone();
-    map.render_still(Box::new(move |error| *result.borrow_mut() = Some(error)));
+    map.render_still(Box::new(move |done| *result.borrow_mut() = Some(done)));
 
     let stats = Arc::default();
-    let frame = |mode| RendererEvent::RenderFrameFinished {
+    let frame = |mode, still_image_request_id| RendererEvent::RenderFrameFinished {
         mode,
         needs_repaint: false,
         placement_changed: false,
+        still_image_request_id,
         stats: Arc::clone(&stats),
     };
-    report(&map, frame(mln_renderer::RenderMode::Partial));
+    report(&map, frame(mln_renderer::RenderMode::Partial, 1));
     map.process_events();
     assert!(outcome.borrow().is_none());
-    report(&map, frame(mln_renderer::RenderMode::Full));
+    report(&map, frame(mln_renderer::RenderMode::Full, 1));
     map.process_events();
-    assert_eq!(*outcome.borrow(), Some(None));
+    assert_eq!(*outcome.borrow(), Some(Ok(())));
     assert!(map.is_fully_loaded());
+
+    // A full frame of the first image's update, drawn late, doesn't complete
+    // the next image.
+    *outcome.borrow_mut() = None;
+    let result = outcome.clone();
+    map.render_still(Box::new(move |done| *result.borrow_mut() = Some(done)));
+    report(&map, frame(mln_renderer::RenderMode::Full, 1));
+    map.process_events();
+    assert!(outcome.borrow().is_none());
+    report(&map, frame(mln_renderer::RenderMode::Full, 2));
+    map.process_events();
+    assert_eq!(*outcome.borrow(), Some(Ok(())));
 }

@@ -540,8 +540,8 @@ impl Map {
                     }
                     let outcome = Rc::new(RefCell::new(None));
                     let done = outcome.clone();
-                    entry.core.render_still(Box::new(move |error| {
-                        *done.borrow_mut() = Some(error.map_or(Ok(()), |error| Err(still_image_error(error))));
+                    entry.core.render_still(Box::new(move |result| {
+                        *done.borrow_mut() = Some(result.map_err(still_image_error));
                     }));
                     entry.pending_still = Some(PendingStill { resolver, outcome });
                 },

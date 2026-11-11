@@ -257,9 +257,7 @@ impl HeadlessFrontend {
 
         let outcome: Rc<RefCell<Option<Result<(), Error>>>> = Rc::new(RefCell::new(None));
         let o = outcome.clone();
-        map.render_still(Box::new(move |error| {
-            *o.borrow_mut() = Some(error.map_or(Ok(()), Err));
-        }));
+        map.render_still(Box::new(move |result| *o.borrow_mut() = Some(result)));
 
         // C++ spins on runOnce, which costs a core per renderer while the
         // workers parse tiles. Sleeping as soon as the loop is idle delays

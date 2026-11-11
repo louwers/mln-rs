@@ -43,6 +43,11 @@ pub enum RendererEvent {
         /// The frame has transitions still running.
         needs_repaint: bool,
         placement_changed: bool,
+        /// The still image request of the update that the frame drew, or 0
+        /// when the update requested none. Only a frame of the request's own
+        /// updates completes it, not one of an earlier update that a renderer
+        /// on another thread drew late.
+        still_image_request_id: u64,
         /// The context's counters after the frame.
         stats: Arc<RenderingStats>,
     },

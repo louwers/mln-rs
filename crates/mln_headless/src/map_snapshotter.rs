@@ -290,11 +290,8 @@ impl MapSnapshotter {
         let still_image_result = self.still_image_result.clone();
         let deliver = self.deliver.sender();
         let frontend = self.frontend.clone();
-        self.map().render_still(Box::new(move |error| {
-            *still_image_result.borrow_mut() = Some(match error {
-                None => Ok(frontend.read_still_image()),
-                Some(error) => Err(error),
-            });
+        self.map().render_still(Box::new(move |result| {
+            *still_image_result.borrow_mut() = Some(result.map(|()| frontend.read_still_image()));
             deliver.send();
         }));
     }

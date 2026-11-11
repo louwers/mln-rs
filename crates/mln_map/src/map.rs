@@ -38,8 +38,9 @@ use crate::map_snapshot::{CameraBounds, FreeCamera, MapSnapshot, TileSettings};
 use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 use crate::transform::{Transform, TransformObserver};
 
-/// `Map::StillImageCallback`: called with `None` on success, or the error.
-pub type StillImageCallback = Box<dyn FnOnce(Option<Error>)>;
+/// Receives the outcome of [`Map::render_still`]: `Ok` once a complete frame
+/// rendered, or why the image failed.
+pub type StillImageCallback = Box<dyn FnOnce(Result<(), Error>)>;
 
 /// A call of the style's observer.
 enum StyleEvent {
@@ -368,8 +369,8 @@ impl Map {
                     self.emit(MapEvent::RenderFrameStarted);
                 }
             }
-            RendererEvent::RenderFrameFinished { mode, needs_repaint, placement_changed, stats } => {
-                self.on_render_frame_finished(mode, needs_repaint, placement_changed, stats);
+            RendererEvent::RenderFrameFinished { mode, needs_repaint, placement_changed, still_image_request_id, stats } => {
+                self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
             }
             RendererEvent::RenderMapStarted => {
                 if continuous {
@@ -417,7 +418,7 @@ impl Map {
         if self.mode != MapMode::Continuous
             && let Some(callback) = self.still_image_request.take()
         {
-            callback(Some(error));
+            callback(Err(error));
         }
     }
 
@@ -426,6 +427,7 @@ impl Map {
         mode: mln_renderer::RenderMode,
         needs_repaint: bool,
         placement_changed: bool,
+        still_image_request_id: u64,
         stats: Arc<RenderingStats>,
     ) {
         let fully_loaded = mode == mln_renderer::RenderMode::Full;
@@ -451,9 +453,10 @@ impl Map {
                 self.emit(MapEvent::Idle);
             }
         } else if self.renderer_fully_loaded
+            && still_image_request_id == self.still_image_request_id
             && let Some(callback) = self.still_image_request.take()
         {
-            callback(None);
+            callback(Ok(()));
         }
 
         self.last_frame_stats = Some(stats);
@@ -538,17 +541,17 @@ impl Map {
     pub fn render_still(&mut self, callback: StillImageCallback) {
         self.process_events();
         if self.mode != MapMode::Static && self.mode != MapMode::Tile {
-            callback(Some(Error::invalid_state("Map is not in static or tile image render modes")));
+            callback(Err(Error::invalid_state("Map is not in static or tile image render modes")));
             return;
         }
 
         if self.still_image_request.is_some() {
-            callback(Some(Error::invalid_state("Map is currently rendering an image")));
+            callback(Err(Error::invalid_state("Map is currently rendering an image")));
             return;
         }
 
         if let Some(error) = self.style.impl_.get_last_error() {
-            callback(Some(error));
+            callback(Err(error));
             return;
         }
 

@@ -40,7 +40,7 @@ pub fn style_image(
 
 // gtest: API.RenderWithoutCallback
 #[test]
-#[ignore = "not applicable as written: the Rust StillImageCallback is a Box<dyn FnOnce>, so there is no null callback to pass (C++ renderStill(nullptr) logs \"StillImageCallback not set\"); see api_misuse.test.cpp:16"]
+#[ignore = "not applicable as written: the Rust still image callback is a Box<dyn FnOnce>, so there is no null callback to pass (C++ renderStill(nullptr) logs \"StillImageCallback not set\"); see api_misuse.test.cpp:16"]
 fn render_without_callback() {
     // C++: map->renderStill(nullptr); map.reset(); expects one Error/General
     // log "StillImageCallback not set". The Rust type system rules the
