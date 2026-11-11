@@ -1,3 +1,1 @@
-minimumReleaseAgeExclude:
-  - vite@8.3.8
 # pnpm reads its settings from here; this package is the whole workspace.
