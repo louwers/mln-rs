@@ -10,6 +10,7 @@ members = [
     "crates/*",
     "examples/*",
     "tools/bench",
+    "tools/c-abi-gen",
     "tools/expression-test",
     "tools/render-test",
     "tools/style-codegen",

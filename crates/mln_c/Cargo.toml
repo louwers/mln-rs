@@ -1,0 +1,22 @@
+[package]
+name = "mln-rs-c"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# maplibre-native-ffi's C ABI, built as a C library rather than used from
+# Rust, so not published to crates.io.
+publish = false
+
+[lib]
+# The name of maplibre-native-ffi's CMake target, so its ABI suite links this
+# library as it links that one (tools/c-abi-test).
+name = "maplibre_native_c"
+crate-type = ["cdylib", "staticlib"]
+doctest = false
+
+[lints]
+workspace = true

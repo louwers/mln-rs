@@ -1,0 +1,28 @@
+[package]
+name = "mln-rs-c-abi-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# Generates crates/mln_c/src/generated from crates/mln_c/include; a dev tool.
+publish = false
+
+# `just generate-c-abi`
+[[bin]]
+name = "c-abi-gen"
+path = "src/main.rs"
+
+[dependencies]
+# Loads libclang at run time, so building the workspace needs no libclang;
+# running the generator does.
+bindgen = { version = "0.73.2", default-features = false, features = ["runtime"] }
+prettyplease = "0.2.37"
+proc-macro2 = "1.0.107"
+quote = "1.0.47"
+syn = { version = "2.0.119", features = ["full"] }
+
+[lints]
+workspace = true
