@@ -18,6 +18,7 @@ use mln_util::sync::MutexExt;
 
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
+use crate::feature_state::{FeatureState, FeatureStateSelector, FeatureStateStore};
 use crate::render::{AttachOptions, RenderSession, RenderTarget, SessionId, Worker, worker_post};
 use crate::runtime::{Outbox, Runtime, RuntimeCore, RuntimeShared, post};
 
@@ -26,7 +27,7 @@ use crate::runtime::{Outbox, Runtime, RuntimeCore, RuntimeShared, post};
 pub struct MapId(pub u64);
 
 /// How to create a map.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct MapOptions {
     pub map: mln_map::MapOptions,
     /// The events that the map reports.
@@ -35,6 +36,20 @@ pub struct MapOptions {
     /// that the style's fonts lack, as `Style::set_fallback_font_faces`
     /// takes it.
     pub fallback_font_faces: Option<String>,
+    /// Whether the renderers of the map keep tiles in memory after they
+    /// leave the view, so they show again without loading. On by default.
+    pub tile_cache_enabled: bool,
+}
+
+impl Default for MapOptions {
+    fn default() -> Self {
+        MapOptions {
+            map: mln_map::MapOptions::default(),
+            event_mask: EventMask::default(),
+            fallback_font_faces: None,
+            tile_cache_enabled: true,
+        }
+    }
 }
 
 impl MapOptions {
@@ -49,6 +64,11 @@ impl MapOptions {
 
     pub fn with_fallback_font_faces(mut self, json: impl Into<String>) -> Self {
         self.fallback_font_faces = Some(json.into());
+        self
+    }
+
+    pub fn with_tile_cache_enabled(mut self, enabled: bool) -> Self {
+        self.tile_cache_enabled = enabled;
         self
     }
 }
@@ -220,6 +240,11 @@ impl Map {
         self.shared.id
     }
 
+    /// When the map renders, as its options set it.
+    pub fn mode(&self) -> MapMode {
+        self.shared.mode
+    }
+
     /// The runtime that the map lives on.
     pub fn runtime(&self) -> Runtime {
         Runtime { shared: self.shared.runtime.clone() }
@@ -306,21 +331,40 @@ impl Map {
         Ok(completion)
     }
 
+    /// Releases the map without a completion, as dropping its last handle
+    /// does, and lets the runtime finish in the background. Fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the map was
+    /// released already.
+    pub fn dispose(&self) -> Result<(), Error> {
+        self.shared.release(None)
+    }
+
     // MARK: - Map
 
-    /// Sets the map's size. Fails with
+    /// Sets the map's size. A resize to the size the map has changes
+    /// nothing, so it renders nothing. Fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while a render
     /// session is attached, since the session sizes the map to its target:
-    /// resize the session instead.
+    /// resize the session instead. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
+    /// size.
     pub fn resize(&self, size: Size) -> Result<Completion<Applied>, Error> {
         if self.shared.session.lock_unpoisoned().is_some() {
             return Err(Error::invalid_state("the map has a render session: resize the session instead"));
         }
-        self.command(move |map| map.set_size(size))
+        if size.is_empty() {
+            return Err(Error::invalid_argument("logical size dimensions must be positive"));
+        }
+        self.command(move |map| if map.get_map_options().size() == size { Ok(()) } else { map.set_size(size) })
     }
 
     /// Renders a new frame of a continuous map, even when nothing changed.
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// static or tile map, which renders only still images.
     pub fn request_repaint(&self) -> Result<Completion<Applied>, Error> {
+        if self.shared.mode != MapMode::Continuous {
+            return Err(Error::invalid_state("map is not in continuous mode"));
+        }
         self.command(|map| {
             map.trigger_repaint();
             Ok(())
@@ -536,6 +580,62 @@ impl Map {
         sent.map(drop)
     }
 
+    // MARK: - Feature state
+
+    /// Merges `state` into the state of the feature that `selector` names:
+    /// its keys replace the same keys of the feature's state, and the other
+    /// keys stay.
+    ///
+    /// The map keeps the state until it is removed, its source leaves the
+    /// style, or a style loads: [`remove_style_source`](Self::remove_style_source)
+    /// removes the state of the source's features, and a style that loads
+    /// removes the state of every source. To set state for a new style's
+    /// sources, wait until [`set_style_url`](Self::set_style_url) or
+    /// [`set_style_json`](Self::set_style_json) completes.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// selector without a feature, or an empty state.
+    pub fn set_feature_state(
+        &self,
+        selector: FeatureStateSelector,
+        state: FeatureState,
+    ) -> Result<Completion<Applied>, Error> {
+        let key = selector.key(true)?;
+        if state.is_empty() {
+            return Err(Error::invalid_argument("feature state must not be empty"));
+        }
+        self.send(
+            move |entry, _| {
+                entry.feature_state.set(key, state);
+                Ok(())
+            },
+            |(), entry| entry.applied(),
+        )
+    }
+
+    /// The state of the feature that `selector` names, empty when it has
+    /// none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for a selector without a feature.
+    pub fn feature_state(&self, selector: FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
+        let key = selector.key(true)?;
+        self.send(move |entry, _| Ok(entry.feature_state.get(&key)), |state, _| state)
+    }
+
+    /// Removes the state that `selector` selects: one key of a feature, all
+    /// of a feature's state, or that of every feature in a source layer.
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// state key without a feature.
+    pub fn remove_feature_state(&self, selector: FeatureStateSelector) -> Result<Completion<Applied>, Error> {
+        let key = selector.key(false)?;
+        self.send(
+            move |entry, _| {
+                entry.feature_state.remove(&key);
+                Ok(())
+            },
+            |(), entry| entry.applied(),
+        )
+    }
+
     // MARK: - Style
 
     /// Loads the map's style from `url`.
@@ -598,23 +698,28 @@ impl Map {
     /// Removes a source from the style. Completes with
     /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the style has no
     /// such source, and [`ErrorKind::InvalidState`](mln_util::ErrorKind)
-    /// when a layer uses it or the style isn't loaded.
+    /// when a layer uses it or the style isn't loaded. The source's features
+    /// lose their state.
     pub fn remove_style_source(&self, source_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
-        self.command(move |map| {
-            let style = map.get_style_mut();
-            if !style.is_loaded() {
-                return Err(style_not_loaded());
-            }
-            if style.get_source(&source_id).is_none() {
-                return Err(Error::not_found(format!("source \"{source_id}\" does not exist")));
-            }
-            if style.get_layers().iter().any(|layer| layer.get_source_id() == source_id) {
-                return Err(Error::invalid_state(format!("source \"{source_id}\" is in use by a layer")));
-            }
-            style.remove_source(&source_id);
-            Ok(())
-        })
+        self.send(
+            move |entry, _| {
+                let style = entry.core.get_style_mut();
+                if !style.is_loaded() {
+                    return Err(style_not_loaded());
+                }
+                if style.get_source(&source_id).is_none() {
+                    return Err(Error::not_found(format!("source \"{source_id}\" does not exist")));
+                }
+                if style.get_layers().iter().any(|layer| layer.get_source_id() == source_id) {
+                    return Err(Error::invalid_state(format!("source \"{source_id}\" is in use by a layer")));
+                }
+                style.remove_source(&source_id);
+                entry.feature_state.remove_source(&source_id);
+                Ok(())
+            },
+            |(), entry| entry.applied(),
+        )
     }
 
     /// Adds a layer to the style from its JSON, below `before_layer_id` or
@@ -857,6 +962,9 @@ pub(crate) struct MapEntry {
     session: Option<SessionLink>,
     /// Whether a flush of the map's events is on its way.
     flush_scheduled: Arc<AtomicBool>,
+    pub(crate) feature_state: FeatureStateStore,
+    #[expect(dead_code, reason = "the renderers of the map's render sessions read it")]
+    pub(crate) tile_cache_enabled: bool,
 }
 
 impl MapEntry {
@@ -908,6 +1016,8 @@ pub(crate) fn create(
             pending_still: None,
             session: None,
             flush_scheduled,
+            feature_state: FeatureStateStore::default(),
+            tile_cache_enabled: options.tile_cache_enabled,
         },
     );
     flush(core, id, outbox);
@@ -1007,7 +1117,11 @@ fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     let mut style_outcome = None;
     for event in &events {
         match event {
-            MapEvent::StyleLoaded => style_outcome = Some(Ok(())),
+            MapEvent::StyleLoaded => {
+                // A new style's sources start without state.
+                entry.feature_state.clear();
+                style_outcome = Some(Ok(()));
+            }
             MapEvent::LoadingFailed(error) => style_outcome = Some(Err(Error::native(error.message()))),
             _ => {}
         }
