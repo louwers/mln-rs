@@ -15,6 +15,7 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::Duration;
 
 use mln_gfx::offscreen_texture;
 use mln_gfx::renderable::{Renderable, RenderableBase};
@@ -22,12 +23,16 @@ use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use mln_util::time::Instant;
 
 use crate::context::Context;
 use crate::renderable_resource::{RenderableResource, RenderableResourceBox, downcast_resource};
 use crate::texture2d::Texture2D;
 
 const BYTES_PER_ROW_ALIGNMENT: u32 = 256;
+
+/// How long a readback waits again after waits that reported a timeout.
+const WAIT_AGAIN_LIMIT: Duration = Duration::from_secs(1);
 
 fn linear_clamp() -> SamplerState {
     SamplerState {
@@ -204,7 +209,17 @@ impl OffscreenTextureResource {
         staging_buffer.map_async(wgpu::MapMode::Read, .., move |result| {
             let _ = tx.send(result);
         });
-        if let Err(e) = device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None }) {
+        // A wait without a timeout can still report one: PowerVR's Vulkan
+        // driver on Android ends the wait shortly before the fence value
+        // that wgpu reads afterwards shows the submission finished. Waiting
+        // again returns at once then, so this asks until the value caught up.
+        let wait = || device.poll(wgpu::PollType::Wait { submission_index: None, timeout: None });
+        let start = Instant::now();
+        let mut waited = wait();
+        while matches!(waited, Err(wgpu::PollError::Timeout)) && start.elapsed() < WAIT_AGAIN_LIMIT {
+            waited = wait();
+        }
+        if let Err(e) = waited {
             eprintln!("WebGPU: Buffer mapping wait failed: {e}");
         }
         match rx.try_recv() {
