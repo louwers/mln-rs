@@ -1569,6 +1569,7 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
  "mln-rs-text",
  "mln-rs-util",
  "mln-rs-webgpu",

@@ -18,6 +18,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
 use mln_renderer::query::SourceQueryOptions;
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geo::LatLng;
@@ -325,6 +326,31 @@ impl Scene {
             .borrow()
             .as_ref()
             .is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
+    }
+
+    /// Shows or hides every layer that draws `source`.
+    pub fn set_source_visible(&mut self, source: &str, visible: bool) {
+        let ids: Vec<String> = self
+            .map
+            .get_style()
+            .get_layers()
+            .iter()
+            .filter(|layer| layer.get_source_id() == source)
+            .map(|layer| layer.get_id())
+            .collect();
+        assert!(!ids.is_empty(), "no layer draws {source}");
+        let visibility = if visible { VisibilityType::Visible } else { VisibilityType::None };
+        for id in ids {
+            self.map.get_style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
+        }
+    }
+
+    /// The vertex and index buffers the GPU held after the last frame, in
+    /// MiB.
+    pub fn gpu_buffers_mib(&self) -> f64 {
+        let last_frame = self.observer.last_frame.borrow();
+        let stats = &last_frame.as_ref().expect("a frame").rendering_stats;
+        f64::from(stats.mem_vertex_buffers + stats.mem_index_buffers) / (1024.0 * 1024.0)
     }
 
     /// Drops every loaded tile and the renderer's other data, as after a

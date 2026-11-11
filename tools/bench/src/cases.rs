@@ -11,7 +11,7 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use crate::meter::{Meter, ms};
+use crate::meter::{Meter, live_heap_mib, ms};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
     basemap_center, basemap_north_west, basemap_south_east, basemap_style, cjk_center, write_frame,
@@ -107,6 +107,7 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
     cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     cases.push(Case::new("Frame/FeatureStateHover", frame_feature_state_hover));
+    cases.push(Case::new("Frame/HideLayers", frame_hide_layers));
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
@@ -411,6 +412,34 @@ fn frame_feature_state(cx: &Context) -> Metrics {
     let mut metrics = meter.finish();
     metrics.lead("frame_p95_ms", p95);
     metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Every layer of the loaded basemap hidden until the map settles, then
+/// shown again until it settles complete. `hidden_heap_mib` and
+/// `hidden_gpu_mib` are the heap and the GPU buffers live while they're
+/// hidden.
+fn frame_hide_layers(cx: &Context) -> Metrics {
+    let mut scene = basemap(cx, Mode::OnDemand);
+    scene.settle();
+    let mut meter = Meter::new();
+    let (mut heap, mut gpu) = (Vec::new(), Vec::new());
+    for _ in 0..cx.iterations(10) {
+        meter.start();
+        scene.set_source_visible("basemap", false);
+        scene.settle();
+        heap.push(live_heap_mib());
+        gpu.push(scene.gpu_buffers_mib());
+        scene.set_source_visible("basemap", true);
+        scene.settle();
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/HideLayers", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("hidden_heap_mib", median(&heap));
+    metrics.lead("hidden_gpu_mib", median(&gpu));
     metrics
 }
 

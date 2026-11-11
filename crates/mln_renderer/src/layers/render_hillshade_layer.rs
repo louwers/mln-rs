@@ -221,12 +221,14 @@ impl RenderLayer for RenderHillshadeLayer {
     }
 
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::markLayerRenderable
-        self.base.is_renderable = will_render;
-        let group = self.base.layer_group.clone();
-        crate::render_layer::activate_layer_group(&group, will_render, changes);
+        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
 
         self.remove_render_targets(changes);
+    }
+
+    fn release_render_data(&mut self) {
+        crate::render_layer::release_render_data_base(self);
+        self.bucket_render_targets.clear();
     }
 
     fn layer_removed(&mut self, changes: &mut UniqueChangeRequestVec) {

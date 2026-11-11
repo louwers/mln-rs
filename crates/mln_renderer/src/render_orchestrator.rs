@@ -738,17 +738,17 @@ impl RenderOrchestrator {
                 self.filtered_layers_for_source = filtered_layers;
                 self.filtered_layers_for_source.clear();
             }
-
-            // Update all layers with their new renderability status, if it
-            // changed.
-            for (i, will_render) in update_list.iter().enumerate() {
-                let mut layer = self.ordered_layers[i].borrow_mut();
-                if layer.is_layer_renderable() != *will_render {
-                    layer.mark_layer_renderable(*will_render, &mut changes);
-                }
-            }
-            self.add_changes(&mut changes);
         }
+
+        // Update all layers with their new renderability status, if it
+        // changed.
+        for (i, will_render) in update_list.iter().enumerate() {
+            let mut layer = self.ordered_layers[i].borrow_mut();
+            if layer.is_layer_renderable() != *will_render {
+                layer.mark_layer_renderable(*will_render, &mut changes);
+            }
+        }
+        self.add_changes(&mut changes);
 
         render_tree_parameters.loaded = update_parameters.style_loaded && self.is_loaded();
         if !is_map_mode_continuous && !render_tree_parameters.loaded {
@@ -765,6 +765,8 @@ impl RenderOrchestrator {
                     image_manager: &self.image_manager,
                     source_name: name.clone(),
                 });
+            } else {
+                render_source.release_render_data();
             }
         }
 

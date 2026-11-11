@@ -312,6 +312,11 @@ impl RenderLayer for RenderColorReliefLayer {
         false
     }
 
+    fn release_render_data(&mut self) {
+        crate::render_layer::release_render_data_base(self);
+        self.dem_textures.clear();
+    }
+
     fn prepare(&mut self, params: &mut LayerPrepareParameters<'_>) {
         match params.source {
             Some(source) => {

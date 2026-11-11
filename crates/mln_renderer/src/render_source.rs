@@ -174,6 +174,10 @@ pub trait RenderSource {
     /// Creates the render data to be passed to the render item.
     fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>);
 
+    /// Releases the render data from the last `prepare` while the source is
+    /// disabled.
+    fn release_render_data(&mut self) {}
+
     fn update_fading_tiles(&mut self);
     fn has_fading_tiles(&self) -> bool;
 

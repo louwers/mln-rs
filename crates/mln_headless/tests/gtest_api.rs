@@ -124,6 +124,14 @@ fn basic() {
     // under a fill layer (test/fixtures/custom_layer/basic, 0.0006, 0.1).
 }
 
+// gtest: CustomLayer.RendersAfterLeavingZoomRange
+#[test]
+#[ignore = "OpenGL-only in C++, and needs the CustomLayer that CustomLayer.Basic waits on"]
+fn renders_after_leaving_zoom_range() {
+    // A GL CustomLayer with minzoom 10 renders at zoom 16, is blank at zoom
+    // 5, and renders the same image at zoom 16 again.
+}
+
 // gtest: API.RecycleMapUpdateImages
 #[test]
 fn recycle_map_update_images() {

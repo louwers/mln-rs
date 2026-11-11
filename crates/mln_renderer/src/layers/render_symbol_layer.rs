@@ -1051,10 +1051,7 @@ impl RenderLayer for RenderSymbolLayer {
     }
 
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::markLayerRenderable
-        self.base.is_renderable = will_render;
-        let group = self.base.layer_group.clone();
-        activate_layer_group(&group, will_render, changes);
+        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
         if self.collision_tile_layer_group.is_some() {
             activate_layer_group(&self.collision_tile_layer_group, will_render, changes);
         }

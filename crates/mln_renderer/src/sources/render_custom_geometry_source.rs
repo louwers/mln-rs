@@ -116,6 +116,10 @@ impl RenderSource for RenderCustomGeometrySource {
         self.tile_source.prepare(parameters);
     }
 
+    fn release_render_data(&mut self) {
+        self.tile_source.release_render_data();
+    }
+
     fn update_fading_tiles(&mut self) {
         self.tile_source.update_fading_tiles();
     }

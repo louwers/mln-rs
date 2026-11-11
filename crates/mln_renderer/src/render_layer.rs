@@ -407,12 +407,15 @@ pub trait RenderLayer {
 
     /// Called when the layer is included or excluded from rendering.
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        self.base_mut().is_renderable = will_render;
+        mark_layer_renderable_base(self, will_render, changes);
+    }
 
-        // This layer is either being freshly included in the renderable set
-        // or excluded
-        let group = self.base().layer_group.clone();
-        activate_layer_group(&group, will_render, changes);
+    /// Drops what the last `prepare` and `update` built: the drawables, and
+    /// the tiles and placement data that keep the tiles' buckets alive.
+    /// Called when the layer stops rendering, since neither runs again until
+    /// it renders, and they then rebuild everything from the source's tiles.
+    fn release_render_data(&mut self) {
+        release_render_data_base(self);
     }
 
     /// Remove all drawables for the tile from the layer group.
@@ -579,6 +582,36 @@ pub trait RenderLayer {
         let renderable = self.base().is_renderable;
         activate_layer_group(&group, renderable, changes);
     }
+}
+
+/// The default `RenderLayer::mark_layer_renderable`, callable from
+/// overrides: sets the renderable flag, (un-)registers the layer group, and
+/// releases the render data of a layer that stops rendering.
+pub fn mark_layer_renderable_base<L: RenderLayer + ?Sized>(
+    layer: &mut L,
+    will_render: bool,
+    changes: &mut UniqueChangeRequestVec,
+) {
+    layer.base_mut().is_renderable = will_render;
+
+    // This layer is either being freshly included in the renderable set or
+    // excluded
+    let group = layer.base().layer_group.clone();
+    activate_layer_group(&group, will_render, changes);
+
+    if !will_render {
+        layer.release_render_data();
+    }
+}
+
+/// The default `RenderLayer::release_render_data`, callable from overrides.
+pub fn release_render_data_base<L: RenderLayer + ?Sized>(layer: &mut L) {
+    layer.remove_all_drawables();
+    let base = layer.base_mut();
+    base.render_tiles = None;
+    base.render_tiles_owner = Rc::new(Vec::new());
+    base.render_tile_ids.clear();
+    base.placement_data.clear();
 }
 
 /// The default `RenderLayer::prepare(params)`, callable from overrides (C++

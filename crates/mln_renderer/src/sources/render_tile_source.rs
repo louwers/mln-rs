@@ -553,6 +553,14 @@ impl RenderTileSource {
         self.render_tiles = Rc::new(tiles);
     }
 
+    pub fn release_render_data(&mut self) {
+        if !self.render_tiles.is_empty() {
+            *self.filtered_render_tiles.borrow_mut() = None;
+            *self.render_tiles_sorted_by_y.borrow_mut() = None;
+            self.render_tiles = Rc::new(Vec::new());
+        }
+    }
+
     pub fn update_fading_tiles(&mut self) {
         self.tile_pyramid.update_fading_tiles();
     }

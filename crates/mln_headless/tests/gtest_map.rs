@@ -3224,3 +3224,292 @@ fn empty_size_is_an_error() {
         assert_eq!(result.err().as_deref(), Some("failed to resize: size is empty"));
     }
 }
+
+// gtest: Map.SourcelessLayersRenderAfterLeavingZoomRange
+// Layers without a source rebuild what they draw when they return to their
+// zoom range. The C++ test draws a location-indicator layer, which mln-rs
+// core doesn't render; a second background layer, which isn't drawn as the
+// clear color, stands in for it.
+#[test]
+fn sourceless_layers_render_after_leaving_zoom_range() {
+    let test = MapTest::new();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {},
+      "layers": [{
+        "id": "background",
+        "type": "background",
+        "minzoom": 10,
+        "paint": {"background-color": "red"}
+      }, {
+        "id": "tint",
+        "type": "background",
+        "minzoom": 10,
+        "paint": {"background-color": "blue", "background-opacity": 0.5}
+      }]
+    }"#,
+    );
+    let render = |zoom: f64| {
+        test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(zoom)));
+        test.render().image
+    };
+    let is_blank = |image: &PremultipliedImage| image.data.iter().all(|&v| v == 0);
+
+    let image = render(16.0);
+    let center = center_pixel(&image);
+    assert!(center[0] > 0 && center[2] > 0 && center[3] == 255, "{center:?}");
+    assert!(is_blank(&render(5.0)));
+
+    let again = render(16.0);
+    assert_eq!(image.bytes(), again.bytes());
+    assert!(image.data == again.data);
+}
+
+/// `InactiveLayerCase`: a source, a layer object without "id", "source",
+/// "minzoom" or "maxzoom", and a layer of the same source that renders
+/// nothing.
+struct InactiveLayerCase {
+    source: &'static str,
+    layer: &'static str,
+    keeper: &'static str,
+}
+
+/// At zoom 16.1 to 16.45, a 256 pixel viewport shows one raster tile at the
+/// small center, and four at the large one.
+const INACTIVE_SMALL_TILE: CanonicalTileID = CanonicalTileID { z: 15, x: 16484, y: 16283 };
+
+fn inactive_small_center() -> LatLng {
+    let id = INACTIVE_SMALL_TILE;
+    LatLngBounds::from_canonical_tile(id.z, id.x, id.y).center()
+}
+
+fn inactive_large_center() -> LatLng {
+    ll(0.0, 0.0)
+}
+
+fn inactive_layer_features() -> String {
+    let mut features: Vec<String> = Vec::new();
+    let mut feature = |geometry: String| {
+        features.push(format!(r#"{{"type":"Feature","properties":{{}},"geometry":{geometry}}}"#));
+    };
+    let point = |center: &LatLng, dx: f64, dy: f64| format!("[{},{}]", center.longitude() + dx, center.latitude() + dy);
+
+    let small = inactive_small_center();
+    feature(format!(
+        r#"{{"type":"Polygon","coordinates":[[{},{},{},{}]]}}"#,
+        point(&small, 0.0, 0.0),
+        point(&small, 0.001, 0.0),
+        point(&small, 0.0, 0.001),
+        point(&small, 0.0, 0.0)
+    ));
+    feature(format!(
+        r#"{{"type":"LineString","coordinates":[{},{}]}}"#,
+        point(&small, 0.0, 0.0),
+        point(&small, 0.001, 0.001)
+    ));
+    feature(format!(r#"{{"type":"Point","coordinates":{}}}"#, point(&small, 0.0, 0.0)));
+
+    let large = inactive_large_center();
+    let ring: Vec<String> = (0..=256)
+        .map(|i| {
+            let angle = std::f64::consts::TAU * f64::from(i % 256) / 256.0;
+            point(&large, 0.002 * angle.cos(), 0.002 * angle.sin())
+        })
+        .collect();
+    feature(format!(r#"{{"type":"Polygon","coordinates":[[{}]]}}"#, ring.join(",")));
+    for row in 0..32 {
+        let mut line = Vec::new();
+        for column in 0..32 {
+            let coordinates = point(&large, -0.002 + f64::from(column) * 0.000125, -0.002 + f64::from(row) * 0.000125);
+            feature(format!(r#"{{"type":"Point","coordinates":{coordinates}}}"#));
+            line.push(coordinates);
+        }
+        feature(format!(r#"{{"type":"LineString","coordinates":[{}]}}"#, line.join(",")));
+    }
+    format!(r#"{{"type":"FeatureCollection","features":[{}]}}"#, features.join(","))
+}
+
+/// The GPU resources of `RenderingStats` the test compares.
+fn inactive_layer_resources(stats: &mln_gfx::rendering_stats::RenderingStats) -> [i32; 5] {
+    [
+        stats.num_vertex_buffers,
+        stats.mem_vertex_buffers,
+        stats.num_index_buffers,
+        stats.mem_index_buffers,
+        stats.num_active_textures,
+    ]
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+// A layer outside its zoom range, and a source whose layers all are, release
+// the tiles they last rendered.
+fn releases_tiles_outside_zoom_range(param: InactiveLayerCase) {
+    let test = MapTest::new();
+    test.map().set_prefetch_zoom_delta(0);
+    test.frontend.with_renderer(|renderer| renderer.set_tile_cache_enabled(false));
+    test.file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
+    let small_tile = Arc::new(mln_image::encode_png(&PremultipliedImage::new(Size::new(4, 4))));
+    let large_tile = Arc::new(read_bytes("test/fixtures/resources/raster.tile"));
+    test.file_source.set_response(Kind::Tile, move |resource: &Resource| {
+        let tile = resource.tile_data.as_ref().expect("a tile resource");
+        let (z, x, y) = (tile.z, tile.x, tile.y);
+        let mut response = Response::new();
+        if z == 15 && x == INACTIVE_SMALL_TILE.x as i32 && y == INACTIVE_SMALL_TILE.y as i32 {
+            response.data = Some(small_tile.clone());
+        } else if z == 15 && (x == 16383 || x == 16384) && (y == 16383 || y == 16384) {
+            response.data = Some(large_tile.clone());
+        } else {
+            response.no_content = true;
+        }
+        Some(response)
+    });
+
+    let source = if param.source == "geojson" {
+        format!(r#"{{"type":"geojson","data":{}}}"#, inactive_layer_features())
+    } else {
+        format!(r#"{{"type":"{}","tiles":["https://example.com/{{z}}/{{x}}/{{y}}.png"]}}"#, param.source)
+    };
+    let layer = |id: &str, zoom: &str, json: &str| format!(r#"{{"id":"{id}","source":"data",{zoom},{}"#, &json[1..]);
+    test.load_json(&format!(
+        r#"{{"version":8,"glyphs":"https://example.com/{{fontstack}}/{{range}}.pbf","sources":{{"data":{source}}},"layers":[{},{}]}}"#,
+        layer("layer", r#""minzoom":16.4"#, param.layer),
+        layer("keeper", r#""minzoom":16.2,"maxzoom":16.35"#, param.keeper),
+    ));
+
+    // Tiles a source drops are released on the render thread during the
+    // frame, so the frame's stats already count them out.
+    let render = |center: LatLng, zoom: f64| {
+        test.map().jump_to(&cam().with_center(Some(center)).with_zoom(Some(zoom)));
+        test.render()
+    };
+    let leave_zoom_range = |center: LatLng| {
+        // The layer leaves its zoom range while the keeper still renders the
+        // source.
+        render(center, 16.3);
+        // The keeper leaves its zoom range too, so the source stops
+        // rendering.
+        render(center, 16.1).stats
+    };
+
+    // Render the layer with the large data first: the context's buffers of
+    // default attribute values grow to the largest drawable they serve, and
+    // stay.
+    render(inactive_large_center(), 16.45);
+    leave_zoom_range(inactive_large_center());
+    // Render the layer once with little data, so it creates whatever it
+    // keeps between frames.
+    assert!(render(inactive_small_center(), 16.45).stats.num_draw_calls > 0);
+    let released = leave_zoom_range(inactive_small_center());
+
+    let rendered = render(inactive_large_center(), 16.45);
+    let image = &rendered.image;
+    assert!(image.data.iter().any(|&v| v != 0));
+    assert_eq!(
+        inactive_layer_resources(&released),
+        inactive_layer_resources(&leave_zoom_range(inactive_large_center())),
+        "released"
+    );
+
+    let rendered_again = render(inactive_large_center(), 16.45);
+    assert_eq!(
+        inactive_layer_resources(&rendered.stats),
+        inactive_layer_resources(&rendered_again.stats),
+        "rendered again"
+    );
+    assert_eq!(image.bytes(), rendered_again.image.bytes());
+    assert!(image.data == rendered_again.image.data, "rendered again");
+}
+
+const INACTIVE_NO_FEATURES: &str = r#"{"type":"circle","filter":["==",["get","missing"],1]}"#;
+const INACTIVE_DEM_KEEPER: &str = r#"{"type":"color-relief","paint":{"color-relief-opacity":0}}"#;
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_fill() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"fill","paint":{"fill-color":"red"}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_line() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"line","paint":{"line-width":4}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_circle() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"circle"}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_fill_extrusion() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"fill-extrusion","paint":{"fill-extrusion-height":100}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_symbol() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"symbol","layout":{"text-field":"x","text-font":["Open Sans Regular"],"text-allow-overlap":true}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_heatmap() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"heatmap"}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_raster() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "raster",
+        layer: r#"{"type":"raster"}"#,
+        keeper: r#"{"type":"raster","paint":{"raster-opacity":0}}"#,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_hillshade() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "raster-dem",
+        layer: r#"{"type":"hillshade"}"#,
+        keeper: INACTIVE_DEM_KEEPER,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_color_relief() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "raster-dem",
+        layer: r#"{"type":"color-relief","paint":{"color-relief-color":["interpolate",["linear"],["elevation"],-10000,"black",10000,"white"]}}"#,
+        keeper: INACTIVE_DEM_KEEPER,
+    });
+}

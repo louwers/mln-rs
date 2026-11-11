@@ -302,13 +302,19 @@ impl RenderLayer for RenderRasterLayer {
     }
 
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::markLayerRenderable
-        self.base.is_renderable = will_render;
-        let group = self.base.layer_group.clone();
-        activate_layer_group(&group, will_render, changes);
+        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
         if self.image_layer_group.is_some() {
             activate_layer_group(&self.image_layer_group, will_render, changes);
         }
+    }
+
+    fn release_render_data(&mut self) {
+        crate::render_layer::release_render_data_base(self);
+        if let Some(layer_group) = &self.image_layer_group {
+            self.base.stats.drawables_removed += layer_group.borrow_mut().clear_drawables();
+        }
+        self.textures.clear();
+        self.image_data = None;
     }
 
     fn layer_removed(&mut self, changes: &mut UniqueChangeRequestVec) {

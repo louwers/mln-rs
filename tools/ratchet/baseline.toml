@@ -292,7 +292,6 @@
 "crates/mln_webgpu/src/renderer_backend.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_program.rs" = 1
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
-"crates/mln_webgpu/src/texture2d.rs" = 1
 "examples/desktop/src/frontend.rs" = 1
 "examples/desktop/src/main.rs" = 2
 "examples/desktop/src/settings.rs" = 1
