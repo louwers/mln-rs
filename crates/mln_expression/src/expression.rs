@@ -536,6 +536,22 @@ pub fn evaluate_accumulated(
     e.evaluate(&EvaluationContext::from_accumulated(accumulated, Some(&f)))
 }
 
+/// `Expression::evaluate(feature, params)`: evaluates against a GeoJSON
+/// feature and every other input of `params`, whose own feature is ignored.
+/// When `params` names a canonical tile, the feature's geometry is placed in
+/// that tile, as the within and distance expressions need.
+pub fn evaluate_feature_with_context(
+    e: &dyn Expression,
+    feature: &Feature<f64>,
+    params: EvaluationContext<'_>,
+) -> EvaluationResult {
+    let f = match params.canonical {
+        Some(canonical) => GeoJSONFeature::with_canonical(feature, canonical),
+        None => GeoJSONFeature::new(feature),
+    };
+    e.evaluate(&EvaluationContext { feature: Some(&f), ..params })
+}
+
 /// `evaluate`, borrowing a literal's value instead of cloning it.
 pub(crate) fn evaluate_ref<'a>(
     expression: &'a dyn Expression,
