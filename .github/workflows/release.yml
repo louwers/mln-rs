@@ -47,9 +47,9 @@ jobs:
 
       # Builds each package from its packaged sources. Packages resolve each
       # other locally, so this works before any of them is on crates.io. The
-      # GLFW app is never released (justfile, `package`).
+      # desktop app is never released (justfile, `package`).
       - name: Package
-        run: cargo package --workspace --locked --exclude mln-rs-glfw
+        run: cargo package --workspace --locked --exclude mln-rs-desktop
 
       # In dependency order, waiting for each to reach the index. Package
       # verified these exact packages, so skip the second build. A 429 is

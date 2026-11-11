@@ -16,7 +16,7 @@ version:
   `mln-rs-cheap-ruler` and `mln-rs-earcut-test-fixtures`. mln-rs does not
   depend on them.
 
-The other `publish = false` packages (the GLFW app, the browser build in
+The other `publish = false` packages (the desktop app, the browser build in
 examples/web and crates/mln_web_shaper, the expression test runner) are not
 released.
 
@@ -47,7 +47,7 @@ first.
 1. Checks out this repository. It needs no C++ checkout: the WGSL shaders are
    vendored in `crates/mln_webgpu/src/shaders/wgsl_sources.rs` (see below).
 2. Installs stable Rust and runs `cargo package --workspace --locked`
-   (without the GLFW app). It packages every crate and builds each one from
+   (without the desktop app). It packages every crate and builds each one from
    its packaged sources. The
    packages resolve each other locally, so this works before any of them is
    on crates.io.

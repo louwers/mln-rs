@@ -13,11 +13,11 @@ coverage_lcov := 'target/llvm-cov/lcov.info'
 # generate-* and the analysis recipes).
 cpp := justfile_directory() / '..' / 'maplibre-native'
 
-# The Cargo profile `just glfw` builds the app with, e.g. `just profile=release glfw`
+# The Cargo profile `just desktop` builds the app with, e.g. `just profile=release desktop`
 profile := 'dev'
 
 # On NixOS, the tests and the apps build and run inside the C++ repo's #linux dev shell, extended by nix/flake.nix, which has the
-# libraries they link and load (GLFW, the Vulkan loader, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
+# libraries they load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
 nixos := path_exists('/etc/NIXOS')
 dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
 
@@ -149,12 +149,11 @@ get-crate-field field package=main_crate:  (assert-cmd 'jq')
 # Get the minimum supported Rust version (MSRV) for the crate
 get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 
-# It builds with the Cargo profile in `profile`: `just profile=release glfw` runs an optimized build. Outside NixOS it needs the
-# system packages CI installs (.github/workflows/ci.yml, "Install system packages").
-[doc('Run the GLFW app: OpenFreeMap Liberty in a window (needs a display and the system GLFW). Arguments go to the app')]
+# It builds with the Cargo profile in `profile`: `just profile=release desktop` runs an optimized build.
+[doc('Run the desktop app: OpenFreeMap Liberty in a window (needs a display). Arguments go to the app')]
 [positional-arguments]
-glfw *args:  _dev-shell
-    {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-glfw --bin mln-glfw -- "$@"
+desktop *args:  _dev-shell
+    {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-desktop --bin mln-desktop -- "$@"
 
 # wasm-bindgen-cli must be the version in Cargo.lock (`cargo install wasm-bindgen-cli --version 0.2.130`). It builds with the
 # Cargo profile in `profile`: `just profile=release web` for the page to ship, the dev profile to debug with the names kept.
@@ -294,7 +293,7 @@ liberty-references filter='.':  _dev-shell
     EOF
     done
 
-# The GLFW app is never released, and its tools/ binary is outside the packaged files.
+# The desktop app is never released.
 # The verify step serves the packaged crates to each other from a local registry, and Cargo
 # treats a registry crate's name and version as immutable: it keeps the source it unpacked
 # into CARGO_HOME and the build in target/ from the last run. Delete both, or a branch is
@@ -302,7 +301,7 @@ liberty-references filter='.':  _dev-shell
 [doc('Package every crate from its packaged sources as the release does (RELEASING.md), and compile every test target')]
 package:
     rm -rf "${CARGO_HOME:-$HOME/.cargo}"/registry/src/*/mln-rs-* "${CARGO_TARGET_DIR:-target}"/debug/.fingerprint/mln-rs-*
-    cargo package --workspace --locked --exclude mln-rs-glfw
+    cargo package --workspace --locked --exclude mln-rs-desktop
     cargo test --workspace --locked --no-run
 
 # Fail when a file has more library panic sites or TODO(port) comments than tools/ratchet/baseline.toml; `--update` lowers it

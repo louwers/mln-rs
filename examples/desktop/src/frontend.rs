@@ -1,9 +1,8 @@
-// Ports platform/glfw/glfw_renderer_frontend.hpp and
-// glfw_renderer_frontend.cpp.
+// The renderer frontend, after platform/glfw/glfw_renderer_frontend.cpp.
 //
 // Like HeadlessFrontend, the frontend is a handle (`Clone` shares the state)
-// because the Map keeps one (C++: a reference). C++ holds the GLFWView to
-// call `invalidate()`; here it holds the view's shared `invalidate` state.
+// because the Map keeps one (C++: a reference). It holds the view's shared
+// state to mark it dirty when the map has a new frame to draw.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -12,7 +11,7 @@ use std::sync::Arc;
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 
-use crate::glfw_view::ViewShared;
+use crate::view::ViewShared;
 
 struct Shared {
     view: Rc<ViewShared>,
@@ -21,18 +20,15 @@ struct Shared {
     update_parameters: RefCell<Option<Arc<UpdateParameters>>>,
 }
 
-/// `GLFWRendererFrontend`
+/// Draws the map's latest update parameters on the view's backend.
 #[derive(Clone)]
-pub struct GLFWRendererFrontend {
+pub struct Frontend {
     shared: Rc<Shared>,
 }
 
-impl GLFWRendererFrontend {
-    /// `GLFWRendererFrontend(std::unique_ptr<Renderer>, GLFWView&)`; C++
-    /// also registers itself with the view (`setRenderFrontend`), which
-    /// main.rs does.
+impl Frontend {
     pub fn new(renderer: Renderer, backend: Rc<dyn RendererBackend>, view: Rc<ViewShared>) -> Self {
-        GLFWRendererFrontend {
+        Frontend {
             shared: Rc::new(Shared {
                 view,
                 backend,
@@ -65,7 +61,7 @@ impl GLFWRendererFrontend {
     }
 }
 
-impl RendererFrontend for GLFWRendererFrontend {
+impl RendererFrontend for Frontend {
     fn reset(&self) {
         let renderer = self.shared.renderer.borrow_mut().take();
         drop(renderer);

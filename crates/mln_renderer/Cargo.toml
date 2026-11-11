@@ -20,7 +20,7 @@ default = ["font-face-shaper"]
 # The style's font faces shaped in-process with mln_text's HBShaper
 # (HarfRust), the default FontFaceEngine (src/text/font_face_engine.rs). The
 # workspace's packages depend on this crate without its default features,
-# and those that render (mln-rs, examples/glfw, tools/render-test, and
+# and those that render (mln-rs, examples/desktop, tools/render-test, and
 # through it tools/bench) turn this one on. The browser build (examples/web)
 # leaves it off: HarfRust, skrifa and the FreeType port go into its second
 # module, crates/mln_web_shaper, which its map loads only for styles with font
