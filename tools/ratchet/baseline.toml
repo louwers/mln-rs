@@ -240,7 +240,6 @@
 "crates/mln_renderer/src/tile/geometry_tile.rs" = 6
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 1
 "crates/mln_renderer/src/tile/tile_observer.rs" = 1
-"crates/mln_renderer/src/tile/tile_worker_transport.rs" = 2
 "crates/mln_renderer/src/tile_parameters.rs" = 1
 "crates/mln_renderer/src/update_parameters.rs" = 1
 "crates/mln_renderer/src/util/tile_cover.rs" = 1

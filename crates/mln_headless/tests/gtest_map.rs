@@ -46,7 +46,7 @@ use mln_style::property_expression::PropertyExpression;
 use mln_style::sources::custom_geometry_source::{
     CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
 };
-use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
 use mln_style::style_property::Kind as StylePropertyKind;
@@ -2526,6 +2526,114 @@ fn set_frustum_offset() {
     test.map().set_frustum_offset(&insets(50.0, 50.0, 50.0, 50.0));
 
     check_image("test/fixtures/map/setFrustumOffset/after", &test.render().image, 0.0006, 0.1);
+}
+
+/// A `width` x `height` opaque red image.
+fn red_image(width: u32, height: u32) -> PremultipliedImage {
+    let pixels = [255, 0, 0, 255].repeat((width * height) as usize);
+    PremultipliedImage::from_vec(Size::new(width, height), pixels)
+}
+
+/// The shared setup of the GeoJSON symbol tests: a 512x512 map with a white
+/// background, glyphs from test/fixtures/resources/glyphs.pbf, counting the
+/// glyph requests.
+fn geojson_symbol_map() -> (MapTest, Rc<Cell<u32>>) {
+    let test = MapTest::new();
+    test.frontend.clone().set_size(Size::new(512, 512));
+    test.map().set_size(Size::new(512, 512)).unwrap();
+
+    let glyph_requests = Rc::new(Cell::new(0));
+    let counter = glyph_requests.clone();
+    test.file_source.set_response(Kind::Glyphs, move |_| {
+        counter.set(counter.get() + 1);
+        Some(file_response("test/fixtures/resources/glyphs.pbf"))
+    });
+    test.load_json(
+        r#"{
+        "version": 8,
+        "glyphs": "https://example.com/{fontstack}/{range}.pbf",
+        "sources": {},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}}]
+    }"#,
+    );
+    (test, glyph_requests)
+}
+
+/// Adds a GeoJSON source with a point at `longitude` and a symbol layer
+/// drawing the "marker" icon above it and, `with_text`, a label below it.
+fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous: bool, with_text: bool) {
+    let source_id = format!("point-{index}");
+    let options = GeoJSONOptions { synchronous_update: synchronous, ..GeoJSONOptions::default() };
+    let source = GeoJSONSource::new(source_id.clone(), Arc::new(options));
+    source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(longitude, 0.0)))).unwrap();
+    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+
+    let text = if with_text { "New place" } else { "" };
+    let layer_json = format!(
+        r#"{{
+            "id": "symbol-{index}", "type": "symbol", "source": "{source_id}",
+            "layout": {{
+                "icon-image": "marker", "icon-anchor": "bottom",
+                "icon-allow-overlap": true, "icon-ignore-placement": true,
+                "text-field": "{text}", "text-font": ["Open Sans Regular"], "text-anchor": "top",
+                "text-allow-overlap": true, "text-ignore-placement": true
+            }}
+        }}"#
+    );
+    let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
+    test.map().get_style_mut().add_layer(layer, None).unwrap();
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom
+fn retains_icons_and_text_across_zoom(synchronous: bool, with_text: bool) {
+    let (test, glyph_requests) = geojson_symbol_map();
+    test.map().get_style_mut().add_image(style_image("marker", red_image(40, 48), 1.0));
+    for i in 0..3 {
+        add_geojson_symbol(&test, i, (i as f64 - 1.0) * 0.01, synchronous, with_text);
+    }
+
+    for zoom in [14.0, 13.5, 13.0, 12.5, 14.0] {
+        test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(zoom)));
+        let image = test.render().image;
+        let mut red_pixels = 0;
+        let mut black_pixels = 0;
+        for pixel in image.data.chunks_exact(4) {
+            red_pixels += usize::from(pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50);
+            black_pixels += usize::from(pixel[0] < 100 && pixel[1] < 100 && pixel[2] < 100);
+        }
+        assert!(red_pixels >= 5000, "zoom {zoom}: {red_pixels} red pixels");
+        if with_text {
+            assert!(black_pixels > 100, "zoom {zoom}: {black_pixels} black pixels");
+            assert_eq!(glyph_requests.get(), 1, "zoom {zoom}");
+        }
+    }
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/AsynchronousIconOnly
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_asynchronous_icon_only() {
+    retains_icons_and_text_across_zoom(false, false);
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/AsynchronousWithText
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_asynchronous_with_text() {
+    retains_icons_and_text_across_zoom(false, true);
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/SynchronousIconOnly
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_synchronous_icon_only() {
+    retains_icons_and_text_across_zoom(true, false);
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/SynchronousWithText
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_synchronous_with_text() {
+    retains_icons_and_text_across_zoom(true, true);
 }
 
 // End-to-end: a feature-state change must alter the *rendered* output, not just
