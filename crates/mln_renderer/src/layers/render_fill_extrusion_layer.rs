@@ -1,6 +1,13 @@
 // Ports src/mln/renderer/layers/render_fill_extrusion_layer.hpp and
 // src/mln/renderer/layers/render_fill_extrusion_layer.cpp (drawable path,
-// `!MLN_USE_FILL_EXTRUSION_INSTANCING`).
+// `MLN_USE_FILL_EXTRUSION_INSTANCING`).
+//
+// Each tile draws its roofs from the bucket's triangles and its walls as
+// instances of one static quad, an instance per bucket vertex. The WebGPU
+// walls also read the next vertex as attributes of their own
+// (`ID_FILL_EXTRUSION_NEXT_*`), from the same buffer one vertex further on,
+// so a tile draws an instance for every vertex but the last, which ends a
+// ring and has no wall.
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -8,8 +15,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::drawable_tweaker::DrawableTweakerPtr;
+use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
+use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::vertex_attribute::VertexAttributeArray;
+use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, Context, CullFaceMode, DrawMode, DrawableBuilder, ShaderRegistry,
     UniqueDrawableBuilder,
@@ -27,10 +38,14 @@ use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
-use super::{TileDrawables, drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot};
+use super::{
+    TileDrawables, drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot, shared_vertices,
+};
 use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::buckets::fill_extrusion_bucket::{FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex};
+use crate::buckets::fill_extrusion_bucket::{
+    FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex, FillExtrusionStaticVertex,
+};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
@@ -38,6 +53,7 @@ use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
 use crate::render_layer::{CaptureView, RenderLayer, RenderLayerBase, Stats, vertex_color_alpha};
 use crate::render_pass::RenderPass;
+use crate::render_static_data::RenderStaticData;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
@@ -122,6 +138,86 @@ fn capture_rendered_features(
     }
 }
 
+/// `readDataDrivenPaintProperties<FillExtrusionBase, FillExtrusionColor,
+/// FillExtrusionHeight, FillExtrusionPattern>(binders, evaluated,
+/// propertiesAsUniforms, idFillExtrusionBaseVertexAttribute)`.
+fn read_paint_properties(
+    attrs: &mut VertexAttributeArray,
+    binders: &FillExtrusionBinders,
+    evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
+    shared: &VertexVectorBasePtr,
+    properties_as_uniforms: &mut StringIDSetsPair,
+) {
+    properties_as_uniforms.0.clear();
+    properties_as_uniforms.1.clear();
+    let buffer = &binders.interleaved_vertex_buffer;
+    let mut id = ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE;
+    read_data_driven_paint_property(
+        attrs,
+        &binders.fill_extrusion_base,
+        buffer,
+        shared,
+        &["a_base"],
+        evaluated.get::<FillExtrusionBase>().is_constant(),
+        properties_as_uniforms,
+        &mut id,
+    );
+    read_data_driven_paint_property(
+        attrs,
+        &binders.fill_extrusion_color,
+        buffer,
+        shared,
+        &["a_color"],
+        evaluated.get::<FillExtrusionColor>().is_constant(),
+        properties_as_uniforms,
+        &mut id,
+    );
+    read_data_driven_paint_property(
+        attrs,
+        &binders.fill_extrusion_height,
+        buffer,
+        shared,
+        &["a_height"],
+        evaluated.get::<FillExtrusionHeight>().is_constant(),
+        properties_as_uniforms,
+        &mut id,
+    );
+    read_data_driven_paint_property(
+        attrs,
+        &binders.fill_extrusion_pattern,
+        buffer,
+        shared,
+        &["a_pattern_to", "a_pattern_from"],
+        evaluated.get::<FillExtrusionPattern>().is_constant(),
+        properties_as_uniforms,
+        &mut id,
+    );
+}
+
+/// The builder of a tile's depth pass or color pass drawables.
+fn create_builder(
+    context: &dyn Context,
+    name: String,
+    shader: &mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr,
+    enable_color: bool,
+    tweaker: Option<&DrawableTweakerPtr>,
+) -> UniqueDrawableBuilder {
+    let mut builder = context.create_drawable_builder(name);
+    builder.set_shader(Some(shader.clone()));
+    builder.set_is_3d(true);
+    builder.set_enable_color(enable_color);
+    if enable_color {
+        builder.set_color_mode(&ColorMode::alpha_blended());
+    }
+    builder.set_render_pass(RenderPass::Translucent);
+    builder.set_cull_face_mode(&CullFaceMode::back_ccw());
+    builder.set_draw_priority(if enable_color { 1 } else { 0 });
+    if let Some(tweaker) = tweaker {
+        builder.add_tweaker(tweaker.clone());
+    }
+    builder
+}
+
 pub struct RenderFillExtrusionLayer {
     base: RenderLayerBase,
     // Paint properties
@@ -129,6 +225,12 @@ pub struct RenderFillExtrusionLayer {
 
     fill_extrusion_group: Option<ShaderGroupPtr>,
     fill_extrusion_pattern_group: Option<ShaderGroupPtr>,
+    fill_extrusion_instanced_group: Option<ShaderGroupPtr>,
+    fill_extrusion_pattern_instanced_group: Option<ShaderGroupPtr>,
+
+    /// The wall quad (`RenderStaticData::fill_extrusion_vertices`).
+    static_data_vertices: Option<VertexVectorBasePtr>,
+    static_data_indices: Option<IndexVectorBasePtr>,
 }
 
 impl RenderFillExtrusionLayer {
@@ -137,7 +239,16 @@ impl RenderFillExtrusionLayer {
         let properties: Immutable<dyn LayerProperties> = Arc::new(FillExtrusionLayerProperties::new(impl_));
         let mut base = RenderLayerBase::new(properties);
         base.style_dependencies = unevaluated.get_dependencies();
-        RenderFillExtrusionLayer { base, unevaluated, fill_extrusion_group: None, fill_extrusion_pattern_group: None }
+        RenderFillExtrusionLayer {
+            base,
+            unevaluated,
+            fill_extrusion_group: None,
+            fill_extrusion_pattern_group: None,
+            fill_extrusion_instanced_group: None,
+            fill_extrusion_pattern_instanced_group: None,
+            static_data_vertices: None,
+            static_data_indices: None,
+        }
     }
 }
 
@@ -266,6 +377,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
         if self.fill_extrusion_pattern_group.is_none() {
             self.fill_extrusion_pattern_group = shaders.get_shader_group("FillExtrusionPatternShader");
         }
+        if self.fill_extrusion_instanced_group.is_none() {
+            self.fill_extrusion_instanced_group = shaders.get_shader_group("FillExtrusionInstancedShader");
+        }
+        if self.fill_extrusion_pattern_instanced_group.is_none() {
+            self.fill_extrusion_pattern_instanced_group =
+                shaders.get_shader_group("FillExtrusionPatternInstancedShader");
+        }
 
         let evaluated_properties = self.base.evaluated_properties.clone();
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&evaluated_properties);
@@ -292,10 +410,15 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
         let mut depth_builder: Option<UniqueDrawableBuilder> = None;
         let mut color_builder: Option<UniqueDrawableBuilder> = None;
+        let mut instanced_depth_builder: Option<UniqueDrawableBuilder> = None;
+        let mut instanced_color_builder: Option<UniqueDrawableBuilder> = None;
 
-        let shader_group =
-            if has_pattern { self.fill_extrusion_pattern_group.clone() } else { self.fill_extrusion_group.clone() };
-        let Some(shader_group) = shader_group else {
+        let (shader_group, instanced_shader_group) = if has_pattern {
+            (self.fill_extrusion_pattern_group.clone(), self.fill_extrusion_pattern_instanced_group.clone())
+        } else {
+            (self.fill_extrusion_group.clone(), self.fill_extrusion_instanced_group.clone())
+        };
+        let (Some(shader_group), Some(instanced_shader_group)) = (shader_group, instanced_shader_group) else {
             self.remove_all_drawables();
             return;
         };
@@ -306,7 +429,20 @@ impl RenderLayer for RenderFillExtrusionLayer {
             tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
         }
 
+        let static_vertices = self
+            .static_data_vertices
+            .get_or_insert_with(|| shared_vertices(&RenderStaticData::fill_extrusion_vertices()))
+            .clone();
+        let static_indices = self
+            .static_data_indices
+            .get_or_insert_with(|| {
+                Rc::new(RefCell::new(IndexVectorBase::new(RenderStaticData::fill_extrusion_triangle_indices())))
+            })
+            .clone();
+        let instance_vertex_count = static_vertices.get_raw_count();
+
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();
+        let mut instance_properties_as_uniforms: StringIDSetsPair = Default::default();
         let layer_id = self.get_id().to_owned();
         for tile in render_tiles.iter() {
             let tile_id = *tile.get_overscaled_tile_id();
@@ -331,10 +467,11 @@ impl RenderLayer for RenderFillExtrusionLayer {
             self.set_render_tile_bucket_id(&tile_id, bucket.base.bucket_id);
 
             let mut tweaker: Option<DrawableTweakerPtr> = None;
-            if let Some(builder) = &mut depth_builder {
-                builder.clear_tweakers();
-            }
-            if let Some(builder) = &mut color_builder {
+            for builder in
+                [&mut depth_builder, &mut color_builder, &mut instanced_depth_builder, &mut instanced_color_builder]
+                    .into_iter()
+                    .flatten()
+            {
                 builder.clear_tweakers();
             }
 
@@ -362,63 +499,40 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 continue;
             }
 
-            properties_as_uniforms.0.clear();
-            properties_as_uniforms.1.clear();
-
+            // The roofs read the paint values per vertex, the walls per
+            // instance, from the same buffer.
+            let paint = paint_vertices(
+                geometry,
+                bucket,
+                &binders.interleaved_vertex_buffer,
+                binders.depends_on_feature_state(),
+            );
             let vertex_attrs = context.create_vertex_attribute_array();
-            {
-                let buffer = &binders.interleaved_vertex_buffer;
-                let shared = paint_vertices(geometry, bucket, buffer, binders.depends_on_feature_state());
-                let mut attrs = vertex_attrs.borrow_mut();
-                let mut id = ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE;
-                let b = binders;
-                let pau = &mut properties_as_uniforms;
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.fill_extrusion_base,
-                    buffer,
-                    &shared,
-                    &["a_base"],
-                    evaluated.get::<FillExtrusionBase>().is_constant(),
-                    pau,
-                    &mut id,
-                );
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.fill_extrusion_color,
-                    buffer,
-                    &shared,
-                    &["a_color"],
-                    evaluated.get::<FillExtrusionColor>().is_constant(),
-                    pau,
-                    &mut id,
-                );
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.fill_extrusion_height,
-                    buffer,
-                    &shared,
-                    &["a_height"],
-                    evaluated.get::<FillExtrusionHeight>().is_constant(),
-                    pau,
-                    &mut id,
-                );
-                read_data_driven_paint_property(
-                    &mut attrs,
-                    &b.fill_extrusion_pattern,
-                    buffer,
-                    &shared,
-                    &["a_pattern_to", "a_pattern_from"],
-                    evaluated.get::<FillExtrusionPattern>().is_constant(),
-                    pau,
-                    &mut id,
-                );
-            }
+            read_paint_properties(
+                &mut vertex_attrs.borrow_mut(),
+                binders,
+                evaluated,
+                &paint,
+                &mut properties_as_uniforms,
+            );
+            let instance_attrs = context.create_vertex_attribute_array();
+            read_paint_properties(
+                &mut instance_attrs.borrow_mut(),
+                binders,
+                evaluated,
+                &paint,
+                &mut instance_properties_as_uniforms,
+            );
 
-            let Some(shader) = shader_group.get_or_create_shader(
+            let variant = self.base.projection_variant;
+            let Some(shader) = shader_group.get_or_create_shader(context, &properties_as_uniforms, variant, "a_pos")
+            else {
+                continue;
+            };
+            let Some(instanced_shader) = instanced_shader_group.get_or_create_shader(
                 context,
-                &properties_as_uniforms,
-                self.base.projection_variant,
+                &instance_properties_as_uniforms,
+                variant,
                 "a_pos",
             ) else {
                 continue;
@@ -430,31 +544,30 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let do_depth_pass = !opaque || has_pattern;
 
             if do_depth_pass && depth_builder.is_none() {
-                let mut builder = context.create_drawable_builder(format!("{layer_prefix}depth"));
-                builder.set_shader(Some(shader.clone()));
-                builder.set_is_3d(true);
-                builder.set_enable_color(false);
-                builder.set_render_pass(draw_pass);
-                builder.set_cull_face_mode(&CullFaceMode::back_ccw());
-                builder.set_draw_priority(0);
-                if let Some(tweaker) = &tweaker {
-                    builder.add_tweaker(tweaker.clone());
-                }
-                depth_builder = Some(builder);
+                depth_builder =
+                    Some(create_builder(context, format!("{layer_prefix}depth"), &shader, false, tweaker.as_ref()));
             }
             if color_builder.is_none() {
-                let mut builder = context.create_drawable_builder(format!("{layer_prefix}color"));
-                builder.set_shader(Some(shader.clone()));
-                builder.set_is_3d(true);
-                builder.set_enable_color(true);
-                builder.set_color_mode(&ColorMode::alpha_blended());
-                builder.set_render_pass(draw_pass);
-                builder.set_cull_face_mode(&CullFaceMode::back_ccw());
-                builder.set_draw_priority(1);
-                if let Some(tweaker) = &tweaker {
-                    builder.add_tweaker(tweaker.clone());
-                }
-                color_builder = Some(builder);
+                color_builder =
+                    Some(create_builder(context, format!("{layer_prefix}color"), &shader, true, tweaker.as_ref()));
+            }
+            if do_depth_pass && instanced_depth_builder.is_none() {
+                instanced_depth_builder = Some(create_builder(
+                    context,
+                    format!("{layer_prefix}depthInstanced"),
+                    &instanced_shader,
+                    false,
+                    tweaker.as_ref(),
+                ));
+            }
+            if instanced_color_builder.is_none() {
+                instanced_color_builder = Some(create_builder(
+                    context,
+                    format!("{layer_prefix}colorInstanced"),
+                    &instanced_shader,
+                    true,
+                    tweaker.as_ref(),
+                ));
             }
 
             if has_pattern && tweaker.is_none() {
@@ -469,10 +582,15 @@ impl RenderLayer for RenderFillExtrusionLayer {
                         false,
                         false,
                     ));
-                    if let Some(builder) = &mut depth_builder {
-                        builder.add_tweaker(new_tweaker.clone());
-                    }
-                    if let Some(builder) = &mut color_builder {
+                    for builder in [
+                        &mut depth_builder,
+                        &mut color_builder,
+                        &mut instanced_depth_builder,
+                        &mut instanced_color_builder,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
                         builder.add_tweaker(new_tweaker.clone());
                     }
                     tweaker = Some(new_tweaker);
@@ -481,8 +599,8 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let _ = &tweaker;
 
             let vertices = bucket_vertices(geometry, bucket, &bucket.vertices);
+            let stride = std::mem::size_of::<FillExtrusionLayoutVertex>() as u32;
             {
-                let stride = std::mem::size_of::<FillExtrusionLayoutVertex>() as u32;
                 let mut attrs = vertex_attrs.borrow_mut();
                 if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
                 {
@@ -495,12 +613,6 @@ impl RenderLayer for RenderFillExtrusionLayer {
                     // offsetof(FillExtrusionLayoutVertex, a2)
                     attr.set_shared_raw_data(Some(vertices.clone()), 4, 0, stride, AttributeDataType::UShort2);
                 }
-                if let Some(attr) =
-                    attrs.set(ID_FILL_EXTRUSION_NORMAL_2D_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
-                {
-                    // offsetof(FillExtrusionLayoutVertex, a3)
-                    attr.set_shared_raw_data(Some(vertices.clone()), 8, 0, stride, AttributeDataType::Short2);
-                }
             }
 
             if do_depth_pass && let Some(builder) = &mut depth_builder {
@@ -508,38 +620,103 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 builder.set_vertex_attributes(Some(vertex_attrs.clone()));
             }
 
-            let color = color_builder.as_mut().expect("color builder");
-            color.set_enable_stencil(do_depth_pass);
-            color.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
-            color.set_vertex_attributes(Some(vertex_attrs));
+            if let Some(builder) = &mut color_builder {
+                builder.set_enable_stencil(do_depth_pass);
+                builder.set_raw_vertices(Vec::new(), vertex_count, AttributeDataType::Short2);
+                builder.set_vertex_attributes(Some(vertex_attrs));
+            }
+
+            let instance_vertex_attrs = context.create_vertex_attribute_array();
+            {
+                let static_stride = std::mem::size_of::<FillExtrusionStaticVertex>() as u32;
+                let mut attrs = instance_vertex_attrs.borrow_mut();
+                if let Some(attr) = attrs.set(ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE, -1, AttributeDataType::Invalid, 0)
+                {
+                    attr.set_shared_raw_data(
+                        Some(static_vertices.clone()),
+                        0,
+                        0,
+                        static_stride,
+                        AttributeDataType::Short2,
+                    );
+                }
+            }
+            {
+                let mut attrs = instance_attrs.borrow_mut();
+                // An instance's outline vertex, then the next one.
+                for (vertex_offset, pos_id, decimals_ed_id) in [
+                    (0, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+                    (1, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+                ] {
+                    if let Some(attr) = attrs.set(pos_id, -1, AttributeDataType::Invalid, 0) {
+                        attr.set_shared_raw_data(
+                            Some(vertices.clone()),
+                            0,
+                            vertex_offset,
+                            stride,
+                            AttributeDataType::Short2,
+                        );
+                    }
+                    if let Some(attr) = attrs.set(decimals_ed_id, -1, AttributeDataType::Invalid, 0) {
+                        attr.set_shared_raw_data(
+                            Some(vertices.clone()),
+                            4,
+                            vertex_offset,
+                            stride,
+                            AttributeDataType::UShort2,
+                        );
+                    }
+                }
+            }
+
+            if do_depth_pass && let Some(builder) = &mut instanced_depth_builder {
+                builder.set_raw_vertices(Vec::new(), instance_vertex_count, AttributeDataType::Short2);
+                builder.set_vertex_attributes(Some(instance_vertex_attrs.clone()));
+                builder.set_instance_attributes(Some(instance_attrs.clone()));
+            }
+
+            if let Some(builder) = &mut instanced_color_builder {
+                builder.set_enable_stencil(do_depth_pass);
+                builder.set_raw_vertices(Vec::new(), instance_vertex_count, AttributeDataType::Short2);
+                builder.set_vertex_attributes(Some(instance_vertex_attrs));
+                builder.set_instance_attributes(Some(instance_attrs));
+            }
 
             let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
+            let instance_segments = [RenderStaticData::fill_extrusion_segment(vertex_count.saturating_sub(1))];
             let stats = &mut self.base.stats;
-            let mut finish = |builder: &mut dyn DrawableBuilder| {
-                if bucket.triangles.is_empty() {
-                    return;
+            let mut finish =
+                |builder: &mut dyn DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
+                    builder.set_segments_shared(DrawMode::Triangles(), Some(indexes.clone()), segments);
+
+                    builder.flush(context);
+
+                    let mut group = layer_group.borrow_mut();
+                    let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+                    for mut drawable in builder.clear_drawables() {
+                        drawable.set_tile_id(tile_id);
+                        drawable.set_type(usize::from(has_pattern));
+                        drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
+                        drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
+                        drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
+
+                        tile_layer_group.add_drawable(draw_pass, &tile_id, drawable);
+                        stats.drawables_added += 1;
+                    }
+                };
+            let (depth, instanced_depth) =
+                if do_depth_pass { (depth_builder.as_mut(), instanced_depth_builder.as_mut()) } else { (None, None) };
+            if !bucket.triangles.is_empty() {
+                for builder in [depth, color_builder.as_mut()].into_iter().flatten() {
+                    finish(builder.as_mut(), &triangles, &bucket.triangle_segments);
                 }
-                builder.set_segments_shared(DrawMode::Triangles(), Some(triangles.clone()), &bucket.triangle_segments);
-
-                builder.flush(context);
-
-                let mut group = layer_group.borrow_mut();
-                let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
-                for mut drawable in builder.clear_drawables() {
-                    drawable.set_tile_id(tile_id);
-                    drawable.set_type(usize::from(has_pattern));
-                    drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                    drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
-                    drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
-
-                    tile_layer_group.add_drawable(draw_pass, &tile_id, drawable);
-                    stats.drawables_added += 1;
-                }
-            };
-            if do_depth_pass && let Some(builder) = &mut depth_builder {
-                finish(builder.as_mut());
             }
-            finish(color_builder.as_mut().expect("color builder").as_mut());
+            // A tile with one vertex has no wall.
+            if vertex_count > 1 {
+                for builder in [instanced_depth, instanced_color_builder.as_mut()].into_iter().flatten() {
+                    finish(builder.as_mut(), &static_indices, &instance_segments);
+                }
+            }
         }
     }
 }

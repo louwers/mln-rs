@@ -1889,10 +1889,10 @@ struct FragmentStage {
     float2 pos_b;
 
 #if !defined(HAS_UNIFORM_u_pattern_from)
-    half4 pattern_from;
+    float4 pattern_from [[flat]];
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
-    half4 pattern_to;
+    float4 pattern_to [[flat]];
 #endif
 };
 
@@ -1920,10 +1920,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
             .pos_b          = float2(0.0),
 
 #if !defined(HAS_UNIFORM_u_pattern_from)
-            .pattern_from   = half4(0.0),
+            .pattern_from   = float4(0.0),
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
-            .pattern_to     = half4(0.0),
+            .pattern_to     = float4(0.0),
 #endif
         };
     }
@@ -1961,10 +1961,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .pos_b          = float2(1.0),
 
 #if !defined(HAS_UNIFORM_u_pattern_from)
-        .pattern_from   = half4(1.0),
+        .pattern_from   = float4(1.0),
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
-        .pattern_to     = half4(1.0),
+        .pattern_to     = float4(1.0),
 #endif
     };
 #endif
@@ -2019,10 +2019,10 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         .pos_b          = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, pos),
 
 #if !defined(HAS_UNIFORM_u_pattern_from)
-        .pattern_from   = half4(pattern_from),
+        .pattern_from   = pattern_from,
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
-        .pattern_to     = half4(pattern_to),
+        .pattern_to     = pattern_to,
 #endif
     };
 }
@@ -2056,11 +2056,11 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
     const float2 pattern_br_b = pattern_to.zw;
 
     const float2 imagecoord = glMod(in.pos_a, 1.0);
-    const float2 pos = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, imagecoord);
+    const float2 pos = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord);
     const float4 color1 = image0.sample(image0_sampler, pos);
 
     const float2 imagecoord_b = glMod(in.pos_b, 1.0);
-    const float2 pos2 = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, imagecoord_b);
+    const float2 pos2 = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
     const float4 color2 = image0.sample(image0_sampler, pos2);
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
@@ -2134,19 +2134,18 @@ static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 struct VertexStage {
     short2 pos [[attribute(0)]];
     ushort2 decimals_ed [[attribute(1)]];
-    short2 normal2d [[attribute(2)]];
 
 #if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(3)]];
+    float2 base [[attribute(2)]];
 #endif
 #if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(4)]];
+    float2 height [[attribute(3)]];
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_from)
-    ushort4 pattern_from [[attribute(5)]];
+    ushort4 pattern_from [[attribute(4)]];
 #endif
 #if !defined(HAS_UNIFORM_u_pattern_to)
-    ushort4 pattern_to [[attribute(6)]];
+    ushort4 pattern_to [[attribute(5)]];
 #endif
 };
 
@@ -2191,10 +2190,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    // The roof's vertices have no 2D normal; a wall's points out of the
-    // polygon. The lowest bit of decimals_ed.x (`t`) marks the top vertices.
-    const float3 normal = float3(float2(vertx.normal2d) / 16384.0, all(vertx.normal2d == 0) ? 1.0 : 0.0);
-    const float t = glMod(float(vertx.decimals_ed.x), 2.0);
+    const float3 normal = float3(0.0, 0.0, 1.0);
+    const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
     const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
 
@@ -2239,9 +2236,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
 
-    // The roof's pattern lies in the tile plane, a wall's along the outline
-    // (the edge distance in decimals_ed.y) and up.
-    const float2 pos = normal.z == 1.0 ? float2(vertx.pos) : float2(float(vertx.decimals_ed.y), z * drawable.height_factor);
+    const float2 pos = float2(vertx.pos); // extrusion top
 
     float4 lighting = float4(0.0, 0.0, 0.0, 1.0);
     float directional = clamp(dot(normal, props.light_position_base.xyz), 0.0, 1.0);
@@ -2381,16 +2376,15 @@ static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 struct VertexStage {
     short2 pos [[attribute(0)]];
     ushort2 decimals_ed [[attribute(1)]];
-    short2 normal2d [[attribute(2)]];
 
 #if !defined(HAS_UNIFORM_u_color)
-    float4 color [[attribute(3)]];
+    float4 color [[attribute(2)]];
 #endif
 #if !defined(HAS_UNIFORM_u_base)
-    float2 base [[attribute(4)]];
+    float2 base [[attribute(3)]];
 #endif
 #if !defined(HAS_UNIFORM_u_height)
-    float2 height [[attribute(5)]];
+    float2 height [[attribute(4)]];
 #endif
 };
 
@@ -2423,10 +2417,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const auto height = max(unpack_mix_float(vertx.height, drawable.height_t), 0.0);
 #endif
 
-    // The roof's vertices have no 2D normal; a wall's points out of the
-    // polygon. The lowest bit of decimals_ed.x (`t`) marks the top vertices.
-    const float3 normal = float3(float2(vertx.normal2d) / 16384.0, all(vertx.normal2d == 0) ? 1.0 : 0.0);
-    const float t = glMod(float(vertx.decimals_ed.x), 2.0);
+    const float3 normal = float3(0.0, 0.0, 1.0);
+    const float t = 1.0;
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
     const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
 

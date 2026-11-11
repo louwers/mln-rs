@@ -20,13 +20,13 @@ use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::*;
 use mln_mtl::shaders::msl_sources::PRELUDE;
-use mln_mtl::shaders::shader_source::{ShaderSource, shader_source};
+use mln_mtl::shaders::shader_source::{AttributeInfo, ShaderSource, shader_source};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_foundation::{NSDictionary, NSObject, NSString};
 use objc2_metal::{
     MTLCompileOptions, MTLCreateSystemDefaultDevice, MTLDevice, MTLFunction, MTLLanguageVersion, MTLLibrary,
-    MTLPixelFormat, MTLRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat,
+    MTLPixelFormat, MTLRenderPipelineDescriptor, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction,
 };
 
 const ALL_BUILT_INS: &[BuiltIn] = &[
@@ -235,7 +235,10 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             ],
             "fillUBOCount",
         ),
-        "FillExtrusionShader" | "FillExtrusionPatternShader" => (
+        "FillExtrusionShader"
+        | "FillExtrusionInstancedShader"
+        | "FillExtrusionPatternShader"
+        | "FillExtrusionPatternInstancedShader" => (
             &[
                 ("idFillExtrusionDrawableUBO", ID_FILL_EXTRUSION_DRAWABLE_UBO),
                 ("idFillExtrusionTilePropsUBO", ID_FILL_EXTRUSION_TILE_PROPS_UBO),
@@ -406,15 +409,21 @@ fn vertex_format(data_type: AttributeDataType) -> (MTLVertexFormat, usize) {
     }
 }
 
+/// The vertex and instance attributes of a table.
+fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
+    source.attributes.iter().chain(source.instance_attributes)
+}
+
 /// A vertex descriptor with every attribute of the table, the attributes of
-/// a buffer one after the other in its vertices.
+/// a buffer one after the other in its vertices, the instance attributes'
+/// buffers stepping per instance.
 fn vertex_descriptor(
     source: &ShaderSource,
     data_type: impl Fn(AttributeDataType) -> AttributeDataType,
 ) -> Retained<MTLVertexDescriptor> {
     let descriptor = MTLVertexDescriptor::new();
     let mut strides = [0usize; 31];
-    for attr in source.attributes {
+    for attr in all_attributes(source) {
         let (format, size) = vertex_format(data_type(attr.data_type));
         // SAFETY: the attribute and buffer indices are below 31.
         unsafe {
@@ -426,8 +435,15 @@ fn vertex_descriptor(
         strides[attr.buffer_index] += size;
     }
     for (buffer_index, &stride) in strides.iter().enumerate().filter(|(_, stride)| **stride > 0) {
+        let per_instance = source.instance_attributes.iter().any(|attr| attr.buffer_index == buffer_index);
         // SAFETY: the buffer index is below 31.
-        unsafe { descriptor.layouts().objectAtIndexedSubscript(buffer_index).setStride(stride) };
+        unsafe {
+            let layout = descriptor.layouts().objectAtIndexedSubscript(buffer_index);
+            layout.setStride(stride);
+            if per_instance {
+                layout.setStepFunction(MTLVertexStepFunction::PerInstance);
+            }
+        }
     }
     descriptor
 }
@@ -466,7 +482,7 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             let vertex = function(source.msl.vertex_main_function);
             let fragment = function(source.msl.fragment_main_function);
             for attribute in vertex.vertexAttributes().unwrap().iter().filter(|attribute| attribute.isActive()) {
-                if !source.attributes.iter().any(|attr| attr.index == attribute.attributeIndex()) {
+                if !all_attributes(source).any(|attr| attr.index == attribute.attributeIndex()) {
                     failures.push(format!(
                         "{} ({variant}): [[attribute({})]] {} has no table entry",
                         source.name,
@@ -499,14 +515,25 @@ fn attribute_and_texture_slots_are_distinct() {
     // Metal's argument tables have 31 buffers, 31 vertex attributes and 16
     // samplers.
     for source in sources() {
-        let indices: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.index).collect();
-        assert_eq!(indices.len(), source.attributes.len(), "{}: attribute indices repeat", source.name);
+        let count = all_attributes(source).count();
+        let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
+        assert_eq!(indices.len(), count, "{}: attribute indices repeat", source.name);
         let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
         assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", source.name);
-        assert!(source.attributes.iter().all(|attr| attr.index < 31 && attr.buffer_index < 31), "{}", source.name);
+        let ids: BTreeSet<usize> = source.instance_attributes.iter().map(|attr| attr.id).collect();
+        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", source.name);
+        assert!(all_attributes(source).all(|attr| attr.index < 31 && attr.buffer_index < 31), "{}", source.name);
+        // A buffer steps per vertex or per instance.
+        assert!(
+            source
+                .attributes
+                .iter()
+                .all(|attr| source.instance_attributes.iter().all(|i| i.buffer_index != attr.buffer_index)),
+            "{}: a buffer has vertex and instance attributes",
+            source.name
+        );
         let textures: BTreeSet<usize> = source.textures.iter().map(|texture| texture.index).collect();
         assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", source.name);
         assert!(source.textures.iter().all(|texture| texture.index < 16), "{}", source.name);
-        assert!(source.instance_attributes.is_empty(), "{}: instancing is off", source.name);
     }
 }

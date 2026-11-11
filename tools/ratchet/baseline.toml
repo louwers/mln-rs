@@ -48,7 +48,7 @@
 "crates/mln_map_types/src/vertical_perspective_projection.rs" = 1
 "crates/mln_mtl/src/context.rs" = 1
 "crates/mln_renderer/src/algorithm/update_renderables.rs" = 1
-"crates/mln_renderer/src/buckets/fill_extrusion_bucket.rs" = 2
+"crates/mln_renderer/src/buckets/fill_extrusion_bucket.rs" = 1
 "crates/mln_renderer/src/buckets/heatmap_bucket.rs" = 1
 "crates/mln_renderer/src/buckets/hillshade_bucket.rs" = 3
 "crates/mln_renderer/src/buckets/raster_bucket.rs" = 3
@@ -61,7 +61,7 @@
 "crates/mln_renderer/src/layers/render_background_layer.rs" = 4
 "crates/mln_renderer/src/layers/render_circle_layer.rs" = 4
 "crates/mln_renderer/src/layers/render_color_relief_layer.rs" = 5
-"crates/mln_renderer/src/layers/render_fill_extrusion_layer.rs" = 7
+"crates/mln_renderer/src/layers/render_fill_extrusion_layer.rs" = 5
 "crates/mln_renderer/src/layers/render_fill_layer.rs" = 4
 "crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 7
 "crates/mln_renderer/src/layers/render_hillshade_layer.rs" = 8

@@ -149,8 +149,8 @@ fn fill_bucket() {
     assert!(!bucket.needs_upload());
 }
 
-/// The roof and wall vertices of a fill-extrusion bucket holding `polygon`
-/// extruded with `fill-extrusion-rounded-corner-distance` set to `distance`.
+/// The vertices of a fill-extrusion bucket holding `polygon` extruded with
+/// `fill-extrusion-rounded-corner-distance` set to `distance`.
 fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> usize {
     let mut layout = FillExtrusionLayoutProperties::PossiblyEvaluated::default();
     *layout.get_mut::<FillExtrusionRoundedCornerDistance>() = distance;
@@ -173,10 +173,10 @@ fn fill_extrusion_vertex_count(polygon: &GeometryCollection, distance: f32) -> u
 fn fill_extrusion_bucket_rounds_corners() {
     let square = collection(&[&[(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]]);
 
-    // A ring of n points has n roof vertices and 4 per wall.
-    assert_eq!(fill_extrusion_vertex_count(&square, 0.0), 5 + 4 * 4);
+    // A ring of n points has n vertices, each the roof's and a wall's.
+    assert_eq!(fill_extrusion_vertex_count(&square, 0.0), 5);
     // Rounding replaces each of the 4 corners with 5 points.
-    assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21 + 4 * 20);
+    assert_eq!(fill_extrusion_vertex_count(&square, 10.0), 21);
 }
 
 /// `StubIndexBuffer`: an index buffer that stands in for an upload.

@@ -3,9 +3,9 @@
 // Ports the `MLN_RENDER_BACKEND_METAL` part of test/util/hash.test.cpp; the
 // rest is in crates/mln_gfx/tests/gtest_hash.rs.
 //
-// The port has no Metal source for the instanced fill extrusion and location
-// indicator shaders (`shader_source` returns `None`), so the test checks the
-// listed shaders that have one.
+// The port has no Metal source for the location indicator shaders
+// (`shader_source` returns `None`), so the test checks the listed shaders
+// that have one.
 
 use std::collections::BTreeSet;
 
