@@ -54,8 +54,11 @@ pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, String> {
     match image_type(data) {
         Some(ImageType::Webp) => Ok(crate::webp_reader::decode_webp(data)),
         Some(ImageType::Png) => crate::png_reader::decode_png(data),
-        // TODO(port): decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp).
-        Some(ImageType::Jpeg) => Err("TODO(port): JPEG decoding is not ported".to_string()),
+        #[cfg(not(target_family = "wasm"))]
+        Some(ImageType::Jpeg) => crate::jpeg_reader::decode_jpeg(data),
+        // The browser build decodes JPEG with the browser (`decoder::decode`).
+        #[cfg(target_family = "wasm")]
+        Some(ImageType::Jpeg) => Err("JPEG Reader: JPEG is decoded by the browser".to_string()),
         None => Err(UNSUPPORTED.to_string()),
     }
 }
@@ -125,7 +128,6 @@ mod fixture_tests {
     // TEST(Image, JPEGTile)
     // gtest: Image.JPEGTile
     #[test]
-    #[ignore = "TODO(port): decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp)"]
     fn jpeg_tile() {
         let image = decode_image(&read_file("test/fixtures/image/tile.jpeg")).unwrap();
         assert_eq!(image.size.width, 256);
@@ -139,15 +141,6 @@ mod fixture_tests {
         let image = decode_image(&read_file("test/fixtures/image/tile.webp")).unwrap();
         assert_eq!(image.size.width, 256);
         assert_eq!(image.size.height, 256);
-    }
-
-    // Not in the C++ suite: JPEG is recognized and reported as not ported
-    // rather than as unsupported.
-    #[test]
-    fn jpeg_is_todo() {
-        let file = "tile.jpeg";
-        let error = decode_image(&read_file(&format!("test/fixtures/image/{file}"))).unwrap_err();
-        assert!(error.starts_with("TODO(port)"), "{file}: {error}");
     }
 
     // Not in the C++ suite: the lossless DEM tiles of the render tests

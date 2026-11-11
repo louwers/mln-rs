@@ -1,6 +1,6 @@
 //! The image codecs: ports of those `include/mln/util/image.hpp` declares
 //! (`decodeImage`, `encodePNG`), from
-//! `platform/default/src/mln/util/{image,png_reader,png_writer}.cpp`.
+//! `platform/default/src/mln/util/{image,jpeg_reader,png_reader,png_writer}.cpp`.
 //!
 //! C++ throws `std::runtime_error`; here the functions return
 //! `Err(message)` with the same message.
@@ -12,6 +12,8 @@
 mod browser_decoder;
 pub mod decoder;
 pub mod image;
+#[cfg(not(target_family = "wasm"))]
+pub mod jpeg_reader;
 pub mod png_reader;
 pub mod png_writer;
 pub mod webp_reader;

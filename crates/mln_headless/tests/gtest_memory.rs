@@ -93,7 +93,6 @@ fn vector() {
 
 // gtest: Memory.Raster
 #[test]
-#[ignore = "TODO(port): JPEG decoding (test/fixtures/resources/raster.tile is a JPEG; the still image fails with its tile error)"]
 fn raster() {
     let test = MemoryTest::new();
     let ratio = 2.0;
@@ -132,8 +131,6 @@ fn get_current_rss() -> usize {
 // gtest: Memory.Footprint
 #[test]
 fn footprint() {
-    // When enabled, the hybrid (raster) maps need JPEG decoding, a
-    // TODO(port) (see Memory.Raster).
     if !should_run_footprint() {
         return;
     }

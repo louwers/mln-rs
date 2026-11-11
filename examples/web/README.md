@@ -89,8 +89,8 @@ and tilt; the arrow keys to pan (Shift: rotate and tilt) and `+`/`=` and
 ## Images decode in the browser
 
 Every instance decodes images with the browser's decoders (mln_image's
-default on wasm), so the module carries no PNG or WebP decoder. The decoder
-answers later, from the event loop, so a tile worker's reply can come
+default on wasm), so the module carries no PNG, WebP or JPEG decoder. The
+decoder answers later, from the event loop, so a tile worker's reply can come
 outside `TileWorker::run`; it then wakes web/worker.js for a run.
 
 ## CJK glyphs are drawn locally
