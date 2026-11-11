@@ -485,9 +485,9 @@ fn fill_extrusion_roof_counts_its_vertices_once() {
 // gtest: Subdivision.FillExtrusionRoofBesideLongWallsTakesItsOwnSegment
 #[test]
 fn fill_extrusion_roof_beside_long_walls_takes_its_own_segment() {
-    // The zigzag makes a ring of 9,644 vertices and a roof of 59,160 at the
-    // zoom's granularity, too many to share a segment with the walls but few
-    // enough for one of their own.
+    // The zigzag makes a ring of 9,644 vertices, which only the walls draw,
+    // and a roof of 59,160 at the zoom's granularity, few enough for a
+    // segment of their own.
     let polygon = fine_zigzag();
     let tile = CanonicalTileID::new(2, 1, 1);
     let bucket = extrude_on_the_globe(&polygon, &tile);

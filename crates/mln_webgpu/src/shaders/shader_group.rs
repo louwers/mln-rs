@@ -100,14 +100,12 @@ impl shader_group::ShaderGroup for ShaderGroup {
         fragment_source = preprocess_wgsl(&fragment_source, &define_set);
 
         let context = gfx_context.as_any().downcast_ref::<Context>().expect("webgpu::Context");
-        let shader: ShaderProgramBasePtr = Rc::new(ShaderProgram::new(
-            context,
-            &vertex_source,
-            &fragment_source,
-            source.attributes,
-            source.textures,
-            name,
-        ));
+        let mut program =
+            ShaderProgram::new(context, &vertex_source, &fragment_source, source.attributes, source.textures, name);
+        for attribute in source.instance_attributes {
+            program.init_instance_attribute(attribute);
+        }
+        let shader: ShaderProgramBasePtr = Rc::new(program);
         if !self.register_shader_named(shader.clone(), &shader_name) {
             panic!("Failed to register {shader_name} with shader group!");
         }

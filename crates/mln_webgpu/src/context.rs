@@ -355,7 +355,9 @@ impl Context {
 
         let ubo_size = std::mem::size_of::<ProjectionUBO>() as u64;
         let mut uniform_buffers = self.clip_mask_uniform_buffers.borrow_mut();
-        uniform_buffers.clear();
+        for buffer in uniform_buffers.drain(..) {
+            self.count_buffer_released(buffer.size());
+        }
         uniform_buffers.reserve(masks.len());
         for mask in masks {
             let Some((buffer, _)) =

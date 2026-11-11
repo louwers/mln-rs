@@ -223,6 +223,17 @@ impl Scene {
         );
     }
 
+    /// Jumps to a camera with `bearing` and `pitch` in degrees.
+    pub fn jump_pitched(&mut self, center: LatLng, zoom: f64, bearing: f64, pitch: f64) {
+        self.map.jump_to(
+            &CameraOptions::default()
+                .with_center(Some(center))
+                .with_zoom(Some(zoom))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch)),
+        );
+    }
+
     /// A complete still frame, read back. Waits on the run loop, which
     /// sleeps until there is work, rather than polling it, so the wait
     /// costs no CPU time.

@@ -642,11 +642,9 @@ pub struct RendererBackend {
     context: RefCell<Option<Rc<Context>>>,
 }
 
-/// The shader types registered by `initShaders`, in the C++ order, without
-/// the instanced fill extrusion shaders: the port's renderer builds fill
-/// extrusions without instancing. `init_shaders` skips the ones without a
-/// Vulkan source in the port (`shader_source`): the location indicator and
-/// wide vector shaders.
+/// The shader types registered by `initShaders`, in the C++ order.
+/// `init_shaders` skips the ones without a Vulkan source in the port
+/// (`shader_source`): the location indicator and wide vector shaders.
 const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
@@ -664,7 +662,9 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::FillOutlinePatternShader,
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
+    BuiltIn::FillExtrusionInstancedShader,
     BuiltIn::FillExtrusionPatternShader,
+    BuiltIn::FillExtrusionPatternInstancedShader,
     BuiltIn::HeatmapShader,
     BuiltIn::HeatmapTextureShader,
     BuiltIn::HillshadeShader,

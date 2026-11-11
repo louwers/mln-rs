@@ -11,6 +11,7 @@ use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::chrono::{TimePoint, milliseconds};
+use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
 
 use super::*;
@@ -477,6 +478,23 @@ fn notches_on_the_globe_zoom_out_to_the_floor_at_the_center_latitude() {
     // The floor at 60° is a level below the plain minimum.
     assert!((limit - rig.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
     assert!(limit < rig.camera.get_state().get_min_zoom() - 0.5, "{limit}");
+    assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
+}
+
+#[test]
+fn notches_zoom_out_to_the_floor_screen_bounds_set() {
+    let mut rig = Rig::new();
+    rig.camera.set_constrain_mode(ConstrainMode::Screen);
+    let bounds = LatLngBounds::hull(LatLng::new(52.3, 4.8).unwrap(), LatLng::new(52.4, 5.0).unwrap());
+    rig.camera.set_lat_lng_bounds(bounds).unwrap();
+    rig.camera
+        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(52.35, 4.9).unwrap())).with_zoom(Some(14.0)));
+    let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
+    // The bounds fill the 800 px width at about 11.46, far above the plain
+    // minimum.
+    let floor = rig.camera.get_state().get_min_zoom_for_screen_bounds().unwrap();
+    assert!((limit - floor).abs() < 1e-6, "{limit} {floor}");
+    assert!(limit > rig.camera.get_state().get_min_zoom() + 10.0, "{limit}");
     assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
 }
 

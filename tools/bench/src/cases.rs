@@ -112,6 +112,9 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     cases.push(Case::new("Frame/FeatureStateHover", frame_feature_state_hover));
     cases.push(Case::new("Frame/HideLayers", frame_hide_layers));
+    for (name, data_driven) in [("Frame/Extrusions", false), ("Frame/Extrusions/DataDriven", true)] {
+        cases.push(Case::new(name, move |cx| frame_extrusions(cx, name, data_driven)));
+    }
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
@@ -444,6 +447,57 @@ fn frame_hide_layers(cx: &Context) -> Metrics {
     let mut metrics = meter.finish();
     metrics.lead("hidden_heap_mib", median(&heap));
     metrics.lead("hidden_gpu_mib", median(&gpu));
+    metrics
+}
+
+/// The basemap's buildings extruded, over its background, with every
+/// building's height and color from its id if `data_driven`.
+fn extrusions_style(fixtures: &std::path::Path, data_driven: bool) -> String {
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(fixtures)).expect("the basemap style is JSON");
+    let (height, color) = if data_driven {
+        (
+            serde_json::json!(["+", 8, ["*", 4, ["%", ["id"], 10]]]),
+            serde_json::json!(["case", ["==", ["%", ["id"], 2], 0], "#c9a28f", "#d9d0c9"]),
+        )
+    } else {
+        (serde_json::json!(20), serde_json::json!("#d9d0c9"))
+    };
+    style["layers"] = serde_json::json!([
+        { "id": "background", "type": "background", "paint": { "background-color": "#f2efe9" } },
+        {
+            "id": "buildings",
+            "type": "fill-extrusion",
+            "source": "basemap",
+            "source-layer": "buildings",
+            "paint": { "fill-extrusion-height": height, "fill-extrusion-color": color, "fill-extrusion-opacity": 0.9 }
+        }
+    ]);
+    style.to_string()
+}
+
+/// Frames of the basemap's buildings extruded (`extrusions_style`), seen at
+/// a pitch, the zoom alternating by 0.001 as in `Still`. `gpu_mib` is the
+/// vertex and index buffers the GPU holds for them.
+fn frame_extrusions(cx: &Context, name: &str, data_driven: bool) -> Metrics {
+    let nudge = |scene: &mut Scene, i: usize| {
+        scene.jump_pitched(basemap_center(), BASEMAP_ZOOM + 0.5 + 0.001 * (i % 2) as f64, 30.0, 50.0);
+    };
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    nudge(&mut scene, 0);
+    scene.load_json(&extrusions_style(&cx.fixtures, data_driven));
+    scene.settle();
+    let gpu = scene.gpu_buffers_mib();
+    let mut meter = Meter::new();
+    for i in 0..cx.iterations(100) {
+        nudge(&mut scene, i);
+        meter.time(|| scene.render_frame());
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, name, &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("gpu_mib", gpu);
     metrics
 }
 

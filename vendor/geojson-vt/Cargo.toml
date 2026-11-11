@@ -19,7 +19,6 @@ doctest = false
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true
-libstdcxx.workspace = true
 
 # The fixture-free tests of geojson-vt-cpp/test/test.cpp.
 [[test]]

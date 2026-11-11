@@ -3,12 +3,12 @@
 // getCentroidCell}) for `T = double`, the instantiation
 // layout/symbol_layout.cpp uses.
 //
-// The cell queue is libstdc++'s `std::priority_queue` (//vendor/libstdcxx):
-// which of several cells with the same `max` comes first decides the
-// result. The debug printing is not ported.
+// The debug printing is not ported.
+
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use geometry::{LinearRing, Point, Polygon};
-use libstdcxx::PriorityQueue;
 
 /// `polygon.at(0)` / `ring.at(0)` on an empty vector (std::out_of_range).
 const OUT_OF_RANGE: &str = "vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)";
@@ -88,6 +88,29 @@ impl Cell {
     }
 }
 
+/// A [`Cell`] in the cell queue, ordered by `max`.
+struct QueuedCell(Cell);
+
+impl Ord for QueuedCell {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.max.total_cmp(&other.0.max)
+    }
+}
+
+impl PartialOrd for QueuedCell {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for QueuedCell {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for QueuedCell {}
+
 // get polygon centroid
 pub fn get_centroid_cell(polygon: &Polygon<f64>) -> Result<Cell, String> {
     let mut area = 0.0;
@@ -144,7 +167,7 @@ pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, S
 
     // a priority queue of cells in order of their "potential" (max distance
     // to polygon)
-    let mut cell_queue = PriorityQueue::new(|a: &Cell, b: &Cell| a.max < b.max);
+    let mut cell_queue = BinaryHeap::new();
 
     if cell_size == 0.0 {
         return Ok(min);
@@ -155,7 +178,7 @@ pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, S
     while x < max.x {
         let mut y = min.y;
         while y < max.y {
-            cell_queue.push(Cell::new(Point::new(x + h, y + h), h, polygon));
+            cell_queue.push(QueuedCell(Cell::new(Point::new(x + h, y + h), h, polygon)));
             y += cell_size;
         }
         x += cell_size;
@@ -170,11 +193,8 @@ pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, S
         best_cell = bbox_cell;
     }
 
-    while !cell_queue.is_empty() {
-        // pick the most promising cell from the queue
-        let cell = *cell_queue.top();
-        cell_queue.pop();
-
+    // pick the most promising cell from the queue
+    while let Some(QueuedCell(cell)) = cell_queue.pop() {
         // update the best cell if we found a better one
         if cell.d > best_cell.d {
             best_cell = cell;
@@ -187,10 +207,10 @@ pub fn polylabel(polygon: &Polygon<f64>, precision: f64) -> Result<Point<f64>, S
 
         // split the cell into four cells
         h = cell.h / 2.0;
-        cell_queue.push(Cell::new(Point::new(cell.c.x - h, cell.c.y - h), h, polygon));
-        cell_queue.push(Cell::new(Point::new(cell.c.x + h, cell.c.y - h), h, polygon));
-        cell_queue.push(Cell::new(Point::new(cell.c.x - h, cell.c.y + h), h, polygon));
-        cell_queue.push(Cell::new(Point::new(cell.c.x + h, cell.c.y + h), h, polygon));
+        cell_queue.push(QueuedCell(Cell::new(Point::new(cell.c.x - h, cell.c.y - h), h, polygon)));
+        cell_queue.push(QueuedCell(Cell::new(Point::new(cell.c.x + h, cell.c.y - h), h, polygon)));
+        cell_queue.push(QueuedCell(Cell::new(Point::new(cell.c.x - h, cell.c.y + h), h, polygon)));
+        cell_queue.push(QueuedCell(Cell::new(Point::new(cell.c.x + h, cell.c.y + h), h, polygon)));
     }
 
     Ok(best_cell.c)

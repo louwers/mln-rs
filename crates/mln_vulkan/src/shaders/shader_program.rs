@@ -6,7 +6,7 @@
 //   with `shaders::compiler` in place of glslang), which hands the program
 //   its modules.
 // - `vulkan::VertexAttribute`'s storage buffer (`initVertexAttribute`'s
-//   `ubo`) has no use without instancing.
+//   `ubo`) is not ported: instance attributes are vertex inputs.
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -210,8 +210,8 @@ impl ShaderProgram {
     }
 
     pub fn init_instance_attribute(&mut self, info: &AttributeInfo) {
-        // Index is the block index of the instance attribute. Indexes must
-        // not be reused by regular attributes or uniform blocks.
+        // Index is the input location of the instance attribute. Indexes
+        // must not be reused by regular attributes.
         self.instance_attributes.set(info.id, info.index as i32, info.data_type, 1);
     }
 

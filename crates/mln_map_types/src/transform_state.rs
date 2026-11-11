@@ -1598,6 +1598,23 @@ impl TransformState {
         }
     }
 
+    /// The lowest zoom `ConstrainMode::Screen` allows: the one at which the
+    /// lat/lng bounds fill the screen, which
+    /// [`constrain_camera_and_zoom_to_bounds`](Self::constrain_camera_and_zoom_to_bounds)
+    /// raises lower zooms to. `None` in the other modes or without bounds.
+    pub fn get_min_zoom_for_screen_bounds(&self) -> Option<f64> {
+        if self.constrain_mode != ConstrainMode::Screen || self.bounds == LatLngBounds::default() {
+            return None;
+        }
+        // The bounds' extent on screen grows with the scale alone, so they
+        // fill the screen at the same zoom wherever the center is.
+        let ne = Projection::project(&self.bounds.northeast(), 1.0);
+        let sw = Projection::project(&self.bounds.southwest(), 1.0);
+        let scale_x = f64::from(self.size.width) / (ne.x - sw.x);
+        let scale_y = f64::from(self.size.height) / (sw.y - ne.y);
+        Some(self.scale_zoom(std_max(scale_x, scale_y)))
+    }
+
     /// Viewport center offset, from [size.width / 2, size.height / 2],
     /// defined by |edgeInsets| in screen coordinates, with top left origin.
     pub fn get_center_offset(&self) -> ScreenCoordinate {

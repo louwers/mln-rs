@@ -329,8 +329,9 @@ impl Drawable {
         if build_instance_buffer {
             let attrs = self.base.instance_attributes.clone().unwrap();
             let mut instance_buffers = Vec::new();
+            let instance_count = attrs.borrow().get_min_count();
             let instance_bindings = upload_pass.build_attribute_bindings(
-                self.impl_.vertex_count,
+                instance_count,
                 self.impl_.vertex_type,
                 usize::MAX,
                 &[],
@@ -577,7 +578,6 @@ struct UniqueBinding {
     base_offset: u64,
     step_mode: wgpu::VertexStepMode,
     attributes: Vec<wgpu::VertexAttribute>,
-    attribute_byte_offsets: Vec<u64>,
 }
 
 fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexStepMode, out: &mut Vec<UniqueBinding>) {
@@ -595,10 +595,15 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
             continue;
         }
         let binding_byte_offset = u64::from(binding.vertex_offset) * u64::from(binding.vertex_stride);
+        // Attributes of a buffer at different vertex offsets (a fill
+        // extrusion wall's outline vertex and the next one) read it through
+        // slots of their own, since an attribute's offset must stay within
+        // the stride.
         let pos = out.iter().position(|e| {
             std::ptr::addr_eq(Rc::as_ptr(&e.vertex_resource), Rc::as_ptr(resource))
                 && e.stride == binding.vertex_stride
                 && e.step_mode == step_mode
+                && e.base_offset == binding_byte_offset
         });
         let entry = match pos {
             None => {
@@ -610,22 +615,16 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
                     base_offset: binding_byte_offset,
                     step_mode,
                     attributes: Vec::with_capacity(4),
-                    attribute_byte_offsets: Vec::with_capacity(4),
                 });
                 out.last_mut().unwrap()
             }
-            Some(i) => {
-                let e = &mut out[i];
-                e.base_offset = e.base_offset.min(binding_byte_offset);
-                e
-            }
+            Some(i) => &mut out[i],
         };
         entry.attributes.push(wgpu::VertexAttribute {
             format: wgpu_vertex_format_of(binding.attribute.data_type),
             offset: u64::from(binding.attribute.offset),
             shader_location: attribute_index as u32,
         });
-        entry.attribute_byte_offsets.push(binding_byte_offset);
     }
 }
 
@@ -744,16 +743,6 @@ impl drawable::Drawable for Drawable {
                 unique_bindings.len()
             );
             unique_bindings.truncate(MAX_VERTEX_BUFFER_SLOTS);
-        }
-
-        for entry in &mut unique_bindings {
-            for j in 0..entry.attributes.len() {
-                if entry.attribute_byte_offsets[j] < entry.base_offset {
-                    continue;
-                }
-                let delta = entry.attribute_byte_offsets[j] - entry.base_offset;
-                entry.attributes[j].offset += u64::from(delta as u32);
-            }
         }
 
         if self.impl_.pipeline_state.is_none() {
@@ -902,21 +891,17 @@ impl drawable::Drawable for Drawable {
         }
 
         // Draw indexed geometry - loop through segments (exactly like Metal does)
-        let instance_count = match &self.base.instance_attributes {
-            Some(attrs) => attrs.borrow().get_min_count() as u32,
-            None => 1,
-        };
         let mut draw_calls = 0;
         for segment in &self.impl_.segments {
             let ml_segment = segment.get_segment();
             if ml_segment.index_length > 0 {
                 let index_offset = ml_segment.index_offset as u32;
                 let base_vertex = ml_segment.vertex_offset as i32;
-                let base_instance = 0u32;
+                let base_instance = ml_segment.base_instance as u32;
                 encoder.draw_indexed(
                     index_offset..index_offset + ml_segment.index_length as u32,
                     base_vertex,
-                    base_instance..base_instance + instance_count,
+                    base_instance..base_instance + ml_segment.instance_count as u32,
                 );
                 draw_calls += 1;
             }

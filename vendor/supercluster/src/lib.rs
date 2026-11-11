@@ -318,7 +318,7 @@ impl Supercluster {
 
         let zoom = self.zooms.get(&self.limit_zoom(z)).expect("zoom_iter != zooms.end()");
 
-        let z2 = libstdcxx::cvt::f64_to_u32(2.0f64.powf(f64::from(z)));
+        let z2 = 2.0f64.powf(f64::from(z)) as u32;
         let r = f64::from(self.options.radius) / f64::from(self.options.extent);
         let mut x = x_ as i32;
         let extent = f64::from(self.options.extent);
@@ -328,8 +328,8 @@ impl Supercluster {
             let c = &zoom.clusters[id as usize];
 
             let point = Point::new(
-                libstdcxx::cvt::f64_to_i16((extent * (c.pos.x * f64::from(z2) - f64::from(x))).round()),
-                libstdcxx::cvt::f64_to_i16((extent * (c.pos.y * f64::from(z2) - yf)).round()),
+                (extent * (c.pos.x * f64::from(z2) - f64::from(x))).round() as i16,
+                (extent * (c.pos.y * f64::from(z2) - yf)).round() as i16,
             );
 
             if c.num_points == 1 {

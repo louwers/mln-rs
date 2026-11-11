@@ -1,6 +1,6 @@
 // Ports src/mln/renderer/buckets/fill_extrusion_bucket.hpp and
-// fill_extrusion_bucket.cpp (`!MLN_USE_FILL_EXTRUSION_INSTANCING`, as for the
-// WebGPU backend), plus the `PatternLayout` instantiation of
+// fill_extrusion_bucket.cpp (`MLN_USE_FILL_EXTRUSION_INSTANCING`, on every
+// backend), plus the `PatternLayout` instantiation of
 // FillExtrusionLayerFactory::createLayout (layermanager/fill_extrusion_layer_factory.cpp).
 //
 // The vertex/index vectors are plain `Vec`s (the bucket is built on the
@@ -55,14 +55,19 @@ crate::paint_property_binders!(
 );
 
 /// `FillExtrusionLayoutVertex = gfx::Vertex<TypeList<attributes::pos,
-/// attributes::decimals_ed, attributes::normal2d>>`.
+/// attributes::decimals_ed>>`: a vertex of the roof, and the wall instance
+/// from it to the next vertex of its ring.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct FillExtrusionLayoutVertex {
     pub a1: [i16; 2],
     pub a2: [u16; 2],
-    pub a3: [i16; 2],
 }
+
+/// `FillExtrusionStaticVertex = gfx::Vertex<TypeList<attributes::pos>>`: a
+/// corner of the wall quad every instance draws, x picking the instance's
+/// vertex (0) or the next one (1), y the base (0) or the top (1).
+pub type FillExtrusionStaticVertex = [i16; 2];
 
 /// `EvaluatedLight = style::LightProperties::PossiblyEvaluated`.
 pub use crate::render_light::EvaluatedLight;
@@ -98,27 +103,12 @@ pub struct FillExtrusionBucket {
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 
-// Each ring vertex can add a wall quad beside itself.
-fn wall_vertex_count(ring_vertices: usize) -> usize {
-    if ring_vertices == 0 { 0 } else { 5 * (ring_vertices - 1) + 1 }
-}
-
 /// `util::dist<uint16_t>(a, b)`: `static_cast<uint16_t>` of the double
 /// distance (x86-64: through a 32-bit conversion, keeping the low bits).
 fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
     ((dx * dx + dy * dy).sqrt() as i64) as u16
-}
-
-/// `util::unit(util::perp(v))` for a `Point<double>`.
-fn unit_perp(v: Point<f64>) -> Point<f64> {
-    let p = Point::new(-v.y, v.x);
-    let magnitude = (p.x * p.x + p.y * p.y).sqrt();
-    if magnitude == 0.0 {
-        return p;
-    }
-    Point::new(p.x * (1.0 / magnitude), p.y * (1.0 / magnitude))
 }
 
 impl FillExtrusionBucket {
@@ -150,9 +140,8 @@ impl FillExtrusionBucket {
         self.subdivision_granularity = *value;
     }
 
-    /// `layoutVertex(p, nx, ny, t, edgeDistance)` (non-instanced).
-    pub fn layout_vertex(p: Point<f64>, nx: f64, ny: f64, t: u16, edge_distance: u16) -> FillExtrusionLayoutVertex {
-        let factor = 2f64.powi(14);
+    /// `layoutVertex(p, edgeDistance, isDiscarded)`.
+    pub fn layout_vertex(p: Point<f64>, edge_distance: u16, is_discarded: bool) -> FillExtrusionLayoutVertex {
         let int_part = Point::new(p.x.floor(), p.y.floor());
         // Multiply factional part by 2^7 to pack them into integers [0..127]
         let frac_x = ((p.x - int_part.x) * 128.0) as u8;
@@ -161,23 +150,47 @@ impl FillExtrusionBucket {
         FillExtrusionLayoutVertex {
             a1: [int_part.x as i16, int_part.y as i16],
             a2: [
-                // We pack a bool (`t`) indicating whether it is an upper or
-                // lower vertex
-                ((i32::from(frac_x) * 256 + i32::from(frac_y)) * 2 + i32::from(t)) as u16,
-                // The edgedistance attribute is used for wrapping
+                // We pack a bool (`isDiscarded`) indicating whether this
+                // instance is discarded
+                ((i32::from(frac_x) * 256 + i32::from(frac_y)) * 2 + i32::from(is_discarded)) as u16,
+                // The edgeDistance attribute is used for wrapping
                 // fill_extrusion patterns
                 edge_distance,
             ],
-            // Multiply normal vector components in the 2D plane by 2^14 to
-            // pack them into integers
-            a3: [(nx * factor) as i16, (ny * factor) as i16],
+        }
+    }
+
+    /// Appends the outline of `polygon`: each vertex of a ring is a wall
+    /// instance up to the next one, the last vertex ends the ring.
+    fn add_outline<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) {
+        let vertices = self.vertices.get_mut();
+        for ring in polygon {
+            let ring = ring.as_ref();
+            let mut edge_distance: usize = 0;
+            for (i, p) in ring.iter().enumerate() {
+                let p1 = Point::new(p.x.into(), p.y.into());
+                let p2 = ring.get(i + 1).map(|p| Point::new(p.x.into(), p.y.into()));
+
+                // processRingPoints(p1, p2, edgeDistance)
+                vertices.push(Self::layout_vertex(p1, edge_distance as u16, p2.is_none()));
+
+                if let Some(p2) = p2 {
+                    let dist = usize::from(dist_u16(p1, p2));
+                    if edge_distance + dist > usize::from(u16::MAX) {
+                        edge_distance = 0;
+                    }
+
+                    edge_distance += dist;
+                }
+            }
         }
     }
 
     /// Adds the walls and the roof of one polygon (its outer ring, then its
     /// holes), with integer or, after corner rounding, float coordinates.
-    /// With a subdivided `roof` (the globe's), the rings make only the walls
-    /// and the roof is that mesh.
+    /// The outline's vertices are the roof's, unless a subdivided `roof`
+    /// (the globe's) is that mesh, with vertices of its own: the outline
+    /// then stays out of the segments, as only its walls draw it.
     fn add_polygon<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(
         &mut self,
         polygon: &[R],
@@ -195,107 +208,12 @@ impl FillExtrusionBucket {
             return Ok(());
         }
 
-        let mut flat_indices: Vec<u32> = Vec::with_capacity(total_vertices);
-
-        let wall_vertices = wall_vertex_count(total_vertices);
-
-        let start_vertices = self.vertices.len();
-
-        if self.triangle_segments.is_empty()
-            || self.triangle_segments.last().expect("segment").vertex_length + wall_vertices > usize::from(u16::MAX)
-        {
-            self.triangle_segments.push(SegmentBase::new(start_vertices, self.triangles.len()));
-        }
-
-        let segment_index = self.triangle_segments.len() - 1;
-        debug_assert!(self.triangle_segments[segment_index].vertex_length <= usize::from(u16::MAX));
-        let mut triangle_index = self.triangle_segments[segment_index].vertex_length as u16;
-
-        debug_assert!(usize::from(triangle_index) + wall_vertices <= usize::from(u16::MAX));
-
-        for ring in polygon {
-            let ring = ring.as_ref();
-            let n_vertices = ring.len();
-
-            if n_vertices == 0 {
-                continue;
-            }
-
-            let mut edge_distance: usize = 0;
-
-            for i in 0..n_vertices {
-                let p1 = Point::new(ring[i].x.into(), ring[i].y.into());
-                let p2 = if i < n_vertices - 1 {
-                    Some(Point::new(ring[i + 1].x.into(), ring[i + 1].y.into()))
-                } else {
-                    None
-                };
-
-                // processRingPoints(p1, p2, edgeDistance)
-                self.vertices.get_mut().push(Self::layout_vertex(p1, 0.0, 0.0, 1, edge_distance as u16));
-                flat_indices.push(u32::from(triangle_index));
-                triangle_index = triangle_index.wrapping_add(1);
-
-                if let Some(p2) = p2 {
-                    let perp = unit_perp(Point::new(p2.x - p1.x, p2.y - p1.y));
-
-                    let dist = usize::from(dist_u16(p1, p2));
-                    if edge_distance + dist > usize::from(u16::MAX) {
-                        edge_distance = 0;
-                    }
-
-                    self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 0, edge_distance as u16));
-                    self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 1, edge_distance as u16));
-
-                    edge_distance += dist;
-
-                    self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 0, edge_distance as u16));
-                    self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 1, edge_distance as u16));
-
-                    // ┌──────┐
-                    // │ 0  1 │ Counter-Clockwise winding order.
-                    // │      │ Triangle 1: 0 => 2 => 1
-                    // │ 2  3 │ Triangle 2: 1 => 2 => 3
-                    // └──────┘
-                    let t = triangle_index;
-                    self.triangles.get_mut().extend_from_slice(&[t, t.wrapping_add(2), t.wrapping_add(1)]);
-                    self.triangles.get_mut().extend_from_slice(&[
-                        t.wrapping_add(1),
-                        t.wrapping_add(2),
-                        t.wrapping_add(3),
-                    ]);
-                    triangle_index = triangle_index.wrapping_add(4);
-                    let segment = &mut self.triangle_segments[segment_index];
-                    segment.vertex_length += 4;
-                    segment.index_length += 6;
-                }
-            }
-        }
-
-        let indices: Vec<u32> = if roof.is_none() { earcut::earcut::<u32, _, _>(polygon) } else { Vec::new() };
-
-        let n_indices = indices.len();
-        debug_assert!(n_indices % 3 == 0);
-
-        for i in (0..n_indices).step_by(3) {
-            // Counter-Clockwise winding order.
-            self.triangles.get_mut().extend_from_slice(&[
-                flat_indices[indices[i] as usize] as u16,
-                flat_indices[indices[i + 2] as usize] as u16,
-                flat_indices[indices[i + 1] as usize] as u16,
-            ]);
-        }
-
-        let segment = &mut self.triangle_segments[segment_index];
-        segment.vertex_length += total_vertices;
-        segment.index_length += n_indices;
-
-        // The roof's triangles index only its own vertices, so it
-        // continues the walls' segment or starts its own.
         if let Some(roof) = roof {
+            self.add_outline(polygon);
+            // The roof's vertices have no walls.
             fill_large_mesh_arrays(
                 self.vertices.get_mut(),
-                |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0, 1, 0),
+                |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0, true),
                 &mut self.triangle_segments,
                 self.triangles.get_mut(),
                 &roof.vertices,
@@ -303,9 +221,35 @@ impl FillExtrusionBucket {
                 None,
                 MAX_SEGMENT_VERTICES,
             );
+            return Ok(());
         }
-        // (instanceSegments, and the roof's vertices counted into them:
-        // MLN_USE_FILL_EXTRUSION_INSTANCING only.)
+
+        // The roof continues the last segment if that ends at the outline
+        // and has room for it.
+        let start_vertices = self.vertices.len();
+        let continues = self.triangle_segments.last().is_some_and(|last| {
+            last.vertex_offset + last.vertex_length == start_vertices
+                && last.vertex_length + total_vertices <= MAX_SEGMENT_VERTICES
+        });
+        if !continues {
+            self.triangle_segments.push(SegmentBase::new(start_vertices, self.triangles.len()));
+        }
+        let segment_index = self.triangle_segments.len() - 1;
+        let first_index = self.triangle_segments[segment_index].vertex_length;
+
+        self.add_outline(polygon);
+
+        let indices: Vec<u32> = earcut::earcut::<u32, _, _>(polygon);
+        debug_assert!(indices.len() % 3 == 0);
+        let index = |i: u32| (first_index + i as usize) as u16;
+        for triangle in indices.chunks_exact(3) {
+            // Counter-Clockwise winding order.
+            self.triangles.get_mut().extend_from_slice(&[index(triangle[0]), index(triangle[2]), index(triangle[1])]);
+        }
+
+        let segment = &mut self.triangle_segments[segment_index];
+        segment.vertex_length += total_vertices;
+        segment.index_length += indices.len();
         Ok(())
     }
 
@@ -368,14 +312,14 @@ impl Bucket for FillExtrusionBucket {
 
             // On the globe the walls follow subdivided rings and the roof is a
             // subdivided mesh of its own, spread over as many segments as it
-            // needs. Walls too long for a segment are drawn as on Mercator.
-            // Rounded corners are not subdivided.
+            // needs. Rings with more vertices than a polygon may have are
+            // extruded as on Mercator. Rounded corners are not subdivided.
             let granularity = self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z);
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
                     polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
-                let ring_vertices = subdivided_rings.iter().map(|ring| ring.len()).sum();
-                if wall_vertex_count(ring_vertices) <= MAX_SEGMENT_VERTICES {
+                let ring_vertices: usize = subdivided_rings.iter().map(|ring| ring.len()).sum();
+                if ring_vertices <= MAX_SEGMENT_VERTICES {
                     let roof = subdivide_polygon(&polygon, canonical, granularity, false);
                     self.add_polygon(&subdivided_rings, Some(&roof))?;
                     continue;
@@ -497,9 +441,12 @@ mod tests {
 
     #[test]
     fn layout_vertex_packs_like_cpp() {
-        let v = FillExtrusionBucket::layout_vertex(Point::new(10.0, 20.0), 0.6, -0.8, 1, 7);
+        let v = FillExtrusionBucket::layout_vertex(Point::new(10.0, 20.0), 7, true);
         assert_eq!(v.a1, [10, 20]);
         assert_eq!(v.a2, [1, 7]);
-        assert_eq!(v.a3, [9830, -13107]);
+
+        let v = FillExtrusionBucket::layout_vertex(Point::new(-1.5, 2.25), 9, false);
+        assert_eq!(v.a1, [-2, 2]);
+        assert_eq!(v.a2, [(64 * 256 + 32) * 2, 9]);
     }
 }

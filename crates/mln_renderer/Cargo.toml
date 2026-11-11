@@ -32,7 +32,6 @@ bytemuck.workspace = true
 earcut.workspace = true
 feature.workspace = true
 geometry.workspace = true
-libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_expression.workspace = true
 mln_gfx.workspace = true

@@ -6,9 +6,14 @@
 //   C++ binds one for every drawable, of placeholders for most: the layer
 //   shaders read no drawable buffer.
 // - A new shader has the vertex input rebuilt at the next upload; its
-//   attributes can differ from the last one's.
+//   vertex and instance attributes can differ from the last one's.
 // - `setSharedBuffers`, which binds the instance data of symbols and fill
-//   extrusions as storage buffers, is not ported with the instancing.
+//   extrusions as storage buffers, is not ported: instance attributes are
+//   vertex inputs that step per instance.
+// - A vertex input binding is a buffer read at a stride, a rate and a vertex
+//   offset, and is bound at that offset. C++ has a binding for each buffer,
+//   bound at its start, and reads a fill extrusion wall's next outline vertex
+//   from the storage buffer.
 
 use std::any::Any;
 use std::rc::Rc;
@@ -32,7 +37,7 @@ use mln_gfx::types::{BufferUsageType, DepthMaskType};
 use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::upload_pass::UploadPass as _;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_gfx::vertex_buffer::{IndexBuffer as GfxIndexBuffer, VertexBufferResource as GfxVertexBufferResource};
+use mln_gfx::vertex_buffer::IndexBuffer as GfxIndexBuffer;
 use mln_util::logging::{Event, Log};
 use mln_util::time::Instant;
 
@@ -86,6 +91,18 @@ struct DrawableImpl {
 pub struct Drawable {
     base: DrawableBase,
     impl_: DrawableImpl,
+}
+
+/// What a vertex input binding reads: attributes that agree on it share a
+/// binding.
+#[derive(Clone, Copy, PartialEq)]
+struct InputSource {
+    /// The address of the buffer's resource.
+    buffer: *const (),
+    stride: u32,
+    input_rate: vk::VertexInputRate,
+    /// Where in the buffer the binding starts, in bytes.
+    offset: vk::DeviceSize,
 }
 
 fn same_textures(a: &Textures, b: &Textures) -> bool {
@@ -173,7 +190,9 @@ impl Drawable {
             }
         }
 
-        let build_attribs = self.impl_.pipeline_info.input_attributes.is_empty()
+        // No vertex input yet, or a new shader's to build.
+        let no_vertex_input = self.impl_.pipeline_info.input_attributes.is_empty();
+        let build_attribs = no_vertex_input
             || match (&self.base.vertex_attributes, self.base.attribute_update_time) {
                 (Some(attrs), Some(t)) => attrs.borrow().is_modified_after(t),
                 _ => true,
@@ -202,7 +221,7 @@ impl Drawable {
 
         // build instance buffer
         let build_instance_buffer = match (&self.base.instance_attributes, self.base.attribute_update_time) {
-            (Some(attrs), Some(t)) => attrs.borrow().is_modified_after(t),
+            (Some(attrs), Some(t)) => no_vertex_input || attrs.borrow().is_modified_after(t),
             (Some(_), None) => true,
             (None, _) => false,
         };
@@ -242,8 +261,8 @@ impl Drawable {
     }
 
     /// `buildVulkanInputBindings(context)`: the vertex input of the
-    /// pipelines, a binding for each buffer the attributes read, and the
-    /// buffers to bind at them.
+    /// pipelines, a binding for each way the attributes read a buffer, and
+    /// the buffers and offsets to bind at them.
     fn build_vulkan_input_bindings(&mut self, context: &Context) {
         let impl_ = &mut self.impl_;
         impl_.vulkan_vertex_buffers.clear();
@@ -251,8 +270,11 @@ impl Drawable {
         impl_.pipeline_info.input_attributes.clear();
         impl_.pipeline_info.input_bindings.clear();
 
-        // The buffer at each binding, `None` for the placeholder's.
-        let mut unique_buffers: Vec<Option<*const dyn GfxVertexBufferResource>> = Vec::new();
+        // What each binding reads, `None` for the placeholder's. Attributes
+        // of a buffer at different vertex offsets (a fill extrusion wall's
+        // outline vertex and the next one) read it through bindings of their
+        // own, bound that far into it.
+        let mut unique_sources: Vec<Option<InputSource>> = Vec::new();
         let mut dummy_binding_index: Option<u32> = None;
 
         for (bindings, input_rate) in [
@@ -270,11 +292,12 @@ impl Drawable {
                     .filter(|(_, buffer)| buffer.get().is_valid());
                 let Some((resource, vertex_buffer)) = vertex_buffer else {
                     // Back missing attributes with a zero-stride dummy
-                    // buffer that reads a constant value.
+                    // buffer that reads a constant value, per vertex or per
+                    // instance alike.
                     let binding_index = *dummy_binding_index.get_or_insert_with(|| {
                         let index = impl_.pipeline_info.input_bindings.len() as u32;
-                        // sync `unique_buffers` with `input_bindings`
-                        unique_buffers.push(None);
+                        // sync `unique_sources` with `input_bindings`
+                        unique_sources.push(None);
                         impl_.pipeline_info.input_bindings.push(
                             vk::VertexInputBindingDescription::default()
                                 .binding(index)
@@ -295,25 +318,29 @@ impl Drawable {
                     continue;
                 };
 
-                let pointer = Rc::as_ptr(resource);
-                let binding_index =
-                    match unique_buffers.iter().position(|b| b.is_some_and(|b| std::ptr::addr_eq(b, pointer))) {
-                        Some(index) => index,
-                        None => {
-                            let index = impl_.pipeline_info.input_bindings.len();
-                            unique_buffers.push(Some(pointer));
-                            // add new buffer binding
-                            impl_.pipeline_info.input_bindings.push(
-                                vk::VertexInputBindingDescription::default()
-                                    .binding(index as u32)
-                                    .stride(binding.vertex_stride)
-                                    .input_rate(input_rate),
-                            );
-                            impl_.vulkan_vertex_buffers.push(vertex_buffer.get().get_vulkan_buffer());
-                            impl_.vulkan_vertex_offsets.push(0);
-                            index
-                        }
-                    };
+                let source = InputSource {
+                    buffer: Rc::as_ptr(resource).cast(),
+                    stride: binding.vertex_stride,
+                    input_rate,
+                    offset: vk::DeviceSize::from(binding.vertex_offset) * vk::DeviceSize::from(binding.vertex_stride),
+                };
+                let binding_index = match unique_sources.iter().position(|s| *s == Some(source)) {
+                    Some(index) => index,
+                    None => {
+                        let index = impl_.pipeline_info.input_bindings.len();
+                        unique_sources.push(Some(source));
+                        // add new buffer binding
+                        impl_.pipeline_info.input_bindings.push(
+                            vk::VertexInputBindingDescription::default()
+                                .binding(index as u32)
+                                .stride(source.stride)
+                                .input_rate(input_rate),
+                        );
+                        impl_.vulkan_vertex_buffers.push(vertex_buffer.get().get_vulkan_buffer());
+                        impl_.vulkan_vertex_offsets.push(source.offset);
+                        index
+                    }
+                };
                 impl_.pipeline_info.input_attributes.push(
                     vk::VertexInputAttributeDescription::default()
                         .binding(binding_index as u32)
