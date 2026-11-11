@@ -131,6 +131,9 @@ pub(crate) struct SessionState {
     /// graphics types, whose auto traits are deep to prove for every type
     /// that holds a map handle.
     pub(crate) init: Option<Box<dyn Any + Send>>,
+    /// Counts the resizes sent, which run on the map's thread before they
+    /// reach the session's.
+    pub(crate) resizes_sent: u64,
 }
 
 impl SessionState {
@@ -341,7 +344,7 @@ fn check_usable(state: &SessionState) -> Result<(), Error> {
             Err(state.failure.clone().unwrap_or_else(|| Error::native("the render session failed")))
         }
         RenderSessionState::Detaching | RenderSessionState::Detached | RenderSessionState::Abandoned => {
-            Err(Error::invalid_state("the render session was detached or abandoned"))
+            Err(Error::invalid_state("the render session is not attached: it was detached or abandoned"))
         }
     }
 }
@@ -502,6 +505,7 @@ pub(crate) fn attach(
             next_work: 0,
             map: Some(map.clone()),
             init: Some(Box::new(Init { target, size, pixel_ratio, glyph_cache: map.glyph_cache() })),
+            resizes_sent: 0,
         }),
         gate: Mutex::new(()),
         frame_wake: options.frame_wake,
@@ -570,8 +574,8 @@ impl RenderSession {
     }
 
     /// Sends `task` to the session's thread, after the work sent before,
-    /// and completes with its result. A session that lost its graphics
-    /// objects before the task runs completes it with
+    /// resizes included, and completes with its result. A session that lost
+    /// its graphics objects before the task runs completes it with
     /// [`ErrorKind::TargetLost`](mln_util::ErrorKind).
     fn operation<T: Send + 'static>(
         &self,
@@ -583,10 +587,14 @@ impl RenderSession {
             check_usable(&state)?;
             let (completion, resolver) = shared.completion();
             let work = state.register(resolver);
+            let resizes = state.resizes_sent;
             worker::post(&shared.run_loop, move |worker, outbox| {
-                let Some(resolver) = worker.take_work(work) else { return };
-                let result = task(worker, outbox);
-                outbox.resolve(resolver, result);
+                let task: worker::Task = Box::new(move |worker, outbox| {
+                    let Some(resolver) = worker.take_work(work) else { return };
+                    let result = task(worker, outbox);
+                    outbox.resolve(resolver, result);
+                });
+                worker.after_resizes(resizes, task, outbox);
             });
             drop(state);
             Ok(completion)
@@ -708,22 +716,30 @@ impl RenderSession {
             return Err(Error::invalid_argument("the target's size must not be empty"));
         }
         let shared = self.shared();
-        let mut state = shared.state.lock_unpoisoned();
-        check_usable(&state)?;
-        let map = state.map.clone().ok_or_else(|| Error::invalid_state("the render session has no map"))?;
-        let (completion, resolver) = shared.completion();
-        let work = state.register(resolver);
-        let sent = map.resize_for_session(size, shared.run_loop.clone(), move |worker, result, outbox| {
-            let Some(resolver) = worker.take_work::<Applied>(work) else { return };
-            let result = result.and_then(|applied| change(worker, size, outbox).map(|()| applied));
-            outbox.resolve(resolver, result);
-        });
-        if let Err(error) = sent {
-            state.pending.remove(&work);
-            return Err(error);
-        }
-        drop(state);
-        Ok(completion)
+        with_unlocked_wakes(|| {
+            let mut state = shared.state.lock_unpoisoned();
+            check_usable(&state)?;
+            let map = state.map.clone().ok_or_else(|| Error::invalid_state("the render session has no map"))?;
+            let (completion, resolver) = shared.completion();
+            let work = state.register(resolver);
+            // The work sent after waits for the resize to land, which it
+            // does even when the map drops it.
+            state.resizes_sent += 1;
+            let landing = worker::ResizeLanding::new(shared.run_loop.clone());
+            let sent = map.resize_for_session(size, shared.run_loop.clone(), move |worker, result, outbox| {
+                if let Some(resolver) = worker.take_work::<Applied>(work) {
+                    let result = result.and_then(|applied| change(worker, size, outbox).map(|()| applied));
+                    outbox.resolve(resolver, result);
+                }
+                landing.land(worker, outbox);
+            });
+            if let Err(error) = sent {
+                state.pending.remove(&work);
+                return Err(error);
+            }
+            drop(state);
+            Ok(completion)
+        })
     }
 
     /// Lets go of a surface session's surface, and keeps the rest of the
@@ -811,6 +827,8 @@ impl RenderSession {
 
     /// The features that the session drew in an area of the screen, in its
     /// last frame. A feature that several layers draw appears once for each.
+    /// A box covers only its part inside the target, so one past every edge
+    /// covers the whole target.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// point that isn't finite or a line string without points.
@@ -819,8 +837,11 @@ impl RenderSession {
         geometry: RenderedQueryGeometry,
         options: RenderedQueryOptions,
     ) -> Result<Completion<Vec<Feature>>, Error> {
-        let points = geometry.points()?;
-        self.operation(move |worker, _| worker.renderer()?.query_rendered_features(&points, &options))
+        geometry.points()?;
+        self.operation(move |worker, _| match geometry.within(worker.size()).map(|geometry| geometry.points()) {
+            Some(points) => worker.renderer()?.query_rendered_features(&points?, &options),
+            None => Ok(Vec::new()),
+        })
     }
 
     /// The features of the source `source_id` in the tiles that it loaded
