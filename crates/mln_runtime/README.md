@@ -13,7 +13,9 @@ thread: they run in the order they were sent, and each reports through a
 `Completion`, which is a future, can be waited for, or calls back. A map
 publishes a snapshot of its state after each command, which any thread reads
 without waiting, and the events of a runtime and its maps reach one handler in
-batches.
+batches. A `RenderSession` that a map attaches renders the map's frames on a
+thread of its own, offscreen for now: the host demands frames and drains their
+results, reads the pixels back, and queries the features drawn.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)

@@ -1,19 +1,24 @@
 //! A handle to a map that lives on its runtime's thread.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use mln_actor::RunLoopHandle;
 use mln_map::{
     BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, MapDebugOptions, MapEvent,
-    MapSnapshot, ProjectionMode,
+    MapMode, MapSnapshot, ProjectionMode,
 };
-use mln_util::error::Error;
+use mln_text::GlyphCache;
+use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
 
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
+use crate::render::{AttachOptions, RenderSession, RenderTarget, SessionId, Worker, worker_post};
 use crate::runtime::{Outbox, Runtime, RuntimeCore, RuntimeShared, post};
 
 /// The ID of a map, unique within its runtime.
@@ -90,6 +95,11 @@ impl Published {
 pub(crate) struct MapShared {
     id: MapId,
     runtime: Arc<RuntimeShared>,
+    mode: MapMode,
+    pixel_ratio: f32,
+    /// The render session attached to the map, from its attach until its
+    /// detach completes.
+    session: Mutex<Option<SessionId>>,
     /// The sequence number of the last command sent. It stays locked while
     /// a command is numbered and posted, so the runtime's thread runs the
     /// map's commands in the order of their numbers.
@@ -99,8 +109,22 @@ pub(crate) struct MapShared {
 }
 
 impl MapShared {
-    pub(crate) fn new(id: MapId, runtime: Arc<RuntimeShared>, published: Arc<Published>) -> Self {
-        MapShared { id, runtime, sent: Mutex::new(1), released: AtomicBool::new(false), published }
+    pub(crate) fn new(
+        id: MapId,
+        runtime: Arc<RuntimeShared>,
+        options: &mln_map::MapOptions,
+        published: Arc<Published>,
+    ) -> Self {
+        MapShared {
+            id,
+            runtime,
+            mode: options.map_mode(),
+            pixel_ratio: options.pixel_ratio(),
+            session: Mutex::new(None),
+            sent: Mutex::new(1),
+            released: AtomicBool::new(false),
+            published,
+        }
     }
 
     /// Numbers a command and posts it to the runtime's thread.
@@ -271,8 +295,12 @@ impl Map {
 
     /// Releases the map. The completion reports when the runtime has let go
     /// of it. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
-    /// when the map was released already.
+    /// when the map was released already, or while a render session is
+    /// attached to it.
     pub fn release(&self) -> Result<Completion<()>, Error> {
+        if self.shared.session.lock_unpoisoned().is_some() {
+            return Err(Error::invalid_state("the map still has an attached render session"));
+        }
         let (completion, resolver) = self.shared.runtime.completion();
         self.shared.release(Some(resolver))?;
         Ok(completion)
@@ -280,8 +308,14 @@ impl Map {
 
     // MARK: - Map
 
-    /// Sets the map's size.
+    /// Sets the map's size. Fails with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while a render
+    /// session is attached, since the session sizes the map to its target:
+    /// resize the session instead.
     pub fn resize(&self, size: Size) -> Result<Completion<Applied>, Error> {
+        if self.shared.session.lock_unpoisoned().is_some() {
+            return Err(Error::invalid_state("the map has a render session: resize the session instead"));
+        }
         self.command(move |map| map.set_size(size))
     }
 
@@ -328,6 +362,178 @@ impl Map {
             },
             |(), entry| entry.applied(),
         )
+    }
+
+    // MARK: - Rendering
+
+    /// Attaches a render session, which renders the map into `target` on a
+    /// thread of its own, and sizes the map to the target. A map has one
+    /// session at a time. The session takes frame demands and other work at
+    /// once, and runs them once the completion reports it ready.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// map already has a session or was released,
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
+    /// target, and [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// driver that the target can't use. The completion fails as
+    /// [`OffscreenDevice::new`](crate::OffscreenDevice::new) does when the
+    /// session has to create its device and can't.
+    pub fn attach(
+        &self,
+        target: RenderTarget,
+        options: AttachOptions,
+    ) -> Result<(RenderSession, Completion<()>), Error> {
+        crate::render::attach(self, target, options)
+    }
+
+    /// Renders a still image of a static or tile map, once every resource
+    /// that it needs has loaded. The map's render session draws it, and
+    /// [`RenderSession::read_texture`] reads its pixels once the completion
+    /// reports success. Without a session, the image waits for the next one.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// continuous map. Completes with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while another image
+    /// is on its way, [`ErrorKind::Native`](mln_util::ErrorKind) when the
+    /// style or a resource that the image needs fails to load, and
+    /// [`ErrorKind::Cancelled`](mln_util::ErrorKind) when the map is released
+    /// first.
+    pub fn request_still_image(&self) -> Result<Completion<()>, Error> {
+        if self.shared.mode == MapMode::Continuous {
+            return Err(Error::invalid_state("the map is not in static or tile mode"));
+        }
+        self.shared.send(move |core, outbox, id, sequence, resolver| {
+            if !core.maps.contains_key(&id) {
+                return outbox.resolve(resolver, Err(missing_map()));
+            }
+            apply_command(
+                core,
+                id,
+                sequence,
+                outbox,
+                move |entry, outbox| {
+                    if entry.pending_still.is_some() {
+                        let error = Error::invalid_state("the map is rendering a still image already");
+                        return outbox.resolve(resolver, Err(error));
+                    }
+                    let outcome = Rc::new(RefCell::new(None));
+                    let done = outcome.clone();
+                    entry.core.render_still(Box::new(move |error| {
+                        *done.borrow_mut() = Some(error.map_or(Ok(()), |error| Err(still_image_error(error))));
+                    }));
+                    entry.pending_still = Some(PendingStill { resolver, outcome });
+                },
+                |_, (), _, _| {},
+            );
+        })
+    }
+
+    pub(crate) fn pixel_ratio(&self) -> f32 {
+        self.shared.pixel_ratio
+    }
+
+    pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
+        self.shared.runtime.glyph_cache.clone()
+    }
+
+    /// Reserves the map for the session `id`.
+    pub(crate) fn claim_session(&self, id: SessionId) -> Result<(), Error> {
+        let mut session = self.shared.session.lock_unpoisoned();
+        if self.shared.released.load(Ordering::SeqCst) {
+            return Err(released());
+        }
+        if session.is_some() {
+            return Err(Error::invalid_state("the map already has an attached render session"));
+        }
+        *session = Some(id);
+        Ok(())
+    }
+
+    /// Lets another session attach once the session `id` is gone.
+    pub(crate) fn release_session_claim(&self, id: SessionId) {
+        let mut session = self.shared.session.lock_unpoisoned();
+        if *session == Some(id) {
+            *session = None;
+        }
+    }
+
+    /// Sends the command that binds the session `id`, whose thread runs
+    /// `run_loop`, to the map: it sizes the map to `size`, and hands the
+    /// session the map's updates.
+    pub(crate) fn bind_session(&self, id: SessionId, run_loop: RunLoopHandle, size: Size) -> Result<(), Error> {
+        let sent = self.shared.send(move |core, outbox, map_id, sequence, resolver: Resolver<()>| {
+            drop(resolver);
+            if !core.maps.contains_key(&map_id) {
+                return worker_post(&run_loop, |worker, outbox| worker.bind_failed(missing_map(), outbox));
+            }
+            let link = SessionLink { id, run_loop: run_loop.clone() };
+            apply_command(
+                core,
+                map_id,
+                sequence,
+                outbox,
+                move |entry, _| {
+                    entry.session = Some(link);
+                    let resized = entry.core.set_size(size);
+                    (resized, entry.core.update_reader(), entry.core.renderer_events())
+                },
+                move |_, (resized, reader, events), _, _| match resized {
+                    Ok(()) => {
+                        worker_post(&run_loop, move |worker, outbox| worker.bound(sequence, reader, events, outbox));
+                    }
+                    Err(error) => worker_post(&run_loop, move |worker, outbox| worker.bind_failed(error, outbox)),
+                },
+            );
+        });
+        sent.map(drop)
+    }
+
+    /// Unbinds the session `id` from the map on the runtime's thread, after
+    /// the commands sent before, then runs `then` on the session's thread.
+    pub(crate) fn unbind_session(
+        &self,
+        id: SessionId,
+        run_loop: RunLoopHandle,
+        then: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static,
+    ) {
+        let map_id = self.shared.id;
+        self.shared.runtime.post(move |core, _| {
+            if let Some(entry) = core.maps.get_mut(&map_id)
+                && entry.session.as_ref().is_some_and(|link| link.id == id)
+            {
+                entry.session = None;
+            }
+            worker_post(&run_loop, then);
+        });
+    }
+
+    /// Sends a command that resizes the map to `size`, then runs `resize`
+    /// with its outcome on the thread of the session that `run_loop` runs,
+    /// before the session learns of any later command.
+    pub(crate) fn resize_for_session(
+        &self,
+        size: Size,
+        run_loop: RunLoopHandle,
+        resize: impl FnOnce(&mut Worker, Result<Applied, Error>, &mut Outbox) + Send + 'static,
+    ) -> Result<(), Error> {
+        let sent = self.shared.send(move |core, outbox, id, sequence, resolver: Resolver<()>| {
+            drop(resolver);
+            if !core.maps.contains_key(&id) {
+                return worker_post(&run_loop, move |worker, outbox| resize(worker, Err(missing_map()), outbox));
+            }
+            apply_command(
+                core,
+                id,
+                sequence,
+                outbox,
+                move |entry, _| entry.core.set_size(size),
+                move |_, resized, applied, _| {
+                    let result = resized.map(|()| applied);
+                    worker_post(&run_loop, move |worker, outbox| resize(worker, result, outbox));
+                },
+            );
+        });
+        sent.map(drop)
     }
 
     // MARK: - Style
@@ -615,6 +821,28 @@ enum StyleLoad {
     Json(String),
 }
 
+/// The render session bound to a map, as the runtime's thread knows it.
+pub(crate) struct SessionLink {
+    id: SessionId,
+    run_loop: RunLoopHandle,
+}
+
+/// A still image on its way: the map's callback leaves its outcome for the
+/// next flush.
+struct PendingStill {
+    resolver: Resolver<()>,
+    outcome: Rc<RefCell<Option<Result<(), Error>>>>,
+}
+
+/// A still image's error as the handle reports it: a load failure is the
+/// library's, whatever the core called it.
+fn still_image_error(error: Error) -> Error {
+    match error.kind {
+        ErrorKind::InvalidState => error,
+        _ => Error::native(error.message),
+    }
+}
+
 /// A map on the runtime's thread.
 pub(crate) struct MapEntry {
     pub(crate) core: mln_map::Map,
@@ -624,6 +852,9 @@ pub(crate) struct MapEntry {
     applied: u64,
     /// The completion of the style load in progress.
     pending_style: Option<Resolver<Applied>>,
+    pending_still: Option<PendingStill>,
+    /// The render session that draws the map.
+    session: Option<SessionLink>,
     /// Whether a flush of the map's events is on its way.
     flush_scheduled: Arc<AtomicBool>,
 }
@@ -668,7 +899,16 @@ pub(crate) fn create(
     published.applied.store(1, Ordering::SeqCst);
     core.maps.insert(
         id,
-        MapEntry { core: map, published, mask: options.event_mask, applied: 1, pending_style: None, flush_scheduled },
+        MapEntry {
+            core: map,
+            published,
+            mask: options.event_mask,
+            applied: 1,
+            pending_style: None,
+            pending_still: None,
+            session: None,
+            flush_scheduled,
+        },
     );
     flush(core, id, outbox);
     if let Some(entry) = core.maps.get(&id) {
@@ -676,8 +916,34 @@ pub(crate) fn create(
     }
 }
 
-/// Runs a command on the map `id`: handles what came before it, applies it,
-/// publishes the map's state, and sends its events before its result.
+/// Runs a command on the map `id`, which must be there: handles what came
+/// before it, applies it, publishes the map's state, sends its events, and
+/// runs `after` with what `apply` returned. Then it tells the map's render
+/// session that the command ran, so `after` can send the session what the
+/// session must see first.
+fn apply_command<T>(
+    core: &mut RuntimeCore,
+    id: MapId,
+    sequence: u64,
+    outbox: &mut Outbox,
+    apply: impl FnOnce(&mut MapEntry, &mut Outbox) -> T,
+    after: impl FnOnce(&MapEntry, T, Applied, &mut Outbox),
+) {
+    flush(core, id, outbox);
+    let Some(entry) = core.maps.get_mut(&id) else { return };
+    let value = apply(entry, outbox);
+    entry.applied = sequence;
+    flush(core, id, outbox);
+    let Some(entry) = core.maps.get(&id) else { return };
+    after(entry, value, entry.applied(), outbox);
+    entry.published.applied.store(sequence, Ordering::SeqCst);
+    if let Some(link) = &entry.session {
+        worker_post(&link.run_loop, move |worker, outbox| worker.map_applied(sequence, outbox));
+    }
+}
+
+/// Runs a command on the map `id` and completes with what `finish` makes of
+/// its result and the map after it.
 fn run_command<T, R: 'static>(
     core: &mut RuntimeCore,
     id: MapId,
@@ -690,15 +956,9 @@ fn run_command<T, R: 'static>(
     if !core.maps.contains_key(&id) {
         return outbox.resolve(resolver, Err(missing_map()));
     }
-    flush(core, id, outbox);
-    let Some(entry) = core.maps.get_mut(&id) else { return };
-    let result = apply(entry, outbox);
-    entry.applied = sequence;
-    entry.published.applied.store(sequence, Ordering::SeqCst);
-    flush(core, id, outbox);
-    let Some(entry) = core.maps.get(&id) else { return };
-    let result = result.map(|value| finish(value, entry));
-    outbox.resolve(resolver, result);
+    apply_command(core, id, sequence, outbox, apply, move |entry, result, _, outbox| {
+        outbox.resolve(resolver, result.map(|value| finish(value, entry)));
+    });
 }
 
 /// Starts a style load on the map `id`. Its completion waits for the load's
@@ -714,20 +974,25 @@ fn load_style(
     if !core.maps.contains_key(&id) {
         return outbox.resolve(resolver, Err(missing_map()));
     }
-    // The outcomes of earlier loads go to their own completions first.
-    flush(core, id, outbox);
-    let Some(entry) = core.maps.get_mut(&id) else { return };
-    if let Some(previous) = entry.pending_style.replace(resolver) {
-        outbox.resolve(previous, Err(Error::cancelled("another style load started")));
-    }
-    let style = entry.core.get_style_mut();
-    match load {
-        StyleLoad::Url(url) => style.load_url(&url),
-        StyleLoad::Json(json) => style.load_json(&json),
-    }
-    entry.applied = sequence;
-    entry.published.applied.store(sequence, Ordering::SeqCst);
-    flush(core, id, outbox);
+    // The flush before the load sends the outcomes of earlier loads to their
+    // own completions.
+    apply_command(
+        core,
+        id,
+        sequence,
+        outbox,
+        move |entry, outbox| {
+            if let Some(previous) = entry.pending_style.replace(resolver) {
+                outbox.resolve(previous, Err(Error::cancelled("another style load started")));
+            }
+            let style = entry.core.get_style_mut();
+            match load {
+                StyleLoad::Url(url) => style.load_url(&url),
+                StyleLoad::Json(json) => style.load_json(&json),
+            }
+        },
+        |_, (), _, _| {},
+    );
 }
 
 /// Handles what the map's style and renderer reported, publishes its state,
@@ -748,6 +1013,8 @@ fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
         }
     }
     let style_outcome = style_outcome.map(|outcome| (outcome, entry.pending_style.take(), entry.applied()));
+    let still_outcome = entry.pending_still.as_ref().and_then(|pending| pending.outcome.borrow_mut().take());
+    let still = still_outcome.and_then(|outcome| Some((outcome, entry.pending_still.take()?.resolver)));
 
     let mask = entry.mask;
     let events: Vec<RuntimeEvent> = events
@@ -761,6 +1028,9 @@ fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     if let Some((outcome, Some(pending), applied)) = style_outcome {
         outbox.resolve(pending, outcome.map(|()| applied));
     }
+    if let Some((outcome, resolver)) = still {
+        outbox.resolve(resolver, outcome);
+    }
 }
 
 /// Lets go of the map `id`, after sending the events it still had.
@@ -770,6 +1040,9 @@ fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox:
         entry.core.set_waker(None);
         if let Some(pending) = entry.pending_style.take() {
             outbox.resolve(pending, Err(Error::cancelled("the map was released")));
+        }
+        if let Some(pending) = entry.pending_still.take() {
+            outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));
         }
         drop(entry);
     }

@@ -13,6 +13,7 @@ use mln_storage::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use mln_storage::resource::Kind;
 use mln_storage::resource_transform::{FinishedCallback, ResourceTransform};
 use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::sync::MutexExt;
 
@@ -68,6 +69,9 @@ pub(crate) struct RuntimeShared {
     thread: ThreadId,
     lifecycle: Mutex<Lifecycle>,
     next_map_id: AtomicU64,
+    /// The glyphs that the renderers of the runtime's maps parse, which they
+    /// share.
+    pub(crate) glyph_cache: Arc<GlyphCache>,
 }
 
 impl RuntimeShared {
@@ -169,7 +173,7 @@ impl Outbox {
         self.push(move || resolver.resolve(result));
     }
 
-    fn deliver(self) {
+    pub(crate) fn deliver(self) {
         for delivery in self.deliveries {
             delivery();
         }
@@ -314,6 +318,7 @@ impl Runtime {
                 thread: thread_id,
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
                 next_map_id: AtomicU64::new(1),
+                glyph_cache: Arc::default(),
             }),
         })
     }
@@ -367,7 +372,7 @@ impl Runtime {
         }
         let id = MapId(self.shared.next_map_id.fetch_add(1, Ordering::Relaxed));
         let published = Arc::new(Published::new(options.event_mask));
-        let map = Map::new(MapShared::new(id, self.shared.clone(), published.clone()));
+        let map = Map::new(MapShared::new(id, self.shared.clone(), &options.map, published.clone()));
         let (completion, resolver) = self.shared.completion();
         self.shared.post(move |core, outbox| crate::map::create(core, id, options, published, resolver, outbox));
         Ok((map, completion))

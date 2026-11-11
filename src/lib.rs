@@ -2,7 +2,7 @@
 //!
 //! The root holds the thread-safe handles of `mln_runtime`: a [`Runtime`]
 //! and its [`Map`]s, whose commands run on the runtime's thread and report
-//! through a [`Completion`].
+//! through a [`Completion`], and the [`RenderSession`]s that draw them.
 //!
 //! Every library crate of <https://github.com/louwers/mln-rs> is
 //! re-exported here under its crate name: `mln_rs::mln_map`,
@@ -30,9 +30,12 @@ pub use mln_map_types;
 pub use mln_math;
 pub use mln_renderer;
 pub use mln_runtime::{
-    self, Applied, CacheDatabaseOperation, CameraQuery, CommandGroup, Completion, Error, ErrorKind, EventHandler,
-    EventMask, EventSource, EventType, Map, MapId, MapOptions, MapSnapshot, Offline, ResourceProvider, ResourceRequest,
-    Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions,
+    self, Applied, AttachOptions, CacheDatabaseOperation, CameraQuery, CommandGroup, Completion, DemandMode, Driver,
+    Error, ErrorKind, EventHandler, EventMask, EventSource, EventType, FrameDemand, FrameDisposition, FrameResult, Map,
+    MapId, MapOptions, MapSnapshot, Offline, OffscreenDevice, OffscreenDeviceOptions, RenderSession,
+    RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry,
+    RenderedQueryOptions, ResourceProvider, ResourceRequest, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions,
+    STILL_IMAGE_TOKEN, SourceQueryOptions, Wake,
 };
 pub use mln_sprite;
 pub use mln_storage;
