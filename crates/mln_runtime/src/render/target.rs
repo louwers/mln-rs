@@ -15,7 +15,8 @@ pub enum Driver {
     /// A thread of the session's own.
     #[default]
     CoreWorker,
-    /// The host's graphics thread.
+    /// The host's graphics thread, which runs the work through the session's
+    /// [`DriverWork`](crate::DriverWork).
     CallerThread,
 }
 
@@ -28,8 +29,12 @@ pub struct AttachOptions {
     /// and not again until a drain takes them.
     pub frame_wake: Option<Wake>,
     /// Runs when the map has something new to draw, and not again until the
-    /// host demands a frame.
+    /// host demands a frame, or while the session has no target.
     pub redraw_wake: Option<Wake>,
+    /// Runs when a [`Driver::CallerThread`] session has work for
+    /// [`DriverWork::service`](crate::DriverWork::service), and not again
+    /// until a service starts.
+    pub driver_work_wake: Option<Wake>,
 }
 
 impl std::fmt::Debug for AttachOptions {
@@ -38,18 +43,109 @@ impl std::fmt::Debug for AttachOptions {
             .field("driver", &self.driver)
             .field("frame_wake", &self.frame_wake.is_some())
             .field("redraw_wake", &self.redraw_wake.is_some())
+            .field("driver_work_wake", &self.driver_work_wake.is_some())
             .finish()
     }
 }
 
 /// What a render session renders into.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum RenderTarget {
     /// An image of `size` logical pixels, rendered at the map's pixel ratio,
     /// whose pixels [`read_texture`](crate::RenderSession::read_texture)
     /// reads. It renders on `device`, or on a device of its own when that is
     /// `None`.
     Offscreen { size: Size, device: Option<OffscreenDevice> },
+    /// A surface of `size` logical pixels, rendered at the map's pixel ratio,
+    /// that shows each frame that the session renders. It renders on
+    /// `device`, or, for a [`Surface::window`], on a device of its own when
+    /// that is `None`.
+    ///
+    /// [`release_target`](crate::RenderSession::release_target) lets go of
+    /// the surface, and [`set_surface`](crate::RenderSession::set_surface)
+    /// gives the session another one.
+    Surface { size: Size, surface: Surface, device: Option<HostDevice> },
+}
+
+/// What a surface session presents to.
+pub struct Surface {
+    pub(crate) kind: SurfaceKind,
+}
+
+pub(crate) enum SurfaceKind {
+    #[cfg(not(target_family = "wasm"))]
+    Window(Arc<dyn wgpu::DisplayAndWindowHandle>),
+    #[cfg(not(target_family = "wasm"))]
+    Wgpu(wgpu::Surface<'static>),
+}
+
+impl Surface {
+    /// Whether the session makes the surface on a window.
+    pub(crate) fn is_window(&self) -> bool {
+        match self.kind {
+            #[cfg(not(target_family = "wasm"))]
+            SurfaceKind::Window(_) => true,
+            #[cfg(not(target_family = "wasm"))]
+            SurfaceKind::Wgpu(_) => false,
+        }
+    }
+}
+
+impl std::fmt::Debug for Surface {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Surface").finish_non_exhaustive()
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl Surface {
+    /// A window, which the session makes its surface on with the instance of
+    /// its device. The window must outlive the session's use of it: until a
+    /// [`set_surface`](crate::RenderSession::set_surface) or
+    /// [`release_target`](crate::RenderSession::release_target) replaces it,
+    /// or the session detaches or is abandoned.
+    pub fn window(window: impl wgpu::DisplayAndWindowHandle + 'static) -> Surface {
+        Surface { kind: SurfaceKind::Window(Arc::new(window)) }
+    }
+
+    /// A surface that the host made with the instance of the [`HostDevice`]
+    /// that the session renders on.
+    pub fn wgpu(surface: wgpu::Surface<'static>) -> Surface {
+        Surface { kind: SurfaceKind::Wgpu(surface) }
+    }
+}
+
+/// A GPU device of the host's, which a surface session renders on.
+#[derive(Clone)]
+pub struct HostDevice {
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) instance: wgpu::Instance,
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) device: wgpu::Device,
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) queue: wgpu::Queue,
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) format: wgpu::TextureFormat,
+}
+
+impl std::fmt::Debug for HostDevice {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HostDevice").finish_non_exhaustive()
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+impl HostDevice {
+    /// The device and queue that `instance` made. The session configures its
+    /// surfaces with `format`, which each surface must support.
+    pub fn new(
+        instance: wgpu::Instance,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> HostDevice {
+        HostDevice { instance, device, queue, format }
+    }
 }
 
 /// How to create an [`OffscreenDevice`].

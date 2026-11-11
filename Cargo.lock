@@ -2409,6 +2409,7 @@ dependencies = [
  "mln-rs-webgpu",
  "pollster",
  "wgpu",
+ "winit",
 ]
 
 [[package]]

@@ -3,7 +3,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use mln_actor::RunLoopHandle;
 use mln_map::{
@@ -19,7 +19,9 @@ use mln_util::sync::MutexExt;
 use crate::completion::{Completion, Resolver};
 use crate::event::{EventMask, EventSource, RuntimeEvent, RuntimeEventKind};
 use crate::feature_state::{FeatureState, FeatureStateSelector, FeatureStateStore};
-use crate::render::{AttachOptions, RenderSession, RenderTarget, SessionId, Worker, worker_post};
+use crate::render::{
+    Abandoner, AttachOptions, RenderSession, RenderTarget, SessionId, SessionShared, Worker, worker_post,
+};
 use crate::runtime::{Outbox, Runtime, RuntimeCore, RuntimeShared, post};
 
 /// The ID of a map, unique within its runtime.
@@ -119,7 +121,7 @@ pub(crate) struct MapShared {
     pixel_ratio: f32,
     /// The render session attached to the map, from its attach until its
     /// detach completes.
-    session: Mutex<Option<SessionId>>,
+    session: Mutex<Option<SessionClaim>>,
     /// The sequence number of the last command sent. It stays locked while
     /// a command is numbered and posted, so the runtime's thread runs the
     /// map's commands in the order of their numbers.
@@ -319,12 +321,28 @@ impl Map {
     }
 
     /// Releases the map. The completion reports when the runtime has let go
-    /// of it. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
-    /// when the map was released already, or while a render session is
-    /// attached to it.
+    /// of it. A render session that was released, but hasn't let go of the
+    /// map yet, is abandoned, as
+    /// [`RenderSession::abandon`](crate::RenderSession::abandon) does: a
+    /// caller-driven one that the host stopped servicing would otherwise
+    /// hold the map for good.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// map was released already, or while a render session that wasn't
+    /// released is attached to it.
     pub fn release(&self) -> Result<Completion<()>, Error> {
-        if self.shared.session.lock_unpoisoned().is_some() {
-            return Err(Error::invalid_state("the map still has an attached render session"));
+        let claimed = self.shared.session.lock_unpoisoned().as_ref().map(|claim| (claim.id, claim.session.clone()));
+        if let Some((id, session)) = claimed {
+            match session.upgrade() {
+                // Abandoned now, or ended already and about to let go.
+                Some(session) if session.is_released() => {
+                    let _ = session.abandon(Abandoner::Library);
+                }
+                Some(_) => return Err(Error::invalid_state("the map still has an attached render session")),
+                // The session is gone without letting go of the map.
+                None => {}
+            }
+            self.release_session_claim(id);
         }
         let (completion, resolver) = self.shared.runtime.completion();
         self.shared.release(Some(resolver))?;
@@ -410,18 +428,26 @@ impl Map {
 
     // MARK: - Rendering
 
-    /// Attaches a render session, which renders the map into `target` on a
-    /// thread of its own, and sizes the map to the target. A map has one
-    /// session at a time. The session takes frame demands and other work at
-    /// once, and runs them once the completion reports it ready.
+    /// Attaches a render session, which renders the map into `target`, and
+    /// sizes the map to the target. A map has one session at a time. The
+    /// session takes frame demands and other work at once, and runs them
+    /// once the completion reports it ready.
+    ///
+    /// The session renders on a thread of its own, or, with
+    /// [`Driver::CallerThread`](crate::Driver::CallerThread), on the thread
+    /// that takes its [`DriverWork`](crate::DriverWork): the attach completes
+    /// in that thread's first service.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
-    /// map already has a session or was released,
+    /// map already has a session or was released, and with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
-    /// target, and [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
-    /// driver that the target can't use. The completion fails as
+    /// target, or a [`Surface::wgpu`](crate::Surface::wgpu) without the
+    /// host's device. The completion fails as
     /// [`OffscreenDevice::new`](crate::OffscreenDevice::new) does when the
-    /// session has to create its device and can't.
+    /// session has to create its device and can't, with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no GPU can present
+    /// to a window, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// the window has no surface to give.
     pub fn attach(
         &self,
         target: RenderTarget,
@@ -481,22 +507,22 @@ impl Map {
     }
 
     /// Reserves the map for the session `id`.
-    pub(crate) fn claim_session(&self, id: SessionId) -> Result<(), Error> {
-        let mut session = self.shared.session.lock_unpoisoned();
+    pub(crate) fn claim_session(&self, id: SessionId, session: Weak<SessionShared>) -> Result<(), Error> {
+        let mut claim = self.shared.session.lock_unpoisoned();
         if self.shared.released.load(Ordering::SeqCst) {
             return Err(released());
         }
-        if session.is_some() {
+        if claim.is_some() {
             return Err(Error::invalid_state("the map already has an attached render session"));
         }
-        *session = Some(id);
+        *claim = Some(SessionClaim { id, session });
         Ok(())
     }
 
     /// Lets another session attach once the session `id` is gone.
     pub(crate) fn release_session_claim(&self, id: SessionId) {
         let mut session = self.shared.session.lock_unpoisoned();
-        if *session == Some(id) {
+        if session.as_ref().is_some_and(|claim| claim.id == id) {
             *session = None;
         }
     }
@@ -924,6 +950,12 @@ impl Drop for CommandGroup {
 enum StyleLoad {
     Url(String),
     Json(String),
+}
+
+/// The render session that a map is reserved for.
+struct SessionClaim {
+    id: SessionId,
+    session: Weak<SessionShared>,
 }
 
 /// The render session bound to a map, as the runtime's thread knows it.

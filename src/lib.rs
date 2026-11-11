@@ -31,11 +31,11 @@ pub use mln_math;
 pub use mln_renderer;
 pub use mln_runtime::{
     self, Applied, AttachOptions, CacheDatabaseOperation, CameraQuery, CommandGroup, Completion, DemandMode, Driver,
-    Error, ErrorKind, EventHandler, EventMask, EventSource, EventType, FrameDemand, FrameDisposition, FrameResult, Map,
-    MapId, MapOptions, MapSnapshot, Offline, OffscreenDevice, OffscreenDeviceOptions, RenderSession,
-    RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry,
-    RenderedQueryOptions, ResourceProvider, ResourceRequest, Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions,
-    STILL_IMAGE_TOKEN, SourceQueryOptions, Wake,
+    DriverWork, Error, ErrorKind, EventHandler, EventMask, EventSource, EventType, FrameDemand, FrameDisposition,
+    FrameResult, HostDevice, Map, MapId, MapOptions, MapSnapshot, Offline, OffscreenDevice, OffscreenDeviceOptions,
+    RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
+    RenderedQueryGeometry, RenderedQueryOptions, ResourceProvider, ResourceRequest, Runtime, RuntimeEvent,
+    RuntimeEventKind, RuntimeOptions, STILL_IMAGE_TOKEN, SourceQueryOptions, Surface, Wake,
 };
 pub use mln_sprite;
 pub use mln_storage;

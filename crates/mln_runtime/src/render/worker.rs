@@ -20,21 +20,41 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
-use mln_webgpu::HeadlessBackend;
+use mln_webgpu::{HeadlessBackend, SurfaceBackend};
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult, STILL_IMAGE_TOKEN};
-use super::session::{RenderSessionState, SessionShared, physical_size};
-use super::target::OffscreenDevice;
+use super::session::{RenderSessionState, SessionShared, WorkId, physical_size};
+use super::target::{Driver, HostDevice, OffscreenDevice, Surface};
 use crate::completion::Resolver;
 use crate::runtime::Outbox;
 
+/// Where a thread keeps the session whose work it runs.
+pub(crate) type Slot = Rc<RefCell<Option<Worker>>>;
+
 thread_local! {
-    /// The session whose thread this is.
-    static WORKER: RefCell<Option<Worker>> = const { RefCell::new(None) };
+    /// The session whose work this thread runs now.
+    static CURRENT: RefCell<Option<Slot>> = const { RefCell::new(None) };
 }
 
-/// Runs `task` on the session's thread whose loop is `run_loop`, after the
-/// work sent before.
+/// Makes a session the one whose work this thread runs, until it drops.
+pub(crate) struct Entered {
+    previous: Option<Slot>,
+}
+
+impl Drop for Entered {
+    fn drop(&mut self) {
+        CURRENT.with(|current| *current.borrow_mut() = self.previous.take());
+    }
+}
+
+/// Makes the session in `slot` the one whose work this thread runs, until
+/// the guard drops: a host thread runs several sessions' work in turn.
+pub(crate) fn enter(slot: &Slot) -> Entered {
+    Entered { previous: CURRENT.with(|current| current.borrow_mut().replace(slot.clone())) }
+}
+
+/// Runs `task` on the session whose loop is `run_loop`, after the work sent
+/// before.
 pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static) {
     run_loop.invoke(move || run(task));
 }
@@ -44,74 +64,105 @@ pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut Worker, &mut
 /// of its graphics objects first.
 fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
     let mut outbox = Outbox::default();
-    let unrun = WORKER.with(|cell| {
-        let mut slot = cell.borrow_mut();
-        let Some(worker) = slot.as_mut() else { return Some(task) };
-        let shared = worker.shared.clone();
-        let _gate = shared.gate.lock_unpoisoned();
-        if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
-            worker.tear_down(&mut outbox);
+    if let Some(slot) = CURRENT.with(|current| current.borrow().clone()) {
+        let mut slot = slot.borrow_mut();
+        if let Some(worker) = slot.as_mut() {
+            let shared = worker.shared.clone();
+            let _gate = shared.gate.lock_unpoisoned();
+            if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
+                worker.tear_down(&mut outbox);
+            }
+            task(worker, &mut outbox);
         }
-        task(worker, &mut outbox);
-        None
-    });
-    drop(unrun);
+    }
     outbox.deliver();
-}
-
-/// Lets go of the session as its thread ends.
-pub(crate) fn exit() {
-    let worker = WORKER.with(|cell| cell.borrow_mut().take());
-    drop(worker);
 }
 
 /// What a session's thread needs to build its renderer.
 pub(crate) struct Init {
-    pub(crate) device: Option<OffscreenDevice>,
+    pub(crate) target: TargetInit,
     pub(crate) size: Size,
     pub(crate) pixel_ratio: f32,
     pub(crate) glyph_cache: Arc<GlyphCache>,
-    pub(crate) attach: Resolver<()>,
 }
 
-/// Builds the session's renderer on its thread, before any other work.
-pub(crate) fn init(shared: &Arc<SessionShared>, init: Init) {
-    let shared = shared.clone();
-    shared.run_loop.clone().invoke(move || {
-        let mut outbox = Outbox::default();
-        let gate = shared.gate.lock_unpoisoned();
-        let worker = Worker::new(shared.clone(), init, &mut outbox);
-        WORKER.with(|cell| *cell.borrow_mut() = Some(worker));
-        drop(gate);
-        outbox.deliver();
-    });
+/// What a session renders into, before its thread builds it.
+pub(crate) enum TargetInit {
+    Offscreen(Option<OffscreenDevice>),
+    Surface { surface: Surface, device: Option<HostDevice> },
+}
+
+/// Builds the session's renderer into `slot`, on the thread that runs the
+/// session's work, before any other work.
+pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
+    let Some(Ok(init)) = shared.state.lock_unpoisoned().init.take().map(|init| init.downcast::<Init>()) else {
+        return;
+    };
+    let mut outbox = Outbox::default();
+    let gate = shared.gate.lock_unpoisoned();
+    let worker = Worker::new(shared.clone(), *init, &mut outbox);
+    *slot.borrow_mut() = Some(worker);
+    drop(gate);
+    outbox.deliver();
+}
+
+/// What a session draws into.
+enum Backend {
+    Offscreen(Rc<HeadlessBackend>),
+    Surface(Rc<SurfaceBackend>),
 }
 
 /// The renderer and what it draws into.
 struct Gfx {
     renderer: Renderer,
-    backend: Rc<HeadlessBackend>,
+    backend: Backend,
 }
 
 impl Gfx {
-    fn new(
-        device: Option<OffscreenDevice>,
-        size: Size,
-        pixel_ratio: f32,
-        glyph_cache: Arc<GlyphCache>,
-    ) -> Result<Gfx, Error> {
-        let device = match device {
-            Some(device) => device,
-            None => OffscreenDevice::new(Default::default())?,
+    fn new(target: TargetInit, size: Size, pixel_ratio: f32, glyph_cache: Arc<GlyphCache>) -> Result<Gfx, Error> {
+        let size = physical_size(size, pixel_ratio);
+        let (backend, renderer_backend): (Backend, Rc<dyn RendererBackend>) = match target {
+            TargetInit::Offscreen(device) => {
+                let device = match device {
+                    Some(device) => device,
+                    None => OffscreenDevice::new(Default::default())?,
+                };
+                let backend = Rc::new(offscreen_backend(device, size)?);
+                (Backend::Offscreen(backend.clone()), backend)
+            }
+            TargetInit::Surface { surface, device } => {
+                let backend = Rc::new(surface_backend(surface, device, size)?);
+                (Backend::Surface(backend.clone()), backend)
+            }
         };
-        let backend = Rc::new(offscreen_backend(device, physical_size(size, pixel_ratio))?);
-        let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
         let renderer = Renderer::with_glyph_cache(renderer_backend, pixel_ratio, None, glyph_cache);
         Ok(Gfx { renderer, backend })
     }
 
+    fn renderer_backend(&self) -> &dyn RendererBackend {
+        match &self.backend {
+            Backend::Offscreen(backend) => backend.get_renderer_backend(),
+            Backend::Surface(backend) => &**backend,
+        }
+    }
+
     fn scope(&self) -> BackendScope<'_> {
-        BackendScope::new(self.backend.get_renderer_backend(), ScopeType::Explicit)
+        BackendScope::new(self.renderer_backend(), ScopeType::Explicit)
+    }
+
+    /// Whether the target can take a frame now: a surface needs a texture.
+    fn ready_for_frame(&self) -> bool {
+        match &self.backend {
+            Backend::Offscreen(_) => true,
+            Backend::Surface(backend) => backend.has_surface() && backend.acquire_next_texture(),
+        }
+    }
+
+    fn resize(&self, size: Size) {
+        match &self.backend {
+            Backend::Offscreen(backend) => backend.set_size(size),
+            Backend::Surface(backend) => backend.set_framebuffer_size(size),
+        }
     }
 }
 
@@ -124,6 +175,74 @@ fn offscreen_backend(device: OffscreenDevice, size: Size) -> Result<HeadlessBack
 #[cfg(target_family = "wasm")]
 fn offscreen_backend(_: OffscreenDevice, _: Size) -> Result<HeadlessBackend, Error> {
     Err(Error::unsupported("the browser has no offscreen devices"))
+}
+
+/// A surface backend that presents to `surface`, of `size` pixels, on
+/// `device` or on a device of its own.
+#[cfg(not(target_family = "wasm"))]
+fn surface_backend(surface: Surface, device: Option<HostDevice>, size: Size) -> Result<SurfaceBackend, Error> {
+    use super::target::SurfaceKind;
+    match (surface.kind, device) {
+        (SurfaceKind::Window(window), None) => {
+            SurfaceBackend::new(move |instance| window_surface(instance, window), size, true)
+        }
+        (SurfaceKind::Wgpu(_), None) => {
+            Err(Error::invalid_argument("a surface that the host made needs the host's device"))
+        }
+        (kind, Some(host)) => {
+            let surface = match kind {
+                SurfaceKind::Window(window) => window_surface(&host.instance, window)?,
+                SurfaceKind::Wgpu(surface) => surface,
+            };
+            Ok(SurfaceBackend::from_host(
+                host.instance,
+                host.device,
+                host.queue,
+                surface,
+                host.format,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+                size,
+            ))
+        }
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn surface_backend(surface: Surface, _: Option<HostDevice>, _: Size) -> Result<SurfaceBackend, Error> {
+    match surface.kind {}
+}
+
+/// A surface on `window`, made with `instance`.
+#[cfg(not(target_family = "wasm"))]
+fn window_surface(
+    instance: &wgpu::Instance,
+    window: Arc<dyn wgpu::DisplayAndWindowHandle>,
+) -> Result<wgpu::Surface<'static>, Error> {
+    instance
+        .create_surface(window)
+        .map_err(|error| Error::native(format!("can't make a surface on the window: {error}")))
+}
+
+/// Has `backend` present to `surface` from now on, at `size` pixels.
+#[cfg(not(target_family = "wasm"))]
+fn replace_surface(backend: &SurfaceBackend, surface: Surface, size: Size) -> Result<(), Error> {
+    use super::target::SurfaceKind;
+    let surface = match surface.kind {
+        SurfaceKind::Window(window) => {
+            let instance = backend
+                .webgpu_backend()
+                .get_instance()
+                .ok_or_else(|| Error::native("the session's device has no instance to make a surface with"))?;
+            window_surface(&instance, window)?
+        }
+        SurfaceKind::Wgpu(surface) => surface,
+    };
+    backend.set_surface(surface, size)
+}
+
+#[cfg(target_family = "wasm")]
+fn replace_surface(_: &SurfaceBackend, surface: Surface, _: Size) -> Result<(), Error> {
+    match surface.kind {}
 }
 
 /// A host's frame demand on its way, and the last command sent before it.
@@ -144,8 +263,6 @@ pub(crate) struct Worker {
     /// `None` once the session failed to build it, or let go of it.
     gfx: Option<Gfx>,
     pixel_ratio: f32,
-    /// The attach's completion, until the map binds the session.
-    attach: Option<Resolver<()>>,
     reader: Option<UpdateReader>,
     /// The map's queue for the renderer's events.
     map_events: Option<RendererEvents>,
@@ -170,6 +287,8 @@ pub(crate) struct Worker {
     /// The sources of the last render.
     sources: Option<ImmutableVector<dyn source_impl::Impl>>,
     torn_down: bool,
+    /// Whether the session ended: its thread has no more work for it.
+    pub(crate) finished: bool,
 }
 
 fn target_lost() -> Error {
@@ -185,31 +304,34 @@ impl Worker {
                 worker.forward_events();
             });
         })));
-        let mut attach = Some(init.attach);
-        let gfx = match Gfx::new(init.device, init.size, init.pixel_ratio, init.glyph_cache) {
-            Ok(mut gfx) => {
+        // A session that a detach or abandon reached first needs no renderer.
+        let attaching = shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Attaching;
+        let built = attaching.then(|| Gfx::new(init.target, init.size, init.pixel_ratio, init.glyph_cache));
+        let gfx = match built {
+            Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
                 Some(gfx)
             }
-            Err(error) => {
-                {
+            Some(Err(error)) => {
+                let attach = {
                     let mut state = shared.state.lock_unpoisoned();
                     if state.lifecycle == RenderSessionState::Attaching {
                         state.lifecycle = RenderSessionState::Failed;
                     }
                     state.failure = Some(error.clone());
-                }
-                if let Some(attach) = attach.take() {
+                    state.attach.take()
+                };
+                if let Some(attach) = attach {
                     outbox.resolve(attach, Err(error));
                 }
                 None
             }
+            None => None,
         };
         Worker {
             shared,
             gfx,
             pixel_ratio: init.pixel_ratio,
-            attach,
             reader: None,
             map_events: None,
             renderer_events,
@@ -223,7 +345,13 @@ impl Worker {
             has_frame: false,
             sources: None,
             torn_down: false,
+            finished: false,
         }
+    }
+
+    /// The completion of the work `id`, unless an abandon completed it.
+    pub(crate) fn take_work<T: Send + 'static>(&self, id: WorkId) -> Option<Resolver<T>> {
+        self.shared.take_work(id)
     }
 
     // MARK: - The map
@@ -244,13 +372,14 @@ impl Worker {
         })));
         self.reader = Some(reader);
         self.map_events = Some(events);
-        {
+        let attach = {
             let mut state = self.shared.state.lock_unpoisoned();
             if state.lifecycle == RenderSessionState::Attaching {
                 state.lifecycle = RenderSessionState::Attached;
             }
-        }
-        if let Some(attach) = self.attach.take() {
+            state.attach.take()
+        };
+        if let Some(attach) = attach {
             outbox.resolve(attach, Ok(()));
         }
         self.pump(outbox);
@@ -258,15 +387,16 @@ impl Worker {
 
     /// The map couldn't bind the session.
     pub(crate) fn bind_failed(&mut self, error: Error, outbox: &mut Outbox) {
-        {
+        let attach = {
             let mut state = self.shared.state.lock_unpoisoned();
             if state.lifecycle == RenderSessionState::Attaching {
                 state.lifecycle = RenderSessionState::Failed;
                 state.failure = Some(error.clone());
             }
-        }
+            state.attach.take()
+        };
         self.gfx = None;
-        if let Some(attach) = self.attach.take() {
+        if let Some(attach) = attach {
             outbox.resolve(attach, Err(error));
         }
         self.end_demands(FrameDisposition::Failed, outbox);
@@ -282,17 +412,23 @@ impl Worker {
     fn on_update(&mut self, outbox: &mut Outbox) {
         self.update_scheduled.store(false, Ordering::SeqCst);
         if self.gfx.is_some() && self.latest().is_some_and(|update| update.generation != self.rendered_update) {
-            let wake = {
-                let mut state = self.shared.state.lock_unpoisoned();
-                let wake = state.redraw_armed && state.lifecycle == RenderSessionState::Attached;
-                state.redraw_armed &= !wake;
-                wake.then(|| self.shared.redraw_wake.clone()).flatten()
-            };
-            if let Some(wake) = wake {
-                outbox.push(move || wake());
-            }
+            self.wake_for_redraw(outbox);
         }
         self.pump(outbox);
+    }
+
+    /// Tells the host that the map has something new to draw, unless it was
+    /// told since its last demand, or the session has no target.
+    fn wake_for_redraw(&self, outbox: &mut Outbox) {
+        let wake = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
+            state.redraw_armed &= !wake;
+            wake.then(|| self.shared.redraw_wake.clone()).flatten()
+        };
+        if let Some(wake) = wake {
+            outbox.push(move || wake());
+        }
     }
 
     fn latest(&self) -> Option<Update> {
@@ -322,6 +458,10 @@ impl Worker {
     /// Takes a host's demand, which supersedes the demands with its mode on
     /// their way unless it forces a frame.
     pub(crate) fn demand(&mut self, demand: FrameDemand, sequence: u64, outbox: &mut Outbox) {
+        if self.torn_down {
+            let result = FrameResult::unrendered(demand.token, FrameDisposition::TargetNotReady, 0);
+            return self.publish(result, outbox);
+        }
         if demand.mode != DemandMode::Force {
             let latest = self.latest_generation();
             let (superseded, kept): (Vec<_>, Vec<_>) =
@@ -380,10 +520,13 @@ impl Worker {
         }
     }
 
-    /// Renders an update that asks for a still image, once for each update.
+    /// Renders an update that asks for a still image, once for each update
+    /// that reaches a target that can take the frame.
     fn render_still_image(&mut self, outbox: &mut Outbox) {
         let Some(update) = self.latest() else { return };
-        if self.gfx.is_none() || !update.parameters.still_image_request || update.generation <= self.still_attempted {
+        let Some(gfx) = self.gfx.as_ref() else { return };
+        if !update.parameters.still_image_request || update.generation <= self.still_attempted || !gfx.ready_for_frame()
+        {
             return;
         }
         self.still_attempted = update.generation;
@@ -395,12 +538,22 @@ impl Worker {
     }
 
     /// Renders `update` for the demand `token`, and publishes its result. A
-    /// still map draws no frame until everything that it shows has loaded.
+    /// still map draws no frame until everything that it shows has loaded,
+    /// and a surface without a texture to render into takes no frame.
     fn render(&mut self, token: u64, update: Update, outbox: &mut Outbox) {
         let Some(gfx) = self.gfx.as_mut() else { return };
+        if !gfx.ready_for_frame() {
+            let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
+            return self.publish(result, outbox);
+        }
         {
-            let backend = gfx.backend.clone();
-            let _scope = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
+            let _scope = BackendScope::new(
+                match &gfx.backend {
+                    Backend::Offscreen(backend) => backend.get_renderer_backend(),
+                    Backend::Surface(backend) => &**backend,
+                },
+                ScopeType::Explicit,
+            );
             gfx.renderer.render(&update.parameters);
         }
         self.rendered_update = update.generation;
@@ -477,12 +630,54 @@ impl Worker {
     /// Resizes the target, after the map resized.
     pub(crate) fn resize(&mut self, size: Size) -> Result<(), Error> {
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        gfx.backend.set_size(physical_size(size, self.pixel_ratio));
+        gfx.resize(physical_size(size, self.pixel_ratio));
+        self.target_changed(size, None);
+        Ok(())
+    }
+
+    /// The target changed to `size`, and has a surface again when
+    /// `has_target` says so.
+    fn target_changed(&mut self, size: Size, has_target: Option<bool>) {
         self.has_frame = false;
         let mut state = self.shared.state.lock_unpoisoned();
         state.size = size;
         state.generation += 1;
+        if let Some(has_target) = has_target {
+            state.has_target = has_target;
+        }
+    }
+
+    /// Lets go of a surface session's surface, and ends the demands on their
+    /// way.
+    pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
+        let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
+        if let Backend::Surface(backend) = &gfx.backend {
+            backend.release_surface();
+        }
+        self.has_frame = false;
+        self.shared.state.lock_unpoisoned().has_target = false;
+        self.end_demands(FrameDisposition::TargetNotReady, outbox);
         Ok(())
+    }
+
+    /// Presents to `surface` from now on, at `size` logical pixels, after
+    /// the map resized. On failure the session keeps the surface that it
+    /// had, if any, at the new size.
+    pub(crate) fn set_surface(&mut self, size: Size, surface: Surface, outbox: &mut Outbox) -> Result<(), Error> {
+        let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
+        let Backend::Surface(backend) = &gfx.backend else {
+            return Err(Error::unsupported("an offscreen session keeps its target"));
+        };
+        let physical = physical_size(size, self.pixel_ratio);
+        let replaced = replace_surface(backend, surface, physical);
+        if replaced.is_err() {
+            backend.set_framebuffer_size(physical);
+        }
+        self.target_changed(size, replaced.is_ok().then_some(true));
+        if replaced.is_ok() {
+            self.wake_for_redraw(outbox);
+        }
+        replaced
     }
 
     pub(crate) fn reduce_memory_use(&mut self) -> Result<(), Error> {
@@ -493,15 +688,7 @@ impl Worker {
     pub(crate) fn clear_data(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
         self.renderer()?.clear_data();
         self.rendered_update = 0;
-        let wake = {
-            let mut state = self.shared.state.lock_unpoisoned();
-            let wake = state.redraw_armed && state.lifecycle == RenderSessionState::Attached;
-            state.redraw_armed &= !wake;
-            wake.then(|| self.shared.redraw_wake.clone()).flatten()
-        };
-        if let Some(wake) = wake {
-            outbox.push(move || wake());
-        }
+        self.wake_for_redraw(outbox);
         Ok(())
     }
 
@@ -512,13 +699,16 @@ impl Worker {
 
     pub(crate) fn read_texture(&mut self) -> Result<PremultipliedImage, Error> {
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
+        let Backend::Offscreen(backend) = &gfx.backend else {
+            return Err(Error::unsupported("a surface session can't read its frames back"));
+        };
         if !self.has_frame {
             return Err(Error::invalid_state(
                 "the render session hasn't rendered a frame since it attached or resized",
             ));
         }
         let _scope = gfx.scope();
-        Ok(gfx.backend.read_still_image())
+        Ok(backend.read_still_image())
     }
 
     /// Runs `read` on the data of the clustered GeoJSON source `source_id`
@@ -562,7 +752,7 @@ impl Worker {
 
     /// Lets go of the map's updates and the graphics objects, and ends the
     /// demands on their way.
-    fn tear_down(&mut self, outbox: &mut Outbox) {
+    pub(crate) fn tear_down(&mut self, outbox: &mut Outbox) {
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
         self.torn_down = true;
         if let Some(reader) = self.reader.take() {
@@ -574,8 +764,16 @@ impl Worker {
         self.map_events = None;
         self.sources = None;
         self.has_frame = false;
-        if let Some(attach) = self.attach.take() {
-            outbox.resolve(attach, Err(Error::cancelled("the render session ended before it attached")));
+        let attach = self.shared.state.lock_unpoisoned().attach.take();
+        if let Some(attach) = attach {
+            outbox.resolve(attach, Err(Error::target_lost("the render session ended before it attached")));
+        }
+    }
+
+    /// Lets go of the session on its thread, which runs no more of its work.
+    pub(crate) fn close(mut self, outbox: &mut Outbox) {
+        if !self.torn_down {
+            self.tear_down(outbox);
         }
     }
 
@@ -600,15 +798,16 @@ impl Worker {
             if state.lifecycle == RenderSessionState::Detaching {
                 state.lifecycle = RenderSessionState::Detached;
             }
-            (std::mem::take(&mut state.detach_waiters), state.map.take())
+            (state.take_waiters(), state.map.take())
         };
         if let Some(map) = &map {
             map.release_session_claim(self.shared.id);
         }
-        for waiter in waiters {
-            outbox.resolve(waiter, Ok(()));
-        }
+        outbox.push(move || waiters.settle(Ok(()), target_lost));
         outbox.push(move || drop(map));
-        self.shared.run_loop.stop();
+        self.finished = true;
+        if self.shared.driver == Driver::CoreWorker {
+            self.shared.run_loop.stop();
+        }
     }
 }

@@ -427,14 +427,12 @@ fn attaching_sizes_the_map_and_holds_it() {
 }
 
 #[test]
-fn attach_rejects_what_an_offscreen_session_cannot_take() {
+fn attach_rejects_an_empty_target() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let empty = map.attach(offscreen(Size::new(0, 64)), AttachOptions::default()).unwrap_err();
     assert_eq!(ErrorKind::InvalidArgument, empty.kind);
-    let options = AttachOptions { driver: Driver::CallerThread, ..AttachOptions::default() };
-    assert_eq!(ErrorKind::Unsupported, map.attach(offscreen(SIZE), options).unwrap_err().kind);
-    // Neither left the map with a session.
+    // It didn't leave the map with a session.
     drop(attach(&map));
 }
 

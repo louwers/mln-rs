@@ -8,7 +8,8 @@
 //! publishes a [`MapSnapshot`] after each command, which any thread reads
 //! without waiting, and the events of the runtime and its maps reach one
 //! handler in batches. A [`RenderSession`] that [`Map::attach`] creates
-//! draws a map's frames on a thread of its own.
+//! draws a map's frames offscreen or onto a surface, on a thread of its own,
+//! or on the host's graphics thread through its [`DriverWork`].
 //!
 //! The synchronous, single-thread core that these handles drive is
 //! `mln_map`'s; [`Map::with_core`] runs a closure on it.
@@ -31,9 +32,9 @@ pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
-    AttachOptions, DemandMode, Driver, FrameDemand, FrameDisposition, FrameResult, OffscreenDevice,
-    OffscreenDeviceOptions, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState,
-    RenderTarget, RenderedQueryGeometry, STILL_IMAGE_TOKEN, Wake,
+    AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, HostDevice,
+    OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot,
+    RenderSessionState, RenderTarget, RenderedQueryGeometry, STILL_IMAGE_TOKEN, Surface, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest};
 pub use runtime::{Runtime, RuntimeOptions};

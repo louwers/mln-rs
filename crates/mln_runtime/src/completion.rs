@@ -2,7 +2,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::task::{Context, Poll, Waker};
 use std::thread::ThreadId;
 
@@ -21,12 +21,30 @@ enum State<T> {
     Taken,
 }
 
+/// The thread that resolves a completion, where waiting for it would never
+/// end.
+pub(crate) enum Home {
+    Anywhere,
+    Thread(ThreadId),
+    /// The thread that the cell names once it is set.
+    Later(Arc<OnceLock<ThreadId>>),
+}
+
+impl Home {
+    fn is_current(&self) -> bool {
+        let current = std::thread::current().id();
+        match self {
+            Home::Anywhere => false,
+            Home::Thread(thread) => *thread == current,
+            Home::Later(thread) => thread.get() == Some(&current),
+        }
+    }
+}
+
 struct Shared<T> {
     state: Mutex<State<T>>,
     ready: Condvar,
-    /// The thread that resolves the completion, where waiting for it would
-    /// never end.
-    home: Option<ThreadId>,
+    home: Home,
 }
 
 /// The result of a command, which arrives once the command has run.
@@ -50,6 +68,11 @@ pub(crate) struct Resolver<T> {
 impl<T: Send + 'static> Completion<T> {
     /// A completion that a resolver on the thread `home` resolves.
     pub(crate) fn new(home: Option<ThreadId>) -> (Completion<T>, Resolver<T>) {
+        Completion::at(home.map_or(Home::Anywhere, Home::Thread))
+    }
+
+    /// A completion that a resolver on the thread `home` resolves.
+    pub(crate) fn at(home: Home) -> (Completion<T>, Resolver<T>) {
         let shared = Arc::new(Shared {
             state: Mutex::new(State::Pending { waker: None, callback: None }),
             ready: Condvar::new(),
@@ -72,8 +95,9 @@ impl<T: Send + 'static> Completion<T> {
 
     /// Blocks until the result arrives, and returns it.
     ///
-    /// The runtime's own thread resolves the completion, so a wait there
-    /// would never end: it fails with
+    /// A wait on the thread that resolves the completion would never end,
+    /// such as the runtime's own thread, or the thread that runs a render
+    /// session's [`DriverWork`](crate::DriverWork): it fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) instead,
     /// unless the result is already there.
     pub fn wait(self) -> Result<T, Error> {
@@ -83,9 +107,9 @@ impl<T: Send + 'static> Completion<T> {
                 State::Ready(result) => return result,
                 pending @ State::Pending { .. } => {
                     *state = pending;
-                    if self.shared.home == Some(std::thread::current().id()) {
+                    if self.shared.home.is_current() {
                         return Err(Error::invalid_state(
-                            "a completion can't be waited for on the runtime's thread, which resolves it",
+                            "a completion can't be waited for on the thread that resolves it",
                         ));
                     }
                     state = self.shared.ready.wait_unpoisoned(state);
