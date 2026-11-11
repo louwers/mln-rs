@@ -8,64 +8,32 @@ inputs:
     description: Also install the Khronos validation layer (VK_LAYER_KHRONOS_validation).
     default: 'false'
 
-# The packages are downloaded once per runner image and installed from the
-# Actions cache after that, as the Ubuntu archive is at times out of reach
-# for minutes. A download that fails is tried again after a pause.
+# The packages are the Ubuntu ones that packages.sha256 pins, and
+# validation-layer.sha256 for the validation layer, downloaded from a release
+# of this repository (mirror.sh uploads them) rather than from the Ubuntu
+# archive, which is at times out of reach of the runners for hours. The
+# runner image has everything they depend on, so dpkg installs them without
+# apt.
 runs:
   using: composite
   steps:
-    - id: apt
-      shell: bash
+    - shell: bash
       env:
+        RELEASE: https://github.com/louwers/mln-rs/releases/download/ci-lavapipe
         VALIDATION_LAYER: ${{ inputs.validation-layer }}
       run: |
-        packages="libvulkan1 mesa-vulkan-drivers"
+        pins=("$GITHUB_ACTION_PATH/packages.sha256")
         if [[ "$VALIDATION_LAYER" == true ]]; then
-          packages+=" vulkan-validationlayers"
+          pins+=("$GITHUB_ACTION_PATH/validation-layer.sha256")
         fi
-        echo "packages=$packages" >> "$GITHUB_OUTPUT"
-        echo "key=apt-${packages// /+}-$ImageOS-$ImageVersion-$RUNNER_ARCH" >> "$GITHUB_OUTPUT"
-
-    - id: cache
-      uses: actions/cache@v6
-      with:
-        path: ~/.cache/lavapipe
-        key: ${{ steps.apt.outputs.key }}
-
-    - if: steps.cache.outputs.cache-hit != 'true'
-      shell: bash
-      env:
-        PACKAGES: ${{ steps.apt.outputs.packages }}
-      run: |
-        archives="$RUNNER_TEMP/lavapipe-archives"
-        mkdir -p "$archives/partial" ~/.cache/lavapipe
-        for attempt in 1 2 3 4 5; do
-          # `apt-get update` succeeds without the indexes it can't reach, so
-          # the download is what fails.
-          # shellcheck disable=SC2086
-          if sudo apt-get update &&
-            sudo apt-get install -y --no-install-recommends --download-only \
-              -o Dir::Cache::archives="$archives" $PACKAGES; then
-            break
-          fi
-          if ((attempt == 5)); then
-            exit 1
-          fi
-          echo "::warning::Downloading $PACKAGES failed; trying again in $((attempt * 60)) s"
-          sleep $((attempt * 60))
-        done
-        # The image can have some of them already, which aren't downloaded.
-        shopt -s nullglob
-        debs=("$archives"/*.deb)
-        if ((${#debs[@]})); then
-          cp "${debs[@]}" ~/.cache/lavapipe/
-        fi
-
-    - shell: bash
-      run: |
-        shopt -s nullglob
-        debs=(~/.cache/lavapipe/*.deb)
-        if ((${#debs[@]})); then
-          sudo dpkg -i "${debs[@]}"
-        fi
+        dir="$RUNNER_TEMP/lavapipe"
+        mkdir -p "$dir"
+        debs=()
+        while read -r sha256 path; do
+          deb="$dir/${path##*/}"
+          curl -fsSL --retry 5 --retry-all-errors --max-time 120 -o "$deb" "$RELEASE/${path##*/}"
+          echo "$sha256  $deb" | sha256sum --check --quiet
+          debs+=("$deb")
+        done < <(cat "${pins[@]}")
+        sudo dpkg --install "${debs[@]}"
         echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"

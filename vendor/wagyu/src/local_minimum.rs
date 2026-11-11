@@ -2,6 +2,8 @@
 // `std::deque<local_minimum>` is a Vec; the left and right bounds are in the
 // bound arena.
 
+use std::cmp::Ordering;
+
 use crate::bound::BoundPtr;
 
 /// `local_minimum<int32_t>`.
@@ -13,10 +15,8 @@ pub(crate) struct LocalMinimum {
     pub minimum_has_horizontal: bool,
 }
 
-/// `local_minimum_sorter`.
-pub(crate) fn local_minimum_sorter(lm1: &LocalMinimum, lm2: &LocalMinimum) -> bool {
-    if lm2.y == lm1.y {
-        return lm2.minimum_has_horizontal != lm1.minimum_has_horizontal && lm1.minimum_has_horizontal;
-    }
-    lm2.y < lm1.y
+/// `local_minimum_sorter`: by descending y, then the minima with a
+/// horizontal edge first.
+pub(crate) fn local_minimum_sorter(lm1: &LocalMinimum, lm2: &LocalMinimum) -> Ordering {
+    lm2.y.cmp(&lm1.y).then(lm2.minimum_has_horizontal.cmp(&lm1.minimum_has_horizontal))
 }

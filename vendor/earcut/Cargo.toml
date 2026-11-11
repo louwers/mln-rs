@@ -17,7 +17,6 @@ doctest = false
 
 [dependencies]
 geometry.workspace = true
-libstdcxx.workspace = true
 
 # Port of earcut.hpp/test/test.cpp over its fixtures, read in place.
 [[test]]

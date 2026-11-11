@@ -44,14 +44,10 @@ fn property_value(property: Property<'_>) -> Value {
     }
 }
 
-/// `PointConverter`: `static_cast<int16_t>(std::round(coord * scale))`, the
-/// cast as clang compiles it on x86-64 (out of range: the low 16 bits of
-/// cvttsd2si).
+/// `PointConverter`: `static_cast<int16_t>(std::round(coord * scale))`,
+/// saturating out of range.
 fn convert_point(scale: f64, coord: &Coordinate) -> GeometryCoordinate {
-    GeometryCoordinate::new(
-        libstdcxx::cvt::f64_to_i16((f64::from(coord.x) * scale).round()),
-        libstdcxx::cvt::f64_to_i16((f64::from(coord.y) * scale).round()),
-    )
+    GeometryCoordinate::new((f64::from(coord.x) * scale).round() as i16, (f64::from(coord.y) * scale).round() as i16)
 }
 
 fn convert_coords(scale: f64, coords: &[Coordinate]) -> GeometryCoordinates {

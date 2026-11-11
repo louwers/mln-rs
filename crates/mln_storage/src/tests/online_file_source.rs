@@ -29,8 +29,15 @@ use crate::response::{Error, Reason, Response};
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
 const CONNECTION_TIMEOUT: f64 = 0.0;
 
+/// An online file source whose thread has set up its HTTP transport, so that
+/// the tests that time their requests don't count that setup.
 fn online_file_source() -> Rc<dyn FileSource> {
-    Rc::new(OnlineFileSource::new(&ResourceOptions::default_options(), &ClientOptions::default()))
+    let fs: Rc<dyn FileSource> =
+        Rc::new(OnlineFileSource::new(&ResourceOptions::default_options(), &ClientOptions::default()));
+    // `pause` returns once the thread runs.
+    fs.pause();
+    fs.resume();
+    fs
 }
 
 fn data(res: &Response) -> &[u8] {

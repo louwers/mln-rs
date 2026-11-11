@@ -4,9 +4,10 @@
 // src/mln/shaders/vulkan/*.cpp are below.
 //
 // The tables describe the vertex layout the port's renderer produces, which
-// is C++'s with MLN_USE_SYMBOL_INSTANCING and MLN_USE_FILL_EXTRUSION_INSTANCING
-// off: the fill-extrusion and symbol tables are the non-instanced ones, plus
-// the attributes the port adds (`normal2d`, `tex_origin`).
+// is C++'s with MLN_USE_FILL_EXTRUSION_INSTANCING on and
+// MLN_USE_SYMBOL_INSTANCING off: the symbol tables are the non-instanced ones,
+// plus the attribute the port adds (`tex_origin`), and the instanced fill
+// extrusions' have the next outline vertex as instance attributes of its own.
 
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::*;
@@ -32,9 +33,10 @@ pub struct GlslShaderSource {
 }
 
 /// `shaders::AttributeInfo` (include/mln/shaders/vulkan/shader_program.hpp):
-/// the vertex attribute `id` is the input at `layout(location = index)`.
-/// C++'s `ubo`, the storage buffer an instanced attribute is also read
-/// through, has no use without instancing.
+/// the vertex or instance attribute `id` is the input at
+/// `layout(location = index)`. C++'s `ubo`, the storage buffer an instanced
+/// attribute is also read through, is not ported: every attribute is a vertex
+/// input.
 #[derive(Clone, Copy, Debug)]
 pub struct AttributeInfo {
     pub index: usize,
@@ -74,11 +76,14 @@ use AttributeDataType::{Float, Float2, Float3, Float4, Short2, Short4, UByte4, U
 
 macro_rules! shader_source {
     ($name:ident, $str:literal, $attrs:expr, $textures:expr) => {
+        shader_source!($name, $str, $attrs, &[], $textures);
+    };
+    ($name:ident, $str:literal, $attrs:expr, $instance_attrs:expr, $textures:expr) => {
         static $name: ShaderSource = ShaderSource {
             glsl: &glsl_sources::$name,
             name: $str,
             attributes: $attrs,
-            instance_attributes: &[],
+            instance_attributes: $instance_attrs,
             textures: $textures,
         };
     };
@@ -185,33 +190,72 @@ shader_source!(
     &[]
 );
 
-// src/mln/shaders/vulkan/fill_extrusion.cpp, with the non-instanced layout
-// vertex's `normal2d` (`!MLN_USE_FILL_EXTRUSION_INSTANCING`, as WebGPU).
+// src/mln/shaders/vulkan/fill_extrusion.cpp. An instance of the instanced
+// shaders is an outline vertex; the port adds the vertex after it, which C++
+// reads from the instances' storage buffer.
 const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(2, Short2, ID_FILL_EXTRUSION_NORMAL_2D_VERTEX_ATTRIBUTE),
+    // Data driven
+    attr(2, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+    attr(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+];
+const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
+const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+    attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
     // Data driven
     attr(3, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
     attr(4, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
     attr(5, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    // The next outline vertex
+    attr(6, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(7, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
 const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
     attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(2, Short2, ID_FILL_EXTRUSION_NORMAL_2D_VERTEX_ATTRIBUTE),
+    // Data driven
+    attr(2, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(3, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    attr(4, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    attr(5, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+];
+const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+    attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
     // Data driven
     attr(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
     attr(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
     attr(5, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
     attr(6, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+    // The next outline vertex
+    attr(7, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(8, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
 ];
+const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
 shader_source!(FILL_EXTRUSION_SHADER, "FillExtrusionShader", FILL_EXTRUSION_ATTRIBUTES, &[]);
+shader_source!(
+    FILL_EXTRUSION_INSTANCED_SHADER,
+    "FillExtrusionInstancedShader",
+    FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
+    FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
+    &[]
+);
 shader_source!(
     FILL_EXTRUSION_PATTERN_SHADER,
     "FillExtrusionPatternShader",
     FILL_EXTRUSION_PATTERN_ATTRIBUTES,
-    &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)]
+    FILL_EXTRUSION_PATTERN_TEXTURES
+);
+shader_source!(
+    FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    "FillExtrusionPatternInstancedShader",
+    FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
+    FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
+    FILL_EXTRUSION_PATTERN_TEXTURES
 );
 
 // src/mln/shaders/vulkan/globe_depth.cpp
@@ -392,8 +436,7 @@ shader_source!(
 );
 
 /// `ShaderSource<shader_id, Vulkan>`, or `None` for the shaders the port's
-/// renderer doesn't draw with: the instanced fill extrusions, the location
-/// indicator and the wide vector.
+/// renderer doesn't draw with: the location indicator and the wide vector.
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
         BuiltIn::BackgroundShader => Some(&BACKGROUND_SHADER),
@@ -410,7 +453,9 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
         BuiltIn::FillOutlinePatternShader => Some(&FILL_OUTLINE_PATTERN_SHADER),
         BuiltIn::FillOutlineTriangulatedShader => Some(&FILL_OUTLINE_TRIANGULATED_SHADER),
         BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
+        BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
         BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
+        BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
         BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),
         BuiltIn::HillshadeShader => Some(&HILLSHADE_SHADER),

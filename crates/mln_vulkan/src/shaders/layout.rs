@@ -11,7 +11,8 @@
 //   properties storage buffer at 5 (fill, fill extrusion, color relief), 6.
 // - A drawable's uniform buffers are the whole drawable set. C++ puts four
 //   storage buffers before them, for the instance data of symbols and fill
-//   extrusions, which the port's renderer draws without instancing.
+//   extrusions; the port's symbols aren't instanced, and its fill extrusions
+//   read their instances as vertex inputs.
 // - A texture and its sampler are two descriptors, the sampler
 //   `MAX_TEXTURE_COUNT_PER_SHADER` bindings after the texture: naga's GLSL
 //   front end has Vulkan's separate textures and samplers only, where C++

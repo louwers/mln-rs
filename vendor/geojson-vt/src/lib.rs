@@ -281,9 +281,7 @@ impl GeoJSONVT {
 
             // stop tiling if it's not an ancestor of the target tile
             let m = f64::from(1u32.wrapping_shl(u32::from(cz - z)));
-            if x != libstdcxx::cvt::f64_to_u32((f64::from(cx) / m).floor())
-                || y != libstdcxx::cvt::f64_to_u32((f64::from(cy) / m).floor())
-            {
+            if x != (f64::from(cx) / m).floor() as u32 || y != (f64::from(cy) / m).floor() as u32 {
                 tile.source_features = features.clone();
                 return;
             }

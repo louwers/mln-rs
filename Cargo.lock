@@ -1979,7 +1979,6 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-kdbush",
- "mln-rs-libstdcxx",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
@@ -2106,7 +2105,6 @@ version = "0.0.11"
 dependencies = [
  "mln-rs-earcut-test-fixtures",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
 ]
 
 [[package]]
@@ -2122,7 +2120,6 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "mln-rs-math",
  "mln-rs-nunicode",
  "mln-rs-rapidjson",
@@ -2178,7 +2175,6 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "serde_json",
 ]
 
@@ -2256,13 +2252,6 @@ dependencies = [
 [[package]]
 name = "mln-rs-kdbush"
 version = "0.0.11"
-dependencies = [
- "mln-rs-libstdcxx",
-]
-
-[[package]]
-name = "mln-rs-libstdcxx"
-version = "0.0.11"
 
 [[package]]
 name = "mln-rs-map"
@@ -2329,7 +2318,6 @@ name = "mln-rs-polylabel"
 version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "serde_json",
 ]
 
@@ -2381,7 +2369,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-image",
- "mln-rs-libstdcxx",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
@@ -2529,7 +2516,6 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-kdbush",
- "mln-rs-libstdcxx",
  "serde_json",
 ]
 
@@ -2567,7 +2553,6 @@ version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "mln-rs-math",
  "mln-rs-protozero",
  "mln-rs-tile-id",
@@ -2648,7 +2633,6 @@ name = "mln-rs-wagyu"
 version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
 ]
 
 [[package]]

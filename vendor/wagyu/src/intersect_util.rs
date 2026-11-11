@@ -1,7 +1,7 @@
 // Ports vendor/wagyu/include/mapbox/geometry/wagyu/intersect.hpp,
 // intersect_util.hpp and bubble_sort.hpp.
 
-use libstdcxx::stable_sort_by as stable_sort;
+use std::cmp::Reverse;
 
 use crate::active_bound_list::{is_even_odd_fill_type, swap_rings, swap_sides};
 use crate::bound::{Bound, BoundPtr};
@@ -20,14 +20,25 @@ pub(crate) struct IntersectNode {
     pub pt: (f64, f64),
 }
 
-/// `intersect_list_sorter` (not a strict weak ordering: the ULP tolerance).
-fn intersect_list_sorter(node1: &IntersectNode, node2: &IntersectNode, b: &[Bound]) -> bool {
-    if !values_are_equal(node2.pt.1, node1.pt.1) {
-        node2.pt.1 < node1.pt.1
-    } else {
-        (b[node2.bound1].winding_count2 + b[node2.bound2].winding_count2)
-            > (b[node1.bound1].winding_count2 + b[node1.bound2].winding_count2)
+/// `std::stable_sort` with `intersect_list_sorter`: by descending y, then
+/// by descending sum of the bounds' `winding_count2`, where y values within
+/// the ULP tolerance of each other count as equal.
+///
+/// The tolerance makes `intersect_list_sorter` no strict weak ordering, and
+/// Rust's sorts may panic on one. This sorts by exact y, then sorts each run
+/// of neighbours within the tolerance by winding count. Where every two y
+/// values of a run are within the tolerance, that is the order
+/// `std::stable_sort` gives.
+fn sort_intersect_list(intersects: &mut Vec<IntersectNode>, b: &[Bound]) {
+    let mut order: Vec<usize> = (0..intersects.len()).collect();
+    order.sort_by(|&i, &j| intersects[j].pt.1.total_cmp(&intersects[i].pt.1));
+    for run in order.chunk_by_mut(|&i, &j| values_are_equal(intersects[i].pt.1, intersects[j].pt.1)) {
+        run.sort_by_key(|&i| {
+            let node = &intersects[i];
+            (Reverse(b[node.bound1].winding_count2 + b[node.bound2].winding_count2), i)
+        });
     }
+    *intersects = order.into_iter().map(|i| intersects[i]).collect();
 }
 
 /// `round_point`.
@@ -328,10 +339,10 @@ pub(crate) fn process_intersections(
     }
 
     // Restore order of active bounds list
-    stable_sort(active_bounds, |&b1, &b2| b[b1].pos < b[b2].pos);
+    active_bounds.sort_by_key(|&bnd| b[bnd].pos);
 
     // Sort the intersection list
-    stable_sort(&mut intersects, |n1, n2| intersect_list_sorter(n1, n2, b));
+    sort_intersect_list(&mut intersects, b);
 
     process_intersect_list(&mut intersects, cliptype, subject_fill_type, clip_fill_type, b, rings, active_bounds)
 }

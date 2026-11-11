@@ -47,7 +47,7 @@ use mln_vulkan::shaders::layout::{
     drawable_uniform_binding, global_uniform_binding, image_sampler_binding, image_texture_binding,
     layer_storage_binding, layer_uniform_binding,
 };
-use mln_vulkan::shaders::shader_source::{ShaderSource, shader_source};
+use mln_vulkan::shaders::shader_source::{AttributeInfo, ShaderSource, shader_source};
 use naga::{AddressSpace, ArraySize, Binding, Interpolation, Module, ScalarKind, StorageAccess, TypeInner};
 
 const ALL_BUILT_INS: &[BuiltIn] = &[
@@ -279,12 +279,12 @@ fn buffers(source: &ShaderSource) -> Vec<(Buffer, usize)> {
             (LayerStorage(ID_FILL_TILE_PROPS_UBO), size_of::<FillTilePropsUnionUBO>()),
             (LayerUniform(ID_FILL_EVALUATED_PROPS_UBO), size_of::<FillEvaluatedPropsUBO>()),
         ],
-        "FillExtrusionShader" => vec![
+        "FillExtrusionShader" | "FillExtrusionInstancedShader" => vec![
             (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
             projection,
             (LayerUniform(ID_FILL_EXTRUSION_PROPS_UBO), size_of::<FillExtrusionPropsUBO>()),
         ],
-        "FillExtrusionPatternShader" => vec![
+        "FillExtrusionPatternShader" | "FillExtrusionPatternInstancedShader" => vec![
             (LayerStorage(ID_FILL_EXTRUSION_DRAWABLE_UBO), size_of::<FillExtrusionDrawableUBO>()),
             projection,
             (LayerStorage(ID_FILL_EXTRUSION_TILE_PROPS_UBO), size_of::<FillExtrusionTilePropsUBO>()),
@@ -606,26 +606,29 @@ fn stage_outputs(module: &Module) -> BTreeMap<u32, Varying> {
     outputs
 }
 
+/// The vertex and instance attributes of a table.
+fn all_attributes(source: &ShaderSource) -> impl Iterator<Item = &AttributeInfo> {
+    source.attributes.iter().chain(source.instance_attributes)
+}
+
 /// The attributes a table has that the GLSL doesn't read, by shader and
 /// index: the color relief's texture position, which its vertex stage works
 /// out from the position, as C++'s does.
 const UNREAD_ATTRIBUTES: &[(&str, usize)] = &[("ColorReliefShader", 1)];
 
-// The inputs of a vertex stage are the attributes of the shader's table, at
-// the locations of their indices and in the types that read their formats.
-// With a property as a uniform, the stage reads a subset of them. The globe
-// clipping mask also reads the three per-tile vectors the context binds as
-// instance attributes itself.
+// The inputs of a vertex stage are the vertex and instance attributes of the
+// shader's tables, at the locations of their indices and in the types that
+// read their formats. With a property as a uniform, the stage reads a subset
+// of them. The globe clipping mask also reads the three per-tile vectors the
+// context binds as instance attributes itself.
 #[test]
 fn vertex_inputs_are_the_attribute_tables() {
     let mut failures = Vec::new();
     for source in sources() {
-        let indices: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.index).collect();
-        assert_eq!(indices.len(), source.attributes.len(), "{}: attribute indices repeat", source.name);
+        let indices: BTreeSet<usize> = all_attributes(source).map(|attr| attr.index).collect();
+        assert_eq!(indices.len(), all_attributes(source).count(), "{}: attribute indices repeat", source.name);
         for variant in variants(source, true) {
-            let mut table: BTreeMap<u32, (ScalarKind, u32)> = source
-                .attributes
-                .iter()
+            let mut table: BTreeMap<u32, (ScalarKind, u32)> = all_attributes(source)
                 .filter(|attr| !UNREAD_ATTRIBUTES.contains(&(source.name, attr.index)))
                 .map(|attr| (attr.index as u32, input_type(attr.data_type)))
                 .collect();
@@ -651,7 +654,28 @@ fn vertex_inputs_are_the_attribute_tables() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
-// What a fragment stage reads from a location is what the vertex stage
+// A fill extrusion wall reads its next outline vertex from the buffer of its
+// outline vertex, a vertex further on: the two have the same formats.
+#[test]
+fn a_walls_next_outline_vertex_has_the_formats_of_its_outline_vertex() {
+    let instanced: Vec<&ShaderSource> = sources().filter(|source| !source.instance_attributes.is_empty()).collect();
+    assert_eq!(instanced.len(), 2);
+    for source in instanced {
+        let format = |id: usize| {
+            let mut found = source.instance_attributes.iter().filter(|attr| attr.id == id);
+            let attr = found.next().unwrap_or_else(|| panic!("{}: no instance attribute {id}", source.name));
+            assert!(found.next().is_none());
+            attr.data_type
+        };
+        for (id, next_id) in [
+            (ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+            (ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+        ] {
+            assert_eq!(format(id), format(next_id), "{}", source.name);
+        }
+    }
+}
+
 // compiled with the same defines writes there, flat where the other is, and
 // the fragment stage writes one color.
 #[test]
@@ -730,8 +754,8 @@ fn bindings_follow_from_the_packed_ids() {
 }
 
 // The tables and `glsl_sources::ALL` list the same shaders, under their
-// `BuiltIn` names, and no table has instance attributes or more attributes
-// and textures than a shader can have.
+// `BuiltIn` names, and no table has more attributes and textures than a
+// shader can have. Only the fill extrusion walls have instance attributes.
 #[test]
 fn tables_and_sources_are_the_same_shaders() {
     let names: Vec<&str> = sources().map(|source| source.name).collect();
@@ -742,11 +766,14 @@ fn tables_and_sources_are_the_same_shaders() {
     }
     for source in sources() {
         assert_eq!(source.name, source.glsl.name);
-        assert!(source.attributes.len() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", source.name);
+        assert!(all_attributes(source).count() <= MAX_ATTRIBUTE_COUNT_PER_SHADER, "{}", source.name);
         assert!(source.textures.len() <= MAX_TEXTURE_COUNT_PER_SHADER, "{}", source.name);
-        assert!(source.instance_attributes.is_empty(), "{}: instancing is off", source.name);
+        let instanced = matches!(source.name, "FillExtrusionInstancedShader" | "FillExtrusionPatternInstancedShader");
+        assert_eq!(!source.instance_attributes.is_empty(), instanced, "{}", source.name);
         let ids: BTreeSet<usize> = source.attributes.iter().map(|attr| attr.id).collect();
         assert_eq!(ids.len(), source.attributes.len(), "{}: attribute ids repeat", source.name);
+        let ids: BTreeSet<usize> = source.instance_attributes.iter().map(|attr| attr.id).collect();
+        assert_eq!(ids.len(), source.instance_attributes.len(), "{}: instance attribute ids repeat", source.name);
         let textures: BTreeSet<usize> = source.textures.iter().map(|texture| texture.index).collect();
         assert_eq!(textures.len(), source.textures.len(), "{}: texture indices repeat", source.name);
         assert!(textures.iter().all(|&index| index < IMAGE_TEXTURE_COUNT), "{}", source.name);

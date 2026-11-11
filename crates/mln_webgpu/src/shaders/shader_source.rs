@@ -1,7 +1,8 @@
 // Ports the WebGPU `ShaderSource<BuiltIn, Backend::Type::WebGPU>`
 // specialisations: the WGSL strings come from include/mln/shaders/webgpu/*.hpp
-// through the vendored `wgsl_sources` module (`just vendor-shaders`); the
-// attribute/texture tables from src/mln/shaders/webgpu/*.cpp are below.
+// through the vendored `wgsl_sources` module (`just vendor-shaders`), but for
+// the fill extrusions' (`fill_extrusion_wgsl`); the attribute/texture tables
+// from src/mln/shaders/webgpu/*.cpp are below.
 //
 // TODO(port): the attribute/texture tables of the other shader types
 // (fill_extrusion.cpp, symbol.cpp, raster.cpp, ...) arrive with their layers.
@@ -10,7 +11,7 @@ use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::shader_source::BuiltIn;
 
-use super::wgsl_sources;
+use super::{fill_extrusion_wgsl, wgsl_sources};
 
 /// The WGSL members of a `ShaderSource` specialisation, as extracted.
 #[derive(Debug)]
@@ -307,33 +308,73 @@ shader_source!(
     COLOR_RELIEF_TEXTURES
 );
 
-// src/mln/shaders/webgpu/fill_extrusion.cpp (conformance)
+// The fill extrusions' (the port's, fill_extrusion_wgsl.rs): the attribute
+// locations of the roofs, and of the walls with their instances.
 const FILL_EXTRUSION_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    attr(4, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(5, Short2, ID_FILL_EXTRUSION_NORMAL_2D_VERTEX_ATTRIBUTE),
-    attr(6, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
-    attr(7, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
-    attr(8, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
+    attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+    attr(2, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
+    attr(3, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(4, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
 ];
-const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
-    attr(3, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
-    attr(4, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
-    attr(5, Short2, ID_FILL_EXTRUSION_NORMAL_2D_VERTEX_ATTRIBUTE),
+const FILL_EXTRUSION_INSTANCED_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE)];
+const FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+    attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+    attr(3, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(4, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+    attr(5, Float4, ID_FILL_EXTRUSION_COLOR_VERTEX_ATTRIBUTE),
     attr(6, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
     attr(7, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
-    attr(8, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
-    attr(9, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+];
+const FILL_EXTRUSION_PATTERN_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(0, Short2, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE),
+    attr(1, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+    attr(2, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(3, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    attr(4, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    attr(5, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
+];
+const FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES: &[AttributeInfo] = &[
+    attr(1, Short2, ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE),
+    attr(2, UShort2, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE),
+    attr(3, Short2, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE),
+    attr(4, UShort2, ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE),
+    attr(5, Float2, ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE),
+    attr(6, Float2, ID_FILL_EXTRUSION_HEIGHT_VERTEX_ATTRIBUTE),
+    attr(7, UShort4, ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE),
+    attr(8, UShort4, ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE),
 ];
 const FILL_EXTRUSION_PATTERN_TEXTURES: &[TextureInfo] = &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)];
-shader_source!(FILL_EXTRUSION_SHADER, FILL_EXTRUSION_SHADER, "FillExtrusionShader", FILL_EXTRUSION_ATTRIBUTES, &[]);
-shader_source!(
-    FILL_EXTRUSION_PATTERN_SHADER,
-    FILL_EXTRUSION_PATTERN_SHADER,
-    "FillExtrusionPatternShader",
-    FILL_EXTRUSION_PATTERN_ATTRIBUTES,
-    FILL_EXTRUSION_PATTERN_TEXTURES
-);
+static FILL_EXTRUSION_SHADER: ShaderSource = ShaderSource {
+    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_SHADER,
+    name: "FillExtrusionShader",
+    attributes: FILL_EXTRUSION_ATTRIBUTES,
+    instance_attributes: &[],
+    textures: &[],
+};
+static FILL_EXTRUSION_INSTANCED_SHADER: ShaderSource = ShaderSource {
+    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_INSTANCED_SHADER,
+    name: "FillExtrusionInstancedShader",
+    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
+    instance_attributes: FILL_EXTRUSION_INSTANCED_INSTANCE_ATTRIBUTES,
+    textures: &[],
+};
+static FILL_EXTRUSION_PATTERN_SHADER: ShaderSource = ShaderSource {
+    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_SHADER,
+    name: "FillExtrusionPatternShader",
+    attributes: FILL_EXTRUSION_PATTERN_ATTRIBUTES,
+    instance_attributes: &[],
+    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
+};
+static FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: ShaderSource = ShaderSource {
+    wgsl: &fill_extrusion_wgsl::FILL_EXTRUSION_PATTERN_INSTANCED_SHADER,
+    name: "FillExtrusionPatternInstancedShader",
+    attributes: FILL_EXTRUSION_INSTANCED_ATTRIBUTES,
+    instance_attributes: FILL_EXTRUSION_PATTERN_INSTANCED_INSTANCE_ATTRIBUTES,
+    textures: FILL_EXTRUSION_PATTERN_TEXTURES,
+};
 
 // src/mln/shaders/webgpu/symbol.cpp (symbols)
 const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
@@ -447,7 +488,9 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
         BuiltIn::LineGradientSDFShader => Some(&LINE_GRADIENT_SDF_SHADER),
         BuiltIn::RasterShader => Some(&RASTER_SHADER),
         BuiltIn::FillExtrusionShader => Some(&FILL_EXTRUSION_SHADER),
+        BuiltIn::FillExtrusionInstancedShader => Some(&FILL_EXTRUSION_INSTANCED_SHADER),
         BuiltIn::FillExtrusionPatternShader => Some(&FILL_EXTRUSION_PATTERN_SHADER),
+        BuiltIn::FillExtrusionPatternInstancedShader => Some(&FILL_EXTRUSION_PATTERN_INSTANCED_SHADER),
         // dem-heatmap
         BuiltIn::HeatmapShader => Some(&HEATMAP_SHADER),
         BuiltIn::HeatmapTextureShader => Some(&HEATMAP_TEXTURE_SHADER),

@@ -79,7 +79,7 @@ pub trait Index: Copy + Ord + std::fmt::Debug {
     fn to_usize(self) -> usize;
     /// `static_cast<double>(TIndex)`
     fn to_f64(self) -> f64;
-    /// `TIndex(double)` as clang emits it on x86-64.
+    /// `TIndex(double)`, saturating out of range.
     fn from_f64(v: f64) -> Self;
     fn wrapping_add(self, other: Self) -> Self;
     fn wrapping_sub(self, other: Self) -> Self;
@@ -99,7 +99,7 @@ impl Index for u32 {
         f64::from(self)
     }
     fn from_f64(v: f64) -> Self {
-        libstdcxx::cvt::f64_to_u32(v)
+        v as u32
     }
     fn wrapping_add(self, other: Self) -> Self {
         u32::wrapping_add(self, other)
@@ -126,14 +126,7 @@ impl Index for usize {
         self as f64
     }
     fn from_f64(v: f64) -> Self {
-        // clang x86-64 `double -> uint64_t`: cvttsd2si below 2^63, else on
-        // v - 2^63 with the top bit set.
-        if v < 9223372036854775808.0 {
-            libstdcxx::cvt::cvttsd2si64(v) as usize
-        } else {
-            // In u64, so that it also compiles where usize is 32 bits.
-            ((libstdcxx::cvt::cvttsd2si64(v - 9223372036854775808.0) as u64) ^ (1u64 << 63)) as usize
-        }
+        v as usize
     }
     fn wrapping_add(self, other: Self) -> Self {
         usize::wrapping_add(self, other)

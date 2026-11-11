@@ -2,8 +2,8 @@
 // and src/mln/vulkan/vertex_attribute.cpp (`VertexAttribute::getBuffer`)
 //
 // `vulkan::VertexAttribute` adds the storage buffer an instanced attribute
-// is also read through (`getUBO`, `getBufferUsage`); without instancing
-// every attribute's buffer is a vertex buffer.
+// is also read through (`getUBO`, `getBufferUsage`); here every attribute's
+// buffer is a vertex buffer, an instance attribute's too.
 
 use std::any::Any;
 use std::rc::Rc;

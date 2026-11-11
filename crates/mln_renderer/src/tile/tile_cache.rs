@@ -108,6 +108,10 @@ impl TileCache {
 
     /// Pop the tile cached under any wrap of `key` and give it `key`'s wrap.
     /// On the globe every wrap of a tile is the same piece of the sphere.
+    ///
+    /// Unlike C++, where only renderable tiles reach the cache, the tile may
+    /// still be loading (see [`add`](Self::add)); it goes on loading under
+    /// its new wrap.
     pub fn pop_any_wrap(&mut self, key: &OverscaledTileID) -> Option<Box<dyn Tile>> {
         let found = *self
             .tiles
@@ -115,7 +119,6 @@ impl TileCache {
             .find(|entry| entry.overscaled_z == key.overscaled_z && entry.canonical == key.canonical)?;
         self.remove_key(&found);
         let tile = self.tiles.remove(&found)?;
-        debug_assert!(tile.is_renderable());
         tile.base().set_id(*key);
         Some(tile)
     }
@@ -223,6 +226,24 @@ mod tests {
 
     fn thread_pool() -> TaggedScheduler {
         TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new())
+    }
+
+    // Port-only: the cache keeps a tile that is still loading, and on the
+    // globe the pyramid takes it back under another wrap of the same tile,
+    // where it goes on loading.
+    #[test]
+    fn pop_any_wrap_takes_a_loading_tile() {
+        let mut cache = TileCache::new(thread_pool(), 2);
+        let id = OverscaledTileID::with_zxy(2, 0, 2, 1, 1);
+        let tile = VectorTileMock::new(id);
+        tile.base.renderable.set(false);
+        cache.add(id, tile);
+
+        let other_wrap = OverscaledTileID::with_zxy(2, 1, 2, 1, 1);
+        let tile = cache.pop_any_wrap(&other_wrap).expect("the tile, under another wrap");
+        assert_eq!(other_wrap, tile.base().id());
+        assert!(!tile.is_renderable());
+        assert!(!cache.has(&id));
     }
 
     // gtest: TileCache.Smoke

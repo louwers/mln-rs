@@ -3,13 +3,14 @@
 // src/mln/util/geometry_util.{hpp,cpp}, whose only user is this expression.
 //
 // Distances are in meters, measured with a cheap ruler at the latitude of
-// the feature's first point. The divide-and-conquer searches order their
-// candidates with libstdc++'s heap, as the C++ `std::priority_queue` does.
+// the feature's first point.
+
+use std::cmp::Ordering;
+use std::collections::BinaryHeap;
 
 use cheap_ruler::{CheapRuler, Unit};
 use feature::{Value as MbglValue, ValueObject};
 use geometry::{Geometry, LineString, MultiLineString, MultiPoint, Point, Polygon};
-use libstdcxx::PriorityQueue;
 use mln_conversion::{Convertible, Error};
 use mln_tile::geometry_tile_data::convert_geometry;
 use mln_tile_id::CanonicalTileID;
@@ -406,12 +407,33 @@ fn polygon_to_polygon_distance(
     dist
 }
 
-/// `<distance, range1, range2>`.
-type DistPair = (f64, IndexRange, IndexRange);
+/// `<distance, range1, range2>`, ordered by the distance alone.
+#[derive(Clone, Copy)]
+struct DistPair(f64, IndexRange, IndexRange);
+
+impl Ord for DistPair {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+impl PartialOrd for DistPair {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for DistPair {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for DistPair {}
 
 /// The candidate range pairs, the one with the biggest distance on top.
-fn dist_queue() -> PriorityQueue<DistPair, impl FnMut(&DistPair, &DistPair) -> bool> {
-    PriorityQueue::new(|left: &DistPair, right: &DistPair| left.0 < right.0)
+fn dist_queue() -> BinaryHeap<DistPair> {
+    BinaryHeap::new()
 }
 
 // Divide and conquer: O(n log n), against O(n²) by brute force. The ranges
@@ -430,17 +452,13 @@ fn points_to_polygon_distance(
     }
 
     let mut dist_queue = dist_queue();
-    dist_queue.push((0.0, (0, points.len() - 1), (0, 0)));
+    dist_queue.push(DistPair(0.0, (0, points.len() - 1), (0, 0)));
 
     let poly_bbox = get_polygon_bbox(polygon);
-    while !dist_queue.is_empty() {
-        let dist_pair = *dist_queue.top();
-        dist_queue.pop();
-        if dist_pair.0 >= mini_dist {
+    while let Some(DistPair(dist, range, _)) = dist_queue.pop() {
+        if dist >= mini_dist {
             continue;
         }
-
-        let range = dist_pair.1;
 
         // In case the set size are relatively small, we could use
         // brute-force directly
@@ -464,7 +482,7 @@ fn points_to_polygon_distance(
                 // than miniDist, The pair with biggest distance will be at
                 // the top
                 if temp_dist < mini_dist {
-                    dist_queue.push((temp_dist, range_a, (0, 0)));
+                    dist_queue.push(DistPair(temp_dist, range_a, (0, 0)));
                 }
             }
         }
@@ -485,17 +503,13 @@ fn line_to_polygon_distance(
     }
 
     let mut dist_queue = dist_queue();
-    dist_queue.push((0.0, (0, line.len() - 1), (0, 0)));
+    dist_queue.push(DistPair(0.0, (0, line.len() - 1), (0, 0)));
 
     let poly_bbox = get_polygon_bbox(polygon);
-    while !dist_queue.is_empty() {
-        let dist_pair = *dist_queue.top();
-        dist_queue.pop();
-        if dist_pair.0 >= mini_dist {
+    while let Some(DistPair(dist, range, _)) = dist_queue.pop() {
+        if dist >= mini_dist {
             continue;
         }
-
-        let range = dist_pair.1;
 
         // In case the set size are relatively small, we could use
         // brute-force directly
@@ -510,7 +524,7 @@ fn line_to_polygon_distance(
             for range_a in [new_ranges_a.0, new_ranges_a.1].into_iter().flatten() {
                 let temp_dist = bbox_to_bbox_distance(&get_range_bbox(line, &range_a), &poly_bbox, ruler);
                 if temp_dist < mini_dist {
-                    dist_queue.push((temp_dist, range_a, (0, 0)));
+                    dist_queue.push(DistPair(temp_dist, range_a, (0, 0)));
                 }
             }
         }
@@ -539,11 +553,9 @@ fn line_to_line_distance(
     }
 
     let mut dist_queue = dist_queue();
-    dist_queue.push((0.0, (0, line1.len() - 1), (0, line2.len() - 1)));
+    dist_queue.push(DistPair(0.0, (0, line1.len() - 1), (0, line2.len() - 1)));
 
-    while !dist_queue.is_empty() {
-        let (dist, range_a, range_b) = *dist_queue.top();
-        dist_queue.pop();
+    while let Some(DistPair(dist, range_a, range_b)) = dist_queue.pop() {
         if dist >= mini_dist {
             continue;
         }
@@ -562,7 +574,7 @@ fn line_to_line_distance(
                 let temp_dist =
                     bbox_to_bbox_distance(&get_range_bbox(line1, &range1), &get_range_bbox(line2, &range2), ruler);
                 if temp_dist < mini_dist {
-                    dist_queue.push((temp_dist, range1, range2));
+                    dist_queue.push(DistPair(temp_dist, range1, range2));
                 }
             }
         }
@@ -578,11 +590,9 @@ fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoi
     }
 
     let mut dist_queue = dist_queue();
-    dist_queue.push((0.0, (0, point_set1.len() - 1), (0, point_set2.len() - 1)));
+    dist_queue.push(DistPair(0.0, (0, point_set1.len() - 1), (0, point_set2.len() - 1)));
 
-    while !dist_queue.is_empty() {
-        let (dist, range_a, range_b) = *dist_queue.top();
-        dist_queue.pop();
+    while let Some(DistPair(dist, range_a, range_b)) = dist_queue.pop() {
         if dist >= mini_dist {
             continue;
         }
@@ -604,7 +614,7 @@ fn points_to_points_distance(point_set1: &MultiPoint<f64>, point_set2: &MultiPoi
                     ruler,
                 );
                 if temp_dist < mini_dist {
-                    dist_queue.push((temp_dist, range1, range2));
+                    dist_queue.push(DistPair(temp_dist, range1, range2));
                 }
             }
         }
@@ -625,11 +635,9 @@ fn points_to_line_distance(
     }
 
     let mut dist_queue = dist_queue();
-    dist_queue.push((0.0, (0, points.len() - 1), (0, line.len() - 1)));
+    dist_queue.push(DistPair(0.0, (0, points.len() - 1), (0, line.len() - 1)));
 
-    while !dist_queue.is_empty() {
-        let (dist, range_a, range_b) = *dist_queue.top();
-        dist_queue.pop();
+    while let Some(DistPair(dist, range_a, range_b)) = dist_queue.pop() {
         if dist >= mini_dist {
             continue;
         }
@@ -654,7 +662,7 @@ fn points_to_line_distance(
                 let temp_dist =
                     bbox_to_bbox_distance(&get_range_bbox(points, &range1), &get_range_bbox(line, &range2), ruler);
                 if temp_dist < mini_dist {
-                    dist_queue.push((temp_dist, range1, range2));
+                    dist_queue.push(DistPair(temp_dist, range1, range2));
                 }
             }
         }
