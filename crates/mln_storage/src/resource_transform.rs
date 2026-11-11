@@ -1,19 +1,26 @@
 // Ports include/mln/storage/resource_transform.hpp and
-// src/mln/storage/resource_transform.cpp.
+// src/mln/storage/resource_transform.cpp, with maplibre-native-ffi's patch 0068
+// (a transform can fail a request).
 
 use std::sync::Arc;
 
 use crate::resource::Kind;
+use crate::response::Error;
 
-/// `ResourceTransform::FinishedCallback` (`std::function<void(const std::string&)>`).
-pub type FinishedCallback = Box<dyn FnOnce(String) + Send>;
+/// `ResourceTransform::Result`: the URL to load instead, or the error to fail
+/// the request with. A failed request is never sent. When the error's reason
+/// allows a retry, the retry calls the transform again.
+pub type TransformResult = Result<String, Error>;
+
+/// `ResourceTransform::FinishedCallback` (`std::function<void(Result)>`).
+pub type FinishedCallback = Box<dyn FnOnce(TransformResult) + Send>;
 
 /// `ResourceTransform::TransformCallback`. It runs on the online file
 /// source's thread, hence `Send + Sync`.
 pub type TransformCallback = Arc<dyn Fn(Kind, &str, FinishedCallback) + Send + Sync>;
 
 /// `ResourceTransform`: rewrites request URLs (asynchronously) before the
-/// online file source requests them.
+/// online file source requests them, or fails the requests.
 #[derive(Clone, Default)]
 pub struct ResourceTransform {
     transform_callback: Option<TransformCallback>,

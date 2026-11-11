@@ -5,6 +5,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use feature::Value;
 use mln_actor::{RunLoop, Timer};
@@ -20,7 +22,8 @@ use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Reason, Response};
+use crate::resource_transform::{FinishedCallback, ResourceTransform};
+use crate::response::{Error, Reason, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
 const CONNECTION_TIMEOUT: f64 = 0.0;
@@ -803,6 +806,84 @@ fn request_same_url_multiple_times() {
             }),
         ));
     }
+
+    run_loop.run();
+}
+
+// gtest: OnlineFileSource.FailedResourceTransform
+#[test]
+fn failed_resource_transform() {
+    let run_loop = RunLoop::new();
+    let fs = online_file_source();
+    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
+        |_kind: Kind, _url: &str, finished: FinishedCallback| {
+            finished(Err(Error::new(Reason::Other, "No credential")));
+        },
+    ))));
+
+    let stop = run_loop.clone();
+    let _req = fs.request(
+        &Resource::new(Kind::Unknown, "http://127.0.0.1:3000/test"),
+        Box::new(move |res: Response| {
+            let error = res.error.as_ref().expect("error");
+            assert_eq!(Reason::Other, error.reason);
+            assert_eq!("No credential", error.message);
+            assert!(res.data.is_none());
+            stop.stop();
+        }),
+    );
+
+    run_loop.run();
+}
+
+// A retry of a request that the resource transform failed asks the transform
+// again instead of loading the original URL.
+// gtest: OnlineFileSource.RetryFailedResourceTransform
+#[test]
+fn retry_failed_resource_transform() {
+    let _serial = serial();
+    let server = HttpServer::new();
+    let run_loop = RunLoop::new();
+    let fs = online_file_source();
+
+    let transforms = Arc::new(AtomicU32::new(0));
+    let (delayed, test) = (server.url("/delayed"), server.url("/test"));
+    let counter = transforms.clone();
+    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
+        move |_kind: Kind, url: &str, finished: FinishedCallback| {
+            assert_eq!(delayed, url);
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                finished(Err(Error::new(Reason::Connection, "Offline")));
+            } else {
+                finished(Ok(test.clone()));
+            }
+        },
+    ))));
+
+    let responses = Rc::new(Cell::new(0));
+    let stop = run_loop.clone();
+    let _req = fs.request(
+        &Resource::new(Kind::Unknown, server.url("/delayed")),
+        Box::new(move |res: Response| {
+            responses.set(responses.get() + 1);
+            match responses.get() {
+                1 => {
+                    let error = res.error.as_ref().expect("error");
+                    assert_eq!(Reason::Connection, error.reason);
+                    assert_eq!("Offline", error.message);
+                    // Retry now instead of after the backoff.
+                    NetworkStatus::reachable();
+                }
+                2 => {
+                    assert_eq!(None, res.error);
+                    assert_eq!(b"Hello World!", data(&res));
+                    assert_eq!(2, transforms.load(Ordering::SeqCst));
+                    stop.stop();
+                }
+                _ => {}
+            }
+        }),
+    );
 
     run_loop.run();
 }
