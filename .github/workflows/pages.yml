@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
 
       - uses: taiki-e/install-action@v2
-        with: { tool: 'just,wasm-bindgen@0.2.130' }
+        with: { tool: 'just,wasm-bindgen@0.2.130,cargo-about' }
 
       # pnpm, the version in examples/web/package.json, for the page's Vite
       # build; the runner has Node.
