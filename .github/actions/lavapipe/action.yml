@@ -1,0 +1,61 @@
+name: Lavapipe
+description: >-
+  Installs Mesa's Vulkan drivers and points the Vulkan loader at lavapipe,
+  the software rasterizer the GPU tests on Linux run on.
+
+# The packages are downloaded once per runner image and installed from the
+# Actions cache after that, as the Ubuntu archive is at times out of reach
+# for minutes. A download that fails is tried again after a pause.
+runs:
+  using: composite
+  steps:
+    - id: apt
+      shell: bash
+      run: |
+        packages="libvulkan1 mesa-vulkan-drivers"
+        echo "packages=$packages" >> "$GITHUB_OUTPUT"
+        echo "key=apt-${packages// /+}-$ImageOS-$ImageVersion-$RUNNER_ARCH" >> "$GITHUB_OUTPUT"
+
+    - id: cache
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/lavapipe
+        key: ${{ steps.apt.outputs.key }}
+
+    - if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PACKAGES: ${{ steps.apt.outputs.packages }}
+      run: |
+        archives="$RUNNER_TEMP/lavapipe-archives"
+        mkdir -p "$archives/partial" ~/.cache/lavapipe
+        for attempt in 1 2 3 4 5; do
+          # `apt-get update` succeeds without the indexes it can't reach, so
+          # the download is what fails.
+          # shellcheck disable=SC2086
+          if sudo apt-get update &&
+            sudo apt-get install -y --no-install-recommends --download-only \
+              -o Dir::Cache::archives="$archives" $PACKAGES; then
+            break
+          fi
+          if ((attempt == 5)); then
+            exit 1
+          fi
+          echo "::warning::Downloading $PACKAGES failed; trying again in $((attempt * 60)) s"
+          sleep $((attempt * 60))
+        done
+        # The image can have some of them already, which aren't downloaded.
+        shopt -s nullglob
+        debs=("$archives"/*.deb)
+        if ((${#debs[@]})); then
+          cp "${debs[@]}" ~/.cache/lavapipe/
+        fi
+
+    - shell: bash
+      run: |
+        shopt -s nullglob
+        debs=(~/.cache/lavapipe/*.deb)
+        if ((${#debs[@]})); then
+          sudo dpkg -i "${debs[@]}"
+        fi
+        echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
