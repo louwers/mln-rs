@@ -80,6 +80,13 @@ impl InterleavedVertexBuffer {
         data[start..start + value.len()].copy_from_slice(value);
     }
 
+    /// `get<T>(index, offset)`, `len` = `sizeof(T)`, or `None` when the
+    /// vertex is out of range.
+    pub fn try_get(&self, index: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
+        let start = self.stride.checked_mul(index)?.checked_add(offset)?;
+        self.shared_vertex_vector.data().get(start..start.checked_add(len)?).map(<[u8]>::to_vec)
+    }
+
     /// `get<T>(index, offset)`, `len` = `sizeof(T)`.
     pub fn get(&self, index: usize, offset: usize, len: usize) -> Vec<u8> {
         let start = self.stride * index + offset;
@@ -432,21 +439,22 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     }
 
     /// `getVertexValue(index)`: the zoom-interpolated vertex (`2 *
-    /// DIMENSIONS` floats).
-    pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Vec<f32> {
+    /// DIMENSIONS` floats), or `None` when `index` is out of range (C++
+    /// throws `std::out_of_range`).
+    pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Option<Vec<f32>> {
         let n = T::DIMENSIONS;
-        match &self.kind {
+        Some(match &self.kind {
             PaintPropertyBinderKind::Constant { .. } => vec![0.0; 2 * n],
             PaintPropertyBinderKind::SourceFunction { .. } => {
-                let base: Vec<f32> = bytemuck::pod_collect_to_vec(&buffer.get(index, self.vertex_offset, n * 4));
+                let base: Vec<f32> = bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset, n * 4)?);
                 let mut value = base.clone();
                 value.extend_from_slice(&base);
                 value
             }
             PaintPropertyBinderKind::CompositeFunction { .. } => {
-                bytemuck::pod_collect_to_vec(&buffer.get(index, self.vertex_offset, 2 * n * 4))
+                bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset, 2 * n * 4)?)
             }
-        }
+        })
     }
 
     /// `applyPaintProperty<TAttribute>(attrIndex, attrib)`.

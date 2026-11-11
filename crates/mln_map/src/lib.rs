@@ -25,4 +25,6 @@ pub use mln_map_types::{
     MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TileLodMode,
     TransformState, TransitionEnd, TransitionOutcome, ViewportMode,
 };
-pub use mln_renderer::RenderingStats;
+pub use mln_renderer::{
+    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, RenderingStats, SourceLayerID,
+};

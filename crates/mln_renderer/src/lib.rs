@@ -48,5 +48,8 @@ pub mod util;
 
 pub use renderer::Renderer;
 pub use renderer_frontend::RendererFrontend;
-pub use renderer_observer::{ExceptionPtr, FontStack, GlyphRange, RenderMode, RendererObserver, RenderingStats};
+pub use renderer_observer::{
+    ExceptionPtr, FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, RenderMode,
+    RendererObserver, RenderingStats, SourceLayerID,
+};
 pub use update_parameters::UpdateParameters;

@@ -9,7 +9,7 @@ use mln_map_types::{
     ConstrainMode, MapDebugOptions, MapMode, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
     ViewportMode,
 };
-use mln_renderer::{ExceptionPtr, RendererFrontend};
+use mln_renderer::{ExceptionPtr, FeatureInfo, LayerFeaturesMap, RendererFrontend, RenderingStats, SourceLayerID};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::Style;
 use mln_util::chrono::TimePoint;
@@ -575,6 +575,93 @@ impl Map {
 
     pub fn get_tile_lod_mode(&self) -> TileLodMode {
         self.impl_.tile_lod_mode.get()
+    }
+
+    // MARK: - Rendered features
+    //
+    // With `MapOptions::with_rendered_feature_info(true)`, these give the
+    // features rendered in the most recently completed frame.
+
+    /// The stats of the most recently completed frame, whose
+    /// `frame_rendered_features` holds every rendered feature by source and
+    /// layer. `None` before the first frame.
+    pub fn get_last_frame_stats(&self) -> Option<Arc<RenderingStats>> {
+        self.impl_.last_frame_stats.borrow().clone()
+    }
+
+    /// Calls `result` with the ID and info of each feature rendered in the
+    /// last frame that matches the given feature, layer and source IDs
+    /// (`None` matches any), until it returns `false`.
+    pub fn get_rendered_features(
+        &self,
+        feature_id: Option<&str>,
+        layer_id: Option<&str>,
+        source_id: Option<&str>,
+        mut result: impl FnMut(&str, &FeatureInfo) -> bool,
+    ) {
+        let Some(stats) = self.get_last_frame_stats() else {
+            return;
+        };
+        let features = &stats.frame_rendered_features;
+
+        let mut search_features = |layer_features: &LayerFeaturesMap| {
+            for (id, info) in layer_features {
+                if feature_id.is_none_or(|feature_id| id == feature_id) && !result(id, info) {
+                    return false;
+                }
+            }
+            true
+        };
+
+        if let (Some(source_id), Some(layer_id)) = (source_id, layer_id) {
+            // Both source and layer are specified, look for an exact match
+            let key = SourceLayerID { source_id: source_id.to_owned(), layer_id: layer_id.to_owned() };
+            if let Some(layer_features) = features.get(&key) {
+                search_features(layer_features);
+            }
+        } else {
+            // Linear search for matching items
+            for (id, layer_features) in features {
+                if source_id.is_none_or(|source_id| id.source_id == source_id)
+                    && layer_id.is_none_or(|layer_id| id.layer_id == layer_id)
+                    && !search_features(layer_features)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// The number of matching features rendered in the last frame (see
+    /// [`get_rendered_features`](Self::get_rendered_features)).
+    pub fn get_rendered_feature_count(
+        &self,
+        feature_id: Option<&str>,
+        layer_id: Option<&str>,
+        source_id: Option<&str>,
+    ) -> usize {
+        let mut count = 0;
+        self.get_rendered_features(feature_id, layer_id, source_id, |_, _| {
+            count += 1;
+            true
+        });
+        count
+    }
+
+    /// Whether any matching feature was rendered in the last frame (see
+    /// [`get_rendered_features`](Self::get_rendered_features)).
+    pub fn is_feature_rendered(
+        &self,
+        feature_id: Option<&str>,
+        layer_id: Option<&str>,
+        source_id: Option<&str>,
+    ) -> bool {
+        let mut found = false;
+        self.get_rendered_features(feature_id, layer_id, source_id, |_, _| {
+            found = true;
+            false
+        });
+        found
     }
 
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).

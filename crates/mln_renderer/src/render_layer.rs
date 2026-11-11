@@ -8,10 +8,11 @@
 // they are `Rc<RefCell<dyn RenderLayer>>`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
 use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry, UploadPass};
 use mln_map_types::TransformState;
 use mln_style::expression::Dependency;
@@ -23,6 +24,9 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
+use mln_util::interpolate::Interpolate;
+use mln_util::mat4::{Mat4, matrix};
+use mln_util::vectors::{Vec3, Vec4};
 
 use crate::bucket::BucketPtr;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
@@ -86,7 +90,176 @@ pub struct LayerPrepareParameters<'a> {
 pub struct Stats {
     pub drawables_added: usize,
     pub drawables_removed: usize,
-    // TODO(port): renderedFeatures (rendered-feature capture).
+    /// The features this layer rendered in the current frame, filled by
+    /// `update` when `UpdateParameters::capture_rendered_features` is set.
+    pub rendered_features: LayerFeaturesMap,
+}
+
+impl Stats {
+    /// `addRenderedFeature`: add an entry or merge with an existing one.
+    pub fn add_rendered_feature(&mut self, feature_id: &str, bound: &NDCBound, tile_ids: HashSet<OverscaledTileID>) {
+        mln_gfx::rendering_stats::add_rendered_feature(&mut self.rendered_features, feature_id, bound, tile_ids);
+    }
+}
+
+/// `RenderLayer::unpack_mix_alpha`: the alpha of a packed pair of colors
+/// (as the paint property binders store them), interpolated by `t`.
+pub fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
+    fn decode_alpha(encoded: f32) -> f32 {
+        let packed_int_value = encoded as i32;
+        (packed_int_value - (packed_int_value / 256) * 256) as f32 / 255.0
+    }
+    decode_alpha(packed[1]).interpolate_f32(&decode_alpha(packed[3]), t)
+}
+
+/// The zoom-interpolated value of a data-driven opacity at a vertex (the
+/// first two floats of `PaintPropertyBinder::get_vertex_value`).
+pub fn vertex_opacity(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
+    match vertex {
+        [a, b, ..] => Some(a.interpolate(b, zoom_fraction)),
+        _ => None,
+    }
+}
+
+/// The zoom-interpolated alpha of a data-driven color at a vertex (the four
+/// floats of `PaintPropertyBinder::get_vertex_value`).
+pub fn vertex_color_alpha(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
+    let packed: &[f32; 4] = vertex.get(..4)?.try_into().ok()?;
+    Some(unpack_mix_alpha(packed, zoom_fraction as f32))
+}
+
+/// What the fill, line, circle and fill-extrusion layers'
+/// `captureRenderedFeatures` share: the features `bucket` retained, bounded
+/// in NDC.
+///
+/// `visible(vertex_offset)` is `false` for a feature whose data-driven
+/// paint values at its first vertex make it invisible. `get_vertex(matrix,
+/// i)` is the position of the bucket's `i`th vertex, given the tile matrix
+/// of `tile_id` translated by `translation`: in NDC if `pre_transformed`,
+/// else in tile space, to be projected through that matrix.
+#[allow(clippy::too_many_arguments)]
+pub fn capture_retained_features(
+    stats: &mut Stats,
+    bucket: &dyn crate::bucket::Bucket,
+    tile_id: &OverscaledTileID,
+    state: &TransformState,
+    transform_params: &crate::paint_parameters::TransformParameters,
+    translation: &[f32; 2],
+    anchor: mln_style_types::TranslateAnchorType,
+    pre_transformed: bool,
+    mut visible: impl FnMut(usize) -> bool,
+    mut get_vertex: impl FnMut(&Mat4, usize) -> Option<Vec3>,
+) {
+    let mut tile_matrix: Option<Mat4> = None;
+    let features = bucket.get_retained_features();
+    stats.rendered_features.reserve(features.len());
+
+    for feature in features {
+        debug_assert!(!feature.feature_id.is_empty());
+
+        // Consider only the value for the first vertex of this feature, for now.
+        let vertex_offset = feature.vertex_offset;
+        if !visible(vertex_offset) {
+            continue;
+        }
+
+        // Compute the tile matrix once
+        let tile_matrix = tile_matrix.get_or_insert_with(|| {
+            crate::layer_tweaker::get_tile_matrix_for(
+                &tile_id.to_unwrapped(),
+                state,
+                transform_params,
+                translation,
+                anchor,
+                /*origin=*/ None,
+                /*near_clipped=*/ false,
+                /*in_viewport_pixel_units=*/ false,
+                /*aligned=*/ false,
+            )
+        });
+
+        let bound = compute_feature_ndc_bound(feature.vertex_count, tile_matrix, pre_transformed, |i| {
+            get_vertex(tile_matrix, vertex_offset.checked_add(i)?)
+        });
+        if let Some(bound) = bound {
+            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from([*tile_id]));
+        }
+    }
+}
+
+fn minmax(range: (f64, f64), value: f64) -> (f64, f64) {
+    (range.0.min(value), range.1.max(value))
+}
+
+/// `RenderLayer::computeFeatureNDCBound`: the NDC bounding box of
+/// `vertex_count` vertices from `get_vertex`, or `None` when they are
+/// degenerate or entirely outside the viewport.
+///
+/// The vertices' bounding box is projected by its corners through
+/// `tile_matrix`, unless `pre_transformed`, in which case the vertices are
+/// already in NDC.
+pub fn compute_feature_ndc_bound(
+    vertex_count: usize,
+    tile_matrix: &Mat4,
+    pre_transformed: bool,
+    mut get_vertex: impl FnMut(usize) -> Option<Vec3>,
+) -> Option<NDCBound> {
+    // Compute the feature's bounding box in tile space and project the
+    // corners into NDC space. Faster than projecting every vertex, and good
+    // enough for our purposes.
+    let init_range = (f64::MAX, f64::MIN);
+    let mut range_x = init_range;
+    let mut range_y = init_range;
+    let mut range_z = init_range;
+    for i in 0..vertex_count {
+        let vertex = get_vertex(i)?;
+        range_x = minmax(range_x, vertex[0]);
+        range_y = minmax(range_y, vertex[1]);
+        range_z = minmax(range_z, vertex[2]);
+    }
+
+    if range_x.1 <= range_x.0 || range_y.1 <= range_y.0 || range_z.1 < range_z.0 {
+        return None;
+    }
+
+    let corners: [Vec4; 8] = [
+        [range_x.0, range_y.0, range_z.0, 1.0],
+        [range_x.1, range_y.0, range_z.0, 1.0],
+        [range_x.1, range_y.1, range_z.0, 1.0],
+        [range_x.0, range_y.1, range_z.0, 1.0],
+        [range_x.0, range_y.0, range_z.1, 1.0],
+        [range_x.1, range_y.0, range_z.1, 1.0],
+        [range_x.1, range_y.1, range_z.1, 1.0],
+        [range_x.0, range_y.1, range_z.1, 1.0],
+    ];
+    let corners_count = if range_z.0 < range_z.1 { 8 } else { 4 };
+
+    let mut ndc_range_x = init_range;
+    let mut ndc_range_y = init_range;
+    let mut ndc_range_z = init_range;
+    for view_pos in &corners[..corners_count] {
+        let clip_pos = if pre_transformed { *view_pos } else { matrix::transform_mat4_value(view_pos, tile_matrix) };
+        ndc_range_x = minmax(ndc_range_x, clip_pos[0] / clip_pos[3]);
+        ndc_range_y = minmax(ndc_range_y, clip_pos[1] / clip_pos[3]);
+        ndc_range_z = minmax(ndc_range_z, clip_pos[2] / clip_pos[3]);
+    }
+
+    if ndc_range_x.0 < ndc_range_x.1
+        && ndc_range_y.0 < ndc_range_y.1
+        && ndc_range_z.0 <= ndc_range_z.1
+        && -1.0 <= ndc_range_x.1
+        && ndc_range_x.0 <= 1.0
+        && -1.0 <= ndc_range_y.1
+        && ndc_range_y.0 <= 1.0
+    {
+        return Some(NDCBound {
+            min_x: ndc_range_x.0,
+            max_x: ndc_range_x.1,
+            min_y: ndc_range_y.0,
+            max_y: ndc_range_y.1,
+        });
+    }
+    None
 }
 
 /// The data members of `RenderLayer`.

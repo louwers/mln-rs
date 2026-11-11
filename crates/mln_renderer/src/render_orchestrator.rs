@@ -18,6 +18,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::{TaggedScheduler, scheduler};
+use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_gfx::{Context, LayerGroupBase, LayerGroupBasePtr, ShaderRegistry};
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
@@ -256,6 +257,9 @@ pub struct RenderOrchestrator {
     render_targets: Vec<crate::render_target::RenderTargetPtr>,
 
     pending_changes: UniqueChangeRequestVec,
+
+    /// The features the layers rendered in the last `update_layers`.
+    frame_rendered_features: FrameRenderedFeaturesMap,
 }
 
 impl RenderOrchestrator {
@@ -313,6 +317,7 @@ impl RenderOrchestrator {
             debug_layer_groups: VecMap::new(), // layers: debug
             render_targets: Vec::new(),        // dem-heatmap
             pending_changes: Vec::new(),
+            frame_rendered_features: FrameRenderedFeaturesMap::new(),
         }
     }
 
@@ -1081,6 +1086,7 @@ impl RenderOrchestrator {
         let items = render_tree.get_layer_render_item_map();
 
         let mut changes: UniqueChangeRequestVec = Vec::with_capacity(items.len() * 3);
+        let mut all_features = FrameRenderedFeaturesMap::new();
 
         for item in items.values() {
             let mut render_layer = item.layer.borrow_mut();
@@ -1096,10 +1102,25 @@ impl RenderOrchestrator {
                 &mut changes,
             );
 
-            // TODO(port): accumulate renderLayer.stats.renderedFeatures
-            // (rendered-feature capture).
+            // Accumulate rendered features from each render layer, leaving each one empty.
+            let rendered_features = std::mem::take(&mut render_layer.base_mut().stats.rendered_features);
+            if !rendered_features.is_empty() {
+                let id = SourceLayerID {
+                    source_id: item.source.clone().unwrap_or_default(),
+                    layer_id: render_layer.get_id().to_owned(),
+                };
+                merge_layer_features(all_features.entry(id).or_default(), rendered_features);
+            }
         }
         self.add_changes(&mut changes);
+
+        self.frame_rendered_features = all_features;
+    }
+
+    /// `moveFrameRenderedFeatures()`: the features the layers rendered in
+    /// the last `update_layers`, leaving none.
+    pub fn move_frame_rendered_features(&mut self) -> FrameRenderedFeaturesMap {
+        std::mem::take(&mut self.frame_rendered_features)
     }
 
     pub fn process_changes(&mut self) {

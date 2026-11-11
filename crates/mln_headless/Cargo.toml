@@ -38,8 +38,7 @@ path = "tests/m1_background_render_test.rs"
 name = "local_glyph_rasterizer_test"
 path = "tests/local_glyph_rasterizer_test.rs"
 
-# gtests-core: test/renderer/feature_tracking.test.cpp (all ignored until
-# rendered-feature tracking is ported; see the file comment).
+# gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]
 name = "gtest_feature_tracking"
 path = "tests/gtest_feature_tracking.rs"

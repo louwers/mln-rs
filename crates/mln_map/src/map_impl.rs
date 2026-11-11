@@ -141,7 +141,9 @@ pub struct MapImpl {
     pub(crate) capture_rendered_features: bool,
 
     pub(crate) debug_options: Cell<MapDebugOptions>,
-    // TODO(port): renderingStatsView, lastFrameStats, annotationManager.
+    // TODO(port): renderingStatsView, annotationManager.
+    /// The stats of the last frame the renderer finished.
+    pub(crate) last_frame_stats: RefCell<Option<Arc<RenderingStats>>>,
     pub(crate) style: RefCell<Style>,
     pending_style_events: RefCell<Vec<StyleEvent>>,
 
@@ -193,6 +195,7 @@ impl MapImpl {
             fast_pfor_enabled: map_options.fast_pfor_enabled(),
             capture_rendered_features: map_options.rendered_feature_info(),
             debug_options: Cell::new(MapDebugOptions::NO_DEBUG),
+            last_frame_stats: RefCell::new(None),
             style: RefCell::new(Style::with_file_source(file_source.clone(), pixel_ratio, thread_pool)),
             pending_style_events: RefCell::new(Vec::new()),
             camera_mutated: Cell::new(false),
@@ -418,7 +421,7 @@ impl RendererObserver for MapImpl {
                 },
                 needs_repaint,
                 placement_changed,
-                rendering_stats: stats,
+                rendering_stats: stats.clone(),
             };
             self.observer.on_did_finish_rendering_frame(&frame_status);
 
@@ -433,6 +436,8 @@ impl RendererObserver for MapImpl {
                 (request.callback)(None);
             }
         }
+
+        *self.last_frame_stats.borrow_mut() = Some(stats);
     }
 
     fn on_will_start_rendering_map(&self) {

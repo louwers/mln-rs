@@ -1,8 +1,6 @@
 // Ports src/mln/renderer/layers/render_fill_layer.hpp and
 // src/mln/renderer/layers/render_fill_layer.cpp (drawable path,
 // MLN_TRIANGULATE_FILL_OUTLINES = 1 as for WebGPU).
-//
-// TODO(port): captureRenderedFeatures.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -36,10 +34,13 @@ use crate::buckets::fill_bucket::{FillBinders, FillBucket, FillLayoutVertex};
 use crate::buckets::line_bucket::LineLayoutVertex;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
-use crate::paint_parameters::PaintParameters;
+use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase};
+use crate::render_layer::{
+    RenderLayer, RenderLayerBase, Stats, capture_retained_features, vertex_color_alpha, vertex_opacity,
+};
 use crate::render_pass::RenderPass;
+use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
@@ -83,6 +84,59 @@ impl FillVariant {
 /// `vertexAttrs->readDataDrivenPaintProperties<FillColor, FillOpacity,
 /// FillOutlineColor, FillPattern>(binders, evaluated, propertiesAsUniforms,
 /// idFillColorVertexAttribute)`.
+/// `RenderFillLayer::captureRenderedFeatures`.
+fn capture_rendered_features(
+    stats: &mut Stats,
+    bucket: &FillBucket,
+    tile: &RenderTile,
+    binders: &FillBinders,
+    evaluated: &FillPaintProperties::PossiblyEvaluated,
+    state: &TransformState,
+    transform_params: &TransformParameters,
+) {
+    let alpha = evaluated.get::<FillOpacity>();
+    let alpha_is_constant = alpha.is_constant();
+    if alpha_is_constant && binders.fill_opacity.uniform_value(alpha) == 0.0 {
+        return;
+    }
+
+    let color = evaluated.get::<FillColor>();
+    let color_is_constant = color.is_constant();
+    if color_is_constant && binders.fill_color.uniform_value(color).a == 0.0 {
+        return;
+    }
+
+    let zoom_fraction = state.get_zoom_fraction();
+    let buffer = &binders.interleaved_vertex_buffer;
+    let vertices = bucket.vertices.data();
+    capture_retained_features(
+        stats,
+        bucket,
+        tile.get_overscaled_tile_id(),
+        state,
+        transform_params,
+        evaluated.get::<FillTranslate>(),
+        *evaluated.get::<FillTranslateAnchor>(),
+        /*pre_transformed=*/ false,
+        |vertex_offset| {
+            if !alpha_is_constant {
+                let opacity = binders.fill_opacity.get_vertex_value(buffer, vertex_offset);
+                if opacity.and_then(|v| vertex_opacity(&v, zoom_fraction)) == Some(0.0) {
+                    return false;
+                }
+            }
+            if !color_is_constant {
+                let color = binders.fill_color.get_vertex_value(buffer, vertex_offset);
+                if color.and_then(|v| vertex_color_alpha(&v, zoom_fraction)) == Some(0.0) {
+                    return false;
+                }
+            }
+            true
+        },
+        |_, i| vertices.get(i).map(|vertex| [vertex.a1[0].into(), vertex.a1[1].into(), 0.0]),
+    );
+}
+
 fn read_fill_attributes(
     attrs: &mut mln_gfx::vertex_attribute::VertexAttributeArray,
     binders: &FillBinders,
@@ -247,13 +301,13 @@ impl RenderLayer for RenderFillLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
-        _update_parameters: &Arc<UpdateParameters>,
+        state: &TransformState,
+        update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
+        render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
-        // TODO(port): stats.renderedFeatures.clear() (rendered-feature capture).
+        self.base.stats.rendered_features.clear();
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
@@ -372,8 +426,12 @@ impl RenderLayer for RenderFillLayer {
                 paint_vertices(geometry, bucket, &binders.interleaved_vertex_buffer, binders.depends_on_feature_state())
             };
 
-            // (getAtlasTweaker: in the pattern branch.) TODO(port):
-            // captureRenderedFeatures.
+            // (getAtlasTweaker: in the pattern branch.)
+
+            if update_parameters.capture_rendered_features {
+                let params = &render_tree.get_parameters().transform_params;
+                capture_rendered_features(&mut self.base.stats, bucket, tile, binders, evaluated, state, params);
+            }
 
             // Drawables' stored attributes point directly into the bucket's
             // shared vectors; the backend upload guard fires automatically

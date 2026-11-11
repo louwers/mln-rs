@@ -1,7 +1,5 @@
 // Ports src/mln/renderer/layers/render_line_layer.hpp and
 // src/mln/renderer/layers/render_line_layer.cpp (drawable path).
-//
-// TODO(port): captureRenderedFeatures.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -42,10 +40,14 @@ use crate::buckets::line_bucket::{LineBinders, LineBucket, LineLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::line_atlas::LinePatternCap;
-use crate::paint_parameters::PaintParameters;
+use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{LayerPrepareParameters, RenderLayer, RenderLayerBase};
+use crate::render_layer::{
+    LayerPrepareParameters, RenderLayer, RenderLayerBase, Stats, capture_retained_features, vertex_color_alpha,
+    vertex_opacity,
+};
 use crate::render_pass::RenderPass;
+use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
@@ -85,6 +87,60 @@ pub fn apply_color_ramp(
 /// LineOpacity, LineGapWidth, LineOffset, LineWidth, LineFloorWidth,
 /// LinePattern>(binders, evaluated, propertiesAsUniforms,
 /// idLineColorVertexAttribute)`.
+/// `RenderLineLayer::captureRenderedFeatures`.
+fn capture_rendered_features(
+    stats: &mut Stats,
+    bucket: &LineBucket,
+    tile: &RenderTile,
+    binders: &LineBinders,
+    evaluated: &LinePaintProperties::PossiblyEvaluated,
+    state: &TransformState,
+    transform_params: &TransformParameters,
+) {
+    let alpha = evaluated.get::<LineOpacity>();
+    let alpha_is_constant = alpha.is_constant();
+    if alpha_is_constant && binders.line_opacity.uniform_value(alpha) == 0.0 {
+        return;
+    }
+
+    let color = evaluated.get::<LineColor>();
+    let color_is_constant = color.is_constant();
+    if color_is_constant && binders.line_color.uniform_value(color).a == 0.0 {
+        return;
+    }
+
+    let zoom_fraction = state.get_zoom_fraction();
+    let buffer = &binders.interleaved_vertex_buffer;
+    let vertices = bucket.vertices.data();
+    capture_retained_features(
+        stats,
+        bucket,
+        tile.get_overscaled_tile_id(),
+        state,
+        transform_params,
+        evaluated.get::<LineTranslate>(),
+        *evaluated.get::<LineTranslateAnchor>(),
+        /*pre_transformed=*/ false,
+        |vertex_offset| {
+            if !alpha_is_constant {
+                let opacity = binders.line_opacity.get_vertex_value(buffer, vertex_offset);
+                if opacity.and_then(|v| vertex_opacity(&v, zoom_fraction)) == Some(0.0) {
+                    return false;
+                }
+            }
+            if !color_is_constant {
+                let color = binders.line_color.get_vertex_value(buffer, vertex_offset);
+                if color.and_then(|v| vertex_color_alpha(&v, zoom_fraction)) == Some(0.0) {
+                    return false;
+                }
+            }
+            true
+        },
+        // Not considering line width yet
+        |_, i| vertices.get(i).map(|vertex| [f64::from(vertex.a1[0]) / 2.0, f64::from(vertex.a1[1]) / 2.0, 0.0]),
+    );
+}
+
 fn read_line_attributes(
     attrs: &mut mln_gfx::vertex_attribute::VertexAttributeArray,
     b: &LineBinders,
@@ -464,13 +520,13 @@ impl RenderLayer for RenderLineLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
-        _parameters: &Arc<UpdateParameters>,
+        state: &TransformState,
+        parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
+        render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
-        // TODO(port): stats.renderedFeatures.clear() (rendered-feature capture).
+        self.base.stats.rendered_features.clear();
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
@@ -614,7 +670,18 @@ impl RenderLayer for RenderLineLayer {
             };
             let evaluated = get_evaluated::<LineLayerProperties>(&render_data.layer_properties);
 
-            // TODO(port): captureRenderedFeatures.
+            if parameters.capture_rendered_features {
+                let params = &render_tree.get_parameters().transform_params;
+                capture_rendered_features(
+                    &mut self.base.stats,
+                    bucket,
+                    tile,
+                    paint_property_binders,
+                    evaluated,
+                    state,
+                    params,
+                );
+            }
 
             let prev_bucket_id = self.get_render_tile_bucket_id(&tile_id);
             if prev_bucket_id != SimpleIdentity::EMPTY && prev_bucket_id != bucket.base.bucket_id {

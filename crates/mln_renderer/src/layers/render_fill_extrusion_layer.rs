@@ -1,10 +1,9 @@
 // Ports src/mln/renderer/layers/render_fill_extrusion_layer.hpp and
 // src/mln/renderer/layers/render_fill_extrusion_layer.cpp (drawable path,
 // `!MLN_USE_FILL_EXTRUSION_INSTANCING`).
-//
-// TODO(port): captureRenderedFeatures (UpdateParameters::captureRenderedFeatures).
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -20,29 +19,111 @@ use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
 use mln_style::layers::fill_extrusion_layer_properties::*;
+use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
+use mln_util::mat4::Mat4;
 use mln_util::sync::RwLockExt;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
 use super::{TileDrawables, drawable_binders_slot, drawable_has_layer_tweaker, drawable_render_tile_slot};
+use crate::bucket::Bucket;
 use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
-use crate::buckets::fill_extrusion_bucket::{FillExtrusionBucket, FillExtrusionLayoutVertex};
+use crate::buckets::fill_extrusion_bucket::{FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
-use crate::paint_parameters::PaintParameters;
+use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for, layer_tweaker_slot};
+use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase};
+use crate::render_layer::{RenderLayer, RenderLayerBase, Stats, compute_feature_ndc_bound, vertex_color_alpha};
 use crate::render_pass::RenderPass;
+use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
 use crate::update_parameters::UpdateParameters;
 
 fn impl_cast(impl_: &Immutable<dyn layer::Impl>) -> &FillExtrusionLayerImpl {
     debug_assert!(std::ptr::eq(impl_.get_type_info(), FillExtrusionLayerImpl::static_type_info()));
     impl_.downcast_ref::<FillExtrusionLayerImpl>().expect("RenderFillExtrusionLayer: not a fill-extrusion layer impl")
+}
+
+/// `RenderFillExtrusionLayer::captureRenderedFeatures`.
+fn capture_rendered_features(
+    stats: &mut Stats,
+    bucket: &FillExtrusionBucket,
+    tile: &RenderTile,
+    binders: &FillExtrusionBinders,
+    evaluated: &FillExtrusionPaintProperties::PossiblyEvaluated,
+    state: &TransformState,
+    transform_params: &TransformParameters,
+) {
+    let tile_id = tile.get_overscaled_tile_id();
+
+    // fill-extrusion-opacity does not support data-driven expressions
+    if *evaluated.get::<FillExtrusionOpacity>() == 0.0 {
+        return;
+    }
+
+    let color = evaluated.get::<FillExtrusionColor>();
+    let color_is_constant = color.is_constant();
+    if color_is_constant && binders.fill_extrusion_color.uniform_value(color).a == 0.0 {
+        return;
+    }
+
+    let translation = evaluated.get::<FillExtrusionTranslate>();
+    let translation_anchor = *evaluated.get::<FillExtrusionTranslateAnchor>();
+    let base = f64::from(evaluated.get::<FillExtrusionBase>().constant_or(&FillExtrusionBase::default_value()));
+    let height = f64::from(evaluated.get::<FillExtrusionHeight>().constant_or(&FillExtrusionHeight::default_value()));
+    let zoom_fraction = state.get_zoom_fraction();
+    let buffer = &binders.interleaved_vertex_buffer;
+    let vertices = bucket.vertices.data();
+    let mut tile_matrix: Option<Mat4> = None;
+
+    let features = bucket.get_retained_features();
+    stats.rendered_features.reserve(features.len());
+
+    for feature in features {
+        debug_assert!(!feature.feature_id.is_empty());
+
+        if !color_is_constant {
+            // Consider only the value for the first vertex of this feature, for now.
+            let alpha = binders
+                .fill_extrusion_color
+                .get_vertex_value(buffer, feature.vertex_offset)
+                .and_then(|v| vertex_color_alpha(&v, zoom_fraction));
+            if alpha == Some(0.0) {
+                continue;
+            }
+        }
+
+        // Compute the tile matrix once
+        let tile_matrix = tile_matrix.get_or_insert_with(|| {
+            get_tile_matrix_for(
+                &tile_id.to_unwrapped(),
+                state,
+                transform_params,
+                translation,
+                translation_anchor,
+                /*origin=*/ None,
+                /*near_clipped=*/ true,
+                /*in_viewport_pixel_units=*/ false,
+                /*aligned=*/ false,
+            )
+        });
+
+        // Each vertex is considered twice, once at the base z and once at the height z
+        let vertex_offset = feature.vertex_offset;
+        let vertex_count = feature.vertex_count;
+        let get_vertex = |vi: usize| {
+            let vertex = vertices.get(vertex_offset.checked_add(vi.checked_rem(vertex_count)?)?)?;
+            let z = if vi < vertex_count { base } else { height };
+            Some([f64::from(vertex.a1[0]), f64::from(vertex.a1[1]), z])
+        };
+        if let Some(bound) = compute_feature_ndc_bound(2 * vertex_count, tile_matrix, false, get_vertex) {
+            stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from([*tile_id]));
+        }
+    }
 }
 
 pub struct RenderFillExtrusionLayer {
@@ -142,13 +223,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
         &mut self,
         shaders: &ShaderRegistry,
         context: &dyn Context,
-        _state: &TransformState,
-        _update_parameters: &Arc<UpdateParameters>,
+        state: &TransformState,
+        update_parameters: &Arc<UpdateParameters>,
         _paint_parameters: &PaintParameters<'_>,
-        _render_tree: &RenderTree,
+        render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
-        // TODO(port): stats.renderedFeatures.clear() (rendered-feature capture).
+        self.base.stats.rendered_features.clear();
 
         let render_tiles = match self.base.render_tiles.clone() {
             Some(tiles) if !tiles.is_empty() && self.base.passes != RenderPass::None => tiles,
@@ -268,7 +349,11 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let binders = &*binders_guard;
             let geometry = tile.get_bucket_geometry();
 
-            // TODO(port): captureRenderedFeatures.
+            // Capture rendered features if requested
+            if update_parameters.capture_rendered_features {
+                let params = &render_tree.get_parameters().transform_params;
+                capture_rendered_features(&mut self.base.stats, bucket, tile, binders, evaluated, state, params);
+            }
 
             // If we already have drawables for this tile, update them.
             let update_existing = |drawable: &mut dyn mln_gfx::Drawable| {

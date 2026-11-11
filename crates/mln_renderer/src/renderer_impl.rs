@@ -369,9 +369,9 @@ impl RendererImpl {
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
 
-        // TODO(port): stats->frameRenderedFeatures =
-        // orchestrator.moveFrameRenderedFeatures().
-        let stats = Arc::new(context.thread_safe_copy_rendering_stats());
+        let mut stats = context.thread_safe_copy_rendering_stats();
+        stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
+        let stats = Arc::new(stats);
         drop(parameters);
 
         if let Some(observer) = &observer {
