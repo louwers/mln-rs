@@ -196,9 +196,6 @@ pub(crate) fn run(launch: Launch) {
             .with_fov(Some(settings.fov)),
     );
     map.set_debug(MapDebugOptions(settings.debug));
-    // The window always rotates (right drag), so drags and zooms on the
-    // globe turn the bearing with the planet.
-    map.set_globe_free_bearing(true);
 
     let style_url = match &args.style {
         Some(style) if !style.contains("://") => format!("file://{style}"),
