@@ -13,7 +13,7 @@
 // and drains it when deactivated, around each frame's explicit
 // `BackendScope`.
 
-use std::cell::Cell;
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
@@ -55,13 +55,16 @@ impl BackendImpl {
 pub struct RendererBackend {
     pub base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
-    /// The autorelease pool opened by `activate`.
-    autorelease_pool: Cell<Option<*mut c_void>>,
+    /// The autorelease pools opened by `activate`, innermost last. Scopes
+    /// of other backends can nest between two of this backend's.
+    autorelease_pools: RefCell<Vec<*mut c_void>>,
 }
 
 /// The shader types registered by `initShaders`, in the C++ order, without
 /// the instanced fill extrusion shaders: the port's renderer builds fill
-/// extrusions without instancing.
+/// extrusions without instancing. `init_shaders` skips the ones without a
+/// Metal source in the port (`shader_source`): the location indicator and
+/// wide vector shaders.
 const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
@@ -112,7 +115,7 @@ impl RendererBackend {
         Ok(RendererBackend {
             base: RendererBackendBase::new(context_mode),
             impl_: Rc::new(BackendImpl { device, command_queue, base_vertex_instance_drawing_supported }),
-            autorelease_pool: Cell::new(None),
+            autorelease_pools: RefCell::new(Vec::new()),
         })
     }
 
@@ -140,17 +143,18 @@ impl RendererBackend {
 
     /// `activate()`: opens the autorelease pool of a frame.
     pub fn activate(&self) {
-        if self.autorelease_pool.get().is_none() {
-            // SAFETY: `deactivate` pops it on this thread, after the pools
-            // opened inside the scope (BackendScope nests on one thread).
-            self.autorelease_pool.set(Some(unsafe { objc2::ffi::objc_autoreleasePoolPush() }));
-        }
+        // SAFETY: `deactivate` pops it on this thread, after the pools
+        // opened inside the scope (BackendScopes nest on one thread).
+        let pool = unsafe { objc2::ffi::objc_autoreleasePoolPush() };
+        self.autorelease_pools.borrow_mut().push(pool);
     }
 
-    /// `deactivate()`: drains the autorelease pool `activate` opened.
+    /// `deactivate()`: drains the autorelease pool of the innermost
+    /// `activate`.
     pub fn deactivate(&self) {
-        if let Some(pool) = self.autorelease_pool.take() {
-            // SAFETY: `pool` is the innermost pool, pushed by `activate`.
+        if let Some(pool) = self.autorelease_pools.borrow_mut().pop() {
+            // SAFETY: `pool` is the innermost pool: the scopes opened inside
+            // the one that pushed it have ended.
             unsafe { objc2::ffi::objc_autoreleasePoolPop(pool) };
         }
     }

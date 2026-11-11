@@ -46,7 +46,7 @@ pub struct BufferResource {
 
 /// Copies `data` into a new buffer of `size` bytes, or allocates an empty
 /// one when there is no data.
-fn new_metal_buffer(
+pub(crate) fn new_metal_buffer(
     device: &ProtocolObject<dyn objc2_metal::MTLDevice>,
     data: Option<&[u8]>,
     size: usize,

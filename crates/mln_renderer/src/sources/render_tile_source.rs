@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_actor::TaggedScheduler;
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::polyline_generator::PolylineGeneratorOptions;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
@@ -390,6 +391,8 @@ pub struct PolylineLayerTweaker {
     props_ubo: LineEvaluatedPropsUBO,
     /// MLN_UBO_CONSOLIDATION
     drawable_uniform_buffer: Option<UniformBufferPtr>,
+    /// Port-only: the Metal line shaders' `LineExpressionUBO`.
+    expression_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl PolylineLayerTweaker {
@@ -402,6 +405,7 @@ impl PolylineLayerTweaker {
             base: LayerTweakerBase::new("debug-polyline".to_owned(), layer_properties),
             props_ubo: properties,
             drawable_uniform_buffer: None,
+            expression_uniform_buffer: None,
         }
     }
 }
@@ -431,12 +435,13 @@ impl LayerTweaker for PolylineLayerTweaker {
         // mask isn't empty
         debug_assert!(self.props_ubo.expression_mask == line_expression_mask::NONE);
         // No GPU expressions; only the Metal line shaders read it.
-        layer_group.mutable_uniform_buffers().create_or_update(
-            ID_LINE_EXPRESSION_UBO,
-            &[0; LINE_EXPRESSION_UBO_SIZE],
-            context,
-            false,
-        );
+        if context.backend_type() == BackendType::Metal {
+            if self.expression_uniform_buffer.is_none() {
+                self.expression_uniform_buffer =
+                    Some(context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE], false, false));
+            }
+            layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
+        }
 
         let mut i: u32 = 0;
         let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.get_drawable_count()];

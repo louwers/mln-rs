@@ -22,8 +22,6 @@
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::ffi::c_void;
-use std::ptr::NonNull;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::backend::Type as BackendType;
@@ -60,7 +58,7 @@ use objc2_metal::{
     MTLStencilDescriptor, MTLStencilOperation, MTLVertexDescriptor, MTLVertexFormat, MTLVertexStepFunction, MTLWinding,
 };
 
-use crate::buffer_resource::BufferResource;
+use crate::buffer_resource::{self, BufferResource};
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::DrawableBuilder;
 use crate::layer_group::LayerGroup;
@@ -345,14 +343,7 @@ impl Context {
 
     /// A persistent buffer holding `data`.
     fn new_metal_buffer(&self, data: &[u8]) -> Option<MTLBufferPtr> {
-        // SAFETY: `data` is non-empty, and Metal copies it.
-        unsafe {
-            self.backend.get_device().newBufferWithBytes_length_options(
-                NonNull::from(data).cast::<c_void>(),
-                data.len(),
-                BUFFER_USAGE,
-            )
-        }
+        buffer_resource::new_metal_buffer(self.backend.get_device(), Some(data), data.len(), BUFFER_USAGE)
     }
 
     /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four

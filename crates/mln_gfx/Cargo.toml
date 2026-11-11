@@ -41,12 +41,8 @@ path = "tests/gtest_renderable.rs"
 name = "gtest_backend_scope"
 path = "tests/gtest_backend_scope.rs"
 
-# gtests-core: test/renderer/metal_renderable.test.cpp and
-# vulkan_acquire.test.cpp: backend-specific, ignored placeholders.
-[[test]]
-name = "gtest_metal_renderable"
-path = "tests/gtest_metal_renderable.rs"
-
+# gtests-core: test/renderer/vulkan_acquire.test.cpp: backend-specific,
+# an ignored placeholder.
 [[test]]
 name = "gtest_vulkan_acquire"
 path = "tests/gtest_vulkan_acquire.rs"

@@ -4,9 +4,7 @@
 // (metal_overlay.rs).
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 
 /// The controls' last frame, which the overlay paints over each frame of the
 /// map until the next.
@@ -16,47 +14,20 @@ pub(crate) struct Paint {
     /// The textures to update before painting, and to free after.
     pub(crate) textures: egui::TexturesDelta,
     pub(crate) pixels_per_point: f32,
-    /// Every texture egui has, as of its last update: egui sends a texture
-    /// once, and a new overlay needs them all again (`resend_textures`).
-    images: HashMap<egui::TextureId, (Arc<egui::ColorImage>, egui::TextureOptions)>,
 }
 
 impl Paint {
-    /// Takes egui's texture updates, for the overlay to apply before it next
-    /// paints.
-    pub(crate) fn add_textures(&mut self, delta: egui::TexturesDelta) {
-        for (id, updates) in &delta.set {
-            for update in updates {
-                let egui::ImageData::Color(image) = &update.image;
-                match update.pos {
-                    None => {
-                        self.images.insert(*id, (image.clone(), update.options));
-                    }
-                    Some([x, y]) => {
-                        if let Some((full, _)) = self.images.get_mut(id) {
-                            let full = Arc::make_mut(full);
-                            let width = full.size[0];
-                            for (row, pixels) in image.pixels.chunks_exact(image.size[0].max(1)).enumerate() {
-                                let start = (y + row) * width + x;
-                                full.pixels[start..start + pixels.len()].copy_from_slice(pixels);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        for id in &delta.free {
-            self.images.remove(id);
-        }
-        self.textures.append(delta);
-    }
-
-    /// Sends every texture again, whole, for an overlay that has none.
-    pub(crate) fn resend_textures(&mut self) {
+    /// Has egui send every texture again, whole, with its next pass, for an
+    /// overlay that has none (egui sends a texture once): the font atlas,
+    /// and the images, which egui loads again.
+    pub(crate) fn resend_textures(&mut self, ui: &egui::Context) {
         self.textures.clear();
-        for (id, (image, options)) in &self.images {
-            self.textures.push(*id, egui::epaint::ImageDelta::full(image.clone(), *options));
-        }
+        let font_image = ui.fonts(|fonts| fonts.image());
+        ui.tex_manager().write().set(
+            egui::TextureId::default(),
+            egui::epaint::ImageDelta::full(font_image, egui::epaint::TextureAtlas::texture_options()),
+        );
+        ui.forget_all_images();
     }
 }
 

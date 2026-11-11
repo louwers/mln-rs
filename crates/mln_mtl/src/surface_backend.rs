@@ -33,15 +33,15 @@ use objc2::rc::{Retained, autoreleasepool};
 use objc2::runtime::ProtocolObject;
 use objc2_core_foundation::CGSize;
 use objc2_metal::{
-    MTLBlitCommandEncoder, MTLBuffer, MTLCommandBuffer, MTLCommandEncoder, MTLCommandQueue, MTLDevice, MTLOrigin,
-    MTLPixelFormat, MTLRenderPassDescriptor, MTLResourceOptions, MTLSize, MTLStorageMode, MTLTexture,
-    MTLTextureDescriptor, MTLTextureUsage,
+    MTLBuffer, MTLCommandBuffer, MTLCommandQueue, MTLDevice, MTLPixelFormat, MTLRenderPassDescriptor,
+    MTLResourceOptions, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
 use crate::mtl_fwd::{MTLCommandBufferPtr, MTLRenderPassDescriptorPtr, MTLTexturePtr};
 use crate::renderable_resource::{RenderableResource, RenderableResourceBox};
 use crate::renderer_backend::{BackendImpl, RendererBackend};
+use crate::texture2d::{buffer_bytes, encode_texture_copy};
 
 /// The format of the layer's drawables.
 const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
@@ -139,23 +139,8 @@ impl SurfaceState {
             .backend
             .get_device()
             .newBufferWithLength_options(bytes_per_row * height, MTLResourceOptions::StorageModeShared)?;
-        let blit = command_buffer.blitCommandEncoder()?;
-        // SAFETY: the region is the whole texture and the buffer holds it.
-        unsafe {
-            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-                texture,
-                0,
-                0,
-                MTLOrigin { x: 0, y: 0, z: 0 },
-                MTLSize { width, height, depth: 1 },
-                &buffer,
-                0,
-                bytes_per_row,
-                bytes_per_row * height,
-            );
-        }
-        blit.endEncoding();
-        Some((buffer, Size::new(width as u32, height as u32)))
+        encode_texture_copy(command_buffer, texture, bytes_per_row, &buffer)
+            .then(|| (buffer, Size::new(width as u32, height as u32)))
     }
 
     fn swap(&self) {
@@ -183,6 +168,7 @@ impl SurfaceState {
             } else {
                 self.readback_requested.set(false);
                 readback = self.encode_readback(&command_buffer, &texture);
+                self.layer.setFramebufferOnly(true);
             }
         }
 
@@ -192,8 +178,7 @@ impl SurfaceState {
         if let Some((buffer, size)) = readback {
             command_buffer.waitUntilCompleted();
             let mut image = PremultipliedImage::new(size);
-            // SAFETY: the copy is complete and the buffer holds the image.
-            let bgra = unsafe { std::slice::from_raw_parts(buffer.contents().as_ptr().cast::<u8>(), image.data.len()) };
+            let bgra = buffer_bytes(&buffer, image.data.len());
             for (dst, src) in image.data.chunks_exact_mut(4).zip(bgra.chunks_exact(4)) {
                 dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
             }
@@ -327,11 +312,17 @@ impl SurfaceBackend {
     }
 
     /// Port-only: copy the next presented frame (see `take_readback`). The
-    /// layer's drawables can be read from the next one it hands out; a frame
-    /// on one taken before is copied from the frame after.
+    /// layer's drawables can be read until that copy, from the next one it
+    /// hands out: a drawable taken ahead of the next frame is given back,
+    /// and one that a frame is drawing into now has its copy in the frame
+    /// after.
     pub fn request_readback(&self) {
-        self.state.layer.setFramebufferOnly(false);
-        self.state.readback_requested.set(true);
+        let state = &self.state;
+        state.layer.setFramebufferOnly(false);
+        state.readback_requested.set(true);
+        if state.command_buffer.borrow().is_none() {
+            state.drawable.borrow_mut().take_if(|drawable| drawable.texture().isFramebufferOnly());
+        }
     }
 
     /// Port-only: draws `overlay` over each frame from now on, after the map

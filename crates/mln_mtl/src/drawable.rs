@@ -204,8 +204,6 @@ impl Drawable {
         let Some(shader) = as_mtl_shader(&shader_ptr) else {
             return;
         };
-        let context = upload_pass.mtl_context().clone();
-
         // We need either raw index data or a buffer already created from
         // them. We can have a buffer and no indexes, but only if it's not
         // marked dirty.
@@ -348,7 +346,6 @@ impl Drawable {
             }
         }
 
-        drop(context);
         self.base.attribute_update_time = Some(Instant::now());
     }
 

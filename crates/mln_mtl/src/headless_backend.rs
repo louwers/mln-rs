@@ -3,7 +3,6 @@
 // `Backend::Create<Backend::Type::Metal>`.
 
 use std::any::Any;
-use std::cell::Cell;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
@@ -62,7 +61,6 @@ impl RenderableResource for HeadlessRenderableResource {
 pub struct HeadlessBackend {
     renderer_backend: RendererBackend,
     renderable: RenderableBase,
-    active: Cell<bool>,
 }
 
 impl HeadlessBackend {
@@ -72,7 +70,6 @@ impl HeadlessBackend {
         Ok(HeadlessBackend {
             renderer_backend: RendererBackend::new(mode)?,
             renderable: RenderableBase::new(size, None),
-            active: Cell::new(false),
         })
     }
 
@@ -140,12 +137,10 @@ impl renderer_backend::RendererBackend for HeadlessBackend {
     }
 
     fn activate(&self) {
-        self.active.set(true);
         self.renderer_backend.activate();
     }
 
     fn deactivate(&self) {
-        self.active.set(false);
         self.renderer_backend.deactivate();
     }
 }

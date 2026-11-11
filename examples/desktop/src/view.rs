@@ -591,7 +591,7 @@ impl View {
             let mut paint = self.paint.borrow_mut();
             paint.primitives = primitives;
             paint.pixels_per_point = output.pixels_per_point;
-            paint.add_textures(output.textures_delta);
+            paint.textures.append(output.textures_delta);
             self.ui_shapes = output.shapes;
             self.shared.invalidate();
         }
@@ -653,7 +653,9 @@ impl View {
         let renderer = Renderer::new(renderer_backend.clone(), self.pixel_ratio as f32, None);
         self.frontend.attach(renderer, renderer_backend);
         self.backend.set_controls_overlay(self.paint.clone());
-        self.paint.borrow_mut().resend_textures();
+        self.paint.borrow_mut().resend_textures(&self.ui);
+        // The controls take egui's textures before the map's next frame.
+        self.ui_repaint_at = Some(Instant::now());
         self.adapter = self.backend.adapter();
         Log::info(Event::Render, self.backend.describe());
         self.map.trigger_repaint();

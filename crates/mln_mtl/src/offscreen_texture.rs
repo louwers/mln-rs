@@ -1,9 +1,10 @@
 // Ports include/mln/mtl/offscreen_texture.hpp and src/mln/mtl/offscreen_texture.cpp
 //
-// Port-only: once its image has been read back, each frame's command buffer
-// ends with a copy of the color texture into a buffer kept for the next
-// read, which then needs no work of the GPU's own (C++ reads the texture
-// itself, which the port does on the first read; see texture2d.rs).
+// Port-only: the image is read back through a buffer kept for the reads.
+// After a read, the next frame's command buffer ends with a copy of the
+// color texture into it, so that a read right after that frame needs no work
+// of the GPU's own; other reads copy the texture then (C++ reads the texture
+// itself; see texture2d.rs).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -57,10 +58,13 @@ pub struct OffscreenTextureResource {
     stencil_texture: Option<Rc<RefCell<Texture2D>>>,
     command_buffer: RefCell<Option<MTLCommandBufferPtr>>,
     render_pass_descriptor: RefCell<Option<MTLRenderPassDescriptorPtr>>,
-    /// The buffer frames copy the color texture into, once read back.
+    /// The buffer the color texture is copied into to read it back.
     readback_buffer: RefCell<Option<MTLBufferPtr>>,
     /// Whether the readback buffer holds the last frame swapped.
     readback_current: Cell<bool>,
+    /// Whether the next frame copies its image into the readback buffer: set
+    /// by a read, cleared by the frame after it.
+    copy_next_frame: Cell<bool>,
 }
 
 impl OffscreenTextureResource {
@@ -84,6 +88,7 @@ impl OffscreenTextureResource {
             render_pass_descriptor: RefCell::new(None),
             readback_buffer: RefCell::new(None),
             readback_current: Cell::new(false),
+            copy_next_frame: Cell::new(false),
         }
     }
 
@@ -91,22 +96,25 @@ impl OffscreenTextureResource {
     pub fn read_still_image(&self) -> PremultipliedImage {
         let mut image = PremultipliedImage::new(self.size);
         let color = self.color_texture.borrow();
-        if self.readback_current.get()
-            && let Some(buffer) = self.readback_buffer.borrow().as_ref()
-        {
-            let length = image.data.len();
-            image.data.copy_from_slice(buffer_bytes(buffer, length));
+        if color.get_data_size() != image.data.len() {
             return image;
         }
-        // The first read: from now on, frames copy their image as they end.
-        if self.readback_buffer.borrow().is_none() {
-            *self.readback_buffer.borrow_mut() = color.new_pixels_buffer();
+        let mut buffer = self.readback_buffer.borrow_mut();
+        if buffer.is_none() {
+            *buffer = color.new_pixels_buffer();
         }
-        if let Some(pixels) = color.read_pixels()
-            && pixels.len() == image.data.len()
-        {
-            image.data = pixels;
+        let Some(buffer) = buffer.as_ref() else {
+            return image;
+        };
+        if !self.readback_current.get() {
+            if !color.copy_to(buffer) {
+                return image;
+            }
+            self.readback_current.set(true);
         }
+        let length = image.data.len();
+        image.data.copy_from_slice(buffer_bytes(buffer, length));
+        self.copy_next_frame.set(true);
         image
     }
 
@@ -156,7 +164,9 @@ impl RenderableResource for OffscreenTextureResource {
         let command_buffer = self.command_buffer.borrow_mut().take();
         debug_assert!(command_buffer.is_some());
         if let Some(command_buffer) = command_buffer {
-            if let Some(buffer) = self.readback_buffer.borrow().as_ref() {
+            if self.copy_next_frame.replace(false)
+                && let Some(buffer) = self.readback_buffer.borrow().as_ref()
+            {
                 let copied = self.color_texture.borrow().encode_copy_to(&command_buffer, buffer);
                 self.readback_current.set(copied);
             }

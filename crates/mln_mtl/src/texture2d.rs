@@ -3,10 +3,10 @@
 // Differences from C++:
 // - Textures that aren't render targets, which the CPU writes, don't allow
 //   GPU-optimized contents (see `create_metal_texture`).
-// - Port-only: `read_pixels`, the copy of the texture that offscreen
-//   textures read their image back with, through a blit into shared memory
-//   (C++ reads the texture with `getBytes`, which on macOS needs a
-//   synchronized managed texture).
+// - Port-only: `copy_to`, the copy of the texture that offscreen textures
+//   read their image back with, through a blit into shared memory (C++
+//   reads the texture with `getBytes`, which on macOS needs a synchronized
+//   managed texture).
 
 use std::any::Any;
 use std::ffi::c_void;
@@ -206,68 +206,76 @@ impl Texture2D {
         self.context.rendering_stats().num_texture_bindings -= 1;
     }
 
-    /// Port-only: the size in bytes of the texture's pixels, rows tightly
-    /// packed.
-    pub fn pixels_length(&self) -> usize {
-        self.size.width as usize * self.size.height as usize * texture2d::Texture2D::get_pixel_stride(self)
-    }
-
     /// Port-only: encodes a copy of the texture's pixels into `buffer`,
-    /// which holds `pixels_length()` bytes, rows tightly packed. False if
+    /// which holds `get_data_size()` bytes, rows tightly packed. False if
     /// there is nothing to copy.
     pub fn encode_copy_to(&self, command_buffer: &ProtocolObject<dyn MTLCommandBuffer>, buffer: &MTLBufferPtr) -> bool {
         let Some(texture) = self.metal_texture.as_ref() else {
             return false;
         };
-        let length = self.pixels_length();
-        debug_assert!(buffer.length() >= length);
-        let Some(blit) = command_buffer.blitCommandEncoder() else {
-            return false;
-        };
-        // SAFETY: the region is the whole texture and the buffer holds it.
-        unsafe {
-            blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
-                texture,
-                0,
-                0,
-                MTLOrigin { x: 0, y: 0, z: 0 },
-                MTLSize { width: self.size.width as usize, height: self.size.height as usize, depth: 1 },
-                buffer,
-                0,
-                self.size.width as usize * texture2d::Texture2D::get_pixel_stride(self),
-                length,
-            );
-        }
-        blit.endEncoding();
-        true
+        let bytes_per_row = self.size.width as usize * texture2d::Texture2D::get_pixel_stride(self);
+        encode_texture_copy(command_buffer, texture, bytes_per_row, buffer)
     }
 
     /// Port-only: a shared buffer that holds the texture's pixels.
     pub fn new_pixels_buffer(&self) -> Option<MTLBufferPtr> {
-        self.context
-            .get_backend()
-            .get_device()
-            .newBufferWithLength_options(self.pixels_length().max(1), MTLResourceOptions::StorageModeShared)
+        self.context.get_backend().get_device().newBufferWithLength_options(
+            texture2d::Texture2D::get_data_size(self).max(1),
+            MTLResourceOptions::StorageModeShared,
+        )
     }
 
-    /// Port-only: the texture's pixels, copied through shared memory once
-    /// the GPU work queued before is done. Rows are tightly packed.
-    pub fn read_pixels(&self) -> Option<Vec<u8>> {
+    /// Port-only: copies the texture's pixels into `buffer` as
+    /// `encode_copy_to` does, once the GPU work queued before is done, and
+    /// waits for the copy. False if there is nothing to copy.
+    pub fn copy_to(&self, buffer: &MTLBufferPtr) -> bool {
         autoreleasepool(|_| {
-            let buffer = self.new_pixels_buffer()?;
-            let command_buffer = self.context.get_backend().get_command_queue().commandBuffer()?;
-            if !self.encode_copy_to(&command_buffer, &buffer) {
-                return None;
+            let Some(command_buffer) = self.context.get_backend().get_command_queue().commandBuffer() else {
+                return false;
+            };
+            if !self.encode_copy_to(&command_buffer, buffer) {
+                return false;
             }
             command_buffer.commit();
             command_buffer.waitUntilCompleted();
-            Some(buffer_bytes(&buffer, self.pixels_length()).to_vec())
+            true
         })
     }
 }
 
+/// Encodes a copy of all of `texture` into `buffer`, rows `bytes_per_row`
+/// apart. False if the command buffer has no blit encoder to give.
+pub(crate) fn encode_texture_copy(
+    command_buffer: &ProtocolObject<dyn MTLCommandBuffer>,
+    texture: &ProtocolObject<dyn MTLTexture>,
+    bytes_per_row: usize,
+    buffer: &ProtocolObject<dyn MTLBuffer>,
+) -> bool {
+    let (width, height) = (texture.width(), texture.height());
+    debug_assert!(buffer.length() >= bytes_per_row * height);
+    let Some(blit) = command_buffer.blitCommandEncoder() else {
+        return false;
+    };
+    // SAFETY: the region is the whole texture and the buffer holds it.
+    unsafe {
+        blit.copyFromTexture_sourceSlice_sourceLevel_sourceOrigin_sourceSize_toBuffer_destinationOffset_destinationBytesPerRow_destinationBytesPerImage(
+            texture,
+            0,
+            0,
+            MTLOrigin { x: 0, y: 0, z: 0 },
+            MTLSize { width, height, depth: 1 },
+            buffer,
+            0,
+            bytes_per_row,
+            bytes_per_row * height,
+        );
+    }
+    blit.endEncoding();
+    true
+}
+
 /// The first `length` bytes of a shared buffer that no GPU work writes.
-pub(crate) fn buffer_bytes(buffer: &MTLBufferPtr, length: usize) -> &[u8] {
+pub(crate) fn buffer_bytes(buffer: &ProtocolObject<dyn MTLBuffer>, length: usize) -> &[u8] {
     debug_assert!(buffer.length() >= length);
     // SAFETY: the buffer is shared memory of at least `length` bytes, and no
     // GPU work writes it while the slice lives.

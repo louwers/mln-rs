@@ -2,12 +2,12 @@
 // (examples/web/web/index.html and page.css): the style picker, zoom, a
 // compass, the sources' attributions, the renderer's backend, which a click
 // switches where there are two, and a panel with the gestures, the debug
-// overlays and the renderer's status.
+// overlays and the renderer's status. `Controls::show` lays them out and
+// returns what the user asked of the map; the view (view.rs) carries it out.
 //
 // The WebGPU logo (assets/webgpu.svg) is W3C's, under CC BY 4.0, which the
 // about panel credits; the Metal logo (assets/metal.svg) is Apple's, from
-// Wikimedia Commons, where it is in the public domain. `Controls::show` lays them out and
-// returns what the user asked of the map; the view (view.rs) carries it out.
+// Wikimedia Commons, where it is in the public domain.
 
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Order, Rect, Response, RichText, Sense, Shadow,

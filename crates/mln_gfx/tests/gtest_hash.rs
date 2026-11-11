@@ -1,5 +1,6 @@
 // Ports test/util/hash.test.cpp (`util::order_independent_hash` is in
 // mln_gfx::util_hash, next to the other util/hash.hpp functions gfx uses).
+// Its Metal shader test is in crates/mln_mtl/tests/gtest_hash.rs.
 //
 // The C++ draws the values with `std::default_random_engine` seeded from a
 // `std::seed_seq` and `uniform_int_distribution<size_t>(0, maxVal)`; the
@@ -73,13 +74,4 @@ fn permutations() {
             }
         }
     }
-}
-
-// gtest: OrderIndependentHash.Shaders
-#[test]
-#[ignore = "MLN_RENDER_BACKEND_METAL only in C++ (Metal shader attribute ids); the port has no Metal backend"]
-fn shaders() {
-    // test/util/hash.test.cpp:73: for every built-in Metal shader, every
-    // subset of its attribute ids hashes the same in every order and
-    // differently from every other subset.
 }

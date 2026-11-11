@@ -42,5 +42,15 @@ path = "tests/msl_compile_test.rs"
 name = "background_test"
 path = "tests/background_test.rs"
 
+# Ports test/renderer/metal_renderable.test.cpp.
+[[test]]
+name = "gtest_metal_renderable"
+path = "tests/gtest_metal_renderable.rs"
+
+# Ports the Metal shader test of test/util/hash.test.cpp.
+[[test]]
+name = "gtest_hash"
+path = "tests/gtest_hash.rs"
+
 [lints]
 workspace = true
