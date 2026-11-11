@@ -2756,6 +2756,173 @@ fn feature_state_changes_rendered_style() {
     }
 }
 
+fn load_selectable_halves_style(test: &MapTest) {
+    test.load_json(
+        r##"{
+      "version": 8,
+      "sources": {
+        "fs": {
+          "type": "geojson",
+          "data": {
+            "type": "FeatureCollection",
+            "features": [{
+              "type": "Feature",
+              "id": 1,
+              "properties": {},
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[-180, -85], [0, -85], [0, 85], [-180, 85], [-180, -85]]]
+              }
+            }, {
+              "type": "Feature",
+              "id": 2,
+              "properties": {},
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, -85], [180, -85], [180, 85], [0, 85], [0, -85]]]
+              }
+            }]
+          }
+        }
+      },
+      "layers": [{
+        "id": "fill",
+        "type": "fill",
+        "source": "fs",
+        "paint": {
+          "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#ff0000", "#0000ff"]
+        }
+      }]
+    }"##,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
+}
+
+/// Whether feature 1 (the left half) and feature 2 (the right half) render as
+/// selected.
+fn render_selected_halves(test: &MapTest) -> (bool, bool) {
+    let image = test.render().image;
+    let is_selected = |x: usize| {
+        let offset = (image.size.height as usize / 2) * image.stride() + x * 4;
+        image.data[offset] > 200 && image.data[offset + 2] < 40
+    };
+    let width = image.size.width as usize;
+    (is_selected(width / 4), is_selected(width * 3 / 4))
+}
+
+fn feature_state(key: &str) -> mln_style::expression::expression::FeatureState {
+    let mut state = mln_style::expression::expression::FeatureState::new();
+    state.insert(key.into(), Value::Bool(true));
+    state
+}
+
+fn set_state(test: &MapTest, feature_id: &str, state: &mln_style::expression::expression::FeatureState) {
+    test.frontend.with_renderer(|renderer| renderer.set_feature_state("fs", None, feature_id, state));
+}
+
+fn remove_state(test: &MapTest, feature_id: Option<&str>, state_key: Option<&str>) {
+    test.frontend.with_renderer(|renderer| renderer.remove_feature_state("fs", None, feature_id, state_key));
+}
+
+// gtest: Map.FeatureStateRemovalAndChangeOfAnotherFeatureBeforeOneRender
+#[test]
+fn feature_state_removal_and_change_of_another_feature_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    remove_state(&test, Some("1"), None);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (false, true));
+}
+
+// gtest: Map.FeatureStateKeyRemovalAndChangeOfSameKeyBeforeOneRender
+#[test]
+fn feature_state_key_removal_and_change_of_same_key_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    remove_state(&test, Some("1"), Some("selected"));
+    set_state(&test, "1", &selected);
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    set_state(&test, "1", &selected);
+    remove_state(&test, Some("1"), Some("selected"));
+    assert_eq!(render_selected_halves(&test), (false, false));
+}
+
+// gtest: Map.FeatureStateChangeAndRemovalOfSameFeatureBeforeOneRender
+#[test]
+fn feature_state_change_and_removal_of_same_feature_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+
+    set_state(&test, "1", &feature_state("selected"));
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    set_state(&test, "1", &feature_state("hovered"));
+    remove_state(&test, Some("1"), None);
+    assert_eq!(render_selected_halves(&test), (false, false));
+}
+
+// gtest: Map.FeatureStateKeyRemovalsOfTwoFeaturesBeforeOneRender
+#[test]
+fn feature_state_key_removals_of_two_features_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (true, true));
+
+    remove_state(&test, Some("1"), Some("selected"));
+    remove_state(&test, Some("2"), Some("selected"));
+    assert_eq!(render_selected_halves(&test), (false, false));
+}
+
+// gtest: Map.FeatureStateChangeSourceRemovalAndChangeBeforeOneRender
+#[test]
+fn feature_state_change_source_removal_and_change_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    remove_state(&test, None, None);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (false, true));
+}
+
+// gtest: Map.FeatureStateSourceRemovalAndChangeBeforeOneRender
+#[test]
+fn feature_state_source_removal_and_change_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (true, true));
+
+    remove_state(&test, None, None);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (false, true));
+}
+
 fn count_green_pixels(image: &PremultipliedImage) -> usize {
     let mut green_pixels = 0;
     for pixel in image.data.chunks_exact(4) {
