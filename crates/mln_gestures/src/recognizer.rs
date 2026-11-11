@@ -6,8 +6,8 @@ use std::ops::{Add, AddAssign, Div, Mul, Sub};
 use std::rc::Rc;
 
 use mln_map::{
-    AnimationOptions, CameraDelta, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode, CameraVelocity,
-    GesturePhase, MomentumDecay, TransitionEnd, TransitionOutcome,
+    AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
+    CameraVelocity, GesturePhase, MomentumDecay, TransitionEnd, TransitionOutcome,
 };
 use mln_util::UnitBezier;
 use mln_util::chrono::Duration;
@@ -479,6 +479,26 @@ impl GestureRecognizer {
         std::mem::take(&mut self.events)
     }
 
+    /// A host's own eased step, such as the GLFW app's `+` and `-`: it gets
+    /// the phase the recognizer's own steps get (an update of a gesture under
+    /// way, or a gesture of its own), and a step that zooms takes over a
+    /// running notch ease. `delta.phase` is ignored.
+    pub fn step(&mut self, camera: &mut dyn GestureCamera, delta: CameraDelta) -> Result<(), CameraError> {
+        delta.validate()?;
+        self.eased_step(camera, delta);
+        Ok(())
+    }
+
+    /// The same for a step to an absolute camera, such as resetting the
+    /// bearing; one that sets the zoom stops a running notch ease.
+    /// `update.phase` is ignored.
+    pub fn step_to(&mut self, camera: &mut dyn GestureCamera, update: CameraUpdate) {
+        if update.camera.zoom.is_some() {
+            self.stop_notch_ease();
+        }
+        camera.update_camera(&CameraUpdate { phase: self.step_phase(), ..update });
+    }
+
     /// Steps the eased zoom of wheel notches, and ends a scroll once it
     /// idles. Call once a display frame with the frame's time, on the
     /// inputs' clock; returns whether it needs more frames.
@@ -714,10 +734,10 @@ impl GestureRecognizer {
                     // Compose resets its tracker here, which protects its
                     // least-squares fit; an average needs no protecting, and
                     // dropping the jump loses the start of a short flick.
-                    self.step(camera, down, position, now);
+                    self.drag_step(camera, down, position, now);
                 }
             }
-            Mode::Pan | Mode::Rotate => self.step(camera, last, position, now),
+            Mode::Pan | Mode::Rotate => self.drag_step(camera, last, position, now),
             Mode::BoxZoom { .. } => {}
             Mode::TapDrag { origin, moved } => {
                 let (origin, dy) = (*origin, position.y - last.y);
@@ -734,7 +754,7 @@ impl GestureRecognizer {
                 // The other finger of a two-finger tap lifted, and this one
                 // moves on: a pan.
                 self.mode = Mode::Pan;
-                self.step(camera, last, position, now);
+                self.drag_step(camera, last, position, now);
             }
             Mode::Pinch(pinch) => {
                 if index > 1 {
@@ -751,7 +771,7 @@ impl GestureRecognizer {
     }
 
     /// One pan or mouse-rotate step from `from` to `to`.
-    fn step(&mut self, camera: &mut dyn GestureCamera, from: V2, to: V2, now: f64) {
+    fn drag_step(&mut self, camera: &mut dyn GestureCamera, from: V2, to: V2, now: f64) {
         let delta = to - from;
         match self.mode {
             Mode::Rotate => {
@@ -975,15 +995,16 @@ impl GestureRecognizer {
         };
         let viewport = V2::from(camera.viewport());
         let zoom = (viewport.x / size.x).min(viewport.y / size.y).log2();
-        // The box is what the user sees now: a running notch ease stops.
-        self.stop_notch_ease();
+        // The box is what the user sees now: setting the zoom stops a
+        // running notch ease.
         let target = clamp_zoom(camera, zoom_of(camera) + zoom);
-        camera.update_camera(&CameraUpdate {
+        let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
             camera: CameraOptions::default().with_center(Some(center)).with_zoom(Some(target)),
             animation: self.animation(BOX_EASE, EASE),
-            phase: self.step_phase(),
-        });
+            phase: GesturePhase::None,
+        };
+        self.step_to(camera, update);
     }
 
     /// Double-click, double-tap and two-finger-tap zoom: one level around a

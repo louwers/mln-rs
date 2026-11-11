@@ -457,18 +457,14 @@ fn animation_ms(ms: i64) -> AnimationOptions {
     AnimationOptions::new(Duration::from_millis(ms))
 }
 
-/// `+` and `-`: the C++ binding's 500 ms scale around the cursor, as an eased
-/// gesture step.
-fn key_zoom(map: &mut Map, scale: f64, x: f64, y: f64) {
-    let step = CameraDelta {
+/// `+` and `-`: the C++ binding's 500 ms scale around the cursor.
+fn key_zoom(scale: f64, x: f64, y: f64) -> CameraDelta {
+    CameraDelta {
         scale: Some(scale),
         anchor: Some(ScreenCoordinate::new(x, y)),
         animation: animation_ms(500),
-        phase: GesturePhase::End,
         ..CameraDelta::default()
-    };
-    // A finite scale and anchor are a valid delta.
-    let _ = map.apply_camera_delta(&step);
+    }
 }
 
 impl ViewState {
@@ -507,6 +503,15 @@ impl ViewState {
             self.gestures.handle(&mut *map.borrow_mut(), input, time);
             // The app has no use for clicks.
             self.gestures.take_events();
+        }
+    }
+
+    /// One of the C++ bindings' eased steps, through the recognizer, so the
+    /// camera reports it as a gesture and it doesn't end a drag or lose a
+    /// running notch ease's zoom.
+    fn key_step(&mut self, step: CameraDelta) {
+        if let Some(map) = self.map.clone() {
+            log_error(self.gestures.step(&mut *map.borrow_mut(), step).map_err(|e| format!("{e:?}")));
         }
     }
 
@@ -553,11 +558,11 @@ impl ViewState {
                     }
                 }
                 Key::Tab => self.cycle_debug_options(),
-                // Port: the C++ bindings' steps, as eased gesture steps (their
-                // own gesture's end), so the camera reports them as the
-                // user's, as the recognizer's keys are.
-                Key::KpAdd | Key::Equal => self.with_map(|map| key_zoom(map, 1.1, last_x, last_y)),
-                Key::KpSubtract | Key::Minus => self.with_map(|map| key_zoom(map, 1.0 / 1.1, last_x, last_y)),
+                // Port: the C++ bindings' steps, through the recognizer, so the
+                // camera reports them as the user's, as the recognizer's keys
+                // are.
+                Key::KpAdd | Key::Equal => self.key_step(key_zoom(1.1, last_x, last_y)),
+                Key::KpSubtract | Key::Minus => self.key_step(key_zoom(1.0 / 1.1, last_x, last_y)),
                 Key::X => {
                     if mods.is_empty() {
                         self.with_map(|map| {
@@ -582,15 +587,16 @@ impl ViewState {
                     }
                 }
                 Key::N => {
-                    if mods.is_empty() {
-                        self.with_map(|map| {
-                            map.update_camera(&CameraUpdate {
-                                mode: CameraUpdateMode::Ease,
-                                camera: CameraOptions::default().with_bearing(Some(0.0)),
-                                animation: animation_ms(500),
-                                phase: GesturePhase::End,
-                            })
-                        })
+                    if mods.is_empty()
+                        && let Some(map) = self.map.clone()
+                    {
+                        let north = CameraUpdate {
+                            mode: CameraUpdateMode::Ease,
+                            camera: CameraOptions::default().with_bearing(Some(0.0)),
+                            animation: animation_ms(500),
+                            phase: GesturePhase::None,
+                        };
+                        self.gestures.step_to(&mut *map.borrow_mut(), north);
                     }
                 }
                 Key::Z => self.next_orientation(),

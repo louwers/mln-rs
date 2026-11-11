@@ -786,3 +786,61 @@ fn a_key_step_during_a_scroll_leaves_the_scroll_going() {
     assert!(!rig.camera.is_gesture_in_progress());
     assert!((rig.zoom() - (zoom + 1.0 / 3.0 + 1.0)).abs() < 1e-6, "{}", rig.zoom() - zoom);
 }
+
+/// A host's own step: zoom in by `levels`, around `at` or the center, over
+/// 500 ms (the GLFW app's `+`).
+fn host_zoom(levels: f64, at: Option<ScreenCoordinate>) -> CameraDelta {
+    CameraDelta {
+        scale: Some(levels.exp2()),
+        anchor: at,
+        animation: AnimationOptions::new(Duration::from_millis(500)),
+        // Ignored: the recognizer picks the phase.
+        phase: GesturePhase::End,
+        ..CameraDelta::default()
+    }
+}
+
+#[test]
+fn a_host_step_during_a_drag_leaves_the_drag_going() {
+    let mut rig = Rig::new();
+    let zoom = rig.zoom();
+    rig.down(1, PointerKind::Mouse, 400.0, 300.0);
+    for i in 1..=4 {
+        rig.now += 16.0;
+        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
+    }
+    // Unanchored: an anchored zoom couples the center, which the drag's next
+    // move takes over, ending the step (maplibre-native-ffi's patch 0015).
+    rig.input.step(&mut rig.camera, host_zoom(0.5, None)).unwrap();
+    assert!(rig.camera.is_gesture_in_progress());
+    for i in 5..=8 {
+        rig.now += 16.0;
+        rig.to(1, 400.0 + 10.0 * f64::from(i), 300.0);
+        rig.frame();
+    }
+    assert!(rig.camera.is_gesture_in_progress());
+    rig.up(1, 480.0, 300.0);
+    rig.settle();
+    assert!(!rig.camera.is_gesture_in_progress());
+    assert!((rig.zoom() - (zoom + 0.5)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+}
+
+#[test]
+fn a_host_step_during_a_notch_ease_keeps_both_zooms() {
+    let mut rig = Rig::new();
+    let zoom = rig.zoom();
+    let at = p(100.0, 100.0);
+    rig.send(notches(at, -1.0));
+    rig.frame();
+    rig.input.step(&mut rig.camera, host_zoom(0.5, Some(at))).unwrap();
+    assert!(rig.camera.is_gesture_in_progress());
+    rig.settle();
+    assert!((rig.zoom() - (zoom + 1.0 / 3.0 + 0.5)).abs() < 1e-6, "{}", rig.zoom() - zoom);
+}
+
+#[test]
+fn a_host_step_must_be_valid() {
+    let mut rig = Rig::new();
+    let step = CameraDelta { scale: Some(0.0), ..CameraDelta::default() };
+    assert!(rig.input.step(&mut rig.camera, step).is_err());
+}
