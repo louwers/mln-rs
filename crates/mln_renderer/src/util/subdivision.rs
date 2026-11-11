@@ -2,9 +2,9 @@
 //
 // The C++ lives in util/, but it takes tile ids and tile geometry, so the
 // port lives in mln_renderer, as util/tile_cover.rs does. C++ throws
-// `std::out_of_range` and `std::invalid_argument` here; the port panics with
-// the same messages, which the tile worker reports as the tile's error, as it
-// reports the C++ exceptions.
+// `std::out_of_range` and `std::invalid_argument` for a vertex outside the
+// 16-bit range and an empty ring, which 16-bit tile geometry can't produce;
+// the port panics with the same messages, as broken invariants.
 
 use std::collections::HashMap;
 
@@ -488,7 +488,7 @@ pub fn subdivide_vertex_line(line: &GeometryCoordinates, granularity: u32, is_ri
     // `static_cast<int16_t>`: the values are integral and in range.
     let push_unique = |result: &mut GeometryCoordinates, x: f64, y: f64| {
         let next = GeometryCoordinate::new(x as i16, y as i16);
-        if *result.last().expect("result") != next {
+        if result.last() != Some(&next) {
             result.push(next);
         }
     };

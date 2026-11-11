@@ -213,19 +213,13 @@ impl CrossTileSymbolLayerIndex {
                     index.bucket_instance_id == bucket.bucket_instance_id && key.canonical == tile_id.canonical
                 })
                 .map(|(key, _)| *key);
-            if let Some(moved) = moved {
-                let mut index = this_zoom_indexes.remove(&moved).expect("moved index");
+            if let Some(mut index) = moved.and_then(|moved| this_zoom_indexes.remove(&moved)) {
                 index.coord = *tile_id;
                 this_zoom_indexes.insert(*tile_id, index);
             }
         }
 
-        let previous = self
-            .indexes
-            .entry(tile_id.overscaled_z)
-            .or_default()
-            .get(tile_id)
-            .map(|index| (index.bucket_instance_id, index.clone()));
+        let previous = this_zoom_indexes.get(tile_id).map(|index| (index.bucket_instance_id, index.clone()));
         if let Some((previous_bucket_instance_id, previous_index)) = previous {
             if previous_bucket_instance_id == bucket.bucket_instance_id && !state.has_uninitialized_symbols {
                 return false;

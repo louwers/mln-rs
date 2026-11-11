@@ -46,18 +46,6 @@ fn type_from_name_or_mercator(name: &str) -> ProjectionType {
     type_.unwrap_or(ProjectionType::Mercator)
 }
 
-/// `std::clamp(x, 0.0, 1.0)`: `x < lo ? lo : hi < x ? hi : x` (NaN and -0.0
-/// pass through).
-fn clamp_unit(x: f64) -> f64 {
-    if x < 0.0 {
-        0.0
-    } else if 1.0 < x {
-        1.0
-    } else {
-        x
-    }
-}
-
 /// The value of the style's `projection.type`: a single projection, or a
 /// transition between two.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,7 +92,7 @@ impl ProjectionDefinition {
         }
         // A transition past either end, from a literal or an overshooting
         // curve, holds at that end's projection.
-        let share = clamp_unit(self.transition);
+        let share = self.transition.clamp(0.0, 1.0);
         if is_globe(self.from) && !is_globe(self.to) {
             return 1.0 - share;
         }

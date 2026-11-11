@@ -1,7 +1,8 @@
 // Ports include/mln/util/tile_mesh.hpp and src/mln/util/tile_mesh.cpp.
 //
 // C++ throws `std::invalid_argument` for a granularity past the 16-bit index
-// space; the port panics with the same message.
+// space, which the subdivision granularity settings never ask for; the port
+// panics with the same message, as a broken invariant.
 
 use mln_util::constants::EXTENT;
 

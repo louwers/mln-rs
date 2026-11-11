@@ -166,7 +166,7 @@ pub fn text_property_values(
 }
 
 /// `getScreenMatrix(translation)`: the tile matrix of screen-space symbols.
-fn get_screen_matrix(translation: &[f32; 2]) -> Mat4 {
+pub(crate) fn get_screen_matrix(translation: &[f32; 2]) -> Mat4 {
     let mut m: Mat4 = [0.0; 16];
     matrix::ortho(&mut m, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
     let a = m;
@@ -1345,9 +1345,6 @@ impl RenderLayer for RenderSymbolLayer {
         let symbol_projection_variant =
             if is_screen_space { ProjectionVariant::Mercator } else { self.base.projection_variant };
         let is_offset = !layout.get::<IconOffset>().is_undefined();
-        let screen_space = layout.get::<SymbolScreenSpace>();
-        let is_screen_space =
-            if screen_space.is_constant() { *screen_space.as_constant() } else { SymbolScreenSpace::default_value() };
 
         let current_zoom = state.get_zoom() as f32;
         let layer_prefix = format!("{}/", self.get_id());

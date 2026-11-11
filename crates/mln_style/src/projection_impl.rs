@@ -10,18 +10,6 @@ use crate::property_value::PropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::PropertyEvaluator;
 
-/// `std::clamp(x, 0.0, 1.0)`: `x < lo ? lo : hi < x ? hi : x` (NaN and -0.0
-/// pass through).
-fn clamp_unit(x: f64) -> f64 {
-    if x < 0.0 {
-        0.0
-    } else if 1.0 < x {
-        1.0
-    } else {
-        x
-    }
-}
-
 /// `Projection::Impl`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Impl {
@@ -58,10 +46,9 @@ impl Impl {
         const GLOBE_TO_MERCATOR_START_ZOOM: f32 = 11.0;
         const GLOBE_TO_MERCATOR_END_ZOOM: f32 = 12.0;
         let globe_share = 1.0
-            - clamp_unit(
-                (zoom - GLOBE_TO_MERCATOR_START_ZOOM) as f64
-                    / (GLOBE_TO_MERCATOR_END_ZOOM - GLOBE_TO_MERCATOR_START_ZOOM) as f64,
-            );
+            - ((zoom - GLOBE_TO_MERCATOR_START_ZOOM) as f64
+                / (GLOBE_TO_MERCATOR_END_ZOOM - GLOBE_TO_MERCATOR_START_ZOOM) as f64)
+                .clamp(0.0, 1.0);
         let share = |end: ProjectionType| match end {
             ProjectionType::Globe => globe_share,
             ProjectionType::Mercator => 0.0,
@@ -70,7 +57,7 @@ impl Impl {
         let globe = if definition.from == definition.to {
             share(definition.from)
         } else {
-            interpolate(&share(definition.from), &share(definition.to), clamp_unit(definition.transition))
+            interpolate(&share(definition.from), &share(definition.to), definition.transition.clamp(0.0, 1.0))
         };
         if globe >= 1.0 {
             return ProjectionDefinition::new(ProjectionType::VerticalPerspective);

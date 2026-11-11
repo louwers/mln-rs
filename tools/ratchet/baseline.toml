@@ -54,7 +54,6 @@
 "crates/mln_renderer/src/buckets/symbol_bucket.rs" = 1
 "crates/mln_renderer/src/gfx/dynamic_texture_atlas.rs" = 2
 "crates/mln_renderer/src/gfx/fill_generator.rs" = 2
-"crates/mln_renderer/src/globe_depth_pass.rs" = 1
 "crates/mln_renderer/src/globe_tile_mesh.rs" = 3
 "crates/mln_renderer/src/image_manager.rs" = 1
 "crates/mln_renderer/src/layers/hillshade_layer_tweaker.rs" = 1
@@ -82,18 +81,17 @@
 "crates/mln_renderer/src/render_tile.rs" = 1
 "crates/mln_renderer/src/renderer.rs" = 2
 "crates/mln_renderer/src/renderer_impl.rs" = 7
-"crates/mln_renderer/src/sky_pass.rs" = 1
 "crates/mln_renderer/src/sources/render_image_source.rs" = 2
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 3
-"crates/mln_renderer/src/text/cross_tile_symbol_index.rs" = 3
+"crates/mln_renderer/src/text/cross_tile_symbol_index.rs" = 2
 "crates/mln_renderer/src/text/placement.rs" = 18
 "crates/mln_renderer/src/text/quads.rs" = 1
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 3
 "crates/mln_renderer/src/tile/worker_codec/transport.rs" = 1
 "crates/mln_renderer/src/tile_pyramid.rs" = 3
-"crates/mln_renderer/src/util/subdivision.rs" = 3
+"crates/mln_renderer/src/util/subdivision.rs" = 2
 "crates/mln_renderer/src/util/tile_cover.rs" = 3
 "crates/mln_renderer/src/util/tile_cover_impl.rs" = 2
 "crates/mln_renderer/src/util/tile_mesh.rs" = 1
@@ -137,7 +135,7 @@
 "crates/mln_style/src/property_value.rs" = 3
 "crates/mln_style/src/source_impl.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
-"crates/mln_style/src/style_impl.rs" = 7
+"crates/mln_style/src/style_impl.rs" = 4
 "crates/mln_text/src/glyph_pbf.rs" = 1
 "crates/mln_text/src/harfbuzz_impl.rs" = 2
 "crates/mln_text/src/hb_ft.rs" = 2

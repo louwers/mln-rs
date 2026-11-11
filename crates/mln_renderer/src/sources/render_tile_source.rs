@@ -59,6 +59,7 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
 use crate::tile::tile::Tile;
 use crate::tile_pyramid::TilePyramid;
+use crate::util::subdivision::subdivide_vertex_line;
 
 /// `TileSourceRenderItem`.
 pub struct TileSourceRenderItem {
@@ -292,38 +293,9 @@ impl RenderItem for TileSourceRenderItem {
                 Point::new(0, extent),
                 Point::new(0, 0),
             ];
-            // On the globe the edges bend with the sphere: a ring at the tile
-            // mesh's granularity, one per zoom.
+            // On the globe the edges bend with the sphere: the border
+            // subdivided at the tile mesh's granularity, one per zoom.
             let mut globe_borders: BTreeMap<u8, GeometryCoordinates> = BTreeMap::new();
-            let mut border_for = |tile_id: &OverscaledTileID| -> GeometryCoordinates {
-                if !globe {
-                    return tile_border.clone();
-                }
-                let z = tile_id.canonical.z;
-                globe_borders
-                    .entry(z)
-                    .or_insert_with(|| {
-                        let steps =
-                            SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(z) as i32;
-                        let mut ring = GeometryCoordinates::new();
-                        let mut add = |x: i32, y: i32| ring.push(Point::new(x as i16, y as i16));
-                        for i in 0..steps {
-                            add(EXTENT * i / steps, 0);
-                        }
-                        for i in 0..steps {
-                            add(EXTENT, EXTENT * i / steps);
-                        }
-                        for i in 0..steps {
-                            add(EXTENT - EXTENT * i / steps, EXTENT);
-                        }
-                        for i in 0..steps {
-                            add(0, EXTENT - EXTENT * i / steps);
-                        }
-                        add(0, 0);
-                        ring
-                    })
-                    .clone()
-            };
             let border_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
             for tile in self.render_tiles.iter() {
                 let tile_id = *tile.get_overscaled_tile_id();
@@ -335,10 +307,19 @@ impl RenderItem for TileSourceRenderItem {
                     drawn |= drawable.get_name() == drawable_name;
                 });
                 if !drawn {
+                    let border = if globe {
+                        let z = tile_id.canonical.z;
+                        globe_borders.entry(z).or_insert_with(|| {
+                            let steps = SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(z);
+                            subdivide_vertex_line(&tile_border, steps, false)
+                        })
+                    } else {
+                        &tile_border
+                    };
                     add_polyline_drawable(
                         tile_layer_group,
                         tile_id,
-                        std::slice::from_ref(&border_for(&tile_id)),
+                        std::slice::from_ref(border),
                         &border_options,
                         None,
                     );

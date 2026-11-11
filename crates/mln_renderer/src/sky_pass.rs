@@ -55,7 +55,7 @@ fn make_fullscreen_layer_group(
 
     {
         let mut group = layer_group.borrow_mut();
-        let group = group.as_layer_group_mut().expect("a sky layer group is a LayerGroup");
+        let group = group.as_layer_group_mut()?;
         for drawable in builder.clear_drawables() {
             group.add_drawable(drawable);
         }
@@ -126,15 +126,7 @@ impl SkyPass {
             return;
         };
 
-        // `std::clamp(state.getProjectionTransition(), 0.0, 1.0)`.
-        let transition = state.get_projection_transition();
-        let projection_transition = if transition < 0.0 {
-            0.0
-        } else if 1.0 < transition {
-            1.0
-        } else {
-            transition
-        };
+        let projection_transition = state.get_projection_transition().clamp(0.0, 1.0);
         if projection_transition < 1.0 {
             if self.sky_shader.is_none() {
                 self.sky_shader = context.get_generic_shader(shaders, SKY_SHADER_NAME, ProjectionVariant::Mercator);

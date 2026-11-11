@@ -11,12 +11,11 @@ use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_properties::*;
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
-use mln_util::constants::EXTENT;
 use mln_util::immutable::Immutable;
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::sync::RwLockExt;
 
-use super::render_symbol_layer::{SymbolDrawableData, SymbolType};
+use super::render_symbol_layer::{SymbolDrawableData, SymbolType, get_screen_matrix};
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::buckets::symbol_bucket::SymbolBucket;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
@@ -159,18 +158,11 @@ impl LayerTweaker for SymbolLayerTweaker {
             };
             let paint_properties = paint_properties.read_unpoisoned();
 
-            // from RenderTile::translatedMatrix
             let translate = if is_text { evaluated.get::<TextTranslate>() } else { evaluated.get::<IconTranslate>() };
             let anchor =
                 if is_text { *evaluated.get::<TextTranslateAnchor>() } else { *evaluated.get::<IconTranslateAnchor>() };
             let mut projection: ProjectionData = if is_screen_space {
-                let mut screen_matrix: Mat4 = [0.0; 16];
-                matrix::ortho(&mut screen_matrix, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
-                let a = screen_matrix;
-                matrix::translate(&mut screen_matrix, &a, 0.0, -f64::from(EXTENT), 0.0);
-                let a = screen_matrix;
-                matrix::translate(&mut screen_matrix, &a, f64::from(translate[0]), f64::from(translate[1]), 0.0);
-                MercatorProjection.get_projection_data(state, &tile_id, &screen_matrix)
+                MercatorProjection.get_projection_data(state, &tile_id, &get_screen_matrix(translate))
             } else {
                 const NEAR_CLIPPED: bool = false;
                 const IN_VIEWPORT_PIXEL_UNITS: bool = false;

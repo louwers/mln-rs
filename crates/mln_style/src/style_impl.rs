@@ -703,8 +703,10 @@ impl Impl {
 
     /// `Sky* getSky()` for mutation (see `get_layer_mut`).
     pub fn get_sky_mut(&mut self) -> Option<SkyRefMut<'_>> {
-        let before = self.sky.as_ref()?.impl_.clone();
-        Some(SkyRefMut { style: self, before })
+        let observer = self.observer();
+        let sky = self.sky.as_mut()?;
+        let before = sky.impl_.clone();
+        Some(SkyRefMut { sky, before, observer })
     }
 
     // Projection
@@ -821,6 +823,7 @@ impl Impl {
     pub fn get_sky_impl(&self) -> Option<Immutable<sky::Impl>> {
         self.sky.as_ref().map(|sky| sky.impl_.clone())
     }
+
     pub fn dump_debug_logs(&self) {
         Log::info(Event::General, format!("styleURL: {}", self.url));
         for source in self.sources.iter() {
@@ -998,27 +1001,29 @@ impl Drop for LightRefMut<'_> {
 /// The mutable sky of a style; notifies the style when dropped (see
 /// `Impl::get_sky_mut`).
 pub struct SkyRefMut<'a> {
-    style: &'a mut Impl,
+    sky: &'a mut Sky,
     before: Immutable<sky::Impl>,
+    /// The style's observer, which `Impl::on_sky_changed` notifies.
+    observer: Rc<dyn Observer>,
 }
 
 impl std::ops::Deref for SkyRefMut<'_> {
     type Target = Sky;
     fn deref(&self) -> &Sky {
-        self.style.sky.as_ref().expect("a sky")
+        self.sky
     }
 }
 
 impl std::ops::DerefMut for SkyRefMut<'_> {
     fn deref_mut(&mut self) -> &mut Sky {
-        self.style.sky.as_mut().expect("a sky")
+        self.sky
     }
 }
 
 impl Drop for SkyRefMut<'_> {
     fn drop(&mut self) {
-        if !Arc::ptr_eq(&self.before, &self.style.sky.as_ref().expect("a sky").impl_) {
-            self.style.on_sky_changed();
+        if !Arc::ptr_eq(&self.before, &self.sky.impl_) {
+            self.observer.on_update();
         }
     }
 }

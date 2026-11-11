@@ -261,8 +261,9 @@ fn without_horizon(mut data: ProjectionData) -> ProjectionData {
 }
 
 /// The C++ context's `tileProjector`, `textLabelPlane` and `iconLabelPlane`.
-/// They borrow the transform state, which placement changes while a context
-/// lives, so the port builds them for each pass over a context's symbols
+/// They borrow a transform state, and placing a symbol borrows the
+/// placement (and its collision index's state) mutably, so the port builds
+/// them over a copy of the state for each pass over a context's symbols
 /// (`PlacementContext::projectors`) instead of keeping them in it.
 pub struct PlacementProjectors<'a> {
     pub tile_projector: TileProjector<'a>,
@@ -328,16 +329,14 @@ pub struct PlacementContext {
 
 impl PlacementContext {
     /// `PlacementContext(bucket, renderTile, state, placementZoom,
-    /// collisionGroup, textTranslate, iconTranslate, avoidEdges)`. Locks the
-    /// bucket's state briefly; call it without holding the lock.
-    #[allow(clippy::too_many_arguments)]
+    /// collisionGroup, textTranslate, iconTranslate, avoidEdges)`, with the
+    /// translations from `params`. Locks the bucket's state briefly; call it
+    /// without holding the lock.
     pub fn new(
         params: &BucketPlacementData,
         state: &TransformState,
         placement_zoom: f32,
         collision_group: CollisionGroup,
-        text_translate: &SymbolTranslate,
-        icon_translate: &SymbolTranslate,
         avoid_edges: Option<CollisionBoundaries>,
     ) -> Self {
         let bucket = symbol_bucket(&params.bucket).expect("PlacementContext: a symbol bucket");
@@ -356,8 +355,8 @@ impl PlacementContext {
         let placement_type = *layout.get::<SymbolPlacement>();
 
         let screen_space = *layout.get::<SymbolScreenSpace>();
-        let text_translation = translation_point(&render_tile.id, text_translate, state, screen_space);
-        let icon_translation = translation_point(&render_tile.id, icon_translate, state, screen_space);
+        let text_translation = translation_point(&render_tile.id, &params.text_translate, state, screen_space);
+        let icon_translation = translation_point(&render_tile.id, &params.icon_translate, state, screen_space);
         let tile_projection =
             if screen_space { without_horizon(render_tile.projection) } else { render_tile.projection };
 
@@ -979,8 +978,6 @@ impl Placement {
             self.collision_index.get_transform_state(),
             self.placement_zoom,
             collision_group,
-            &params.text_translate,
-            &params.icon_translate,
             avoid_edges,
         );
         let transform_state = self.collision_index.get_transform_state().clone();
@@ -2491,6 +2488,7 @@ impl Placement {
             hash_u16string(&a.key) < hash_u16string(&b.key)
         });
         // Place intersections.
+        let transform_state = self.collision_index.get_transform_state().clone();
         for &i in &order {
             let intersection = &intersections[i];
             let ctx = &intersection.ctx;
@@ -2501,7 +2499,6 @@ impl Placement {
             if seen_cross_tile_ids.contains(&symbol.get_cross_tile_id()) {
                 continue;
             }
-            let transform_state = self.collision_index.get_transform_state().clone();
             let projectors = ctx.projectors(&transform_state);
             let placement = self.place_symbol(intersection.symbol_index, symbol, &state, ctx, &projectors);
             if self.should_retry_placement(&placement, ctx) {
@@ -2542,8 +2539,6 @@ impl Placement {
             self.collision_index.get_transform_state(),
             self.placement_zoom,
             collision_group,
-            &params.text_translate,
-            &params.icon_translate,
             avoid_edges,
         ));
 

@@ -89,8 +89,9 @@ impl GlobeDepthPass {
         );
 
         let mut group = layer_group.borrow_mut();
-        let tile_layer_group =
-            group.as_tile_layer_group_mut().expect("the globe depth layer group is a TileLayerGroup");
+        let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
+            return;
+        };
 
         let covered: BTreeSet<OverscaledTileID> = tile_cover.iter().copied().collect();
         tile_layer_group

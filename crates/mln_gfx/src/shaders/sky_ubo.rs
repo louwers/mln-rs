@@ -24,7 +24,7 @@ const _: () = assert!(std::mem::size_of::<SkyPropsUBO>() == 4 * 16);
 pub struct AtmospherePropsUBO {
     /*  0 */ pub inv_view_projection: [f32; 4 * 4],
     /* 64 */ pub camera_position: [f32; 4],
-    // The fourth component stores the evaluated atmosphere blend.
+    /// The fourth component stores the evaluated atmosphere blend.
     /* 80 */
     pub sun_position: [f32; 4],
     /* 96 */
