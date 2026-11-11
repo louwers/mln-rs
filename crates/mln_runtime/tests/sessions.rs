@@ -266,7 +266,8 @@ fn a_burst_of_queued_commands_renders_in_one_frame() {
     let open = hold_runtime(&map);
     let zooms: Vec<_> = (1..=8).map(|step| zoom(&map, f64::from(step))).collect();
     drop(open);
-    let last = zooms.into_iter().map(|zoom| zoom.wait().unwrap()).last().unwrap();
+    let applied: Vec<_> = zooms.into_iter().map(|zoom| zoom.wait().unwrap()).collect();
+    let last = applied.last().unwrap();
     let result = take_one(&session);
     assert_eq!((621, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
     assert_eq!(last.render_update_generation, result.map_update_generation);
