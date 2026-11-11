@@ -63,7 +63,7 @@ pub use layer::{Layer, LayerTypeInfo};
 pub use layers::background_layer::BackgroundLayer;
 pub use property_value::PropertyValue;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
-pub use renderer::transition_parameters::TransitionParameters;
+pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use style::Style;
 pub use transition_options::TransitionOptions;
 

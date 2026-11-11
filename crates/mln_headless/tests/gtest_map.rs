@@ -2615,6 +2615,92 @@ impl RendererFrontend for CapturingFrontend {
     // TODO(port): getThreadPool() (not in the Rust RendererFrontend yet).
 }
 
+/// Renders a frame and returns the RGB of the pixel at the centre of the map.
+fn render_center_pixel(test: &MapTest) -> [u8; 3] {
+    test.map().trigger_repaint();
+    test.frontend.render_frame();
+    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+    let [r, g, b, _] = center_pixel(&test.frontend.read_still_image());
+    [r, g, b]
+}
+
+// gtest: Map.GlobalStateChangeTransitionsPaintProperty
+#[test]
+fn global_state_change_transitions_paint_property() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(
+        r##"{
+      "version": 8,
+      "transition": { "duration": 100, "delay": 0 },
+      "state": { "color": { "default": "#ff0000" } },
+      "sources": {},
+      "layers": [{
+        "id": "background",
+        "type": "background",
+        "paint": { "background-color": ["global-state", "color"] }
+      }]
+    }"##,
+    );
+
+    let initial = render_center_pixel(&test);
+    assert!(initial[0] > 240, "{initial:?}");
+    assert!(initial[2] < 10, "{initial:?}");
+
+    test.map().get_style_mut().set_global_state_property("color", &Value::String("#0000ff".to_owned())).unwrap();
+
+    // The frame that picks up the change starts the transition at its own time point, so it still shows red.
+    let changed = render_center_pixel(&test);
+    assert!(changed[0] > 200, "{changed:?}");
+    assert!(changed[2] < 55, "{changed:?}");
+
+    // Once the transition has run its course, the new state shows.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let finished = render_center_pixel(&test);
+    assert!(finished[0] < 10, "{finished:?}");
+    assert!(finished[2] > 240, "{finished:?}");
+}
+
+// gtest: Map.LayerAddedWithGlobalStateChangeShowsNewState
+#[test]
+fn layer_added_with_global_state_change_shows_new_state() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(
+        r##"{
+      "version": 8,
+      "transition": { "duration": 100, "delay": 0 },
+      "state": { "color": { "default": "#0000ff" } },
+      "sources": {},
+      "layers": [{
+        "id": "base",
+        "type": "background",
+        "paint": { "background-color": "#ff0000" }
+      }]
+    }"##,
+    );
+
+    let initial = render_center_pixel(&test);
+    assert!(initial[0] > 240, "{initial:?}");
+    assert!(initial[1] < 10, "{initial:?}");
+
+    // The state changes and a layer reading it is added before the next frame.
+    test.map().get_style_mut().set_global_state_property("color", &Value::String("#00ff00".to_owned())).unwrap();
+
+    let layer_value: serde_json::Value = serde_json::from_str(
+        r#"{"id": "added", "type": "background", "paint": {"background-color": ["global-state", "color"]}}"#,
+    )
+    .unwrap();
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
+    test.map().get_style_mut().add_layer(layer, None).unwrap();
+
+    // The new layer never showed the prior state, so it must show the current one at once.
+    let added = render_center_pixel(&test);
+    assert!(added[0] < 10, "{added:?}");
+    assert!(added[1] > 240, "{added:?}");
+    assert!(added[2] < 10, "{added:?}");
+}
+
 // gtest: Map.TileSelectionOptionsPublishUpdates
 #[test]
 fn tile_selection_options_publish_updates() {

@@ -45,6 +45,7 @@ pub struct PropertyExpressionBase {
     captured_global_state: Option<Arc<GlobalStateMap>>,
     global_state_refs: Option<Arc<VecSet<String>>>,
     use_integer_zoom: bool,
+    global_state_pinned: bool,
     is_zoom_constant: bool,
     is_feature_constant: bool,
     is_runtime_constant: bool,
@@ -63,6 +64,7 @@ impl Clone for PropertyExpressionBase {
             captured_global_state: self.captured_global_state.clone(),
             global_state_refs: self.global_state_refs.clone(),
             use_integer_zoom: self.use_integer_zoom,
+            global_state_pinned: self.global_state_pinned,
             is_zoom_constant: self.is_zoom_constant,
             is_feature_constant: self.is_feature_constant,
             is_runtime_constant: self.is_runtime_constant,
@@ -93,6 +95,7 @@ impl PropertyExpressionBase {
             captured_global_state: None,
             global_state_refs,
             use_integer_zoom: false,
+            global_state_pinned: false,
             is_zoom_constant,
             is_feature_constant,
             is_runtime_constant,
@@ -158,9 +161,21 @@ impl PropertyExpressionBase {
     /// explicit plumbing. Only retained if the expression actually depends on
     /// it.
     pub fn capture_global_state(&mut self, global_state: Option<Arc<GlobalStateMap>>) {
-        if self.expression.has(Dependency::GLOBAL_STATE) {
+        if self.expression.has(Dependency::GLOBAL_STATE) && !self.global_state_pinned {
             self.captured_global_state = global_state;
         }
+    }
+
+    /// Evaluate `global-state` with this snapshot even when the evaluation
+    /// context carries a state of its own, so a value shown before a global
+    /// state change keeps its look while it transitions out. The first pin
+    /// wins: a value already showing an older state keeps showing it.
+    pub fn pin_global_state(&mut self, global_state: Arc<GlobalStateMap>) {
+        if self.global_state_pinned {
+            return;
+        }
+        self.captured_global_state = Some(global_state);
+        self.global_state_pinned = true;
     }
 
     pub fn get_captured_global_state(&self) -> Option<&Arc<GlobalStateMap>> {
@@ -204,6 +219,7 @@ struct PropertyExpressionParts {
     expression: Arc<dyn Expression>,
     captured_global_state: Option<Arc<GlobalStateMap>>,
     use_integer_zoom: bool,
+    global_state_pinned: bool,
 }
 
 impl Serialize for PropertyExpressionBase {
@@ -212,6 +228,7 @@ impl Serialize for PropertyExpressionBase {
             expression: self.expression.clone(),
             captured_global_state: self.captured_global_state.clone(),
             use_integer_zoom: self.use_integer_zoom,
+            global_state_pinned: self.global_state_pinned,
         }
         .serialize(serializer)
     }
@@ -223,6 +240,7 @@ impl<'de> Deserialize<'de> for PropertyExpressionBase {
         let mut base = PropertyExpressionBase::new(parts.expression);
         base.captured_global_state = parts.captured_global_state;
         base.use_integer_zoom = parts.use_integer_zoom;
+        base.global_state_pinned = parts.global_state_pinned;
         Ok(base)
     }
 }
@@ -261,13 +279,15 @@ impl<T> PropertyExpression<T> {
 
 impl<T: Clone + ValueConverter> PropertyExpression<T> {
     pub fn evaluate(&self, context: &EvaluationContext<'_>, final_default_value: T) -> T {
-        if context.global_state.is_none() {
-            if let Some(captured) = &self.base.captured_global_state {
+        // A pinned snapshot wins, and the captured one fills in for a context
+        // that carries no state.
+        match &self.base.captured_global_state {
+            Some(captured) if self.base.global_state_pinned || context.global_state.is_none() => {
                 let context_with_state = context.with_global_state(Some(captured.as_ref()));
-                return self.evaluate_context(&context_with_state, final_default_value);
+                self.evaluate_context(&context_with_state, final_default_value)
             }
+            _ => self.evaluate_context(context, final_default_value),
         }
-        self.evaluate_context(context, final_default_value)
     }
 
     /// `evaluate(float zoom)`.

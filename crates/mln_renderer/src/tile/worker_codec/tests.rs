@@ -417,10 +417,9 @@ fn format_section_overrides_cross() {
         "paint": {"text-color": "blue"}}"#,
     );
     let render_layer = layermanager::create_render_layer(&layer.base_impl()).unwrap();
-    render_layer.borrow_mut().transition(&TransitionParameters {
-        now: mln_util::chrono::TimePoint::default(),
-        transition: TransitionOptions::default(),
-    });
+    render_layer
+        .borrow_mut()
+        .transition(&TransitionParameters::new(mln_util::chrono::TimePoint::default(), TransitionOptions::default()));
     render_layer.borrow_mut().evaluate(&PropertyEvaluationParameters::new(0.0));
     let layers = vec![render_layer.borrow().base().evaluated_properties.clone()];
     cross(&layers, &tile_data());
@@ -528,10 +527,10 @@ fn properties_cross_while_a_paint_property_transitions() {
     let mut render_layer = render_layer.borrow_mut();
     let start = TimePoint::new(Duration::from_secs(1));
     let at = |now| PropertyEvaluationParameters::with_zoom_history(ZoomHistory::default(), now, Duration::zero());
-    render_layer.transition(&TransitionParameters { now: start, transition: TransitionOptions::default() });
+    render_layer.transition(&TransitionParameters::new(start, TransitionOptions::default()));
     render_layer.evaluate(&at(start));
     let transition = TransitionOptions::new(Some(Duration::from_millis(300)), None, true);
-    render_layer.transition_with_impl(&TransitionParameters { now: start, transition }, convert(&constant).base_impl());
+    render_layer.transition_with_impl(&TransitionParameters::new(start, transition), convert(&constant).base_impl());
     render_layer.evaluate(&at(start + Duration::from_millis(100)));
     let transitioning = render_layer.base().evaluated_properties.clone();
     assert!(!get_evaluated::<FillLayerProperties>(&transitioning).get::<FillColor>().is_constant());

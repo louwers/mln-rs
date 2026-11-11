@@ -25,7 +25,9 @@ use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::map::zoom_history::ZoomHistory;
-use mln_style::{PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source};
+use mln_style::{
+    GlobalStateChange, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source,
+};
 use mln_text::GlyphCache;
 use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
@@ -371,8 +373,6 @@ impl RenderOrchestrator {
         let transition_options =
             if is_map_mode_continuous { update_parameters.transition_options } else { TransitionOptions::default() };
 
-        let transition_parameters =
-            TransitionParameters { now: update_parameters.time_point, transition: transition_options };
         let transition_duration = transition_options.duration.unwrap_or(if is_map_mode_continuous {
             DEFAULT_TRANSITION_DURATION
         } else {
@@ -381,12 +381,31 @@ impl RenderOrchestrator {
 
         let global_state_changed = !ptr_eq_option(&self.global_state, &update_parameters.global_state);
         let mut changed_global_state_keys: Option<Arc<VecSet<String>>> = None;
+        let mut global_state_change = None;
         if global_state_changed {
             if let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state) {
-                changed_global_state_keys = Some(Arc::new(diff_global_state_keys(previous, current)));
+                let changed_keys = Arc::new(diff_global_state_keys(previous, current));
+                changed_global_state_keys = Some(changed_keys.clone());
+                global_state_change =
+                    Some(GlobalStateChange { prior_state: previous.clone(), changed_keys, state_only: false });
             }
         }
         self.global_state = update_parameters.global_state.clone();
+
+        // A layer added this frame has shown nothing yet, so a global-state
+        // change leaves it nothing to transition from.
+        let added_layer_transition_parameters =
+            TransitionParameters::new(update_parameters.time_point, transition_options);
+        let transition_parameters =
+            TransitionParameters { global_state_change, ..added_layer_transition_parameters.clone() };
+
+        // Transitions the values that read a changed global-state key, where
+        // nothing else changed.
+        let global_state_transition_parameters =
+            transition_parameters.global_state_change.as_ref().map(|change| TransitionParameters {
+                global_state_change: Some(GlobalStateChange { state_only: true, ..change.clone() }),
+                ..transition_parameters.clone()
+            });
 
         let mut evaluation_parameters = PropertyEvaluationParameters::with_zoom_history(
             self.zoom_history,
@@ -430,6 +449,8 @@ impl RenderOrchestrator {
         if light_changed {
             self.render_light.impl_ = update_parameters.light.clone();
             self.render_light.transition(&transition_parameters);
+        } else if let Some(parameters) = &global_state_transition_parameters {
+            self.render_light.transition(parameters);
         }
 
         if light_changed || zoom_changed || global_state_changed || self.render_light.has_transition() {
@@ -481,7 +502,7 @@ impl RenderOrchestrator {
         // Create render layers for newly added layers.
         for (id, impl_) in &layer_diff.added {
             if let Some(render_layer) = layermanager::create_render_layer(impl_) {
-                render_layer.borrow_mut().transition(&transition_parameters);
+                render_layer.borrow_mut().transition(&added_layer_transition_parameters);
                 // `emplace` keeps an existing entry.
                 self.render_layers.entry(id.clone()).or_insert(render_layer);
             }
@@ -539,6 +560,14 @@ impl RenderOrchestrator {
             let global_state_changed_and_matters = global_state_changed
                 && !layer_added_or_changed
                 && layer.get_style_dependencies().intersects(Dependency::GLOBAL_STATE);
+
+            // A running transition may read the changed state too, from a
+            // value the layer no longer has.
+            if let Some(parameters) = &global_state_transition_parameters {
+                if !layer_added_or_changed && (global_state_changed_and_matters || layer.has_transition()) {
+                    layer.transition(parameters);
+                }
+            }
 
             if layer_added_or_changed
                 || zoom_changed_and_matters
