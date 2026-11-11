@@ -178,15 +178,13 @@
 "crates/mln_expression/src/coercion.rs" = 1
 "crates/mln_expression/src/collator_expression.rs" = 1
 "crates/mln_expression/src/comparison.rs" = 1
-"crates/mln_expression/src/distance.rs" = 2
 "crates/mln_expression/src/dsl.rs" = 1
 "crates/mln_expression/src/find_zoom_curve.rs" = 1
 "crates/mln_expression/src/formatted.rs" = 1
 "crates/mln_expression/src/interpolate.rs" = 1
 "crates/mln_expression/src/number_format.rs" = 1
 "crates/mln_expression/src/slice.rs" = 2
-"crates/mln_expression/src/tests/dependency.rs" = 3
-"crates/mln_expression/src/tests/expression.rs" = 1
+"crates/mln_expression/src/tests/dependency.rs" = 2
 "crates/mln_expression/src/value.rs" = 1
 "crates/mln_gfx/src/attribute.rs" = 1
 "crates/mln_gfx/src/backend_scope.rs" = 1
@@ -285,7 +283,7 @@
 "crates/mln_style/src/sources/mod.rs" = 1
 "crates/mln_style/src/sources/tile_source.rs" = 3
 "crates/mln_style/src/style_impl.rs" = 1
-"crates/mln_style/src/tests/property_expression.rs" = 2
+"crates/mln_style/src/tests/property_expression.rs" = 1
 "crates/mln_style/src/tests/style.rs" = 2
 "crates/mln_style_types/src/position.rs" = 1
 "crates/mln_text/src/ft/face.rs" = 10

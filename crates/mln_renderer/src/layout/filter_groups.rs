@@ -58,6 +58,7 @@ mod tests {
     use mln_style::conversion::{Convertible, Error, convert};
     use mln_style::expression::{EvaluationContext, GlobalStateMap};
     use mln_tile::{VectorMLTTileData, VectorMVTTileData};
+    use mln_tile_id::CanonicalTileID;
     use mln_tile_id::geometry_tile_data::GeometryTileData;
     use mlt_core::encoder::{EncoderConfig, Network, Profile};
     use mlt_core::geo_types::Coord;
@@ -199,6 +200,7 @@ mod tests {
     ) -> FilterGroups {
         let mut global_state = GlobalStateMap::new();
         global_state.insert("class".to_owned(), Value::String("primary".into()));
+        let canonical = CanonicalTileID::new(0, 0, 0);
         let mut groups = FilterGroups::default();
         for (text, expect_grouped) in grouped.iter().map(|t| (t, true)).chain(per_feature.iter().map(|t| (t, false))) {
             let filter = parse_filter(text);
@@ -206,6 +208,7 @@ mod tests {
                 let passes = |feature: &dyn GeometryTileFeature| {
                     filter.evaluate(
                         &EvaluationContext::with_zoom_feature(zoom, Some(feature))
+                            .with_canonical_tile_id(Some(&canonical))
                             .with_global_state(Some(&global_state)),
                     )
                 };
@@ -266,6 +269,7 @@ mod tests {
             r#"["==", ["get", "class", ["properties"]], "path"]"#,
             r#"["==", ["get", "name"], "road 7"]"#,
             r#"["within", {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}]"#,
+            r#"[">", ["distance", {"type": "Point", "coordinates": [0, 0]}], 0]"#,
         ];
         let groups = check_selection("roads", &*layer, &grouped, &per_feature);
         // 400 roads in about 4 classes by 4 geometry types, plus the few
@@ -372,6 +376,7 @@ mod tests {
             r#"["==", ["get", "class", ["properties"]], "path"]"#,
             r#"["==", ["get", "name"], "road 7"]"#,
             r#"["within", {"type": "Polygon", "coordinates": [[[0, 0], [0, 1], [1, 1], [0, 0]]]}]"#,
+            r#"[">", ["distance", {"type": "Point", "coordinates": [0, 0]}], 0]"#,
         ];
         let groups = check_selection("roads", &*layer, &grouped, &per_feature);
         // 400 roads in 4 classes or none, by 3 geometry types.

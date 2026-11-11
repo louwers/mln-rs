@@ -1489,6 +1489,7 @@ name = "mln-rs"
 version = "0.0.10"
 dependencies = [
  "mln-rs-actor",
+ "mln-rs-cheap-ruler",
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
  "mln-rs-earcut",
@@ -1622,10 +1623,12 @@ version = "0.0.10"
 name = "mln-rs-expression"
 version = "0.0.10"
 dependencies = [
+ "mln-rs-cheap-ruler",
  "mln-rs-conversion",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
+ "mln-rs-libstdcxx",
  "mln-rs-math",
  "mln-rs-nunicode",
  "mln-rs-rapidjson",

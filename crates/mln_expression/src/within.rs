@@ -378,10 +378,15 @@ impl Within {
             };
             // The first polygon wins; every non-polygon before it reports an
             // error.
-            for geometry in geometries {
+            for geometry in &geometries {
                 if let Some(ret) = get_polygon_info(geometry, ctx) {
                     return Some(Box::new(Within::new(parsed_value.clone(), ret)));
                 }
+            }
+            // C++ reports nothing for an empty collection, and its parser
+            // then asserts that a failed parse reported an error.
+            if geometries.is_empty() {
+                ctx.error(POLYGON_REQUIRED.to_owned());
             }
             return None;
         }
@@ -464,5 +469,19 @@ impl Expression for Within {
 
     fn get_operator(&self) -> String {
         "within".to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_feature_collection_is_a_parse_error() {
+        let document = serde_json::json!(["within", {"type": "FeatureCollection", "features": []}]);
+        let mut ctx = ParsingContext::new();
+        assert!(ctx.parse_expression(&Convertible::from(&document), None).is_none());
+        assert_eq!(ctx.get_errors().len(), 1);
+        assert_eq!(ctx.get_errors()[0].message, POLYGON_REQUIRED);
     }
 }

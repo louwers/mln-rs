@@ -7,8 +7,6 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# Nothing in mln-rs uses it; published for the difftests
-# (louwers/mln-rs-difftests).
 # The [[test]]s below; tests/ also holds their modules.
 autotests = false
 

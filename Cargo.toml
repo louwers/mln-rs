@@ -241,6 +241,7 @@ keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
 [dependencies]
+cheap_ruler.workspace = true
 csscolorparser.workspace = true
 earcut.workspace = true
 feature.workspace = true

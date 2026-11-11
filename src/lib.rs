@@ -5,6 +5,7 @@
 //! `mln_rs::mln_util`, `mln_rs::earcut`, and so on. They are published as
 //! the `mln-rs-*` packages, which only exist for this crate.
 
+pub use cheap_ruler;
 pub use csscolorparser;
 pub use earcut;
 pub use feature;
