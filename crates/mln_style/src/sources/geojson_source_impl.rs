@@ -13,6 +13,7 @@ use mln_expression::expression::evaluate_accumulated;
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
+use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -66,16 +67,16 @@ impl GeoJSONData for GeoJSONVTData {
         }
     }
 
-    fn get_children(&self, _cluster_id: u32) -> Features {
-        Features::new()
+    fn get_children(&self, _cluster_id: u32) -> Result<Features, RuntimeError> {
+        Ok(Features::new())
     }
 
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Features {
-        Features::new()
+    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, RuntimeError> {
+        Ok(Features::new())
     }
 
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> u8 {
-        0
+    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, RuntimeError> {
+        Ok(0)
     }
 }
 
@@ -95,19 +96,16 @@ impl GeoJSONData for SuperclusterData {
         callback(self.impl_.get_tile(id.z, id.x, id.y));
     }
 
-    // C++ lets the "No cluster with the specified id." exception escape;
-    // TODO(port): queryFeatureExtensions reports it; here it is an empty
-    // result.
-    fn get_children(&self, cluster_id: u32) -> Features {
-        self.impl_.get_children(cluster_id).unwrap_or_default()
+    fn get_children(&self, cluster_id: u32) -> Result<Features, RuntimeError> {
+        self.impl_.get_children(cluster_id).map_err(RuntimeError)
     }
 
-    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Features {
-        self.impl_.get_leaves(cluster_id, limit, offset).unwrap_or_default()
+    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, RuntimeError> {
+        self.impl_.get_leaves(cluster_id, limit, offset).map_err(RuntimeError)
     }
 
-    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> u8 {
-        self.impl_.get_cluster_expansion_zoom(cluster_id).unwrap_or(0)
+    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, RuntimeError> {
+        self.impl_.get_cluster_expansion_zoom(cluster_id).map_err(RuntimeError)
     }
 }
 

@@ -1322,6 +1322,22 @@ impl RenderOrchestrator {
         source.query_source_features(options, self.global_state.as_deref())
     }
 
+    /// `queryFeatureExtensions(sourceID, feature, extension, extensionField,
+    /// args)`: a null value for a source the style doesn't have.
+    pub fn query_feature_extensions(
+        &self,
+        source_id: &str,
+        feature: &mln_util::feature::Feature,
+        extension: &str,
+        extension_field: &str,
+        args: Option<&feature::PropertyMap>,
+    ) -> Result<crate::query::FeatureExtensionValue, ExceptionPtr> {
+        match self.get_render_source(source_id) {
+            Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
+            None => Ok(Default::default()),
+        }
+    }
+
     /// `dumpDebugLogs()`.
     pub fn dump_debug_logs(&self) {
         for source in self.render_sources.values() {

@@ -81,16 +81,16 @@ impl GeoJSONData for FakeGeoJSONData {
         callback(self.features.clone());
     }
 
-    fn get_children(&self, _cluster_id: u32) -> Features {
-        Features::new()
+    fn get_children(&self, _cluster_id: u32) -> Result<Features, RuntimeError> {
+        Ok(Features::new())
     }
 
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Features {
-        Features::new()
+    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, RuntimeError> {
+        Ok(Features::new())
     }
 
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> u8 {
-        0
+    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, RuntimeError> {
+        Ok(0)
     }
 }
 

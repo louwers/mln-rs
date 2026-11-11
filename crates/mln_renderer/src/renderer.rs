@@ -124,6 +124,23 @@ impl Renderer {
         self.impl_ref().orchestrator.query_source_features(source_id, options)
     }
 
+    /// `queryFeatureExtensions(sourceID, feature, extension, extensionField,
+    /// args)`: for a GeoJSON source with `cluster` on, the "supercluster"
+    /// extension's "children", "leaves" or "expansion-zoom" of a cluster
+    /// feature (one with a `cluster_id` property). Anything else is a null
+    /// value. `Err` is the `std::runtime_error` C++ throws for a cluster ID
+    /// the source doesn't have.
+    pub fn query_feature_extensions(
+        &self,
+        source_id: &str,
+        feature: &mln_util::feature::Feature,
+        extension: &str,
+        extension_field: &str,
+        args: Option<&feature::PropertyMap>,
+    ) -> Result<crate::query::FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+        self.impl_ref().orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
+    }
+
     /// `getPlacedSymbolsData()`.
     pub fn get_placed_symbols_data(&self) -> Vec<crate::text::placement::PlacedSymbolData> {
         self.impl_ref().orchestrator.get_placed_symbols_data()

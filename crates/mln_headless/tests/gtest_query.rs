@@ -2,19 +2,24 @@
 
 use std::sync::Arc;
 
-use feature::Value;
+use feature::{PropertyMap, Value};
 use geojson::{GeoJSON, Geometry, Point};
 use mln_actor::RunLoop;
 use mln_map::{CameraOptions, MapMode};
-use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
+use mln_renderer::query::{FeatureExtensionValue, RenderedQueryOptions, SourceQueryOptions};
+use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style::PropertyValue;
 use mln_style::conversion::{Convertible, Error, convert};
 use mln_style::expression::Value as ExpressionValue;
 use mln_style::expression::dsl::{eq, get_str, gt, id, literal, literal_str, ne, number};
 use mln_style::expression::expression::FeatureState;
 use mln_style::filter::Filter;
 use mln_style::layers::circle_layer::CircleLayer;
-use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_style::layers::symbol_layer::SymbolLayer;
+use mln_style::source::Source;
+use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
+use mln_util::exception::RuntimeError;
 use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 
@@ -456,35 +461,188 @@ fn query_source_features_filter() {
     assert_eq!(features3.len(), 1);
 }
 
+/// `frontend.getRenderer()->queryFeatureExtensions(sourceID, feature,
+/// extension, extensionField, args)`.
+fn query_feature_extensions(
+    test: &QueryTest,
+    source_id: &str,
+    feature: &Feature,
+    extension: &str,
+    extension_field: &str,
+    args: Option<&PropertyMap>,
+) -> FeatureExtensionValue {
+    test.0
+        .frontend
+        .with_renderer(|renderer| {
+            renderer.query_feature_extensions(source_id, feature, extension, extension_field, args)
+        })
+        .expect("queryFeatureExtensions")
+}
+
+fn feature_collection(value: FeatureExtensionValue) -> Vec<feature::Feature<f64>> {
+    match value {
+        FeatureExtensionValue::FeatureCollection(features) => features,
+        other => panic!("not a FeatureCollection: {other:?}"),
+    }
+}
+
+/// `getTopClusterFeature(test)`: the top cluster of
+/// test/fixtures/supercluster/places.json, clustered at z0.
+fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
+    test.0.file_source.set_response(Kind::Source, |resource| {
+        assert_eq!("http://url", resource.url);
+        Some(file_response("test/fixtures/supercluster/places.json"))
+    });
+
+    let coordinate = ll(0.0, 0.0);
+    let options = GeoJSONOptions { cluster: true, ..GeoJSONOptions::default() };
+    let source = GeoJSONSource::new("cluster_source", Arc::new(options));
+    source.set_url("http://url");
+    source.load_description(&*test.0.file_source);
+
+    let mut cluster_layer = SymbolLayer::new("cluster_layer", "cluster_source");
+    cluster_layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("test-icon")));
+    cluster_layer.set_icon_size(&PropertyValue::Constant(12.0));
+
+    test.map().jump_to(&CameraOptions::default().with_center(Some(coordinate)).with_zoom(Some(0.0)));
+    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+    test.map().get_style_mut().add_layer(Box::new(cluster_layer), None).unwrap();
+    test.0.run_loop.run_once();
+    test.render();
+
+    let screen_coordinate = test.map().pixel_for_lat_lng(&coordinate);
+    let query_options = RenderedQueryOptions::new(Some(vec!["cluster_layer".to_owned()]), None);
+    test.query_rendered_features(&screen_coordinate, &query_options)
+}
+
+fn uint_property(feature: &feature::Feature<f64>, name: &str) -> Option<u64> {
+    match feature.properties.get(name) {
+        Some(Value::Uint(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+fn string_property<'a>(feature: &'a feature::Feature<f64>, name: &str) -> Option<&'a str> {
+    match feature.properties.get(name) {
+        Some(Value::String(value)) => Some(value),
+        _ => None,
+    }
+}
+
 // gtest: Query.QueryFeatureExtensionsInvalidExtension
 #[test]
-#[ignore = "TODO(port): Renderer::queryFeatureExtensions; see query.test.cpp:305"]
 fn query_feature_extensions_invalid_extension() {
-    // An unknown extension ("unknown"/"children") on source4 returns a null
-    // mln::Value.
+    let test = QueryTest::new();
+
+    let unknown_ext = query_feature_extensions(&test, "source4", &Feature::default(), "unknown", "children", None);
+    assert_eq!(unknown_ext, FeatureExtensionValue::Value(Value::Null));
 }
 
 // gtest: Query.QueryFeatureExtensionsSuperclusterChildren
 #[test]
-#[ignore = "TODO(port): Renderer::queryFeatureExtensions (supercluster children); see query.test.cpp:313"]
 fn query_feature_extensions_supercluster_children() {
-    // The top cluster of test/fixtures/supercluster/places.json (clustered
-    // GeoJSONSource loaded from a URL, symbol layer, z0) has 4 children with
-    // cluster_id 2, 34, 258, 2466 and point_count 7, 16, 7, 2.
+    let test = QueryTest::new();
+    let top_cluster_feature = get_top_cluster_feature(&test);
+
+    assert_eq!(top_cluster_feature.len(), 1);
+    let feature_props = &top_cluster_feature[0].properties;
+    assert!(feature_props.contains_key("cluster_id"));
+    assert!(feature_props.contains_key("cluster"));
+
+    let query_children =
+        query_feature_extensions(&test, "cluster_source", &top_cluster_feature[0], "supercluster", "children", None);
+    let children = feature_collection(query_children);
+    assert_eq!(children.len(), 4);
+
+    // Compare results produced by supercluster with default clustering options.
+    let cluster_ids: Vec<_> = children.iter().map(|c| uint_property(c, "cluster_id")).collect();
+    assert_eq!(cluster_ids, [Some(2), Some(34), Some(258), Some(2466)]);
+    let point_counts: Vec<_> = children.iter().map(|c| uint_property(c, "point_count")).collect();
+    assert_eq!(point_counts, [Some(7), Some(16), Some(7), Some(2)]);
 }
 
 // gtest: Query.QueryFeatureExtensionsSuperclusterExpansionZoom
 #[test]
-#[ignore = "TODO(port): Renderer::queryFeatureExtensions (supercluster expansion-zoom); see query.test.cpp:342"]
 fn query_feature_extensions_supercluster_expansion_zoom() {
-    // The expansion zoom of the top cluster is 1, of its fourth child 3.
+    let test = QueryTest::new();
+    let top_cluster_feature = get_top_cluster_feature(&test);
+    assert_eq!(top_cluster_feature.len(), 1);
+
+    let children = feature_collection(query_feature_extensions(
+        &test,
+        "cluster_source",
+        &top_cluster_feature[0],
+        "supercluster",
+        "children",
+        None,
+    ));
+
+    let query_expansion_zoom1 = query_feature_extensions(
+        &test,
+        "cluster_source",
+        &top_cluster_feature[0],
+        "supercluster",
+        "expansion-zoom",
+        None,
+    );
+    let query_expansion_zoom2 = query_feature_extensions(
+        &test,
+        "cluster_source",
+        &Feature::from(children[3].clone()),
+        "supercluster",
+        "expansion-zoom",
+        None,
+    );
+    assert_eq!(query_expansion_zoom1, FeatureExtensionValue::Value(Value::Uint(1)));
+    assert_eq!(query_expansion_zoom2, FeatureExtensionValue::Value(Value::Uint(3)));
 }
 
 // gtest: Query.QueryFeatureExtensionsSuperclusterLeaves
 #[test]
-#[ignore = "TODO(port): Renderer::queryFeatureExtensions (supercluster leaves); see query.test.cpp:364"]
 fn query_feature_extensions_supercluster_leaves() {
-    // Leaves of the top cluster: 10 by default; with limit 3: Niagara Falls,
-    // Cape May, Cape Fear; with limit 3, offset 3: Cape Hatteras, Cape Sable,
-    // Cape Cod.
+    let test = QueryTest::new();
+    let top_cluster_feature = get_top_cluster_feature(&test);
+    assert_eq!(top_cluster_feature.len(), 1);
+    let leaves = |args: Option<&PropertyMap>| {
+        feature_collection(query_feature_extensions(
+            &test,
+            "cluster_source",
+            &top_cluster_feature[0],
+            "supercluster",
+            "leaves",
+            args,
+        ))
+    };
+    let names = |features: &[feature::Feature<f64>]| -> Vec<String> {
+        features.iter().map(|f| string_property(f, "name").unwrap_or_default().to_owned()).collect()
+    };
+
+    // Get leaves for cluster 1, with default limit 10, offset 0.
+    assert_eq!(leaves(None).len(), 10);
+
+    // Get leaves for cluster 1, with limit 3, offset 0.
+    let limit_opts = PropertyMap::from_iter([("limit".to_owned(), Value::Uint(3))]);
+    let limit_leaves3 = leaves(Some(&limit_opts));
+    assert_eq!(names(&limit_leaves3), ["Niagara Falls", "Cape May", "Cape Fear"]);
+
+    // Get leaves for cluster 1, with limit 3, offset 3.
+    let offset_opts =
+        PropertyMap::from_iter([("limit".to_owned(), Value::Uint(3)), ("offset".to_owned(), Value::Uint(3))]);
+    let offset_leaves3 = leaves(Some(&offset_opts));
+    assert_eq!(names(&offset_leaves3), ["Cape Hatteras", "Cape Sable", "Cape Cod"]);
+}
+
+#[test]
+fn query_feature_extensions_unknown_cluster() {
+    // A cluster ID the source doesn't have is the error C++ throws.
+    let test = QueryTest::new();
+    let mut top_cluster_feature = get_top_cluster_feature(&test);
+    assert_eq!(top_cluster_feature.len(), 1);
+    top_cluster_feature[0].properties.insert("cluster_id".to_owned(), Value::Uint(7));
+
+    let result = test.0.frontend.with_renderer(|renderer| {
+        renderer.query_feature_extensions("cluster_source", &top_cluster_feature[0], "supercluster", "children", None)
+    });
+    let error = result.expect_err("unknown cluster");
+    assert!(error.downcast_ref::<RuntimeError>().is_some(), "{error}");
 }

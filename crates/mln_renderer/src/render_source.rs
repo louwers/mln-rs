@@ -254,6 +254,18 @@ pub trait RenderSource {
         Ok(Vec::new())
     }
 
+    /// `queryFeatureExtensions(feature, extension, extensionField, args)`:
+    /// sources without extensions return a null value.
+    fn query_feature_extensions(
+        &self,
+        _feature: &mln_util::feature::Feature,
+        _extension: &str,
+        _extension_field: &str,
+        _args: Option<&feature::PropertyMap>,
+    ) -> Result<crate::query::FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+        Ok(Default::default())
+    }
+
     fn set_cache_enabled(&mut self, _enable: bool) {}
 
     fn set_fast_pfor_enabled(&mut self, _enable: bool) {}

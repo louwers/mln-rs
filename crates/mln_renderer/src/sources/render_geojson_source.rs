@@ -1,8 +1,5 @@
 // Ports src/mln/renderer/sources/render_geojson_source.hpp and
 // src/mln/renderer/sources/render_geojson_source.cpp.
-//
-// TODO(port): queryFeatureExtensions (supercluster children/leaves/
-// expansion-zoom, M6).
 
 use std::any::Any;
 use std::rc::Rc;
@@ -16,8 +13,10 @@ use mln_style::source_impl::Impl as _;
 use mln_style::sources::geojson_source::GeoJSONData;
 use mln_style::sources::geojson_source_impl;
 use mln_util::constants;
+use mln_util::exception::RuntimeError;
 use mln_util::immutable::Immutable;
 
+use crate::query::FeatureExtensionValue;
 use crate::render_source::{RenderSource, RenderSourceBase, RenderTiles, SourcePrepareParameters};
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderItem;
@@ -33,6 +32,42 @@ fn same_data(a: &Option<Arc<dyn GeoJSONData>>, b: &Option<Arc<dyn GeoJSONData>>)
         (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
         _ => false,
     }
+}
+
+/// `getProperty<uint64_t>(cont, name)`: the property if it is an unsigned
+/// integer.
+fn get_uint_property(properties: &feature::PropertyMap, name: &str) -> Option<u64> {
+    match properties.get(name) {
+        Some(feature::Value::Uint(value)) => Some(*value),
+        _ => None,
+    }
+}
+
+/// The supercluster `extensionGetters`: the `extension_field` of cluster
+/// `cluster_id`, or `None` for a field it doesn't have.
+fn supercluster_extension(
+    cluster_data: &dyn GeoJSONData,
+    extension_field: &str,
+    cluster_id: u32,
+    args: Option<&feature::PropertyMap>,
+) -> Option<Result<FeatureExtensionValue, RuntimeError>> {
+    Some(match extension_field {
+        "children" => cluster_data.get_children(cluster_id).map(FeatureExtensionValue::FeatureCollection),
+        "leaves" => {
+            // Offset cannot be set without limit.
+            let (limit, offset) = match args.and_then(|args| Some((get_uint_property(args, "limit")?, args))) {
+                Some((limit, args)) => {
+                    (limit as u32, get_uint_property(args, "offset").map_or(0, |offset| offset as u32))
+                }
+                None => (10, 0),
+            };
+            cluster_data.get_leaves(cluster_id, limit, offset).map(FeatureExtensionValue::FeatureCollection)
+        }
+        "expansion-zoom" => cluster_data
+            .get_cluster_expansion_zoom(cluster_id)
+            .map(|zoom| FeatureExtensionValue::Value(feature::Value::Uint(u64::from(zoom)))),
+        _ => return None,
+    })
 }
 
 /// `RenderGeoJSONSource`.
@@ -176,6 +211,31 @@ impl RenderSource for RenderGeoJSONSource {
         global_state: Option<&mln_style::expression::GlobalStateMap>,
     ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
         self.tile_source.query_source_features(options, global_state)
+    }
+
+    /// The "supercluster" extension: a cluster feature's "children",
+    /// "leaves" (`args` "limit", default 10, and "offset", default 0) or
+    /// "expansion-zoom". Anything else is a null value.
+    fn query_feature_extensions(
+        &self,
+        feature: &mln_util::feature::Feature,
+        extension: &str,
+        extension_field: &str,
+        args: Option<&feature::PropertyMap>,
+    ) -> Result<FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+        if extension != "supercluster" {
+            return Ok(Default::default());
+        }
+        let Some(cluster_id) = get_uint_property(&feature.properties, "cluster_id") else {
+            return Ok(Default::default());
+        };
+        let Some(json_data) = self.data.as_ref().and_then(Weak::upgrade) else {
+            return Ok(Default::default());
+        };
+        match supercluster_extension(&*json_data, extension_field, cluster_id as u32, args) {
+            Some(result) => result.map_err(|e| Arc::new(e) as mln_util::exception::ExceptionPtr),
+            None => Ok(Default::default()),
+        }
     }
 
     // layers: feature state

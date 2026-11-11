@@ -209,7 +209,7 @@
 "crates/mln_headless/tests/gtest_feature_tracking.rs" = 14
 "crates/mln_headless/tests/gtest_map.rs" = 12
 "crates/mln_headless/tests/gtest_map_snapshotter.rs" = 1
-"crates/mln_headless/tests/gtest_query.rs" = 5
+"crates/mln_headless/tests/gtest_query.rs" = 1
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
 "crates/mln_map/src/map.rs" = 4
@@ -240,7 +240,6 @@
 "crates/mln_renderer/src/renderer_impl.rs" = 5
 "crates/mln_renderer/src/renderer_observer.rs" = 1
 "crates/mln_renderer/src/sources/mod.rs" = 1
-"crates/mln_renderer/src/sources/render_geojson_source.rs" = 1
 "crates/mln_renderer/src/sources/render_image_source.rs" = 1
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
 "crates/mln_renderer/src/sources/render_tile_source.rs" = 5
@@ -281,7 +280,7 @@
 "crates/mln_style/src/properties.rs" = 2
 "crates/mln_style/src/property_expression.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
-"crates/mln_style/src/sources/geojson_source_impl.rs" = 2
+"crates/mln_style/src/sources/geojson_source_impl.rs" = 1
 "crates/mln_style/src/sources/mod.rs" = 1
 "crates/mln_style/src/sources/tile_source.rs" = 3
 "crates/mln_style/src/style_impl.rs" = 1

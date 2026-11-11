@@ -113,10 +113,12 @@ pub trait GeoJSONData: Send + Sync {
     /// thread, either right away or later from its RunLoop.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
 
-    // SuperclusterData
-    fn get_children(&self, cluster_id: u32) -> Features;
-    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Features;
-    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> u8;
+    // SuperclusterData: data that isn't clustered has no clusters, and
+    // gives empty results. `Err` is the `std::runtime_error` C++ throws for
+    // a cluster ID the data doesn't have.
+    fn get_children(&self, cluster_id: u32) -> Result<Features, RuntimeError>;
+    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, RuntimeError>;
+    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, RuntimeError>;
 }
 
 /// `GeoJSONData::create(geoJSON, sequencedScheduler, options)`. C++ lets a
