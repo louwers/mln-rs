@@ -13,7 +13,8 @@ mod support;
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use feature::Value;
 use geojson::{Feature, GeoJSON, Geometry, Point};
@@ -34,20 +35,26 @@ use mln_storage::{
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::custom_tile_loader::TileFunction;
 use mln_style::layers::background_layer::BackgroundLayer;
+use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
 use mln_style::layers::raster_layer::RasterLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::property_expression::PropertyExpression;
+use mln_style::sources::custom_geometry_source::{
+    CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
+};
 use mln_style::sources::geojson_source::GeoJSONSource;
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
 use mln_style::style_property::Kind as StylePropertyKind;
-use mln_style::{PropertyValue, TransitionOptions};
+use mln_style::{PropertyValue, TransitionOptions, source};
 use mln_style_types::VisibilityType;
 use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
+use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::chrono::{Duration, Timestamp};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -1622,22 +1629,156 @@ fn empty_image_name_is_no_image() {
     assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());
 }
 
+// gtest: Map.PrefetchDeltaOverride
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource (the test counts tiles of a vector and a custom source); see map.test.cpp:1261"]
 fn prefetch_delta_override() {
-    // test/map/map.test.cpp:1261: with setPrefetchZoomDelta(0) on a vector and
-    // a CustomGeometrySource, z16 requests 2 x 4 tiles; resetting the delta
-    // to the default requests 4 parent tiles per source.
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    test.load_json(
+        r#"{
+                "layers": [{
+                    "id": "vector",
+                    "type": "fill",
+                    "source": "vector",
+                    "minzoom": 0,
+                    "maxzoom": 24
+                },
+                {
+                    "id": "custom",
+                    "type": "fill",
+                    "source": "custom",
+                    "minzoom": 0,
+                    "maxzoom": 24
+                }]
+                }"#,
+    );
+
+    // Vector source
+    let vector = vector_source("vector", "a/{z}/{x}/{y}");
+    source::set_prefetch_zoom_delta(&vector, Some(0));
+    test.map().get_style_mut().add_source(Box::new(vector)).unwrap();
+
+    let requested_tiles = Arc::new(AtomicI32::new(0));
+    {
+        let requested_tiles = requested_tiles.clone();
+        test.file_source.set_response(Kind::Tile, move |_| {
+            requested_tiles.fetch_add(1, Ordering::SeqCst);
+            no_content()
+        });
+    }
+
+    // Custom source
+    test.map().get_style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+
+    test.map().jump_to(&cam().with_zoom(Some(16.0)));
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    }
+    test.run_loop.run();
+    // 2 sources x 4 tiles
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
+
+    requested_tiles.store(0, Ordering::SeqCst);
+
+    // Should request z12 tiles when delta is set back to default, that is 4.
+    stop_on_full_frame(&test);
+
+    for id in ["vector", "custom"] {
+        let map = test.map();
+        source::set_prefetch_zoom_delta(map.get_style().get_source(id).unwrap(), None);
+    }
+    test.run_loop.run();
+
+    // Each source requests 4 additional parent tiles.
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
+}
+
+/// A custom geometry source "custom" that counts its fetches in
+/// `requested_tiles` and answers each with empty data.
+fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: Option<u8>) -> CustomGeometrySource {
+    let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
+    let fetch: TileFunction = {
+        let handle = handle.clone();
+        let requested_tiles = requested_tiles.clone();
+        Arc::new(move |tile_id: &CanonicalTileID| {
+            requested_tiles.fetch_add(1, Ordering::SeqCst);
+            if let Some(handle) = handle.get() {
+                handle.set_tile_data(*tile_id, GeoJSON::default());
+            }
+        })
+    };
+    let options = CustomGeometrySourceOptions {
+        fetch_tile_function: Some(fetch),
+        cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID| {})),
+        ..Default::default()
+    };
+    let custom = CustomGeometrySource::new("custom", options).unwrap();
+    handle.set(custom.handle()).unwrap();
+    if prefetch_zoom_delta.is_some() {
+        source::set_prefetch_zoom_delta(&custom, prefetch_zoom_delta);
+    }
+    custom
+}
+
+/// Stops the run loop at the next full frame.
+fn stop_on_full_frame<FS: mln_storage::FileSource + 'static>(test: &MapTest<FS>) {
+    let run_loop = test.run_loop.clone();
+    test.observer.did_finish_rendering_frame_callback.set(move |status: RenderFrameStatus| {
+        if status.mode == RenderMode::Full {
+            run_loop.stop();
+        }
+    });
 }
 
 // Test that custom source's tile pyramid is reset
 // if there is a significant change.
 // gtest: Map.PrefetchDeltaOverrideCustomSource
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource; see map.test.cpp:1337"]
 fn prefetch_delta_override_custom_source() {
-    // test/map/map.test.cpp:1337: removing and re-adding the custom source
-    // re-requests the z16 tiles and their parents (8 requests).
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    test.load_json(
+        r#"{
+                "layers": [{
+                    "id": "custom",
+                    "type": "fill",
+                    "source": "custom",
+                    "source-layer": "a",
+                    "minzoom": 0,
+                    "maxzoom": 24
+                }]
+                }"#,
+    );
+
+    let requested_tiles = Arc::new(AtomicI32::new(0));
+
+    test.map().get_style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+
+    test.map().jump_to(&cam().with_zoom(Some(16.0)));
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    }
+    test.run_loop.run();
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 4);
+    requested_tiles.store(0, Ordering::SeqCst);
+
+    stop_on_full_frame(&test);
+
+    {
+        let mut map = test.map();
+        let mut style = map.get_style_mut();
+        let layer = style.remove_layer("custom").unwrap();
+        style.remove_source("custom");
+        style.add_layer(layer, None).unwrap();
+        style.add_source(Box::new(counted_custom_source(&requested_tiles, None))).unwrap();
+    }
+    test.run_loop.run();
+
+    // Source was significantly mutated, therefore, tile pyramid would be
+    // cleared and current zoom level + parent tiles would be re-requested.
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
 }
 
 /// The `ForwardingHeadlessFrontend` of Map.ExpiredSpriteSheet: a
@@ -2071,10 +2212,37 @@ fn resource_error() {
 
 // gtest: Map.StencilOverflow
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource; see map.test.cpp:1767"]
 fn stencil_overflow() {
-    // test/map/map.test.cpp:1767: a CustomGeometrySource with 16 px tiles at
-    // z5 renders without crashing; ASSERT_LE(0, result.stats.stencilUpdates).
+    let test = MapTest::new();
+
+    test.load_json("{}");
+
+    // Create a tile source with small tiles that produces enough tiles to
+    // exceed the stencil ID limit and causes a clearing of the stencil buffer.
+    let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
+    let fetch: TileFunction = {
+        let handle = handle.clone();
+        Arc::new(move |tile_id: &CanonicalTileID| {
+            if let Some(handle) = handle.get() {
+                handle.set_tile_data(*tile_id, GeoJSON::default());
+            }
+        })
+    };
+    let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
+    options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
+    let custom = CustomGeometrySource::new("custom", options).unwrap();
+    handle.set(custom.handle()).unwrap();
+
+    test.map().get_style_mut().add_source(Box::new(custom)).unwrap();
+    test.map().get_style_mut().add_layer(Box::new(FillLayer::new("fill", "custom")), None).unwrap();
+
+    test.map().jump_to(&cam().with_zoom(Some(5.0)));
+    let result = test.render();
+
+    // No drawables are built because no bucket/tiledata is available.
+    assert!(0 <= result.stats.stencil_updates);
+
+    // TODO: confirm that the stencil masking actually worked
 }
 
 // gtest: Map.InvalidUTF8InTile

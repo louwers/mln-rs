@@ -3,4 +3,3 @@
 
 pub mod tile_cover;
 pub mod tile_cover_impl;
-pub mod tile_range;

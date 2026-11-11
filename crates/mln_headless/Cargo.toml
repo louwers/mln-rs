@@ -57,6 +57,10 @@ path = "tests/gtest_map.rs"
 name = "gtest_api"
 path = "tests/gtest_api.rs"
 
+[[test]]
+name = "gtest_tile_lod"
+path = "tests/gtest_tile_lod.rs"
+
 # gtests-core: test/util/memory.test.cpp (Map over a StubFileSource with the
 # test/fixtures/resources styles). Shared fixture in tests/support/mod.rs.
 [[test]]
@@ -80,6 +84,7 @@ mln_storage = { workspace = true, features = ["sqlite"] }
 mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 mln_text = { package = "mln-rs-text", path = "../mln_text" }
+mln_tile_id.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 

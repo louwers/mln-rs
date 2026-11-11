@@ -1,0 +1,321 @@
+// Ports src/mln/tile/custom_geometry_tile.hpp and
+// src/mln/tile/custom_geometry_tile.cpp, with the request tracking of ffi
+// patches 0069 and 0070.
+//
+// A custom tile is a GeometryTile whose data a custom source's loader hands
+// it. It's generic over that data, as the loader is (see
+// mln_style::custom_tile_loader). Like the C++ tile, it has a mailbox of its
+// own for the loader's messages, separate from the GeometryTile's mailbox
+// for its worker's replies.
+
+use std::any::Any;
+use std::cell::Cell;
+use std::rc::{Rc, Weak};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use mln_actor::actor::PoolActorRef;
+use mln_actor::{ActorRef, Mailbox, scheduler};
+use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, SubscriberKey};
+use mln_style::expression::GlobalStateMap;
+use mln_style::layer_properties::LayerProperties;
+use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
+use mln_style::sources::geojson_source::TileFeatures;
+use mln_tile_id::OverscaledTileID;
+use mln_util::exception::ExceptionPtr;
+use mln_util::immutable::Immutable;
+
+use crate::tile::geojson_tile_data::GeoJSONTileData;
+use crate::tile::geometry_tile::{GeometryTile, GeometryTileInner};
+use crate::tile::geometry_tile_worker::SharedTileData;
+use crate::tile::tile::{Tile, TileBase, TileNecessity};
+use crate::tile::tile_observer::TileObserver;
+use crate::tile_parameters::TileParameters;
+use crate::tile_render_data::TileRenderData;
+
+/// Turns the data a loader hands a tile into the tile's data.
+type DataConverter<D> = Box<dyn Fn(D) -> Option<SharedTileData>>;
+
+/// A key no other custom tile has.
+fn next_subscriber_key() -> SubscriberKey {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+/// The part of a custom tile that its loader's messages reach.
+struct Link<D: Clone + Send + 'static> {
+    tile: Weak<GeometryTileInner>,
+    convert: DataConverter<D>,
+    stale: Cell<bool>,
+    necessity: Cell<TileNecessity>,
+    key: SubscriberKey,
+    loader: PoolActorRef<CustomTileLoader<D>>,
+}
+
+impl<D: Clone + Send + 'static> Link<D> {
+    /// `setTileData(data)`.
+    fn set_tile_data(&self, data: D) {
+        if let Some(tile) = self.tile.upgrade() {
+            tile.set_data((self.convert)(data));
+        }
+    }
+
+    /// `setTileError(error)`.
+    fn set_tile_error(&self, error: ExceptionPtr) {
+        if let Some(tile) = self.tile.upgrade() {
+            if !tile.is_obsolete() {
+                tile.set_error(error);
+            }
+        }
+    }
+
+    /// `invalidateTileData()`.
+    fn invalidate_tile_data(&self) {
+        self.stale.set(true);
+        if let Some(tile) = self.tile.upgrade() {
+            tile.base.observer().on_tile_changed(&tile.base);
+        }
+    }
+}
+
+/// How the loader reaches a tile: through the tile's mailbox.
+struct Subscriber<D: Clone + Send + 'static>(ActorRef<Link<D>>);
+
+impl<D: Clone + Send + 'static> CustomTileSubscriber<D> for Subscriber<D> {
+    fn set_tile_data(&self, data: D) {
+        self.0.invoke(move |link| link.set_tile_data(data));
+    }
+
+    fn set_tile_error(&self, error: ExceptionPtr) {
+        self.0.invoke(move |link| link.set_tile_error(error));
+    }
+
+    fn invalidate_tile_data(&self) {
+        self.0.invoke(Link::invalidate_tile_data);
+    }
+}
+
+/// A tile of a custom source.
+pub struct CustomTile<D: Clone + Send + 'static> {
+    tile: GeometryTile,
+    link: Rc<Link<D>>,
+    mailbox: Arc<Mailbox>,
+    /// Whether the tile's data has one layer, which a source query gets
+    /// whatever source layer it names.
+    single_layer: bool,
+}
+
+/// `CustomGeometryTile`.
+pub type CustomGeometryTile = CustomTile<Arc<TileFeatures>>;
+
+impl<D: Clone + Send + 'static> CustomTile<D> {
+    fn with_converter(
+        overscaled_tile_id: OverscaledTileID,
+        source_id: String,
+        parameters: &TileParameters<'_>,
+        loader: PoolActorRef<CustomTileLoader<D>>,
+        observer: Option<Rc<dyn TileObserver>>,
+        convert: DataConverter<D>,
+        single_layer: bool,
+    ) -> Self {
+        let tile = GeometryTile::new(overscaled_tile_id, source_id, parameters, observer);
+        let link = Rc::new(Link {
+            tile: Rc::downgrade(tile.inner()),
+            convert,
+            stale: Cell::new(true),
+            necessity: Cell::new(TileNecessity::Optional),
+            key: next_subscriber_key(),
+            loader,
+        });
+        // `mailbox(std::make_shared<Mailbox>(*Scheduler::GetCurrent()))`
+        let mailbox = Mailbox::with_target(&scheduler::get_current(), link.clone() as Rc<dyn Any>);
+        CustomTile { tile, link, mailbox, single_layer }
+    }
+
+    /// `setTileData(data)`, as the loader's message does.
+    pub fn set_tile_data(&self, data: D) {
+        self.link.set_tile_data(data);
+    }
+
+    /// `setTileError(error)`, as the loader's message does.
+    pub fn set_tile_error(&self, error: ExceptionPtr) {
+        self.link.set_tile_error(error);
+    }
+
+    /// `invalidateTileData()`, as the loader's message does.
+    pub fn invalidate_tile_data(&self) {
+        self.link.invalidate_tile_data();
+    }
+
+    pub fn geometry_tile(&self) -> &GeometryTile {
+        &self.tile
+    }
+
+    fn subscriber(&self) -> Box<dyn CustomTileSubscriber<D>> {
+        Box::new(Subscriber(ActorRef::<Link<D>>::new(&self.mailbox)))
+    }
+}
+
+impl CustomGeometryTile {
+    /// `CustomGeometryTile(const OverscaledTileID&, std::string sourceID,
+    /// const TileParameters&, Immutable<TileOptions>,
+    /// ActorRef<CustomTileLoader>, TileObserver*)`, without the tile
+    /// options: the loader cuts the tile's features.
+    pub fn new(
+        overscaled_tile_id: OverscaledTileID,
+        source_id: String,
+        parameters: &TileParameters<'_>,
+        loader: PoolActorRef<CustomGeometryTileLoader>,
+        observer: Option<Rc<dyn TileObserver>>,
+    ) -> Self {
+        Self::with_converter(
+            overscaled_tile_id,
+            source_id,
+            parameters,
+            loader,
+            observer,
+            Box::new(|features: Arc<TileFeatures>| Some(Arc::new(GeoJSONTileData::from_shared(features)))),
+            true,
+        )
+    }
+}
+
+impl<D: Clone + Send + 'static> Drop for CustomTile<D> {
+    fn drop(&mut self) {
+        self.cancel();
+        let id = self.tile.inner().base.id();
+        let key = self.link.key;
+        self.link.loader.invoke(move |loader| loader.remove_tile(&id, key));
+    }
+}
+
+impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
+    fn base(&self) -> &TileBase {
+        self.tile.base()
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn create_render_data(&self) -> Box<dyn TileRenderData> {
+        self.tile.create_render_data()
+    }
+
+    fn set_observer(&self, observer: Rc<dyn TileObserver>) {
+        self.tile.set_observer(observer);
+    }
+
+    /// Fetching tile data for custom sources is assumed to be an expensive
+    /// operation. Only required tiles make fetchTile requests. Attempt to
+    /// cancel a tile that is no longer required.
+    fn set_necessity(&self, necessity: TileNecessity) {
+        let link = &self.link;
+        if necessity != link.necessity.get() || link.stale.get() {
+            link.necessity.set(necessity);
+            let id = self.id();
+            let key = link.key;
+            if necessity == TileNecessity::Required {
+                let subscriber = self.subscriber();
+                link.loader.invoke(move |loader| loader.fetch_tile(&id, key, subscriber));
+                link.stale.set(false);
+            } else if !self.is_renderable() {
+                link.loader.invoke(move |loader| loader.cancel_tile(&id, key));
+            }
+        }
+    }
+
+    /// Closes the loader's mailbox as well as the GeometryTile's.
+    fn cancel(&self) {
+        self.mailbox.close();
+        self.tile.cancel();
+    }
+
+    fn layer_properties_updated(&self, layer_properties: &Immutable<dyn LayerProperties>) -> bool {
+        self.tile.layer_properties_updated(layer_properties)
+    }
+
+    fn set_show_collision_boxes(&self, show: bool) {
+        self.tile.set_show_collision_boxes(show);
+    }
+
+    // layers: feature state
+    fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
+        self.tile.set_feature_state(states);
+    }
+
+    fn set_layers(&self, layers: &[Immutable<dyn LayerProperties>], global_state: Option<Arc<GlobalStateMap>>) {
+        self.tile.set_layers(layers, global_state);
+    }
+
+    fn hold_for_fade(&self) -> bool {
+        self.tile.hold_for_fade()
+    }
+
+    fn mark_rendered_ideal(&self) {
+        self.tile.mark_rendered_ideal();
+    }
+
+    fn mark_rendered_previously(&self) {
+        self.tile.mark_rendered_previously();
+    }
+
+    fn performed_fade_placement(&self) {
+        self.tile.performed_fade_placement();
+    }
+
+    // query
+    fn query_rendered_features(
+        &self,
+        result: &mut crate::geometry::feature_index::QueryResults,
+        query_geometry: &mln_tile_id::geometry_tile_data::GeometryCoordinates,
+        transform_state: &mln_map_types::TransformState,
+        layers: &crate::geometry::feature_index::QueryLayers<'_>,
+        options: &crate::query::RenderedQueryOptions,
+        global_state: Option<&GlobalStateMap>,
+        proj_matrix: &mln_util::mat4::Mat4,
+        feature_state: &crate::source_state::SourceFeatureState,
+    ) -> Result<(), ExceptionPtr> {
+        self.tile.query_rendered_features(
+            result,
+            query_geometry,
+            transform_state,
+            layers,
+            options,
+            global_state,
+            proj_matrix,
+            feature_state,
+        )
+    }
+
+    fn get_query_padding(&self, layers: &crate::geometry::feature_index::QueryLayers<'_>) -> f32 {
+        self.tile.get_query_padding(layers)
+    }
+
+    /// `querySourceFeatures(result, options, globalState)`.
+    fn query_source_features(
+        &self,
+        result: &mut Vec<mln_util::feature::Feature>,
+        options: &crate::query::SourceQueryOptions,
+        global_state: Option<&GlobalStateMap>,
+    ) -> Result<(), ExceptionPtr> {
+        if !self.single_layer {
+            return self.tile.query_source_features(result, options, global_state);
+        }
+        // Ignore the sourceLayer, there is only one
+        if let Some(feature_index) = self.tile.get_feature_index() {
+            if let Some(tile_data) = feature_index.get_data() {
+                if let Some(layer) = tile_data.get_layer("")? {
+                    crate::tile::geometry_tile::query_layer_source_features(
+                        &*layer,
+                        result,
+                        options,
+                        global_state,
+                        &self.tile.inner().base.id(),
+                    )?;
+                }
+            }
+        }
+        Ok(())
+    }
+}

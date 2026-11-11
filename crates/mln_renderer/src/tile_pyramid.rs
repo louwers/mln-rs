@@ -13,6 +13,7 @@ use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source;
 use mln_style_types::SourceType;
+use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::immutable::Immutable;
@@ -25,7 +26,6 @@ use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, tile_cover};
-use crate::util::tile_range::TileRange;
 
 /// `util::clamp<double>(value, min, max)`.
 fn clamp(value: f64, min: f64, max: f64) -> f64 {

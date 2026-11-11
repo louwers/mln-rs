@@ -313,9 +313,13 @@ pub fn create(impl_: &Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler
             debug_assert!(false);
             None
         }
-        // TODO(port): RenderRasterDEMSource,
-        // RenderAnnotationSource, RenderImageSource,
-        // RenderCustomGeometrySource, RenderCustomVectorSource. The
+        SourceType::CustomVector => {
+            Some(Box::new(crate::sources::render_custom_geometry_source::RenderCustomGeometrySource::new(
+                source::static_immutable_cast::<mln_style::sources::custom_geometry_source::Impl>(impl_),
+                thread_pool,
+            )))
+        }
+        // TODO(port): RenderAnnotationSource, RenderCustomVectorSource. The
         // orchestrator skips the layers of a source without a render source.
         _ => None,
     }

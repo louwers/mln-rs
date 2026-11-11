@@ -12,6 +12,7 @@
 pub mod color_ramp_property_value;
 pub mod constant;
 pub mod coordinate;
+pub mod custom_geometry_source_options;
 pub mod filter;
 pub mod function;
 pub mod geojson;

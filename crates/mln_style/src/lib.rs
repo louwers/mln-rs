@@ -26,6 +26,7 @@ pub mod collection;
 pub mod color_ramp_property_value;
 pub mod conversion;
 pub mod conversion_impl;
+pub mod custom_tile_loader;
 pub mod expression;
 pub mod filter;
 pub mod format_section_override;

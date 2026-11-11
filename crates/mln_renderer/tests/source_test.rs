@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use geojson::GeoJSON;
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{
@@ -28,13 +29,14 @@ use mln_style::layers::{
 };
 use mln_style::observer::SourceObserver;
 use mln_style::source::{self, Source};
+use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
 use mln_style::sources::geojson_source_impl;
 use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 use mln_style_types::SourceType;
-use mln_tile_id::OverscaledTileID;
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::{Duration, milliseconds};
-use mln_util::exception::ExceptionPtr;
+use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
@@ -489,13 +491,76 @@ fn raster_dem_tile_attribution() {
     tile_attribution(Tiled::RasterDEM, mapbox);
 }
 
+/// A loaded custom geometry source "source", a line layer for it, and its
+/// render source after one update, observed by `observer`.
+fn custom_geometry_case(
+    test: &SourceTest,
+    observer: Rc<StubRenderSourceObserver>,
+) -> (CustomGeometrySource, Box<dyn RenderSource>) {
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let source = CustomGeometrySource::new("source", CustomGeometrySourceOptions::default()).unwrap();
+    source.load_description(&file_source);
+
+    let mut layer = LineLayer::new("id", "source");
+    layer.set_source_layer("water");
+    let layer_properties: Immutable<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+    let layers = vec![layer_properties];
+
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    render_source.set_observer(observer);
+    render_source.update(source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
+    (source, render_source)
+}
+
 // gtest: Source.CustomGeometrySourceSetTileData
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource (style/sources/custom_geometry_source*, RenderCustomGeometrySource)"]
 fn custom_geometry_source_set_tile_data() {
-    // TODO(port): body: a CustomGeometrySource with a LineLayer ("water");
-    // `setTileData(CanonicalTileID(0, 0, 0), GeoJSON{FeatureCollection{}})`
-    // from the loop must report tileChanged for "source" and no tileError.
+    let test = SourceTest::new();
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let end = test.end_handle();
+        *observer.tile_changed.borrow_mut() = Some(Box::new(move |source_id, _tile_id| {
+            assert_eq!("source", source_id);
+            end();
+        }));
+    }
+    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
+
+    let (source, _render_source) = custom_geometry_case(&test, observer);
+
+    let handle = source.handle();
+    test.run_loop.invoke(move || {
+        // Set Tile Data
+        handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJSON::FeatureCollection(Vec::new()));
+    });
+
+    test.run();
+}
+
+// gtest: Source.CustomGeometrySourceSetTileError
+#[test]
+fn custom_geometry_source_set_tile_error() {
+    let test = SourceTest::new();
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let end = test.end_handle();
+        *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
+            assert_eq!("source", source_id);
+            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), *tile_id);
+            assert_eq!("failed", error.to_string());
+            end();
+        }));
+    }
+
+    let (source, _render_source) = custom_geometry_case(&test, observer);
+
+    let handle = source.handle();
+    test.run_loop.invoke(move || {
+        handle.set_tile_error(CanonicalTileID::new(0, 0, 0), RuntimeError::ptr("failed"));
+    });
+
+    test.run();
 }
 
 // gtest: Source.InvisibleSourcesTileNecessity

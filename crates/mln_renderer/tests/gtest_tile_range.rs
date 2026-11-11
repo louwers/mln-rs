@@ -1,8 +1,8 @@
 // Ports test/util/tile_range.test.cpp (util::TileRange lives in
-// mln_renderer::util::tile_range).
+// mln_tile_id::tile_range).
 
-use mln_renderer::util::tile_range::TileRange;
 use mln_tile_id::CanonicalTileID;
+use mln_tile_id::tile_range::TileRange;
 use mln_util::geo::{LatLng, LatLngBounds};
 
 fn ll(lat: f64, lon: f64) -> LatLng {
