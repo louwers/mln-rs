@@ -7,7 +7,7 @@
 use std::sync::{Arc, OnceLock};
 
 use crate::ft;
-use crate::glyph::{Glyph, GlyphID};
+use crate::glyph::{FontData, Glyph, GlyphID};
 
 /// `SDF_FONT_SIZE`: glyphs are loaded at 24 px (FT_Set_Char_Size at 72 dpi).
 pub const SDF_FONT_SIZE: i64 = 24;
@@ -28,7 +28,7 @@ impl FreeTypeLibrary {
 pub struct FreeTypeFace {
     /// `memoryFile`: the font data the face reads from, shared with whoever
     /// handed it over (such as the response it arrived in).
-    memory_file: Arc<Vec<u8>>,
+    memory_file: FontData,
     face: Option<ft::face::Face>,
     /// The hinted glyph loader (FT_Load_Glyph at 24 px), made on first use.
     scaler: Arc<OnceLock<Option<skrifa::ScalerFont>>>,
@@ -40,15 +40,15 @@ impl FreeTypeFace {
     pub fn from_file(font_file_name: &str, lib: &FreeTypeLibrary) -> Self {
         match std::fs::read(font_file_name) {
             Ok(data) => Self::from_memory(data, lib),
-            Err(_) => FreeTypeFace { memory_file: Arc::default(), face: None, scaler: Arc::default() },
+            Err(_) => FreeTypeFace { memory_file: FontData::default(), face: None, scaler: Arc::default() },
         }
     }
 
     /// `FreeTypeFace(const char* fontData, size_t fontDataSize, const FreeTypeLibrary&)`.
     /// The face keeps `font_data` instead of copying it.
-    pub fn from_memory(font_data: impl Into<Arc<Vec<u8>>>, _lib: &FreeTypeLibrary) -> Self {
+    pub fn from_memory(font_data: impl Into<FontData>, _lib: &FreeTypeLibrary) -> Self {
         let memory_file = font_data.into();
-        let face = match ft::face::Face::open(&memory_file) {
+        let face = match ft::face::Face::open(memory_file.as_bytes()) {
             Ok(mut face) => {
                 Self::force_ucs2_charmap(&mut face);
                 face.set_char_size(SDF_FONT_SIZE * 64, 72);
@@ -85,7 +85,7 @@ impl FreeTypeFace {
     }
 
     /// The font data the face reads from.
-    pub fn data(&self) -> &Arc<Vec<u8>> {
+    pub fn data(&self) -> &FontData {
         &self.memory_file
     }
 
@@ -93,14 +93,14 @@ impl FreeTypeFace {
     pub fn get_char_index(&self, charcode: u32) -> u32 {
         let Some(face) = &self.face else { return 0 };
         let cm = face.charmap.map(|i| &face.charmaps[i]);
-        ft::cmap::get_char_index(face.lookup_context(&self.memory_file), cm, charcode)
+        ft::cmap::get_char_index(face.lookup_context(self.memory_file.as_bytes()), cm, charcode)
     }
 
     /// `FT_Face_GetCharVariantIndex`.
     pub fn get_char_variant_index(&self, charcode: u32, variant_selector: u32) -> u32 {
         let Some(face) = &self.face else { return 0 };
         ft::cmap::get_char_variant_index(
-            face.lookup_context(&self.memory_file),
+            face.lookup_context(self.memory_file.as_bytes()),
             &face.charmaps,
             face.charmap,
             charcode,
@@ -111,7 +111,7 @@ impl FreeTypeFace {
     /// `FT_Get_Advance(face, glyph, FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING)`:
     /// the 16.16 advance, `None` on error.
     pub fn get_advance(&self, glyph: u32) -> Option<i64> {
-        self.face.as_ref()?.get_advance(&self.memory_file, glyph)
+        self.face.as_ref()?.get_advance(self.memory_file.as_bytes(), glyph)
     }
 
     /// The glyph loader of a valid face.
