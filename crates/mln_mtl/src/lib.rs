@@ -6,8 +6,8 @@
 //! calls through objc2. `NS::SharedPtr`s become `Retained` objects, and the
 //! `Context&` members of resources become `Rc<Context>`.
 //!
-//! The MSL comes from the C++ headers: `just vendor-shaders` runs
-//! `tools/extract_msl.rs` over them and generates `shaders::msl_sources`.
+//! The MSL comes from the C++ headers, with the port's changes
+//! (`shaders::msl_sources`).
 //!
 //! Metal exists on Apple platforms only; elsewhere this crate is empty.
 

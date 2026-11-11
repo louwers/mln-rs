@@ -112,11 +112,12 @@ mln-rs dependency. A new third-party crate goes into
 
 ## Shaders
 
-The WGSL and MSL shaders come from the C++ core's
-`include/mln/shaders/webgpu/*.hpp` and `include/mln/shaders/mtl/*.hpp`.
+The WGSL shaders come from the C++ core's `include/mln/shaders/webgpu/*.hpp`.
 `just vendor-shaders [maplibre-native checkout]` extracts them, unchanged,
-into `crates/mln_webgpu/src/shaders/wgsl_sources.rs` and
-`crates/mln_mtl/src/shaders/msl_sources.rs` (default checkout:
+into `crates/mln_webgpu/src/shaders/wgsl_sources.rs` (default checkout:
 `../maplibre-native`). Rerun it when the C++ shaders change, and commit the
-result. mln-rs's copies also have edits of their own, which a rerun reverts:
-keep them when you review the diff.
+result. mln-rs's copy also has edits of its own, which a rerun reverts: keep
+them when you review the diff. The MSL in
+`crates/mln_mtl/src/shaders/msl_sources.rs` comes from the same core's
+`include/mln/shaders/mtl/*.hpp`, with the port's changes, and is updated by
+hand.

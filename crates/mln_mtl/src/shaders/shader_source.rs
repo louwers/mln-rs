@@ -1,7 +1,7 @@
 // Ports the Metal `ShaderSource<BuiltIn, Backend::Type::Metal>`
 // specialisations: the MSL strings come from include/mln/shaders/mtl/*.hpp
-// through the vendored `msl_sources` module (`just vendor-shaders`); the
-// attribute/texture tables from src/mln/shaders/mtl/*.cpp are below.
+// through the `msl_sources` module; the attribute/texture tables from
+// src/mln/shaders/mtl/*.cpp are below.
 //
 // The tables describe the vertex layout the port's renderer produces, which
 // is C++'s with MLN_USE_SYMBOL_INSTANCING and MLN_USE_FILL_EXTRUSION_INSTANCING
