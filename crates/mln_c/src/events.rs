@@ -89,16 +89,16 @@ impl EventBatch {
         let events = events
             .iter()
             .map(|event| {
-                let (source_type, source) = match event.source {
-                    EventSource::Runtime => (MLN_RUNTIME_EVENT_SOURCE_RUNTIME, runtime),
-                    EventSource::Map(id) => (MLN_RUNTIME_EVENT_SOURCE_MAP, map_handle(id)),
+                let (source_type, source, generation) = match event.source {
+                    EventSource::Runtime => (MLN_RUNTIME_EVENT_SOURCE_RUNTIME, runtime, 0),
+                    EventSource::Map { id, generation } => (MLN_RUNTIME_EVENT_SOURCE_MAP, map_handle(id), generation),
                 };
                 let (payload_type, payload, message) = payload(&event.kind, &mut builder);
                 mln_runtime_event {
                     type_: event.kind.event_type() as u32,
                     source_type,
                     source,
-                    generation: event.generation,
+                    generation,
                     payload_type,
                     message: builder.text(message.unwrap_or("")),
                     payload,
@@ -333,21 +333,21 @@ mod tests {
     }
 
     fn event(source: EventSource, kind: RuntimeEventKind) -> RuntimeEvent {
-        RuntimeEvent { source, generation: 9, kind }
+        RuntimeEvent { source, kind }
     }
 
     #[test]
     fn a_batch_names_its_sources_and_lends_its_text() {
         let events = [
             event(
-                EventSource::Map(MapId(3)),
+                EventSource::Map { id: MapId(3), generation: 9 },
                 RuntimeEventKind::Map(MapEvent::CameraWillChange(CameraChange {
                     mode: CameraChangeMode::Animated,
                     source: CameraChangeSource::Gesture,
                 })),
             ),
             event(
-                EventSource::Map(MapId(3)),
+                EventSource::Map { id: MapId(3), generation: 9 },
                 RuntimeEventKind::Map(MapEvent::TileAction {
                     op: TileOperation::EndParse,
                     id: OverscaledTileID::new(4, -1, CanonicalTileID::new(3, 1, 2)),
@@ -355,7 +355,7 @@ mod tests {
                 }),
             ),
             event(
-                EventSource::Map(MapId(3)),
+                EventSource::Map { id: MapId(3), generation: 9 },
                 RuntimeEventKind::Map(MapEvent::GlyphsError {
                     font_stack: vec!["Open Sans".into(), "Noto".into()],
                     range: GlyphRange::new(256, 511, GlyphIDType::FontPBF),
@@ -425,7 +425,7 @@ mod tests {
             placement_changed: false,
             rendering_stats: Arc::new(stats),
         };
-        let events = [event(EventSource::Map(MapId(1)), RuntimeEventKind::Map(MapEvent::RenderFrameFinished(status)))];
+        let events = [event(EventSource::Map { id: MapId(1), generation: 9 }, RuntimeEventKind::Map(MapEvent::RenderFrameFinished(status)))];
         EventBatch::new(&events, 0, |_| 1).lend(|view| {
             // SAFETY: the batch's one event.
             let event = unsafe { &*view.events };

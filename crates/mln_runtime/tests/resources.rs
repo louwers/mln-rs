@@ -306,7 +306,7 @@ fn an_offline_region_downloads_and_reports_its_progress() {
             if *region_id == id && status.complete() && status.download_state == OfflineRegionDownloadState::Inactive)
     });
     let done = done.expect("the download finishes");
-    assert_eq!((EventSource::Runtime, 0), (done.source, done.generation));
+    assert_eq!(EventSource::Runtime, done.source);
     assert!(wait(offline.region_status(id)).complete());
 
     wait(offline.invalidate_region(id));

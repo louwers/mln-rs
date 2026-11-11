@@ -47,7 +47,9 @@ fn an_event_comes_after_a_snapshot_that_includes_it() {
     wait(runtime.set_event_handler(move |batch| {
         let snapshot = inner.snapshot().unwrap();
         for event in batch {
-            record.lock().unwrap().push((event.generation, snapshot.generation));
+            if let EventSource::Map { generation, .. } = event.source {
+                record.lock().unwrap().push((generation, snapshot.generation));
+            }
         }
     }));
     let applied = wait(map.set_style_json(EMPTY_STYLE));
@@ -75,9 +77,9 @@ fn every_event_names_its_map() {
         .events()
         .into_iter()
         .filter(|event| is_map_event(event, EventType::MapStyleLoaded))
-        .map(|event| event.source)
+        .map(|event| event.source.map_id())
         .collect();
-    assert_eq!(vec![EventSource::Map(first.id()), EventSource::Map(second.id())], loaded);
+    assert_eq!(vec![Some(first.id()), Some(second.id())], loaded);
 }
 
 #[test]

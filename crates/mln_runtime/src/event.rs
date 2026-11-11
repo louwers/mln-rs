@@ -17,16 +17,25 @@ pub type EventHandler = Arc<dyn Fn(&[RuntimeEvent]) + Send + Sync>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EventSource {
     Runtime,
-    Map(MapId),
+    /// A map: a snapshot of it with `generation` or a later one includes
+    /// what the event reports.
+    Map { id: MapId, generation: u64 },
+}
+
+impl EventSource {
+    /// The map that raised the event.
+    pub fn map_id(&self) -> Option<MapId> {
+        match self {
+            EventSource::Runtime => None,
+            EventSource::Map { id, .. } => Some(*id),
+        }
+    }
 }
 
 /// An event of a runtime or of one of its maps.
 #[derive(Clone, Debug)]
 pub struct RuntimeEvent {
     pub source: EventSource,
-    /// For a map event, a snapshot of the map with this generation or a later
-    /// one includes what the event reports. Zero for a runtime event.
-    pub generation: u64,
     pub kind: RuntimeEventKind,
 }
 

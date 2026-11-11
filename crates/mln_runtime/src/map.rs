@@ -1346,7 +1346,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
         .into_iter()
         .map(RuntimeEventKind::Map)
         .filter(|kind| mask.contains(kind.event_type()))
-        .map(|kind| RuntimeEvent { source: EventSource::Map(id), generation, kind })
+        .map(|kind| RuntimeEvent { source: EventSource::Map { id, generation }, kind })
         .collect();
     let ends = entry.ends.clone();
     core.send_events(events, outbox);

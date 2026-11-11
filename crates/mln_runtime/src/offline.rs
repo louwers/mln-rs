@@ -160,7 +160,7 @@ impl RegionObserver {
         if !self.events.contains(kind.event_type()) {
             return;
         }
-        let event = RuntimeEvent { source: EventSource::Runtime, generation: 0, kind };
+        let event = RuntimeEvent { source: EventSource::Runtime, kind };
         post(&self.run_loop, move |core, outbox| core.send_events(vec![event], outbox));
     }
 }
