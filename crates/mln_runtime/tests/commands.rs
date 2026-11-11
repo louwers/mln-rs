@@ -335,7 +335,8 @@ fn a_disposed_map_lets_its_runtime_release() {
     let runtime = runtime();
     let map = map(&runtime);
     let clone = map.clone();
-    map.dispose().unwrap();
+    let disposed = map.dispose().unwrap();
     assert_eq!(ErrorKind::InvalidState, clone.dispose().unwrap_err().kind);
-    assert!(eventually(|| runtime.release().is_ok()));
+    disposed.wait().unwrap();
+    runtime.release().unwrap().wait().unwrap();
 }

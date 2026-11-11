@@ -160,7 +160,7 @@ impl PendingCompletion {
         let user_data = UserData::new(descriptor.user_data);
         // The result owns the user data, even without a release, so a queue
         // that never runs it reports the user data abandoned.
-        let hold = queue.as_ref().and_then(|queue| queue.hold(user_data));
+        let hold = queue.as_ref().map(|queue| queue.hold(user_data)).transpose()?.flatten();
         Ok(Self(Sink { callback, user_data, release: descriptor.release_user_data, queue, hold }))
     }
 

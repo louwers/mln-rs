@@ -206,6 +206,9 @@ pub(crate) struct SessionShared {
     /// worker's from the attach, and a caller thread's from when the host
     /// takes the driver work.
     pub(crate) thread: Arc<OnceLock<ThreadId>>,
+    /// The thread of the map's runtime, which runs the map's side of the
+    /// session's work.
+    runtime_thread: ThreadId,
     pub(crate) state: Mutex<SessionState>,
     /// Held while the session's thread runs a task, so an abandon waits for
     /// the graphics work in progress.
@@ -223,7 +226,7 @@ pub(crate) struct SessionShared {
 impl SessionShared {
     /// A completion that the session's thread resolves.
     fn completion<T: Send + 'static>(&self) -> (Completion<T>, Resolver<T>) {
-        Completion::at(Home::Later(self.thread.clone()))
+        Completion::at(Home::Later(self.thread.clone(), self.runtime_thread))
     }
 
     /// The completion of the work `id`, unless an end of the session
@@ -527,6 +530,7 @@ pub(crate) fn attach(
         driver: options.driver,
         run_loop: run_loop.clone(),
         thread: Arc::default(),
+        runtime_thread: map.runtime_thread(),
         state: Mutex::new(SessionState {
             lifecycle: RenderSessionState::Attaching,
             released: false,

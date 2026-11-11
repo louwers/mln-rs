@@ -375,6 +375,16 @@ pub(crate) mod tests {
         pub(crate) fn status(self) -> mln_status {
             self.receiver.recv_timeout(std::time::Duration::from_secs(30)).expect("the completion ran")
         }
+
+        /// Checks that the library neither ran the completion nor released
+        /// its user data, which a failed call leaves with the caller, and
+        /// frees the user data.
+        pub(crate) fn unused(self) {
+            assert_eq!(self.receiver.try_recv(), Err(std::sync::mpsc::TryRecvError::Empty));
+            // SAFETY: the sender that `new` leaked, which the library didn't
+            // release.
+            unsafe { drop_sender(self.descriptor.user_data) };
+        }
     }
 
     pub(crate) fn create() -> mln_runtime {

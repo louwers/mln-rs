@@ -317,6 +317,9 @@ pub(crate) struct Worker {
     /// The sources of the last render.
     sources: Option<ImmutableVector<dyn source_impl::Impl>>,
     torn_down: bool,
+    /// Whether the map refused to bind the session, which then never gets
+    /// an update to render.
+    unbound: bool,
     /// Whether the session ended: its thread has no more work for it.
     pub(crate) finished: bool,
     /// Counts the resizes that landed, of those that the session sent.
@@ -386,6 +389,7 @@ impl Worker {
             has_frame: false,
             sources: None,
             torn_down: false,
+            unbound: false,
             finished: false,
             resizes_landed: 0,
             behind_resizes: VecDeque::new(),
@@ -438,6 +442,7 @@ impl Worker {
             }
             state.attach.take()
         };
+        self.unbound = true;
         self.drop_gfx();
         if let Some(attach) = attach {
             outbox.resolve(attach, Err(error));
@@ -526,7 +531,14 @@ impl Worker {
     /// Evaluates the demands whose commands ran and those whose update came,
     /// then a still image that the map waits for.
     fn pump(&mut self, outbox: &mut Outbox) {
-        if self.torn_down || self.reader.is_none() {
+        if self.torn_down {
+            return;
+        }
+        if self.reader.is_none() {
+            // A demand that came after a failed bind ends at once.
+            if self.unbound {
+                self.end_demands(FrameDisposition::Failed, outbox);
+            }
             return;
         }
         while self.queue.front().is_some_and(|pending| pending.sequence <= self.map_applied) {

@@ -445,6 +445,37 @@ fn attaching_sizes_the_map_and_holds_it() {
 }
 
 #[test]
+fn a_disposed_map_lasts_until_its_session_ends() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    let disposed = map.dispose().unwrap();
+    assert_eq!(ErrorKind::InvalidState, map.snapshot().unwrap_err().kind);
+    assert_eq!(ErrorKind::InvalidState, map.dispose().unwrap_err().kind);
+    // The runtime keeps the map, which the session still draws.
+    assert_eq!(ErrorKind::InvalidState, runtime.release().unwrap_err().kind);
+    demand(&session, DemandMode::Force, 1);
+    assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
+
+    // A disposed runtime shuts down once the session lets go of the map.
+    runtime.dispose().unwrap();
+    wait(session.release());
+    disposed.wait().unwrap();
+}
+
+#[test]
+fn a_wait_for_session_work_on_the_runtimes_thread_fails_instead_of_hanging() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    let resizing = session.clone();
+    // The resize needs the runtime's thread, which the wait would hold.
+    let waited = wait(map.with_core(move |_| resizing.resize(Size::new(32, 32)).unwrap().wait().map_err(|e| e.kind)));
+    assert_eq!(Err(ErrorKind::InvalidState), waited.map(drop));
+    wait(session.release());
+}
+
+#[test]
 fn attach_rejects_an_empty_target() {
     let runtime = runtime();
     let map = red_map(&runtime);

@@ -210,10 +210,17 @@ pub unsafe extern "C" fn mln_runtime_create_map(
     })
 }
 
-/// Lets go of a removed map: its handle leaves the runtime's table once the
-/// map's last events are out.
-fn retire(object: Arc<MapObject>, completion: Option<completion::Completion>) -> Result<(), Error> {
-    let released = object.map.release()?;
+/// Lets go of a released map's handle: it leaves the table now, and the
+/// runtime's table once the map's last events are out, when `completion`
+/// runs too.
+fn retire(
+    map: mln_map,
+    object: &MapObject,
+    released: ::mln_runtime::Completion<()>,
+    completion: Option<completion::Completion>,
+) {
+    // A caller that released the map at the same time lost to this one.
+    let _ = MAPS.remove(map);
     let id = object.map.id();
     let handles = Arc::clone(&object.handles);
     released.on_complete(move |result| {
@@ -222,7 +229,6 @@ fn retire(object: Arc<MapObject>, completion: Option<completion::Completion>) ->
             completion.complete(result.map_err(Error::from), Generations::default());
         }
     });
-    Ok(())
 }
 
 /// `mln_map_release()`.
@@ -239,8 +245,12 @@ pub unsafe extern "C" fn mln_map_release(
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
         let pending = unsafe { PendingCompletion::new(completion) }?;
-        let object = MAPS.remove(map)?;
-        retire(object, Some(pending.accept()))
+        let object = resolve(map)?;
+        // A map that can't be released keeps its handle, and the caller its
+        // completion.
+        let released = object.map.release()?;
+        retire(map, &object, released, Some(pending.accept()));
+        Ok(())
     })
 }
 
@@ -254,9 +264,13 @@ pub unsafe extern "C" fn mln_map_dispose(map: mln_map, out_diagnostic: *mut mln_
     export!(out_diagnostic, { dispose(map) })
 }
 
-/// Releases `map` without waiting, as `mln_map_dispose()` does.
+/// Releases `map` whatever its state, without waiting, as
+/// `mln_map_dispose()` does.
 pub(crate) fn dispose(map: mln_map) -> Result<(), Error> {
-    retire(MAPS.remove(map)?, None)
+    let object = resolve(map)?;
+    let disposed = object.map.dispose()?;
+    retire(map, &object, disposed, None);
+    Ok(())
 }
 
 fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) -> mln_map_snapshot {

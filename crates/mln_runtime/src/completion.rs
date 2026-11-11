@@ -26,8 +26,9 @@ enum State<T> {
 pub(crate) enum Home {
     Anywhere,
     Thread(ThreadId),
-    /// The thread that the cell names once it is set.
-    Later(Arc<OnceLock<ThreadId>>),
+    /// The thread that the cell names once it is set, and a thread whose
+    /// work the result waits for on the way.
+    Later(Arc<OnceLock<ThreadId>>, ThreadId),
 }
 
 impl Home {
@@ -36,7 +37,7 @@ impl Home {
         match self {
             Home::Anywhere => false,
             Home::Thread(thread) => *thread == current,
-            Home::Later(thread) => thread.get() == Some(&current),
+            Home::Later(thread, via) => thread.get() == Some(&current) || *via == current,
         }
     }
 }
@@ -97,7 +98,10 @@ impl<T: Send + 'static> Completion<T> {
     ///
     /// A wait on the thread that resolves the completion would never end,
     /// such as the runtime's own thread, or the thread that runs a render
-    /// session's [`DriverWork`](crate::DriverWork): it fails with
+    /// session's [`DriverWork`](crate::DriverWork). A render session's
+    /// completions wait for its map's runtime too, as a resize or a detach
+    /// does, so their wait on the runtime's thread would never end either.
+    /// Such a wait fails with
     /// [`ErrorKind::InvalidState`](mln_util::ErrorKind::InvalidState) instead,
     /// unless the result is already there.
     pub fn wait(self) -> Result<T, Error> {

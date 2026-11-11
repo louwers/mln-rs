@@ -92,7 +92,7 @@ impl Registration {
         let queue = resolve_queue(queue)?;
         let user_data = UserData::new(user_data);
         let hold = match (&queue, release) {
-            (Some(queue), Some(_)) => queue.hold(user_data),
+            (Some(queue), Some(_)) => queue.hold(user_data)?,
             _ => None,
         };
         Ok(Self { user_data, release, queue, hold, accepted: AtomicBool::new(false) })
@@ -161,7 +161,7 @@ impl Wake {
         };
         let user_data = UserData::new(wake.user_data);
         let hold = match (&queue, wake.release_user_data) {
-            (Some(queue), Some(_)) => queue.hold(user_data),
+            (Some(queue), Some(_)) => queue.hold(user_data)?,
             _ => None,
         };
         Ok(Self {

@@ -82,19 +82,22 @@ impl Queue {
         }
     }
 
-    /// Holds `user_data` for the abandon hook, if the queue has one and is
-    /// open.
-    pub(crate) fn hold(self: &Arc<Self>, user_data: UserData) -> Option<Hold> {
-        self.abandon?;
+    /// Holds `user_data` for the abandon hook, if the queue has one. Fails
+    /// when the queue was released, which then can't report the user data,
+    /// so the call that names the queue fails and leaves it with the caller.
+    pub(crate) fn hold(self: &Arc<Self>, user_data: UserData) -> Result<Option<Hold>, Error> {
         let mut state = lock(&self.state);
         if state.closed {
-            return None;
+            return Err(Error::invalid_state("the delivery queue was released"));
+        }
+        if self.abandon.is_none() {
+            return Ok(None);
         }
         let id = state.next_hold;
         state.next_hold += 1;
         state.held.insert(id, user_data);
         drop(state);
-        Some(Hold { queue: Arc::clone(self), id: Some(id) })
+        Ok(Some(Hold { queue: Arc::clone(self), id: Some(id) }))
     }
 
     /// Queues a call, or gives it back when the queue is released.
@@ -554,8 +557,8 @@ pub(crate) mod tests {
         let state = resolve(queue).unwrap();
         let first = log.user_data('1');
         let second = log.user_data('2');
-        let first_hold = state.hold(first);
-        let second_hold = state.hold(second);
+        let first_hold = state.hold(first).unwrap();
+        let second_hold = state.hold(second).unwrap();
         let run_first = Call::new(move || {
             Log::record(first, 'c');
             mln_delivery_queue_release(queue);
@@ -575,17 +578,20 @@ pub(crate) mod tests {
         let (queue, _) = queue_with_abandon(Some(Log::abandon));
         let state = resolve(queue).unwrap();
         // Held, and never queued.
-        let live = state.hold(log.user_data('l'));
+        let live = state.hold(log.user_data('l')).unwrap();
         // Queued as a last call.
         let queued = log.user_data('q');
-        let queued_hold = state.hold(queued);
+        let queued_hold = state.hold(queued).unwrap();
         assert!(state.push_last(Call::new(move || Log::record(queued, 'r')), queued_hold).is_ok());
         // Withdrawn, as a rejected registration's.
-        drop(state.hold(log.user_data('w')));
+        drop(state.hold(log.user_data('w')).unwrap());
         // Held at the release, and refused after it.
         let late = log.user_data('t');
-        let late_hold = state.hold(late);
+        let late_hold = state.hold(late).unwrap();
         mln_delivery_queue_release(queue);
+        // A registration that comes after the release fails, and keeps its
+        // user data.
+        assert!(state.hold(log.user_data('n')).is_err());
         assert!(state.push_last(Call::new(move || Log::record(late, 'r')), late_hold).is_err());
         let mut reports: Vec<char> = log.take().chars().collect();
         reports.sort_unstable();

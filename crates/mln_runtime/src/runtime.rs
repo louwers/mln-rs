@@ -81,6 +81,30 @@ impl RuntimeShared {
         post(&self.run_loop, task);
     }
 
+    /// Runs `task` with `value` on the runtime's thread, after everything
+    /// sent before it, or `instead` with `value` on this thread when the
+    /// runtime has shut down, so that what must happen either way isn't lost
+    /// with the runtime's loop.
+    pub(crate) fn post_or<V: Send + 'static>(
+        &self,
+        value: V,
+        task: impl FnOnce(&mut RuntimeCore, &mut Outbox, V) + Send + 'static,
+        instead: impl FnOnce(V),
+    ) {
+        // Posting with the lock held orders the task before a shutdown.
+        let lifecycle = self.lifecycle.lock_unpoisoned();
+        if lifecycle.shut_down {
+            drop(lifecycle);
+            instead(value);
+        } else {
+            post(&self.run_loop, move |core, outbox| task(core, outbox, value));
+        }
+    }
+
+    pub(crate) fn thread(&self) -> ThreadId {
+        self.thread
+    }
+
     /// A completion that the runtime's thread resolves.
     pub(crate) fn completion<T: Send + 'static>(&self) -> (Completion<T>, Resolver<T>) {
         Completion::new(Some(self.thread))

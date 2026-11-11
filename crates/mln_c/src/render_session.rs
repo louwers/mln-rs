@@ -739,11 +739,13 @@ pub(crate) mod tests {
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
         MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_UNSUPPORTED, mln_completion_result, mln_map,
+        mln_map_snapshot,
         mln_offscreen_descriptor, mln_queue_lock, mln_runtime, mln_texture_readback_result, mln_wake,
     };
-    use crate::map::mln_map_set_style_json;
+    use crate::map::{mln_map_dispose, mln_map_get_snapshot, mln_map_release, mln_map_set_style_json};
     use crate::map::tests::{create_map, options, release_map, view};
     use crate::offscreen::mln_map_attach_offscreen;
+    use crate::runtime::mln_runtime_release;
     use crate::runtime::tests::{Waiter, create, release};
     use crate::texture::mln_render_session_read_texture;
 
@@ -909,6 +911,44 @@ pub(crate) mod tests {
         assert_eq!(released.status(), MLN_STATUS_OK);
         assert_eq!(snapshot(session).unwrap_err(), MLN_STATUS_INVALID_STATE);
         release_map(map);
+        release(runtime);
+    }
+
+    #[test]
+    fn an_attached_session_holds_its_map_until_it_ends() {
+        let (runtime, map, session) = rendered_session();
+        let map_snapshot = |map| {
+            // SAFETY: zeros are a valid snapshot to overwrite.
+            let mut snapshot: mln_map_snapshot = unsafe { core::mem::zeroed() };
+            snapshot.size = size_of::<mln_map_snapshot>() as u32;
+            // SAFETY: a local snapshot.
+            unsafe { mln_map_get_snapshot(map, &mut snapshot, NO_DIAGNOSTIC) }
+        };
+
+        let refused = Waiter::new();
+        let mut out = diagnostic();
+        // SAFETY: local arguments.
+        let status = unsafe { mln_map_release(map, &refused.descriptor, &mut *out) };
+        assert_eq!(status, MLN_STATUS_INVALID_STATE);
+        assert!(message(&out).contains("map still has an attached render session"), "{}", message(&out));
+        refused.unused();
+        assert_eq!(map_snapshot(map), MLN_STATUS_OK);
+
+        // A disposed map stays with its session, which keeps rendering it,
+        // and with its runtime, until the session ends.
+        // SAFETY: a null diagnostic.
+        assert_eq!(unsafe { mln_map_dispose(map, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(map_snapshot(map), MLN_STATUS_INVALID_STATE);
+        assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, 2), MLN_STATUS_OK);
+        let result = wait_for_result(session);
+        assert_eq!((result.token, result.disposition), (2, MLN_RENDER_RESULT_RENDERED));
+        let refused = Waiter::new();
+        // SAFETY: local arguments.
+        let status = unsafe { mln_runtime_release(runtime, &refused.descriptor, NO_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_INVALID_STATE);
+        refused.unused();
+
+        release_session(session);
         release(runtime);
     }
 

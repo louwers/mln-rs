@@ -97,6 +97,23 @@ fn center_pixel(driver: &DriverWork, session: &RenderSession) -> [u8; 4] {
 }
 
 #[test]
+fn a_demand_made_while_attaching_fails_when_the_map_cant_bind_the_session() {
+    let runtime = runtime();
+    let options = MapOptions::new(mln_map::MapOptions::new().with_size(Size::new(256, 256)))
+        .with_fallback_font_faces("not font faces");
+    let (map, created) = runtime.create_map(options).unwrap();
+    assert!(created.wait().is_err());
+    let (session, attached) = map.attach(offscreen(), caller_options()).unwrap();
+    let driver = session.take_driver_work().unwrap();
+    // The runtime refused the bind before it ran this command.
+    wait(runtime.clear_event_handler());
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 3)).unwrap();
+    assert!(serviced(&driver, attached).is_err());
+    let result = take_one(&driver, &session);
+    assert_eq!((3, FrameDisposition::Failed), (result.token, result.disposition));
+}
+
+#[test]
 fn a_caller_driven_session_works_only_when_serviced() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");

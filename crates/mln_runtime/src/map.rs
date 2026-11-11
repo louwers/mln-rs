@@ -128,7 +128,10 @@ pub(crate) struct MapShared {
     /// a command is numbered and posted, so the runtime's thread runs the
     /// map's commands in the order of their numbers.
     sent: Mutex<u64>,
+    /// Whether the handles refuse commands.
     released: AtomicBool,
+    /// Whether the map's removal was posted to the runtime's thread.
+    removed: AtomicBool,
     published: Arc<Published>,
 }
 
@@ -147,6 +150,7 @@ impl MapShared {
             session: Mutex::new(None),
             sent: Mutex::new(1),
             released: AtomicBool::new(false),
+            removed: AtomicBool::new(false),
             published,
         }
     }
@@ -171,22 +175,38 @@ impl MapShared {
     /// Releases the map: no command is sent after its removal. Fails when
     /// the map was released already.
     fn release(&self, done: Option<Resolver<()>>) -> Result<(), Error> {
-        {
-            let _sent = self.sent.lock_unpoisoned();
-            if self.released.swap(true, Ordering::SeqCst) {
-                return Err(released());
-            }
-            let id = self.id;
-            self.runtime.post(move |core, outbox| remove(core, id, done, outbox));
-        }
-        self.runtime.map_released();
+        self.close()?;
+        self.remove(done);
         Ok(())
+    }
+
+    /// Refuses the commands sent from now on. Fails when the map was
+    /// released already.
+    fn close(&self) -> Result<(), Error> {
+        let _sent = self.sent.lock_unpoisoned();
+        if self.released.swap(true, Ordering::SeqCst) {
+            return Err(released());
+        }
+        Ok(())
+    }
+
+    /// Removes the closed map from its runtime's thread, after the commands
+    /// sent before, once.
+    fn remove(&self, done: Option<Resolver<()>>) {
+        if self.removed.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let id = self.id;
+        self.runtime.post(move |core, outbox| remove(core, id, done, outbox));
+        self.runtime.map_released();
     }
 }
 
 impl Drop for MapShared {
     fn drop(&mut self) {
-        let _ = self.release(None);
+        let _ = self.close();
+        let deferred = self.session.get_mut_unpoisoned().take().and_then(|claim| claim.removal);
+        self.remove(deferred);
     }
 }
 
@@ -333,30 +353,54 @@ impl Map {
     /// map was released already, or while a render session that wasn't
     /// released is attached to it.
     pub fn release(&self) -> Result<Completion<()>, Error> {
-        let claimed = self.shared.session.lock_unpoisoned().as_ref().map(|claim| (claim.id, claim.session.clone()));
+        self.release_with(false)
+    }
+
+    /// Releases the map whatever its state, as dropping its last handle
+    /// does, and lets the runtime finish in the background: the completion
+    /// reports when the runtime has let go of it, and may be dropped. Every
+    /// command fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// from now on. A render session that is attached and wasn't released
+    /// keeps drawing the map's last update, and the runtime lets go of the
+    /// map once the session detaches or is abandoned. A released one is
+    /// abandoned, as [`release`](Self::release) does.
+    ///
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// map was released already.
+    pub fn dispose(&self) -> Result<Completion<()>, Error> {
+        self.release_with(true)
+    }
+
+    fn release_with(&self, in_any_state: bool) -> Result<Completion<()>, Error> {
+        let (completion, resolver) = self.shared.runtime.completion();
+        let claimed = {
+            let mut claim = self.shared.session.lock_unpoisoned();
+            match claim.as_mut() {
+                None => None,
+                Some(held) => match held.session.upgrade() {
+                    // Abandoned now, or ended already and about to let go.
+                    Some(session) if session.is_released() => Some((held.id, Some(session))),
+                    // The session lets go of the map when it ends, and the
+                    // map is removed then.
+                    Some(_) if in_any_state => {
+                        self.shared.close()?;
+                        held.removal = Some(resolver);
+                        return Ok(completion);
+                    }
+                    Some(_) => return Err(Error::invalid_state("the map still has an attached render session")),
+                    // The session is gone without letting go of the map.
+                    None => Some((held.id, None)),
+                },
+            }
+        };
         if let Some((id, session)) = claimed {
-            match session.upgrade() {
-                // Abandoned now, or ended already and about to let go.
-                Some(session) if session.is_released() => {
-                    let _ = session.abandon(Abandoner::Library);
-                }
-                Some(_) => return Err(Error::invalid_state("the map still has an attached render session")),
-                // The session is gone without letting go of the map.
-                None => {}
+            if let Some(session) = session {
+                let _ = session.abandon(Abandoner::Library);
             }
             self.release_session_claim(id);
         }
-        let (completion, resolver) = self.shared.runtime.completion();
         self.shared.release(Some(resolver))?;
         Ok(completion)
-    }
-
-    /// Releases the map without a completion, as dropping its last handle
-    /// does, and lets the runtime finish in the background. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the map was
-    /// released already.
-    pub fn dispose(&self) -> Result<(), Error> {
-        self.shared.release(None)
     }
 
     // MARK: - Map
@@ -509,6 +553,10 @@ impl Map {
         })
     }
 
+    pub(crate) fn runtime_thread(&self) -> std::thread::ThreadId {
+        self.shared.runtime.thread()
+    }
+
     pub(crate) fn pixel_ratio(&self) -> f32 {
         self.shared.pixel_ratio
     }
@@ -526,15 +574,19 @@ impl Map {
         if claim.is_some() {
             return Err(Error::invalid_state("the map already has an attached render session"));
         }
-        *claim = Some(SessionClaim { id, session });
+        *claim = Some(SessionClaim { id, session, removal: None });
         Ok(())
     }
 
-    /// Lets another session attach once the session `id` is gone.
+    /// Lets another session attach once the session `id` is gone, and
+    /// removes the map when a dispose waited for the session.
     pub(crate) fn release_session_claim(&self, id: SessionId) {
-        let mut session = self.shared.session.lock_unpoisoned();
-        if session.as_ref().is_some_and(|claim| claim.id == id) {
-            *session = None;
+        let claim = {
+            let mut session = self.shared.session.lock_unpoisoned();
+            if session.as_ref().is_some_and(|claim| claim.id == id) { session.take() } else { None }
+        };
+        if let Some(removal) = claim.and_then(|claim| claim.removal) {
+            self.shared.remove(Some(removal));
         }
     }
 
@@ -578,14 +630,20 @@ impl Map {
         then: impl FnOnce(&mut Worker, &mut Outbox) + Send + 'static,
     ) {
         let map_id = self.shared.id;
-        self.shared.runtime.post(move |core, _| {
-            if let Some(entry) = core.maps.get_mut(&map_id)
-                && entry.session.as_ref().is_some_and(|link| link.id == id)
-            {
-                entry.session = None;
-            }
-            worker_post(&run_loop, then);
-        });
+        let session_loop = run_loop.clone();
+        // A runtime that shut down has no map to unbind from.
+        self.shared.runtime.post_or(
+            then,
+            move |core, _, then| {
+                if let Some(entry) = core.maps.get_mut(&map_id)
+                    && entry.session.as_ref().is_some_and(|link| link.id == id)
+                {
+                    entry.session = None;
+                }
+                worker_post(&run_loop, then);
+            },
+            |then| worker_post(&session_loop, then),
+        );
     }
 
     /// Sends a command that resizes the map to `size`, then runs `resize`
@@ -1040,6 +1098,8 @@ enum StyleLoad {
 struct SessionClaim {
     id: SessionId,
     session: Weak<SessionShared>,
+    /// The completion of a dispose that waits for the session to end.
+    removal: Option<Resolver<()>>,
 }
 
 /// The render session bound to a map, as the runtime's thread knows it.
