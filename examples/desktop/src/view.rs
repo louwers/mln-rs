@@ -51,7 +51,7 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
-use crate::backend::SurfaceBackend;
+use crate::backend::{Kind, SurfaceBackend};
 use crate::frontend::Frontend;
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
@@ -231,6 +231,7 @@ pub(crate) fn run(launch: Launch) {
         styles: styles::styles(),
         style: styles::style_for(&style_url),
         adapter,
+        next_backend: None,
         frame_report: String::new(),
         benchmark: args.benchmark,
         pixel_ratio,
@@ -331,6 +332,8 @@ struct View {
     styles: Vec<Style>,
     style: Style,
     adapter: String,
+    /// The backend the controls asked for, which the next frame switches to.
+    next_backend: Option<Kind>,
     frame_report: String,
 
     benchmark: bool,
@@ -433,6 +436,9 @@ impl View {
     /// waiting for it, the recognizer's eases, the controls, and the map's
     /// frame.
     fn frame(&mut self) {
+        if let Some(kind) = self.next_backend.take() {
+            self.switch_backend(kind);
+        }
         // Wait for the display first, so that the frame takes the input that
         // came meanwhile.
         let drawable = (self.shared.dirty.get() || !self.inbox.is_empty()) && self.backend.acquire_next_texture();
@@ -566,6 +572,7 @@ impl View {
                 let type_ = style.get_projection().get_type();
                 type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
             },
+            backend: self.backend.kind(),
             status: &status,
         };
         let mut actions = Vec::new();
@@ -584,7 +591,7 @@ impl View {
             let mut paint = self.paint.borrow_mut();
             paint.primitives = primitives;
             paint.pixels_per_point = output.pixels_per_point;
-            paint.textures.append(output.textures_delta);
+            paint.add_textures(output.textures_delta);
             self.ui_shapes = output.shapes;
             self.shared.invalidate();
         }
@@ -620,7 +627,36 @@ impl View {
                 self.map.get_style_mut().set_projection(projection);
             }
             Action::ResetCache => self.reset_cache(),
+            Action::SetBackend(kind) => {
+                self.next_backend = Some(kind);
+                self.shared.invalidate();
+            }
         }
+    }
+
+    /// Renders with `kind` from now on: a new backend on the window, and a
+    /// new renderer on it, which loads the tiles again (from the cache).
+    fn switch_backend(&mut self, kind: Kind) {
+        if self.backend.kind() == kind {
+            return;
+        }
+        let size = self.backend.framebuffer_size();
+        // The renderer goes before its backend. The new backend configures
+        // the window's surface before the old one goes, which leaves it as
+        // it is.
+        self.frontend.release();
+        match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
+            Ok(backend) => self.backend = backend,
+            Err(e) => Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name())),
+        }
+        let renderer_backend = self.backend.renderer_backend();
+        let renderer = Renderer::new(renderer_backend.clone(), self.pixel_ratio as f32, None);
+        self.frontend.attach(renderer, renderer_backend);
+        self.backend.set_controls_overlay(self.paint.clone());
+        self.paint.borrow_mut().resend_textures();
+        self.adapter = self.backend.adapter();
+        Log::info(Event::Render, self.backend.describe());
+        self.map.trigger_repaint();
     }
 
     /// Empties the cache database.

@@ -1,7 +1,7 @@
 // The controls over the map, in egui, after the web demo's
 // (examples/web/web/index.html and page.css): the style picker, zoom, a
 // compass, the sources' attributions and a panel with the gestures, the debug
-// overlays and the renderer's status. `Controls::show` lays them out and
+// overlays, the renderer's backend and its status. `Controls::show` lays them out and
 // returns what the user asked of the map; the view (view.rs) carries it out.
 
 use egui::{
@@ -10,6 +10,7 @@ use egui::{
 };
 use mln_map::MapDebugOptions;
 
+use crate::backend::Kind;
 use crate::styles::Style;
 
 /// What the controls ask of the map.
@@ -25,6 +26,8 @@ pub(crate) enum Action {
     SetGlobe(bool),
     /// Empty the cache database.
     ResetCache,
+    /// Render with this backend from the next frame on.
+    SetBackend(Kind),
 }
 
 /// What the controls show, as of this frame.
@@ -41,6 +44,8 @@ pub(crate) struct Shown<'a> {
     pub debug: MapDebugOptions,
     /// Whether the style's projection is the globe.
     pub globe: bool,
+    /// The backend the map renders with.
+    pub backend: Kind,
     /// Lines about the renderer: its adapter, its frame time.
     pub status: &'a [String],
 }
@@ -293,7 +298,11 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
         palette.panel().inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
             ui.set_width(PANEL_WIDTH);
             ui.label(RichText::new("mln-rs").size(16.0).strong());
-            ui.label("A map renderer in Rust, drawing MapLibre styles with WebGPU.");
+            ui.label(if Kind::ALL.len() > 1 {
+                "A map renderer in Rust, drawing MapLibre styles with Metal or WebGPU."
+            } else {
+                "A map renderer in Rust, drawing MapLibre styles with WebGPU."
+            });
             ui.add_space(8.0);
             egui::Grid::new("gestures").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
                 for (gesture, how) in GESTURES {
@@ -317,6 +326,16 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
             let mut globe = shown.globe;
             if ui.checkbox(&mut globe, "Globe").on_hover_text("Draw the map on the globe").changed() {
                 actions.push(Action::SetGlobe(globe));
+            }
+            if Kind::ALL.len() > 1 {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Renderer").strong());
+                    for &kind in Kind::ALL {
+                        if ui.selectable_label(kind == shown.backend, kind.name()).clicked() && kind != shown.backend {
+                            actions.push(Action::SetBackend(kind));
+                        }
+                    }
+                });
             }
             let reset = egui::Button::new("Reset the cache").stroke(Stroke::new(1.0, palette.line));
             if ui.add(reset).on_hover_text("Empty the cache database").clicked() {

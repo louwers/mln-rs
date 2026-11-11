@@ -179,8 +179,7 @@ impl SurfaceState {
         let mut readback = None;
         if self.readback_requested.get() {
             if texture.isFramebufferOnly() {
-                // Drawables taken from now on can be read; copy the next one.
-                self.layer.setFramebufferOnly(false);
+                // Taken before the request: copy the next frame.
             } else {
                 self.readback_requested.set(false);
                 readback = self.encode_readback(&command_buffer, &texture);
@@ -327,10 +326,11 @@ impl SurfaceBackend {
         autoreleasepool(|_| self.state.acquire_drawable())
     }
 
-    /// Port-only: copy a presented frame (see `take_readback`). The layer's
-    /// drawables can't be read until it is asked to, so the copy is of the
-    /// first frame presented after the next one.
+    /// Port-only: copy the next presented frame (see `take_readback`). The
+    /// layer's drawables can be read from the next one it hands out; a frame
+    /// on one taken before is copied from the frame after.
     pub fn request_readback(&self) {
+        self.state.layer.setFramebufferOnly(false);
         self.state.readback_requested.set(true);
     }
 

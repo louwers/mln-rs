@@ -3,6 +3,9 @@
 // Like HeadlessFrontend, the frontend is a handle (`Clone` shares the state)
 // because the Map keeps one (C++: a reference). It holds the view's shared
 // state to mark it dirty when the map has a new frame to draw.
+//
+// Port-only: the view can give it a renderer on another backend (`release`,
+// then `attach`), which draws the map's last update parameters again.
 
 use std::cell::RefCell;
 use std::rc::{Rc, Weak};
@@ -15,8 +18,10 @@ use crate::view::ViewShared;
 
 struct Shared {
     view: Rc<ViewShared>,
-    backend: Rc<dyn RendererBackend>,
+    backend: RefCell<Option<Rc<dyn RendererBackend>>>,
     renderer: RefCell<Option<Renderer>>,
+    /// The map's renderer observer, which an attached renderer gets too.
+    observer: RefCell<Option<Weak<dyn RendererObserver>>>,
     update_parameters: RefCell<Option<Arc<UpdateParameters>>>,
 }
 
@@ -31,8 +36,9 @@ impl Frontend {
         Frontend {
             shared: Rc::new(Shared {
                 view,
-                backend,
+                backend: RefCell::new(Some(backend)),
                 renderer: RefCell::new(Some(renderer)),
+                observer: RefCell::new(None),
                 update_parameters: RefCell::new(None),
             }),
         }
@@ -49,10 +55,32 @@ impl Frontend {
             return;
         };
 
-        let _guard = BackendScope::new(&*shared.backend, ScopeType::Implicit);
+        let Some(backend) = shared.backend.borrow().clone() else {
+            return;
+        };
+        let _guard = BackendScope::new(&*backend, ScopeType::Implicit);
         if let Some(renderer) = shared.renderer.borrow_mut().as_mut() {
             renderer.render(&update_parameters);
         }
+    }
+
+    /// Drops the renderer and its backend, before the view makes another
+    /// (`attach`).
+    pub fn release(&self) {
+        let renderer = self.shared.renderer.borrow_mut().take();
+        drop(renderer);
+        self.shared.backend.borrow_mut().take();
+    }
+
+    /// Draws with `renderer` on `backend` from now on, from the map's last
+    /// update parameters.
+    pub fn attach(&self, mut renderer: Renderer, backend: Rc<dyn RendererBackend>) {
+        if let Some(observer) = self.shared.observer.borrow().clone() {
+            renderer.set_observer(Some(observer));
+        }
+        *self.shared.renderer.borrow_mut() = Some(renderer);
+        *self.shared.backend.borrow_mut() = Some(backend);
+        self.shared.view.invalidate();
     }
 
     /// `getRenderer()`: runs `f` with the renderer, if it still exists.
@@ -68,6 +96,7 @@ impl RendererFrontend for Frontend {
     }
 
     fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
+        *self.shared.observer.borrow_mut() = Some(observer.clone());
         if let Some(renderer) = self.shared.renderer.borrow_mut().as_mut() {
             renderer.set_observer(Some(observer));
         }

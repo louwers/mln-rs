@@ -161,9 +161,23 @@ struct Open {
     /// macOS phases each apart, and the map gets one pinch of both.
     pinching: bool,
     rotating: bool,
+    /// The window's CAMetalLayer, made when a backend first asks for it.
+    #[cfg(target_os = "macos")]
+    metal_layer: Option<MetalLayer>,
 }
 
 impl Open {
+    /// The window's CAMetalLayer, which both backends present to.
+    #[cfg(target_os = "macos")]
+    fn metal_layer(&mut self) -> Result<MetalLayer, String> {
+        if let Some(layer) = &self.metal_layer {
+            return Ok(layer.clone());
+        }
+        let layer = MetalLayer::new(&self.window)?;
+        self.metal_layer = Some(layer.clone());
+        Ok(layer)
+    }
+
     fn logical(&self, position: PhysicalPosition<f64>) -> ScreenCoordinate {
         ScreenCoordinate::new(position.x / self.pixel_ratio, position.y / self.pixel_ratio)
     }
@@ -286,6 +300,8 @@ impl ApplicationHandler<UserEvent> for Host {
             modifiers: Modifiers::default(),
             pinching: false,
             rotating: false,
+            #[cfg(target_os = "macos")]
+            metal_layer: None,
         };
         open.send_ui_input(true);
         self.open = Some(open);
@@ -418,6 +434,9 @@ impl ApplicationHandler<UserEvent> for Host {
         };
         match event {
             UserEvent::MakeSurface(instance, reply) => {
+                #[cfg(target_os = "macos")]
+                let surface = open.metal_layer().and_then(|layer| layer.create_surface(&instance));
+                #[cfg(not(target_os = "macos"))]
                 let surface = instance
                     .create_surface(open.window.clone())
                     .map_err(|e| format!("Failed to create a surface for the window: {e}"));
@@ -425,7 +444,7 @@ impl ApplicationHandler<UserEvent> for Host {
             }
             #[cfg(target_os = "macos")]
             UserEvent::MakeLayer(reply) => {
-                let _ = reply.send(MetalLayer::new(&open.window));
+                let _ = reply.send(open.metal_layer());
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),

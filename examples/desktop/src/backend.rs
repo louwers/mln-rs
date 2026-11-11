@@ -1,6 +1,7 @@
 // The window's renderer backend: Metal by default on macOS, WebGPU (through
-// wgpu) everywhere, picked with --backend. C++'s GLFW app builds one backend
-// and ignores the flag.
+// wgpu) everywhere, picked with --backend and switched in the controls.
+// C++'s GLFW app builds one backend and ignores the flag. On macOS both
+// present to the window's one CAMetalLayer (metal_layer.rs).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -37,6 +38,22 @@ impl Kind {
     const NAMES: &str = "metal, webgpu";
     #[cfg(not(target_os = "macos"))]
     const NAMES: &str = "webgpu";
+
+    /// The backends this platform has.
+    pub(crate) const ALL: &[Kind] = &[
+        #[cfg(target_os = "macos")]
+        Kind::Metal,
+        Kind::WebGpu,
+    ];
+
+    /// The backend's name in the controls.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            #[cfg(target_os = "macos")]
+            Kind::Metal => "Metal",
+            Kind::WebGpu => "WebGPU",
+        }
+    }
 }
 
 impl Default for Kind {
@@ -84,6 +101,23 @@ impl SurfaceBackend {
                 let backend = mln_webgpu::SurfaceBackend::new(make_surface, framebuffer_size, cap_frame_rate)?;
                 Ok(SurfaceBackend::WebGpu(Rc::new(backend)))
             }
+        }
+    }
+
+    pub(crate) fn kind(&self) -> Kind {
+        match self {
+            #[cfg(target_os = "macos")]
+            SurfaceBackend::Metal(_) => Kind::Metal,
+            SurfaceBackend::WebGpu(_) => Kind::WebGpu,
+        }
+    }
+
+    /// The size of the frames, in physical pixels.
+    pub(crate) fn framebuffer_size(&self) -> Size {
+        match self {
+            #[cfg(target_os = "macos")]
+            SurfaceBackend::Metal(backend) => backend.get_framebuffer_size(),
+            SurfaceBackend::WebGpu(backend) => backend.get_framebuffer_size(),
         }
     }
 
