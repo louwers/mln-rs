@@ -372,7 +372,8 @@ udeps:  (cargo-install 'cargo-udeps')
 update:
     cargo update
 
-# The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
+# The shared suites' directories are copied whole, so new tests come along; every other file that is there, outside
+# tools/c-abi-test (update-ffi-abi), is copied again.
 # The copies are from johncarmack1984/maplibre-native's maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe branch of maplibre/maplibre-native#4533 (phased/12h), with louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the sky branch of maplibre/maplibre-native#4534 merged in.
 [doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
@@ -382,14 +383,15 @@ update-testdata checkout=cpp:
             tools/expression-test/testdata/metrics/integration/expression-tests; do
         rsync -a --delete {{quote(checkout)}}/"${dir#*/testdata/}"/ "$dir"/
     done
-    git ls-files -z '*/testdata/*' | while IFS= read -r -d '' file; do
+    git ls-files -z '*/testdata/*' ':!tools/c-abi-test/testdata' | while IFS= read -r -d '' file; do
         cp {{quote(checkout)}}/"${file#*/testdata/}" "$file"
     done
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
 # The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
-# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then the declarations are
-# regenerated. The copies are from maplibre/maplibre-native-ffi at b20632a6145a.
+# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
+# fix the suite's own bugs, and the declarations are regenerated. The copies are from maplibre/maplibre-native-ffi at
+# b20632a6145a.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash
@@ -402,6 +404,9 @@ update-ffi-abi checkout=ffi:
         rsync -a --delete {{quote(checkout)}}/"$dir"/ "tools/c-abi-test/testdata/$dir"/
     done
     cp {{quote(checkout)}}/LICENSE tools/c-abi-test/testdata/
+    for patch in tools/c-abi-test/patches/*.patch; do
+        git apply --directory=tools/c-abi-test/testdata "$patch"
+    done
     {{just}} generate-c-abi
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 

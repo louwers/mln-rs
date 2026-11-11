@@ -4,8 +4,10 @@ failing cases with expected-failures.txt.
 
 The suite binary is the one CMakeLists.txt builds. Each test file runs in a
 process of its own, in parallel, as maplibre-native-ffi's CTest entries do.
-When a process dies (a crash, or the suite's hang watchdog), the case it was
-running fails, and the file's later cases each run in a process of their own.
+A case that fails leaves its handles to the suite's tearDown, whose callbacks
+can still reach the failed case's stack, so the file's later cases each run in
+a process of their own. When a process dies (a crash, or the suite's hang
+watchdog), the case it was running fails.
 
 The run fails when a case fails that the list doesn't name, when a case that
 the list names passes, or when the list names a case that the suite doesn't
@@ -109,17 +111,19 @@ def list_cases(binary: pathlib.Path, env: dict[str, str]) -> list[tuple[str, str
 
 def run_file(binary: pathlib.Path, env: dict[str, str], file: str, cases: list[str]) -> dict[str, tuple[str, str]]:
     """Each case's outcome and message, keyed <file>:<case>."""
-    results, died = run(binary, env, ["-f", PREFIX + file])
-    missing = [case for case in cases if f"{file}:{case}" not in results]
-    if not missing:
-        return results
-    # The process ended before its last case: the first case without a result
-    # is the one it died in, and the later ones run alone.
-    results[f"{file}:{missing[0]}"] = ("FAIL", died)
-    for case in missing[1:]:
+    together, died = run(binary, env, ["-f", PREFIX + file])
+    results = {}
+    later = []
+    for index, case in enumerate(cases):
+        key = f"{file}:{case}"
+        # A case without a result is the one the process died in.
+        results[key] = together.get(key, ("FAIL", died))
+        if results[key][0] == "FAIL":
+            later = cases[index + 1 :]
+            break
+    for case in later:
         alone, died = run(binary, env, ["-n", f"{PREFIX}{file}:{case}"])
-        results.update(alone)
-        results.setdefault(f"{file}:{case}", ("FAIL", died))
+        results[f"{file}:{case}"] = alone.get(f"{file}:{case}", ("FAIL", died))
     return results
 
 
