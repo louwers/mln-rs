@@ -4,25 +4,39 @@
 // the replies go back in batches, each its bytes and its payloads (pixels,
 // vertices, indices), all transferred. A raster tile's reply comes once the
 // browser has decoded its image, outside a run: the instance asks for one.
+//
+// A panic aborts the instance (wasm32-unknown-unknown can't unwind), and
+// nothing may call into it after that. The worker sends {fatal: message}
+// over the port instead of replies, with the message the panic hook left in
+// `mlnPanic` (src/lib.rs), and the map stops. The page's first message may
+// carry `panic`, a message to panic with once the instance starts
+// (`panic_for_check`), for check/check.mjs.
 
-import init, { TileWorker } from './pkg/mln_web.js';
+import init, { TileWorker, panic_for_check } from './pkg/mln_web.js';
 
 let worker = null;
 let port = null;
 const early = []; // requests that arrived before the instance was ready
-// A panic aborts the instance (wasm32-unknown-unknown can't unwind), and
-// nothing may call into it after that: its tiles stay pending.
 let dead = false;
+
+function fatal(error) {
+  if (dead) return;
+  dead = true;
+  port?.postMessage({ fatal: self.mlnPanic ?? String(error) });
+}
 
 function call(f) {
   if (dead) return;
   try {
     f();
   } catch (error) {
-    dead = true;
-    console.error('tile worker instance dead, its tiles stay pending:', error);
+    fatal(error);
   }
 }
+
+// What throws outside `call`: a reply's image decode, the instance's start.
+addEventListener('error', (event) => fatal(event.error ?? event.message));
+addEventListener('unhandledrejection', (event) => fatal(event.reason));
 
 // The workers' tasks run in slices of up to 10 ms, so that requests (a
 // tile's removal, newer data) get in between them.
@@ -55,6 +69,7 @@ onmessage = async ({ data }) => {
   };
   await init({ module_or_path: data.module });
   worker = new TileWorker(schedule);
+  if (data.panic) call(() => panic_for_check(data.panic));
   for (const request of early.splice(0)) call(() => worker.handle(request));
   schedule();
 };

@@ -9,11 +9,13 @@
     canvas { display: block; width: 100vw; height: 100vh; }
     #box { position: absolute; display: none; pointer-events: none; box-sizing: border-box; border: 2px dotted #202020; background: #ffffff80; }
     #status { position: fixed; left: 8px; bottom: 8px; padding: 4px 8px; background: #fffc; border-radius: 4px; }
+    #error { position: fixed; left: 8px; right: 8px; top: 8px; padding: 8px 12px; background: #fffc; border-left: 4px solid #b3261e; border-radius: 4px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
   <canvas id="map"></canvas>
   <div id="status">loading…</div>
+  <div id="error" role="alert" hidden></div>
   <script type="module" src="main.js"></script>
 </body>
 </html>

@@ -6,14 +6,22 @@
 //
 // From the page: first {preload: {style, ratio, zoom}} as soon as the page
 // starts, then {module, canvas, ports, width, height, ratio, style,
-// fallbackFontFaces, camera, localIdeographFontFamily}, then {readPixels},
+// fallbackFontFaces, camera, localIdeographFontFamily, panic}, then {readPixels},
 // {resize: [width, height]} in CSS pixels, and {input, args}: a call of
 // WebMap's input methods (pointer_down, pointer_move, pointer_up,
 // pointer_cancel, wheel, key, blur) whose last argument is the event's time
 // as performance.timeOrigin + timeStamp. To the page: {status}, {loaded:
 // {loadedMs, replies}} once the map is fully loaded, {pixels: {width,
-// height, pixels}} for each readPixels, and {box} when a Shift-drag's box
-// changes ([x0, y0, x1, y1], or null).
+// height, pixels}} for each readPixels, {box} when a Shift-drag's box
+// changes ([x0, y0, x1, y1], or null), and {fatal} once the map stops.
+//
+// A panic aborts the instance it happens in (wasm32-unknown-unknown can't
+// unwind), and nothing may call into it after that. When this instance or a
+// tile worker's panics, the map stops: no more frames, ticks or replies, and
+// {fatal: message} goes to the page, with the message the panic hook left
+// in `mlnPanic` (src/lib.rs) or a tile worker sent. `panic`, if given, is a
+// message to panic with once the map exists (`panic_for_check`), for
+// check/check.mjs.
 
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
@@ -23,10 +31,32 @@ let start = null;
 const early = []; // messages before the map exists
 onmessage = ({ data }) => {
   if (data.preload) preloadStyle(data.preload.style, data.preload.ratio, data.preload.zoom);
-  else if (data.module) start = run(data);
-  else if (start) start.then((handle) => handle(data));
+  else if (data.module) start = run(data).catch((error) => fatal('map', error));
+  else if (start) start.then((handle) => handle?.(data));
   else early.push(data);
 };
+
+let stopped = false;
+
+function fatal(where, error) {
+  if (stopped) return;
+  stopped = true;
+  postMessage({ fatal: `${where}: ${self.mlnPanic ?? String(error)}` });
+}
+
+// Calls into the instance, unless the map has stopped.
+function guard(f) {
+  if (stopped) return;
+  try {
+    f();
+  } catch (error) {
+    fatal('map', error);
+  }
+}
+
+// What throws outside `guard`: a fetch's or an image decode's completion.
+addEventListener('error', (event) => fatal('map', event.error ?? event.message));
+addEventListener('unhandledrejection', (event) => fatal('map', event.reason));
 
 // What the map fetches first, fetched while the module downloads and
 // compiles: the style, then its sources' TileJSON, its sprite and its
@@ -121,8 +151,8 @@ function percentEncode(text) {
   return encoded;
 }
 
-async function run({ module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily }) {
-  const { default: init, WebMap, set_preloads } = await bindings;
+async function run({ module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily, panic }) {
+  const { default: init, WebMap, set_preloads, panic_for_check } = await bindings;
   await init({ module_or_path: module });
   set_preloads(takePreload);
 
@@ -133,7 +163,7 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
   const ticks = new MessageChannel();
   let tickScheduled = false;
   const wake = () => {
-    if (!tickScheduled) {
+    if (!tickScheduled && !stopped) {
       tickScheduled = true;
       ticks.port2.postMessage(null);
     }
@@ -146,18 +176,25 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
     return shaper;
   };
   const map = await WebMap.create(canvas, width, height, ratio, ports.length,
-    (instance, bytes) => ports[instance].postMessage(bytes, [bytes.buffer]), wake, loadShaper,
+    (instance, bytes) => {
+      if (!stopped) ports[instance].postMessage(bytes, [bytes.buffer]);
+    }, wake, loadShaper,
     localIdeographFontFamily);
 
   ticks.port1.onmessage = () => {
     tickScheduled = false;
-    if (map.tick(4)) wake();
+    guard(() => {
+      if (map.tick(4)) wake();
+    });
   };
   ports.forEach((port, instance) => {
-    port.onmessage = ({ data: replies }) => {
-      for (const reply of replies) map.receive(instance, reply);
+    port.onmessage = ({ data }) => {
+      if (data.fatal !== undefined) fatal(`tile worker ${instance}`, data.fatal);
+      else guard(() => data.forEach((reply) => map.receive(instance, reply)));
     };
   });
+
+  if (panic) panic_for_check(panic);
 
   if (fallbackFontFaces) map.set_fallback_font_faces(fallbackFontFaces);
   map.set_style_url(style);
@@ -177,6 +214,10 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
     });
   };
   function frame() {
+    guard(drawFrame);
+    if (!stopped) requestAnimationFrame(frame);
+  }
+  function drawFrame() {
     map.frame(8, performance.now());
     if (loaded === null && map.is_fully_loaded()) {
       loaded = { loadedMs: performance.now() - started, replies: map.received() };
@@ -192,14 +233,13 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
       }
     }
     report(false);
-    requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
   // The page's events, on this worker's clock: the one frames run on.
   const INPUTS = new Set(['pointer_down', 'pointer_move', 'pointer_up', 'pointer_cancel', 'wheel', 'key', 'blur']);
   let box = null;
-  const handle = (data) => {
+  const handle = (data) => guard(() => {
     if (data.readPixels) {
       if (readPixels++ === 0) map.request_pixels();
     }
@@ -214,7 +254,7 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
         postMessage({ box });
       }
     }
-  };
+  });
   for (const data of early.splice(0)) handle(data);
   return handle;
 }

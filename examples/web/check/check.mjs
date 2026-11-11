@@ -4,8 +4,10 @@
 // render of the same view (pixelmatch, as the render tests compare). It
 // fails when a frame differs by more than its threshold, when the page, one of
 // its Web Workers (the map's or a tile worker's) or the native runner reports
-// an error, or when a view's tiles got no worker replies. CI runs it (the
-// `web` job); see ../README.md.
+// an error, or when a view's tiles got no worker replies. It also makes the
+// map's wasm instance and a tile worker's panic (the page's `panic`), and
+// fails unless the page stops and shows the panic. CI runs it (the `web`
+// job); see ../README.md.
 //
 //   node examples/web/check/check.mjs [options]
 //
@@ -465,7 +467,10 @@ async function load(browser, view, count) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         return await Promise.race([
-          window.mln.loaded,
+          // A panic's message, on one line.
+          window.mln.loaded.catch((error) => {
+            throw new Error(error.message.replaceAll('\\n', ' '));
+          }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('not loaded after 60 s')), 60000)),
         ]);
       })()`,
@@ -543,14 +548,65 @@ try {
   if (!/swiftshader/.test(gpu ?? '')) throw new Error(`the page's WebGPU adapter is ${gpu}, not SwiftShader`);
 
   failures = await compare();
+  for (const [where, instance] of [['map', "the map's instance"], ['tile', "a tile worker's instance"]]) {
+    const failure = await checkPanic(browser, views[0], where);
+    console.log(`a panic in ${instance}: ${failure ?? 'the page stopped and showed it'}`);
+    if (failure) failures.push(`a panic in ${instance}: ${failure}`);
+  }
 } finally {
   await browser.close();
   server.close();
   database.close();
 }
 if (failures.length > 0) {
-  console.log(`\n${failures.length} of ${views.length} views failed:\n  ${failures.join('\n  ')}`);
+  console.log(`\nfailed:\n  ${failures.join('\n  ')}`);
   process.exitCode = 1;
+}
+
+/**
+ * Loads `view` with the map's instance or the first tile worker's panicking
+ * at its start (the page's `panic`); returns how the page failed to stop
+ * and show the panic, if it did.
+ */
+async function checkPanic(browser, view, where) {
+  const session = await open(browser, `${pageUrl(view, workers)}&panic=${where}`);
+  try {
+    const page = await evaluate(
+      browser,
+      session,
+      `(async () => {
+        const deadline = performance.now() + 60000;
+        while (!window.mln) {
+          if (performance.now() > deadline) throw new Error('the page did not start');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const fatal = await Promise.race([
+          window.mln.fatal,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('no fatal error after 60 s')), 60000)),
+        ]);
+        const message = (promise) => promise.then(() => 'resolved', (error) => error.message);
+        const banner = document.getElementById('error');
+        return {
+          fatal: fatal.message,
+          loaded: await message(window.mln.loaded),
+          readPixels: await message(window.mln.readPixels()),
+          banner: banner.hidden ? 'hidden' : banner.textContent,
+        };
+      })()`,
+    );
+    const expected = `${where === 'map' ? 'map' : 'tile worker 0'}: panicked at `;
+    if (!page.fatal.startsWith(expected) || !page.fatal.includes('panic=<map|tile> asked for this panic')) {
+      return `the page's fatal error is ${JSON.stringify(page.fatal)}`;
+    }
+    if (page.loaded !== page.fatal) return `\`loaded\` is ${page.loaded}`;
+    if (page.readPixels !== page.fatal) return `\`readPixels()\` is ${page.readPixels}`;
+    if (!page.banner.includes(page.fatal)) return `the page shows ${JSON.stringify(page.banner)}`;
+    return null;
+  } catch (error) {
+    return firstLines(error.message);
+  } finally {
+    await session.close();
+  }
 }
 
 /** Loads and compares every view; returns what failed. */

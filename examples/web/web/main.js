@@ -19,6 +19,8 @@
 //                          the font CJK glyphs are drawn in rather than
 //                          downloaded, as GL JS's option (default:
 //                          sans-serif); empty or `false` downloads them
+//   panic=<map|tile>       the map's instance or the first tile worker's
+//                          panics once it starts, for check/check.mjs
 //
 // Input: the canvas's pointer, wheel, key and focus events go to the map's
 // Web Worker, whose gesture recognizer (mln_gestures) moves the camera: drag
@@ -32,11 +34,14 @@
 // `window.mln` is for scripts (check/check.mjs): `loaded` resolves with the
 // load time and the number of worker replies once the map is fully loaded,
 // and `readPixels()` draws the frame again and resolves with its RGBA
-// pixels, read back from the GPU.
+// pixels, read back from the GPU. A panic in any of the Web Workers' wasm
+// instances stops the map: the page shows its message, `fatal` resolves
+// with it as an Error, and `loaded` and `readPixels()` reject with it.
 
 const params = new URLSearchParams(location.search);
 const number = (name, fallback) => (params.has(name) ? Number(params.get(name)) : fallback);
 const status = document.getElementById('status');
+const banner = document.getElementById('error');
 const canvas = document.getElementById('map');
 
 if (params.has('width') && params.has('height')) {
@@ -61,10 +66,14 @@ const style = new URL(params.get('style') ?? 'https://tiles.openfreemap.org/styl
 // The map's Web Worker fetches the style and what it needs first meanwhile.
 map.postMessage({ preload: { style, ratio, zoom: camera[2] } });
 
+const panic = params.get('panic');
+const panicMessage = 'panic=<map|tile> asked for this panic';
+
 const module = await compiling;
-const ports = tileWorkers.map((worker) => {
+const ports = tileWorkers.map((worker, i) => {
   const channel = new MessageChannel();
-  worker.postMessage({ module, port: channel.port2 }, [channel.port2]);
+  worker.postMessage({ module, port: channel.port2, panic: panic === 'tile' && i === 0 ? panicMessage : undefined },
+    [channel.port2]);
   return channel.port1;
 });
 
@@ -80,26 +89,52 @@ map.postMessage({
   fallbackFontFaces: params.get('fallbackFontFaces'),
   camera,
   localIdeographFontFamily: localFamily === '' || localFamily === 'false' ? undefined : localFamily,
+  panic: panic === 'map' ? panicMessage : undefined,
 }, [offscreen, ...ports]);
 
 let markLoaded;
+let failLoaded;
+let markFatal;
+let fatal = null;
 const pixelRequests = [];
 window.mln = {
-  loaded: new Promise((resolve) => { markLoaded = resolve; }),
+  loaded: new Promise((resolve, reject) => {
+    markLoaded = resolve;
+    failLoaded = reject;
+  }),
+  fatal: new Promise((resolve) => { markFatal = resolve; }),
   readPixels() {
-    return new Promise((resolve) => {
-      pixelRequests.push(resolve);
+    return new Promise((resolve, reject) => {
+      if (fatal) {
+        reject(fatal);
+        return;
+      }
+      pixelRequests.push({ resolve, reject });
       map.postMessage({ readPixels: true });
     });
   },
 };
+// Rejected on a panic, which the page reports itself.
+window.mln.loaded.catch(() => {});
 
 map.onmessage = ({ data }) => {
   if (data.box !== undefined) showBox(data.box);
   if (data.status !== undefined) status.textContent = data.status;
   if (data.loaded) markLoaded(data.loaded);
-  if (data.pixels) pixelRequests.shift()?.(data.pixels);
+  if (data.pixels) pixelRequests.shift()?.resolve(data.pixels);
+  if (data.fatal !== undefined) stop(data.fatal);
 };
+
+function stop(message) {
+  fatal = new Error(message);
+  console.error(`the map stopped: ${message}`);
+  banner.textContent = `The map stopped: ${message}`;
+  banner.hidden = false;
+  status.textContent = 'stopped';
+  failLoaded(fatal);
+  markFatal(fatal);
+  for (const request of pixelRequests.splice(0)) request.reject(fatal);
+}
 
 // The map's input. Positions are CSS pixels from the canvas's top-left
 // corner; modifiers are bits: Shift 1, Ctrl 2, Alt 4, Meta 8.

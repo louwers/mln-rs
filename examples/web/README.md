@@ -157,18 +157,16 @@ Then open <http://localhost:8000/> in a browser with WebGPU. URL parameters
 - `width`, `height`, `ratio`: a fixed canvas size in CSS pixels and pixel
   ratio;
 - `localIdeographFontFamily=<CSS font-family list>` (default: `sans-serif`):
-  see above; empty or `false` turns it off.
+  see above; empty or `false` turns it off;
+- `panic=map` or `panic=tile`: the map's instance or the first tile
+  worker's panics once it starts, for the check.
 
-## A panic stops a Web Worker
+## A panic stops the map
 
-wasm32-unknown-unknown aborts on a panic, so the tile workers'
-`catch_unwind`, which natively turns a panic while parsing (a malformed
-vector tile, MVT or MLT) into an error for its tile, as C++ `catch (...)`
-does, doesn't run in the browser. The panic aborts the Web Worker's wasm
-instance instead: web/worker.js logs the instance as dead and drops its
-requests, and every tile whose worker it hosts stays pending. TODO(port):
-build with `panic=unwind` and wasm exception handling, or respawn the
-instance and create its tiles' workers again.
+A panic is a bug. wasm32-unknown-unknown aborts on one, which traps the
+wasm instance it happens in, so nothing calls into that instance again.
+When the map's instance or a tile worker's traps, the map stops and the
+page shows the panic's message (`window.mln.fatal` in web/main.js).
 
 ## Check
 
@@ -207,7 +205,9 @@ It fails when more than 0.1% of a view's pixels differ (the combination
 of raster-dem and vector at z1: 1%, where SwiftShader and lavapipe
 antialias coastlines differently), when the page or a Web Worker logs an
 error or throws (a worker that panics, a tile that fails to load), or
-when a view gets no worker replies. The page renders on SwiftShader, which
+when a view gets no worker replies. It also loads the first view with
+`panic=map` and with `panic=tile`, and fails unless the page stops and
+shows the panic. The page renders on SwiftShader, which
 Chromium bundles, and most views come out identical to lavapipe's;
 leaving out one layer of labels changes 0.1% to 2% of the pixels.
 
