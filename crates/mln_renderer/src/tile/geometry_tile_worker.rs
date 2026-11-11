@@ -29,11 +29,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::actor::PoolActorRef;
+use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, shared_image_map};
+use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, ImageType, shared_image_map};
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
@@ -658,6 +659,7 @@ impl GeometryTileWorker {
         let mut glyph_dependencies = GlyphDependencies::default();
         let mut image_dependencies = ImageDependencies::new();
         let mut filter_groups = FilterGroups::default();
+        let unavailable_images = UnavailableImages::start();
 
         // Create render layers and group by layout
         let group_map = group_layers(&layers);
@@ -794,6 +796,11 @@ impl GeometryTileWorker {
             }
         }
 
+        // Ask for the images that the layout's expressions passed over as
+        // unavailable, so that adding one lays the tile out again.
+        for id in unavailable_images.finish() {
+            image_dependencies.entry(id).or_insert(ImageType::Icon);
+        }
         self.request_new_dependencies(&glyph_dependencies, image_dependencies);
 
         self.finalize_layout()
