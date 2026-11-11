@@ -77,6 +77,8 @@ pub enum DatabaseError {
     Runtime(String),
     /// An argument was invalid, such as a region definition's zoom range.
     Logic(String),
+    /// The database has no offline region with this ID.
+    RegionNotFound(i64),
 }
 
 impl From<SqliteError> for DatabaseError {
@@ -107,7 +109,21 @@ impl std::fmt::Display for DatabaseError {
             DatabaseError::Io { message, .. } => f.write_str(message),
             DatabaseError::TileCountLimitExceeded => TileCountLimitExceeded.fmt(f),
             DatabaseError::Runtime(message) | DatabaseError::Logic(message) => f.write_str(message),
+            DatabaseError::RegionNotFound(region_id) => write!(f, "no offline region has ID {region_id}"),
         }
+    }
+}
+
+impl From<DatabaseError> for Error {
+    /// An invalid argument for [`DatabaseError::Logic`], not found for
+    /// [`DatabaseError::RegionNotFound`], and a native error otherwise.
+    fn from(error: DatabaseError) -> Self {
+        let kind = match error {
+            DatabaseError::Logic(_) => ErrorKind::InvalidArgument,
+            DatabaseError::RegionNotFound(_) => ErrorKind::NotFound,
+            _ => ErrorKind::Native,
+        };
+        Error::new(kind, error.to_string())
     }
 }
 
@@ -454,6 +470,9 @@ impl OfflineDatabase {
             DatabaseError::Logic(_) => {
                 // C++: assert(false) in debug builds.
                 Log::error(Event::Database, format!("Can't {action}"));
+            }
+            DatabaseError::RegionNotFound(_) => {
+                // The caller's to report.
             }
         }
     }
