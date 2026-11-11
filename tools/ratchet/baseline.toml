@@ -202,7 +202,7 @@
 "crates/mln_gfx/src/upload_pass.rs" = 1
 "crates/mln_gfx/src/vertex_attribute.rs" = 1
 "crates/mln_gfx/tests/gtest_backend_scope.rs" = 1
-"crates/mln_headless/src/headless_frontend.rs" = 2
+"crates/mln_headless/src/headless_frontend.rs" = 1
 "crates/mln_headless/src/map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_annotations.rs" = 28
 "crates/mln_headless/tests/gtest_api.rs" = 2

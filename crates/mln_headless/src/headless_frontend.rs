@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::headless_backend::HeadlessBackend as GfxHeadlessBackend;
+use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, ContextMode, RendererBackend, ScopeType, SwapBehaviour};
 use mln_map::{CameraOptions, Map, TransformState};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
@@ -21,7 +22,7 @@ use mln_webgpu::HeadlessBackend;
 /// `HeadlessFrontend::RenderResult`.
 pub struct RenderResult {
     pub image: PremultipliedImage,
-    // TODO(port): gfx::RenderingStats stats.
+    pub stats: RenderingStats,
 }
 
 struct Shared {
@@ -227,7 +228,8 @@ impl HeadlessFrontend {
             }
         }
 
-        Ok(RenderResult { image })
+        let stats = backend.get_renderer_backend().get_context().rendering_stats().clone();
+        Ok(RenderResult { image, stats })
     }
 
     /// `renderOnce(Map&)`.

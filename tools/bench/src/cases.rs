@@ -89,6 +89,10 @@ pub fn all() -> Vec<Case> {
         let name = format!("Still/{}", view.name);
         cases.push(Case::new(name, move |cx| still(cx, &view)));
     }
+    for (icons, overlap) in [(256, false), (1024, false), (1024, true)] {
+        let name = format!("Still/CollidingIcons/{icons}{}", if overlap { "-overlap" } else { "" });
+        cases.push(Case::new(name.clone(), move |cx| still_colliding_icons(cx, &name, icons, overlap)));
+    }
     cases.push(Case::new("Frame/Throughput", frame_throughput));
     cases.push(Case::new("Frame/Paced", frame_paced));
     cases.push(Case::new("Frame/Idle", frame_idle));
@@ -123,6 +127,48 @@ fn still(cx: &Context, view: &View) -> Metrics {
     if let Some(dir) = &cx.frames {
         nudge(&mut scene, 0);
         write_frame(dir, &format!("Still/{}", view.name), &scene.render_still());
+    }
+    meter.finish()
+}
+
+/// A still frame of `icons` icons at one point, each with its own sort key,
+/// so that each is a drawable of its own. Without `overlap`, placement
+/// hides all but one.
+fn still_colliding_icons(cx: &Context, name: &str, icons: usize, overlap: bool) -> Metrics {
+    let features: Vec<String> = (0..icons)
+        .map(|i| {
+            format!(
+                r#"{{"type":"Feature","properties":{{"rank":{i}}},"geometry":{{"type":"Point","coordinates":[5,5]}}}}"#
+            )
+        })
+        .collect();
+    let style = format!(
+        r#"{{"version":8,"sources":{{"points":{{"type":"geojson","maxzoom":0,
+            "data":{{"type":"FeatureCollection","features":[{}]}}}}}},
+            "layers":[{{"id":"symbols","type":"symbol","source":"points","layout":{{
+            "icon-image":"marker","symbol-sort-key":["get","rank"],"icon-allow-overlap":{overlap}}}}}]}}"#,
+        features.join(",")
+    );
+    let center = LatLng::new(5.0, 5.0).expect("a center");
+    let mut scene = Scene::new(Size::new(256, 256), Mode::Still);
+    scene.jump(center, 4.0);
+    scene.load_json(&style);
+    scene.add_image("marker", PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]));
+    let nudge = |scene: &mut Scene, i: usize| scene.jump(center, 4.0 + 0.001 * (i % 2) as f64);
+    for i in 0..10 {
+        nudge(&mut scene, i);
+        scene.render_still();
+    }
+    let mut meter = Meter::new();
+    for i in 0..cx.iterations(100) {
+        meter.time(|| {
+            nudge(&mut scene, i);
+            scene.render_still()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        nudge(&mut scene, 0);
+        write_frame(dir, name, &scene.render_still());
     }
     meter.finish()
 }

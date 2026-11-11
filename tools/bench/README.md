@@ -26,6 +26,7 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 | case | what one iteration is |
 |---|---|
 | `Still/<scene>` | a still frame of a loaded map, read back; the zoom alternates by 0.001, so each is a new frame over the same tiles |
+| `Still/CollidingIcons/<n>` | as `Still`, of n icons at one point, each with its own sort key; placement hides all but one, or none in the `-overlap` case |
 | `Load/Style/<scene>` | from loading the style on a new map to its first complete still; the GPU device is set up before |
 | `Frame/Throughput` | a camera jump around a 200-pixel circle until the GPU has finished the frame that shows it, over tiles an untimed lap loaded |
 | `Frame/Paced` | a two-second flight from the block's north-west corner at zoom 14 to its south-east corner at zoom 15.5, past the tiles' zoom, on a 60 Hz display's clock, with only the first view loaded |

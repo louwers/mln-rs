@@ -343,6 +343,30 @@ impl Buffer {
     pub fn update_modified(&mut self) {
         self.modified += 1;
     }
+
+    /// `hasVisibleVertices(offset, count)`: whether any of the `count`
+    /// opacity vertices from `offset` can draw. A range placement hasn't
+    /// filled yet counts as visible.
+    pub fn has_visible_vertices(&self, offset: usize, count: usize) -> bool {
+        let Some(range) = offset.checked_add(count).and_then(|end| self.opacity_attribute_data.get(offset..end)) else {
+            return true;
+        };
+        // Zero is an unplaced symbol at zero opacity. A placed symbol whose
+        // fade-in starts at zero, and one still fading out, are not zero.
+        range.iter().any(|vertex| vertex.a1[0] != 0.0)
+    }
+
+    /// Whether the drawable of `segment` (one segment, or `None` for the
+    /// whole buffer) has any vertex that can draw.
+    pub fn segment_has_visible_vertices(&self, segment: Option<usize>) -> bool {
+        match segment {
+            Some(i) => self
+                .segments
+                .get(i)
+                .is_none_or(|segment| self.has_visible_vertices(segment.vertex_offset, segment.vertex_length)),
+            None => self.has_visible_vertices(0, self.attribute_data.len()),
+        }
+    }
 }
 
 /// `SymbolBucket::CollisionBuffer` (+ box lines / circle triangles).
@@ -843,5 +867,51 @@ impl DefaultValueF32 for TextSize {
 impl DefaultValueF32 for IconSize {
     fn default_value_f32() -> f32 {
         <IconSize as mln_style::properties::Property>::default_value()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::shaders::segment::SegmentBase;
+
+    use super::*;
+
+    // gtest: SymbolRendering.KeepFadingSymbolsVisible
+    #[test]
+    fn keep_fading_symbols_visible() {
+        let mut buffer = Buffer::default();
+        // Without placement results, leave rendering enabled.
+        assert!(buffer.has_visible_vertices(0, 1));
+
+        buffer.opacity_attribute_data.extend([
+            SymbolBucket::opacity_attributes(false, 0.0),
+            SymbolBucket::opacity_attributes(true, 0.0),
+            SymbolBucket::opacity_attributes(false, 0.5),
+            SymbolBucket::opacity_attributes(true, 1.0),
+        ]);
+        assert!(!buffer.has_visible_vertices(0, 1));
+        assert!(buffer.has_visible_vertices(1, 1)); // Just starting to fade in.
+        assert!(buffer.has_visible_vertices(2, 1)); // Still fading out.
+        assert!(buffer.has_visible_vertices(3, 1));
+        assert!(buffer.has_visible_vertices(0, 4)); // Mixed visibility in one segment.
+        assert!(buffer.has_visible_vertices(4, 1)); // Not placed yet.
+        assert!(buffer.has_visible_vertices(usize::MAX, 2));
+    }
+
+    #[test]
+    fn segment_visibility_reads_the_segment_range() {
+        let mut buffer = Buffer::default();
+        buffer.opacity_attribute_data.extend([
+            SymbolBucket::opacity_attributes(false, 0.0),
+            SymbolBucket::opacity_attributes(false, 0.0),
+            SymbolBucket::opacity_attributes(true, 1.0),
+            SymbolBucket::opacity_attributes(true, 1.0),
+        ]);
+        buffer.segments.push(SegmentBase::with_lengths(0, 0, 2, 0));
+        buffer.segments.push(SegmentBase::with_lengths(2, 0, 2, 0));
+        assert!(!buffer.segment_has_visible_vertices(Some(0)));
+        assert!(buffer.segment_has_visible_vertices(Some(1)));
+        // An unknown segment draws.
+        assert!(buffer.segment_has_visible_vertices(Some(2)));
     }
 }

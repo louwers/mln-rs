@@ -165,6 +165,14 @@ impl Scene {
         self.map.get_style_mut().load_json(json);
     }
 
+    /// Adds an image to the style, as a sprite's would be.
+    pub fn add_image(&mut self, id: &str, image: PremultipliedImage) {
+        let image =
+            mln_style::image::Impl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
+                .expect("a style image");
+        self.map.get_style_mut().add_image(Arc::new(image));
+    }
+
     pub fn jump(&mut self, center: LatLng, zoom: f64) {
         self.map.jump_to(&CameraOptions::default().with_center(Some(center)).with_zoom(Some(zoom)));
     }

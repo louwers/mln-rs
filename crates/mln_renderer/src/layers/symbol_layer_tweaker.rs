@@ -104,10 +104,10 @@ impl LayerTweaker for SymbolLayerTweaker {
             .mutable_uniform_buffers()
             .set(ID_SYMBOL_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
 
-        let mut i: u32 = 0;
+        // Only enabled drawables draw, so only they get an entry.
         let count = layer_group.get_drawable_count();
-        let mut drawable_ubo_vector = vec![SymbolDrawableUBO::default(); count];
-        let mut tile_props_ubo_vector = vec![SymbolTilePropsUBO::default(); count];
+        let mut drawable_ubo_vector = Vec::with_capacity(count);
+        let mut tile_props_ubo_vector = Vec::with_capacity(count);
 
         let cam_dist = state.get_camera_to_center_distance();
         let screen_space_prop = symbol_layer_properties.layer_impl().layout.get::<SymbolScreenSpace>();
@@ -120,6 +120,9 @@ impl LayerTweaker for SymbolLayerTweaker {
         let self_ptr: *const Self = self;
         let id = self.base.id.clone();
         visit_layer_group_drawables(layer_group, |drawable| {
+            if !drawable.get_enabled() {
+                return;
+            }
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
             };
@@ -235,7 +238,7 @@ impl LayerTweaker for SymbolLayerTweaker {
                 )
             };
 
-            drawable_ubo_vector[i as usize] = SymbolDrawableUBO {
+            drawable_ubo_vector.push(SymbolDrawableUBO {
                 matrix: cast_matrix(&matrix),
                 label_plane_matrix: cast_matrix(&label_plane_matrix),
                 coord_matrix: cast_matrix(&gl_coord_matrix),
@@ -257,16 +260,18 @@ impl LayerTweaker for SymbolLayerTweaker {
                 pad1: 0.0,
                 pad2: 0.0,
                 pad3: 0.0,
-            };
-            tile_props_ubo_vector[i as usize] = SymbolTilePropsUBO {
+            });
+            tile_props_ubo_vector.push(SymbolTilePropsUBO {
                 is_text: is_text as i32,
                 is_halo: symbol_data.is_halo as i32,
                 gamma_scale,
                 pad1: 0.0,
-            };
-            drawable.set_ubo_index(i);
-            i += 1;
+            });
+            drawable.set_ubo_index((drawable_ubo_vector.len() - 1) as u32);
         });
+        if drawable_ubo_vector.is_empty() {
+            return;
+        }
 
         let bytes: &[u8] = bytemuck::cast_slice(&drawable_ubo_vector);
         match &self.drawable_uniform_buffer {

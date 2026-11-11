@@ -63,6 +63,12 @@ path = "tests/gtest_api.rs"
 name = "gtest_memory"
 path = "tests/gtest_memory.rs"
 
+# gtests-core: test/renderer/symbol_rendering.test.cpp (maplibre-native
+# #4628). Shared fixture in tests/support/mod.rs.
+[[test]]
+name = "gtest_symbol_rendering"
+path = "tests/gtest_symbol_rendering.rs"
+
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
@@ -71,6 +77,7 @@ mln_image = { package = "mln-rs-image", path = "../mln_image" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }
 mln_storage = { workspace = true, features = ["sqlite"] }
+mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
