@@ -15,6 +15,7 @@ use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_text::GlyphCache;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -53,6 +54,31 @@ impl RealWorld {
         LatLng::new(self.latitude, self.longitude).expect("a scene's center")
     }
 }
+
+/// The render suite's `text-font/chinese` style, without its unused
+/// sprite: `data/chinese.geojson`'s 500 labels in Noto Sans CJK, about 2,500
+/// characters over 80 glyph ranges, all in the cache database.
+pub const CJK_STYLE: &str = r#"{
+  "version": 8,
+  "sources": { "geojson": { "type": "geojson", "data": "local://data/chinese.geojson" } },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "white" } },
+    {
+      "id": "labels",
+      "type": "symbol",
+      "source": "geojson",
+      "layout": { "text-field": "{name}", "text-font": ["NotoCJK"], "symbol-placement": "point" }
+    }
+  ]
+}"#;
+
+/// The `text-font/chinese` test's camera, at its size.
+pub fn cjk_center() -> LatLng {
+    LatLng::new(43.3900489867738, -70.752954126).expect("the CJK view's center")
+}
+pub const CJK_ZOOM: f64 = 11.0;
+pub const CJK_SIZE: Size = Size { width: 512, height: 512 };
 
 /// maplibre-native-ffi's view of the basemap.
 pub const BASEMAP_SIZE: Size = Size { width: 1024, height: 768 };
@@ -125,18 +151,25 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// A map without a style; its GPU device is ready.
+    /// A map without a style; its GPU device is ready. Its renderer has a
+    /// glyph cache of its own.
     pub fn new(size: Size, mode: Mode) -> Scene {
+        Scene::with_glyph_cache(size, mode, Arc::default())
+    }
+
+    /// A map whose renderer shares `glyph_cache`.
+    pub fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         render_test::file_source::register_proxy_file_source();
         let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db");
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
         let client_options = ClientOptions::default();
-        let frontend = HeadlessFrontend::with_options(
+        let frontend = HeadlessFrontend::with_glyph_cache(
             size,
             1.0,
             SwapBehaviour::NoFlush,
             ContextMode::Unique,
             mode != Mode::OnDemand,
+            glyph_cache,
         );
         let file_source = FileSourceManager::get().get_file_source(
             FileSourceType::ResourceLoader,

@@ -12,7 +12,8 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 ## Data
 
 - The shared render suite's real-world styles (Chicago, San Francisco,
-  Norway) at their tests' cameras, 512 x 512, read from its cache database.
+  Norway) at their tests' cameras, 512 x 512, and its CJK labels
+  (`text-font/chinese`), read from its cache database.
 - maplibre-native-ffi's basemap: VersaTiles' Shortbread tiles over central
   San Francisco (a 5 x 5 block at zoom 14) with Noto Sans glyphs and a
   generated sprite, 1024 x 768. `fixtures.json` and `style.json` are
@@ -32,6 +33,7 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 | `Frame/Idle` | 100 ms of a settled map whose run loop draws whenever the map asks |
 | `Frame/SettleWithoutSymbols` | from a camera nudge on the basemap with its symbol layers left out, which has nothing to place, until the map stops asking for frames |
 | `Load/Concurrent` | 16 renderers on threads of their own, each from loading a real-world style on a new map to its first complete still through `HeadlessFrontend::render`, as the render tests' workers draw; the GPU devices are set up before |
+| `Load/GlyphCache/Private`, `Load/GlyphCache/Shared` | `Load/Concurrent` over the render suite's `text-font/chinese` style (500 labels, about 2,500 CJK characters over 80 glyph ranges), each renderer with a glyph cache of its own, or all sharing one `GlyphCache` |
 | `Load/JumpWarm`, `Load/JumpCold` | a jump between two views that share no tile until a frame shows the new view complete, on the display's clock; cold drops the loaded tiles first |
 
 In `Frame/Paced`, refreshes are absolute deadlines, and at each refresh

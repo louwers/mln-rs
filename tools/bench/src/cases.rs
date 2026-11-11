@@ -2,18 +2,19 @@
 //! follow maplibre-native-ffi's of the same names, over the same data and
 //! cameras, so their numbers are comparable to the C++ core's.
 
-use std::sync::Barrier;
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use mln_map::RenderMode;
+use mln_text::GlyphCache;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
 use crate::meter::{Meter, ms};
 use crate::scene::{
-    BASEMAP_SIZE, BASEMAP_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene, basemap_center, basemap_north_west,
-    basemap_south_east, basemap_style, write_frame,
+    BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
+    basemap_center, basemap_north_west, basemap_south_east, basemap_style, cjk_center, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};
@@ -46,6 +47,7 @@ struct View {
 #[derive(Clone)]
 enum Style {
     Url(String),
+    Json(&'static str),
     Basemap,
 }
 
@@ -53,11 +55,17 @@ impl View {
     fn scene(&self, cx: &Context, mode: Mode) -> Scene {
         let mut scene = Scene::new(self.size, mode);
         scene.jump(self.center, self.zoom);
+        self.load(cx, &mut scene);
+        scene
+    }
+
+    /// Starts loading the style on `scene`.
+    fn load(&self, cx: &Context, scene: &mut Scene) {
         match &self.style {
             Style::Url(url) => scene.load_url(url),
+            Style::Json(json) => scene.load_json(json),
             Style::Basemap => scene.load_json(&basemap_style(&cx.fixtures)),
         }
-        scene
     }
 }
 
@@ -98,6 +106,8 @@ pub fn all() -> Vec<Case> {
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
     cases.push(Case::new("Load/Concurrent", load_concurrent));
+    cases.push(Case::new("Load/GlyphCache/Private", |cx| load_glyph_cache(cx, false)));
+    cases.push(Case::new("Load/GlyphCache/Shared", |cx| load_glyph_cache(cx, true)));
     cases.push(Case::new("Load/JumpWarm", |cx| load_jump(cx, false)));
     cases.push(Case::new("Load/JumpCold", |cx| load_jump(cx, true)));
     cases
@@ -137,10 +147,7 @@ fn load_style(cx: &Context, view: &View) -> Metrics {
         let mut scene = Scene::new(view.size, Mode::Still);
         scene.jump(view.center, view.zoom);
         meter.start();
-        match &view.style {
-            Style::Url(url) => scene.load_url(url),
-            Style::Basemap => scene.load_json(&basemap_style(&cx.fixtures)),
-        }
+        view.load(cx, &mut scene);
         last = Some(scene.render_still());
         meter.stop();
     }
@@ -153,26 +160,48 @@ fn load_style(cx: &Context, view: &View) -> Metrics {
 /// Renderers on threads of their own, as the render tests run many at
 /// once: each loads a real-world style on a new map and renders its first
 /// complete still through `HeadlessFrontend::render`, the threads taking
-/// the styles in turn. An iteration is every renderer's load
-/// and still; the GPU devices are set up before.
+/// the styles in turn.
 fn load_concurrent(cx: &Context) -> Metrics {
+    let views: Vec<View> = views().into_iter().filter(|view| matches!(view.style, Style::Url(_))).collect();
+    concurrent(cx, "Load/Concurrent", &views, false)
+}
+
+/// Load/Concurrent over the CJK view, every renderer with a glyph cache of
+/// its own or all sharing one: the glyphs that several maps in one process
+/// parse from the same glyph ranges.
+fn load_glyph_cache(cx: &Context, shared: bool) -> Metrics {
+    let view =
+        View { name: "cjk", size: CJK_SIZE, center: cjk_center(), zoom: CJK_ZOOM, style: Style::Json(CJK_STYLE) };
+    let name = if shared { "Load/GlyphCache/Shared" } else { "Load/GlyphCache/Private" };
+    concurrent(cx, name, &[view], shared)
+}
+
+/// 16 renderers on threads of their own, taking `views` in turn: each loads
+/// its view's style on a new map and renders its first complete still
+/// through `HeadlessFrontend::render`, as the render tests' workers draw.
+/// An iteration is every renderer's load and still; the GPU devices are set
+/// up before. With `shared`, the renderers share one glyph cache, new for
+/// each iteration.
+fn concurrent(cx: &Context, name: &str, views: &[View], shared: bool) -> Metrics {
     const RENDERERS: usize = 16;
     let mut meter = Meter::new();
     let mut last = None;
     for _ in 0..cx.iterations(5) {
+        let glyph_cache = shared.then(Arc::<GlyphCache>::default);
         let ready = Barrier::new(RENDERERS + 1);
         let images: Vec<PremultipliedImage> = std::thread::scope(|scope| {
-            let threads: Vec<_> = REAL_WORLD
+            let threads: Vec<_> = views
                 .iter()
                 .cycle()
                 .take(RENDERERS)
                 .map(|view| {
-                    let ready = &ready;
+                    let (ready, glyph_cache) = (&ready, glyph_cache.clone());
                     scope.spawn(move || {
-                        let mut scene = Scene::new(REAL_WORLD_SIZE, Mode::Still);
-                        scene.jump(view.center(), view.zoom);
+                        let mut scene =
+                            Scene::with_glyph_cache(view.size, Mode::Still, glyph_cache.unwrap_or_default());
+                        scene.jump(view.center, view.zoom);
                         ready.wait();
-                        scene.load_url(&view.style_url());
+                        view.load(cx, &mut scene);
                         scene.render()
                     })
                 })
@@ -186,7 +215,7 @@ fn load_concurrent(cx: &Context) -> Metrics {
         last = images.into_iter().next();
     }
     if let (Some(dir), Some(image)) = (&cx.frames, &last) {
-        write_frame(dir, "Load/Concurrent", image);
+        write_frame(dir, name, image);
     }
     meter.finish()
 }
