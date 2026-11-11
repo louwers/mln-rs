@@ -2636,6 +2636,54 @@ fn geojson_symbol_retains_icons_and_text_across_zoom_synchronous_with_text() {
     retains_icons_and_text_across_zoom(true, true);
 }
 
+/// The RGBA pixel at `x`, `y`.
+fn pixel_at(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
+    let offset = ((y * image.size.width + x) * 4) as usize;
+    image.data[offset..offset + 4].try_into().unwrap()
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout
+fn renders_image_added_after_layout(synchronous: bool, with_text: bool) {
+    let (test, _) = geojson_symbol_map();
+    add_geojson_symbol(&test, 0, 0.0, synchronous, with_text);
+
+    // Complete tile layout with the image missing, then add it without
+    // changing the camera or layers.
+    let icon_size = Size::new(32, 32);
+    let before = test.render().image;
+    let x = before.size.width / 2;
+    let y = before.size.height / 2 - icon_size.height / 2;
+    assert_eq!(pixel_at(&before, x, y)[..3], [255, 255, 255]);
+
+    test.map().get_style_mut().add_image(style_image("marker", red_image(icon_size.width, icon_size.height), 1.0));
+    let after = test.render().image;
+    assert_eq!(pixel_at(&after, x, y), [255, 0, 0, 255]);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/AsynchronousIconOnly
+#[test]
+fn late_style_image_renders_image_added_after_layout_asynchronous_icon_only() {
+    renders_image_added_after_layout(false, false);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/AsynchronousWithText
+#[test]
+fn late_style_image_renders_image_added_after_layout_asynchronous_with_text() {
+    renders_image_added_after_layout(false, true);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/SynchronousIconOnly
+#[test]
+fn late_style_image_renders_image_added_after_layout_synchronous_icon_only() {
+    renders_image_added_after_layout(true, false);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/SynchronousWithText
+#[test]
+fn late_style_image_renders_image_added_after_layout_synchronous_with_text() {
+    renders_image_added_after_layout(true, true);
+}
+
 // End-to-end: a feature-state change must alter the *rendered* output, not just
 // the value read back through the API. A fill covering the viewport is colored
 // by a data-driven expression on feature-state "active" (blue by default, red

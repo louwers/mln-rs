@@ -465,9 +465,10 @@ impl RenderOrchestrator {
         let image_diff = diff_images(&self.image_impls, &update_parameters.images);
         self.image_impls = update_parameters.images.clone();
 
-        // Only trigger tile reparse for changed images. Changed images only
-        // need a relayout when they have a different size.
-        let mut _has_image_diff = !image_diff.removed.is_empty();
+        // Adding or removing an image changes layout for tiles that already
+        // requested it. Updating an existing image only needs a relayout when
+        // its size changes.
+        let mut has_image_diff = !image_diff.added.is_empty() || !image_diff.removed.is_empty();
 
         // Remove removed images from sprite atlas.
         for id in image_diff.removed.keys() {
@@ -484,7 +485,7 @@ impl RenderOrchestrator {
         for change in image_diff.changed.values() {
             if self.image_manager.update_image(change.after.clone()) {
                 // TODO(port): patternAtlas->removePattern(id) (background-pattern).
-                _has_image_diff = true;
+                has_image_diff = true;
             }
         }
 
@@ -683,7 +684,7 @@ impl RenderOrchestrator {
                                 }
                             };
                             source_needs_relayout = source_needs_relayout
-                                || _has_image_diff
+                                || has_image_diff
                                 || constants_mask_changed.contains(&layer_id)
                                 || has_layout_difference(&layer_diff, &layer_id)
                                 || global_state_requires_relayout;
