@@ -29,17 +29,19 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::actor::PoolActorRef;
+use mln_expression::image_expression::UnavailableImages;
 use mln_map_types::MapMode;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
-use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, shared_image_map};
+use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, ImageType, shared_image_map};
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -87,18 +89,26 @@ pub enum WorkerMessage {
         available_images: Immutable<VecSet<String>>,
         correlation_id: u64,
     },
-    /// `setLayers(layers, globalState, availableImages, correlationID)`.
+    /// `setLayers(layers, globalState, availableImages,
+    /// subdivisionGranularity, correlationID)`.
     SetLayers {
         #[serde(with = "fields::layers")]
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Immutable<VecSet<String>>,
+        subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     },
+    /// `setAvailableImages(availableImages, correlationID)`: parse again
+    /// with images added since the last parse.
+    SetAvailableImages { available_images: Immutable<VecSet<String>>, correlation_id: u64 },
     /// `reset(correlationID)`.
     Reset { correlation_id: u64 },
     /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
     SetShowCollisionBoxes { show_collision_boxes: bool, correlation_id: u64 },
+    /// Forget the glyphs that came back missing and lay out again, which
+    /// requests them again.
+    RetryMissingGlyphs { correlation_id: u64 },
     /// `onGlyphsAvailable(newGlyphMap, results)`.
     GlyphsAvailable { glyph_map: GlyphMap, results: HBShapeResults },
     /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
@@ -119,8 +129,10 @@ impl WorkerMessage {
         match self {
             WorkerMessage::SetData { correlation_id, .. }
             | WorkerMessage::SetLayers { correlation_id, .. }
+            | WorkerMessage::SetAvailableImages { correlation_id, .. }
             | WorkerMessage::Reset { correlation_id }
-            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
+            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. }
+            | WorkerMessage::RetryMissingGlyphs { correlation_id } => *correlation_id,
             WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
         }
     }
@@ -191,6 +203,7 @@ pub struct GeometryTileWorker {
     available_images: Immutable<VecSet<String>>,
 
     show_collision_boxes: bool,
+    subdivision_granularity: SubdivisionGranularitySetting,
     first_load: bool,
 }
 
@@ -240,6 +253,7 @@ impl GeometryTileWorker {
             version_map: ImageVersionMap::new(),
             available_images: Arc::new(VecSet::new()),
             show_collision_boxes,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
         }
     }
@@ -254,13 +268,21 @@ impl GeometryTileWorker {
             WorkerMessage::SetData { data, available_images, correlation_id } => {
                 self.set_data(data, available_images, correlation_id)
             }
-            WorkerMessage::SetLayers { layers, global_state, available_images, correlation_id } => {
-                self.set_layers(layers, global_state, available_images, correlation_id)
+            WorkerMessage::SetLayers {
+                layers,
+                global_state,
+                available_images,
+                subdivision_granularity,
+                correlation_id,
+            } => self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id),
+            WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
+                self.set_available_images(available_images, correlation_id)
             }
             WorkerMessage::Reset { correlation_id } => self.reset(correlation_id),
             WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
                 self.set_show_collision_boxes(show_collision_boxes, correlation_id)
             }
+            WorkerMessage::RetryMissingGlyphs { correlation_id } => self.retry_missing_glyphs(correlation_id),
             WorkerMessage::GlyphsAvailable { glyph_map, results } => self.on_glyphs_available(glyph_map, results),
             WorkerMessage::ImagesAvailable { icon_map, pattern_map, version_map, image_correlation_id } => {
                 self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id)
@@ -332,12 +354,14 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `setLayers(layers, globalState, availableImages, correlationID)`.
+    /// `setLayers(layers, globalState, availableImages,
+    /// subdivisionGranularity, correlationID)`.
     pub fn set_layers(
         &mut self,
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Immutable<VecSet<String>>,
+        subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     ) {
         self.guarded(|this| {
@@ -345,6 +369,27 @@ impl GeometryTileWorker {
             this.global_state = global_state;
             this.correlation_id = correlation_id;
             this.available_images = available_images;
+            this.subdivision_granularity = subdivision_granularity;
+
+            match this.state {
+                State::Idle => {
+                    this.parse()?;
+                    this.coalesce()?;
+                }
+                State::Coalescing | State::NeedsSymbolLayout => {
+                    this.state = State::NeedsParse;
+                }
+                State::NeedsParse => {}
+            }
+            Ok(())
+        });
+    }
+
+    /// `setAvailableImages(availableImages, correlationID)`.
+    pub fn set_available_images(&mut self, available_images: Immutable<VecSet<String>>, correlation_id: u64) {
+        self.guarded(|this| {
+            this.available_images = available_images;
+            this.correlation_id = correlation_id;
 
             match this.state {
                 State::Idle => {
@@ -393,6 +438,29 @@ impl GeometryTileWorker {
                     this.state = State::NeedsSymbolLayout;
                 }
                 State::NeedsSymbolLayout | State::NeedsParse => {}
+            }
+            Ok(())
+        });
+    }
+
+    /// Forgets the glyphs that came back missing and parses again, so the
+    /// layout requests them again.
+    pub fn retry_missing_glyphs(&mut self, correlation_id: u64) {
+        self.guarded(|this| {
+            for glyphs in this.glyph_map.values_mut() {
+                glyphs.retain(|_, glyph| glyph.is_some());
+            }
+            this.correlation_id = correlation_id;
+
+            match this.state {
+                State::Idle => {
+                    this.parse()?;
+                    this.coalesce()?;
+                }
+                State::Coalescing | State::NeedsSymbolLayout => {
+                    this.state = State::NeedsParse;
+                }
+                State::NeedsParse => {}
             }
             Ok(())
         });
@@ -603,6 +671,7 @@ impl GeometryTileWorker {
         let mut glyph_dependencies = GlyphDependencies::default();
         let mut image_dependencies = ImageDependencies::new();
         let mut filter_groups = FilterGroups::default();
+        let unavailable_images = UnavailableImages::start();
 
         // Create render layers and group by layout
         let group_map = group_layers(&layers);
@@ -624,6 +693,7 @@ impl GeometryTileWorker {
                 layer_type: leader_impl.get_type_info(),
                 global_state: self.global_state.clone(),
                 retain_features_by_id: self.capture_rendered_features,
+                subdivision_granularity: self.subdivision_granularity,
             };
 
             let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer)? else {
@@ -739,6 +809,11 @@ impl GeometryTileWorker {
             }
         }
 
+        // Ask for the images that the layout's expressions passed over as
+        // unavailable, so that adding one lays the tile out again.
+        for id in unavailable_images.finish() {
+            image_dependencies.entry(id).or_insert(ImageType::Icon);
+        }
         self.request_new_dependencies(&glyph_dependencies, image_dependencies);
 
         self.finalize_layout()

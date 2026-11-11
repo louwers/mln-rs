@@ -16,11 +16,12 @@ use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::exception::ExceptionPtr;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::envelope::{self, Action, MessageKind, Request};
 use super::*;
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlas;
-use crate::image_manager::ImageManager;
+use crate::image_manager::{ImageManager, ImageRequestor};
 use crate::layermanager;
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::geometry_tile::GeometryTile;
@@ -98,6 +99,7 @@ impl Test {
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
@@ -235,6 +237,37 @@ fn failed_set_data_in(mode: MapMode) {
 fn failed_set_data() {
     for mode in [MapMode::Continuous, MapMode::Static] {
         failed_set_data_in(mode);
+    }
+}
+
+/// An added image the tile asked for lays it out again; after a failed
+/// `setData` it gets that error, rather than no answer, which would leave
+/// the tile pending.
+fn requested_image_added_in(mode: MapMode) {
+    let (test, fill) = loaded(mode);
+
+    test.tile.inner().on_requested_image_added();
+    test.wait();
+    assert_eq!(test.errors(), 0);
+    assert!(test.laid_out(&fill));
+
+    test.corrupt.set(Some(MessageKind::SetData));
+    test.set_data();
+    assert_eq!(test.errors(), 1);
+
+    test.tile.inner().on_requested_image_added();
+    test.wait();
+    assert_eq!(test.errors(), 2);
+
+    test.set_data();
+    assert_eq!(test.errors(), 2);
+    assert!(test.laid_out(&fill));
+}
+
+#[test]
+fn requested_image_added() {
+    for mode in [MapMode::Continuous, MapMode::Static] {
+        requested_image_added_in(mode);
     }
 }
 

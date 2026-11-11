@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::shader_group::{self, ShaderGroupData, StringIDSetsPair, get_shader_name, property_hash};
+use mln_gfx::projection_variant::ProjectionVariant;
+use mln_gfx::shader_group::{self, GLOBE_DEFINE, ShaderGroupData, StringIDSetsPair, get_shader_name, property_hash};
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -55,6 +56,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
         &self,
         gfx_context: &dyn GfxContext,
         properties_as_uniforms: &StringIDSetsPair,
+        variant: ProjectionVariant,
         _first_attrib_name: &str,
     ) -> Option<ShaderProgramBasePtr> {
         let source = shader_source(self.shader_id)?;
@@ -63,6 +65,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
         let mut seed = 0u64;
         hash_combine(&mut seed, property_hash(properties_as_uniforms));
         hash_combine(&mut seed, self.program_parameters.get_defines_hash());
+        hash_combine(&mut seed, variant as u64);
         let shader_name = get_shader_name(name, seed);
 
         if let Some(shader) = self.get_typed(&shader_name, ShaderProgram::NAME) {
@@ -71,6 +74,9 @@ impl shader_group::ShaderGroup for ShaderGroup {
 
         let mut additional_defines = HashMap::new();
         Self::add_additional_defines(properties_as_uniforms, &mut additional_defines);
+        if variant == ProjectionVariant::Globe {
+            additional_defines.insert(GLOBE_DEFINE.to_owned(), String::new());
+        }
 
         let context = gfx_context.as_any().downcast_ref::<Context>()?;
         let shader_source = format!("{PRELUDE}{}{}", source.msl.prelude, source.msl.source);

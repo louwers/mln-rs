@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_map_types::TransformState;
+use mln_map_types::{ProjectionData, TileProjector, TransformState};
 use mln_style::expression::expression::FeatureState;
 use mln_style::expression::{EvaluationContext, GlobalStateMap};
 use mln_style::layer::layer_type_info;
@@ -25,7 +25,6 @@ use mln_util::constants;
 use mln_util::exception::ExceptionPtr;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
-use mln_util::mat4::Mat4;
 use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
@@ -212,7 +211,7 @@ impl FeatureIndex {
         }
     }
 
-    /// `query(result, queryGeometry, transformState, posMatrix, tileSize,
+    /// `query(result, queryGeometry, transformState, projector, tileSize,
     /// scale, options, globalState, tileID, layers, additionalQueryPadding,
     /// sourceFeatureState)`.
     #[allow(clippy::too_many_arguments)]
@@ -221,7 +220,7 @@ impl FeatureIndex {
         result: &mut QueryResults,
         query_geometry: &GeometryCoordinates,
         transform_state: &TransformState,
-        pos_matrix: &Mat4,
+        projector: &TileProjector<'_>,
         tile_size: f64,
         scale: f64,
         query_options: &RenderedQueryOptions,
@@ -281,7 +280,7 @@ impl FeatureIndex {
                 query_geometry,
                 transform_state,
                 pixels_to_tile_units,
-                pos_matrix,
+                projector,
                 Some(source_feature_state),
             )?;
         }
@@ -328,8 +327,9 @@ impl FeatureIndex {
             }
         });
 
-        let unused_matrix: Mat4 = [0.0; 16];
         let transform_state = TransformState::default();
+        let unused_projector =
+            TileProjector::with_data(&transform_state, &tile_id.to_unwrapped(), ProjectionData::default());
         for symbol_feature in sorted_features {
             self.add_feature(
                 &mut result,
@@ -343,7 +343,7 @@ impl FeatureIndex {
                 &GeometryCoordinates::new(),
                 &transform_state,
                 0.0,
-                &unused_matrix,
+                &unused_projector,
                 None,
             )?;
         }
@@ -351,7 +351,7 @@ impl FeatureIndex {
     }
 
     /// `addFeature(result, indexedFeature, options, globalState, tileID,
-    /// layers, queryGeometry, transformState, pixelsToTileUnits, posMatrix,
+    /// layers, queryGeometry, transformState, pixelsToTileUnits, projector,
     /// sourceFeatureState)`.
     #[allow(clippy::too_many_arguments)]
     fn add_feature(
@@ -367,7 +367,7 @@ impl FeatureIndex {
         query_geometry: &GeometryCoordinates,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
-        pos_matrix: &Mat4,
+        projector: &TileProjector<'_>,
         source_feature_state: Option<&SourceFeatureState>,
     ) -> Result<(), ExceptionPtr> {
         let Some(tile_data) = &self.tile_data else {
@@ -415,7 +415,7 @@ impl FeatureIndex {
                     transform_state.get_zoom() as f32,
                     transform_state,
                     pixels_to_tile_units,
-                    pos_matrix,
+                    projector,
                     &state,
                 );
             feature.check()?;

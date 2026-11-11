@@ -550,7 +550,7 @@ impl drawable::Drawable for Drawable {
             render_pass.set_stencil_reference(self.impl_.previous_stencil_mode.ref_);
             render_pass.set_depth_range(depth_mode.range);
         } else {
-            render_pass.set_depth_range(parameters.depth_mode_for_3d().range);
+            render_pass.set_depth_range(parameters.depth_mode_for_3d(DepthMaskType::ReadWrite).range);
         }
 
         let base_vertex_supported = context.get_backend().is_base_vertex_instance_drawing_supported();

@@ -10,8 +10,9 @@ use std::collections::HashMap;
 
 use feature::{Identifier, Value};
 use mln_style_types::{
-    AlignmentType, IconTextFitType, LineCapType, LineJoinType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType,
-    TextJustifyType, TextTransformType, TextWritingModeType, VariableAnchorOffsetCollection, VisibilityType,
+    AlignmentType, IconTextFitType, LineCapType, LineJoinType, ProjectionDefinition, SymbolAnchorType,
+    SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
+    VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::enum_::Enum;
 use mln_util::geometry::FeatureType;
@@ -160,6 +161,12 @@ impl Stringify for [f64; 3] {
         writer.double(self[1]);
         writer.double(self[2]);
         writer.end_array();
+    }
+}
+
+impl Stringify for ProjectionDefinition {
+    fn stringify(&self, writer: &mut Writer) {
+        self.serialize().stringify(writer);
     }
 }
 

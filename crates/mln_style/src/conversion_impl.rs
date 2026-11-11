@@ -3,7 +3,7 @@
 // is in mln_conversion.)
 
 use feature::Value;
-use mln_style_types::{Position, Rotation, VariableAnchorOffsetCollection};
+use mln_style_types::{Position, ProjectionDefinition, Rotation, VariableAnchorOffsetCollection};
 use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
 
@@ -47,6 +47,12 @@ impl ValueFactory for Padding {
 
     fn constant_kind() -> Kind {
         Kind::Expression
+    }
+}
+
+impl ValueFactory for ProjectionDefinition {
+    fn make_value(&self) -> Value {
+        self.serialize()
     }
 }
 

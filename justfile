@@ -151,7 +151,7 @@ get-crate-field field package=main_crate:  (assert-cmd 'jq')
 get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 
 # It builds with the Cargo profile in `profile`: `just profile=release desktop` runs an optimized build.
-[doc('Run the desktop app: OpenFreeMap Liberty in a window (needs a display). Arguments go to the app')]
+[doc('Run the desktop app: a map in a window, with its controls (needs a display). Arguments go to the app')]
 [positional-arguments]
 desktop *args:  _dev-shell
     {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-desktop --bin mln-desktop -- "$@"
@@ -348,7 +348,7 @@ update:
     cargo update
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
-# The copies are from louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs).
+# The copies are from johncarmack1984/maplibre-native's maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe branch of maplibre/maplibre-native#4533 (phased/12h), with louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the sky branch of maplibre/maplibre-native#4534 merged in.
 [doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
     #!/usr/bin/env bash

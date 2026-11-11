@@ -1337,6 +1337,37 @@ fn has_region_resource_tile() {
     check_log_empty(&log);
 }
 
+// Not a C++ test: ffi patch 0077 tests these through OfflineDownload.
+// checkRegionResource reports whether the stored copy is usable, and
+// putRegionResource reports the stored size for a 304.
+#[test]
+fn check_region_resource_and_not_modified_size() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
+    let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
+
+    for resource in [style("http://example.com/style.json"), example_tile()] {
+        let mut response = Response::new();
+        response.data = data("first");
+        assert_eq!(None, db.check_region_resource(&resource));
+        assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &response));
+        assert_eq!(Some((5, true)), db.check_region_resource(&resource));
+
+        assert!(db.invalidate_region(region.get_id()).is_none());
+        assert_eq!(Some((5, false)), db.check_region_resource(&resource));
+        assert_eq!(Some(5), db.has_region_resource(&resource));
+
+        let mut not_modified = Response::new();
+        not_modified.not_modified = true;
+        not_modified.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+        assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &not_modified));
+        assert_eq!(Some((5, true)), db.check_region_resource(&resource));
+    }
+
+    check_log_empty(&log);
+}
+
 // gtest: OfflineDatabase.OfflineMapboxTileCount
 #[test]
 fn offline_mapbox_tile_count() {

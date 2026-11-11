@@ -6,16 +6,12 @@
 // `std::set<LayerRenderItem>` (ordered and deduplicated by `index`) is a
 // `VecMap<u32, LayerRenderItem>`.
 
-use std::cell::RefCell; // layers: debug
-use std::rc::Weak;
-
 use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
 use mln_map_types::{MapDebugOptions, MapMode, TransformState};
 use mln_util::Color;
 use mln_util::chrono::TimePoint;
 use mln_vec_map::VecMap;
 
-use crate::layer_tweaker::LayerTweaker; // layers: debug
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::RenderLayerPtr;
 use crate::render_pass::RenderPass; // layers: debug
@@ -31,11 +27,6 @@ pub enum DebugType {
 /// `RenderItem::DebugLayerGroupMap` (layers: debug).
 pub type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
 
-/// The `layerGroup->addLayerTweaker(tweaker)` calls of
-/// `updateDebugDrawables`: Rust layer groups keep no tweaker list (see
-/// layer_group.rs), the orchestrator registers these (layers: debug).
-pub type DebugLayerTweakers = Vec<(LayerGroupBasePtr, Weak<RefCell<dyn LayerTweaker>>)>;
-
 /// `RenderItem`: the render items of sources (`sourceRenderItems`). The
 /// layer render items are the concrete `LayerRenderItem`.
 pub trait RenderItem {
@@ -45,14 +36,9 @@ pub trait RenderItem {
     fn get_name(&self) -> &str;
     /// `updateDebugDrawables(DebugLayerGroupMap&, PaintParameters&)`; a
     /// no-op for the items that have none (LayerRenderItem, the image
-    /// source) (layers: debug).
-    fn update_debug_drawables(
-        &self,
-        _debug_layer_groups: &mut DebugLayerGroupMap,
-        _parameters: &PaintParameters<'_>,
-        _tweakers: &mut DebugLayerTweakers,
-    ) {
-    }
+    /// source). The orchestrator gives each debug layer group its tweaker
+    /// (layers: debug).
+    fn update_debug_drawables(&self, _debug_layer_groups: &mut DebugLayerGroupMap, _parameters: &PaintParameters<'_>) {}
 }
 
 /// `LayerRenderItem`.
@@ -87,6 +73,7 @@ pub struct RenderTreeParameters {
     pub time_point: TimePoint,
     /// conformance: `EvaluatedLight light`.
     pub light: crate::render_light::EvaluatedLight,
+    pub sky: Option<crate::render_sky::EvaluatedSky>,
     pub has_3d: bool,
     pub opaque_pass_cut_off: u32,
     /// C++ default-constructs `Color` (transparent black).
@@ -110,6 +97,7 @@ impl RenderTreeParameters {
             debug_options,
             time_point,
             light: Default::default(),
+            sky: None,
             has_3d: false,
             opaque_pass_cut_off: 0,
             background_color: Color::new_unchecked(0.0, 0.0, 0.0, 0.0),
@@ -128,6 +116,7 @@ pub struct RenderTree {
     source_render_items: Vec<Box<dyn RenderItem>>,
     // symbols:
     layers_need_placement: Vec<crate::render_layer::RenderLayerPtr>,
+    layers_following_placement: Vec<crate::render_layer::RenderLayerPtr>,
     placement: Option<std::rc::Rc<crate::text::placement::Placement>>,
     update_symbol_opacities: bool,
     start_time: mln_util::time::Instant,
@@ -145,6 +134,7 @@ impl RenderTree {
             layer_render_items,
             source_render_items,
             layers_need_placement: Vec::new(),
+            layers_following_placement: Vec::new(),
             placement: None,
             update_symbol_opacities: false,
             start_time,
@@ -155,16 +145,19 @@ impl RenderTree {
     pub(crate) fn set_placement(
         &mut self,
         layers_need_placement: Vec<crate::render_layer::RenderLayerPtr>,
+        layers_following_placement: Vec<crate::render_layer::RenderLayerPtr>,
         placement: std::rc::Rc<crate::text::placement::Placement>,
         update_symbol_opacities: bool,
     ) {
         self.layers_need_placement = layers_need_placement;
+        self.layers_following_placement = layers_following_placement;
         self.placement = Some(placement);
         self.update_symbol_opacities = update_symbol_opacities;
     }
 
     /// `prepare()`: updates the symbol buckets of the layers that need
-    /// placement.
+    /// placement, then the positions of the layers that draw buckets other
+    /// layers place.
     pub fn prepare(&mut self) {
         let Some(placement) = &self.placement else {
             return;
@@ -175,6 +168,9 @@ impl RenderTree {
                 &self.parameters.transform_params.state,
                 self.update_symbol_opacities,
             );
+        }
+        for layer in &self.layers_following_placement {
+            placement.update_follower_buckets(&*layer.borrow(), &self.parameters.transform_params.state);
         }
     }
 

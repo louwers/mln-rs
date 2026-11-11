@@ -186,3 +186,72 @@ fn footprint() {
     assert!(vector_footprint < (40 * 1024 * 1024) as f64, "mln::Map footprint over 65.2MB for vector styles.");
     assert!(raster_footprint < (25 * 1024 * 1024) as f64, "mln::Map footprint over 25MB for raster styles.");
 }
+
+/// The live-resource counters of the frontend's context, by name.
+fn live_resources(frontend: &HeadlessFrontend) -> Vec<(&'static str, i32)> {
+    let _scope = mln_gfx::BackendScope::new(frontend.get_backend(), mln_gfx::ScopeType::Explicit);
+    let stats = frontend.get_backend().get_context().rendering_stats().clone();
+    vec![
+        ("num_active_textures", stats.num_active_textures),
+        ("num_buffers", stats.num_buffers),
+        ("num_frame_buffers", stats.num_frame_buffers),
+        ("num_index_buffers", stats.num_index_buffers),
+        ("num_vertex_buffers", stats.num_vertex_buffers),
+        ("num_uniform_buffers", stats.num_uniform_buffers),
+        ("mem_textures", stats.mem_textures),
+        ("mem_buffers", stats.mem_buffers),
+        ("mem_index_buffers", stats.mem_index_buffers),
+        ("mem_vertex_buffers", stats.mem_vertex_buffers),
+        ("mem_uniform_buffers", stats.mem_uniform_buffers),
+    ]
+}
+
+fn live(counters: &[(&'static str, i32)], name: &str) -> i32 {
+    counters.iter().find(|(n, _)| *n == name).map(|(_, v)| *v).expect("a counter")
+}
+
+// Port-only: the live buffer and texture counters of the rendering stats
+// rise when a map loads its tiles and fall back when the tiles go and when
+// the map is dropped.
+#[test]
+fn rendering_stats_count_live_resources() {
+    const EMPTY: &str = r#"{"version": 8, "sources": {}, "layers": []}"#;
+    let test = MemoryTest::new();
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0);
+    let mut map = test.map(&frontend, 1.0);
+    map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
+
+    map.get_style_mut().load_url("maptiler://maps/streets");
+    frontend.render(&mut map).expect("render");
+    let loaded = live_resources(&frontend);
+    for (name, value) in &loaded {
+        assert!(*value > 0, "{name} is {value} with the map loaded");
+    }
+    let kinds = ["index", "vertex", "uniform"];
+    let sum = |prefix: &str| kinds.iter().map(|k| live(&loaded, &format!("{prefix}_{k}_buffers"))).sum::<i32>();
+    assert!(live(&loaded, "num_buffers") >= sum("num"));
+    assert!(live(&loaded, "mem_buffers") >= sum("mem"));
+
+    // The tiles go with their style.
+    map.get_style_mut().load_json(EMPTY);
+    frontend.render(&mut map).expect("render");
+    let evicted = live_resources(&frontend);
+    assert_eq!(live(&evicted, "num_index_buffers"), 0);
+    assert_eq!(live(&evicted, "mem_index_buffers"), 0);
+    for name in ["num_buffers", "num_vertex_buffers", "num_uniform_buffers", "mem_buffers", "mem_vertex_buffers"] {
+        assert!(live(&evicted, name) < live(&loaded, name), "{name} stays at {} without tiles", live(&loaded, name));
+    }
+
+    // Loading the tiles again and dropping them leaves the same resources.
+    map.get_style_mut().load_url("maptiler://maps/streets");
+    frontend.render(&mut map).expect("render");
+    assert!(live(&live_resources(&frontend), "num_index_buffers") > 0);
+    map.get_style_mut().load_json(EMPTY);
+    frontend.render(&mut map).expect("render");
+    assert_eq!(live_resources(&frontend), evicted);
+
+    drop(map);
+    let torn_down = live_resources(&frontend);
+    assert!(live(&torn_down, "num_active_textures") < live(&loaded, "num_active_textures"));
+    assert!(live(&torn_down, "mem_textures") < live(&loaded, "mem_textures"));
+}

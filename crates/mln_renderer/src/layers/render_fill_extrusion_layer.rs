@@ -24,7 +24,6 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
-use mln_util::mat4::Mat4;
 use mln_util::sync::RwLockExt;
 
 use super::fill_extrusion_layer_tweaker::FillExtrusionLayerTweaker;
@@ -34,10 +33,10 @@ use crate::bucket_geometry::{bucket_indexes, bucket_vertices, paint_vertices};
 use crate::buckets::fill_extrusion_bucket::{FillExtrusionBinders, FillExtrusionBucket, FillExtrusionLayoutVertex};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::drawable_atlases_tweaker::DrawableAtlasesTweaker;
-use crate::layer_tweaker::{LayerTweakerPtr, get_tile_matrix_for, layer_tweaker_slot};
+use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::read_data_driven_paint_property;
-use crate::render_layer::{RenderLayer, RenderLayerBase, Stats, compute_feature_ndc_bound, vertex_color_alpha};
+use crate::render_layer::{CaptureView, RenderLayer, RenderLayerBase, Stats, vertex_color_alpha};
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
 use crate::render_tree::RenderTree;
@@ -78,7 +77,7 @@ fn capture_rendered_features(
     let zoom_fraction = state.get_zoom_fraction();
     let buffer = &binders.interleaved_vertex_buffer;
     let vertices = bucket.vertices.data();
-    let mut tile_matrix: Option<Mat4> = None;
+    let mut view: Option<CaptureView<'_>> = None;
 
     let features = bucket.get_retained_features();
     stats.rendered_features.reserve(features.len());
@@ -97,18 +96,15 @@ fn capture_rendered_features(
             }
         }
 
-        // Compute the tile matrix once
-        let tile_matrix = tile_matrix.get_or_insert_with(|| {
-            get_tile_matrix_for(
-                &tile_id.to_unwrapped(),
+        // Compute the view once
+        let view = view.get_or_insert_with(|| {
+            CaptureView::new(
+                tile_id,
                 state,
                 transform_params,
                 translation,
                 translation_anchor,
-                /*origin=*/ None,
                 /*near_clipped=*/ true,
-                /*in_viewport_pixel_units=*/ false,
-                /*aligned=*/ false,
             )
         });
 
@@ -120,7 +116,7 @@ fn capture_rendered_features(
             let z = if vi < vertex_count { base } else { height };
             Some([f64::from(vertex.a1[0]), f64::from(vertex.a1[1]), z])
         };
-        if let Some(bound) = compute_feature_ndc_bound(2 * vertex_count, tile_matrix, false, get_vertex) {
+        if let Some(bound) = view.tile_space_bound(2 * vertex_count, get_vertex) {
             stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from([*tile_id]));
         }
     }
@@ -201,7 +197,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         _zoom: f32,
         transform_state: &TransformState,
         pixels_to_tile_units: f32,
-        _pos_matrix: &mln_util::mat4::Mat4,
+        _projector: &mln_map_types::TileProjector<'_>,
         _feature_state: &mln_style::expression::expression::FeatureState,
     ) -> bool {
         let evaluated = get_evaluated::<FillExtrusionLayerProperties>(&self.base.evaluated_properties);
@@ -229,6 +225,7 @@ impl RenderLayer for RenderFillExtrusionLayer {
         render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        self.update_projection_variant(state);
         self.base.stats.rendered_features.clear();
 
         let render_tiles = match self.base.render_tiles.clone() {
@@ -418,7 +415,12 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 );
             }
 
-            let Some(shader) = shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos") else {
+            let Some(shader) = shader_group.get_or_create_shader(
+                context,
+                &properties_as_uniforms,
+                self.base.projection_variant,
+                "a_pos",
+            ) else {
                 continue;
             };
 

@@ -44,11 +44,16 @@ pub mod map;
 pub mod observer;
 pub mod paint_property;
 pub mod parser;
+pub mod projection;
+pub mod projection_impl;
 pub mod properties;
 pub mod property_expression;
 pub mod property_value;
 pub mod renderer;
 pub mod serialization;
+#[rustfmt::skip]
+pub mod sky;
+pub mod sky_impl;
 pub mod source;
 pub mod source_impl;
 pub mod sources;

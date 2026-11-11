@@ -11,25 +11,32 @@
 //! before `Expires` as in the .mm (NSHTTPURLResponse doesn't keep the
 //! server's order). Errors map to `Reason`s as in the .mm, with the
 //! NSError's localized description as the message.
+//!
+//! The host's headers (`TransferRequest::headers`) go with the request too.
+//! The session's delegate drops them from a redirect that leaves the origin,
+//! as maplibre-native-ffi's http_file_source.mm does.
 
 // Foundation through objc2 is the FFI here.
 #![allow(unsafe_code)]
 
 use std::sync::{Arc, Mutex};
 
-use block2::RcBlock;
+use block2::{DynBlock, RcBlock};
 use mln_util::chrono::rfc1123;
 use mln_util::sync::MutexExt;
 use objc2::rc::{Retained, autoreleasepool};
+use objc2::runtime::{NSObject, NSObjectProtocol, ProtocolObject};
+use objc2::{AnyThread, define_class, msg_send};
 use objc2_foundation::{
     NSData, NSError, NSHTTPURLResponse, NSInteger, NSMutableURLRequest, NSString, NSURL, NSURLErrorBadServerResponse,
     NSURLErrorCallIsActive, NSURLErrorCannotConnectToHost, NSURLErrorCannotFindHost, NSURLErrorDNSLookupFailed,
     NSURLErrorDataNotAllowed, NSURLErrorInternationalRoamingOff, NSURLErrorNetworkConnectionLost,
-    NSURLErrorNotConnectedToInternet, NSURLErrorTimedOut, NSURLRequestCachePolicy, NSURLResponse, NSURLSession,
-    NSURLSessionConfiguration, NSURLSessionDataTask,
+    NSURLErrorNotConnectedToInternet, NSURLErrorTimedOut, NSURLRequest, NSURLRequestCachePolicy, NSURLResponse,
+    NSURLSession, NSURLSessionConfiguration, NSURLSessionDataTask, NSURLSessionDelegate, NSURLSessionTask,
+    NSURLSessionTaskDelegate,
 };
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header};
+use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
 use crate::response::{Error, Reason};
 
 /// How long a transfer may go without receiving data before it fails with
@@ -44,6 +51,65 @@ const MAXIMUM_CONNECTIONS_PER_HOST: NSInteger = 8;
 /// `Transfer`.
 const RESPONSE_HEADERS: [&str; 6] =
     ["Last-Modified", "ETag", "Cache-Control", "Expires", "Retry-After", "X-Rate-Limit-Reset"];
+
+/// The request headers this transport sets itself. Every other header of a
+/// request is one of the host's.
+const OWN_HEADERS: [&str; 5] = ["Range", "Accept-Encoding", "If-None-Match", "If-Modified-Since", "User-Agent"];
+
+define_class!(
+    /// The session's delegate: drops the host's headers from a redirect to
+    /// another origin.
+    #[unsafe(super(NSObject))]
+    struct RedirectDelegate;
+
+    unsafe impl NSObjectProtocol for RedirectDelegate {}
+
+    unsafe impl NSURLSessionDelegate for RedirectDelegate {}
+
+    unsafe impl NSURLSessionTaskDelegate for RedirectDelegate {
+        #[unsafe(method(URLSession:task:willPerformHTTPRedirection:newRequest:completionHandler:))]
+        fn will_perform_http_redirection(
+            &self,
+            _session: &NSURLSession,
+            _task: &NSURLSessionTask,
+            response: &NSHTTPURLResponse,
+            request: &NSURLRequest,
+            completion_handler: &DynBlock<dyn Fn(*mut NSURLRequest)>,
+        ) {
+            let absolute =
+                |url: Option<Retained<NSURL>>| url.and_then(|url| url.absoluteString()).map(|url| url.to_string());
+            let (from, to) = (absolute(response.URL()), absolute(request.URL()));
+            if let (Some(from), Some(to)) = (&from, &to)
+                && same_origin(from, to)
+            {
+                completion_handler.call((std::ptr::from_ref(request).cast_mut(),));
+                return;
+            }
+            match request.URL() {
+                Some(url) => {
+                    let redirect = NSMutableURLRequest::requestWithURL(&url);
+                    for name in OWN_HEADERS {
+                        let name = NSString::from_str(name);
+                        if let Some(value) = request.valueForHTTPHeaderField(&name) {
+                            redirect.setValue_forHTTPHeaderField(Some(&value), &name);
+                        }
+                    }
+                    completion_handler.call((Retained::as_ptr(&redirect).cast::<NSURLRequest>().cast_mut(),));
+                }
+                // Nil: the task finishes with the redirect itself.
+                None => completion_handler.call((std::ptr::null_mut(),)),
+            }
+        }
+    }
+);
+
+impl RedirectDelegate {
+    fn new() -> Retained<Self> {
+        let this = Self::alloc().set_ivars(());
+        // SAFETY: NSObject's designated initializer.
+        unsafe { msg_send![super(this), init] }
+    }
+}
 
 /// One NSURLSession for the file source's transfers, which run on the
 /// session's own threads. Dropping the transport lets the transfers in
@@ -60,7 +126,16 @@ impl NSURLSessionTransport {
             configuration.setRequestCachePolicy(NSURLRequestCachePolicy::ReloadIgnoringLocalCacheData);
             configuration.setTimeoutIntervalForRequest(IDLE_TIMEOUT_SECONDS);
             configuration.setHTTPMaximumConnectionsPerHost(MAXIMUM_CONNECTIONS_PER_HOST);
-            let session = NSURLSession::sessionWithConfiguration(&configuration);
+            let delegate = RedirectDelegate::new();
+            // SAFETY: the session makes its own serial delegate queue, on
+            // which the delegate and the completion handlers run.
+            let session = unsafe {
+                NSURLSession::sessionWithConfiguration_delegate_delegateQueue(
+                    &configuration,
+                    Some(ProtocolObject::from_ref(&*delegate)),
+                    None,
+                )
+            };
             NSURLSessionTransport { session }
         })
     }
@@ -158,6 +233,9 @@ fn url_request(request: &TransferRequest) -> Option<Retained<NSMutableURLRequest
         set_header("If-Modified-Since", &rfc1123(prior_modified));
     }
     set_header("User-Agent", "MapLibreNative/1.0");
+    for (name, value) in request.headers() {
+        set_header(name, value);
+    }
     Some(url_request)
 }
 

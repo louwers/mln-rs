@@ -770,8 +770,13 @@ impl drawable::Drawable for Drawable {
             let color_mode = self.base.color_mode;
             let draw_mode_type = self.impl_.segments.first().map_or(DrawModeType::Triangles, |s| s.get_mode().type_);
             // Compute pipeline state hash for caching
-            let pipeline_hash =
-                hash_pipeline_state(&vertex_layouts, &color_mode, &depth_mode, &stencil_mode, draw_mode_type);
+            let cull_mode = self.base.cull_face_mode;
+            let pipeline_hash = hash(&[
+                hash_pipeline_state(&vertex_layouts, &color_mode, &depth_mode, &stencil_mode, draw_mode_type),
+                u64::from(cull_mode.enabled),
+                cull_mode.side as u64,
+                cull_mode.winding as u64,
+            ]);
             self.impl_.pipeline_state = shader.get_render_pipeline(
                 &vertex_layouts,
                 &color_mode,
@@ -779,6 +784,7 @@ impl drawable::Drawable for Drawable {
                 &stencil_mode,
                 draw_mode_type,
                 Some(pipeline_hash),
+                &cull_mode,
             );
             if self.impl_.pipeline_state.is_none() {
                 eprintln!(

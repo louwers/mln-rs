@@ -17,6 +17,7 @@ use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use super::envelope::{self, Request};
@@ -96,6 +97,7 @@ fn set_layers(layers: &[Immutable<dyn LayerProperties>], correlation_id: u64) ->
         layers: layers.to_vec(),
         global_state: None,
         available_images: Arc::new(VecSet::new()),
+        subdivision_granularity: SubdivisionGranularitySetting::none(),
         correlation_id,
     }
 }

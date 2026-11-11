@@ -565,9 +565,9 @@ impl TransformActor {
     /// server's /test.
     fn call(&self, url: &str, cb: FinishedCallback) {
         if url == "localhost://test" {
-            cb(self.test_url.clone());
+            cb(Ok(self.test_url.clone()));
         } else {
-            cb(url.to_owned());
+            cb(Ok(url.to_owned()));
         }
     }
 }

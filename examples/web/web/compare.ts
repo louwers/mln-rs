@@ -5,7 +5,12 @@
 //
 // The map that last took input leads, and the other jumps to its camera. A
 // follower's camera changes don't move the leader, so the maps don't echo
-// each other's moves.
+// each other's moves. When the lead changes hands, the new follower only
+// stops its own motion: the new leader keeps the camera it has.
+//
+// GL JS's map lives in a box of its own inside the clipped layer: GL JS's
+// stylesheet makes its container `position: relative`, which would undo the
+// layer's fixed inset and leave the map no height.
 
 import { Map as GlMap, getVersion, setWorkerUrl } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -32,15 +37,24 @@ let split = 0.5;
 
 /**
  * Opens a comparison over `canvas` (the page's map) with `style`, at
- * `camera`. `follow(camera)` moves the page's map to GL JS's camera, and
- * stops its own motion, while GL JS leads.
+ * `camera`. `follow(camera)` moves the page's map to GL JS's camera while
+ * GL JS leads; `stop()` stops the page's map's own motion when GL JS takes
+ * the lead.
  */
 export function compare(
   canvas: HTMLCanvasElement,
-  { style, camera, follow }: { style: string; camera: Camera; follow: (camera: Camera) => void },
+  { style, camera, follow, stop }: {
+    style: string;
+    camera: Camera;
+    follow: (camera: Camera) => void;
+    stop: () => void;
+  },
 ): Comparison {
+  const layer = document.createElement('div');
+  layer.className = 'gl-layer';
   const container = document.createElement('div');
   container.className = 'gl-map';
+  layer.append(container);
   const divider = document.createElement('div');
   divider.className = 'divider';
   divider.tabIndex = 0;
@@ -49,7 +63,7 @@ export function compare(
   divider.ariaValueMin = '0';
   divider.ariaValueMax = '100';
   const labels = [label('compare-label mln', 'mln-rs'), label('compare-label gl', `GL JS ${getVersion()}`)];
-  canvas.after(container, divider, ...labels);
+  canvas.after(layer, divider, ...labels);
 
   const [lat, lon, zoom, bearing, pitch] = camera;
   const map = new GlMap({
@@ -71,19 +85,26 @@ export function compare(
   };
   const listening = new AbortController();
   const { signal } = listening;
+  const lead = (next: 'mln' | 'gl') => {
+    if (next === leader) return;
+    leader = next;
+    if (next === 'mln') map.stop();
+    else stop();
+  };
   // Input on a map makes it lead and stops the other's motion, such as the
   // momentum after a drag. The capture phase sees the input before either
   // map's own handlers do.
-  for (const type of ['pointerdown', 'wheel', 'keydown']) {
-    canvas.addEventListener(type, () => {
-      leader = 'mln';
-      map.stop();
-    }, { capture: true, signal });
-    container.addEventListener(type, () => {
-      leader = 'gl';
-      follow(glCamera());
-    }, { capture: true, signal });
+  for (const type of ['pointerdown', 'wheel', 'keydown'] as const) {
+    canvas.addEventListener(type, () => lead('mln'), { capture: true, passive: true, signal });
+    layer.addEventListener(type, () => lead('gl'), { capture: true, passive: true, signal });
   }
+  // A press keeps its pointer on GL JS's map, so a drag that crosses the
+  // divider or ends over the controls is still GL JS's.
+  layer.addEventListener('pointerdown', (e) => {
+    if (e.target instanceof Element && !e.target.hasPointerCapture(e.pointerId)) {
+      e.target.setPointerCapture(e.pointerId);
+    }
+  }, { capture: true, signal });
   map.on('move', () => {
     if (leader === 'gl') follow(glCamera());
   });
@@ -95,8 +116,7 @@ export function compare(
       if (leader === 'mln') map.jumpTo({ center: [lon, lat], zoom, bearing, pitch });
     },
     lead() {
-      leader = 'mln';
-      map.stop();
+      lead('mln');
     },
     setStyle(url) {
       map.setStyle(url);
@@ -104,7 +124,7 @@ export function compare(
     remove() {
       listening.abort();
       map.remove();
-      for (const element of [container, divider, ...labels]) element.remove();
+      for (const element of [layer, divider, ...labels]) element.remove();
     },
   };
 }

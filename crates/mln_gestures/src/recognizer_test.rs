@@ -8,6 +8,7 @@ use std::rc::Rc;
 
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
+use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::chrono::{TimePoint, milliseconds};
 use mln_util::size::Size;
@@ -924,4 +925,39 @@ fn a_host_step_must_be_valid() {
     let mut rig = Rig::new();
     let step = CameraDelta { scale: Some(0.0), ..CameraDelta::default() };
     assert!(rig.input.step(&mut rig.camera, step).is_err());
+}
+
+// Port-only: a mouse drag on the globe turns it around the cursor, as
+// Transform::move_by_with_anchor does with it (the C++ globe's
+// moveBy(offset, anchor)), and not around the view center.
+#[test]
+fn a_drag_on_the_globe_turns_it_around_the_cursor() {
+    let globe = |transform: &mut Transform| {
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(
+            &CameraOptions::default().with_center(Some(LatLng::new(30.0, 20.0).unwrap())).with_zoom(Some(1.0)),
+        );
+    };
+    let mut rig = Rig::new();
+    globe(&mut rig.camera);
+    let mut direct = transform();
+    globe(&mut direct);
+    let mut centered = transform();
+    globe(&mut centered);
+    rig.down(1, PointerKind::Mouse, 480.0, 240.0);
+    for i in 1..=10 {
+        rig.now += 16.0;
+        let cursor = p(480.0 + 6.0 * f64::from(i), 240.0 + 3.0 * f64::from(i));
+        rig.to(1, cursor.x, cursor.y);
+        direct.move_by_with_anchor(&p(6.0, 3.0), Some(cursor), &AnimationOptions::default()).unwrap();
+        centered.move_by(&p(6.0, 3.0), &AnimationOptions::default()).unwrap();
+    }
+    let center = |transform: &Transform| transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+    assert_eq!(center(&rig.camera), center(&direct));
+    let (dragged, around_the_center) = (center(&rig.camera), center(&centered));
+    assert!(
+        (dragged.latitude() - around_the_center.latitude()).abs() > 0.5
+            || (dragged.longitude() - around_the_center.longitude()).abs() > 0.5,
+        "{dragged:?} {around_the_center:?}"
+    );
 }

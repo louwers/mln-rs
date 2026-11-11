@@ -11,6 +11,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_gfx::shaders::shader_defines::*;
@@ -269,10 +270,7 @@ impl RenderLayer for RenderHeatmapLayer {
     }
 
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
-        // RenderLayer::markLayerRenderable
-        self.base.is_renderable = will_render;
-        let group = self.base.layer_group.clone();
-        crate::render_layer::activate_layer_group(&group, will_render, changes);
+        crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
 
         activate_render_target(&self.render_target, will_render, changes);
     }
@@ -305,6 +303,7 @@ impl RenderLayer for RenderHeatmapLayer {
         _render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        self.update_projection_variant(state);
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
             self.remove_all_drawables();
             return;
@@ -457,7 +456,12 @@ impl RenderLayer for RenderHeatmapLayer {
             }
 
             if heatmap_shader.is_none() {
-                heatmap_shader = heatmap_shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos");
+                heatmap_shader = heatmap_shader_group.get_or_create_shader(
+                    context,
+                    &properties_as_uniforms,
+                    self.base.projection_variant,
+                    "a_pos",
+                );
                 if heatmap_shader.is_none() {
                     continue;
                 }
@@ -535,7 +539,8 @@ impl RenderLayer for RenderHeatmapLayer {
         let texture_tweaker = self.texture_tweaker.clone();
 
         if self.heatmap_texture_shader.is_none() {
-            self.heatmap_texture_shader = context.get_generic_shader(shaders, HEATMAP_TEXTURE_SHADER_GROUP_NAME);
+            self.heatmap_texture_shader =
+                context.get_generic_shader(shaders, HEATMAP_TEXTURE_SHADER_GROUP_NAME, ProjectionVariant::Mercator);
         }
         let Some(heatmap_texture_shader) = self.heatmap_texture_shader.clone() else {
             self.remove_all_drawables();

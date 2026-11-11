@@ -2,6 +2,7 @@
 // wgpu) everywhere, picked with --backend. C++'s GLFW app builds one backend
 // and ignores the flag.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
@@ -11,6 +12,7 @@ use mln_util::size::Size;
 use winit::event_loop::EventLoopProxy;
 
 use crate::host::UserEvent;
+use crate::overlay::Paint;
 
 /// A backend --backend names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -107,6 +109,27 @@ impl SurfaceBackend {
                     backend.get_swap_chain_format()
                 )
             }
+        }
+    }
+
+    /// The GPU and how the map renders on it, for the status line.
+    pub(crate) fn adapter(&self) -> String {
+        match self {
+            #[cfg(target_os = "macos")]
+            SurfaceBackend::Metal(backend) => format!("{} (Metal)", backend.get_device_name()),
+            SurfaceBackend::WebGpu(backend) => {
+                let info = backend.get_adapter_info();
+                format!("{} (wgpu {:?})", info.name, info.backend)
+            }
+        }
+    }
+
+    /// Paints the controls' `paint` over each frame of the map.
+    pub(crate) fn set_controls_overlay(&self, paint: Rc<RefCell<Paint>>) {
+        match self {
+            #[cfg(target_os = "macos")]
+            SurfaceBackend::Metal(backend) => backend.set_overlay(Some(crate::metal_overlay::metal_overlay(paint))),
+            SurfaceBackend::WebGpu(backend) => backend.set_overlay(Some(crate::overlay::webgpu_overlay(paint))),
         }
     }
 

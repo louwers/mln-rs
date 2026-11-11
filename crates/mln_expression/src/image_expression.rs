@@ -1,16 +1,56 @@
 // Ports include/mln/style/expression/image_expression.hpp and
 // src/mln/style/expression/image_expression.cpp.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
+use mln_vec_map::VecSet;
 
 use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
 use crate::image::Image;
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::Type;
 use crate::value::{Value, to_string};
+
+thread_local! {
+    /// The images that `image` expressions found unavailable while an
+    /// [`UnavailableImages`] records on this thread.
+    static UNAVAILABLE: RefCell<Option<VecSet<String>>> = const { RefCell::new(None) };
+}
+
+/// Records the images that `image` expressions evaluated on this thread
+/// against the available images find unavailable, from [`start`] until
+/// [`finish`] or a drop. A tile layout asks for these images too, so that
+/// it is redone when one is added, even where a `coalesce` fell back past
+/// it. The record is per thread because evaluation is synchronous and the
+/// style's evaluation calls don't carry a place to put it. A recorder
+/// started while another records hides its images from the outer one.
+///
+/// [`start`]: UnavailableImages::start
+/// [`finish`]: UnavailableImages::finish
+pub struct UnavailableImages {
+    outer: Option<VecSet<String>>,
+}
+
+impl UnavailableImages {
+    pub fn start() -> Self {
+        UnavailableImages { outer: UNAVAILABLE.with(|record| record.replace(Some(VecSet::new()))) }
+    }
+
+    /// The images recorded since `start`.
+    pub fn finish(self) -> VecSet<String> {
+        UNAVAILABLE.with(|record| record.borrow_mut().take()).unwrap_or_default()
+    }
+}
+
+impl Drop for UnavailableImages {
+    fn drop(&mut self) {
+        let outer = self.outer.take();
+        UNAVAILABLE.with(|record| *record.borrow_mut() = outer);
+    }
+}
 
 pub struct ImageExpression {
     base: ExpressionBase,
@@ -51,7 +91,17 @@ impl Expression for ImageExpression {
         // `toString(Value)` always produces a string.
         let evaluated_image_id = to_string(&image_id_result);
 
-        let available = ctx.available_images.is_some_and(|images| images.contains(&evaluated_image_id));
+        let Some(available_images) = ctx.available_images else {
+            return Ok(Value::Image(Image::with_available(evaluated_image_id, false)));
+        };
+        let available = available_images.contains(&evaluated_image_id);
+        if !available && !evaluated_image_id.is_empty() {
+            UNAVAILABLE.with(|record| {
+                if let Some(record) = record.borrow_mut().as_mut() {
+                    record.insert(evaluated_image_id.clone());
+                }
+            });
+        }
         Ok(Value::Image(Image::with_available(evaluated_image_id, available)))
     }
 

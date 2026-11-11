@@ -4,6 +4,7 @@ use feature::Value;
 use mln_util::client_options::ClientOptions;
 
 use crate::async_request::AsyncRequest;
+use crate::http_header_transform::HttpHeaderTransform;
 use crate::resource::Resource;
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::ResourceTransform;
@@ -73,6 +74,10 @@ pub trait FileSource: Send + Sync {
 
     /// Sets a transformer for resource URLs (online file sources).
     fn set_resource_transform(&self, _transform: ResourceTransform) {}
+
+    /// Port-only: sets the headers to add to HTTP requests (online and HTTP
+    /// file sources).
+    fn set_http_header_transform(&self, _transform: HttpHeaderTransform) {}
 
     /// Generic setter method
     fn set_property(&self, _key: &str, _value: &Value) {}

@@ -78,6 +78,10 @@ impl GlyphManagerObserver for NullObserver {}
 /// `GlyphRequestor`.
 pub trait GlyphRequestor {
     fn on_glyphs_available(&self, glyphs: GlyphMap, requests: HBShapeRequests);
+
+    /// Asks the requestor to request the glyphs it got as missing again,
+    /// because some came from a range whose request failed.
+    fn retry_missing_glyphs(&self) {}
 }
 
 /// A requestor's identity (`GlyphRequestor*`).
@@ -144,6 +148,9 @@ pub struct GlyphManager {
     self_weak: Weak<GlyphManager>,
     glyph_url: RefCell<String>,
     entries: RefCell<HashMap<FontStack, Entry>>,
+    /// The requestors answered without the glyphs of a range whose request
+    /// failed.
+    requestors_missing_glyphs: RefCell<HashMap<GlyphRequestorKey, Weak<dyn GlyphRequestor>>>,
     observer: RefCell<Rc<dyn GlyphManagerObserver>>,
     local_glyph_rasterizer: Box<dyn LocalGlyphRasterizer>,
     glyph_cache: Arc<GlyphCache>,
@@ -198,6 +205,7 @@ impl GlyphManager {
             self_weak: self_weak.clone(),
             glyph_url: RefCell::new(String::new()),
             entries: RefCell::new(HashMap::new()),
+            requestors_missing_glyphs: RefCell::new(HashMap::new()),
             observer: RefCell::new(Rc::new(NullObserver)),
             local_glyph_rasterizer,
             glyph_cache,
@@ -427,6 +435,12 @@ impl GlyphManager {
                 request.glyphs = range_glyphs;
             }
             let requestors = std::mem::take(&mut request.requestors);
+            if error.is_some() {
+                let mut missing = self.requestors_missing_glyphs.borrow_mut();
+                for (key, (requestor, _)) in &requestors {
+                    missing.insert(*key, requestor.clone());
+                }
+            }
             // Release this range's references first, so a requestor's
             // dependencies are unique once all its ranges are parsed.
             let mut pending: Vec<(Weak<dyn GlyphRequestor>, Rc<GlyphDependencies>)> =
@@ -483,8 +497,22 @@ impl GlyphManager {
         }
     }
 
+    /// `retryFailedRequests()`: asks each requestor answered without the
+    /// glyphs of a failed range to request them again. Its request is what
+    /// requests the range again, so a range is requested once however it
+    /// came to be needed.
+    pub fn retry_failed_requests(&self) {
+        let requestors = std::mem::take(&mut *self.requestors_missing_glyphs.borrow_mut());
+        for requestor in requestors.into_values() {
+            if let Some(requestor) = requestor.upgrade() {
+                requestor.retry_missing_glyphs();
+            }
+        }
+    }
+
     /// `removeRequestor(GlyphRequestor&)`, by the requestor's identity.
     pub fn remove_requestor_key(&self, key: GlyphRequestorKey) {
+        self.requestors_missing_glyphs.borrow_mut().remove(&key);
         let mut entries = self.entries.borrow_mut();
         for entry in entries.values_mut() {
             for range in entry.ranges.values_mut() {

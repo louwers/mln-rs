@@ -67,6 +67,8 @@ impl OffscreenTextureResource {
             read_back: Cell::default(),
             copied_at: Cell::default(),
         };
+        // Port-only: the C++ WebGPU backend only decrements this count.
+        res.context.rendering_stats_mut().num_frame_buffers += 1;
         // Create color texture
         *res.color_texture.borrow_mut() = Some(res.create_color_texture());
 

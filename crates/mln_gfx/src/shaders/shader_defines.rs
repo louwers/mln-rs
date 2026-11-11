@@ -4,8 +4,9 @@
 //
 // The values were checked against the C++ headers compiled with
 // -DMLN_RENDER_BACKEND_WEBGPU=1 (idGlobalUBOIndex = 1, idBackgroundDrawableUBO
-// = 2, idBackgroundPropsUBO = 4, layerUBOStartId = 5, maxUBOCountPerShader =
-// 6, maxTextureCountPerShader = 3, maxAttributeCountPerShader = 11).
+// = 2, idProjectionUBO = 4, idBackgroundPropsUBO = 5, layerUBOStartId = 6,
+// maxUBOCountPerShader = 7, maxTextureCountPerShader = 3,
+// maxAttributeCountPerShader = 11).
 //
 // TODO(port): the ids of the other layer types arrive with those layers
 // (circle, fill and line: layers agent, M3).
@@ -22,7 +23,9 @@ pub const MLN_UBO_CONSOLIDATION: bool = true;
 pub const LAYER_SSBO_START_ID: usize = GLOBAL_UBO_COUNT;
 pub const ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO: usize = LAYER_SSBO_START_ID;
 pub const ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO: usize = LAYER_SSBO_START_ID + 1;
-pub const DRAWABLE_RESERVED_UBO_COUNT: usize = LAYER_SSBO_START_ID + 2;
+/// The per-drawable projection block (`ProjectionUBO`), one SSBO per layer.
+pub const ID_PROJECTION_UBO: usize = LAYER_SSBO_START_ID + 2;
+pub const DRAWABLE_RESERVED_UBO_COUNT: usize = LAYER_SSBO_START_ID + 3;
 
 pub const ID_BACKGROUND_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const BACKGROUND_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
@@ -59,11 +62,11 @@ pub const ID_LINE_EXPRESSION_UBO: usize = ID_LINE_EVALUATED_PROPS_UBO + 1;
 pub const LINE_LAYER_UBO_COUNT: usize = ID_LINE_EXPRESSION_UBO + 1;
 
 // --- drawable SSBOs / UBOs ---
-pub const DRAWABLE_SSBO_START_ID: usize = 6;
-pub const DRAWABLE_UBO_START_ID: usize = 6;
+pub const DRAWABLE_SSBO_START_ID: usize = 7;
+pub const DRAWABLE_UBO_START_ID: usize = 7;
 pub const BACKGROUND_UBO_COUNT: usize = BACKGROUND_LAYER_UBO_COUNT; // packed
 
-pub const MAX_UBO_COUNT_PER_SHADER: usize = 6;
+pub const MAX_UBO_COUNT_PER_SHADER: usize = 7;
 pub const MAX_SSBO_COUNT_PER_LAYER: usize = LAYER_UBO_START_ID - LAYER_SSBO_START_ID;
 pub const MAX_UBO_COUNT_PER_LAYER: usize = DRAWABLE_SSBO_START_ID - LAYER_UBO_START_ID;
 pub const MAX_SSBO_COUNT_PER_DRAWABLE: usize = DRAWABLE_UBO_START_ID - DRAWABLE_SSBO_START_ID;
@@ -156,6 +159,19 @@ pub const ID_FILL_EXTRUSION_PATTERN_FROM_VERTEX_ATTRIBUTE: usize = 6;
 pub const ID_FILL_EXTRUSION_PATTERN_TO_VERTEX_ATTRIBUTE: usize = 7;
 pub const FILL_EXTRUSION_VERTEX_ATTRIBUTE_COUNT: usize = 8;
 
+pub const ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub const GLOBE_DEPTH_VERTEX_ATTRIBUTE_COUNT: usize = 1;
+
+// --- sky (`idSkyPropsUBO` / `idAtmospherePropsUBO = getEnumValue(drawableReservedUBOCount, layerUBOStartId)`)
+pub const ID_SKY_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+pub const SKY_LAYER_UBO_COUNT: usize = ID_SKY_PROPS_UBO + 1;
+pub const ID_ATMOSPHERE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
+pub const ATMOSPHERE_LAYER_UBO_COUNT: usize = ID_ATMOSPHERE_PROPS_UBO + 1;
+pub const ID_SKY_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub const SKY_VERTEX_ATTRIBUTE_COUNT: usize = 1;
+pub const ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE: usize = 0;
+pub const ATMOSPHERE_VERTEX_ATTRIBUTE_COUNT: usize = 1;
+
 pub const ID_HEATMAP_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // SSBO
 pub const HEATMAP_LAYER_SSBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 pub const ID_HEATMAP_EVALUATED_PROPS_UBO: usize = HEATMAP_LAYER_SSBO_COUNT; // packed
@@ -205,7 +221,8 @@ pub const ID_SYMBOL_EVALUATED_PROPS_UBO: usize = SYMBOL_LAYER_SSBO_COUNT; // pac
 pub const SYMBOL_LAYER_UBO_COUNT: usize = ID_SYMBOL_EVALUATED_PROPS_UBO + 1;
 pub const ID_COLLISION_DRAWABLE_UBO: usize = ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO; // packed
 pub const ID_COLLISION_TILE_PROPS_UBO: usize = DRAWABLE_RESERVED_UBO_COUNT; // packed
-pub const COLLISION_UBO_COUNT: usize = ID_COLLISION_TILE_PROPS_UBO + 1;
+pub const ID_COLLISION_PROJECTION_UBO: usize = ID_PROJECTION_UBO; // packed
+pub const COLLISION_UBO_COUNT: usize = ID_COLLISION_TILE_PROPS_UBO + 1; // packed
 pub const ID_SYMBOL_IMAGE_TEXTURE: usize = 0;
 pub const ID_SYMBOL_IMAGE_ICON_TEXTURE: usize = 1;
 pub const SYMBOL_TEXTURE_COUNT: usize = 2;

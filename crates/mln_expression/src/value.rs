@@ -5,9 +5,9 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
-    LightAnchorType, LineCapType, LineJoinType, Position, RasterResamplingType, RotateAnchorType, Rotation,
-    SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, RotateAnchorType,
+    Rotation, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType,
+    TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
@@ -37,6 +37,7 @@ pub enum Value {
     Formatted(Formatted),
     Image(Image),
     Padding(Padding),
+    ProjectionDefinition(ProjectionDefinition),
     Array(Vec<Value>),
     Object(ObjectType),
 }
@@ -132,6 +133,11 @@ impl From<Padding> for Value {
         Value::Padding(v)
     }
 }
+impl From<ProjectionDefinition> for Value {
+    fn from(v: ProjectionDefinition) -> Self {
+        Value::ProjectionDefinition(v)
+    }
+}
 impl From<VariableAnchorOffsetCollection> for Value {
     fn from(v: VariableAnchorOffsetCollection) -> Self {
         Value::VariableAnchorOffsetCollection(v)
@@ -171,6 +177,7 @@ pub fn type_of(value: &Value) -> Type {
         Value::String(_) => Type::String,
         Value::Color(_) => Type::Color,
         Value::Padding(_) => Type::Padding,
+        Value::ProjectionDefinition(_) => Type::ProjectionDefinition,
         Value::VariableAnchorOffsetCollection(_) => Type::VariableAnchorOffsetCollection,
         Value::Collator(_) => Type::Collator,
         Value::Formatted(_) => Type::Formatted,
@@ -224,6 +231,9 @@ fn write_json(writer: &mut Writer, value: &Value) {
         Value::String(s) => writer.string(s),
         Value::Color(c) => writer.string(&c.stringify()),
         Value::Padding(p) => stringify_padding(writer, p),
+        // `conversion::stringify(writer, const ProjectionDefinition&)`: its
+        // serialized mln::Value.
+        Value::ProjectionDefinition(p) => stringify_mbgl(writer, &p.serialize()),
         Value::VariableAnchorOffsetCollection(v) => stringify_variable_anchor_offset_collection(writer, v),
         Value::Collator(_) => {
             // Collators are excluded from constant folding and there's no
@@ -349,6 +359,7 @@ pub fn to_mbgl_value(value: &Value) -> MbglValue {
     match value {
         Value::Color(color) => color.serialize(),
         Value::Padding(padding) => padding.serialize(),
+        Value::ProjectionDefinition(projection) => projection.serialize(),
         Value::VariableAnchorOffsetCollection(anchor_offset) => anchor_offset.serialize(),
         Value::Collator(_) => {
             // fromExpressionValue can't be used for Collator values, because
@@ -528,6 +539,7 @@ impl ValueConverter for Color {
     }
 }
 simple_value_converter!(Padding, Padding, Type::Padding);
+simple_value_converter!(ProjectionDefinition, ProjectionDefinition, Type::ProjectionDefinition);
 simple_value_converter!(
     VariableAnchorOffsetCollection,
     VariableAnchorOffsetCollection,

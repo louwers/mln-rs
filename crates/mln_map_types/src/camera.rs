@@ -96,6 +96,12 @@ pub struct AnimationOptions {
     /// Zero-based zoom level at the peak of the flyTo() transition's flight
     /// path.
     pub min_zoom: Option<f64>,
+    /// The longest a flyTo() transition may take, as GL JS's `maxDuration`:
+    /// a flight whose duration, set or derived from the velocity, exceeds it
+    /// jumps instead. `None` caps nothing beyond what [`Duration`] holds: a
+    /// derived duration it can't hold jumps too. Other camera commands
+    /// ignore it.
+    pub max_duration: Option<Duration>,
     /// The easing timing curve of the transition.
     pub easing: Option<UnitBezier>,
     /// A function that is called on each frame of the transition, just before
@@ -225,9 +231,12 @@ pub struct CameraDelta {
     pub bearing: Option<f64>,
     /// Degrees to add to the pitch.
     pub pitch: Option<f64>,
-    /// The screen point that `scale`, `bearing` and `pitch` keep in place.
-    /// It needs one of them, and it combines with `offset` only in a delta
-    /// without a duration.
+    /// The screen point that `scale`, `bearing` and `pitch` keep in place,
+    /// and that a drag's `offset` holds: on the globe the location under it
+    /// follows the drag, as the C++ globe's `moveBy(offset, anchor)` does,
+    /// while a flat map moves the same wherever it is held. It needs one of
+    /// them, and it combines with `offset` and one of the others only in a
+    /// delta without a duration.
     pub anchor: Option<ScreenCoordinate>,
     /// How the gesture keeps moving after this delta, which only a delta in
     /// the [`GesturePhase::End`] phase carries. Its parts' snaps apply only
@@ -267,16 +276,16 @@ pub enum CameraError {
     NotFinite,
     /// The scale isn't finite and positive.
     InvalidScale,
-    /// An anchor needs a scale, bearing or pitch to hold in place.
+    /// An anchor needs an offset, scale, bearing or pitch to hold in place.
     AnchorWithoutChange,
     /// Only a delta in the end phase carries momentum.
     MomentumOutsideEnd,
     /// A delta with momentum sets only its animation's transition id and end
     /// function: the momentum, not an animation, moves the camera.
     MomentumWithAnimation,
-    /// An anchor combines with an offset only in an immediate delta: an
-    /// anchored ease couples the center with its fields, so it would replace
-    /// an animated pan.
+    /// An anchor combines with an offset and a scale, bearing or pitch only
+    /// in an immediate delta: an anchored ease couples the center with its
+    /// fields, so it would replace an animated pan.
     AnimatedAnchoredOffset,
 }
 
@@ -285,7 +294,7 @@ impl std::fmt::Display for CameraError {
         f.write_str(match self {
             CameraError::NotFinite => "camera delta offset, anchor, bearing and pitch must be finite",
             CameraError::InvalidScale => "camera delta scale must be finite and positive",
-            CameraError::AnchorWithoutChange => "a camera delta anchor requires scale, bearing, or pitch",
+            CameraError::AnchorWithoutChange => "a camera delta anchor requires offset, scale, bearing, or pitch",
             CameraError::MomentumOutsideEnd => "only a camera delta in the end phase carries momentum",
             CameraError::MomentumWithAnimation => {
                 "a camera delta with momentum sets only the transition ID and end function of its animation"
@@ -301,7 +310,8 @@ impl std::error::Error for CameraError {}
 
 impl CameraDelta {
     /// Checks the delta as maplibre-native-ffi's `validate_camera_delta`
-    /// does.
+    /// does, except that an anchor with only an offset is the point a drag
+    /// holds, which the globe needs.
     pub fn validate(&self) -> Result<(), CameraError> {
         let finite_point = |p: Option<ScreenCoordinate>| p.is_none_or(|p| p.x.is_finite() && p.y.is_finite());
         if !finite_point(self.offset)
@@ -315,7 +325,7 @@ impl CameraDelta {
             return Err(CameraError::InvalidScale);
         }
         let anchored = self.scale.is_some() || self.bearing.is_some() || self.pitch.is_some();
-        if self.anchor.is_some() && !anchored {
+        if self.anchor.is_some() && !anchored && self.offset.is_none() {
             return Err(CameraError::AnchorWithoutChange);
         }
         if self.momentum.is_some() {
@@ -326,6 +336,7 @@ impl CameraDelta {
             if a.duration.is_some()
                 || a.velocity.is_some()
                 || a.min_zoom.is_some()
+                || a.max_duration.is_some()
                 || a.easing.is_some()
                 || a.transition_frame_fn.is_some()
             {
@@ -334,6 +345,7 @@ impl CameraDelta {
         }
         if self.offset.is_some()
             && self.anchor.is_some()
+            && anchored
             && self.animation.duration.is_some_and(|duration| duration > Duration::zero())
         {
             return Err(CameraError::AnimatedAnchoredOffset);

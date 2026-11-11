@@ -11,10 +11,11 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use crate::meter::{Meter, ms};
+use crate::latency::{set_tile_latency, take_tile_requests};
+use crate::meter::{Meter, live_heap_mib, ms};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
-    basemap_center, basemap_north_west, basemap_south_east, basemap_style, cjk_center, write_frame,
+    basemap_center, basemap_north_west, basemap_point, basemap_south_east, basemap_style, cjk_center, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};
@@ -103,10 +104,14 @@ pub fn all() -> Vec<Case> {
     }
     cases.push(Case::new("Frame/Throughput", frame_throughput));
     cases.push(Case::new("Frame/Paced", frame_paced));
+    cases.push(Case::new("Frame/Oscillate", |cx| frame_oscillate(cx, "Frame/Oscillate", rotate_swing)));
+    cases.push(Case::new("Frame/OscillatePanZoom", |cx| frame_oscillate(cx, "Frame/OscillatePanZoom", pan_zoom_swing)));
     cases.push(Case::new("Frame/Idle", frame_idle));
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
+    cases.push(Case::new("Frame/AddImages", frame_add_images));
     cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     cases.push(Case::new("Frame/FeatureStateHover", frame_feature_state_hover));
+    cases.push(Case::new("Frame/HideLayers", frame_hide_layers));
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
@@ -414,6 +419,34 @@ fn frame_feature_state(cx: &Context) -> Metrics {
     metrics
 }
 
+/// Every layer of the loaded basemap hidden until the map settles, then
+/// shown again until it settles complete. `hidden_heap_mib` and
+/// `hidden_gpu_mib` are the heap and the GPU buffers live while they're
+/// hidden.
+fn frame_hide_layers(cx: &Context) -> Metrics {
+    let mut scene = basemap(cx, Mode::OnDemand);
+    scene.settle();
+    let mut meter = Meter::new();
+    let (mut heap, mut gpu) = (Vec::new(), Vec::new());
+    for _ in 0..cx.iterations(10) {
+        meter.start();
+        scene.set_source_visible("basemap", false);
+        scene.settle();
+        heap.push(live_heap_mib());
+        gpu.push(scene.gpu_buffers_mib());
+        scene.set_source_visible("basemap", true);
+        scene.settle();
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/HideLayers", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("hidden_heap_mib", median(&heap));
+    metrics.lead("hidden_gpu_mib", median(&gpu));
+    metrics
+}
+
 /// The flight of Frame/Paced: from the block's north-west corner at zoom
 /// 14 to its south-east corner at zoom 15.5, eased in and out, at
 /// `progress` from 0 to 1. The tiles stop at zoom 14, so from zoom 15 on the
@@ -494,6 +527,95 @@ fn frame_paced(cx: &Context) -> Metrics {
     metrics
 }
 
+/// A swing back and forth from 0 at `seconds`: to 1, then between -1 and
+/// 1, each swing half a second, back to 0 after each second.
+fn swing(seconds: f64) -> f64 {
+    4.0 * ((seconds - 0.25).rem_euclid(1.0) - 0.5).abs() - 1.0
+}
+
+/// A camera of the basemap's: its center, zoom and bearing.
+type Camera = (LatLng, f64, f64);
+
+/// Frame/Oscillate's camera at `seconds`: the bearing swings between -90°
+/// and 90°. The center is 0.23 of a tile south-east of a tile corner, so
+/// that the view reaches the column and the row of tiles two west and two
+/// north of that corner only near its widest, around 37° and 53°: they
+/// come into view for about a sixth of a second's swing each time one
+/// passes, less than a tile takes to load.
+fn rotate_swing(seconds: f64) -> Camera {
+    (basemap_point(2620.23, 6332.23), BASEMAP_ZOOM, 90.0 * swing(seconds))
+}
+
+/// Frame/OscillatePanZoom's camera at `seconds`: the center swings 0.65 of
+/// a tile east and west of a tile's center while the zoom goes from 14.9
+/// out to 14 at each end, so that the view's edges reach the next tiles
+/// only in the last eighth of a swing.
+fn pan_zoom_swing(seconds: f64) -> Camera {
+    let swing = swing(seconds);
+    (basemap_point(2620.5 + 0.65 * swing, 6332.0), BASEMAP_ZOOM + 0.9 * (1.0 - swing.abs()), 0.0)
+}
+
+/// Three seconds of a camera swinging back and forth (`path`) on a 60 Hz
+/// display's clock, as a drag back and forth does, over the basemap, each
+/// tile request answered 100 ms late, as over a network
+/// ([`set_tile_latency`]). Only the first view is loaded at the start; the
+/// frames are paced as in Frame/Paced. The tile requests are the tiles it
+/// loads, and loads again after dropping them.
+fn frame_oscillate(cx: &Context, name: &str, path: fn(f64) -> Camera) -> Metrics {
+    const LATENCY: Duration = Duration::from_millis(100);
+    const SECONDS: f64 = 3.0;
+    let ticks = (SECONDS / REFRESH.as_secs_f64()).round() as usize;
+    let jump = |scene: &mut Scene, seconds: f64| {
+        let (center, zoom, bearing) = path(seconds);
+        scene.jump_rotated(center, zoom, bearing);
+    };
+    let mut scene = basemap(cx, Mode::OnDemand);
+    set_tile_latency(LATENCY);
+    let mut meter = Meter::new();
+    let (mut frames, mut partial, mut requests) = (Vec::new(), 0, Vec::new());
+    for _ in 0..cx.iterations(3) {
+        scene.clear_data();
+        jump(&mut scene, 0.0);
+        scene.settle();
+        take_tile_requests();
+        meter.start();
+        let start = Instant::now();
+        let refresh = |tick: usize| start + REFRESH * tick as u32;
+        let mut tick = 0;
+        while tick < ticks {
+            std::thread::sleep(refresh(tick).saturating_duration_since(Instant::now()));
+            scene.pump();
+            jump(&mut scene, (tick + 1).min(ticks) as f64 / ticks as f64 * SECONDS);
+            let demanded = Instant::now();
+            let status = scene.render_frame();
+            let finished = Instant::now();
+            frames.push(ms(finished - demanded));
+            partial += usize::from(status.mode != RenderMode::Full);
+            // Shown at the first refresh after it finished, where the next
+            // frame starts.
+            let next = ((finished - start).as_secs_f64() / REFRESH.as_secs_f64()).ceil() as usize;
+            tick = next.max(tick + 1);
+        }
+        meter.stop();
+        requests.push(take_tile_requests() as f64);
+    }
+    set_tile_latency(Duration::ZERO);
+    if let Some(dir) = &cx.frames {
+        scene.settle();
+        write_frame(dir, name, &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.demote("time_ms");
+    metrics.lead("tile_requests", median(&requests));
+    metrics.lead("partial_pct", 100.0 * partial as f64 / frames.len() as f64);
+    metrics.other("frame_p50_ms", percentile(&frames, 50.0));
+    metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
+    metrics.lead("frame_p99_ms", percentile(&frames, 99.0));
+    metrics.other("frame_max_ms", percentile(&frames, 100.0));
+    metrics.other("frames", frames.len() as f64 / requests.len() as f64);
+    metrics
+}
+
 /// A settled map in slices of 100 ms, the run loop drawing whenever the map
 /// asks, as an idle app's: what it costs to do nothing, and how many frames
 /// it draws when nothing changes.
@@ -549,6 +671,73 @@ fn frame_settle_without_symbols(cx: &Context) -> Metrics {
     }
     let mut metrics = meter.finish();
     metrics.lead("frames", median(&frames));
+    metrics
+}
+
+/// From adding the first of 50 icons to the basemap, five on each refresh
+/// over ten refreshes, as a host supplies marker icons when they load,
+/// until the map stops asking for frames. A symbol layer over 20 points
+/// draws five of the icons, which its tile asked for before they were
+/// added; nothing draws the other 45. Each iteration loads the style again
+/// first, untimed, without the icons.
+fn frame_add_images(cx: &Context) -> Metrics {
+    const ICONS: usize = 50;
+    const PER_REFRESH: usize = 5;
+    const DRAWN: usize = 5;
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let features: Vec<serde_json::Value> = (0..20)
+        .map(|n| {
+            let point = basemap_point(2619.5 + 0.1 * (n % 5) as f64, 6331.8 + 0.3 * (n / 5) as f64);
+            serde_json::json!({
+                "type": "Feature",
+                "properties": {"icon": format!("marker-{}", n % DRAWN)},
+                "geometry": {"type": "Point", "coordinates": [point.longitude(), point.latitude()]},
+            })
+        })
+        .collect();
+    style["sources"]["markers"] =
+        serde_json::json!({"type": "geojson", "data": {"type": "FeatureCollection", "features": features}});
+    style["layers"].as_array_mut().expect("the style has layers").push(serde_json::json!({
+        "id": "markers",
+        "type": "symbol",
+        "source": "markers",
+        "layout": {"icon-image": ["get", "icon"], "icon-allow-overlap": true},
+    }));
+    let style = style.to_string();
+    let icon = |n: usize| {
+        let pixel = [(n * 5) as u8, 0, 255 - (n * 5) as u8, 255];
+        PremultipliedImage::from_vec(Size::new(24, 24), pixel.repeat(24 * 24))
+    };
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    for _ in 0..cx.iterations(5) {
+        scene.load_json(&style);
+        scene.settle();
+        meter.start();
+        let start = Instant::now();
+        for tick in 0..ICONS / PER_REFRESH {
+            std::thread::sleep((start + REFRESH * tick as u32).saturating_duration_since(Instant::now()));
+            for n in tick * PER_REFRESH..(tick + 1) * PER_REFRESH {
+                scene.add_image(&format!("marker-{n}"), icon(n));
+            }
+            let demanded = Instant::now();
+            scene.pump();
+            scene.render_frame();
+            frames.push(ms(demanded.elapsed()));
+        }
+        scene.settle();
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/AddImages", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
+    metrics.lead("frame_p99_ms", percentile(&frames, 99.0));
+    metrics.other("frame_p50_ms", percentile(&frames, 50.0));
     metrics
 }
 

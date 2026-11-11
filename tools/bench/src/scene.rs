@@ -18,6 +18,7 @@ use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
 use mln_renderer::query::SourceQueryOptions;
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geo::LatLng;
@@ -164,6 +165,7 @@ impl Scene {
     /// A map whose renderer shares `glyph_cache`.
     pub fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         render_test::file_source::register_proxy_file_source();
+        crate::latency::register();
         let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db");
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
         let client_options = ClientOptions::default();
@@ -211,7 +213,14 @@ impl Scene {
     }
 
     pub fn jump(&mut self, center: LatLng, zoom: f64) {
-        self.map.jump_to(&CameraOptions::default().with_center(Some(center)).with_zoom(Some(zoom)));
+        self.jump_rotated(center, zoom, 0.0);
+    }
+
+    /// Jumps to a camera with `bearing` in degrees.
+    pub fn jump_rotated(&mut self, center: LatLng, zoom: f64, bearing: f64) {
+        self.map.jump_to(
+            &CameraOptions::default().with_center(Some(center)).with_zoom(Some(zoom)).with_bearing(Some(bearing)),
+        );
     }
 
     /// A complete still frame, read back. Waits on the run loop, which
@@ -327,6 +336,31 @@ impl Scene {
             .borrow()
             .as_ref()
             .is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
+    }
+
+    /// Shows or hides every layer that draws `source`.
+    pub fn set_source_visible(&mut self, source: &str, visible: bool) {
+        let ids: Vec<String> = self
+            .map
+            .get_style()
+            .get_layers()
+            .iter()
+            .filter(|layer| layer.get_source_id() == source)
+            .map(|layer| layer.get_id())
+            .collect();
+        assert!(!ids.is_empty(), "no layer draws {source}");
+        let visibility = if visible { VisibilityType::Visible } else { VisibilityType::None };
+        for id in ids {
+            self.map.get_style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
+        }
+    }
+
+    /// The vertex and index buffers the GPU held after the last frame, in
+    /// MiB.
+    pub fn gpu_buffers_mib(&self) -> f64 {
+        let last_frame = self.observer.last_frame.borrow();
+        let stats = &last_frame.as_ref().expect("a frame").rendering_stats;
+        f64::from(stats.mem_vertex_buffers + stats.mem_index_buffers) / (1024.0 * 1024.0)
     }
 
     /// Drops every loaded tile and the renderer's other data, as after a

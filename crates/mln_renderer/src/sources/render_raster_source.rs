@@ -116,7 +116,9 @@ impl RenderSource for RenderRasterSource {
             self.tile_source.tile_pyramid.clear_all();
         }
 
-        let Some(tileset) = self.cached_tileset.clone() else {
+        // A tileset without tiles makes no tiles, and the source counts as
+        // loaded until its tiles are set.
+        let Some(tileset) = self.cached_tileset.clone().filter(|tileset| !tileset.tiles.is_empty()) else {
             return;
         };
 
@@ -129,6 +131,10 @@ impl RenderSource for RenderRasterSource {
 
     fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>) {
         self.tile_source.prepare(parameters);
+    }
+
+    fn release_render_data(&mut self) {
+        self.tile_source.release_render_data();
     }
 
     fn update_fading_tiles(&mut self) {
@@ -157,6 +163,10 @@ impl RenderSource for RenderRasterSource {
 
     fn reduce_memory_use(&mut self) {
         self.tile_source.reduce_memory_use();
+    }
+
+    fn retry_failed_tiles(&mut self) {
+        self.tile_source.retry_failed_tiles();
     }
 
     fn dump_debug_logs(&self) {

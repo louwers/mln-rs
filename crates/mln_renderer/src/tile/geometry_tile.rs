@@ -48,6 +48,7 @@ use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -240,6 +241,7 @@ pub struct GeometryTileInner {
     mode: MapMode,
 
     show_collision_boxes: Cell<bool>,
+    subdivision_granularity: Cell<SubdivisionGranularitySetting>,
 
     fade_state: Cell<FadeState>,
 }
@@ -420,11 +422,44 @@ impl GlyphRequestor for GeometryTileInner {
         }
         self.worker.send(WorkerMessage::GlyphsAvailable { glyph_map, results });
     }
+
+    /// Lays the tile out again with the glyphs it got as missing requested
+    /// again; the tile is pending until then.
+    fn retry_missing_glyphs(&self) {
+        if self.is_obsolete() {
+            return;
+        }
+        if !self.base.pending.get() {
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+        self.base.pending.set(true);
+
+        self.correlation_id.set(self.correlation_id.get() + 1);
+        let correlation_id = self.correlation_id.get();
+        self.worker.send(WorkerMessage::RetryMissingGlyphs { correlation_id });
+    }
 }
 
 impl ImageRequestor for GeometryTileInner {
     fn requestor_base(&self) -> &ImageRequestorBase {
         &self.image_requestor_base
+    }
+
+    /// `onRequestedImageAdded()`: parses again with the added image.
+    fn on_requested_image_added(&self) {
+        if self.is_obsolete() {
+            return;
+        }
+
+        if !self.base.pending.get() {
+            self.base.pending.set(true);
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+
+        self.correlation_id.set(self.correlation_id.get() + 1);
+        let correlation_id = self.correlation_id.get();
+        let available_images = self.available_images();
+        self.worker.send(WorkerMessage::SetAvailableImages { available_images, correlation_id });
     }
 
     /// `onImagesAvailable(images, patterns, versionMap, imageCorrelationID)`.
@@ -498,6 +533,7 @@ impl GeometryTile {
                 atlas_textures: RefCell::new(None),
                 mode: parameters.mode,
                 show_collision_boxes: Cell::new(show_collision_boxes),
+                subdivision_granularity: Cell::new(SubdivisionGranularitySetting::none()),
                 fade_state: Cell::new(FadeState::Loaded),
             }
         });
@@ -604,7 +640,14 @@ impl Tile for GeometryTile {
         inner.correlation_id.set(inner.correlation_id.get() + 1);
         let correlation_id = inner.correlation_id.get();
         let available_images = inner.available_images();
-        inner.worker.send(WorkerMessage::SetLayers { layers: impls, global_state, available_images, correlation_id });
+        let subdivision_granularity = inner.subdivision_granularity.get();
+        inner.worker.send(WorkerMessage::SetLayers {
+            layers: impls,
+            global_state,
+            available_images,
+            subdivision_granularity,
+            correlation_id,
+        });
     }
 
     fn set_show_collision_boxes(&self, show_collision_boxes: bool) {
@@ -615,6 +658,10 @@ impl Tile for GeometryTile {
             let correlation_id = inner.correlation_id.get();
             inner.worker.send(WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id });
         }
+    }
+
+    fn set_subdivision_granularity(&self, value: &SubdivisionGranularitySetting) {
+        self.inner.subdivision_granularity.set(*value);
     }
 
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {
@@ -753,16 +800,17 @@ impl Tile for GeometryTile {
         let query_padding = self.get_query_padding(layers);
 
         let id = self.inner.base.id();
-        let mut pos_matrix: Mat4 = [0.0; 16];
-        transform_state.matrix_for(&mut pos_matrix, &id.to_unwrapped());
-        let tile_matrix = pos_matrix;
-        mln_util::mat4::matrix::multiply(&mut pos_matrix, proj_matrix, &tile_matrix);
+        let projector = mln_map_types::TileProjector::with_data(
+            transform_state,
+            &id.to_unwrapped(),
+            transform_state.get_projection_data_with(&id.to_unwrapped(), proj_matrix),
+        );
 
         layout_result.feature_index.query(
             result,
             query_geometry,
             transform_state,
-            &pos_matrix,
+            &projector,
             mln_util::constants::TILE_SIZE_D * f64::from(id.overscale_factor()),
             2f64.powf(transform_state.get_zoom() - f64::from(id.overscaled_z)),
             options,
@@ -800,7 +848,11 @@ impl Tile for GeometryTile {
             // Go through all sourceLayers, if any
             // to gather all the features
             if let Some(layer) = data.get_layer(source_layer)? {
+                let start = result.len();
                 query_layer_source_features(&*layer, result, options, global_state, &id)?;
+                for feature in &mut result[start..] {
+                    feature.source_layer.clone_from(source_layer);
+                }
             }
         }
         Ok(())

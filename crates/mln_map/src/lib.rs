@@ -9,6 +9,7 @@ pub mod map_observer;
 pub mod map_options;
 // gtests-core: MapProjection (test/map/map.test.cpp).
 pub mod map_projection;
+pub mod rendering_stats_view;
 pub mod transform;
 
 pub use map::Map;
@@ -26,5 +27,6 @@ pub use mln_map_types::{
     TransformState, TransitionEnd, TransitionOutcome, ViewportMode,
 };
 pub use mln_renderer::{
-    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, RenderingStats, SourceLayerID,
+    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, OverscaledTileID, RenderingStats, SourceLayerID,
+    TileOperation,
 };

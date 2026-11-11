@@ -33,6 +33,53 @@ impl SourceFeatureState {
             let feature_states = layer_states.entry(feature_id.to_owned()).or_default();
             feature_states.insert(key.clone(), value.clone());
         }
+        // `coalesce_changes` applies removals after changes, so a removal
+        // queued before this change would undo it.
+        self.cancel_queued_removals(&source_layer, feature_id, new_state);
+    }
+
+    /// Narrows the queued removals of `feature_id` so they don't cover the
+    /// keys of `new_state`. A removal of the whole layer or feature becomes a
+    /// removal of the other current state.
+    fn cancel_queued_removals(&mut self, source_layer: &str, feature_id: &str, new_state: &FeatureState) {
+        let Some(feature_deletions) = self.deleted_states.get_mut(source_layer) else {
+            return;
+        };
+        let current_layer = self.current_states.get(source_layer);
+        let removal_of_keys_not_in_new_state = || -> FeatureState {
+            current_layer
+                .and_then(|layer| layer.get(feature_id))
+                .into_iter()
+                .flat_map(|current| current.keys())
+                .filter(|key| !new_state.contains_key(*key))
+                .map(|key| (key.clone(), Default::default()))
+                .collect()
+        };
+        if feature_deletions.is_empty() {
+            for other in current_layer.into_iter().flat_map(|layer| layer.keys()) {
+                if other != feature_id {
+                    feature_deletions.insert(other.clone(), FeatureState::new());
+                }
+            }
+            let removal = removal_of_keys_not_in_new_state();
+            if !removal.is_empty() {
+                feature_deletions.insert(feature_id.to_owned(), removal);
+            }
+        } else if let Some(deleted_keys) = feature_deletions.get_mut(feature_id) {
+            if deleted_keys.is_empty() {
+                *deleted_keys = removal_of_keys_not_in_new_state();
+            } else {
+                for key in new_state.keys() {
+                    deleted_keys.remove(key);
+                }
+            }
+            if deleted_keys.is_empty() {
+                feature_deletions.remove(feature_id);
+            }
+        }
+        if feature_deletions.is_empty() {
+            self.deleted_states.remove(source_layer);
+        }
     }
 
     /// `getState(result, sourceLayerID, featureID)`.
@@ -50,11 +97,19 @@ impl SourceFeatureState {
             .and_then(|layer_states| layer_states.get(feature_id))
             .cloned()
             .unwrap_or_default();
-        // result = changes; result.insert(current.begin(), current.end()):
-        // insert keeps the existing (changed) values.
+        // A queued removal never covers a key with a queued change, so the
+        // result is the current state less the removals, plus the changes.
         let mut result = changes;
-        for (key, value) in current {
-            result.entry(key).or_insert(value);
+        let layer_deletions = self.deleted_states.get(source_layer);
+        let deleted_keys = layer_deletions.and_then(|layer_deletions| layer_deletions.get(feature_id));
+        let all_removed = layer_deletions.is_some_and(|layer_deletions| layer_deletions.is_empty())
+            || deleted_keys.is_some_and(|deleted_keys| deleted_keys.is_empty());
+        if !all_removed {
+            for (key, value) in current {
+                if !deleted_keys.is_some_and(|deleted_keys| deleted_keys.contains_key(&key)) {
+                    result.entry(key).or_insert(value);
+                }
+            }
         }
         result
     }
@@ -121,51 +176,63 @@ impl SourceFeatureState {
 
     /// `removeState(sourceLayerID, featureID, stateKey)`.
     pub fn remove_state(&mut self, source_layer_id: Option<&str>, feature_id: Option<&str>, state_key: Option<&str>) {
-        let source_layer = source_layer_id.unwrap_or("").to_owned();
+        let source_layer = source_layer_id.unwrap_or("");
 
-        let source_layer_deleted =
-            self.deleted_states.get(&source_layer).is_some_and(|layer_states| layer_states.is_empty());
-        if source_layer_deleted {
+        let layer_deletions = self.deleted_states.get(source_layer);
+        if layer_deletions.is_some_and(|layer_deletions| layer_deletions.is_empty()) {
             return;
         }
 
-        match (state_key, feature_id) {
-            (Some(state_key), Some(feature_id)) => {
-                // `!deletedStates.contains(sourceLayer) &&
-                // !deletedStates[sourceLayer].contains(featureID)`: the
-                // second operand's operator[] inserts the layer; when the
-                // layer is already there, nothing is recorded (C++ quirk).
-                if !self.deleted_states.contains_key(&source_layer) {
-                    let layer_states = self.deleted_states.entry(source_layer).or_default();
-                    if !layer_states.contains_key(feature_id) {
-                        layer_states
-                            .entry(feature_id.to_owned())
-                            .or_default()
-                            .insert(state_key.to_owned(), Default::default());
+        match (feature_id, state_key) {
+            (Some(feature_id), Some(state_key)) => {
+                let feature_deleted = layer_deletions
+                    .and_then(|layer_deletions| layer_deletions.get(feature_id))
+                    .is_some_and(|deleted_keys| deleted_keys.is_empty());
+                if feature_deleted {
+                    return;
+                }
+                self.deleted_states
+                    .entry(source_layer.to_owned())
+                    .or_default()
+                    .entry(feature_id.to_owned())
+                    .or_default()
+                    .insert(state_key.to_owned(), Default::default());
+            }
+            (Some(feature_id), None) => {
+                self.deleted_states
+                    .entry(source_layer.to_owned())
+                    .or_default()
+                    .insert(feature_id.to_owned(), FeatureState::new());
+            }
+            (None, _) => {
+                self.deleted_states.insert(source_layer.to_owned(), FeatureStates::new());
+            }
+        }
+        // A later change turns this removal into removals of the current
+        // state, which don't cover queued changes.
+        self.cancel_queued_changes(source_layer, feature_id, state_key);
+    }
+
+    /// Drops the queued changes that a removal covers.
+    fn cancel_queued_changes(&mut self, source_layer: &str, feature_id: Option<&str>, state_key: Option<&str>) {
+        let Some(feature_id) = feature_id else {
+            self.state_changes.remove(source_layer);
+            return;
+        };
+        let Some(layer_changes) = self.state_changes.get_mut(source_layer) else {
+            return;
+        };
+        match state_key {
+            Some(state_key) => {
+                if let Some(feature_changes) = layer_changes.get_mut(feature_id) {
+                    feature_changes.remove(state_key);
+                    if feature_changes.is_empty() {
+                        layer_changes.remove(feature_id);
                     }
                 }
             }
-            (None, Some(feature_id)) => {
-                let update_in_queue = self
-                    .state_changes
-                    .get(&source_layer)
-                    .is_some_and(|layer_states| layer_states.contains_key(feature_id));
-                if update_in_queue {
-                    let keys: Vec<String> = self.state_changes[&source_layer][feature_id].keys().cloned().collect();
-                    let deleted =
-                        self.deleted_states.entry(source_layer).or_default().entry(feature_id.to_owned()).or_default();
-                    for key in keys {
-                        deleted.insert(key, Default::default());
-                    }
-                } else {
-                    self.deleted_states
-                        .entry(source_layer)
-                        .or_default()
-                        .insert(feature_id.to_owned(), FeatureState::new());
-                }
-            }
-            _ => {
-                self.deleted_states.insert(source_layer, FeatureStates::new());
+            None => {
+                layer_changes.remove(feature_id);
             }
         }
     }
@@ -294,5 +361,100 @@ mod tests {
         render_frame(&mut state, &[&a]);
         assert_eq!(a.applied_count(), 2);
         assert_eq!(a.applied(1)["layer"].len(), 2);
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Op {
+        Set(&'static str, &'static str),
+        RemoveKey(&'static str, &'static str),
+        RemoveFeature(&'static str),
+        RemoveLayer,
+    }
+
+    const FEATURES: [&str; 2] = ["1", "2"];
+    const KEYS: [&str; 2] = ["a", "b"];
+
+    fn ops() -> Vec<Op> {
+        let mut ops = vec![Op::RemoveLayer];
+        for feature in FEATURES {
+            ops.push(Op::RemoveFeature(feature));
+            for key in KEYS {
+                ops.push(Op::Set(feature, key));
+                ops.push(Op::RemoveKey(feature, key));
+            }
+        }
+        ops
+    }
+
+    fn apply(state: &mut SourceFeatureState, expected: &mut FeatureStates, op: Op) {
+        let layer = Some("layer");
+        match op {
+            Op::Set(feature, key) => {
+                let mut new_state = FeatureState::new();
+                new_state.insert(key.to_owned(), Value::String(format!("{feature}{key}")));
+                state.update_state(layer, feature, &new_state);
+                expected.entry(feature.to_owned()).or_default().extend(new_state);
+            }
+            Op::RemoveKey(feature, key) => {
+                state.remove_state(layer, Some(feature), Some(key));
+                if let Some(feature_state) = expected.get_mut(feature) {
+                    feature_state.remove(key);
+                }
+            }
+            Op::RemoveFeature(feature) => {
+                state.remove_state(layer, Some(feature), None);
+                expected.remove(feature);
+            }
+            Op::RemoveLayer => {
+                state.remove_state(layer, None, None);
+                expected.clear();
+            }
+        }
+    }
+
+    fn assert_state(state: &SourceFeatureState, expected: &FeatureStates, context: &str) {
+        for feature in FEATURES {
+            let expected = expected.get(feature).cloned().unwrap_or_default();
+            assert_eq!(state.get_state(Some("layer"), feature), expected, "feature {feature}, {context}");
+        }
+    }
+
+    // Every sequence of three calls before one render ends in the state the
+    // calls would leave if each applied at once, both read back before the
+    // render and drawn by a tile that holds the previous frame.
+    #[test]
+    fn changes_and_removals_apply_in_call_order() {
+        let ops = ops();
+        for &first in &ops {
+            for &second in &ops {
+                for &third in &ops {
+                    let sequence = [first, second, third];
+                    let mut state = SourceFeatureState::new();
+                    let mut expected = FeatureStates::new();
+                    let tile = StubTile::new(0);
+                    apply(&mut state, &mut expected, Op::Set("1", "a"));
+                    apply(&mut state, &mut expected, Op::Set("1", "b"));
+                    apply(&mut state, &mut expected, Op::Set("2", "a"));
+                    render_frame(&mut state, &[&tile]);
+
+                    for op in sequence {
+                        apply(&mut state, &mut expected, op);
+                    }
+                    assert_state(&state, &expected, &format!("before rendering {sequence:?}"));
+
+                    render_frame(&mut state, &[&tile]);
+                    assert_state(&state, &expected, &format!("after rendering {sequence:?}"));
+                    let mut drawn = tile.applied(0).remove("layer").unwrap_or_default();
+                    if tile.applied_count() > 1 {
+                        drawn.extend(tile.applied(1).remove("layer").unwrap_or_default());
+                    }
+                    for feature in FEATURES {
+                        let expected = expected.get(feature).cloned().unwrap_or_default();
+                        let drawn = drawn.get(feature).cloned().unwrap_or_default();
+                        assert_eq!(drawn, expected, "tile's feature {feature} after {sequence:?}");
+                    }
+                }
+            }
+        }
     }
 }

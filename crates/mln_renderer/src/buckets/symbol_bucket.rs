@@ -10,6 +10,7 @@
 //
 // Not ported: the MLN_SYMBOL_GUARDS `check` (memory-corruption guards).
 
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
@@ -327,6 +328,13 @@ pub struct Buffer {
     pub attribute_data: GeometryVec<SymbolLayoutVertex>,
     #[serde(with = "pod")]
     pub dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
+    /// Positions for each layer that shares the bucket at another
+    /// translation than its leader's. A layer keeps them for the bucket's
+    /// life: drawables moved back to the shared positions would keep
+    /// bindings to these. Placement makes them once the bucket is on the
+    /// map side, so they don't cross with it from a worker.
+    #[serde(skip)]
+    pub layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
     #[serde(with = "pod")]
     pub opacity_attribute_data: Vec<SymbolOpacityVertex>,
     /// `TriangleIndexVector` (3 indices per triangle).
@@ -342,6 +350,26 @@ impl Buffer {
     /// `updateModified()`.
     pub fn update_modified(&mut self) {
         self.modified += 1;
+    }
+
+    /// `dynamicAttributeDataFor(layerID)`: the positions a layer draws, its
+    /// own when it has them, the leader's otherwise.
+    pub fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
+        self.layer_dynamic_attribute_data.get(layer_id).unwrap_or(&self.dynamic_attribute_data)
+    }
+
+    /// The positions placement lays out, the leader's or, with a layer ID,
+    /// that layer's (made on first use), with the placed symbols they are
+    /// for (C++ `positions(buffer)` in `updateBucketDynamicAttributeData`).
+    pub fn positions_and_symbols(
+        &mut self,
+        layer_id: Option<&str>,
+    ) -> (&mut Vec<SymbolDynamicLayoutVertex>, &[PlacedSymbol]) {
+        let positions = match layer_id {
+            None => &mut self.dynamic_attribute_data,
+            Some(layer_id) => self.layer_dynamic_attribute_data.entry(layer_id.to_owned()).or_default(),
+        };
+        (positions, &self.placed_symbols)
     }
 
     /// `hasVisibleVertices(offset, count)`: whether any of the `count`
@@ -403,6 +431,10 @@ pub struct SymbolBucketState {
     pub just_reloaded: bool,
     pub has_variable_placement: bool,
     pub has_uninitialized_symbols: bool,
+    /// The tile-unit translations the leader's dynamic positions carry,
+    /// which layers sharing the bucket compare.
+    pub dynamic_text_translation: Point<f32>,
+    pub dynamic_icon_translation: Point<f32>,
 
     pub symbol_instances: Vec<SymbolInstance>,
 
@@ -416,6 +448,15 @@ pub struct SymbolBucketState {
     pub text_collision_circle: Option<CollisionBuffer>,
 
     pub feature_sort_order: Option<Arc<Vec<usize>>>,
+}
+
+impl SymbolBucketState {
+    /// `hasLayerDynamicAttributeData(layerID)`.
+    pub fn has_layer_dynamic_attribute_data(&self, layer_id: &str) -> bool {
+        self.text.layer_dynamic_attribute_data.contains_key(layer_id)
+            || self.icon.layer_dynamic_attribute_data.contains_key(layer_id)
+            || self.sdf_icon.layer_dynamic_attribute_data.contains_key(layer_id)
+    }
 }
 
 static MAX_BUCKET_INSTANCE_ID: AtomicU32 = AtomicU32::new(0);

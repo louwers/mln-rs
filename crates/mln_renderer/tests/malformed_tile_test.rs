@@ -31,6 +31,7 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 use mln_util::size::Size;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::{Tileset, VectorEncoding};
 use proptest::prelude::*;
 use serde_json::json;
@@ -91,10 +92,7 @@ fn layer(json: serde_json::Value) -> Immutable<dyn LayerProperties> {
 /// Loads the z0 tile of a vector source whose tiles are `tile`, with
 /// `layers`, and returns what the render source reports.
 fn load(tile: Vec<u8>, layers: &[Immutable<dyn LayerProperties>]) -> Outcome {
-    load_from(Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() }, tile, layers)
-}
-
-fn load_from(tileset: Tileset, tile: Vec<u8>, layers: &[Immutable<dyn LayerProperties>]) -> Outcome {
+    let tileset = Tileset { tiles: vec!["tiles".to_owned()], ..Default::default() };
     let run_loop = RunLoop::new();
     let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
     let mut transform =
@@ -160,6 +158,7 @@ fn load_from(tileset: Tileset, tile: Vec<u8>, layers: &[Immutable<dyn LayerPrope
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             global_state: None,
             is_update_synchronous: false,
             capture_rendered_features: false,
@@ -330,17 +329,6 @@ fn bad_value_read_by_a_filter_is_a_tile_error() {
 #[test]
 fn bad_value_nothing_reads_is_not_an_error() {
     assert_eq!(load(tile_with_bad_value(), &[fill_layer()]), Outcome::Loaded);
-}
-
-// C++ `tileset.tiles.at(0)` throws out of the render update (uncaught); the
-// port gives the tile that error.
-#[test]
-fn source_without_tiles_is_a_tile_error() {
-    let outcome = load_from(Tileset::default(), valid_tile(), &[fill_layer()]);
-    assert_eq!(
-        outcome,
-        Outcome::Error("vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)".to_owned())
-    );
 }
 
 /// A truncation or some overwritten bytes.

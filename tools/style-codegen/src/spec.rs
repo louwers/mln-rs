@@ -4,7 +4,7 @@
 
 use serde_json::{Map, Value, json};
 
-/// One layout, paint or light property: the spec entry plus its name.
+/// One layout, paint, light or sky property: the spec entry plus its name.
 #[derive(Clone, Debug)]
 pub struct Property {
     pub name: String,
@@ -168,6 +168,14 @@ pub fn light_properties(spec: &Value) -> Result<Vec<Property>, String> {
     for p in &mut result {
         p.light = true;
     }
+    sort_like_collator(&mut result);
+    Ok(result)
+}
+
+/// The sky's properties, as generateRootProperties('Sky', 'sky') of
+/// generate-style-code.mjs collects them.
+pub fn sky_properties(spec: &Value) -> Result<Vec<Property>, String> {
+    let mut result = properties_of(spec, "sky", false)?;
     sort_like_collator(&mut result);
     Ok(result)
 }

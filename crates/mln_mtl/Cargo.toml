@@ -19,15 +19,13 @@ doctest = false
 [target.'cfg(target_vendor = "apple")'.dependencies]
 bytemuck.workspace = true
 mln_gfx.workspace = true
+mln_tile_id.workspace = true
 mln_util.workspace = true
 objc2.workspace = true
 objc2-core-foundation.workspace = true
 objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSObject", "NSRange"] }
 objc2-metal.workspace = true
 objc2-quartz-core.workspace = true
-
-[target.'cfg(target_vendor = "apple")'.dev-dependencies]
-mln_tile_id.workspace = true
 
 # Compiles every MSL source extracted from include/mln/shaders/mtl/*.hpp
 # with the system's Metal compiler.

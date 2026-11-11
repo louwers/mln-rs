@@ -10,6 +10,7 @@
 
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::*;
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
@@ -28,7 +29,7 @@ use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::buckets::line_bucket::LineBucket;
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::line_atlas::LinePatternCap;
 use crate::paint_parameters::PaintParameters;
 
@@ -114,6 +115,8 @@ impl LayerTweaker for LineLayerTweaker {
 
         let zoom = parameters.state.get_zoom() as f32;
         let int_zoom = parameters.state.get_integer_zoom();
+        let state = parameters.state;
+        let pixel_scale = state.get_projection().pixel_scale(state) as f32;
 
         let metal = context.backend_type() == BackendType::Metal;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
@@ -173,6 +176,7 @@ impl LayerTweaker for LineLayerTweaker {
         let mut i: u32 = 0;
         let count = layer_group.get_drawable_count();
         let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); count];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![LineTilePropsUnionUBO::default(); count];
 
         let self_ptr: *const Self = self;
@@ -212,7 +216,7 @@ impl LayerTweaker for LineLayerTweaker {
             let anchor = *evaluated.get::<LineTranslateAnchor>();
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &translation,
@@ -222,12 +226,14 @@ impl LayerTweaker for LineLayerTweaker {
                 drawable,
                 false,
             );
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             match LineType::from_type(drawable.get_type()) {
                 Some(LineType::Simple) => {
                     drawable_ubo_vector[i as usize].set(&LineDrawableUBO {
                         matrix: cast_matrix(&matrix),
-                        ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom),
+                        ratio: pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom),
 
                         color_t: binders.line_color.interpolation_factor(zoom),
                         blur_t: binders.line_blur.interpolation_factor(zoom),
@@ -242,7 +248,7 @@ impl LayerTweaker for LineLayerTweaker {
                 Some(LineType::Gradient) => {
                     drawable_ubo_vector[i as usize].set(&LineGradientDrawableUBO {
                         matrix: cast_matrix(&matrix),
-                        ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom),
+                        ratio: pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom),
 
                         blur_t: binders.line_blur.interpolation_factor(zoom),
                         opacity_t: binders.line_opacity.interpolation_factor(zoom),
@@ -261,7 +267,7 @@ impl LayerTweaker for LineLayerTweaker {
                     }
                     drawable_ubo_vector[i as usize].set(&LinePatternDrawableUBO {
                         matrix: cast_matrix(&matrix),
-                        ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom),
+                        ratio: pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom),
 
                         blur_t: binders.line_blur.interpolation_factor(zoom),
                         opacity_t: binders.line_opacity.interpolation_factor(zoom),
@@ -336,7 +342,7 @@ impl LayerTweaker for LineLayerTweaker {
                             ],
                             tex_y_a: pos_a.y,
                             tex_y_b: pos_b.y,
-                            ratio: 1.0 / tile_id.pixels_to_tile_units(1.0, zoom),
+                            ratio: pixel_scale / tile_id.pixels_to_tile_units(1.0, zoom),
 
                             color_t: binders.line_color.interpolation_factor(zoom),
                             blur_t: binders.line_blur.interpolation_factor(zoom),
@@ -386,5 +392,6 @@ impl LayerTweaker for LineLayerTweaker {
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_LINE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         layer_uniforms.set(ID_LINE_TILE_PROPS_UBO, self.tile_props_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_uniforms, &projection_ubo_vector, context);
     }
 }

@@ -45,6 +45,7 @@
 "crates/mln_map/src/transform.rs" = 1
 "crates/mln_map_types/src/transform_state.rs" = 3
 "crates/mln_map_types/src/util_camera.rs" = 1
+"crates/mln_map_types/src/vertical_perspective_projection.rs" = 1
 "crates/mln_mtl/src/context.rs" = 1
 "crates/mln_renderer/src/algorithm/update_renderables.rs" = 1
 "crates/mln_renderer/src/buckets/fill_extrusion_bucket.rs" = 2
@@ -54,6 +55,7 @@
 "crates/mln_renderer/src/buckets/symbol_bucket.rs" = 1
 "crates/mln_renderer/src/gfx/dynamic_texture_atlas.rs" = 2
 "crates/mln_renderer/src/gfx/fill_generator.rs" = 2
+"crates/mln_renderer/src/globe_tile_mesh.rs" = 3
 "crates/mln_renderer/src/image_manager.rs" = 1
 "crates/mln_renderer/src/layers/hillshade_layer_tweaker.rs" = 1
 "crates/mln_renderer/src/layers/render_background_layer.rs" = 4
@@ -74,7 +76,7 @@
 "crates/mln_renderer/src/layout/symbol_instance.rs" = 1
 "crates/mln_renderer/src/layout/symbol_layout.rs" = 7
 "crates/mln_renderer/src/line_atlas.rs" = 1
-"crates/mln_renderer/src/paint_parameters.rs" = 1
+"crates/mln_renderer/src/paint_parameters.rs" = 2
 "crates/mln_renderer/src/render_layer.rs" = 1
 "crates/mln_renderer/src/render_target.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
@@ -82,7 +84,6 @@
 "crates/mln_renderer/src/renderer_impl.rs" = 7
 "crates/mln_renderer/src/sources/render_image_source.rs" = 2
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
-"crates/mln_renderer/src/sources/render_tile_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 3
 "crates/mln_renderer/src/text/cross_tile_symbol_index.rs" = 2
@@ -90,8 +91,11 @@
 "crates/mln_renderer/src/text/quads.rs" = 1
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 3
 "crates/mln_renderer/src/tile/worker_codec/transport.rs" = 1
-"crates/mln_renderer/src/util/tile_cover.rs" = 4
+"crates/mln_renderer/src/tile_pyramid.rs" = 3
+"crates/mln_renderer/src/util/subdivision.rs" = 2
+"crates/mln_renderer/src/util/tile_cover.rs" = 3
 "crates/mln_renderer/src/util/tile_cover_impl.rs" = 2
+"crates/mln_renderer/src/util/tile_mesh.rs" = 1
 "crates/mln_sprite/src/sprite_loader.rs" = 1
 "crates/mln_sprite/src/sprite_parser.rs" = 1
 "crates/mln_storage/src/database_file_source.rs" = 1
@@ -205,19 +209,19 @@
 "crates/mln_headless/src/map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_annotations.rs" = 28
 "crates/mln_headless/tests/gtest_api.rs" = 1
+"crates/mln_headless/tests/gtest_location_indicator.rs" = 10
 "crates/mln_headless/tests/gtest_map.rs" = 9
 "crates/mln_headless/tests/gtest_map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_query.rs" = 1
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
-"crates/mln_map/src/map.rs" = 4
-"crates/mln_map/src/map_impl.rs" = 8
+"crates/mln_map/src/map.rs" = 3
+"crates/mln_map/src/map_impl.rs" = 5
 "crates/mln_map/src/map_observer.rs" = 1
 "crates/mln_map/tests/gtest_action_journal.rs" = 7
 "crates/mln_mtl/src/context.rs" = 1
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
 "crates/mln_renderer/src/bucket.rs" = 1
-"crates/mln_renderer/src/buckets/debug_bucket.rs" = 2
 "crates/mln_renderer/src/geometry/feature_index.rs" = 1
 "crates/mln_renderer/src/gfx/fill_generator.rs" = 1
 "crates/mln_renderer/src/layermanager.rs" = 4
@@ -226,7 +230,7 @@
 "crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 2
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 1
 "crates/mln_renderer/src/render_layer.rs" = 2
-"crates/mln_renderer/src/render_orchestrator.rs" = 17
+"crates/mln_renderer/src/render_orchestrator.rs" = 16
 "crates/mln_renderer/src/render_source.rs" = 3
 "crates/mln_renderer/src/render_static_data.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
@@ -237,7 +241,7 @@
 "crates/mln_renderer/src/sources/mod.rs" = 1
 "crates/mln_renderer/src/sources/render_image_source.rs" = 1
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
-"crates/mln_renderer/src/sources/render_tile_source.rs" = 5
+"crates/mln_renderer/src/sources/render_tile_source.rs" = 1
 "crates/mln_renderer/src/text/placement.rs" = 2
 "crates/mln_renderer/src/tile/geometry_tile.rs" = 6
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 1
@@ -247,7 +251,7 @@
 "crates/mln_renderer/src/util/tile_cover.rs" = 1
 "crates/mln_renderer/tests/source_test.rs" = 6
 "crates/mln_storage/src/asset_file_source.rs" = 1
-"crates/mln_storage/src/database_file_source.rs" = 2
+"crates/mln_storage/src/database_file_source.rs" = 1
 "crates/mln_storage/src/local_file_source.rs" = 1
 "crates/mln_storage/src/main_resource_loader.rs" = 3
 "crates/mln_storage/src/mbtiles_file_source.rs" = 1
@@ -275,7 +279,6 @@
 "crates/mln_style/src/sources/tile_source.rs" = 3
 "crates/mln_style/src/style_impl.rs" = 1
 "crates/mln_style/src/tests/property_expression.rs" = 1
-"crates/mln_style/src/tests/style.rs" = 2
 "crates/mln_style_types/src/position.rs" = 1
 "crates/mln_text/src/ft/face.rs" = 9
 "crates/mln_text/src/rasterize.rs" = 3
@@ -295,11 +298,7 @@
 "crates/mln_webgpu/src/renderer_backend.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_program.rs" = 1
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
-"crates/mln_webgpu/src/texture2d.rs" = 1
 "examples/desktop/src/frontend.rs" = 1
-"examples/desktop/src/main.rs" = 2
-"examples/desktop/src/settings.rs" = 1
-"examples/desktop/src/view.rs" = 11
 "tools/expression-test/src/parser.rs" = 2
 "tools/render-test/src/metadata.rs" = 2
 "tools/render-test/src/parser.rs" = 5

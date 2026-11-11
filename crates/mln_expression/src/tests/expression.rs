@@ -4,9 +4,12 @@ use std::path::PathBuf;
 
 use mln_conversion::Convertible;
 use mln_text::glyph::{FontFace, FontFaces};
+use mln_tile_id::CanonicalTileID;
 
 use crate::dsl;
-use crate::expression::{EvaluationContext, Expression, GlobalStateMap, Kind};
+use crate::expression::{
+    EvaluationContext, Expression, FeatureState, GlobalStateMap, Kind, evaluate_feature_with_context,
+};
 use crate::is_expression::is_expression;
 use crate::parsing_context::ParsingContext;
 use crate::value::Value;
@@ -114,4 +117,46 @@ fn is_supported_script_accepts_scripts_that_font_faces_cover() {
     assert!(evaluate("မြန်မာ", Some(&myanmar)));
     assert!(!evaluate("देवनागरी", Some(&myanmar)));
     assert!(evaluate("Yangon", Some(&myanmar)));
+}
+
+// Port-only: ffi patch 0050 adds `Expression::evaluate(feature, params)`
+// without a gtest.
+#[test]
+fn evaluate_feature_with_context_uses_every_input() {
+    let parse = |document: serde_json::Value| {
+        let mut ctx = ParsingContext::new();
+        ctx.parse_expression(&Convertible::from(&document), None).expect("parsed")
+    };
+    let mut feature = feature::Feature::new(geometry::Geometry::Point(geometry::Point { x: 2.0, y: 2.0 }));
+    feature.properties.insert("name".to_owned(), feature::Value::String("a".to_owned()));
+    let feature_state: FeatureState = [("hover".to_owned(), feature::Value::Bool(true))].into_iter().collect();
+    let global_state: GlobalStateMap =
+        [("mode".to_owned(), feature::Value::String("dark".to_owned()))].into_iter().collect();
+    let canonical = CanonicalTileID::new(0, 0, 0);
+    let params = EvaluationContext::new(3.0)
+        .with_feature_state(Some(&feature_state))
+        .with_global_state(Some(&global_state))
+        .with_elevation(10.0);
+
+    let all = parse(serde_json::json!([
+        "all",
+        ["==", ["get", "name"], "a"],
+        ["==", ["feature-state", "hover"], true],
+        ["==", ["global-state", "mode"], "dark"],
+        ["==", ["zoom"], 3],
+        ["==", ["elevation"], 10],
+    ]));
+    assert_eq!(evaluate_feature_with_context(&*all, &feature, params), Ok(Value::Bool(true)));
+
+    let polygon = serde_json::json!({
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [5, 0], [5, 5], [0, 5], [0, 0]]],
+    });
+    let within = parse(serde_json::json!(["within", polygon]));
+    assert_eq!(
+        evaluate_feature_with_context(&*within, &feature, params.with_canonical_tile_id(Some(&canonical))),
+        Ok(Value::Bool(true))
+    );
+    // Without a canonical tile, the feature has no tile geometry to test.
+    assert_eq!(evaluate_feature_with_context(&*within, &feature, params), Ok(Value::Bool(false)));
 }

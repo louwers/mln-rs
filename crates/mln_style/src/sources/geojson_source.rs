@@ -54,6 +54,10 @@ pub struct GeoJSONOptions {
 
     // Update options
     pub synchronous_update: bool,
+
+    /// The style's attribution for the source, reported by
+    /// `Source::get_attribution`.
+    pub attribution: Option<String>,
 }
 
 impl Default for GeoJSONOptions {
@@ -71,6 +75,7 @@ impl Default for GeoJSONOptions {
             cluster_min_points: 2,
             cluster_properties: ClusterProperties::new(),
             synchronous_update: false,
+            attribution: None,
         }
     }
 }
@@ -90,6 +95,7 @@ impl std::fmt::Debug for GeoJSONOptions {
             .field("cluster_min_points", &self.cluster_min_points)
             .field("cluster_properties", &self.cluster_properties.keys().collect::<Vec<_>>())
             .field("synchronous_update", &self.synchronous_update)
+            .field("attribution", &self.attribution)
             .finish()
     }
 }
@@ -187,6 +193,7 @@ impl GeoJSONSource {
     /// `setURL(url)`: set the url to a geojson file which can be fetched.
     pub fn set_url(&self, url: &str) {
         *self.inner.url.borrow_mut() = Some(url.to_owned());
+        self.drop_building_response();
 
         // Signal that the source description needs a reload
         if self.loaded() || self.inner.req.borrow().is_some() {
@@ -207,9 +214,16 @@ impl GeoJSONSource {
     /// `setGeoJSONData(data)`.
     pub fn set_geojson_data(&self, geojson_data: Option<Arc<dyn GeoJSONData>>) {
         *self.inner.req.borrow_mut() = None;
+        self.drop_building_response();
         let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_data(&self.impl_(), geojson_data));
         self.inner.base.set_base_impl(new_impl);
         self.inner.base.observer().on_source_changed(self);
+    }
+
+    /// Drops the result of a response that is still building in the
+    /// background.
+    fn drop_building_response(&self) {
+        self.inner.request_generation.set(self.inner.request_generation.get() + 1);
     }
 
     pub fn get_url(&self) -> Option<String> {

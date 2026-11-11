@@ -13,8 +13,10 @@
 // - The depth and stencil attachments are Metal textures of their own, not
 //   `mtl::Texture2D`s, which need the context that `bind` has no access to.
 // - Port-only: `acquire_next_texture` takes the drawable ahead of a frame,
-//   `request_readback` copies a presented frame into an image, and with
-//   `cap_frame_rate` off the layer doesn't wait for the display.
+//   `request_readback` copies a presented frame into an image, with
+//   `cap_frame_rate` off the layer doesn't wait for the display, and
+//   `set_overlay` draws over each frame before it is presented, such as an
+//   app's controls over the map.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -44,6 +46,20 @@ use crate::renderer_backend::{BackendImpl, RendererBackend};
 /// The format of the layer's drawables.
 const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 
+/// Port-only: what an overlay draws into (`SurfaceBackend::set_overlay`):
+/// the frame's drawable, after the map and before it is presented.
+pub struct OverlayTarget<'a> {
+    pub device: &'a ProtocolObject<dyn MTLDevice>,
+    /// The frame's command buffer, which the overlay encodes its passes into.
+    pub command_buffer: &'a ProtocolObject<dyn MTLCommandBuffer>,
+    pub texture: &'a ProtocolObject<dyn MTLTexture>,
+    /// In physical pixels.
+    pub size: Size,
+}
+
+/// Port-only: draws over a frame (`SurfaceBackend::set_overlay`).
+pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
+
 /// The depth and stencil textures of a drawable size.
 struct DepthStencil {
     size: (usize, usize),
@@ -61,6 +77,7 @@ struct SurfaceState {
     depth_stencil: RefCell<Option<DepthStencil>>,
     readback_requested: Cell<bool>,
     readback: RefCell<Option<PremultipliedImage>>,
+    overlay: RefCell<Option<Overlay>>,
 }
 
 impl SurfaceState {
@@ -149,9 +166,18 @@ impl SurfaceState {
             return;
         };
 
+        let texture = drawable.texture();
+        if let Some(overlay) = self.overlay.borrow_mut().as_mut() {
+            overlay(&OverlayTarget {
+                device: self.backend.get_device(),
+                command_buffer: &command_buffer,
+                texture: &texture,
+                size: Size::new(texture.width() as u32, texture.height() as u32),
+            });
+        }
+
         let mut readback = None;
         if self.readback_requested.get() {
-            let texture = drawable.texture();
             if texture.isFramebufferOnly() {
                 // Drawables taken from now on can be read; copy the next one.
                 self.layer.setFramebufferOnly(false);
@@ -254,6 +280,7 @@ impl SurfaceBackend {
             depth_stencil: RefCell::new(None),
             readback_requested: Cell::new(false),
             readback: RefCell::new(None),
+            overlay: RefCell::new(None),
         });
         let resource = RenderableResourceBox::new_rc(SurfaceRenderableResource { state: state.clone() });
         let backend = SurfaceBackend {
@@ -307,6 +334,13 @@ impl SurfaceBackend {
         self.state.readback_requested.set(true);
     }
 
+    /// Port-only: draws `overlay` over each frame from now on, after the map
+    /// and before the frame is presented (and read back), or stops with
+    /// `None`.
+    pub fn set_overlay(&self, overlay: Option<Overlay>) {
+        *self.state.overlay.borrow_mut() = overlay;
+    }
+
     /// Port-only: the frame copied after `request_readback`, once presented.
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
         self.state.readback.borrow_mut().take()
@@ -318,6 +352,7 @@ impl Drop for SurfaceBackend {
         self.renderer_backend.reset_context();
         self.state.drawable.borrow_mut().take();
         self.state.command_buffer.borrow_mut().take();
+        self.state.overlay.borrow_mut().take();
         self.set_resource(None);
     }
 }

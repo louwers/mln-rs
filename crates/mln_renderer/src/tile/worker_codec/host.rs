@@ -14,8 +14,9 @@
 // tile sends others. Here the worker never got them, so the host resets it
 // (which drops both the data and the layers) and gives it back the other of
 // the two, as its tile last sent it. Until the tile sends what failed again,
-// each `setData` or `setLayers` gets that error, as each parse would throw in
-// C++, rather than no answer, which would leave the tile pending.
+// each `setData`, `setLayers` or `setAvailableImages` gets that error, as each
+// parse would throw in C++, rather than no answer, which would leave the tile
+// pending.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -28,6 +29,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_util::exception::RuntimeError;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use super::envelope::{About, Encoded, MessageKind};
@@ -76,7 +78,12 @@ enum Hosted {
 #[derive(Default)]
 struct Sent {
     data: Kept<(Option<SharedTileData>, Immutable<VecSet<String>>)>,
-    layers: Kept<(Vec<Immutable<dyn LayerProperties>>, Option<Arc<GlobalStateMap>>, Immutable<VecSet<String>>)>,
+    layers: Kept<(
+        Vec<Immutable<dyn LayerProperties>>,
+        Option<Arc<GlobalStateMap>>,
+        Immutable<VecSet<String>>,
+        SubdivisionGranularitySetting,
+    )>,
 }
 
 /// The tile's data or its layers, as the worker last got them, with the
@@ -109,9 +116,29 @@ impl Sent {
                 self.data = Kept::Sent((data.clone(), available_images.clone()));
                 self.layers.error().map(|error| (error, *correlation_id))
             }
-            WorkerMessage::SetLayers { layers, global_state, available_images, correlation_id } => {
-                self.layers = Kept::Sent((layers.clone(), global_state.clone(), available_images.clone()));
+            WorkerMessage::SetLayers {
+                layers,
+                global_state,
+                available_images,
+                subdivision_granularity,
+                correlation_id,
+            } => {
+                self.layers = Kept::Sent((
+                    layers.clone(),
+                    global_state.clone(),
+                    available_images.clone(),
+                    *subdivision_granularity,
+                ));
                 self.data.error().map(|error| (error, *correlation_id))
+            }
+            WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
+                if let Kept::Sent((_, images)) = &mut self.data {
+                    *images = available_images.clone();
+                }
+                if let Kept::Sent((_, _, images, _)) = &mut self.layers {
+                    *images = available_images.clone();
+                }
+                self.data.error().or_else(|| self.layers.error()).map(|error| (error, *correlation_id))
             }
             WorkerMessage::Reset { .. } => {
                 *self = Sent::default();
@@ -129,12 +156,15 @@ impl Sent {
             MessageKind::SetData => {
                 self.data = Kept::Failed(error);
                 match &self.layers {
-                    Kept::Sent((layers, global_state, available_images)) => Some(WorkerMessage::SetLayers {
-                        layers: layers.clone(),
-                        global_state: global_state.clone(),
-                        available_images: available_images.clone(),
-                        correlation_id,
-                    }),
+                    Kept::Sent((layers, global_state, available_images, subdivision_granularity)) => {
+                        Some(WorkerMessage::SetLayers {
+                            layers: layers.clone(),
+                            global_state: global_state.clone(),
+                            available_images: available_images.clone(),
+                            subdivision_granularity: *subdivision_granularity,
+                            correlation_id,
+                        })
+                    }
                     _ => None,
                 }
             }

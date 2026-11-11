@@ -139,6 +139,23 @@ fn query_rendered_features_filter_layer() {
     assert_eq!(features4.len(), 1);
 }
 
+// gtest: Query.QueryRenderedFeaturesLayer
+#[test]
+fn query_rendered_features_layer() {
+    let test = QueryTest::new();
+
+    let zz = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
+
+    let features = test.query_rendered_features(&zz, &RenderedQueryOptions::default());
+    let mut layers: Vec<&str> = features.iter().map(|feature| feature.layer.as_str()).collect();
+    layers.sort_unstable();
+    assert_eq!(layers, ["layer1", "layer2", "layer3", "layer4"]);
+
+    let source_features = test.query_source_features("source3", &SourceQueryOptions::default());
+    assert!(!source_features.is_empty());
+    assert_eq!(source_features[0].layer, "");
+}
+
 // gtest: Query.QueryRenderedFeaturesFilter
 #[test]
 fn query_rendered_features_filter() {
@@ -441,6 +458,56 @@ fn query_source_features_option_validation() {
     // RasterSource, not supported
     features = test.query_source_features("source6", &SourceQueryOptions::default());
     assert_eq!(features.len(), 0);
+}
+
+/// One MVT tile with two layers, "points" and "labels", each holding one
+/// point feature at the tile's center: ID 1 in "points" and ID 2 in
+/// "labels".
+const TWO_LAYER_TILE: &[u8] = &[
+    0x1a, 0x1a, 0x78, 0x02, 0x0a, 0x06, b'p', b'o', b'i', b'n', b't', b's', 0x12, 0x0b, 0x08, 0x01, 0x18, 0x01, 0x22,
+    0x05, 0x09, 0x80, 0x20, 0x80, 0x20, 0x28, 0x80, 0x20, 0x1a, 0x1a, 0x78, 0x02, 0x0a, 0x06, b'l', b'a', b'b', b'e',
+    b'l', b's', 0x12, 0x0b, 0x08, 0x02, 0x18, 0x01, 0x22, 0x05, 0x09, 0x80, 0x20, 0x80, 0x20, 0x28, 0x80, 0x20,
+];
+
+// Not a C++ test: ffi patch 0048 has none. Ports the source-layer checks of
+// maplibre-native-ffi's `source_queries_read_the_named_source_layers` ABI
+// test.
+#[test]
+fn query_source_features_source_layer() {
+    let test = MapTest::new();
+    test.file_source.set_response(Kind::Tile, |_| {
+        let mut response = mln_storage::Response::new();
+        response.data = Some(Arc::new(TWO_LAYER_TILE.to_vec()));
+        Some(response)
+    });
+    test.load_json(
+        r#"{
+          "version": 8,
+          "sources": { "tiles": { "type": "vector", "tiles": ["http://example.com/{z}/{x}/{y}.pbf"], "maxzoom": 0 } },
+          "layers": [{ "id": "dots", "type": "circle", "source": "tiles", "source-layer": "points" }]
+        }"#,
+    );
+    test.render();
+
+    let query = |source_layers: &[&str], filter: Option<Filter>| -> Vec<(u64, String)> {
+        let options = SourceQueryOptions::new(layers(source_layers), filter);
+        let features =
+            test.frontend.with_renderer(|renderer| renderer.query_source_features("tiles", &options)).unwrap();
+        let mut hits: Vec<(u64, String)> = features
+            .into_iter()
+            .map(|feature| {
+                assert_eq!(feature.layer, "");
+                let feature::Identifier::Uint(id) = feature.id else { panic!("feature ID: {:?}", feature.id) };
+                (id, feature.source_layer)
+            })
+            .collect();
+        hits.sort_unstable();
+        hits
+    };
+
+    assert_eq!(query(&["labels"], None), [(2, "labels".to_owned())]);
+    assert_eq!(query(&["points", "labels"], None), [(1, "points".to_owned()), (2, "labels".to_owned())]);
+    assert_eq!(query(&["points", "labels"], Some(parse_filter(r#"["==", ["id"], 1]"#))), [(1, "points".to_owned())]);
 }
 
 // gtest: Query.QuerySourceFeaturesFilter

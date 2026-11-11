@@ -27,6 +27,7 @@ use mln_tile_id::geometry_tile_data::GeometryTileData;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 use mln_util::size::Size;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde_json::json;
 
@@ -116,6 +117,7 @@ fn create_bucket(properties: Immutable<dyn LayerProperties>, shape: Shape) -> Bu
         layer_type: properties.base_impl.get_type_info(),
         global_state: None,
         retain_features_by_id: false,
+        subdivision_granularity: SubdivisionGranularitySetting::none(),
     };
     let mut glyph_dependencies = GlyphDependencies::default();
     let mut image_dependencies = ImageDependencies::new();

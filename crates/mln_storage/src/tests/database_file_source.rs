@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use feature::Value;
 use mln_actor::{RunLoop, Timer};
 use mln_util::chrono::Duration;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
@@ -13,9 +14,9 @@ use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use super::{local_callback, req, serial, temp_path};
 use crate::ClientOptions;
 use crate::database_file_source::DatabaseFileSource;
-use crate::file_source::{FileSource, FileSourceType};
+use crate::file_source::{FileSource, FileSourceType, READ_ONLY_MODE_KEY};
 use crate::file_source_manager::FileSourceManager;
-use crate::offline_database::OfflineDatabase;
+use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
@@ -256,4 +257,50 @@ fn failed_accessed_flush_waits_for_next_read() {
         query.get_i64(0).unwrap() > 0
     });
     assert_eq!(1, failures.load(Ordering::SeqCst));
+}
+
+/// Runs a maintenance operation and waits for its callback on the database
+/// thread.
+fn maintain(operation: impl FnOnce(Box<dyn FnOnce(Result<(), DatabaseError>) + Send>)) -> Result<(), DatabaseError> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    operation(Box::new(move |result| tx.send(result).unwrap()));
+    rx.recv_timeout(std::time::Duration::from_secs(5)).expect("callback")
+}
+
+// Not a C++ test: the cache maintenance operations reach the database and
+// report its errors.
+#[test]
+fn cache_maintenance() {
+    let run_loop = RunLoop::new();
+    let path = temp_path("cache-maintenance.db");
+    let source = DatabaseFileSource::new(&ResourceOptions::default().with_cache_path(&path), &ClientOptions::default());
+    let resource =
+        Resource::with_tile_data(Kind::Unknown, "https://example.com/maintained", None, LoadingMethod::CacheOnly);
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"cached".to_vec()));
+    let not_found = |res: Response| res.error.expect("error").reason == Reason::NotFound;
+
+    source.put(&resource, &response);
+    assert_eq!(response.data, cached_request(&run_loop, &source, &resource).data);
+    maintain(|done| source.invalidate_ambient_cache(done)).unwrap();
+    let invalidated = cached_request(&run_loop, &source, &resource);
+    assert_eq!("Cached resource is unusable", invalidated.error.expect("error").message);
+
+    source.put(&resource, &response);
+    maintain(|done| source.clear_ambient_cache(done)).unwrap();
+    assert!(not_found(cached_request(&run_loop, &source, &resource)));
+
+    source.put(&resource, &response);
+    maintain(|done| source.reset_database(done)).unwrap();
+    assert!(not_found(cached_request(&run_loop, &source, &resource)));
+
+    maintain(|done| source.pack_database(done)).unwrap();
+
+    maintain(|done| source.set_maximum_ambient_cache_size(0, done)).unwrap();
+    source.put(&resource, &response);
+    assert!(not_found(cached_request(&run_loop, &source, &resource)));
+
+    source.set_property(READ_ONLY_MODE_KEY, &Value::Bool(true));
+    let error = maintain(|done| source.clear_ambient_cache(done)).unwrap_err();
+    assert_eq!("Cannot modify database in read-only mode", error.to_string());
 }

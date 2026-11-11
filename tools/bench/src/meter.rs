@@ -70,6 +70,11 @@ pub fn peak_heap_mib() -> f64 {
     PEAK.load(Ordering::Relaxed) as f64 / (1024.0 * 1024.0)
 }
 
+/// The heap bytes live now, in MiB.
+pub fn live_heap_mib() -> f64 {
+    LIVE.load(Ordering::Relaxed) as f64 / (1024.0 * 1024.0)
+}
+
 /// The CPU time of every thread of the process so far.
 pub fn process_cpu() -> Duration {
     let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };

@@ -25,11 +25,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use mln_actor::{LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus};
-use mln_renderer::{ExceptionPtr, FontStack, GlyphRange};
+use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
+use mln_style::sprite::Sprite;
 use mln_tile_id::CanonicalTileID;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
@@ -211,10 +212,9 @@ impl<A> CallbackSlot<A> {
     }
 }
 
-/// `StubMapObserver`.
+/// `StubMapObserver`, with callbacks for the source and sprite events too.
 // TODO(port): onRegisterShaders, onPre/PostCompileShader,
-// onShaderCompileFailed, onTileAction callbacks (MapObserver has
-// none of them yet).
+// onShaderCompileFailed callbacks (MapObserver has none of them yet).
 #[derive(Default)]
 pub struct StubMapObserver {
     pub will_start_loading_map_callback: CallbackSlot<()>,
@@ -227,6 +227,11 @@ pub struct StubMapObserver {
     pub on_glyphs_loaded_callback: CallbackSlot<(FontStack, GlyphRange)>,
     pub on_glyphs_error_callback: CallbackSlot<(FontStack, GlyphRange, ExceptionPtr)>,
     pub on_glyphs_requested_callback: CallbackSlot<(FontStack, GlyphRange)>,
+    pub on_tile_action_callback: CallbackSlot<(TileOperation, OverscaledTileID, String)>,
+    pub on_source_changed_callback: CallbackSlot<String>,
+    pub on_sprite_loaded_callback: CallbackSlot<Option<Sprite>>,
+    pub on_sprite_error_callback: CallbackSlot<(Option<Sprite>, ExceptionPtr)>,
+    pub on_sprite_requested_callback: CallbackSlot<Option<Sprite>>,
 }
 
 impl MapObserver for StubMapObserver {
@@ -259,6 +264,21 @@ impl MapObserver for StubMapObserver {
     }
     fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
         self.on_glyphs_requested_callback.call((font_stack.clone(), *range));
+    }
+    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
+        self.on_tile_action_callback.call((op, *id, source_id.to_owned()));
+    }
+    fn on_source_changed(&self, source_id: &str) {
+        self.on_source_changed_callback.call(source_id.to_owned());
+    }
+    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
+        self.on_sprite_loaded_callback.call(sprite.cloned());
+    }
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+        self.on_sprite_error_callback.call((sprite.cloned(), error));
+    }
+    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
+        self.on_sprite_requested_callback.call(sprite.cloned());
     }
 }
 

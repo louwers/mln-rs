@@ -17,7 +17,7 @@ pub struct CircleDrawableUBO {
     /*  88 */ pub stroke_color_t: f32,
     /*  92 */ pub stroke_width_t: f32,
     /*  96 */ pub stroke_opacity_t: f32,
-    /* 100 */ pub pad1: f32,
+    /* 100 */ pub globe_extrude_scale: f32,
     /* 104 */ pub pad2: f32,
     /* 108 */ pub pad3: f32,
     /* 112 */

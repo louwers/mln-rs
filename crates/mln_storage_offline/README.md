@@ -5,7 +5,7 @@
 > any release without notice. Depend on [`mln-rs`](https://crates.io/crates/mln-rs)
 > instead: it re-exports this crate as `mln_rs::mln_storage_offline`.
 
-Ports the offline download (`OfflineDownload`), which downloads an offline region's resources into the offline database.
+Ports the offline download (`OfflineDownload`), which downloads an offline region's resources into the offline database, and the offline region API of the database file source (`DatabaseFileSourceExt`), which creates, lists, downloads and deletes regions.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)

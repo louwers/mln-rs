@@ -3,7 +3,9 @@
 
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
-use mln_style_types::{AnchorOffsetPair, SymbolAnchorType, VariableAnchorOffsetCollection};
+use mln_style_types::{
+    AnchorOffsetPair, ProjectionDefinition, SymbolAnchorType, VariableAnchorOffsetCollection, projection_type_from_name,
+};
 use mln_util::Padding;
 use mln_util::enum_::Enum;
 
@@ -83,6 +85,27 @@ fn padding_from_span(values: &[f32]) -> Padding {
         3 => Padding::new(values[0], values[1], values[2], values[1]),
         4 => Padding::new(values[0], values[1], values[2], values[3]),
         _ => panic!("Padding must have between 1 and 4 elements"),
+    }
+}
+
+fn to_projection_definition(value: &Value) -> EvaluationResult {
+    let error =
+        || Err(EvaluationError::new(format!("Could not parse projectionDefinition from value '{}'", stringify(value))));
+    match value {
+        Value::ProjectionDefinition(projection) => Ok(Value::ProjectionDefinition(*projection)),
+        Value::String(name) => match projection_type_from_name(name) {
+            Some(type_) => Ok(Value::ProjectionDefinition(ProjectionDefinition::new(type_))),
+            None => error(),
+        },
+        Value::Array(components) => {
+            if let [Value::String(from), Value::String(to), Value::Number(transition)] = components.as_slice() {
+                if let (Some(from), Some(to)) = (projection_type_from_name(from), projection_type_from_name(to)) {
+                    return Ok(Value::ProjectionDefinition(ProjectionDefinition::between(from, to, *transition)));
+                }
+            }
+            error()
+        }
+        _ => error(),
     }
 }
 
@@ -185,6 +208,7 @@ fn get_coerce_function(t: &Type) -> CoerceFunction {
         Type::Boolean => to_boolean,
         Type::Color => to_color,
         Type::Padding => to_padding,
+        Type::ProjectionDefinition => to_projection_definition,
         Type::VariableAnchorOffsetCollection => to_variable_anchor_offset,
         Type::Number => to_number,
         Type::String => to_string_value,
@@ -230,6 +254,7 @@ impl Coercion {
             "to-boolean" => Type::Boolean,
             "to-color" => Type::Color,
             "to-padding" => Type::Padding,
+            "to-projection-definition" => Type::ProjectionDefinition,
             "to-number" => Type::Number,
             "to-string" => Type::String,
             "to-variableanchoroffset" => Type::VariableAnchorOffsetCollection,
@@ -339,6 +364,7 @@ impl Expression for Coercion {
             Type::Boolean => "to-boolean",
             Type::Color => "to-color",
             Type::Padding => "to-padding",
+            Type::ProjectionDefinition => "to-projection-definition",
             Type::Number => "to-number",
             Type::String => "to-string",
             Type::VariableAnchorOffsetCollection => "to-variableanchoroffset",

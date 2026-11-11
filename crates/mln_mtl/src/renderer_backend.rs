@@ -94,6 +94,9 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::SymbolSDFShader,
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::WideVectorShader,
+    BuiltIn::SkyShader,
+    BuiltIn::AtmosphereShader,
+    BuiltIn::GlobeDepthShader,
 ];
 
 impl RendererBackend {

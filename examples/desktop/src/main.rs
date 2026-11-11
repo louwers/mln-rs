@@ -1,48 +1,43 @@
-// The desktop example app: OpenFreeMap Liberty (or `--style`, or
-// MLN_STYLE_URL) in a winit window, with the command line and key bindings
-// of platform/glfw's app (main.cpp, glfw_view.cpp).
+// The desktop example app: a map in a winit window (OpenFreeMap Liberty, or
+// `--style`, or MLN_STYLE_URL), with the web demo's controls over it in egui.
 //
 // - host.rs: the window and its event loop on the main thread, which only
 //   turns window events into messages for the render thread.
 // - view.rs: the render thread, which owns the RunLoop, the map, its
 //   renderer and the surface, applies the messages and draws.
+// - ui.rs: the controls, which view.rs lays out and an overlay of the window's
+//   backend paints over the map (overlay.rs, metal_overlay.rs).
 //
-// Command line (C++ uses args.hxx; this parses the same long and short
-// options by hand): -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
+// Command line: -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
 // -s/--style URL, -t/--apikey KEY, -c/--cache FILE, -x/--lon, -y/--lat,
 // -a/--alt, --fov, -z/--zoom, --bearing, -p/--pitch, -r/--roll,
-// -P/--maxPitch, --backend. TODO(port): --testDir, --actionJournalDir,
-// -F/--showFeatures (rendered feature info). C++ declares `-b` twice
-// (benchmark and bearing) and `-F` twice (showFeatures and fov); this gives
-// the short forms to the flags and keeps --bearing/--fov long-only.
-//
-// --backend picks the renderer backend: metal (the default on macOS) or
-// webgpu (wgpu, the default elsewhere); C++ ignores it (backend.rs).
-//
-// Options of this app alone: --readback FILE.png (write the presented frame
-// once the map is idle, see view.rs), --quit-after SECONDS, --gesture-test
-// (scripted input through the view's handlers) and --no-system-fonts:
-// without it, the map falls back to system fonts for the scripts that its
-// glyph PBFs can't shape, and for CJK (system_fonts.rs).
-//
-// TODO(port): SIGINT handling (C++ closes the window; here Ctrl-C ends the
-// process), the plugin registration, settings load/save, the action
-// journal, resetting the database (`I`).
+// -P/--maxPitch, --backend (metal, the default on macOS, or webgpu: wgpu,
+// the default elsewhere; see backend.rs), and for checking the app:
+// --readback FILE.png (write the presented frame once the map is idle, see
+// view.rs), --quit-after SECONDS, --gesture-test (scripted input through the
+// view's handlers) and --no-system-fonts: without it, the map falls back to
+// system fonts for the scripts that its glyph PBFs can't shape, and for CJK
+// (system_fonts.rs).
 
 mod backend;
 mod frontend;
 mod host;
 #[cfg(target_os = "macos")]
 mod metal_layer;
+#[cfg(target_os = "macos")]
+mod metal_overlay;
+mod overlay;
 mod settings;
+mod styles;
 mod system_fonts;
+mod ui;
 mod view;
 
 use crate::settings::Settings;
 
 const USAGE: &str = "  mln-desktop {OPTIONS}
 
-    MapLibre Native desktop example
+    The mln-rs desktop example
 
   OPTIONS:
 
@@ -159,7 +154,6 @@ fn main() {
         }
     };
 
-    // Load settings
     let mut settings = Settings { online: !args.offline, ..Default::default() };
     for (value, field) in [
         (args.lon, &mut settings.longitude),

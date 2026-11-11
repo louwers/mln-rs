@@ -8,6 +8,8 @@ pub mod buckets;
 pub mod change_request;
 pub mod geometry;
 pub mod gfx;
+pub mod globe_depth_pass;
+pub mod globe_tile_mesh;
 pub mod group_by_layout;
 pub mod image_manager;
 pub mod layer_group;
@@ -25,6 +27,7 @@ pub mod render_layer;
 pub mod render_light;
 pub mod render_orchestrator;
 pub mod render_pass;
+pub mod render_sky;
 pub mod render_source;
 pub mod render_static_data;
 pub mod render_target;
@@ -34,6 +37,7 @@ pub mod renderer;
 pub mod renderer_frontend;
 pub mod renderer_impl;
 pub mod renderer_observer;
+pub mod sky_pass;
 pub mod source_state;
 pub mod sources;
 pub mod style_diff;
@@ -49,7 +53,7 @@ pub mod util;
 pub use renderer::Renderer;
 pub use renderer_frontend::RendererFrontend;
 pub use renderer_observer::{
-    ExceptionPtr, FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, RenderMode,
-    RendererObserver, RenderingStats, SourceLayerID,
+    ExceptionPtr, FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound,
+    OverscaledTileID, RenderMode, RendererObserver, RenderingStats, SourceLayerID, TileOperation,
 };
 pub use update_parameters::UpdateParameters;

@@ -813,7 +813,11 @@ impl GestureRecognizer {
             }
             Mode::BoxZoom { .. } => {}
             _ => {
-                self.update(camera, CameraDelta { offset: Some(delta.into()), ..CameraDelta::default() });
+                // The pointer is the point the drag holds, which the globe
+                // turns to keep under it.
+                let step =
+                    CameraDelta { offset: Some(delta.into()), anchor: Some(to.into()), ..CameraDelta::default() };
+                self.update(camera, step);
                 self.tracking.record(now, Step { pan: delta, ..Step::default() });
             }
         }
@@ -881,9 +885,9 @@ impl GestureRecognizer {
         if pan == V2::ZERO && zoom == 0.0 && bearing == 0.0 {
             return;
         }
-        // The pan applies first, then the zoom and turn hold the fingers'
-        // middle in place.
-        let anchored = zoom != 0.0 || bearing != 0.0;
+        // The pan applies first, holding the fingers' middle, then the zoom
+        // and turn hold it in place.
+        let anchored = zoom != 0.0 || bearing != 0.0 || pan != V2::ZERO;
         self.update(
             camera,
             CameraDelta {

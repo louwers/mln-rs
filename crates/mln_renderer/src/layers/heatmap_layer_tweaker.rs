@@ -4,6 +4,7 @@
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::heatmap_layer_ubo::{HeatmapDrawableUBO, HeatmapEvaluatedPropsUBO};
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_HEATMAP_DRAWABLE_UBO, ID_HEATMAP_EVALUATED_PROPS_UBO};
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
@@ -15,7 +16,9 @@ use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, slot_bucket};
 use crate::buckets::heatmap_bucket::HeatmapBucket;
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{
+    LayerTweaker, LayerTweakerBase, get_projection_data, globe_extrude_scale, to_projection_ubo,
+};
 use crate::paint_parameters::PaintParameters;
 
 pub struct HeatmapLayerTweaker {
@@ -70,7 +73,9 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
         let mut i: u32 = 0;
         let mut drawable_ubo_vector = vec![HeatmapDrawableUBO::default(); layer_group.get_drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
 
+        let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
             let Some(tile_id) = drawable.get_tile_id() else {
@@ -101,7 +106,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &[0.0, 0.0],
@@ -111,6 +116,8 @@ impl LayerTweaker for HeatmapLayerTweaker {
                 drawable,
                 false,
             );
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             drawable_ubo_vector[i as usize] = HeatmapDrawableUBO {
                 matrix: cast_matrix(&matrix),
@@ -118,7 +125,7 @@ impl LayerTweaker for HeatmapLayerTweaker {
 
                 weight_t: binders.heatmap_weight.interpolation_factor(zoom),
                 radius_t: binders.heatmap_radius.interpolation_factor(zoom),
-                pad1: 0.0,
+                globe_extrude_scale: globe_extrude_scale(&tile_id, zoom, latitude_scale),
             };
             drawable.set_ubo_index(i);
             i += 1;
@@ -133,5 +140,6 @@ impl LayerTweaker for HeatmapLayerTweaker {
         }
 
         layer_group.mutable_uniform_buffers().set(ID_HEATMAP_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);
     }
 }

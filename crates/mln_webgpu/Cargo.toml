@@ -53,6 +53,11 @@ path = "tests/wgsl_compile_test.rs"
 name = "gtest_offscreen_texture"
 path = "tests/gtest_offscreen_texture.rs"
 
+# HeadlessBackend on a shared or host-made device, and on a named adapter.
+[[test]]
+name = "shared_device_test"
+path = "tests/shared_device_test.rs"
+
 [dev-dependencies]
 mln_image = { package = "mln-rs-image", path = "../mln_image" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }

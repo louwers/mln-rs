@@ -108,6 +108,33 @@ impl HeadlessFrontend {
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
         let (backend, renderer_backend) = create_backend(physical_size(size, pixel_ratio), swap_behavior, context_mode);
+        Self::with_backends(backend, renderer_backend, size, pixel_ratio, invalidate_on_update, glyph_cache)
+    }
+
+    /// Port-only: a frontend that renders through `backend`, such as one
+    /// on a device other backends share (`HeadlessBackend::with_device`),
+    /// which it sizes for `size` at `pixel_ratio`.
+    pub fn with_backend(
+        backend: mln_webgpu::HeadlessBackend,
+        size: Size,
+        pixel_ratio: f32,
+        invalidate_on_update: bool,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
+        backend.set_size(physical_size(size, pixel_ratio));
+        let backend = Rc::new(backend);
+        Self::with_backends(backend.clone(), backend, size, pixel_ratio, invalidate_on_update, glyph_cache)
+    }
+
+    /// A frontend on `backend`, which is also the renderer's backend.
+    fn with_backends(
+        backend: Rc<dyn GfxHeadlessBackend>,
+        renderer_backend: Rc<dyn RendererBackend>,
+        size: Size,
+        pixel_ratio: f32,
+        invalidate_on_update: bool,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
         let shared = Rc::new(Shared {
             size: Cell::new(size),
             pixel_ratio,

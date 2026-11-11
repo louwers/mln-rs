@@ -49,6 +49,7 @@ pub mod quaternion;
 pub mod serialization;
 pub mod size;
 pub mod string_indexer;
+pub mod subdivision_granularity;
 pub mod sync;
 pub mod tile_server_options;
 pub mod tileset;

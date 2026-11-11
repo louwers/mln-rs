@@ -42,6 +42,8 @@ name = "gtest_mapbox"
 path = "tests/gtest_mapbox.rs"
 
 [dev-dependencies]
+# Serves the styles of the DatabaseFileSource region tests.
+httpmock.workspace = true
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }
 

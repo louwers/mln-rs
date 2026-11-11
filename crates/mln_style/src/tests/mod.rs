@@ -7,6 +7,7 @@ mod conversion_geojson_options;
 mod conversion_layer;
 mod conversion_light;
 mod conversion_padding;
+mod conversion_projection;
 mod conversion_property_value;
 mod conversion_source_options;
 mod conversion_stringify;

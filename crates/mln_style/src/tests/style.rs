@@ -6,12 +6,12 @@ use std::sync::Arc;
 
 use feature::Value;
 use mln_conversion::Convertible;
-use mln_style_types::VisibilityType;
-use mln_util::LatLng;
+use mln_style_types::{ProjectionDefinition, VisibilityType};
 use mln_util::chrono::milliseconds;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity};
 use mln_util::size::Size;
+use mln_util::{Color, LatLng};
 
 use super::util::{FixtureLog, parse_json, read_file};
 use crate::image;
@@ -19,6 +19,9 @@ use crate::layer::Layer;
 use crate::layers::line_layer::{Impl as LineLayerImpl, LineLayer};
 use crate::layers::line_layer_properties::LineColor;
 use crate::observer::{Observer, SourceObserver};
+use crate::projection::Projection;
+use crate::property_value::PropertyValue;
+use crate::sky::Sky;
 use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::tile_source::{UrlOrTileset, VectorSource};
 use crate::style::{Impl, Style};
@@ -87,6 +90,30 @@ fn properties() {
     assert_eq!(0.0, style.get_default_camera().zoom.unwrap());
     assert_eq!(0.0, style.get_default_camera().bearing.unwrap());
     assert_eq!(0.0, style.get_default_camera().pitch.unwrap());
+}
+
+// gtest: Style.Projection
+#[test]
+fn projection() {
+    let mut style = stub_style();
+
+    style.load_json(r#"{"projection": {"type": "globe"}}"#);
+    assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
+
+    style.load_json(r#"{}"#);
+    assert!(style.get_projection().get_type().is_undefined());
+
+    let mut projection = Projection::new();
+    projection.set_type(PropertyValue::Constant(ProjectionDefinition::from_name("vertical-perspective")));
+    style.set_projection(projection);
+    assert_eq!(
+        ProjectionDefinition::from_name("vertical-perspective"),
+        *style.get_projection().get_type().as_constant()
+    );
+
+    // A name that is not a projection keeps the default, with a warning.
+    style.load_json(r#"{"projection": {"type": "orthographic"}}"#);
+    assert!(style.get_projection().get_type().is_undefined());
 }
 
 // gtest: Style.GlobalStatePropertyRequiresLoadedStyle
@@ -500,6 +527,77 @@ fn visibility_expression_rejects_other_dependencies() {
     assert_eq!(VisibilityType::Visible, style.get_layer("background").unwrap().get_visibility());
 }
 
+/// gtest `EXPECT_FLOAT_EQ`: within 4 ULPs.
+fn assert_float_eq(expected: f32, actual: f32) {
+    let diff = (i64::from(expected.to_bits()) - i64::from(actual.to_bits())).abs();
+    assert!(diff <= 4, "expected {expected}, got {actual}");
+}
+
+// gtest: Style.SkyPresenceAndReplacement
+#[test]
+fn sky_presence_and_replacement() {
+    let mut style = stub_style();
+
+    assert!(style.get_sky().is_none());
+
+    style.load_json(r#"{"sky":{}}"#);
+    assert!(style.get_sky().expect("sky").get_sky_color().is_undefined());
+
+    style.load_json(r#"{"sky":{"sky-color":"blue","atmosphere-blend":0.4}}"#);
+    let sky = style.get_sky().expect("sky");
+    assert_eq!(Color::blue(), *sky.get_sky_color().as_constant());
+    assert_float_eq(0.4, *sky.get_atmosphere_blend().as_constant());
+
+    let mut replacement = Sky::new();
+    replacement.set_fog_color(PropertyValue::Constant(Color::red()));
+    style.set_sky(Some(replacement));
+    let sky = style.get_sky().expect("sky");
+    assert!(sky.get_sky_color().is_undefined());
+    assert!(sky.get_atmosphere_blend().is_undefined());
+    assert_eq!(Color::red(), *sky.get_fog_color().as_constant());
+
+    style.set_sky(None);
+    assert!(style.get_sky().is_none());
+
+    style.load_json(r#"{"sky":{"sky-color":"white"}}"#);
+    assert!(style.get_sky().is_some());
+    style.load_json(r#"{}"#);
+    assert!(style.get_sky().is_none());
+
+    style.load_json(r#"{"sky":[]}"#);
+    assert!(style.get_sky().is_none());
+}
+
+// gtest: Style.SkyProjectionAndGlobalStateCoexist
+#[test]
+fn sky_projection_and_global_state_coexist() {
+    let mut style = stub_style();
+
+    style.load_json(
+        r#"{
+        "version": 8,
+        "sky": {"sky-color": "blue"},
+        "projection": {"type": "globe"},
+        "state": {"showLabels": {"default": true}},
+        "sources": {},
+        "layers": []
+    }"#,
+    );
+
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").get_sky_color().as_constant());
+    assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
+    assert_eq!(Value::Bool(true), style.get_global_state()["showLabels"]);
+
+    style.set_global_state_property("showLabels", &Value::Bool(false));
+    assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
+    assert_eq!(Color::blue(), *style.get_sky().expect("sky").get_sky_color().as_constant());
+    assert_eq!(ProjectionDefinition::from_name("globe"), *style.get_projection().get_type().as_constant());
+
+    style.set_sky(None);
+    assert!(style.get_sky().is_none());
+    assert_eq!(Value::Bool(false), style.get_global_state()["showLabels"]);
+}
+
 fn vector_source(id: &str) -> Box<VectorSource> {
     Box::new(VectorSource::new(
         id,
@@ -549,9 +647,7 @@ fn remove_source_in_use() {
 #[test]
 fn public_load_state_does_not_wait_for_resources() {
     let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);
-    // TODO(port): StubFileSource::ResponseType::Manual (never answers here,
-    // as no run loop runs).
+        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Manual);
     let mut style = Style::with_file_source(
         Some(Arc::new(file_source)),
         1.0,
@@ -681,13 +777,22 @@ fn load_url_error() {
 // gtest: Style.LoadJSONCancelsPendingLoadURL
 #[test]
 fn load_json_cancels_pending_load_url() {
-    // C++ answers with ResponseType::Manual + respondToAll(); the stub
-    // answers asynchronously here (TODO(port): Manual), on run_once.
-    let (mut style, _observer, run_loop) = stub_with_style_response(|_| {
+    let file_source = Arc::new(mln_storage::stub_file_source::StubFileSource::new(
+        mln_storage::stub_file_source::ResponseType::Manual,
+    ));
+    file_source.set_response(mln_storage::Kind::Style, |_| {
         let mut response = mln_storage::Response::new();
         response.data = Some(Arc::new(read_file("test/fixtures/resources/style_vector.json").into_bytes()));
         Some(response)
     });
+    let mut style = Impl::with_file_source(
+        Some(file_source.clone()),
+        1.0,
+        mln_actor::TaggedScheduler::new(
+            mln_actor::scheduler::get_background(),
+            mln_util::identity::SimpleIdentity::new(),
+        ),
+    );
 
     // Start loading a URL (this will be pending)
     style.load_url("http://some-url");
@@ -707,7 +812,7 @@ fn load_json_cancels_pending_load_url() {
     assert_eq!("", style.get_url());
     assert!(style.get_json().contains("Test Style"));
 
-    run_loop.run_once();
+    file_source.respond_to_all();
     style.process_style_responses();
 
     // The style should still show our JSON content, not the URL content

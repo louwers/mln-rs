@@ -6,11 +6,10 @@
 // in insertion order, duplicates kept; json_document.rs) and written with
 // //vendor/rapidjson's `Writer`. Needs the `sqlite` feature.
 //
-// Deviations: C++ lets the exceptions of `Database::open`, a query,
-// `std::stoi`/`std::stod` and `util::decompress` escape the file source
-// thread (std::terminate); the port answers the request with an `Other`
-// error carrying the message instead, and `std::stoi`/`std::stod` of a
-// string without a number read 0. The resource and client options are kept
+// A database that doesn't open or query, metadata whose zooms or scale don't
+// parse (`std::stoi`/`std::stod` throw), and data that doesn't decompress
+// answer the request with an `Other` error carrying the message, as in
+// maplibre-native-ffi's patched C++. The resource and client options are kept
 // next to the thread behind a mutex (C++: in the thread object, read back
 // with a blocking `ask`).
 //
@@ -32,7 +31,7 @@ use serde_json::Value as Json;
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
-use crate::json_document::{Document, strtol};
+use crate::json_document::Document;
 use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
@@ -51,17 +50,53 @@ fn json_double(d: f64) -> Json {
     serde_json::Number::from_f64(d).map_or(Json::Null, Json::Number)
 }
 
-/// `std::strtod(s, nullptr)`: the longest prefix that is a number, after
-/// leading whitespace; 0 when there is none.
-pub(crate) fn strtod(s: &str) -> f64 {
+/// The longest prefix of `s` that is a number, after leading whitespace, and
+/// its value.
+fn number_prefix(s: &str) -> Option<(&str, f64)> {
     let s = s.trim_start();
-    let mut best = 0.0;
+    let mut best = None;
     for (i, _) in s.char_indices().skip(1).chain(std::iter::once((s.len(), ' '))) {
         if let Ok(v) = s[..i].parse::<f64>() {
-            best = v;
+            best = Some((&s[..i], v));
         }
     }
     best
+}
+
+/// `std::strtod(s, nullptr)`: the longest prefix that is a number, after
+/// leading whitespace; 0 when there is none.
+pub(crate) fn strtod(s: &str) -> f64 {
+    number_prefix(s).map_or(0.0, |(_, v)| v)
+}
+
+/// `std::stod(s)`: [`strtod`], but an error when there is no number, or when
+/// it overflows to infinity or underflows to zero.
+fn stod(s: &str) -> Result<f64, String> {
+    let (number, v) = number_prefix(s).ok_or_else(|| format!("\"{s}\" is not a number"))?;
+    let mantissa = number.split(['e', 'E']).next().unwrap_or_default();
+    let overflow = v.is_infinite() && !number.to_ascii_lowercase().contains("inf");
+    let underflow = v == 0.0 && mantissa.bytes().any(|b| (b'1'..=b'9').contains(&b));
+    if overflow || underflow {
+        return Err(format!("\"{s}\" is out of range"));
+    }
+    Ok(v)
+}
+
+/// `std::stoi(s)`: the leading decimal integer, after whitespace; an error
+/// when there is none or it doesn't fit an `int`.
+fn stoi(s: &str) -> Result<i32, String> {
+    let t = s.trim_start();
+    let sign = usize::from(matches!(t.as_bytes().first(), Some(b'-' | b'+')));
+    let digits = t.as_bytes()[sign..].iter().take_while(|b| b.is_ascii_digit()).count();
+    if digits == 0 {
+        return Err(format!("\"{s}\" is not an integer"));
+    }
+    t[..sign + digits].parse().map_err(|_| format!("\"{s}\" is out of range"))
+}
+
+/// A `minzoom` or `maxzoom` metadata value: 0 when empty, else `std::stoi`.
+fn zoom(name: &str, value: &str) -> Result<i32, String> {
+    if value.is_empty() { Ok(0) } else { stoi(value).map_err(|e| format!("MBTiles {name}: {e}")) }
 }
 
 /// `split(s, delim)`: each `std::getline` piece through `std::strtod`.
@@ -176,15 +211,15 @@ impl MBTilesFileSourceThread {
             values.insert("maxzoom".to_owned(), maxz.clone());
         }
 
-        let min_zoom = if minz.is_empty() { 0 } else { strtol(&minz) as i32 };
-        let max_zoom = if maxz.is_empty() { 0 } else { strtol(&maxz) as i32 };
+        let min_zoom = zoom("minzoom", &minz)?;
+        let max_zoom = zoom("maxzoom", &maxz)?;
 
         for (name, value) in &values {
             if name == "scale" {
-                doc.add_member("scale", json_double(strtod(value)));
+                let scale = stod(value).map_err(|e| format!("MBTiles scale: {e}"))?;
+                doc.add_member("scale", json_double(scale));
             } else if name == "minzoom" || name == "maxzoom" {
-                let value = if value.is_empty() { 0 } else { strtol(value) as i32 };
-                doc.add_member(name.clone(), Json::from(value));
+                doc.add_member(name.clone(), Json::from(zoom(name, value)?));
             } else if name == "bounds" {
                 let bounds_values = split(value, ',');
                 if bounds_values.len() != 4 {
@@ -359,6 +394,22 @@ impl FileSource for MBTilesFileSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::json_document::strtol;
+
+    #[test]
+    fn stoi_and_stod_fail_without_a_number() {
+        assert_eq!(Ok(12), stoi(" 12x"));
+        assert_eq!(Ok(-3), stoi("-3"));
+        assert!(stoi("zero").is_err());
+        assert!(stoi("+").is_err());
+        assert!(stoi("2147483648").is_err());
+        assert_eq!(Ok(1.5), stod("1.5abc"));
+        assert_eq!(Ok(0.0), stod("0e-999"));
+        assert!(stod("abc").is_err());
+        assert!(stod("1e999").is_err());
+        assert!(stod("1e-999").is_err());
+        assert_eq!(Ok(f64::INFINITY), stod("inf"));
+    }
 
     #[test]
     fn strtod_and_strtol_prefixes() {

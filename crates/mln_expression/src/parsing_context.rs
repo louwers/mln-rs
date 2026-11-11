@@ -441,6 +441,10 @@ impl ParsingContext {
                 && (actual == Type::Value || actual == Type::Number || actual.is_array())
             {
                 expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
+            } else if expected == Type::ProjectionDefinition
+                && (actual == Type::Value || actual == Type::String || actual.is_array())
+            {
+                expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
             } else if expected == Type::VariableAnchorOffsetCollection && (actual == Type::Value || actual.is_array()) {
                 expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
             } else {

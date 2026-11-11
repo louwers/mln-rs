@@ -646,7 +646,9 @@ impl OfflineDatabase {
         Ok(result)
     }
 
-    fn has_internal(&mut self, resource: &Resource) -> DbResult<Option<i64>> {
+    /// (stored size, whether the stored copy can be used without
+    /// revalidating it; see `Response::is_usable`).
+    fn has_internal(&mut self, resource: &Resource) -> DbResult<Option<(i64, bool)>> {
         if let Some(tile_data) = tile_data(resource) { self.has_tile(tile_data) } else { self.has_resource(resource) }
     }
 
@@ -779,13 +781,27 @@ impl OfflineDatabase {
         }))
     }
 
-    fn has_resource(&mut self, resource: &Resource) -> DbResult<Option<i64>> {
+    fn has_resource(&mut self, resource: &Resource) -> DbResult<Option<(i64, bool)>> {
         let key = Self::cache_key(resource);
         Ok(self
-            .query_row("SELECT length(data) FROM resources WHERE url = ?", params![key], |row| {
-                Ok(get_optional_i64(row, 0)?)
-            })?
+            .query_row(
+                "SELECT length(data), must_revalidate, expires FROM resources WHERE url = ?",
+                params![key],
+                Self::read_size_and_usable,
+            )?
             .flatten())
+    }
+
+    /// Reads `length(data), must_revalidate, expires`, as hasResource/hasTile
+    /// do.
+    fn read_size_and_usable(row: &rusqlite::Row<'_>) -> DbResult<Option<(i64, bool)>> {
+        let Some(size) = get_optional_i64(row, 0)? else {
+            return Ok(None);
+        };
+        let mut response = Response::new();
+        response.must_revalidate = get_bool(row, 1)?;
+        response.expires = get_optional_i64(row, 2)?.map(Timestamp::from_secs);
+        Ok(Some((size, response.is_usable())))
     }
 
     fn put_resource(
@@ -884,10 +900,10 @@ impl OfflineDatabase {
         }))
     }
 
-    fn has_tile(&mut self, tile: &TileData) -> DbResult<Option<i64>> {
+    fn has_tile(&mut self, tile: &TileData) -> DbResult<Option<(i64, bool)>> {
         Ok(self
             .query_row(
-                "SELECT length(data) \
+                "SELECT length(data), must_revalidate, expires \
                  FROM tiles \
                  WHERE url_template = ?1 \
                    AND pixel_ratio  = ?2 \
@@ -895,7 +911,7 @@ impl OfflineDatabase {
                    AND y            = ?4 \
                    AND z            = ?5 ",
                 params![tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
-                |row| Ok(get_optional_i64(row, 0)?),
+                Self::read_size_and_usable,
             )?
             .flatten())
     }
@@ -1314,6 +1330,13 @@ impl OfflineDatabase {
 
     /// `hasRegionResource(const Resource&)`.
     pub fn has_region_resource(&mut self, resource: &Resource) -> Option<i64> {
+        self.check_region_resource(resource).map(|(size, _)| size)
+    }
+
+    /// `checkRegionResource(const Resource&)`: (stored size, whether the
+    /// stored copy can be used without revalidating it; see
+    /// `Response::is_usable`).
+    pub fn check_region_resource(&mut self, resource: &Resource) -> Option<(i64, bool)> {
         match self.has_internal(resource) {
             Ok(result) => result,
             Err(e) => {
@@ -1420,7 +1443,11 @@ impl OfflineDatabase {
     ) -> DbResult<u64> {
         self.check_flags()?;
 
-        let size = self.put_internal(resource, response, false)?.1;
+        let mut size = self.put_internal(resource, response, false)?.1;
+        if response.not_modified {
+            // A 304 keeps the stored data, so report the size it takes up.
+            size = self.has_internal(resource)?.map_or(0, |(stored, _)| stored as u64);
+        }
         let previously_unused = self.mark_used(region_id, resource)?;
 
         if previously_unused && self.exceeds_offline_mapbox_tile_count_limit(resource) {

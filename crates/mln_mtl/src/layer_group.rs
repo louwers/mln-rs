@@ -2,11 +2,16 @@
 
 use std::any::Any;
 
+use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};
+use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::types::DepthMaskType;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 
+use crate::context::Context;
 use crate::drawable::Drawable;
+use crate::mtl_fwd::MTLDepthStencilStatePtr;
 use crate::render_pass::RenderPass;
 use crate::uniform_buffer::bind_uniform_buffer_array;
 use crate::upload_pass::UploadPass;
@@ -76,6 +81,8 @@ impl layer_group::LayerGroupBase for LayerGroup {
         let uniform_buffers = &self.uniform_buffers;
         let pass = parameters.pass();
         let mut bind_ubos = false;
+        // The depth-stencil states of 3D drawables, built when first used.
+        let mut states_3d: [Option<Option<MTLDepthStencilStatePtr>>; 3] = Default::default();
         self.inner.visit_drawables(|drawable| {
             if !drawable.get_enabled() || !drawable.has_render_pass(pass) {
                 return;
@@ -91,6 +98,29 @@ impl layer_group::LayerGroupBase for LayerGroup {
             let tweakers = drawable.get_tweakers().clone();
             for tweaker in tweakers {
                 tweaker.execute(drawable, parameters);
+            }
+            if drawable.get_is_3d()
+                && let Some(render_pass) =
+                    parameters.render_pass().and_then(|p| p.as_any().downcast_ref::<RenderPass>())
+                && let Some(context) = parameters.context().as_any().downcast_ref::<Context>()
+            {
+                // By depth: none, read-only or read-write.
+                let slot = if !drawable.get_enable_depth() {
+                    0
+                } else if drawable.get_depth_type() == DepthMaskType::ReadOnly {
+                    1
+                } else {
+                    2
+                };
+                let state = states_3d[slot].get_or_insert_with(|| {
+                    let depth_mode = match slot {
+                        0 => DepthMode::disabled(),
+                        1 => parameters.depth_mode_for_3d(DepthMaskType::ReadOnly),
+                        _ => parameters.depth_mode_for_3d(DepthMaskType::ReadWrite),
+                    };
+                    context.make_depth_stencil_state(&depth_mode, &StencilMode::disabled(), render_pass)
+                });
+                render_pass.set_depth_stencil_state(state.as_ref());
             }
             drawable.draw(parameters);
         });

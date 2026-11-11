@@ -28,7 +28,7 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use geometry::Point;
-use mln_map_types::{MapDebugOptions, MapMode, TransformState};
+use mln_map_types::{MapDebugOptions, MapMode, ProjectionData, TileProjector, TransformState};
 use mln_math::{fmaxf, fminf};
 use mln_style::TransitionOptions;
 use mln_style::layers::symbol_layer_properties::*;
@@ -42,7 +42,7 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_DURATION, EXTENT, ONE_EM, TILE_SIZE_D};
 use mln_util::grid_index::BBox;
-use mln_util::mat4::{Mat4, matrix};
+use mln_util::mat4::Mat4;
 use mln_vec_map::VecMap;
 
 use crate::bucket::Bucket;
@@ -53,13 +53,13 @@ use crate::buckets::symbol_bucket::{
 use crate::geometry::feature_index::{FeatureIndex, IndexedSubfeature};
 use crate::layout::symbol_instance::SymbolInstance;
 use crate::layout::symbol_projection::{
-    add_dynamic_attributes, evaluate_size_for_feature, get_label_plane_matrix, hide_glyphs, project,
+    LabelPlaneProjector, add_dynamic_attributes, evaluate_size_for_feature, get_tile_skew_vectors, hide_glyphs,
     reproject_line_labels,
 };
-use crate::render_layer::{BucketPlacementData, RenderLayer, RenderLayerPtr};
+use crate::render_layer::{BucketPlacementData, RenderLayer, RenderLayerPtr, SymbolTranslate};
 use crate::render_tile::RenderTile;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
-use crate::text::collision_index::{CollisionBoundaries, CollisionIndex, IntersectStatus};
+use crate::text::collision_index::{CollisionBoundaries, CollisionIndex, IntersectStatus, PlacedFeatureResult};
 use crate::update_parameters::UpdateParameters;
 
 /// `OpacityState`.
@@ -238,6 +238,39 @@ fn symbol_bucket(bucket: &Arc<dyn Bucket>) -> Option<&SymbolBucket> {
     (**bucket).downcast_ref::<SymbolBucket>()
 }
 
+/// A symbol layer's `*-translate` in the tile's units, as a point.
+fn translation_point(
+    tile_id: &UnwrappedTileID,
+    translate: &SymbolTranslate,
+    state: &TransformState,
+    screen_space: bool,
+) -> Point<f32> {
+    // A screen-space symbol takes its translate in the screen matrix.
+    if screen_space {
+        return Point::new(0.0, 0.0);
+    }
+    let translation = RenderTile::tile_unit_translation(tile_id, &translate.offset, translate.anchor, state);
+    Point::new(translation[0], translation[1])
+}
+
+/// The projection without the horizon plane, so nothing on it counts as
+/// hidden behind the planet.
+fn without_horizon(mut data: ProjectionData) -> ProjectionData {
+    data.clipping_plane = [0.0, 0.0, 0.0, 0.0];
+    data
+}
+
+/// The C++ context's `tileProjector`, `textLabelPlane` and `iconLabelPlane`.
+/// They borrow a transform state, and placing a symbol borrows the
+/// placement (and its collision index's state) mutably, so the port builds
+/// them over a copy of the state for each pass over a context's symbols
+/// (`PlacementContext::projectors`) instead of keeping them in it.
+pub struct PlacementProjectors<'a> {
+    pub tile_projector: TileProjector<'a>,
+    pub text_label_plane: LabelPlaneProjector<'a>,
+    pub icon_label_plane: LabelPlaneProjector<'a>,
+}
+
 /// `PlacementContext`.
 pub struct PlacementContext {
     bucket: Arc<dyn Bucket>,
@@ -256,8 +289,14 @@ pub struct PlacementContext {
     pub pitch_icon_with_map: bool,
     pub placement_type: SymbolPlacementType,
 
-    pub text_label_plane_matrix: Mat4,
-    pub icon_label_plane_matrix: Mat4,
+    /// The tile's projection for `tileProjector`. Screen-space symbols are
+    /// drawn over the view, so the planet does not hide them: no horizon
+    /// plane.
+    tile_projection: ProjectionData,
+    // Labels collide where `*-translate` puts them, line labels' circles
+    // included.
+    pub text_translation: Point<f32>,
+    pub icon_translation: Point<f32>,
 
     pub collision_group: CollisionGroup,
     pub partially_evaluated_text_size: ZoomEvaluatedSize,
@@ -290,8 +329,9 @@ pub struct PlacementContext {
 
 impl PlacementContext {
     /// `PlacementContext(bucket, renderTile, state, placementZoom,
-    /// collisionGroup, avoidEdges)`. Locks the bucket's state briefly; call
-    /// it without holding the lock.
+    /// collisionGroup, textTranslate, iconTranslate, avoidEdges)`, with the
+    /// translations from `params`. Locks the bucket's state briefly; call it
+    /// without holding the lock.
     pub fn new(
         params: &BucketPlacementData,
         state: &TransformState,
@@ -314,25 +354,11 @@ impl PlacementContext {
         let pitch_icon_with_map = *layout.get::<IconPitchAlignment>() == AlignmentType::Map;
         let placement_type = *layout.get::<SymbolPlacement>();
 
-        let text_label_plane_matrix = get_label_plane_matrix(
-            &render_tile.matrix,
-            pitch_text_with_map,
-            rotate_text_with_map,
-            state,
-            pixels_to_tile_units,
-        );
-        let icon_label_plane_matrix =
-            if rotate_text_with_map == rotate_icon_with_map && pitch_text_with_map == pitch_icon_with_map {
-                text_label_plane_matrix
-            } else {
-                get_label_plane_matrix(
-                    &render_tile.matrix,
-                    pitch_icon_with_map,
-                    rotate_icon_with_map,
-                    state,
-                    pixels_to_tile_units,
-                )
-            };
+        let screen_space = *layout.get::<SymbolScreenSpace>();
+        let text_translation = translation_point(&render_tile.id, &params.text_translate, state, screen_space);
+        let icon_translation = translation_point(&render_tile.id, &params.icon_translate, state, screen_space);
+        let tile_projection =
+            if screen_space { without_horizon(render_tile.projection) } else { render_tile.projection };
 
         let partially_evaluated_text_size = bucket.text_size_binder.evaluate_for_zoom(placement_zoom);
         let partially_evaluated_icon_size = bucket.icon_size_binder.evaluate_for_zoom(placement_zoom);
@@ -361,8 +387,9 @@ impl PlacementContext {
             rotate_icon_with_map,
             pitch_icon_with_map,
             placement_type,
-            text_label_plane_matrix,
-            icon_label_plane_matrix,
+            tile_projection,
+            text_translation,
+            icon_translation,
             collision_group,
             partially_evaluated_text_size,
             partially_evaluated_icon_size,
@@ -372,6 +399,28 @@ impl PlacementContext {
             always_show_icon,
             has_icon_text_fit,
             avoid_edges,
+        }
+    }
+
+    /// The context's projectors through `state`, the collision index's.
+    pub fn projectors<'a>(&self, state: &'a TransformState) -> PlacementProjectors<'a> {
+        let tile_projector = TileProjector::with_data(state, &self.get_render_tile().id, self.tile_projection);
+        PlacementProjectors {
+            text_label_plane: LabelPlaneProjector::new(
+                &tile_projector,
+                self.pitch_text_with_map,
+                self.rotate_text_with_map,
+                self.pixels_to_tile_units,
+                self.text_translation,
+            ),
+            icon_label_plane: LabelPlaneProjector::new(
+                &tile_projector,
+                self.pitch_icon_with_map,
+                self.rotate_icon_with_map,
+                self.pixels_to_tile_units,
+                self.icon_translation,
+            ),
+            tile_projector,
         }
     }
 
@@ -533,8 +582,25 @@ pub struct Placement {
     collision_circles: HashMap<CollisionFeatureKey, Vec<ProjectedCollisionBox>>,
 }
 
+/// The `calculateVariableLayoutOffset(anchor, width, height, offset,
+/// textBoxScale)` overload: the shift along the label's own axes; collision
+/// projects it the way the label is aligned.
+fn calculate_variable_layout_offset_unrotated(
+    anchor: SymbolAnchorType,
+    width: f32,
+    height: f32,
+    offset: [f32; 2],
+    text_box_scale: f32,
+) -> Point<f32> {
+    let alignment = AnchorAlignment::get_anchor_alignment(anchor);
+    let shift_x = -(alignment.horizontal_align - 0.5) * width;
+    let shift_y = -(alignment.vertical_align - 0.5) * height;
+    Point::new(shift_x + offset[0] * text_box_scale, shift_y + offset[1] * text_box_scale)
+}
+
 /// `calculateVariableLayoutOffset(anchor, width, height, offset,
-/// textBoxScale, rotateWithMap, pitchWithMap, bearing)`.
+/// textBoxScale, rotateWithMap, pitchWithMap, bearing)`: the shift as a
+/// screen-space offset, for the boxes that are not projected.
 #[allow(clippy::too_many_arguments)]
 fn calculate_variable_layout_offset(
     anchor: SymbolAnchorType,
@@ -546,14 +612,8 @@ fn calculate_variable_layout_offset(
     pitch_with_map: bool,
     bearing: f32,
 ) -> Point<f32> {
-    let alignment = AnchorAlignment::get_anchor_alignment(anchor);
-    let shift_x = -(alignment.horizontal_align - 0.5) * width;
-    let shift_y = -(alignment.vertical_align - 0.5) * height;
-    let mut shift = Point::new(shift_x + offset[0] * text_box_scale, shift_y + offset[1] * text_box_scale);
-    if rotate_with_map {
-        shift = rotate_f32(shift, if pitch_with_map { bearing } else { -bearing });
-    }
-    shift
+    let shift = calculate_variable_layout_offset_unrotated(anchor, width, height, offset, text_box_scale);
+    if rotate_with_map { rotate_f32(shift, if pitch_with_map { bearing } else { -bearing }) } else { shift }
 }
 
 /// `calculateVariableRenderShift(anchor, width, height, textOffset,
@@ -582,15 +642,6 @@ fn rotate_f32(a: Point<f32>, angle: f32) -> Point<f32> {
     let x = cos * a.x - sin * a.y;
     let y = sin * a.x + cos * a.y;
     Point::new(x, y)
-}
-
-/// `util::rotate(Point<float>, double angle)`: the math is in double.
-fn rotate_f64(a: Point<f32>, angle: f64) -> Point<f32> {
-    let cos = angle.cos();
-    let sin = angle.sin();
-    let x = cos * a.x as f64 - sin * a.y as f64;
-    let y = sin * a.x as f64 + cos * a.y as f64;
-    Point::new(x as f32, y as f32)
 }
 
 fn add(a: Point<f32>, b: Point<f32>) -> Point<f32> {
@@ -768,10 +819,10 @@ fn place_text_for_placement_modes(
     this: &mut Placement,
     bucket: &SymbolBucket,
     symbol_instance: &SymbolInstance,
-    placed: &mut (bool, bool),
-    placed_vertical_text: &mut (bool, bool),
-    place_horizontal_fn: &mut dyn FnMut(&mut Placement) -> (bool, bool),
-    place_vertical_fn: &mut dyn FnMut(&mut Placement, (bool, bool)) -> (bool, bool),
+    placed: &mut PlacedFeatureResult,
+    placed_vertical_text: &mut PlacedFeatureResult,
+    place_horizontal_fn: &mut dyn FnMut(&mut Placement) -> PlacedFeatureResult,
+    place_vertical_fn: &mut dyn FnMut(&mut Placement, PlacedFeatureResult) -> PlacedFeatureResult,
 ) {
     if bucket.allow_vertical_placement
         && (symbol_instance.get_writing_modes() & WritingModeType::Vertical) != WritingModeType::None
@@ -785,7 +836,7 @@ fn place_text_for_placement_modes(
                 *placed = place_horizontal_fn(this);
             }
 
-            if placed.0 {
+            if placed.placed {
                 break;
             }
         }
@@ -929,13 +980,15 @@ impl Placement {
             collision_group,
             avoid_edges,
         );
+        let transform_state = self.collision_index.get_transform_state().clone();
+        let projectors = ctx.projectors(&transform_state);
         let mut state = symbol_bucket.state();
         for symbol_index in self.get_sorted_symbols(params, symbol_bucket, &state, ctx.pixel_ratio) {
             let symbol = &state.symbol_instances[symbol_index];
             if seen_cross_tile_ids.contains(&symbol.get_cross_tile_id()) {
                 continue;
             }
-            self.place_symbol(symbol_index, symbol, &state, &ctx);
+            self.place_symbol(symbol_index, symbol, &state, &ctx, &projectors);
 
             // Prevent a flickering issue while zooming out.
             if symbol.get_cross_tile_id() != SymbolInstance::INVALID_CROSS_TILE_ID
@@ -960,13 +1013,15 @@ impl Placement {
         });
     }
 
-    /// `placeSymbol(symbolInstance, ctx)`.
+    /// `placeSymbol(symbolInstance, ctx)`; `projectors` are the context's (see
+    /// `PlacementProjectors`).
     fn place_symbol(
         &mut self,
         symbol_index: usize,
         symbol_instance: &SymbolInstance,
         state: &SymbolBucketState,
         ctx: &PlacementContext,
+        projectors: &PlacementProjectors<'_>,
     ) -> JointPlacement {
         let k_unplaced = JointPlacement::new(false, false, false);
         if symbol_instance.get_cross_tile_id() == SymbolInstance::INVALID_CROSS_TILE_ID {
@@ -981,6 +1036,7 @@ impl Placement {
         }
         let bucket = ctx.get_bucket();
         let pos_matrix = ctx.get_render_tile().matrix;
+        let tile_projector = &projectors.tile_projector;
         let mut variable_text_anchors = symbol_instance.get_text_anchors();
         self.text_boxes.clear();
         self.icon_boxes.clear();
@@ -988,9 +1044,10 @@ impl Placement {
         let mut place_text = false;
         let mut place_icon = false;
         let mut offscreen = true;
-        let mut placed: (bool, bool) = (false, false);
-        let mut placed_vertical_text: (bool, bool) = (false, false);
-        let mut placed_vertical_icon: (bool, bool) = (false, false);
+        let mut icon_occluded = false;
+        let mut placed = PlacedFeatureResult::default();
+        let mut placed_vertical_text = PlacedFeatureResult::default();
+        let mut placed_vertical_icon = PlacedFeatureResult::default();
         let shift: Cell<Point<f32>> = Cell::new(Point::new(0.0, 0.0));
         if let Some(horizontal_text_index) = symbol_instance.get_default_horizontal_placed_text_index() {
             let placed_symbol: &PlacedSymbol = &state.text.placed_symbols[horizontal_text_index];
@@ -1014,21 +1071,23 @@ impl Placement {
                         this.text_boxes.clear();
                         let placed_feature = this.collision_index.place_feature(
                             collision_feature,
-                            Point::new(0.0, 0.0),
-                            &pos_matrix,
-                            &ctx.text_label_plane_matrix,
+                            None,
+                            ctx.text_translation,
+                            tile_projector,
+                            &projectors.text_label_plane,
                             ctx.pixel_ratio,
                             placed_symbol,
                             ctx.scale,
                             font_size,
                             ctx.text_allow_overlap,
                             ctx.pitch_text_with_map,
+                            ctx.rotate_text_with_map,
                             this.show_collision_boxes,
                             &ctx.avoid_edges,
                             ctx.collision_group_predicate(),
                             &mut this.text_boxes,
                         );
-                        if placed_feature.0 {
+                        if placed_feature.placed {
                             this.placed_orientations.entry(cross_tile_id).or_insert(orientation);
                         }
                         placed_feature
@@ -1038,13 +1097,13 @@ impl Placement {
                     place_feature(this, symbol_instance.get_text_collision_feature(), TextWritingModeType::Horizontal)
                 };
 
-                let mut place_vertical = |this: &mut Placement, _placed: (bool, bool)| {
+                let mut place_vertical = |this: &mut Placement, _placed: PlacedFeatureResult| {
                     if bucket.allow_vertical_placement {
                         if let Some(vertical) = symbol_instance.get_vertical_text_collision_feature() {
                             return place_feature(this, vertical, TextWritingModeType::Vertical);
                         }
                     }
-                    (false, false)
+                    PlacedFeatureResult::default()
                 };
 
                 place_text_for_placement_modes(
@@ -1056,10 +1115,10 @@ impl Placement {
                     &mut place_horizontal,
                     &mut place_vertical,
                 );
-                update_previous_orientation_if_not_placed(self, placed.0);
+                update_previous_orientation_if_not_placed(self, placed.placed);
 
-                place_text = placed.0;
-                offscreen &= placed.1;
+                place_text = placed.placed;
+                offscreen &= placed.offscreen;
             } else if !symbol_instance.get_text_collision_feature().along_line
                 && !symbol_instance.get_text_collision_feature().boxes.is_empty()
             {
@@ -1101,6 +1160,7 @@ impl Placement {
                             icon_collision_feature,
                             symbol_instance,
                             ctx,
+                            projectors,
                             placed_symbol,
                             font_size,
                             &pos_matrix,
@@ -1119,8 +1179,8 @@ impl Placement {
                     )
                 };
 
-                let mut place_vertical = |this: &mut Placement, placed: (bool, bool)| {
-                    if bucket.allow_vertical_placement && !placed.0 {
+                let mut place_vertical = |this: &mut Placement, placed: PlacedFeatureResult| {
+                    if bucket.allow_vertical_placement && !placed.placed {
                         if let Some(vertical) = symbol_instance.get_vertical_text_collision_feature() {
                             // C++ passes the vertical text feature as the
                             // icon feature too (its `? :` always picks it).
@@ -1132,7 +1192,7 @@ impl Placement {
                             );
                         }
                     }
-                    (false, false)
+                    PlacedFeatureResult::default()
                 };
 
                 place_text_for_placement_modes(
@@ -1145,10 +1205,10 @@ impl Placement {
                     &mut place_vertical,
                 );
 
-                place_text = placed.0;
-                offscreen &= placed.1;
+                place_text = placed.placed;
+                offscreen &= placed.offscreen;
 
-                update_previous_orientation_if_not_placed(self, placed.0);
+                update_previous_orientation_if_not_placed(self, placed.placed);
 
                 // If we didn't get placed, we still need to copy our position from
                 // the last placement for fade animations
@@ -1163,9 +1223,13 @@ impl Placement {
         }
 
         if let Some(placed_icon_index) = symbol_instance.placed_icon_index {
-            if !ctx.has_icon_text_fit || !place_text || variable_text_anchors.is_empty() {
-                shift.set(Point::new(0.0, 0.0));
-            }
+            // An icon fitted to text that took a variable anchor follows the
+            // text's shift; no other icon has one.
+            let icon_shift = if ctx.has_icon_text_fit && place_text && !variable_text_anchors.is_empty() {
+                Some(shift.get())
+            } else {
+                None
+            };
 
             let icon_buffer = if symbol_instance.has_sdf_icon() { &state.sdf_icon } else { &state.icon };
             let placed_symbol = &icon_buffer.placed_symbols[placed_icon_index];
@@ -1173,15 +1237,17 @@ impl Placement {
             let place_icon_feature = |this: &mut Placement, collision_feature: &CollisionFeature| {
                 this.collision_index.place_feature(
                     collision_feature,
-                    shift.get(),
-                    &pos_matrix,
-                    &ctx.icon_label_plane_matrix,
+                    icon_shift,
+                    ctx.icon_translation,
+                    tile_projector,
+                    &projectors.icon_label_plane,
                     ctx.pixel_ratio,
                     placed_symbol,
                     ctx.scale,
                     font_size,
                     ctx.icon_allow_overlap,
                     ctx.pitch_text_with_map,
+                    ctx.rotate_text_with_map,
                     this.show_collision_boxes,
                     &ctx.avoid_edges,
                     ctx.collision_group_predicate(),
@@ -1190,14 +1256,15 @@ impl Placement {
             };
 
             let placed_icon = match symbol_instance.get_vertical_icon_collision_feature() {
-                Some(vertical) if placed_vertical_text.0 => {
+                Some(vertical) if placed_vertical_text.placed => {
                     placed_vertical_icon = place_icon_feature(self, vertical);
                     placed_vertical_icon
                 }
                 _ => place_icon_feature(self, symbol_instance.get_icon_collision_feature()),
             };
-            place_icon = placed_icon.0;
-            offscreen &= placed_icon.1;
+            place_icon = placed_icon.placed;
+            icon_occluded = placed_icon.occluded;
+            offscreen &= placed_icon.offscreen;
         }
 
         let icon_without_text = !symbol_instance.has_text() || *ctx.get_layout().get::<TextOptional>();
@@ -1215,7 +1282,7 @@ impl Placement {
 
         if place_text {
             let feature = match symbol_instance.get_vertical_text_collision_feature() {
-                Some(vertical) if placed_vertical_text.0 => vertical,
+                Some(vertical) if placed_vertical_text.placed => vertical,
                 _ => symbol_instance.get_text_collision_feature(),
             };
             self.collision_index.insert_feature(
@@ -1229,7 +1296,7 @@ impl Placement {
 
         if place_icon {
             let feature = match symbol_instance.get_vertical_icon_collision_feature() {
-                Some(vertical) if placed_vertical_icon.0 => vertical,
+                Some(vertical) if placed_vertical_icon.placed => vertical,
                 _ => symbol_instance.get_icon_collision_feature(),
             };
             self.collision_index.insert_feature(
@@ -1268,9 +1335,11 @@ impl Placement {
             return k_unplaced;
         }
 
+        // Symbols behind the planet's horizon stay hidden even when overlap is
+        // allowed.
         let result = JointPlacement::new(
-            place_text || ctx.always_show_text,
-            place_icon || ctx.always_show_icon,
+            (place_text || ctx.always_show_text) && !placed.occluded,
+            (place_icon || ctx.always_show_icon) && !icon_occluded,
             offscreen || state.just_reloaded,
         );
         self.placements.entry(symbol_instance.get_cross_tile_id()).or_insert(result);
@@ -1291,19 +1360,20 @@ impl Placement {
         icon_collision_feature: &CollisionFeature,
         symbol_instance: &SymbolInstance,
         ctx: &PlacementContext,
+        projectors: &PlacementProjectors<'_>,
         placed_symbol: &PlacedSymbol,
         font_size: f32,
         pos_matrix: &Mat4,
         variable_text_anchors: &[SymbolAnchorType],
         do_variable_icon_placement: bool,
         shift: &Cell<Point<f32>>,
-    ) -> (bool, bool) {
+    ) -> PlacedFeatureResult {
         let bucket = ctx.get_bucket();
         let text_box = &text_collision_feature.boxes[0];
         let width = text_box.x2 - text_box.x1;
         let height = text_box.y2 - text_box.y1;
         let text_box_scale = symbol_instance.get_text_box_scale();
-        let mut placed_feature = (false, false);
+        let mut placed_feature = PlacedFeatureResult::default();
         let anchors_size = variable_text_anchors.len();
         let placement_attempts = if ctx.text_allow_overlap { anchors_size * 2 } else { anchors_size };
         for i in 0..placement_attempts {
@@ -1316,7 +1386,15 @@ impl Placement {
                 .expect("textVariableAnchorOffset")
                 .get_offset_by_anchor(&anchor);
             let allow_overlap = i >= anchors_size;
-            shift.set(calculate_variable_layout_offset(
+            shift.set(calculate_variable_layout_offset_unrotated(
+                anchor,
+                width,
+                height,
+                variable_text_offset,
+                text_box_scale,
+            ));
+            self.text_boxes.clear();
+            let screen_shift = calculate_variable_layout_offset(
                 anchor,
                 width,
                 height,
@@ -1325,12 +1403,11 @@ impl Placement {
                 ctx.rotate_text_with_map,
                 ctx.pitch_text_with_map,
                 ctx.bearing as f32,
-            ));
-            self.text_boxes.clear();
+            );
             if !self.can_place_at_variable_anchor(
                 text_box,
                 anchor,
-                shift.get(),
+                screen_shift,
                 variable_text_anchors,
                 pos_matrix,
                 ctx.pixel_ratio,
@@ -1340,15 +1417,17 @@ impl Placement {
 
             placed_feature = self.collision_index.place_feature(
                 text_collision_feature,
-                shift.get(),
-                pos_matrix,
-                &[0.0; 16],
+                Some(shift.get()),
+                ctx.text_translation,
+                &projectors.tile_projector,
+                &projectors.text_label_plane,
                 ctx.pixel_ratio,
                 placed_symbol,
                 ctx.scale,
                 font_size,
                 allow_overlap,
                 ctx.pitch_text_with_map,
+                ctx.rotate_text_with_map,
                 self.show_collision_boxes,
                 &ctx.avoid_edges,
                 ctx.collision_group_predicate(),
@@ -1358,27 +1437,29 @@ impl Placement {
             if do_variable_icon_placement {
                 let placed_icon_feature = self.collision_index.place_feature(
                     icon_collision_feature,
-                    shift.get(),
-                    pos_matrix,
-                    &ctx.icon_label_plane_matrix,
+                    Some(shift.get()),
+                    ctx.icon_translation,
+                    &projectors.tile_projector,
+                    &projectors.icon_label_plane,
                     ctx.pixel_ratio,
                     placed_symbol,
                     ctx.scale,
                     font_size,
                     ctx.icon_allow_overlap,
                     ctx.pitch_text_with_map, // TODO: shall it be pitchIconWithMap?
+                    ctx.rotate_text_with_map,
                     self.show_collision_boxes,
                     &ctx.avoid_edges,
                     ctx.collision_group_predicate(),
                     &mut self.icon_boxes,
                 );
                 self.icon_boxes.clear();
-                if !placed_icon_feature.0 {
+                if !placed_icon_feature.placed {
                     continue;
                 }
             }
 
-            if placed_feature.0 {
+            if placed_feature.placed {
                 let cross_tile_id = symbol_instance.get_cross_tile_id();
                 debug_assert!(cross_tile_id != 0);
                 let mut prev_anchor: Option<SymbolAnchorType> = None;
@@ -1543,19 +1624,34 @@ impl Placement {
         for item in layer.get_placement_data() {
             // `sortKeyRange->isFirstRange()`: `start == 0u`.
             if item.sort_key_range.is_none_or(|range| range.start == 0) {
-                update_vertices(&*item.bucket, self, update_opacities, state, item.tile(), &mut seen_cross_tile_ids);
+                update_vertices(&*item.bucket, self, update_opacities, state, item, &mut seen_cross_tile_ids);
             }
         }
     }
 
-    /// `updateBucketDynamicAttributeData(bucket, state, tile)`: whether the
-    /// bucket's vertices were updated.
+    /// `updateFollowerBuckets(layer, state)`: lays out the positions of a
+    /// layer drawn from buckets other layers place, after
+    /// `updateLayerBuckets`.
+    pub fn update_follower_buckets(&self, layer: &dyn RenderLayer, state: &TransformState) {
+        for item in layer.get_follower_data() {
+            if let Some(bucket) = symbol_bucket(&item.bucket) {
+                bucket.update_layer_vertices(self, state, item, layer.get_id());
+            }
+        }
+    }
+
+    /// `updateBucketDynamicAttributeData(bucket, state, data, layerID)`:
+    /// whether the bucket's vertices were updated. With a layer ID, updates
+    /// that layer's own positions, which it needs only at another
+    /// translation than the leader's.
     pub fn update_bucket_dynamic_attribute_data(
         &self,
         bucket: &SymbolBucket,
         state: &TransformState,
-        tile: &RenderTile,
+        data: &BucketPlacementData,
+        layer_id: Option<&str>,
     ) -> bool {
+        let tile = data.tile();
         let layout = &*bucket.layout;
         let along_line = *layout.get::<SymbolPlacement>() != SymbolPlacementType::Point;
         let has_variable_text_anchors = bucket.has_variable_text_anchors();
@@ -1569,36 +1665,61 @@ impl Placement {
             && (bucket.allow_vertical_placement || has_variable_anchors)
             && (has_icon || has_sdf_icon);
         let mut result = false;
+        let tile_projector = TileProjector::with_data(state, &tile.id, tile.projection);
+        let screen_space = *layout.get::<SymbolScreenSpace>();
+        let text_translation = translation_point(&tile.id, &data.text_translate, state, screen_space);
+        let icon_translation = translation_point(&tile.id, &data.icon_translate, state, screen_space);
+        match layer_id {
+            None => {
+                bs.dynamic_text_translation = text_translation;
+                bs.dynamic_icon_translation = icon_translation;
+            }
+            Some(layer_id) => {
+                if (!along_line && !has_variable_anchors)
+                    || (!bs.has_layer_dynamic_attribute_data(layer_id)
+                        && text_translation == bs.dynamic_text_translation
+                        && icon_translation == bs.dynamic_icon_translation)
+                {
+                    return false;
+                }
+            }
+        }
+        // GL JS rewrites a shared bucket's positions for each layer it draws;
+        // one at another translation keeps its own (`positions_and_symbols`).
 
         if along_line {
             if *layout.get::<IconRotationAlignment>() == AlignmentType::Map {
                 let pitch_with_map = *layout.get::<IconPitchAlignment>() == AlignmentType::Map;
                 let keep_upright = *layout.get::<IconKeepUpright>();
                 if has_sdf_icon {
+                    let (positions, placed_symbols) = bs.sdf_icon.positions_and_symbols(layer_id);
                     reproject_line_labels(
-                        &mut bs.sdf_icon.dynamic_attribute_data,
-                        &bs.sdf_icon.placed_symbols,
-                        &tile.matrix,
+                        positions,
+                        placed_symbols,
+                        &tile_projector,
                         pitch_with_map,
                         true, /*rotateWithMap*/
                         keep_upright,
                         tile,
                         &bucket.icon_size_binder,
                         state,
+                        icon_translation,
                     );
                     result = true;
                 }
                 if has_icon {
+                    let (positions, placed_symbols) = bs.icon.positions_and_symbols(layer_id);
                     reproject_line_labels(
-                        &mut bs.icon.dynamic_attribute_data,
-                        &bs.icon.placed_symbols,
-                        &tile.matrix,
+                        positions,
+                        placed_symbols,
+                        &tile_projector,
                         pitch_with_map,
                         true, /*rotateWithMap*/
                         keep_upright,
                         tile,
                         &bucket.icon_size_binder,
                         state,
+                        icon_translation,
                     );
                     result = true;
                 }
@@ -1607,39 +1728,59 @@ impl Placement {
             if has_text && *layout.get::<TextRotationAlignment>() == AlignmentType::Map {
                 let pitch_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
                 let keep_upright = *layout.get::<TextKeepUpright>();
+                let (positions, placed_symbols) = bs.text.positions_and_symbols(layer_id);
                 reproject_line_labels(
-                    &mut bs.text.dynamic_attribute_data,
-                    &bs.text.placed_symbols,
-                    &tile.matrix,
+                    positions,
+                    placed_symbols,
+                    &tile_projector,
                     pitch_with_map,
                     true, /*rotateWithMap*/
                     keep_upright,
                     tile,
                     &bucket.text_size_binder,
                     state,
+                    text_translation,
                 );
                 result = true;
             }
         } else if has_variable_anchors {
-            bs.text.dynamic_attribute_data.clear();
-            bs.has_variable_placement = false;
+            let mut has_variable_placement = false;
 
             let partially_evaluated_size = bucket.text_size_binder.evaluate_for_zoom(state.get_zoom() as f32);
             let tile_scale = 2f64.powf(state.get_zoom() - tile.get_overscaled_tile_id().overscaled_z as f64) as f32;
             let rotate_with_map = *layout.get::<TextRotationAlignment>() == AlignmentType::Map;
             let pitch_with_map = *layout.get::<TextPitchAlignment>() == AlignmentType::Map;
             let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
-            let label_plane_matrix =
-                get_label_plane_matrix(&tile.matrix, pitch_with_map, rotate_with_map, state, pixels_to_tile_units);
+            // The shader leaves the translation to us for variable anchors,
+            // so the shifted anchor carries it.
+            let translation = text_translation;
+            let label_plane = LabelPlaneProjector::new(
+                &tile_projector,
+                pitch_with_map,
+                rotate_with_map,
+                pixels_to_tile_units,
+                translation,
+            );
+            // The shift follows the axes the collision box was projected
+            // along, so the label lands in its own box.
+            let mut vec_east = Point::new(1.0f32, 0.0);
+            let mut vec_south = Point::new(0.0f32, 1.0);
+            if pitch_with_map && !rotate_with_map {
+                let (east, south) = get_tile_skew_vectors(state);
+                vec_east = Point::new(east[0] as f32, east[1] as f32);
+                vec_south = Point::new(south[0] as f32, south[1] as f32);
+            }
             let mut placed_text_shifts: HashMap<usize, (usize, Point<f32>)> = HashMap::new();
 
-            for i in 0..bs.text.placed_symbols.len() {
-                let symbol: &PlacedSymbol = &bs.text.placed_symbols[i];
+            let (text_positions, text_placed_symbols) = bs.text.positions_and_symbols(layer_id);
+            text_positions.clear();
+            for i in 0..text_placed_symbols.len() {
+                let symbol: &PlacedSymbol = &text_placed_symbols[i];
                 let mut variable_offset: Option<VariableOffset> = None;
                 let skip_orientation = bucket.allow_vertical_placement && symbol.placed_orientation.is_none();
                 if !symbol.hidden && symbol.cross_tile_id != 0 && !skip_orientation {
                     if let Some(offset) = self.variable_offsets.get(&symbol.cross_tile_id) {
-                        bs.has_variable_placement = true;
+                        has_variable_placement = true;
                         variable_offset = Some(*offset);
                     }
                 }
@@ -1649,14 +1790,20 @@ impl Placement {
                         // These symbols are from a justification that is not being
                         // used, or a label that wasn't placed so we don't need to do
                         // the extra math to figure out what incremental shift to apply.
-                        hide_glyphs(symbol.glyph_offsets.len(), &mut bs.text.dynamic_attribute_data);
+                        hide_glyphs(symbol.glyph_offsets.len(), text_positions);
                     }
                     Some(variable_offset) => {
                         let tile_anchor = symbol.anchor_point;
-                        let projected_anchor =
-                            project(tile_anchor, if pitch_with_map { &tile.matrix } else { &label_plane_matrix });
-                        let perspective_ratio =
-                            0.5 + 0.5 * (state.get_camera_to_center_distance() / projected_anchor.1);
+                        let projected = if pitch_with_map {
+                            label_plane.to_clip_space_from_tile(tile_anchor)
+                        } else {
+                            label_plane.project(tile_anchor)
+                        };
+                        let projected_anchor = Point::new(projected.point.x as f32, projected.point.y as f32);
+                        let perspective_ratio = 0.5
+                            + 0.5
+                                * (state.get_camera_to_center_distance()
+                                    / projected.signed_distance_from_camera as f32);
                         let mut render_text_size =
                             evaluate_size_for_feature(&partially_evaluated_size, symbol) * perspective_ratio / ONE_EM;
                         if pitch_with_map {
@@ -1679,12 +1826,30 @@ impl Placement {
                         // based shift to the anchor before projecting to the label
                         // plane.
                         let shifted_anchor = if pitch_with_map {
-                            project(Point::new(tile_anchor.x + shift.x, tile_anchor.y + shift.y), &label_plane_matrix).0
+                            let correction = tile_projector.pitched_text_correction(&Point::new(
+                                f64::from(tile_anchor.x + translation.x),
+                                f64::from(tile_anchor.y + translation.y),
+                            )) as f32;
+                            let tile_shift = add(
+                                Point::new(vec_east.x * (shift.x * correction), vec_east.y * (shift.x * correction)),
+                                Point::new(vec_south.x * (shift.y * correction), vec_south.y * (shift.y * correction)),
+                            );
+                            let shifted = label_plane
+                                .project(Point::new(tile_anchor.x + tile_shift.x, tile_anchor.y + tile_shift.y))
+                                .point;
+                            Point::new(shifted.x as f32, shifted.y as f32)
                         } else if rotate_with_map {
-                            let rotated = rotate_f64(shift, -state.get_pitch());
-                            Point::new(projected_anchor.0.x + rotated.x, projected_anchor.0.y + rotated.y)
+                            // Screen-space labels stay east-west aligned, so
+                            // the shift follows the projected east vector.
+                            let east = label_plane.project(Point::new(tile_anchor.x + 1.0, tile_anchor.y)).point;
+                            let to_east_x = east.x as f32 - projected_anchor.x;
+                            let to_east_y = east.y as f32 - projected_anchor.y;
+                            let angle = (to_east_y / to_east_x).atan()
+                                + if to_east_x < 0.0 { std::f32::consts::PI } else { 0.0 };
+                            let rotated = rotate_f32(shift, angle);
+                            Point::new(projected_anchor.x + rotated.x, projected_anchor.y + rotated.y)
                         } else {
-                            Point::new(projected_anchor.0.x + shift.x, projected_anchor.0.y + shift.y)
+                            Point::new(projected_anchor.x + shift.x, projected_anchor.y + shift.y)
                         };
 
                         if update_text_fit_icon && let Some(placed_icon_index) = symbol.placed_icon_index {
@@ -1693,36 +1858,33 @@ impl Placement {
 
                         let angle = symbol.angle;
                         for _ in 0..symbol.glyph_offsets.len() {
-                            add_dynamic_attributes(shifted_anchor, angle, &mut bs.text.dynamic_attribute_data);
+                            add_dynamic_attributes(shifted_anchor, angle, text_positions);
                         }
                     }
                 }
             }
+            if layer_id.is_none() {
+                bs.has_variable_placement = has_variable_placement;
+            }
 
-            if update_text_fit_icon && bs.has_variable_placement {
+            if update_text_fit_icon && has_variable_placement {
                 let update_icon = |icon_buffer: &mut Buffer| {
-                    icon_buffer.dynamic_attribute_data.clear();
-                    for i in 0..icon_buffer.placed_symbols.len() {
-                        let placed_icon = &icon_buffer.placed_symbols[i];
+                    let (icon_positions, icon_placed_symbols) = icon_buffer.positions_and_symbols(layer_id);
+                    icon_positions.clear();
+                    for i in 0..icon_placed_symbols.len() {
+                        let placed_icon = &icon_placed_symbols[i];
                         if placed_icon.hidden
                             || (placed_icon.placed_orientation.is_none() && bucket.allow_vertical_placement)
                         {
-                            hide_glyphs(placed_icon.glyph_offsets.len(), &mut icon_buffer.dynamic_attribute_data);
+                            hide_glyphs(placed_icon.glyph_offsets.len(), icon_positions);
                         } else {
                             match placed_text_shifts.get(&i) {
                                 None => {
-                                    hide_glyphs(
-                                        placed_icon.glyph_offsets.len(),
-                                        &mut icon_buffer.dynamic_attribute_data,
-                                    );
+                                    hide_glyphs(placed_icon.glyph_offsets.len(), icon_positions);
                                 }
                                 Some(pair) => {
                                     for _ in 0..placed_icon.glyph_offsets.len() {
-                                        add_dynamic_attributes(
-                                            pair.1,
-                                            placed_icon.angle,
-                                            &mut icon_buffer.dynamic_attribute_data,
-                                        );
+                                        add_dynamic_attributes(pair.1, placed_icon.angle, icon_positions);
                                     }
                                 }
                             }
@@ -2326,6 +2488,7 @@ impl Placement {
             hash_u16string(&a.key) < hash_u16string(&b.key)
         });
         // Place intersections.
+        let transform_state = self.collision_index.get_transform_state().clone();
         for &i in &order {
             let intersection = &intersections[i];
             let ctx = &intersection.ctx;
@@ -2336,7 +2499,8 @@ impl Placement {
             if seen_cross_tile_ids.contains(&symbol.get_cross_tile_id()) {
                 continue;
             }
-            let placement = self.place_symbol(intersection.symbol_index, symbol, &state, ctx);
+            let projectors = ctx.projectors(&transform_state);
+            let placement = self.place_symbol(intersection.symbol_index, symbol, &state, ctx, &projectors);
             if self.should_retry_placement(&placement, ctx) {
                 continue;
             }
@@ -2396,10 +2560,7 @@ impl Placement {
             borders: CollisionBoundaries,
         }
         let neighbor_tile_data = |collision_index: &CollisionIndex, id: UnwrappedTileID, shift: Point<f32>| {
-            let mut m: Mat4 = [0.0; 16];
-            collision_index.get_transform_state().matrix_for(&mut m, &id);
-            let a = m;
-            matrix::multiply(&mut m, &collision_index.get_transform_state().get_projection_matrix(), &a);
+            let m = collision_index.get_transform_state().get_projection_data(&id).fallback_matrix;
             let borders = collision_index.project_tile_boundaries(&m);
             NeighborTileData { shift, matrix: m, borders }
         };
@@ -2575,11 +2736,11 @@ pub fn update_vertices(
     placement: &Placement,
     update_opacities: bool,
     state: &TransformState,
-    tile: &RenderTile,
+    data: &BucketPlacementData,
     seen_ids: &mut BTreeSet<u32>,
 ) {
     if let Some(symbol_bucket) = bucket.downcast_ref::<SymbolBucket>() {
-        symbol_bucket.update_vertices(placement, update_opacities, state, tile, seen_ids);
+        symbol_bucket.update_vertices(placement, update_opacities, state, data, seen_ids);
     }
 }
 
@@ -2589,25 +2750,44 @@ impl SymbolBucket {
         placement.place_symbol_bucket(data, seen_ids);
     }
 
-    /// `updateVertices(placement, updateOpacities, state, tile, seenIds)`.
+    /// `updateVertices(placement, updateOpacities, state, data, seenIds)`.
     pub fn update_vertices(
         &self,
         placement: &Placement,
         update_opacities: bool,
         state: &TransformState,
-        tile: &RenderTile,
+        data: &BucketPlacementData,
         seen_ids: &mut BTreeSet<u32>,
     ) {
         if update_opacities {
             placement.update_bucket_opacities(self, state, seen_ids);
         }
 
-        let dynamic_updated = placement.update_bucket_dynamic_attribute_data(self, state, tile);
+        let dynamic_updated = placement.update_bucket_dynamic_attribute_data(self, state, data, None);
 
         // `placementChangesUploaded = false; uploaded = false` /
         // `dynamicUploaded = false; uploaded = false`, then the buffers'
         // `updateModified()` when not uploaded.
         self.mark_vertices_updated(update_opacities, dynamic_updated);
+    }
+
+    /// `updateLayerVertices(placement, state, data, layerID)`: lays out the
+    /// positions a layer sharing this bucket draws at its own translation,
+    /// from the leader's placement.
+    pub fn update_layer_vertices(
+        &self,
+        placement: &Placement,
+        state: &TransformState,
+        data: &BucketPlacementData,
+        layer_id: &str,
+    ) {
+        if !placement.update_bucket_dynamic_attribute_data(self, state, data, Some(layer_id)) {
+            return;
+        }
+        // The layer's positions' `updateModified()`: drawables refresh their
+        // dynamic attributes.
+        self.dynamic_version.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.bump_version();
     }
 }
 
