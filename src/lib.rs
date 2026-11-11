@@ -37,6 +37,8 @@ pub use mln_tile;
 pub use mln_tile_id;
 pub use mln_util;
 pub use mln_vec_map;
+/// Empty on Apple platforms and in the browser build.
+pub use mln_vulkan;
 pub use mln_webgpu;
 pub use nunicode;
 pub use pmtiles;

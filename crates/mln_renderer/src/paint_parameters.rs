@@ -1,9 +1,10 @@
 // Ports src/mln/renderer/paint_parameters.hpp and src/mln/renderer/paint_parameters.cpp
-// (the Metal and WebGPU branches, which are the same).
+// (the Metal and WebGPU branches, which are the same, and the Vulkan one).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::color_mode::{BlendFunction, LinearBlend, Mask};
 use mln_gfx::globe_clip_mask::GlobeClipMask;
 use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
@@ -245,10 +246,13 @@ impl<'a> PaintParameters<'a> {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
-        // The render pass clears the stencil only where it begins; within it,
-        // draw zero over the zoom 0 tile, as Metal does.
         let render_pass = self.render_pass.as_deref().expect("render pass");
-        if self.state.is_globe_rendering() {
+        if self.context.backend_type() == BackendType::Vulkan {
+            // MLN_RENDER_BACKEND_VULKAN
+            render_pass.clear_stencil(0);
+        } else if self.state.is_globe_rendering() {
+            // The render pass clears the stencil only where it begins;
+            // within it, draw zero over the zoom 0 tile, as Metal does.
             let masks = [GlobeClipMask {
                 projection: to_projection_ubo(&self.projection_data_for_tile(&UnwrappedTileID::new(0, 0, 0), false)),
                 stencil_ref: 0,
@@ -296,7 +300,8 @@ impl<'a> PaintParameters<'a> {
             self.context.release_globe_clip_masks();
         }
 
-        // MLN_RENDER_BACKEND_METAL and MLN_RENDER_BACKEND_WEBGPU, the same.
+        // MLN_RENDER_BACKEND_METAL, MLN_RENDER_BACKEND_VULKAN and
+        // MLN_RENDER_BACKEND_WEBGPU, the same.
         let globe = self.state.is_globe_rendering();
         let mut tile_ubos: Vec<ClipUBO> = Vec::new();
         let mut globe_masks: Vec<GlobeClipMask> = Vec::new();

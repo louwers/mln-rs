@@ -1,0 +1,163 @@
+// Ports include/mln/vulkan/render_pass.hpp and src/mln/vulkan/render_pass.cpp
+//
+// Differences from C++:
+// - The pass keeps the render pass, the extent and the command buffer it
+//   records with, which C++ reads from the descriptor's renderable and the
+//   encoder where it needs them.
+// - A clear value is given for every attachment: the render passes clear
+//   them all, and C++ gives a color only when the descriptor has one.
+
+use std::any::Any;
+use std::rc::Rc;
+
+use ash::vk;
+use mln_gfx::context::Context as _;
+use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::render_pass::{self, RenderPassDescriptor};
+
+use crate::command_encoder::CommandEncoder;
+use crate::context::Context;
+use crate::renderable_resource::as_vulkan;
+
+pub struct RenderPass {
+    context: Rc<Context>,
+    command_buffer: vk::CommandBuffer,
+    render_pass: vk::RenderPass,
+    extent: vk::Extent2D,
+    /// Whether the pass began: its renderable has a framebuffer.
+    encoding: bool,
+}
+
+impl RenderPass {
+    pub fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
+        let context = command_encoder.get_context().clone();
+        let command_buffer = command_encoder.get_command_buffer();
+        let mut pass = RenderPass {
+            context,
+            command_buffer,
+            render_pass: vk::RenderPass::null(),
+            extent: vk::Extent2D::default(),
+            encoding: false,
+        };
+
+        pass.push_debug_group(name);
+
+        let resource = descriptor.renderable.get_resource();
+        if let Some(resource) = resource.as_deref().and_then(as_vulkan) {
+            resource.bind();
+            pass.render_pass = resource.get_render_pass();
+            pass.extent = resource.get_extent();
+            let framebuffer = resource.get_framebuffer();
+            if pass.render_pass != vk::RenderPass::null() && framebuffer != vk::Framebuffer::null() {
+                let color = descriptor.clear_color.unwrap_or_default();
+                let clear_values = [
+                    vk::ClearValue { color: vk::ClearColorValue { float32: [color.r, color.g, color.b, color.a] } },
+                    vk::ClearValue {
+                        depth_stencil: vk::ClearDepthStencilValue {
+                            depth: descriptor.clear_depth.unwrap_or(1.0),
+                            stencil: descriptor.clear_stencil.unwrap_or(0) as u32,
+                        },
+                    },
+                ];
+                let begin_info = vk::RenderPassBeginInfo::default()
+                    .render_pass(pass.render_pass)
+                    .framebuffer(framebuffer)
+                    .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent: pass.extent })
+                    .clear_values(&clear_values);
+                // SAFETY: the frame's command buffer is recording outside a
+                // render pass, and the framebuffer is the render pass's.
+                unsafe {
+                    pass.context.get_backend().get_device().cmd_begin_render_pass(
+                        command_buffer,
+                        &begin_info,
+                        vk::SubpassContents::INLINE,
+                    );
+                }
+                pass.encoding = true;
+                pass.context.set_render_pass_active(true);
+            }
+        }
+        debug_assert!(pass.encoding);
+
+        pass.context.perform_cleanup();
+        pass
+    }
+
+    pub fn get_context(&self) -> &Rc<Context> {
+        &self.context
+    }
+
+    /// The command buffer the pass records into.
+    pub fn get_command_buffer(&self) -> vk::CommandBuffer {
+        self.command_buffer
+    }
+
+    /// The render pass of the renderable, which pipelines are made for.
+    pub fn get_vulkan_render_pass(&self) -> vk::RenderPass {
+        self.render_pass
+    }
+
+    /// The extent of the renderable's attachments.
+    pub fn get_extent(&self) -> vk::Extent2D {
+        self.extent
+    }
+
+    /// Whether draws can be recorded.
+    pub fn is_encoding(&self) -> bool {
+        self.encoding
+    }
+
+    pub fn end_encoding(&mut self) {
+        if std::mem::take(&mut self.encoding) {
+            // SAFETY: the command buffer is in this render pass.
+            unsafe { self.context.get_backend().get_device().cmd_end_render_pass(self.command_buffer) };
+            self.context.set_render_pass_active(false);
+        }
+    }
+}
+
+impl Drop for RenderPass {
+    fn drop(&mut self) {
+        self.end_encoding();
+        self.pop_debug_group();
+    }
+}
+
+impl DebugGroupTarget for RenderPass {
+    fn push_debug_group(&self, name: &str) {
+        self.context.get_backend().begin_debug_label(self.command_buffer, name, [0.0; 4]);
+    }
+
+    fn pop_debug_group(&self) {
+        self.context.get_backend().end_debug_label(self.command_buffer);
+    }
+}
+
+impl render_pass::RenderPass for RenderPass {
+    fn add_debug_signpost(&self, name: &str) {
+        self.context.get_backend().insert_debug_label(self.command_buffer, name);
+    }
+
+    /// `clearStencil(value)`
+    fn clear_stencil(&self, value: u32) {
+        if !self.encoding {
+            return;
+        }
+        let attachment = vk::ClearAttachment::default()
+            .aspect_mask(vk::ImageAspectFlags::STENCIL)
+            .clear_value(vk::ClearValue { depth_stencil: vk::ClearDepthStencilValue { depth: 0.0, stencil: value } });
+        let rect = vk::ClearRect::default()
+            .base_array_layer(0)
+            .layer_count(1)
+            .rect(vk::Rect2D { offset: vk::Offset2D::default(), extent: self.extent });
+        // SAFETY: the command buffer is in this render pass; without a
+        // stencil attachment the clear has no effect.
+        unsafe {
+            self.context.get_backend().get_device().cmd_clear_attachments(self.command_buffer, &[attachment], &[rect]);
+        }
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}

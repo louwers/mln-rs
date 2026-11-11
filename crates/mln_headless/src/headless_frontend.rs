@@ -6,8 +6,8 @@
 // reference), so `frontend.render(&mut map)` works while the map holds it.
 //
 // C++ renders with the one backend it was built with. The port renders with
-// WebGPU, or with Metal on Apple platforms when the environment variable
-// MLN_RENDER_BACKEND is `metal`.
+// WebGPU, or with the backend the environment variable MLN_RENDER_BACKEND
+// names: `metal` on Apple platforms, `vulkan` on the others.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -21,7 +21,7 @@ use mln_map::{CameraOptions, Map, TransformState};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_text::GlyphCache;
 use mln_util::image::PremultipliedImage;
-#[cfg(target_vendor = "apple")]
+#[cfg(not(target_family = "wasm"))]
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -57,6 +57,16 @@ fn create_backend(
     #[cfg(target_vendor = "apple")]
     if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("metal")) {
         match mln_mtl::HeadlessBackend::new(size, swap_behavior, context_mode) {
+            Ok(backend) => {
+                let backend = Rc::new(backend);
+                return (backend.clone(), backend);
+            }
+            Err(e) => Log::error(Event::Render, format!("{e}; rendering with WebGPU instead")),
+        }
+    }
+    #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+    if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("vulkan")) {
+        match mln_vulkan::HeadlessBackend::new(size, swap_behavior, context_mode) {
             Ok(backend) => {
                 let backend = Rc::new(backend);
                 return (backend.clone(), backend);

@@ -149,6 +149,8 @@
 "crates/mln_util/src/projection.rs" = 2
 "crates/mln_util/src/token.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1
+"crates/mln_vulkan/src/context.rs" = 1
+"crates/mln_vulkan/src/renderer_backend.rs" = 1
 "crates/mln_webgpu/src/context.rs" = 1
 "crates/mln_webgpu/src/drawable.rs" = 2
 "crates/mln_webgpu/src/drawable_builder.rs" = 1
@@ -291,6 +293,7 @@
 "crates/mln_util/src/projection_test.rs" = 1
 "crates/mln_util/src/tileset.rs" = 1
 "crates/mln_util/src/vectors.rs" = 1
+"crates/mln_vulkan/src/context.rs" = 1
 "crates/mln_webgpu/src/context.rs" = 4
 "crates/mln_webgpu/src/drawable.rs" = 1
 "crates/mln_webgpu/src/offscreen_texture.rs" = 1

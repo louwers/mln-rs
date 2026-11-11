@@ -1,0 +1,48 @@
+[package]
+name = "mln-rs-vulkan"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# The [[test]]s below.
+autotests = false
+
+[lib]
+name = "mln_vulkan"
+# The doc comments have no examples to run.
+doctest = false
+
+# The crate is empty on Apple platforms and in the browser build.
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
+ash.workspace = true
+bytemuck.workspace = true
+gpu-allocator.workspace = true
+mln_gfx.workspace = true
+mln_tile_id.workspace = true
+mln_util.workspace = true
+naga.workspace = true
+
+# Compiles every GLSL source to SPIR-V in both projection variants, and
+# checks the bindings each one declares against the descriptor set layouts.
+[[test]]
+name = "glsl_compile_test"
+path = "tests/glsl_compile_test.rs"
+
+# The background shader end to end on the drawable path (after
+# crates/mln_webgpu/tests/background_test.rs): HeadlessBackend, a
+# DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
+# rendered into the offscreen target and read back.
+[[test]]
+name = "background_test"
+path = "tests/background_test.rs"
+
+# test/renderer/vulkan_acquire.test.cpp: ignored placeholders.
+[[test]]
+name = "gtest_vulkan_acquire"
+path = "tests/gtest_vulkan_acquire.rs"
+
+[lints]
+workspace = true

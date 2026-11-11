@@ -24,6 +24,9 @@ pub struct RenderPassDescriptor<'a> {
 /// their encoder state behind a `RefCell`.
 pub trait RenderPass: DebugGroupTarget + Any {
     fn add_debug_signpost(&self, _name: &str) {}
+    /// Clears the pass's stencil attachment to `value`, on the backends
+    /// that can clear within a pass (`vulkan::RenderPass::clearStencil`).
+    fn clear_stencil(&self, _value: u32) {}
     fn as_any(&self) -> &dyn Any;
 }
 

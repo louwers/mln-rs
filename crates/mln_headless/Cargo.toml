@@ -30,6 +30,10 @@ mln_webgpu.workspace = true
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mln_mtl.workspace = true
 
+# The Vulkan backend, which MLN_RENDER_BACKEND=vulkan picks (headless_frontend.rs).
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
+mln_vulkan.workspace = true
+
 # The M1 background render tests through Map -> HeadlessFrontend, without the
 # render-test runner (see the file comment).
 [[test]]

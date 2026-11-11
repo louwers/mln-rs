@@ -49,5 +49,9 @@ wgpu.workspace = true
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mln_mtl.workspace = true
 
+# The Vulkan backend, which MLN_RENDER_BACKEND=vulkan picks there.
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
+mln_vulkan.workspace = true
+
 [lints]
 workspace = true

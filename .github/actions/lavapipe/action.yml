@@ -3,6 +3,11 @@ description: >-
   Installs Mesa's Vulkan drivers and points the Vulkan loader at lavapipe,
   the software rasterizer the GPU tests on Linux run on.
 
+inputs:
+  validation-layer:
+    description: Also install the Khronos validation layer (VK_LAYER_KHRONOS_validation).
+    default: 'false'
+
 # The packages are downloaded once per runner image and installed from the
 # Actions cache after that, as the Ubuntu archive is at times out of reach
 # for minutes. A download that fails is tried again after a pause.
@@ -11,8 +16,13 @@ runs:
   steps:
     - id: apt
       shell: bash
+      env:
+        VALIDATION_LAYER: ${{ inputs.validation-layer }}
       run: |
         packages="libvulkan1 mesa-vulkan-drivers"
+        if [[ "$VALIDATION_LAYER" == true ]]; then
+          packages+=" vulkan-validationlayers"
+        fi
         echo "packages=$packages" >> "$GITHUB_OUTPUT"
         echo "key=apt-${packages// /+}-$ImageOS-$ImageVersion-$RUNNER_ARCH" >> "$GITHUB_OUTPUT"
 
