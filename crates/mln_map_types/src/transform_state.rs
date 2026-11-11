@@ -1369,7 +1369,14 @@ impl TransformState {
         point: &ScreenCoordinate,
         wrap_mode: WrapMode,
     ) -> Result<LatLng, String> {
-        if self.is_globe_rendering() {
+        // Without a size the point is Mercator's, as the tile coordinate is.
+        if self.is_globe_rendering() && !self.size.is_empty() {
+            if point.x.is_nan() || point.y.is_nan() {
+                return Err("screen coordinate must not be NaN".to_owned());
+            }
+            if !point.x.is_finite() || !point.y.is_finite() {
+                return Err("screen coordinate must not be infinite".to_owned());
+            }
             return Ok(VerticalPerspectiveProjection::screen_coordinate_to_lat_lng(self, point, wrap_mode));
         }
         let coord = self.screen_coordinate_to_tile_coordinate(point, 0);

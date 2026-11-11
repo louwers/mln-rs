@@ -3851,6 +3851,45 @@ fn nan_screen_coordinates_are_errors() {
     assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
 }
 
+// Port-only: the globe returns the errors Mercator does for a NaN point,
+// immediate or animated, and ignores a NaN anchor.
+#[test]
+fn nan_screen_coordinates_are_errors_on_the_globe() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(10.0, 10.0), 3.0);
+    let nan = sc(f64::NAN, 0.0);
+    let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
+    assert!(error.ends_with("must not be NaN"), "{error}");
+    let center = transform.get_lat_lng(WrapMode::Wrapped);
+    assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
+    assert!(transform.move_by(&nan, &AnimationOptions::new(seconds(1))).is_err());
+    assert!(transform.move_by(&sc(f64::INFINITY, 0.0), &AnimationOptions::default()).is_err());
+    assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
+    // A NaN anchor is off the planet: the drag turns it around the center.
+    transform.move_by_with_anchor(&sc(10.0, 0.0), Some(nan), &AnimationOptions::default()).unwrap();
+    assert_ne!(transform.get_lat_lng(WrapMode::Wrapped), center);
+    let center = transform.get_lat_lng(WrapMode::Wrapped);
+    transform.jump_to(&CameraOptions { anchor: Some(nan), zoom: Some(2.0), ..cam() });
+    assert_eq!(transform.get_zoom(), 2.0);
+    assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
+}
+
+// Port-only: before its first resize a globe map moves and answers as
+// Mercator does.
+#[test]
+fn unsized_globe_moves_as_mercator() {
+    let mut transform = new_transform();
+    transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    let mercator = new_transform();
+    assert_eq!(
+        transform.screen_coordinate_to_lat_lng(&sc(1.0, 1.0), WrapMode::Wrapped),
+        mercator.screen_coordinate_to_lat_lng(&sc(1.0, 1.0), WrapMode::Wrapped),
+    );
+    transform.move_by(&sc(10.0, 0.0), &AnimationOptions::default()).unwrap();
+    transform.jump_to(&CameraOptions { anchor: Some(sc(5.0, 5.0)), zoom: Some(2.0), ..cam() });
+    assert_eq!(transform.get_zoom(), 2.0);
+}
+
 // The tests below port maplibre-native-ffi's patches 0015 (independent
 // camera animations) and 0043 (cancel transitions by id).
 
@@ -4308,6 +4347,28 @@ fn momentum_pans_the_globe_as_a_drag_does() {
         transform.get_zoom(),
         1e-9,
     );
+}
+
+// Port-only: momentum zoom on the globe keeps to the latitude's minimum
+// zoom, which is below the map's toward the poles, as an ease does.
+#[test]
+fn momentum_zoom_keeps_the_globes_minimum_at_the_latitude() {
+    for zoom_velocity in [-3.0, 3.0] {
+        let mut transform = new_transform();
+        set_up_globe_camera(&mut transform, &ll(80.0, 0.0), -2.0);
+        let start = transform.get_zoom();
+        assert!(start < 0.0, "{start}");
+        let momentum = CameraMomentum { zoom_velocity: Some(zoom_velocity), ..header_momentum() };
+        transform.start_momentum(&momentum, &AnimationOptions::default());
+        let begin = transform.get_latest_transition_start();
+        transform.update_transitions(begin + milliseconds(16));
+        let zoom = transform.get_zoom();
+        let min_zoom =
+            transform.get_state().get_min_zoom_at_latitude(transform.get_lat_lng(WrapMode::Wrapped).latitude());
+        assert!(zoom >= min_zoom - 1e-9, "{zoom_velocity}: {zoom} below {min_zoom}");
+        assert!((zoom - start).abs() < 0.5, "{zoom_velocity}: jumped from {start} to {zoom}");
+        assert_eq!(zoom > start, zoom_velocity > 0.0, "{zoom_velocity}: {start} -> {zoom}");
+    }
 }
 
 // gtest: Transform.MomentumFollowsAnEasedGlide. An eased glide follows its

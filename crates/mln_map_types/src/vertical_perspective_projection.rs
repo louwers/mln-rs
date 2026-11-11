@@ -119,7 +119,8 @@ fn ray_sphere_intersection(origin: &Vec3, direction: &Vec3) -> Option<RaySphereI
     let origin_dot_direction = dot(origin, direction);
     let inner = add(origin, &scaled(direction, -origin_dot_direction));
     let discriminant = 1.0 - dot(&inner, &inner);
-    if discriminant < 0.0 {
+    // A NaN ray, from a NaN point, hits nothing.
+    if discriminant.is_nan() || discriminant < 0.0 {
         return None;
     }
     let c = dot(origin, origin) - 1.0;

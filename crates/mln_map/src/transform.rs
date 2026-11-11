@@ -1183,6 +1183,12 @@ impl Transform {
 
     // MARK: - Position
 
+    /// Whether the globe is drawn on a sized screen, so screen points reach
+    /// it. Before the first resize, screen-point gestures are Mercator's.
+    fn globe_on_screen(&self) -> bool {
+        self.state.is_globe_rendering() && !self.state.get_size().is_empty()
+    }
+
     /// Pans the map by the given amount.
     /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
     /// infinite offset).
@@ -1205,7 +1211,14 @@ impl Transform {
         let size = self.state.get_size();
         let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
         let fling_duration = animation.duration.filter(|duration| *duration > Duration::zero());
-        if self.state.is_globe_rendering()
+        let globe = self.globe_on_screen();
+        if globe && (offset.x.is_nan() || offset.y.is_nan()) {
+            return Err("offset must not be NaN".to_owned());
+        }
+        if globe && (!offset.x.is_finite() || !offset.y.is_finite()) {
+            return Err("offset must not be infinite".to_owned());
+        }
+        if globe
             && let Some(duration) = fling_duration
             && self.globe_free_bearing
         {
@@ -1246,7 +1259,7 @@ impl Transform {
             return Ok(());
         }
 
-        if self.state.is_globe_rendering() && fling_duration.is_some() {
+        if globe && fling_duration.is_some() {
             // An animated move, a fling, turns the globe as GL JS's inertia
             // does: the location under the far end of a long one can be off
             // the planet or over a pole. It stops short of half a turn, which
@@ -1262,7 +1275,7 @@ impl Transform {
             return Ok(());
         }
 
-        if self.state.is_globe_rendering() {
+        if globe {
             // A drag turns the globe as GL JS's does: one rotation that brings
             // the location under the cursor back under it with the bearing
             // held, around the cursor when it is on the planet and around the
@@ -1616,7 +1629,8 @@ impl Transform {
     /// Composes the current camera with each of `active`'s cameras at `now`,
     /// for the fields it still owns, then applies the result.
     fn apply_transitions(&mut self, active: &[Rc<Transition>], now: TimePoint) {
-        // The center is unwrapped (TransformState::getCameraOptions).
+        // The center is unwrapped, or wrapped on the globe without bounds
+        // (TransformState::get_camera_options).
         let current = self.state.get_camera_options(None);
         let mut camera = current;
 
@@ -1671,7 +1685,7 @@ impl Transform {
         // return the C++ exception for an anchor with no LatLng; it is
         // logged, and the anchor's location at the start stands in.
         let globe_zoom_around = match &anchored {
-            Some(anchored) if self.state.is_globe_rendering() => anchored.anchor.map(|anchor| {
+            Some(anchored) if self.globe_on_screen() => anchored.anchor.map(|anchor| {
                 let location =
                     self.state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
                         Log::error(Event::General, &e);
@@ -2081,7 +2095,7 @@ impl Transform {
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.get_lat_lng_bounds() != LatLngBounds::default();
         for _ in 0..steps as u32 {
-            if self.state.is_globe_rendering() {
+            if self.globe_on_screen() {
                 self.step_globe_pan(&step);
                 continue;
             }
@@ -2138,8 +2152,12 @@ impl Transform {
         let before = self.state.get_zoom();
         let altitude = self.state.get_center_altitude();
         let anchor = self.momentum_anchor(anchor);
-        let mut target = mln_math::clamp_f64(before + zoom, self.state.get_min_zoom(), self.state.get_max_zoom());
         let center = self.get_lat_lng(WrapMode::Unwrapped);
+        let mut target = mln_math::clamp_f64(
+            before + zoom,
+            self.state.get_min_zoom_at_latitude(center.latitude()),
+            self.state.get_max_zoom(),
+        );
         let mut camera = CameraOptions::default().with_center(Some(center));
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or(center), target);
@@ -2150,7 +2168,7 @@ impl Transform {
         match anchor {
             // On the globe the zoom around the anchor is the globe's, as in
             // apply_transitions.
-            Some((point, lat_lng)) if self.state.is_globe_rendering() && self.state.get_zoom() != before => {
+            Some((point, lat_lng)) if self.globe_on_screen() && self.state.get_zoom() != before => {
                 let zoom_delta = self.state.get_zoom() - before;
                 VerticalPerspectiveProjection::zoom_around_point(
                     &mut self.state,
