@@ -181,6 +181,13 @@ impl Writes {
         if data.is_empty() {
             return;
         }
+        // WebGL2 copies into an index buffer only from another index buffer,
+        // which the staging buffer isn't.
+        #[cfg(all(feature = "webgl", target_arch = "wasm32"))]
+        if buffer.usage().contains(wgpu::BufferUsages::INDEX) {
+            queue.write_buffer(buffer, offset, data);
+            return;
+        }
         // Copies take 4-byte offsets and sizes: the queue reports an
         // unaligned write.
         let len = data.len() as u64;
@@ -221,6 +228,15 @@ impl Writes {
             && let Some(writes) = self.encode(device, queue)
         {
             queue.submit([writes]);
+        }
+        // Only the browser's WebGPU takes a JS array: WebGL2 gets the bytes
+        // through wasm memory.
+        #[cfg(feature = "webgl")]
+        if queue.as_webgpu().is_none() {
+            if let Some(array) = data.array() {
+                queue.write_buffer(buffer, offset, &array.subarray(at as u32, (at + len) as u32).to_vec());
+            }
+            return;
         }
         let (Some(queue), Some(buffer), Some(array)) = (queue.as_webgpu(), buffer.as_webgpu(), data.array()) else {
             return;

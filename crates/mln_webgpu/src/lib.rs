@@ -29,6 +29,8 @@ pub mod tile_layer_group;
 pub mod uniform_buffer;
 pub mod upload_pass;
 pub mod vertex_buffer_resource;
+#[cfg(feature = "webgl")]
+pub mod webgl2;
 mod writes;
 
 pub use context::Context;

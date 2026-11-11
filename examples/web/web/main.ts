@@ -6,6 +6,11 @@
 // same module with its own memory, so nothing needs SharedArrayBuffer or
 // COOP/COEP headers.
 //
+// The map draws with WebGPU. A browser without it gets the module's other
+// build, which draws with WebGL2 (pkg/webgl, worker-webgl.ts). So does one
+// whose WebGPU can't start the map: the page then loads again with WebGL2,
+// and the tab remembers that.
+//
 // URL parameters:
 //   style=<key|url>        a style of styles.ts, or any style's URL
 //                          (default: OpenFreeMap Liberty)
@@ -26,6 +31,9 @@
 //                          (compare.ts)
 //   panic=<map|tile>       the map's instance or the first tile worker's
 //                          panics once it starts, for check/check.mjs
+//   backend=<webgpu|webgl2>
+//                          what the map draws with (default: WebGPU where
+//                          the browser has it)
 //
 // The hash holds the camera as GL JS's does, #zoom/lat/lon[/bearing/pitch],
 // and follows it, so that a link opens the same view. Picking a style keeps
@@ -40,7 +48,8 @@
 // buttons send the + and - keys; the compass eases the bearing and pitch
 // back to zero.
 //
-// `window.mln` is for scripts (check/check.mjs): `loaded` resolves with the
+// `window.mln` is for scripts (check/check.mjs): `backend` is what the map
+// draws with, `loaded` resolves with the
 // load time and the number of worker replies once the map is fully loaded,
 // and `readPixels()` draws the frame again and resolves with its RGBA
 // pixels, read back from the GPU. `fetches()` resolves with every URL the
@@ -51,8 +60,10 @@
 // methods reject with it.
 
 import wasmUrl from './pkg/mln_web_bg.wasm?url';
+import webglWasmUrl from './pkg/webgl/mln_web_bg.wasm?url';
 import type { Comparison } from './compare.ts';
 import {
+  type Backend,
   type Box,
   type Camera,
   type FromMap,
@@ -69,6 +80,7 @@ import { STYLES, type Style, styleFor } from './styles.ts';
 declare global {
   interface Window {
     mln: {
+      backend: Backend;
       loaded: Promise<Loaded>;
       fatal: Promise<Error>;
       readPixels(): Promise<Pixels>;
@@ -101,14 +113,32 @@ canvas.height = Math.round(canvas.clientHeight * ratio);
 
 const localFamily = params.get('localIdeographFontFamily') ?? 'sans-serif';
 
-const compiling = WebAssembly.compileStreaming(fetch(wasmUrl));
+// What a tab whose WebGPU couldn't start the map draws with from then on.
+const BACKEND_KEY = 'mln-backend';
+function rememberedBackend(): string | null {
+  try {
+    return sessionStorage.getItem(BACKEND_KEY);
+  } catch {
+    return null; // no storage for this page
+  }
+}
+const backend: Backend =
+  (params.get('backend') ?? rememberedBackend() ?? ('gpu' in navigator ? 'webgpu' : 'webgl2')) === 'webgl2'
+    ? 'webgl2'
+    : 'webgpu';
+
+const compiling = WebAssembly.compileStreaming(fetch(backend === 'webgl2' ? webglWasmUrl : wasmUrl));
 
 // The Web Workers load their scripts while the module downloads and
 // compiles, and get it once it has.
 const count = number('workers', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)));
-const tileWorkers = Array.from({ length: count },
-  () => new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }));
-const map = new Worker(new URL('./map-worker.ts', import.meta.url), { type: 'module' });
+const tileWorkers = Array.from({ length: count }, () =>
+  backend === 'webgl2'
+    ? new Worker(new URL('./worker-webgl.ts', import.meta.url), { type: 'module' })
+    : new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' }));
+const map = backend === 'webgl2'
+  ? new Worker(new URL('./map-worker.ts', import.meta.url), { type: 'module', name: 'webgl2' })
+  : new Worker(new URL('./map-worker.ts', import.meta.url), { type: 'module' });
 const toMap = (message: ToMap, transfer: Transferable[] = []) => map.postMessage(message, transfer);
 const camera: Camera = cameraFromHash(location.hash) ??
   [number('lat', 52.37), number('lon', 4.89), number('zoom', 13), number('bearing', 0), number('pitch', 0)];
@@ -155,10 +185,23 @@ function showBanner(text: string) {
   banner.textContent = text;
   banner.hidden = false;
 }
-if (!('gpu' in navigator)) {
-  showBanner(
-    'This browser has no WebGPU, which the map draws with. Try a recent Chrome, Edge or Safari, or Firefox 141 or later on Windows.',
-  );
+
+// The browser's API couldn't start the map. After WebGPU the page loads
+// again to draw with WebGL2, in this tab from now on; after WebGL2 there is
+// nothing left to draw with.
+function unsupported(message: string) {
+  if (backend === 'webgl2') {
+    stop(`this browser has neither WebGPU nor WebGL2 for the map to draw with (${message})`);
+    return;
+  }
+  try {
+    sessionStorage.setItem(BACKEND_KEY, 'webgl2');
+    location.reload();
+  } catch {
+    const url = new URL(location.href);
+    url.searchParams.set('backend', 'webgl2');
+    location.replace(url);
+  }
 }
 
 let markLoaded: (loaded: Loaded) => void = () => {};
@@ -184,6 +227,7 @@ function ask<T>(queue: Pending<T>[], message: ToMap): Promise<T> {
   });
 }
 window.mln = {
+  backend,
   loaded: new Promise((resolve, reject) => {
     markLoaded = resolve;
     failLoaded = reject;
@@ -222,6 +266,9 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
       break;
     case 'fatal':
       stop(data.message);
+      break;
+    case 'unsupported':
+      unsupported(data.message);
       break;
     case 'camera':
       showCamera(data.camera);

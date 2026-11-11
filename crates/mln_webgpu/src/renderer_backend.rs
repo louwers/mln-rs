@@ -37,9 +37,37 @@ pub struct BackendImpl {
     depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
     color_format: Cell<Option<wgpu::TextureFormat>>,
     writes: RefCell<Writes>,
+    #[cfg(feature = "webgl")]
+    webgl2: Cell<bool>,
+    #[cfg(feature = "webgl")]
+    no_half_float_targets: Cell<bool>,
 }
 
 impl BackendImpl {
+    /// Whether the device has no storage buffers, so draws through
+    /// [`crate::webgl2`].
+    #[cfg(feature = "webgl")]
+    pub(crate) fn is_webgl2(&self) -> bool {
+        self.webgl2.get()
+    }
+
+    /// Whether the device renders to half-float textures. It does unless
+    /// [`set_half_float_renderable`](Self::set_half_float_renderable) says
+    /// otherwise.
+    #[cfg(feature = "webgl")]
+    pub(crate) fn half_float_renderable(&self) -> bool {
+        !self.no_half_float_targets.get()
+    }
+
+    /// Says whether the device renders to half-float textures, which WebGL2
+    /// does only with an extension: the adapter's
+    /// `get_texture_format_features` tells. Without it, half-float render
+    /// targets are made with 8 bits a channel.
+    #[cfg(feature = "webgl")]
+    pub fn set_half_float_renderable(&self, renderable: bool) {
+        self.no_half_float_targets.set(!renderable);
+    }
+
     pub fn set_instance(&self, instance: Option<wgpu::Instance>) {
         *self.instance.borrow_mut() = instance;
     }
@@ -47,6 +75,8 @@ impl BackendImpl {
         *self.adapter.borrow_mut() = adapter;
     }
     pub fn set_device(&self, device: Option<wgpu::Device>) {
+        #[cfg(feature = "webgl")]
+        self.webgl2.set(device.as_ref().is_some_and(crate::webgl2::applies));
         *self.device.borrow_mut() = device;
         *self.writes.borrow_mut() = Writes::default();
     }

@@ -216,8 +216,9 @@ web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
 # wgpu-native) onto the Rust implementation of the same API: Vulkan, Metal
 # and DX12 natively (wgpu builds each only where it runs), and on
-# wasm32-unknown-unknown the browser's WebGPU (examples/web). Not its
-# default GLES backend, which nothing selects.
+# wasm32-unknown-unknown the browser's WebGPU (examples/web). mln_webgpu's
+# `webgl` feature adds its WebGL2 backend there; nothing selects its native
+# GLES backend.
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.
 raw-window-metal = { version = "1.1.0" }

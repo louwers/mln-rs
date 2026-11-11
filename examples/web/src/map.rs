@@ -150,6 +150,26 @@ pub fn set_preloads(take: js_sys::Function) {
     mln_storage::set_fetch_preloads(Some(take));
 }
 
+/// The browser's API that this build of the module draws with.
+#[cfg(not(feature = "webgl"))]
+const BACKENDS: wgpu::Backends = wgpu::Backends::BROWSER_WEBGPU;
+#[cfg(feature = "webgl")]
+const BACKENDS: wgpu::Backends = wgpu::Backends::GL;
+
+/// The name of that API, a literal for `concat!`.
+#[cfg(not(feature = "webgl"))]
+macro_rules! api {
+    () => {
+        "WebGPU"
+    };
+}
+#[cfg(feature = "webgl")]
+macro_rules! api {
+    () => {
+        "WebGL2"
+    };
+}
+
 /// A continuous map in an OffscreenCanvas, in the Web Worker that runs it
 /// (web/map-worker.ts).
 #[wasm_bindgen]
@@ -169,7 +189,8 @@ pub struct WebMap {
 
 #[wasm_bindgen]
 impl WebMap {
-    /// Creates the WebGPU device, a surface on `canvas` (the page's canvas,
+    /// Creates the WebGPU device (WebGL2 with the `webgl` feature), a
+    /// surface on `canvas` (the page's canvas,
     /// transferred to this worker) and the map, at
     /// `width` x `height` CSS pixels. The tiles' workers run in
     /// `workers` Web Workers (at least one), reached through
@@ -202,7 +223,7 @@ impl WebMap {
 
         let size = Size::new(width.max(1), height.max(1));
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::BROWSER_WEBGPU,
+            backends: BACKENDS,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
         let surface = instance.create_surface(wgpu::SurfaceTarget::OffscreenCanvas(canvas)).map_err(js_error)?;
@@ -213,7 +234,7 @@ impl WebMap {
                 ..Default::default()
             })
             .await
-            .map_err(|e| js_error(format!("WebGPU found no adapter: {e}")))?;
+            .map_err(|e| js_error(format!(concat!(api!(), " found no adapter: {}"), e)))?;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("MapLibre WebGPU Device"),
@@ -221,12 +242,21 @@ impl WebMap {
                 ..Default::default()
             })
             .await
-            .map_err(|e| js_error(format!("WebGPU device: {e}")))?;
+            .map_err(|e| js_error(format!(concat!(api!(), " device: {}"), e)))?;
         let capabilities = surface.get_capabilities(&adapter);
         let format = capabilities.formats.first().copied().unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
+        // wgpu's WebGL2 surface lists an sRGB format first, which would
+        // encode the map's colors a second time.
+        #[cfg(feature = "webgl")]
+        let format = capabilities.formats.iter().copied().find(|format| !format.is_srgb()).unwrap_or(format);
         // A WebGPU canvas takes any texture usage, so its frames can be read
         // back (wgpu reports only RENDER_ATTACHMENT for it).
+        #[cfg(not(feature = "webgl"))]
         let usages = capabilities.usages | wgpu::TextureUsages::COPY_SRC;
+        // A WebGL2 canvas is only rendered to: the worker reads its frames
+        // from the canvas (web/map-worker.ts).
+        #[cfg(feature = "webgl")]
+        let usages = capabilities.usages;
         let backend = Rc::new(SurfaceBackend::from_host(
             instance,
             device,
@@ -236,6 +266,13 @@ impl WebMap {
             usages,
             physical(size, pixel_ratio),
         ));
+        #[cfg(feature = "webgl")]
+        backend.webgpu_backend().backend_impl().set_half_float_renderable(
+            adapter
+                .get_texture_format_features(wgpu::TextureFormat::Rgba16Float)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT),
+        );
 
         let run_loop = RunLoop::get();
         WAKE.with(|w| *w.borrow_mut() = Some(wake));
@@ -505,14 +542,17 @@ impl WebMap {
     }
 
     /// Draws the map's latest update again with the next frame and copies
-    /// it (see `take_pixels`).
+    /// it (see `take_pixels`). With the `webgl` feature it only draws: the
+    /// worker reads the canvas after that frame.
     pub fn request_pixels(&self) {
+        #[cfg(not(feature = "webgl"))]
         self.frontend.0.backend.request_readback();
         self.frontend.0.dirty.set(true);
     }
 
     /// The frame `request_pixels` asked for, as RGBA rows of the canvas's
-    /// physical size, once the GPU has copied it; until then undefined.
+    /// physical size, once the GPU has copied it; until then undefined, as
+    /// it always is with the `webgl` feature.
     pub fn take_pixels(&self) -> Option<Vec<u8>> {
         self.frontend.0.backend.take_readback().map(|image| image.data.to_vec())
     }

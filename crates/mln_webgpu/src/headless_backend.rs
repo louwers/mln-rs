@@ -177,6 +177,8 @@ impl HeadlessBackend {
         // the Metal of the iOS, tvOS and visionOS simulators allows fewer
         // inter-stage shader variables than they ask.
         let required_limits = wgpu::Limits::default().or_worse_values_from(&adapter.limits());
+        #[cfg(feature = "webgl")]
+        let required_limits = crate::webgl2::limits_from_env(required_limits, &adapter);
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor { required_limits, ..Default::default() }),
         )

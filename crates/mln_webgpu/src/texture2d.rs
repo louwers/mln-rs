@@ -302,6 +302,12 @@ impl texture2d::Texture2D for Texture2D {
         if self.pixel_format == TexturePixelType::RGBA {
             usage |= wgpu::TextureUsages::RENDER_ATTACHMENT;
         }
+        #[cfg(feature = "webgl")]
+        let (format, usage) = crate::webgl2::texture(self.context.get_backend(), format, usage, self.usage_flags);
+        #[cfg(feature = "webgl")]
+        {
+            self.native_format = Some(format);
+        }
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("Texture2D"),

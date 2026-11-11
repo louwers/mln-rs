@@ -195,6 +195,9 @@ thread_local! {
 #[derive(PartialEq)]
 enum EntryResource {
     Buffer(wgpu::Buffer, u64),
+    /// A window of a buffer (`webgl2::Window`): its offset and size.
+    #[cfg(feature = "webgl")]
+    BufferWindow(wgpu::Buffer, u64, u64),
     Sampler(wgpu::Sampler),
     TextureView(wgpu::TextureView),
 }
@@ -430,7 +433,10 @@ impl Drawable {
                             if self.impl_.ubo_index_uniform.is_none()
                                 || self.impl_.ubo_index_written != Some(self.base.ubo_index)
                             {
-                                let index_data = GlobalUBOIndexData { value: self.base.ubo_index, pad: [0; 3] };
+                                let value = self.base.ubo_index;
+                                #[cfg(feature = "webgl")]
+                                let value = shader.global_index(value);
+                                let index_data = GlobalUBOIndexData { value, pad: [0; 3] };
                                 context.emplace_or_update_uniform_buffer(
                                     &mut self.impl_.ubo_index_uniform,
                                     bytemuck::bytes_of(&index_data),
@@ -474,6 +480,13 @@ impl Drawable {
                         // `getSize()`: some UBOs hold less data than their
                         // shader struct.
                         let size = gpu_buffer.size();
+                        #[cfg(feature = "webgl")]
+                        if let Some(window) = shader.window(group, binding_info.binding) {
+                            let (offset, size) = window.range(self.base.ubo_index);
+                            resources
+                                .push((binding_info.binding, EntryResource::BufferWindow(gpu_buffer, offset, size)));
+                            continue;
+                        }
                         resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, size)));
                     }
                     BindingType::Sampler => {
@@ -543,6 +556,14 @@ impl Drawable {
                             offset: 0,
                             size: wgpu::BufferSize::new(*size),
                         }),
+                        #[cfg(feature = "webgl")]
+                        EntryResource::BufferWindow(buffer, offset, size) => {
+                            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer,
+                                offset: *offset,
+                                size: wgpu::BufferSize::new(*size),
+                            })
+                        }
                         EntryResource::Sampler(sampler) => wgpu::BindingResource::Sampler(sampler),
                         EntryResource::TextureView(view) => wgpu::BindingResource::TextureView(view),
                     },
@@ -625,6 +646,27 @@ fn accumulate_bindings(source: &AttributeBindingArray, step_mode: wgpu::VertexSt
             offset: u64::from(binding.attribute.offset),
             shader_location: attribute_index as u32,
         });
+    }
+}
+
+/// Binds the vertex buffers of `bindings` as `Drawable::draw` does, those
+/// stepped per vertex starting at `first_vertex`.
+#[cfg(feature = "webgl")]
+fn bind_vertex_buffers(encoder: &mut wgpu::RenderPass<'_>, bindings: &[UniqueBinding], first_vertex: u64) {
+    let mut buffer_slot = 0u32;
+    for binding in bindings {
+        let Some(buffer) = &binding.buffer else { continue };
+        if binding.base_offset >= binding.buffer_size {
+            continue;
+        }
+        let offset = match binding.step_mode {
+            wgpu::VertexStepMode::Vertex => binding.base_offset + first_vertex * u64::from(binding.stride),
+            wgpu::VertexStepMode::Instance => binding.base_offset,
+        };
+        if offset < binding.buffer_size {
+            encoder.set_vertex_buffer(buffer_slot, buffer.slice(offset..binding.buffer_size));
+        }
+        buffer_slot += 1;
     }
 }
 
@@ -892,11 +934,26 @@ impl drawable::Drawable for Drawable {
 
         // Draw indexed geometry - loop through segments (exactly like Metal does)
         let mut draw_calls = 0;
+        #[cfg(feature = "webgl")]
+        let mut first_vertex = backend.is_webgl2().then_some(0);
         for segment in &self.impl_.segments {
             let ml_segment = segment.get_segment();
             if ml_segment.index_length > 0 {
                 let index_offset = ml_segment.index_offset as u32;
                 let base_vertex = ml_segment.vertex_offset as i32;
+                // WebGL2 draws have no base vertex: the vertex buffers start
+                // at the segment's first vertex instead.
+                #[cfg(feature = "webgl")]
+                let base_vertex = match &mut first_vertex {
+                    Some(bound) => {
+                        if *bound != ml_segment.vertex_offset {
+                            *bound = ml_segment.vertex_offset;
+                            bind_vertex_buffers(encoder, &unique_bindings, ml_segment.vertex_offset as u64);
+                        }
+                        0
+                    }
+                    None => base_vertex,
+                };
                 let base_instance = ml_segment.base_instance as u32;
                 encoder.draw_indexed(
                     index_offset..index_offset + ml_segment.index_length as u32,

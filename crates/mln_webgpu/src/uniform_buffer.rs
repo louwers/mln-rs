@@ -49,6 +49,14 @@ impl UniformBuffer {
 
     fn with_backend(backend: Rc<BackendImpl>, context: Weak<Context>, data: Option<&[u8]>, size: usize) -> Self {
         let aligned_size = aligned_uniform_size(size);
+        let usage = wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST;
+        // Bound in windows, the last of which reaches past the data.
+        #[cfg(feature = "webgl")]
+        let (aligned_size, usage) = if backend.is_webgl2() {
+            (aligned_uniform_size(crate::webgl2::buffer_size(size)), usage - wgpu::BufferUsages::STORAGE)
+        } else {
+            (aligned_size, usage)
+        };
         let mut buffer = None;
         if let Some(device) = backend.get_device()
             && aligned_size > 0
@@ -59,7 +67,7 @@ impl UniformBuffer {
             let b = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("Uniform Buffer"),
                 size: aligned_size as u64,
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                usage,
                 mapped_at_creation: false,
             });
             if let Some(data) = data {

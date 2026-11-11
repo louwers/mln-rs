@@ -20,6 +20,11 @@ autotests = false
 name = "mln_web"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The module for browsers without WebGPU, which draws with WebGL2. `just web`
+# builds it beside the WebGPU one; the page loads one of the two.
+webgl = ["mln_webgpu/webgl"]
+
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true

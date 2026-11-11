@@ -67,7 +67,12 @@ fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, 
     let value = create();
     match pollster::block_on(scope.pop()) {
         None => Ok(value),
-        Some(error) => Err(error),
+        Some(error) => {
+            // A browser shows no stderr, which is where callers print it.
+            #[cfg(all(feature = "webgl", target_arch = "wasm32"))]
+            mln_util::logging::Log::error(mln_util::logging::Event::Shader, format!("WebGL2: {error}"));
+            Err(error)
+        }
     }
 }
 
@@ -188,6 +193,10 @@ pub struct ShaderProgram {
     has_vertex_entry_point: bool,
     has_fragment_entry_point: bool,
     logged_missing_entry_point: Cell<bool>,
+    /// The uniform arrays that stand in for the sources' storage buffers on
+    /// a device without them.
+    #[cfg(feature = "webgl")]
+    windows: Vec<crate::webgl2::Window>,
 }
 
 impl ShaderProgram {
@@ -237,9 +246,30 @@ impl ShaderProgram {
             has_vertex_entry_point: true,
             has_fragment_entry_point: true,
             logged_missing_entry_point: Cell::new(false),
+            #[cfg(feature = "webgl")]
+            windows: Vec::new(),
         };
         let Some(device) = context.get_backend().get_device() else {
             return program;
+        };
+
+        #[cfg(feature = "webgl")]
+        let rewritten = context
+            .get_backend()
+            .is_webgl2()
+            .then(|| (crate::webgl2::rewrite(vertex_source), crate::webgl2::rewrite(fragment_source)));
+        #[cfg(feature = "webgl")]
+        let (vertex_source, fragment_source) = match &rewritten {
+            Some((vertex, fragment)) => {
+                program.windows = vertex.windows.clone();
+                for window in &fragment.windows {
+                    if program.window(window.group, window.binding).is_none() {
+                        program.windows.push(*window);
+                    }
+                }
+                (vertex.source.as_str(), fragment.source.as_str())
+            }
+            None => (vertex_source, fragment_source),
         };
 
         program.has_vertex_entry_point = !trim_string(vertex_source).is_empty();
@@ -333,6 +363,20 @@ impl ShaderProgram {
 
     pub fn get_shader_name(&self) -> &str {
         &self.shader_name
+    }
+
+    /// The uniform array that stands in for the storage buffer at `binding`
+    /// of `group`, on a device without storage buffers.
+    #[cfg(feature = "webgl")]
+    pub fn window(&self, group: u32, binding: u32) -> Option<&crate::webgl2::Window> {
+        self.windows.iter().find(|window| window.group == group && window.binding == binding)
+    }
+
+    /// The value of `globalIndex` for the drawable at `index` of its layer:
+    /// its index within the window that it binds, where there are windows.
+    #[cfg(feature = "webgl")]
+    pub(crate) fn global_index(&self, index: u32) -> u32 {
+        if self.windows.is_empty() { index } else { index % crate::webgl2::WINDOW as u32 }
     }
 
     /// Whether both WGSL modules compiled.

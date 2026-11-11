@@ -15,6 +15,11 @@ name = "mln_webgpu"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# Draws on devices without storage buffers too, and builds wgpu's WebGL2
+# backend into a browser build (src/webgl2.rs). Off, none of it is compiled.
+webgl = ["wgpu/webgl"]
+
 [dependencies]
 bytemuck.workspace = true
 mln_gfx.workspace = true
@@ -57,6 +62,13 @@ path = "tests/gtest_offscreen_texture.rs"
 [[test]]
 name = "shared_device_test"
 path = "tests/shared_device_test.rs"
+
+# Every program rewritten for a device without storage buffers, and built on
+# a device with WebGL2's limits.
+[[test]]
+name = "webgl2_test"
+path = "tests/webgl2_test.rs"
+required-features = ["webgl"]
 
 [dev-dependencies]
 mln_image = { package = "mln-rs-image", path = "../mln_image" }

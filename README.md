@@ -8,6 +8,7 @@
 A Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)
 map rendering core.
 
-**[Open the demo](https://louwers.github.io/mln-rs/)** (in a browser with
-WebGPU), the browser build in [examples/web](examples/web/README.md). On the
-desktop, `just desktop` opens it in a window (examples/desktop).
+**[Open the demo](https://louwers.github.io/mln-rs/)**, the browser build in
+[examples/web](examples/web/README.md): it draws with WebGPU, and with WebGL2
+in a browser without it. On the desktop, `just desktop` opens it in a window
+(examples/desktop).

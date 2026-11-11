@@ -22,6 +22,8 @@
 //   --render-test <path> the native runner (default:
 //                        $CARGO_TARGET_DIR/debug/render-test)
 //   --codec <n>          render natively with --tileWorkerCodec=<n>
+//   --backend <name>     what the page draws with: webgpu (default), or
+//                        webgl2, the module for browsers without WebGPU
 //   --chromium <path>    default: Playwright's Chromium CHROMIUM_BUILD
 //                        (`npx playwright@1.61.1 install chromium`)
 //
@@ -29,7 +31,7 @@
 // frames don't depend on the machine; the native runner renders through
 // VK_DRIVER_FILES (default /usr/share/vulkan/icd.d/lvp_icd.x86_64.json,
 // lavapipe). Headless Chromium composites WebGPU canvases as white, so the
-// page reads its frame back itself.
+// page reads its frame back itself. Its WebGL2 runs on SwiftShader too.
 
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -119,6 +121,7 @@ const { values: options } = parseArgs({
     out: { type: 'string' },
     'render-test': { type: 'string' },
     codec: { type: 'string' },
+    backend: { type: 'string', default: 'webgpu' },
     chromium: {
       type: 'string',
       default: path.join(
@@ -130,6 +133,7 @@ const { values: options } = parseArgs({
   },
 });
 const workers = Number(options.workers);
+if (!['webgpu', 'webgl2'].includes(options.backend)) throw new Error(`--backend is webgpu or webgl2, not ${options.backend}`);
 const icd = process.env.VK_DRIVER_FILES ?? '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json';
 if (!existsSync(options.chromium)) {
   throw new Error(`no Chromium at ${options.chromium}: run \`npx playwright@1.61.1 install chromium\` or pass --chromium`);
@@ -332,6 +336,7 @@ const pageUrl = (view, count) => {
     height: view.height,
     ratio: view.ratio,
     workers: String(count),
+    backend: options.backend,
     // The native runner downloads every glyph, as GL JS's render tests do.
     localIdeographFontFamily: 'false',
   });
@@ -445,6 +450,7 @@ async function open(browser, url) {
       sessions.set(worker, `worker ${sessions.size}`);
       browser
         .send('Runtime.enable', {}, worker)
+        .then(() => (process.env.MLN_WEB_CHECK_LOG ? browser.send('Log.enable', {}, worker) : undefined))
         .then(() => browser.send('Runtime.runIfWaitingForDebugger', {}, worker))
         .catch((error) => report(`attaching to a worker: ${error.message}`));
       return;
@@ -453,6 +459,10 @@ async function open(browser, url) {
     if (where === undefined) return;
     if (process.env.MLN_WEB_CHECK_LOG && message.method === 'Runtime.consoleAPICalled') {
       console.error(`[${where}] ${text(message.params.args)}`);
+    }
+    // What the browser itself reports, such as a WebGL error.
+    if (process.env.MLN_WEB_CHECK_LOG && message.method === 'Log.entryAdded') {
+      console.error(`[${where}] ${message.params.entry.level}: ${message.params.entry.text}`);
     }
     if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') {
       report(`${where}: ${text(message.params.args)}`);
@@ -531,6 +541,8 @@ async function load(browser, view, count) {
         ]);
       })()`,
     );
+    const backend = await evaluate(browser, session, 'window.mln.backend');
+    if (backend !== options.backend) throw new Error(`the page drew with ${backend}, not ${options.backend}`);
     let interaction;
     if (view.interaction) {
       await interact(browser, session, view.interaction);
