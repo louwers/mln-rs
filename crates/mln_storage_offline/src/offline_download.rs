@@ -28,7 +28,7 @@ use mln_storage::offline::{
 };
 use mln_storage::offline_database::OfflineDatabase;
 use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::Reason;
+use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::{AsyncRequest, FileSource, Kind, LoadingMethod, Resource, Response};
 use mln_style::conversion::tileset::convert_json_tileset;
 use mln_style::parser::Parser;
@@ -51,8 +51,9 @@ use crate::mapbox::{canonicalize_glyph_url, canonicalize_source_url, canonicaliz
 const K_RESOURCES_BATCH_SIZE: usize = 64;
 const K_MARK_BATCH_SIZE: usize = 200;
 
-/// `std::function<void(Response)>` of `ensureResource`.
-type ResponseCallback = Rc<dyn Fn(Response)>;
+/// `ResourceCallback` of `ensureResource`: reads a style or TileJSON, and
+/// returns why it can't when it can't.
+type ResponseCallback = Rc<dyn Fn(&Response) -> Result<(), String>>;
 
 // Generic functions
 
@@ -167,6 +168,10 @@ struct Inner {
     resources_remaining: RefCell<VecDeque<Resource>>,
     resources_to_be_marked_as_used: RefCell<Vec<Resource>>,
     buffer: RefCell<Vec<(Resource, Response)>>,
+
+    /// Counts activations and deactivations, so that work an observer
+    /// callback interrupted doesn't go on into a later traversal.
+    traversal: Cell<u64>,
 }
 
 /// `OfflineDownload`: the download of an offline region's resources. Not
@@ -217,6 +222,7 @@ impl OfflineDownload {
             resources_remaining: RefCell::new(VecDeque::new()),
             resources_to_be_marked_as_used: RefCell::new(Vec::new()),
             buffer: RefCell::new(Vec::new()),
+            traversal: Cell::new(0),
         });
         let download = OfflineDownload { inner };
         download.set_observer(None);
@@ -320,13 +326,15 @@ impl Inner {
 
         result.required_resource_count += 1;
         let style_response = self.offline_database.borrow_mut().get(&Resource::style(self.definition.style_url()));
-        let Some(style_response) = style_response else {
+        let mut parser = Parser::default();
+        // A download reports a style it can't read, and the count stays
+        // imprecise.
+        let Some(style_data) = style_response.and_then(|response| response.data) else {
             return result;
         };
-
-        let mut parser = Parser::default();
-        let style_data = style_response.data.as_deref().map(Vec::as_slice).unwrap_or_default();
-        let _ = parser.parse(&String::from_utf8_lossy(style_data));
+        if parser.parse(&String::from_utf8_lossy(&style_data)).is_err() {
+            return result;
+        }
 
         result.required_resource_count_is_precise = true;
 
@@ -335,24 +343,30 @@ impl Inner {
 
             let mut handle_tiled_source = |url_or_tileset: &UrlOrTileset, tile_size: u16| match url_or_tileset {
                 UrlOrTileset::Tileset(tileset) => {
-                    let tile_source_count = tile_count(&self.definition, type_, tile_size, &tileset.zoom_range);
-                    result.required_tile_count += tile_source_count;
-                    result.required_resource_count += tile_source_count;
+                    // A source without tile URLs has no tiles to download.
+                    if !tileset.tiles.is_empty() {
+                        let tile_source_count = tile_count(&self.definition, type_, tile_size, &tileset.zoom_range);
+                        result.required_tile_count += tile_source_count;
+                        result.required_resource_count += tile_source_count;
+                    }
                 }
                 UrlOrTileset::Url(url) => {
                     result.required_resource_count += 1;
                     let source_response = self.offline_database.borrow_mut().get(&Resource::source(url));
-                    if let Some(source_response) = source_response {
+                    let tileset = source_response.and_then(|response| response.data).and_then(|data| {
                         let mut error = ConversionError::default();
-                        let data = source_response.data.as_deref().map(Vec::as_slice).unwrap_or_default();
-                        let tileset = convert_json_tileset(data, &mut error);
-                        if let Some(tileset) = tileset {
+                        convert_json_tileset(&data, &mut error)
+                    });
+                    // As a download does, count no tiles for a TileJSON that
+                    // is missing, can't be read, or has no tile URLs, and
+                    // leave the count imprecise.
+                    match tileset {
+                        Some(tileset) if !tileset.tiles.is_empty() => {
                             let tile_source_count = tile_count(&self.definition, type_, tile_size, &tileset.zoom_range);
                             result.required_tile_count += tile_source_count;
                             result.required_resource_count += tile_source_count;
                         }
-                    } else {
-                        result.required_resource_count_is_precise = false;
+                        _ => result.required_resource_count_is_precise = false,
                     }
                 }
             };
@@ -419,6 +433,7 @@ impl Inner {
     }
 
     fn activate_download(self: &Rc<Self>) {
+        self.traversal.set(self.traversal.get() + 1);
         {
             let mut status = self.status.borrow_mut();
             *status = OfflineRegionStatus::default();
@@ -433,21 +448,21 @@ impl Inner {
         let weak = Rc::downgrade(self);
         self.ensure_resource(
             style_resource,
-            Some(Rc::new(move |style_response: Response| {
-                if let Some(this) = weak.upgrade() {
-                    this.on_style_response(&style_response);
-                }
+            Some(Rc::new(move |style_response: &Response| match weak.upgrade() {
+                Some(this) => this.on_style_response(style_response),
+                None => Ok(()),
             })),
         );
     }
 
     /// The style callback of `activateDownload`.
-    fn on_style_response(self: &Rc<Self>, style_response: &Response) {
-        self.status.borrow_mut().required_resource_count_is_precise = true;
-
+    fn on_style_response(self: &Rc<Self>, style_response: &Response) -> Result<(), String> {
+        let Some(style_data) = &style_response.data else {
+            return Err("the style has no content".to_owned());
+        };
         let mut parser = Parser::default();
-        let style_data = style_response.data.as_deref().map(Vec::as_slice).unwrap_or_default();
-        let _ = parser.parse(&String::from_utf8_lossy(style_data));
+        parser.parse(&String::from_utf8_lossy(style_data)).map_err(|error| error.to_string())?;
+        self.status.borrow_mut().required_resource_count_is_precise = true;
 
         let tile_server_options = self.online_file_source.get_resource_options().tile_server_options();
         parser.glyph_url = canonicalize_glyph_url(&tile_server_options, &parser.glyph_url);
@@ -474,29 +489,36 @@ impl Inner {
                     let weak = Rc::downgrade(self);
                     self.ensure_resource(
                         source_resource,
-                        Some(Rc::new(move |source_response: Response| {
+                        Some(Rc::new(move |source_response: &Response| {
                             let Some(this) = weak.upgrade() else {
-                                return;
+                                return Ok(());
+                            };
+                            let Some(data) = &source_response.data else {
+                                return Err("the TileJSON has no content".to_owned());
                             };
                             let mut error = ConversionError::default();
-                            let data = source_response.data.as_deref().map(Vec::as_slice).unwrap_or_default();
-                            let tileset = convert_json_tileset(data, &mut error);
-                            if let Some(mut tileset) = tileset {
-                                let resource_options = this.online_file_source.get_resource_options();
-                                canonicalize_tileset(
-                                    &resource_options.tile_server_options(),
-                                    &mut tileset,
-                                    &url,
-                                    type_,
-                                    tile_size,
-                                );
-                                this.queue_tiles(type_, tile_size, &tileset);
-
-                                this.required_source_urls.borrow_mut().remove(&url);
-                                if this.required_source_urls.borrow().is_empty() {
-                                    this.status.borrow_mut().required_resource_count_is_precise = true;
-                                }
+                            let Some(mut tileset) = convert_json_tileset(data, &mut error) else {
+                                return Err(error.message);
+                            };
+                            if tileset.tiles.is_empty() {
+                                return Err("the TileJSON has no tile URLs".to_owned());
                             }
+
+                            let resource_options = this.online_file_source.get_resource_options();
+                            canonicalize_tileset(
+                                &resource_options.tile_server_options(),
+                                &mut tileset,
+                                &url,
+                                type_,
+                                tile_size,
+                            );
+                            this.queue_tiles(type_, tile_size, &tileset);
+
+                            this.required_source_urls.borrow_mut().remove(&url);
+                            if this.required_source_urls.borrow().is_empty() {
+                                this.status.borrow_mut().required_resource_count_is_precise = true;
+                            }
+                            Ok(())
                         })),
                     );
                 }
@@ -583,6 +605,7 @@ impl Inner {
         }
 
         self.continue_download();
+        Ok(())
     }
 
     // Fill up our own request queue by requesting the next few resources.
@@ -603,9 +626,19 @@ impl Inner {
     // to that host are going to error. In that case, continuing to try
     // subsequent resources after the first few errors is fruitless anyway.
     fn continue_download(self: &Rc<Self>) {
+        // An observer can pause the download, or restart it, from a status
+        // change.
+        if !self.is_active() {
+            return;
+        }
+        let current = self.traversal.get();
+
         if self.resources_remaining.borrow().is_empty() {
             // Flush pending buffers.
             if !self.flush_resources_buffer() {
+                return;
+            }
+            if self.interrupted(current) {
                 return;
             }
             if self.status.borrow().complete() {
@@ -641,6 +674,17 @@ impl Inner {
         let requests = std::mem::take(&mut *self.requests.borrow_mut());
         drop(requests);
         self.buffer.borrow_mut().clear();
+        self.traversal.set(self.traversal.get() + 1);
+    }
+
+    fn is_active(&self) -> bool {
+        self.status.borrow().download_state == OfflineRegionDownloadState::Active
+    }
+
+    /// Whether an observer paused or restarted the download since traversal
+    /// `current` began, which ends that traversal.
+    fn interrupted(&self, current: u64) -> bool {
+        self.traversal.get() != current || !self.is_active()
     }
 
     fn flush_resources_buffer(self: &Rc<Self>) -> bool {
@@ -678,8 +722,7 @@ impl Inner {
     }
 
     fn queue_tiles(&self, type_: SourceType, tile_size: u16, tileset: &Tileset) {
-        // C++ reads `tileset.tiles[0]` unchecked; a source without tiles has
-        // none to download.
+        // A source without tile URLs has no tiles to download.
         let Some(url_template) = tileset.tiles.first() else {
             return;
         };
@@ -717,11 +760,15 @@ impl Inner {
         debug_assert!(resource.priority == Priority::Low);
         debug_assert!(resource.usage == Usage::Offline);
 
+        // An observer can pause or restart the download from any callback,
+        // which ends this traversal. Nothing more of this resource happens
+        // after that.
+        let current = self.traversal.get();
         let work_request_id = self.insert_request();
         let weak = Rc::downgrade(self);
         let task = invoke_cancellable(move || {
             if let Some(this) = weak.upgrade() {
-                this.ensure_resource_task(work_request_id, resource, callback);
+                this.ensure_resource_task(work_request_id, current, resource, callback);
             }
         });
         self.set_request(work_request_id, task);
@@ -731,87 +778,120 @@ impl Inner {
     fn ensure_resource_task(
         self: &Rc<Self>,
         work_request_id: u64,
+        current: u64,
         resource: Resource,
         callback: Option<ResponseCallback>,
     ) {
         self.remove_request(work_request_id);
-        let resource_kind = resource.kind;
-        let get_resource_size_in_database = || -> Option<i64> {
-            let mut result = None;
-            match &callback {
-                None => {
-                    result = self.offline_database.borrow_mut().has_region_resource(&resource);
-                }
-                Some(callback) => {
-                    let response = self.offline_database.borrow_mut().get_region_resource(&resource);
-                    if let Some((response, size)) = response {
-                        callback(response);
-                        result = Some(size as i64);
-                    }
-                }
-            }
 
-            if result.is_some() {
-                self.resources_to_be_marked_as_used.borrow_mut().push(resource.clone());
+        // A stored resource that can't be used without revalidating it, such
+        // as one invalidate_region marked, isn't complete. Keep it to
+        // revalidate it with the server.
+        let stale = match &callback {
+            None => {
+                let stored = self.offline_database.borrow_mut().check_region_resource(&resource);
+                match stored {
+                    Some((size, true)) => {
+                        self.complete_stored_resource(&resource, size as u64);
+                        return;
+                    }
+                    Some((_, false)) => self.offline_database.borrow_mut().get_region_resource(&resource),
+                    None => None,
+                }
             }
-            result
+            Some(callback) => {
+                let stored = self.offline_database.borrow_mut().get_region_resource(&resource);
+                match stored {
+                    Some((response, size)) if response.is_usable() => {
+                        if let Err(error) = callback(&response) {
+                            self.report_unparsable(&resource, &error);
+                        }
+                        if self.interrupted(current) {
+                            return;
+                        }
+                        self.complete_stored_resource(&resource, size);
+                        return;
+                    }
+                    stale => stale,
+                }
+            }
         };
 
-        let offline_response = get_resource_size_in_database();
-        if let Some(size) = offline_response {
-            debug_assert!(!self.resources_to_be_marked_as_used.borrow().is_empty());
-            {
-                let mut status = self.status.borrow_mut();
-                status.completed_resource_count += 1;
-                status.completed_resource_size = status.completed_resource_size.wrapping_add(size as u64);
-                if resource_kind == Kind::Tile {
-                    status.completed_tile_count += 1;
-                    status.completed_tile_size = status.completed_tile_size.wrapping_add(size as u64);
-                }
-            }
-
-            self.notify_status_changed();
-            self.continue_download();
-            return;
-        }
-
-        let exceeds = self.offline_database.borrow_mut().exceeds_offline_mapbox_tile_count_limit(&resource);
-        if exceeds {
+        // A stale tile is already stored, so refreshing it isn't a new
+        // download. If it isn't in this region yet, put_region_resources
+        // reports the limit when the refresh adds it.
+        if stale.is_none() && self.offline_database.borrow_mut().exceeds_offline_mapbox_tile_count_limit(&resource) {
             self.on_mapbox_tile_count_limit_exceeded();
             return;
         }
 
+        let mut online_resource = resource.clone();
+        if let Some((stored, _)) = &stale {
+            // Lets the server answer 304 Not Modified.
+            online_resource.prior_etag = stored.etag.clone();
+            online_resource.prior_modified = stored.modified;
+        }
+
         let file_request_id = self.insert_request();
         let weak = Rc::downgrade(self);
-        let request_resource = resource.clone();
+        let stale = stale.map(Rc::new);
         let request = self.online_file_source.request(
-            &request_resource,
+            &online_resource,
             Box::new(move |online_response: Response| {
                 if let Some(this) = weak.upgrade() {
-                    this.on_online_response(file_request_id, &resource, callback.as_ref(), online_response);
+                    let stale = stale.as_deref();
+                    this.on_online_response(
+                        file_request_id,
+                        current,
+                        &resource,
+                        callback.as_ref(),
+                        stale,
+                        online_response,
+                    );
                 }
             }),
         );
         self.set_request(file_request_id, request);
     }
 
-    /// The online request callback of `ensureResource`.
+    /// The online request callback of `ensureResource`. `stale` is the stored
+    /// copy being revalidated, with its stored size.
     fn on_online_response(
         self: &Rc<Self>,
         file_request_id: u64,
+        current: u64,
         resource: &Resource,
         callback: Option<&ResponseCallback>,
+        stale: Option<&(Response, u64)>,
         online_response: Response,
     ) {
         if let Some(error) = &online_response.error {
             self.observer().response_error((**error).clone());
+            if self.interrupted(current) {
+                return;
+            }
             if error.reason == Reason::NotFound {
-                // On error 404, we skip this request and go further.
                 self.remove_request(file_request_id);
+                if let (Some(stale), Some(callback)) = (stale, callback) {
+                    self.continue_from_stored_copy(current, resource, callback, stale);
+                    return;
+                }
+
+                // On error 404, we skip this request and go further.
                 {
                     let mut status = self.status.borrow_mut();
                     assert!(status.required_resource_count > 0);
                     status.required_resource_count -= 1;
+                }
+                if resource.kind == Kind::Source {
+                    let mut required_source_urls = self.required_source_urls.borrow_mut();
+                    if required_source_urls.remove(&resource.url) && required_source_urls.is_empty() {
+                        self.status.borrow_mut().required_resource_count_is_precise = true;
+                    }
+                }
+                self.notify_status_changed();
+                if self.interrupted(current) {
+                    return;
                 }
                 self.continue_download();
             }
@@ -821,7 +901,21 @@ impl Inner {
         self.remove_request(file_request_id);
 
         if let Some(callback) = callback {
-            callback(online_response.clone());
+            // A 304 response has no data, so pass on the stored copy.
+            let parsed = match stale {
+                Some((stored, _)) if online_response.not_modified => callback(stored),
+                _ => callback(&online_response),
+            };
+            if let Err(error) = &parsed {
+                self.report_unparsable(resource, error);
+            }
+            if self.interrupted(current) {
+                return;
+            }
+            if let (Err(_), Some(stale), false) = (&parsed, stale, online_response.not_modified) {
+                self.continue_from_stored_copy(current, resource, callback, stale);
+                return;
+            }
         }
 
         // Queue up for batched insertion
@@ -836,9 +930,11 @@ impl Inner {
         if flush && !self.flush_resources_buffer() {
             return;
         }
+        if self.interrupted(current) {
+            return;
+        }
 
-        let exceeds = self.offline_database.borrow_mut().exceeds_offline_mapbox_tile_count_limit(resource);
-        if exceeds {
+        if stale.is_none() && self.offline_database.borrow_mut().exceeds_offline_mapbox_tile_count_limit(resource) {
             self.on_mapbox_tile_count_limit_exceeded();
             return;
         }
@@ -846,9 +942,60 @@ impl Inner {
         self.continue_download();
     }
 
+    /// A style or TileJSON lists the region's other resources. When its
+    /// refresh is missing or can't be read, the download goes on from the
+    /// stored copy.
+    fn continue_from_stored_copy(
+        self: &Rc<Self>,
+        current: u64,
+        resource: &Resource,
+        callback: &ResponseCallback,
+        (stored, size): &(Response, u64),
+    ) {
+        if let Err(error) = callback(stored) {
+            self.report_unparsable(resource, &error);
+        }
+        if self.interrupted(current) {
+            return;
+        }
+        self.complete_stored_resource(resource, *size);
+    }
+
+    /// Counts a resource the region already holds as complete.
+    fn complete_stored_resource(self: &Rc<Self>, resource: &Resource, size: u64) {
+        self.resources_to_be_marked_as_used.borrow_mut().push(resource.clone());
+        {
+            let mut status = self.status.borrow_mut();
+            status.completed_resource_count += 1;
+            status.completed_resource_size = status.completed_resource_size.wrapping_add(size);
+            if resource.kind == Kind::Tile {
+                status.completed_tile_count += 1;
+                status.completed_tile_size = status.completed_tile_size.wrapping_add(size);
+            }
+        }
+
+        let current = self.traversal.get();
+        self.notify_status_changed();
+        if self.interrupted(current) {
+            return;
+        }
+        self.continue_download();
+    }
+
+    fn report_unparsable(&self, resource: &Resource, error: &str) {
+        let message = format!("Can't parse {}: {error}", resource.url);
+        self.observer().response_error(ResponseError::new(Reason::Other, message));
+    }
+
     fn on_mapbox_tile_count_limit_exceeded(self: &Rc<Self>) {
+        // The observer can raise the limit and restart the download, which
+        // this traversal must leave running.
+        let current = self.traversal.get();
         let limit = self.offline_database.borrow().get_offline_mapbox_tile_count_limit();
         self.observer().mapbox_tile_count_limit_exceeded(limit);
+        if self.traversal.get() != current {
+            return;
+        }
         self.set_state(OfflineRegionDownloadState::Inactive);
     }
 }

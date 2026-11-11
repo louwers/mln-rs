@@ -134,6 +134,38 @@ fn a_deleted_region_stops_downloading() {
     assert!(style.calls() <= 1);
 }
 
+// maplibre-native-ffi's ABI test a_download_refreshes_an_invalidated_region:
+// a download after invalidating the region revalidates the style with the
+// server, and a 304 keeps it.
+#[test]
+fn a_download_refreshes_an_invalidated_region() {
+    let dir = TempDir::new();
+    let source = database_file_source(&dir);
+    let server = MockServer::start();
+    let revalidated = server.mock(|when, then| {
+        when.method("GET").path("/style.json").header("If-None-Match", "\"style-1\"");
+        then.status(304).header("Cache-Control", "max-age=3600");
+    });
+    let fetched = server.mock(|when, then| {
+        when.method("GET").path("/style.json");
+        then.status(200).header("ETag", "\"style-1\"").body(r#"{"version":8,"sources":{},"layers":[]}"#);
+    });
+
+    let region =
+        wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
+    let statuses = observe(&source, &region);
+    source.set_offline_region_download_state(&region, OfflineRegionDownloadState::Active);
+    let downloaded = wait_until_complete(&statuses);
+    assert_eq!((1, 0), (fetched.calls(), revalidated.calls()));
+
+    wait(|done| source.invalidate_offline_region(&region, done)).unwrap();
+    source.set_offline_region_download_state(&region, OfflineRegionDownloadState::Active);
+    let refreshed = wait_until_complete(&statuses);
+    assert_eq!((1, 1), (fetched.calls(), revalidated.calls()));
+    assert_eq!(downloaded.completed_resource_count, refreshed.completed_resource_count);
+    assert_eq!(downloaded.completed_resource_size, refreshed.completed_resource_size);
+}
+
 #[test]
 fn merging_copies_the_regions_of_another_database() {
     let dir = TempDir::new();
