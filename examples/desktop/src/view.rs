@@ -837,8 +837,9 @@ impl View {
     /// Once the style is loaded, feeds a scripted sequence of messages (drag,
     /// scroll, double click, rotate, pitch, trackpad pinch, keys) through the
     /// same handlers as the window's, and the controls' actions, logs the
-    /// camera after each, resizes the window, switches to the next backend
-    /// and back where there are two, then closes.
+    /// camera after each, resizes the window, switches through the
+    /// platform's backends back to the first where there are several, then
+    /// closes.
     fn run_gesture_test(&mut self) {
         let Some(test) = self.gesture_test.as_mut() else {
             return;
@@ -919,7 +920,7 @@ impl View {
                 let _ = self.proxy.send_event(UserEvent::RequestSize(LogicalSize::new(800.0, 600.0)));
                 ("window resize to 800x600", vec![], vec![], vec![])
             }
-            16 | 17 if Kind::ALL.len() > 1 => {
+            step if Kind::ALL.len() > 1 && (16..16 + Kind::ALL.len()).contains(&step) => {
                 let next = self.backend.kind().next();
                 ("switch to the next backend", vec![], vec![], vec![Action::SetBackend(next)])
             }

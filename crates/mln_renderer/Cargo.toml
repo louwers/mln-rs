@@ -96,8 +96,9 @@ path = "tests/tile/main.rs"
 name = "text_test"
 path = "tests/text/main.rs"
 
-# gtests-data: test/gl/*.test.cpp except bucket.test.cpp, which are
-# OpenGL-backend-only (all ignored with that reason).
+# gtests-data: test/gl/*.test.cpp except bucket.test.cpp, which test parts of
+# the C++ OpenGL backend that mln_gl doesn't have (all ignored with that
+# reason).
 [[test]]
 name = "gl_test"
 path = "tests/gl/main.rs"

@@ -4,5 +4,5 @@
     "lib": ["es2023", "webworker"],
     "types": []
   },
-  "include": ["web/map-worker.ts", "web/worker.ts", "web/protocol.ts"]
+  "include": ["web/map-worker.ts", "web/tile-worker.ts", "web/worker.ts", "web/worker-webgl.ts", "web/protocol.ts"]
 }

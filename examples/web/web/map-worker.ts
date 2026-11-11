@@ -16,9 +16,13 @@
 // message to panic with once the map exists (`panic_for_check`), for
 // check/check.mjs. So is the count of every URL this worker fetched, which
 // the page asks for with `fetches`.
+//
+// The page names this worker `webgl2` where the map draws with WebGL2: it
+// then runs that build of the module (pkg/webgl). When the browser's API
+// can't start the map, the worker says `unsupported` rather than `fatal`.
 
 import type { WebMap } from './pkg/mln_web.js';
-import type { Box, Camera, FromMap, FromTileWorker, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { Bindings, Box, Camera, FromMap, FromTileWorker, Input, Loaded, Start, ToMap } from './protocol.ts';
 
 // Every URL this worker fetched, and how many times: the map's fetches look
 // the global `fetch` up at each call, and so do the preloads below.
@@ -30,9 +34,13 @@ globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
   return globalFetch(input, init);
 };
 
+const webgl2 = self.name === 'webgl2';
+
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
-const bindings = import('./pkg/mln_web.js');
+const bindings: Promise<Bindings<'WebMap' | 'set_preloads' | 'panic_for_check'>> = webgl2
+  ? import('./pkg/webgl/mln_web.js')
+  : import('./pkg/mln_web.js');
 
 type Handle = (message: ToMap) => void;
 
@@ -204,8 +212,16 @@ async function run(
   const toTileWorker = (instance: number, bytes: Uint8Array) => {
     if (!stopped) ports[instance]?.postMessage(bytes, [bytes.buffer]);
   };
-  const map = await WebMap.create(canvas, width, height, ratio, ports.length, toTileWorker, wake, loadShaper,
-    localIdeographFontFamily);
+  let map: WebMap;
+  try {
+    map = await WebMap.create(canvas, width, height, ratio, ports.length, toTileWorker, wake, loadShaper,
+      localIdeographFontFamily);
+  } catch (error) {
+    if (self.mlnPanic !== undefined) throw error;
+    stopped = true;
+    post({ type: 'unsupported', message: error instanceof Error ? error.message : String(error) });
+    return () => {};
+  }
 
   ticks.port1.onmessage = () => {
     tickScheduled = false;
@@ -240,7 +256,7 @@ async function run(
     reported = now;
     post({
       type: 'status',
-      text: `${ports.length} tile workers, ${map.received()} replies` +
+      text: `${ports.length} tile workers, ${map.received()} replies` + (webgl2 ? ', WebGL2' : '') +
         (loaded === null ? '' : `, loaded in ${Math.round(loaded.loadedMs)} ms`),
     });
     // A source's attribution can come later than its style, with its TileJSON.
@@ -283,7 +299,7 @@ async function run(
       report(true);
     }
     if (readPixels > 0) {
-      const pixels = map.take_pixels();
+      const pixels = webgl2 ? canvasPixels(canvas) : map.take_pixels();
       if (pixels !== undefined) {
         readPixels--;
         post({ type: 'pixels', pixels: { width: canvas.width, height: canvas.height, pixels } }, [pixels.buffer]);
@@ -350,6 +366,16 @@ async function run(
   });
   for (const data of early.splice(0)) handle(data);
   return handle;
+}
+
+// The frame just drawn, in the task that drew it: a WebGL2 canvas can't be
+// copied from on the GPU, and keeps its frame only until it is shown. The
+// rows are RGBA, not premultiplied.
+function canvasPixels(canvas: OffscreenCanvas): Uint8Array | undefined {
+  const copy = new OffscreenCanvas(canvas.width, canvas.height).getContext('2d');
+  if (copy === null) return undefined;
+  copy.drawImage(canvas, 0, 0);
+  return new Uint8Array(copy.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
 }
 
 // The page's events, on this worker's clock: the one frames run on.

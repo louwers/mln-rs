@@ -1,5 +1,15 @@
 // The messages between the page (main.ts), the map's Web Worker
-// (map-worker.ts) and the tile workers' Web Workers (worker.ts).
+// (map-worker.ts) and the tile workers' Web Workers (tile-worker.ts).
+
+/** What the map draws with, each a build of the module. */
+export type Backend = 'webgpu' | 'webgl2';
+
+/** The module's bindings (pkg/mln_web.js). */
+type Module = typeof import('./pkg/mln_web.js');
+/** `names` of the bindings of either build of the module, and its start. */
+export type Bindings<Names extends keyof Module> = Pick<Module, Names> & {
+  default: (options: { module_or_path: WebAssembly.Module }) => Promise<unknown>;
+};
 
 /** A camera: degrees, but for the zoom. */
 export type Camera = [lat: number, lon: number, zoom: number, bearing: number, pitch: number];
@@ -92,7 +102,9 @@ export type FromMap =
   | { type: 'attribution'; attribution: string[] }
   | { type: 'styleName'; name: string }
   // The map stopped: a panic, or it failed to start.
-  | { type: 'fatal'; message: string };
+  | { type: 'fatal'; message: string }
+  // The map didn't start: the browser's API couldn't draw it.
+  | { type: 'unsupported'; message: string };
 
 /** From the page to a tile worker's Web Worker. */
 export interface StartTileWorker {

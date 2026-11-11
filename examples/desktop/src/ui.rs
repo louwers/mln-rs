@@ -10,7 +10,10 @@
 // Wikimedia Commons, where it is in the public domain; the Vulkan logo
 // (assets/vulkan.svg) is Khronos's, from Wikimedia Commons. Vulkan and the
 // Vulkan logo are trademarks of the Khronos Group, which the about panel
-// says.
+// says. The OpenGL logo (assets/opengl.svg) is from Wikimedia Commons too,
+// vectorised by Vulphere: too simple for copyright, so in the public domain,
+// and a trademark of Hewlett Packard Enterprise that the Khronos Group uses
+// under licence.
 
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Order, Rect, Response, RichText, Sense, Shadow,
@@ -429,12 +432,16 @@ enum Piece {
 /// The backend's logo and name, at the bottom left; a click switches to the
 /// next backend.
 fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions: &mut Vec<Action>) {
-    let logo = match backend {
+    // The logos are 18 points high; Vulkan's is 708 by 570, and OpenGL's is a
+    // wordmark of 12 by 5.
+    let (logo, width) = match backend {
         #[cfg(target_os = "macos")]
-        Kind::Metal => egui::include_image!("../assets/metal.svg"),
+        Kind::Metal => (egui::include_image!("../assets/metal.svg"), 18.0),
         #[cfg(not(target_vendor = "apple"))]
-        Kind::Vulkan => egui::include_image!("../assets/vulkan.svg"),
-        Kind::WebGpu => egui::include_image!("../assets/webgpu.svg"),
+        Kind::Vulkan => (egui::include_image!("../assets/vulkan.svg"), 22.4),
+        Kind::WebGpu => (egui::include_image!("../assets/webgpu.svg"), 18.0),
+        #[cfg(target_os = "linux")]
+        Kind::OpenGl => (egui::include_image!("../assets/opengl.svg"), 43.2),
     };
     layer("backend", Align2::LEFT_BOTTOM, vec2(GAP, -GAP)).show(ctx, |ui| {
         let response = palette
@@ -443,10 +450,7 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    // A logo fits in a square, at its own proportions: the
-                    // label is as tall with one that is wider than high.
-                    ui.set_min_height(18.0);
-                    ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(18.0)));
+                    ui.add(egui::Image::new(logo).fit_to_exact_size(vec2(width, 18.0)));
                     ui.add(
                         egui::Label::new(RichText::new(backend.name()).size(12.0).color(palette.ink)).selectable(false),
                     );

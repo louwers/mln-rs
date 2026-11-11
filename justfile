@@ -23,6 +23,10 @@ profile := 'dev'
 nixos := path_exists('/etc/NIXOS')
 dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
 
+# The tests render headless with WebGPU, or with the backend MLN_RENDER_BACKEND names. The OpenGL one (crates/mln_gl, OpenGL
+# ES 3.0 through EGL) is a Cargo feature: `MLN_RENDER_BACKEND=gl just test` builds it in.
+gl_features := if env('MLN_RENDER_BACKEND', '') == 'gl' {'--features mln-rs-headless/gl'} else {''}
+
 # if running in CI, treat warnings as errors by setting CARGO_BUILD_WARNINGS to 'deny' unless it is already set
 # Use `CI=true just ci-lint` to run the same checks as in GitHub CI.
 # Use `just env-info` to see the current value of CARGO_BUILD_WARNINGS
@@ -74,16 +78,20 @@ check:
 
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
 # needs the target, which rust-toolchain.toml installs. Clippy, so that examples/web, which only builds there, is linted
-# too. Two runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
+# too. Three runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
 # on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32, and the in-process font-face
-# shaper), and the browser build's two modules as `just web` builds them, which leave both out; the check fails if
-# anything turns SQLite back on there, or brings in a C build (`cc`) that would need that clang.
+# shaper), the browser build's two modules as `just web` builds them, which leave both out, and the map's module with
+# its `webgl` feature. The check fails if anything turns SQLite back on in the browser build, or brings in a C build
+# (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
+# GL bindings), which only the `webgl` module needs.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
     cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
@@ -188,9 +196,11 @@ desktop *args:  _dev-shell
 # shrinks it with -Oz and strips its names and other custom sections. It inlines a function with one caller only when that
 # function is small: binaryen's default inlines them at any size, which made the module bigger after brotli and slower to
 # start. Two modules, from one cargo run: the map and its tile workers (examples/web, mln_web), and the font-face shaper
-# (crates/mln_web_shaper) that the map's Web Worker loads the first time a style declares font faces. wasm-bindgen writes
-# them into examples/web/web/pkg, and Vite builds the page around them into examples/web/dist, every asset's name hashed by
-# its content; serve that over HTTP, or run `just web-dev`.
+# (crates/mln_web_shaper) that the map's Web Worker loads the first time a style declares font faces. A second cargo run
+# builds the map's module again with its `webgl` feature, for browsers without WebGPU: it draws with WebGL2, and only
+# those browsers download it. wasm-bindgen writes the modules into examples/web/web/pkg (the WebGL2 one into pkg/webgl),
+# and Vite builds the page around them into examples/web/dist, every asset's name hashed by its content; serve that over
+# HTTP, or run `just web-dev`.
 [doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) and its page into examples/web/dist')]
 web:
     #!/usr/bin/env bash
@@ -199,20 +209,26 @@ web:
       # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
       export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
     fi
-    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
     target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
     pkg=examples/web/web/pkg
     if [[ {{quote(profile)}} != dev ]]; then
       command -v wasm-opt > /dev/null ||
         { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (examples/web/README.md)" >&2; exit 1; }
     fi
-    for module in mln_web mln_web_shaper; do
-      wasm-bindgen --target web --out-dir "$pkg" "$target/$module.wasm"
+    # wasm-bindgen's output for a module cargo built, into a directory.
+    bind() {
+      wasm-bindgen --target web --out-dir "$2" "$target/$1.wasm"
       if [[ {{quote(profile)}} != dev ]]; then
         wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
-          --strip-debug --strip-producers --strip-target-features "$pkg/${module}_bg.wasm" -o "$pkg/${module}_bg.wasm"
+          --strip-debug --strip-producers --strip-target-features "$2/$1_bg.wasm" -o "$2/$1_bg.wasm"
       fi
-    done
+    }
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+    bind mln_web "$pkg"
+    bind mln_web_shaper "$pkg"
+    # The same file again, with the feature.
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web --features webgl
+    bind mln_web "$pkg/webgl"
     pnpm -C examples/web install --frozen-lockfile
     pnpm -C examples/web build
 
@@ -349,7 +365,7 @@ release:
 # Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`.
 [positional-arguments]
 test *args:  _dev-shell
-    {{dev_shell}} cargo test --workspace "$@"
+    {{dev_shell}} cargo test --workspace {{gl_features}} "$@"
 
 # Test documentation generation
 test-doc:  (docs '')
@@ -435,7 +451,7 @@ vendor-shaders checkout=cpp:
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
 _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
     cargo llvm-cov clean --workspace
-    {{dev_shell}} cargo llvm-cov --no-report --workspace
+    {{dev_shell}} cargo llvm-cov --no-report --workspace {{gl_features}}
     cargo llvm-cov report --workspace {{report_args}}
 
 # The dev shell flake (nix/flake.nix, which wraps the C++ repo's), used from a copy in .nix-shell: `nix develop path:<repo>` would copy

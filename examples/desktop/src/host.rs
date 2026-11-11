@@ -86,6 +86,10 @@ pub(crate) enum UserEvent {
     /// library, sent back on the channel. The window's thread makes it.
     #[cfg(not(target_vendor = "apple"))]
     MakeVulkanSurface(Box<(ash::Entry, ash::Instance)>, mpsc::Sender<Result<ash::vk::SurfaceKHR, String>>),
+    /// The window, sent back on the channel, for a backend that presents to
+    /// it through EGL.
+    #[cfg(target_os = "linux")]
+    Window(mpsc::Sender<Arc<Window>>),
     SetTitle(String),
     RequestSize(LogicalSize<f64>),
     /// What egui asks of the window after a frame: its cursor, a link to open.
@@ -464,6 +468,10 @@ impl ApplicationHandler<UserEvent> for Host {
             UserEvent::MakeVulkanSurface(vulkan, reply) => {
                 let (entry, instance) = &*vulkan;
                 let _ = reply.send(crate::vulkan_surface::create_surface(&open.window, entry, instance));
+            }
+            #[cfg(target_os = "linux")]
+            UserEvent::Window(reply) => {
+                let _ = reply.send(open.window.clone());
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),

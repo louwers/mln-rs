@@ -1,8 +1,11 @@
 // Ports platform/default/include/mln/gfx/headless_frontend.hpp and
 // platform/default/src/mln/gfx/headless_frontend.cpp.
 //
-// The port renders with WebGPU, or with the backend the environment variable
-// MLN_RENDER_BACKEND names: `metal` on Apple platforms, `vulkan` on the others.
+// C++ renders with the one backend it was built with. The port renders with
+// WebGPU, or with another backend the environment variable
+// MLN_RENDER_BACKEND names: `metal` on Apple platforms, `vulkan` on the
+// others, and `gl` (OpenGL ES 3.0 through EGL) in a build with the `gl`
+// feature.
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc, Weak};
@@ -76,6 +79,16 @@ fn create_backend(
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
     if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("vulkan")) {
         match mln_vulkan::HeadlessBackend::new(size, swap_behavior, context_mode) {
+            Ok(backend) => {
+                let backend = Rc::new(backend);
+                return (backend.clone(), backend);
+            }
+            Err(e) => Log::error(Event::Render, format!("{e}; rendering with WebGPU instead")),
+        }
+    }
+    #[cfg(all(feature = "gl", not(target_arch = "wasm32")))]
+    if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("gl")) {
+        match mln_gl::HeadlessBackend::new(size, swap_behavior, context_mode) {
             Ok(backend) => {
                 let backend = Rc::new(backend);
                 return (backend.clone(), backend);

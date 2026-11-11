@@ -1,9 +1,15 @@
-// The window's renderer backend: Metal by default on macOS, Vulkan elsewhere
-// than on Apple's platforms, WebGPU (through wgpu, the default where there
-// is no Metal) everywhere, picked with --backend and switched in the
-// controls. C++'s GLFW app builds one backend and ignores the flag. On macOS
-// both present to the window's one CAMetalLayer (metal_layer.rs); elsewhere
-// each makes its own surface of the window (vulkan_surface.rs for Vulkan).
+// The window's renderer backend: Metal by default on macOS, WebGPU (through
+// wgpu, the default where there is no Metal) everywhere, Vulkan elsewhere
+// than on Apple's platforms and OpenGL ES on Linux, picked with --backend and
+// switched in the controls. C++'s GLFW app builds one backend and ignores the
+// flag. On macOS both present to the window's one CAMetalLayer
+// (metal_layer.rs). Elsewhere each makes its own surface of the window
+// (vulkan_surface.rs for Vulkan, EGL for OpenGL ES), which takes one
+// backend's frames at a time: the backend that goes gives it up before the
+// next one takes it.
+//
+// OpenGL ES is Linux's only: EGL is no system library on Windows, and macOS
+// has neither it nor OpenGL ES.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -26,6 +32,8 @@ pub(crate) enum Kind {
     #[cfg(not(target_vendor = "apple"))]
     Vulkan,
     WebGpu,
+    #[cfg(target_os = "linux")]
+    OpenGl,
 }
 
 impl Kind {
@@ -37,17 +45,20 @@ impl Kind {
             #[cfg(not(target_vendor = "apple"))]
             "vulkan" => Ok(Kind::Vulkan),
             "webgpu" => Ok(Kind::WebGpu),
+            #[cfg(target_os = "linux")]
+            "opengl" => Ok(Kind::OpenGl),
             _ => Err(format!("Unknown backend '{name}' (available: {})", Kind::NAMES)),
         }
     }
 
-    const NAMES: &str = if cfg!(target_os = "macos") {
-        "metal, webgpu"
-    } else if cfg!(target_vendor = "apple") {
-        "webgpu"
-    } else {
-        "vulkan, webgpu"
-    };
+    #[cfg(target_os = "macos")]
+    const NAMES: &str = "metal, webgpu";
+    #[cfg(target_os = "linux")]
+    const NAMES: &str = "vulkan, webgpu, opengl";
+    #[cfg(all(not(target_vendor = "apple"), not(target_os = "linux")))]
+    const NAMES: &str = "vulkan, webgpu";
+    #[cfg(all(target_vendor = "apple", not(target_os = "macos")))]
+    const NAMES: &str = "webgpu";
 
     /// The backends this platform has.
     pub(crate) const ALL: &[Kind] = &[
@@ -56,6 +67,8 @@ impl Kind {
         #[cfg(not(target_vendor = "apple"))]
         Kind::Vulkan,
         Kind::WebGpu,
+        #[cfg(target_os = "linux")]
+        Kind::OpenGl,
     ];
 
     /// The backend after this one in `ALL`, around to the first.
@@ -72,6 +85,8 @@ impl Kind {
             #[cfg(not(target_vendor = "apple"))]
             Kind::Vulkan => "Vulkan",
             Kind::WebGpu => "WebGPU",
+            #[cfg(target_os = "linux")]
+            Kind::OpenGl => "OpenGL ES",
         }
     }
 }
@@ -92,6 +107,8 @@ pub(crate) enum SurfaceBackend {
     #[cfg(not(target_vendor = "apple"))]
     Vulkan(Rc<mln_vulkan::SurfaceBackend>),
     WebGpu(Rc<mln_webgpu::SurfaceBackend>),
+    #[cfg(target_os = "linux")]
+    OpenGl(Rc<mln_gl::SurfaceBackend>),
 }
 
 /// The window's thread ended before it answered the render thread.
@@ -136,6 +153,14 @@ impl SurfaceBackend {
                 let backend = mln_webgpu::SurfaceBackend::new(make_surface, framebuffer_size, cap_frame_rate)?;
                 Ok(SurfaceBackend::WebGpu(Rc::new(backend)))
             }
+            #[cfg(target_os = "linux")]
+            Kind::OpenGl => {
+                let (reply, window) = mpsc::channel();
+                proxy.send_event(UserEvent::Window(reply)).map_err(|_| closed())?;
+                let window = window.recv().map_err(|_| closed())?;
+                let backend = mln_gl::SurfaceBackend::new(window, framebuffer_size, cap_frame_rate)?;
+                Ok(SurfaceBackend::OpenGl(Rc::new(backend)))
+            }
         }
     }
 
@@ -146,6 +171,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(_) => Kind::Vulkan,
             SurfaceBackend::WebGpu(_) => Kind::WebGpu,
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(_) => Kind::OpenGl,
         }
     }
 
@@ -157,6 +184,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.get_framebuffer_size(),
             SurfaceBackend::WebGpu(backend) => backend.get_framebuffer_size(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.get_framebuffer_size(),
         }
     }
 
@@ -190,6 +219,10 @@ impl SurfaceBackend {
                     backend.get_swap_chain_format()
                 )
             }
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => {
+                format!("Rendering with {} (OpenGL ES through EGL)", backend.get_renderer_name())
+            }
         }
     }
 
@@ -204,6 +237,8 @@ impl SurfaceBackend {
                 let info = backend.get_adapter_info();
                 format!("{} (wgpu {:?})", info.name, info.backend)
             }
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => format!("{} (OpenGL ES)", backend.get_renderer_name()),
         }
     }
 
@@ -215,6 +250,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.set_overlay(Some(crate::vulkan_overlay::vulkan_overlay(paint))),
             SurfaceBackend::WebGpu(backend) => backend.set_overlay(Some(crate::overlay::webgpu_overlay(paint))),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.set_overlay(Some(crate::gl_overlay::gl_overlay(paint))),
         }
     }
 
@@ -225,6 +262,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.clone(),
             SurfaceBackend::WebGpu(backend) => backend.clone(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.clone(),
         }
     }
 
@@ -237,6 +276,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.acquire_next_texture(),
             SurfaceBackend::WebGpu(backend) => backend.acquire_next_texture(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.acquire_next_texture(),
         }
     }
 
@@ -247,12 +288,15 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.set_framebuffer_size(size),
             SurfaceBackend::WebGpu(backend) => backend.set_framebuffer_size(size),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.set_framebuffer_size(size),
         }
     }
 
-    /// Gives the window up for another backend, which makes its own
-    /// surface of it: a window presents one swapchain at a time. On macOS
-    /// there is nothing to give up: the backends present to the one layer.
+    /// Gives the window up for the backend made next, which makes its own
+    /// surface of it and couldn't otherwise: a window presents one
+    /// swapchain at a time. On macOS there is nothing to give up: the
+    /// backends present to the one layer.
     pub(crate) fn release_surface(&self) {
         match self {
             #[cfg(target_os = "macos")]
@@ -261,11 +305,13 @@ impl SurfaceBackend {
             SurfaceBackend::Vulkan(backend) => backend.release_surface(),
             #[cfg(not(target_os = "macos"))]
             SurfaceBackend::WebGpu(backend) => backend.release_surface(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.release_surface(),
         }
     }
 
     /// Takes the window back after `release_surface`, when no other backend
-    /// took it.
+    /// took it. OpenGL ES does so by itself with its next frame.
     pub(crate) fn restore_surface(&self, proxy: &EventLoopProxy<UserEvent>) -> Result<(), Error> {
         match self {
             #[cfg(target_os = "macos")]
@@ -285,6 +331,8 @@ impl SurfaceBackend {
                     .ok_or_else(|| Error::invalid_state("The backend has no instance"))?;
                 backend.set_surface(make_surface(proxy, &instance)?, backend.get_framebuffer_size())
             }
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(_) => Ok(()),
         }
     }
 
@@ -296,6 +344,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.request_readback(),
             SurfaceBackend::WebGpu(backend) => backend.request_readback(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.request_readback(),
         }
     }
 
@@ -307,6 +357,8 @@ impl SurfaceBackend {
             #[cfg(not(target_vendor = "apple"))]
             SurfaceBackend::Vulkan(backend) => backend.take_readback(),
             SurfaceBackend::WebGpu(backend) => backend.take_readback(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.take_readback(),
         }
     }
 }
