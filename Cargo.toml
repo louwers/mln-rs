@@ -52,6 +52,7 @@ mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion"
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.11" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.11" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.11" }
+mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.11" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.11" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.11" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.11" }
@@ -104,11 +105,16 @@ flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] 
 # examples/desktop: finds the system fonts it gives the map as fallback font
 # faces, and reads their names and coverage through short-lived maps.
 fontdb = { version = "0.24.0", default-features = false, features = ["fs", "memmap"] }
+# crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
+glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
 # The HTTP test server of the tests (tools/test-server).
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.
 image-webp = { version = "0.2.4" }
+# crates/mln_gl's headless backend: an EGL context. `dynamic` loads libEGL at
+# run time, so builds need no system development packages.
+khronos-egl = { version = "6.0.0", features = ["dynamic"] }
 # tools/bench: the process's CPU time (clock_gettime), which std lacks.
 libc = { version = "0.2.191" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
@@ -291,6 +297,11 @@ include = ["/src", "/LICENSE.md"]
 keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
+[features]
+# The OpenGL backend (crates/mln_gl): OpenGL ES 3.0 natively, where
+# mln_headless then renders with it on request, and WebGL2 in a browser.
+gl = ["dep:mln_gl", "mln_headless/gl"]
+
 [dependencies]
 cheap_ruler.workspace = true
 csscolorparser.workspace = true
@@ -305,6 +316,7 @@ mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
+mln_gl = { workspace = true, optional = true }
 mln_headless.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true

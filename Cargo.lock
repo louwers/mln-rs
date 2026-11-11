@@ -1298,6 +1298,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4eba85ea1d0a966a983acd07deee566e67395d2d96b6fb39e62b5a833f1eb0b"
 
 [[package]]
+name = "glow"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29038e1c483364cc6bb3cf78feee1816002e127c331a1eec55a4d202b9e1adb5"
+dependencies = [
+ "js-sys",
+ "slotmap",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "gpu-allocator"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1845,6 +1857,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "khronos-egl"
+version = "6.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6aae1df220ece3c0ada96b8153459b67eebe9ae9212258bb0134ae60416fdf76"
+dependencies = [
+ "libc",
+ "libloading",
+]
+
+[[package]]
 name = "kurbo"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2025,6 +2047,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-kdbush",
@@ -2286,6 +2309,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "mln-rs-gl"
+version = "0.0.11"
+dependencies = [
+ "bytemuck",
+ "glow",
+ "khronos-egl",
+ "mln-rs-gfx",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
 name = "mln-rs-headless"
 version = "0.0.11"
 dependencies = [
@@ -2293,6 +2330,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",

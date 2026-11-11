@@ -1,8 +1,8 @@
 //! Ports the backend-independent `gfx/` abstractions of the C++ core
 //! (`include/mln/gfx`, `src/mln/gfx`), the backend-independent `shaders/`
 //! code and the drawable-path files from `renderer/` that the backends
-//! implement. `mln_webgpu` implements the traits on `wgpu`, and `mln_mtl` on
-//! Metal.
+//! implement. `mln_webgpu` implements the traits on `wgpu`, `mln_mtl` on
+//! Metal and `mln_gl` on OpenGL ES 3.0.
 //!
 //! Crate cut (the C++ include cycle): `renderer/layer_group.hpp` and
 //! `renderer/render_pass.hpp` live here (`renderer::layer_group`,

@@ -68,7 +68,7 @@ pub trait Context: Any {
     }
 
     /// The backend this context is of. C++ builds one backend and asks
-    /// `gfx::Backend::GetType()`; the port can build both and asks the
+    /// `gfx::Backend::GetType()`; the port can build several and asks the
     /// context.
     fn backend_type(&self) -> BackendType;
 

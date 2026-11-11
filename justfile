@@ -23,6 +23,10 @@ profile := 'dev'
 nixos := path_exists('/etc/NIXOS')
 dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
 
+# The tests render headless with WebGPU, or with the backend MLN_RENDER_BACKEND names. The OpenGL one (crates/mln_gl, OpenGL
+# ES 3.0 through EGL) is a Cargo feature: `MLN_RENDER_BACKEND=gl just test` builds it in.
+gl_features := if env('MLN_RENDER_BACKEND', '') == 'gl' {'--features mln-rs-headless/gl'} else {''}
+
 # if running in CI, treat warnings as errors by setting CARGO_BUILD_WARNINGS to 'deny' unless it is already set
 # Use `CI=true just ci-lint` to run the same checks as in GitHub CI.
 # Use `just env-info` to see the current value of CARGO_BUILD_WARNINGS
@@ -345,7 +349,7 @@ release:
 # Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`.
 [positional-arguments]
 test *args:  _dev-shell
-    {{dev_shell}} cargo test --workspace "$@"
+    {{dev_shell}} cargo test --workspace {{gl_features}} "$@"
 
 # Test documentation generation
 test-doc:  (docs '')
@@ -431,7 +435,7 @@ vendor-shaders checkout=cpp:
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
 _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
     cargo llvm-cov clean --workspace
-    {{dev_shell}} cargo llvm-cov --no-report --workspace
+    {{dev_shell}} cargo llvm-cov --no-report --workspace {{gl_features}}
     cargo llvm-cov report --workspace {{report_args}}
 
 # The dev shell flake (nix/flake.nix, which wraps the C++ repo's), used from a copy in .nix-shell: `nix develop path:<repo>` would copy
