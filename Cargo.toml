@@ -107,8 +107,10 @@ harfrust = { version = "0.15.0" }
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.
 image-webp = { version = "0.2.4" }
-# tools/bench: the process's CPU time (clock_gettime), which std lacks.
+# tools/bench: the process's CPU time, which std lacks: clock_gettime on Unix,
+# GetProcessTimes on Windows.
 libc = { version = "0.2.191" }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
 # porting the C++ decoder (vendor/maplibre-tile-spec/cpp). Assumed correct
 # (user decision, 2026-11-04); the differential test against the C++ decoder
