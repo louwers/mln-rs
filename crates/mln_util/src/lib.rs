@@ -20,7 +20,6 @@ pub use padding::Padding;
 pub use unitbezier::UnitBezier;
 pub mod bounding_volumes;
 pub mod chrono;
-pub mod client_options;
 pub mod enum_;
 pub mod error;
 pub mod feature;

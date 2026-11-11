@@ -27,7 +27,7 @@ use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapMode, MapObserver, MapOptions, RenderFrameStatus, StyleLoadError};
 use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
@@ -315,17 +315,15 @@ pub struct FakeFileSource {
     requests: LocalObject<FakeRequests>,
     next_id: Mutex<u64>,
     resource_options: Mutex<ResourceOptions>,
-    client_options: Mutex<ClientOptions>,
 }
 
 impl FakeFileSource {
-    /// `FakeFileSource()`: `ResourceOptions::Default()`, `ClientOptions()`.
+    /// `FakeFileSource()`: `ResourceOptions::Default()`.
     pub fn new() -> Self {
         FakeFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
             next_id: Mutex::new(0),
             resource_options: Mutex::new(ResourceOptions::default()),
-            client_options: Mutex::new(ClientOptions::default()),
         }
     }
 
@@ -389,14 +387,6 @@ impl FileSource for FakeFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.resource_options.lock().unwrap().clone()
-    }
-
-    fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
-    }
-
-    fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
     }
 }
 
