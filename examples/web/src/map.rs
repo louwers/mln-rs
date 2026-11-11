@@ -17,6 +17,8 @@ use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameter
 use mln_storage::{ClientOptions, ResourceOptions};
 use mln_util::LatLng;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::host_bytes::HostBytes;
+use mln_util::serialization::payload::Payload;
 use mln_util::size::Size;
 use mln_webgpu::SurfaceBackend;
 use wasm_bindgen::prelude::*;
@@ -292,13 +294,16 @@ impl WebMap {
     }
 
     /// A reply from the tile worker in Web Worker `instance`, as
-    /// `TileWorker::run` returns it: its bytes, then its payloads. Each is
-    /// copied once, into the Vec its image or bucket array takes.
+    /// `TileWorker::run` returns it: its bytes, then its payloads. The bytes
+    /// are copied into wasm memory; the payloads stay JS arrays, which a
+    /// bucket's vertices and indices stay in until they're uploaded
+    /// (mln_util::host_bytes).
     pub fn receive(&self, instance: u32, reply: js_sys::Array) {
         self.received.set(self.received.get() + 1);
-        let mut parts = reply.iter().map(|part| js_sys::Uint8Array::new(&part).to_vec());
-        let bytes = parts.next().unwrap_or_default();
-        self.transport.receive(instance as usize, Encoded { bytes, payloads: parts.collect() });
+        let mut parts = reply.iter().map(js_sys::Uint8Array::from);
+        let bytes = parts.next().map(|bytes| bytes.to_vec()).unwrap_or_default();
+        let payloads = parts.map(|part| Payload::Host(HostBytes::new(part))).collect();
+        self.transport.receive(instance as usize, Encoded { bytes, payloads });
     }
 
     /// How many worker replies arrived so far.

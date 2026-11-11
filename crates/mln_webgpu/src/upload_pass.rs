@@ -7,6 +7,7 @@ use std::rc::Rc;
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
 use mln_gfx::debug_group::DebugGroupTarget;
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::index_vector::IndexVectorBase;
 use mln_gfx::renderable::Renderable;
 use mln_gfx::types::BufferUsageType;
 use mln_gfx::upload_pass;
@@ -62,6 +63,49 @@ impl UploadPass {
         Rc::new(VertexBufferResource::new(buffer))
     }
 
+    /// A vertex buffer of the first `raw_size` bytes of `vec`, written from
+    /// the JS array they're in, if they are.
+    fn create_vertex_buffer_of(&self, vec: &VertexVectorBasePtr, raw_size: usize) -> Rc<VertexBufferResource> {
+        #[cfg(target_family = "wasm")]
+        if let Some(data) = vec.get_host_data() {
+            let buffer = BufferResource::new_from_host(
+                self.context.clone(),
+                &data,
+                wgpu::BufferUsages::VERTEX,
+                /*is_index_buffer=*/ false,
+                /*persistent=*/ false,
+            );
+            return Rc::new(VertexBufferResource::new(buffer));
+        }
+        self.create_vertex_buffer(&vec.get_raw_data()[..raw_size], false)
+    }
+
+    /// An index buffer of `indexes`, written from the JS array they're in,
+    /// if they are.
+    pub fn create_index_buffer_of(
+        &self,
+        indexes: &IndexVectorBase,
+        usage: BufferUsageType,
+    ) -> Box<dyn vertex_buffer::IndexBufferResource> {
+        #[cfg(target_family = "wasm")]
+        if let Some(data) = indexes.host_data() {
+            let buffer = BufferResource::new_from_host(
+                self.context.clone(),
+                data,
+                wgpu::BufferUsages::INDEX,
+                /*is_index_buffer=*/ true,
+                /*persistent=*/ false,
+            );
+            return Box::new(IndexBufferResource::new(buffer));
+        }
+        upload_pass::UploadPass::create_index_buffer_resource(
+            self,
+            bytemuck::cast_slice(indexes.data()),
+            usage,
+            /*persistent=*/ false,
+        )
+    }
+
     /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`
     pub fn get_buffer(
         &self,
@@ -93,7 +137,7 @@ impl UploadPass {
         let _ = usage;
         if raw_size > 0 {
             debug_assert!(vec.has_raw_data());
-            let resource = self.create_vertex_buffer(&vec.get_raw_data()[..raw_size], false);
+            let resource = self.create_vertex_buffer_of(vec, raw_size);
             // A released vector frees its CPU copy here.
             vec.set_buffer(Some(Box::new(VertexBuffer { resource: resource.clone() })));
             return Some(resource);

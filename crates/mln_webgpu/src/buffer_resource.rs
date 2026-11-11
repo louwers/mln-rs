@@ -71,6 +71,23 @@ impl BufferResource {
         res
     }
 
+    /// Port-only: a buffer of the bytes in the JS array `data`, written to
+    /// the GPU from there. It keeps no CPU copy of them (`contents`).
+    #[cfg(target_family = "wasm")]
+    pub fn new_from_host(
+        context: Rc<Context>,
+        data: &mln_util::host_bytes::HostBytes,
+        usage: wgpu::BufferUsages,
+        is_index_buffer: bool,
+        persistent: bool,
+    ) -> Self {
+        let res = BufferResource::new(context, None, data.len(), usage, is_index_buffer, persistent);
+        if let Some(buffer) = &res.buffer {
+            res.context.get_backend().write_buffer_from_host(buffer, 0, data);
+        }
+        res
+    }
+
     /// `clone()`: a new buffer with the same raw contents.
     pub fn clone_resource(&self) -> Self {
         BufferResource::new(

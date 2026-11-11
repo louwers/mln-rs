@@ -2067,6 +2067,7 @@ version = "0.0.10"
 dependencies = [
  "bytemuck",
  "flate2",
+ "js-sys",
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
  "mln-rs-expression",

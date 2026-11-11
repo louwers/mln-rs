@@ -4,6 +4,8 @@ use std::any::Any;
 use std::cell::{Cell, Ref, RefCell};
 use std::rc::Rc;
 
+#[cfg(target_family = "wasm")]
+use mln_util::host_bytes::HostBytes;
 use mln_util::time::Instant;
 
 /// `gfx::VertexBufferBase`: backend buffer attached to a shared vertex vector.
@@ -38,8 +40,15 @@ impl Default for VertexVectorBaseData {
 pub trait VertexVectorBase: Any {
     fn vertex_vector_base(&self) -> &VertexVectorBaseData;
     /// The raw bytes of all vertices (`getRawData()`, `getRawCount() * getRawSize()`
-    /// bytes), empty once the CPU copy is freed after upload.
+    /// bytes), empty once the CPU copy is freed after upload, or while the
+    /// bytes are in a JS array (`get_host_data`).
     fn get_raw_data(&self) -> Ref<'_, [u8]>;
+    /// Port-only: the bytes of all vertices while they are in a JS array
+    /// rather than in wasm memory, until they are freed after upload.
+    #[cfg(target_family = "wasm")]
+    fn get_host_data(&self) -> Option<Ref<'_, HostBytes>> {
+        None
+    }
     /// `sizeof(Vertex)`
     fn get_raw_size(&self) -> usize;
     /// The vertex count, which stays when the CPU copy is freed.
@@ -94,6 +103,9 @@ pub type VertexVectorBasePtr = Rc<dyn VertexVectorBase>;
 pub struct VertexVector<V: bytemuck::Pod> {
     base: VertexVectorBaseData,
     v: RefCell<Vec<V>>,
+    /// The vertices while they are in a JS array; `v` is empty then.
+    #[cfg(target_family = "wasm")]
+    host: RefCell<Option<HostBytes>>,
     /// The element count of the CPU data freed after upload.
     freed_count: Cell<usize>,
 }
@@ -113,7 +125,13 @@ impl<V: bytemuck::Pod> VertexVector<V> {
     /// renderer moves a bucket's vertices into a shared vector this way, see
     /// mln_renderer::bucket_geometry).
     pub fn from_vec(vertices: Vec<V>) -> Self {
-        VertexVector { base: VertexVectorBaseData::default(), v: RefCell::new(vertices), freed_count: Cell::new(0) }
+        VertexVector {
+            base: VertexVectorBaseData::default(),
+            v: RefCell::new(vertices),
+            #[cfg(target_family = "wasm")]
+            host: RefCell::new(None),
+            freed_count: Cell::new(0),
+        }
     }
 
     /// A vector holding `vertices` that will not be updated (`release()`d):
@@ -122,6 +140,27 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         let mut result = Self::from_vec(vertices);
         result.release();
         result
+    }
+
+    /// Port-only: a released vector of the vertices in a JS array, which the
+    /// upload pass writes to the GPU from there. Released, it frees them once
+    /// it has a buffer, so no buffer is ever updated from them.
+    #[cfg(target_family = "wasm")]
+    pub fn from_host_released(vertices: HostBytes) -> Self {
+        debug_assert!(vertices.len().is_multiple_of(size_of::<V>()));
+        let mut result = Self::from_vec(Vec::new());
+        *result.host.get_mut() = Some(vertices);
+        result.release();
+        result
+    }
+
+    /// The vertex count in a JS array.
+    fn host_count(&self) -> usize {
+        #[cfg(target_family = "wasm")]
+        if let Some(bytes) = &*self.host.borrow() {
+            return bytes.len() / size_of::<V>();
+        }
+        0
     }
 
     pub fn emplace_back(&mut self, vertex: V) {
@@ -149,7 +188,7 @@ impl<V: bytemuck::Pod> VertexVector<V> {
 
     /// The element count, which stays when the CPU copy is freed.
     pub fn elements(&self) -> usize {
-        self.v.borrow().len() + self.freed_count.get()
+        self.v.borrow().len() + self.host_count() + self.freed_count.get()
     }
 
     pub fn bytes(&self) -> usize {
@@ -163,6 +202,8 @@ impl<V: bytemuck::Pod> VertexVector<V> {
     pub fn clear(&mut self) {
         self.base.dirty.set(true);
         self.v.get_mut().clear();
+        #[cfg(target_family = "wasm")]
+        self.host.get_mut().take();
         self.freed_count.set(0);
         self.base.raw_freed.set(false);
     }
@@ -180,7 +221,8 @@ impl<V: bytemuck::Pod> VertexVector<V> {
         }
     }
 
-    /// The CPU copy of the vertices, empty once it is freed after upload.
+    /// The CPU copy of the vertices, empty once it is freed after upload or
+    /// while the vertices are in a JS array.
     pub fn data(&self) -> Ref<'_, [V]> {
         Ref::map(self.v.borrow(), |v| v.as_slice())
     }
@@ -203,10 +245,16 @@ impl<V: bytemuck::Pod> VertexVectorBase for VertexVector<V> {
     fn get_raw_count(&self) -> usize {
         self.elements()
     }
+    #[cfg(target_family = "wasm")]
+    fn get_host_data(&self) -> Option<Ref<'_, HostBytes>> {
+        Ref::filter_map(self.host.borrow(), Option::as_ref).ok()
+    }
     fn free_raw_data(&self) {
-        let mut v = self.v.borrow_mut();
-        self.freed_count.set(self.freed_count.get() + v.len());
-        *v = Vec::new();
+        let freed = self.v.borrow().len() + self.host_count();
+        self.freed_count.set(self.freed_count.get() + freed);
+        *self.v.borrow_mut() = Vec::new();
+        #[cfg(target_family = "wasm")]
+        self.host.borrow_mut().take();
         self.base.raw_freed.set(true);
     }
 }

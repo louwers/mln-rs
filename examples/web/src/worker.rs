@@ -79,8 +79,8 @@ impl TileWorker {
         replies
             .into_iter()
             .map(|reply| {
-                std::iter::once(&reply.bytes)
-                    .chain(&reply.payloads)
+                std::iter::once(reply.bytes)
+                    .chain(reply.payloads.into_iter().map(|payload| payload.into_vec()))
                     .map(|part| js_sys::Uint8Array::from(&part[..]))
                     .collect::<js_sys::Array>()
             })

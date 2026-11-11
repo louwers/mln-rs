@@ -318,7 +318,7 @@ fn large_arrays_travel_as_payloads() {
     map.create_raster(TILE);
     let pixels = vec![7; 64 * 64 * 4];
     let encoded = WorkerCodec::new().encode_raster(TILE, parsed(pixels.clone(), 64));
-    assert_eq!(encoded.payloads, [pixels.clone()]);
+    assert_eq!(encoded.payloads, [pixels.clone().into()]);
     assert!(encoded.bytes.len() < 64);
     assert_eq!(decoded(&mut map, encoded.clone()), pixels);
     // Without its payload, the image doesn't decode.

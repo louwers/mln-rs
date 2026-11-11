@@ -29,8 +29,11 @@ Worker and only forwards to it.
   there (the map gets back the pixels, and a DEM with the border it
   backfills from the neighbouring tiles). A reply's large arrays (pixels,
   vertices, indices) travel beside its bytes as their own buffers, which
-  the Web Worker transfers, and which the map copies once, into the
-  arrays its buckets keep.
+  the Web Worker transfers. The map copies pixels into wasm memory, but a
+  bucket's vertices and indices stay in their JS arrays until
+  `GPUQueue.writeBuffer` uploads them from there (mln_util's
+  `host_bytes`); what reads or changes them first, such as feature state,
+  copies them in.
 - in the map's Web Worker again, the first time a style declares font
   faces (`"font-faces"`): the shaper module
   ([crates/mln_web_shaper](../../crates/mln_web_shaper)), mln_text's
