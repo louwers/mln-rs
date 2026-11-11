@@ -444,10 +444,10 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
 #[test]
 fn free_camera_options_place_the_camera_and_cancel_commands() {
     let test = MapTest::new();
-    let ended = Rc::new(Cell::new(None));
+    let ended = Arc::new(mln_util::sync::SyncCell::new(None));
     let record = ended.clone();
     let animation = AnimationOptions {
-        transition_end_fn: Some(Rc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
+        transition_end_fn: Some(Arc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
         ..AnimationOptions::new(Duration::from_secs(10))
     };
     test.map().ease_to(&cam().with_zoom(Some(10.0)), &animation);

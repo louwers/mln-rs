@@ -2,9 +2,8 @@
 //! `input/mod.rs` onto maplibre-native-ffi's camera calls
 //! ([`GestureCamera`]).
 
-use std::cell::Cell;
 use std::ops::{Add, AddAssign, Div, Mul, Sub};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_map::{
     AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
@@ -13,6 +12,7 @@ use mln_map::{
 use mln_util::UnitBezier;
 use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::sync::SyncCell;
 
 use crate::camera::GestureCamera;
 use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
@@ -438,7 +438,7 @@ pub struct GestureRecognizer {
     begun: bool,
     /// The speed the recognizer's last glide had when something cancelled
     /// it, which its momentum's end function reports.
-    cancelled_glide: Rc<Cell<Option<CameraVelocity>>>,
+    cancelled_glide: Arc<SyncCell<Option<CameraVelocity>>>,
     /// The glide that this gesture's press caught, which its release carries
     /// (`carry_caught_glide`).
     caught_glide: Option<CameraVelocity>,
@@ -462,7 +462,7 @@ impl GestureRecognizer {
             mode: Mode::Idle,
             tracking: Tracking::default(),
             begun: false,
-            cancelled_glide: Rc::default(),
+            cancelled_glide: Arc::default(),
             caught_glide: None,
             last_tap: None,
             scroll: None,
@@ -626,7 +626,7 @@ impl GestureRecognizer {
         let cancelled_glide = self.cancelled_glide.clone();
         let animation = AnimationOptions {
             transition_id: Some(self.options.transition_id),
-            transition_end_fn: Some(Rc::new(move |end: &TransitionEnd| {
+            transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
                 if end.outcome == TransitionOutcome::Cancelled {
                     cancelled_glide.set(Some(end.velocity));
                 }

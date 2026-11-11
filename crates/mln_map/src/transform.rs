@@ -15,6 +15,7 @@
 use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use geometry::Point;
 use mln_map_types::{
@@ -32,6 +33,7 @@ use mln_util::interpolate::interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
+use mln_util::sync::SyncCell;
 
 use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
@@ -2005,22 +2007,22 @@ fn joint_end(animation: &AnimationOptions, count: u32) -> AnimationOptions {
     let Some(end_fn) = animation.transition_end_fn.clone().filter(|_| count > 1) else {
         return animation.clone();
     };
-    let remaining = Cell::new(count);
-    let outcome = Cell::new(TransitionOutcome::Completed);
+    // The remaining commands and the outcome so far.
+    let state = SyncCell::new((count, TransitionOutcome::Completed));
     let joint = move |end: &TransitionEnd| {
-        let worst = match (outcome.get(), end.outcome) {
+        let (remaining, outcome) = state.get();
+        let worst = match (outcome, end.outcome) {
             (TransitionOutcome::Cancelled, _) | (_, TransitionOutcome::Cancelled) => TransitionOutcome::Cancelled,
             (TransitionOutcome::Closed, _) | (_, TransitionOutcome::Closed) => TransitionOutcome::Closed,
             (TransitionOutcome::Replaced, _) | (_, TransitionOutcome::Replaced) => TransitionOutcome::Replaced,
             _ => TransitionOutcome::Completed,
         };
-        outcome.set(worst);
-        remaining.set(remaining.get() - 1);
-        if remaining.get() == 0 {
+        state.set((remaining - 1, worst));
+        if remaining == 1 {
             end_fn(&TransitionEnd { outcome: worst, velocity: end.velocity });
         }
     };
-    AnimationOptions { transition_end_fn: Some(Rc::new(joint)), ..animation.clone() }
+    AnimationOptions { transition_end_fn: Some(Arc::new(joint)), ..animation.clone() }
 }
 
 /// Ends a command that started no transition: one that failed before it
