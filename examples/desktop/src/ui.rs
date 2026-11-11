@@ -1,7 +1,12 @@
 // The controls over the map, in egui, after the web demo's
 // (examples/web/web/index.html and page.css): the style picker, zoom, a
-// compass, the sources' attributions and a panel with the gestures, the debug
-// overlays, the renderer's backend and its status. `Controls::show` lays them out and
+// compass, the sources' attributions, the renderer's backend, which a click
+// switches where there are two, and a panel with the gestures, the debug
+// overlays and the renderer's status.
+//
+// The WebGPU logo (assets/webgpu.svg) is W3C's, under CC BY 4.0, which the
+// about panel credits; the Metal logo (assets/metal.svg) is Apple's, from
+// Wikimedia Commons, where it is in the public domain. `Controls::show` lays them out and
 // returns what the user asked of the map; the view (view.rs) carries it out.
 
 use egui::{
@@ -176,6 +181,9 @@ impl Controls {
             about_panel(ctx, &palette, shown, &mut actions);
         }
         camera_controls(ctx, &palette, shown, &mut actions);
+        if Kind::ALL.len() > 1 {
+            backend_label(ctx, &palette, shown.backend, &mut actions);
+        }
         attribution(ctx, &palette, shown.attributions);
         actions
     }
@@ -327,16 +335,6 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
             if ui.checkbox(&mut globe, "Globe").on_hover_text("Draw the map on the globe").changed() {
                 actions.push(Action::SetGlobe(globe));
             }
-            if Kind::ALL.len() > 1 {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Renderer").strong());
-                    for &kind in Kind::ALL {
-                        if ui.selectable_label(kind == shown.backend, kind.name()).clicked() && kind != shown.backend {
-                            actions.push(Action::SetBackend(kind));
-                        }
-                    }
-                });
-            }
             let reset = egui::Button::new("Reset the cache").stroke(Stroke::new(1.0, palette.line));
             if ui.add(reset).on_hover_text("Empty the cache database").clicked() {
                 actions.push(Action::ResetCache);
@@ -347,6 +345,18 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
             }
             ui.add_space(4.0);
             ui.hyperlink_to("Source on GitHub", "https://github.com/louwers/mln-rs");
+            if Kind::ALL.len() > 1 {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.label(RichText::new("WebGPU logo by ").size(11.0).color(palette.muted));
+                    ui.hyperlink_to(RichText::new("W3C").size(11.0), "https://www.w3.org/2023/02/webgpu-logos.html");
+                    ui.label(RichText::new(", ").size(11.0).color(palette.muted));
+                    ui.hyperlink_to(
+                        RichText::new("CC BY 4.0").size(11.0),
+                        "https://creativecommons.org/licenses/by/4.0/",
+                    );
+                });
+            }
         });
     });
 }
@@ -405,6 +415,37 @@ fn needle(p: &egui::Painter, rect: Rect, palette: &Palette, bearing: f64, pitch:
 enum Piece {
     Text(String),
     Link { text: String, url: String },
+}
+
+/// The backend's logo and name, at the bottom left; a click switches to the
+/// next backend.
+fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions: &mut Vec<Action>) {
+    let logo = match backend {
+        #[cfg(target_os = "macos")]
+        Kind::Metal => egui::include_image!("../assets/metal.svg"),
+        Kind::WebGpu => egui::include_image!("../assets/webgpu.svg"),
+    };
+    let index = Kind::ALL.iter().position(|&kind| kind == backend).unwrap_or(0);
+    let next = Kind::ALL[(index + 1) % Kind::ALL.len()];
+    layer("backend", Align2::LEFT_BOTTOM, vec2(GAP, -GAP)).show(ctx, |ui| {
+        let response = palette
+            .control()
+            .inner_margin(Margin::symmetric(8, 4))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(18.0)));
+                    ui.add(
+                        egui::Label::new(RichText::new(backend.name()).size(12.0).color(palette.ink)).selectable(false),
+                    );
+                });
+            })
+            .response
+            .interact(Sense::click());
+        if response.on_hover_cursor(CursorIcon::PointingHand).clicked() {
+            actions.push(Action::SetBackend(next));
+        }
+    });
 }
 
 fn attribution(ctx: &egui::Context, palette: &Palette, attributions: &[String]) {

@@ -22,6 +22,7 @@ doc = false
 [dependencies]
 egui.workspace = true
 egui-wgpu.workspace = true
+egui_extras.workspace = true
 egui-winit.workspace = true
 feature.workspace = true
 fontdb.workspace = true

@@ -269,6 +269,8 @@ impl ApplicationHandler<UserEvent> for Host {
             .map_or(60.0, |mhz| f64::from(mhz) / 1000.0);
         let inbox = Arc::new(Inbox::default());
         let ui = egui::Context::default();
+        // The backends' logos are SVGs (ui.rs).
+        egui_extras::install_image_loaders(&ui);
         let egui = egui_winit::State::new(
             ui.clone(),
             egui::ViewportId::ROOT,

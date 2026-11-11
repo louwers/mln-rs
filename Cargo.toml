@@ -230,6 +230,8 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 # device, its input from winit. `links` opens the attribution's links.
 egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
 egui-wgpu = { version = "0.37.0", default-features = false }
+# The backends' SVG logos in examples/desktop's controls.
+egui_extras = { version = "0.37.0", default-features = false, features = ["svg"] }
 egui-winit = { version = "0.37.0", default-features = false, features = ["links", "wayland", "x11"] }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
