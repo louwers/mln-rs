@@ -1360,7 +1360,7 @@ dependencies = [
 name = "mln-rs-image"
 version = "0.0.10"
 dependencies = [
- "flate2",
+ "crc32fast",
  "image-webp",
  "js-sys",
  "mln-rs-util",
@@ -1680,6 +1680,7 @@ version = "0.0.10"
 dependencies = [
  "bytemuck",
  "flate2",
+ "js-sys",
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
  "mln-rs-expression",
@@ -1694,6 +1695,9 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "web-time",
 ]
 

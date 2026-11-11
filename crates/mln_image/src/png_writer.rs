@@ -14,7 +14,7 @@ fn network_byte_u32(value: u32) -> [u8; 4] {
 
 fn add_chunk(png: &mut Vec<u8>, type_: &[u8; 4], data: &[u8]) {
     // Checksum encompasses type + data
-    let mut checksum = flate2::Crc::new();
+    let mut checksum = crc32fast::Hasher::new();
     checksum.update(type_);
     checksum.update(data);
 
@@ -23,7 +23,7 @@ fn add_chunk(png: &mut Vec<u8>, type_: &[u8; 4], data: &[u8]) {
     png.extend_from_slice(&network_byte_u32(size));
     png.extend_from_slice(type_);
     png.extend_from_slice(data);
-    png.extend_from_slice(&network_byte_u32(checksum.sum()));
+    png.extend_from_slice(&network_byte_u32(checksum.finalize()));
 }
 
 /// `mln::encodePNG(const PremultipliedImage&)`.
@@ -52,8 +52,8 @@ pub fn encode_png(pre: &PremultipliedImage) -> Vec<u8> {
         idat.push(0); // filter type 0
         idat.extend_from_slice(&src.data[y * stride..(y + 1) * stride]);
     }
-    // C++ throws "failed to initialize deflate" if zlib cannot start; an
-    // in-memory flate2 encoder cannot fail.
+    // C++ throws "failed to initialize deflate" if zlib cannot start; the
+    // only error left is running out of memory.
     let idat = compress(&idat).expect("in-memory deflate");
 
     // Assemble the PNG.

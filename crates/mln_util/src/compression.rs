@@ -1,18 +1,33 @@
 // Ports util::compress and util::decompress from
 // platform/default/src/mln/util/compression.cpp.
+//
+// One backend per platform: the system libz on Apple, as the C++ links it;
+// flate2 elsewhere, with zlib-rs natively and miniz_oxide on wasm32, which the
+// png crate depends on anyway. On wasm32, `decompress_async` uses the
+// browser's DecompressionStream.
 
-use std::io::Write;
+#[cfg(target_vendor = "apple")]
+mod libz;
+#[cfg(target_vendor = "apple")]
+use libz as backend;
+
+#[cfg(not(target_vendor = "apple"))]
+mod flate;
+#[cfg(not(target_vendor = "apple"))]
+use flate as backend;
+
+#[cfg(target_family = "wasm")]
+mod browser;
+
+use std::sync::Arc;
 
 /// `util::compress(raw)`: a zlib stream (`windowBits = MAX_WBITS`) at
 /// `Z_DEFAULT_COMPRESSION` (level 6), `memLevel` 8, `Z_DEFAULT_STRATEGY`.
 ///
-/// The stream decompresses to the same bytes as zlib's, but the compressed
-/// bytes (and so their length) can differ from those of the zlib the C++
-/// links.
+/// The stream decompresses to the same bytes on every platform, but the
+/// compressed bytes (and so their length) depend on the backend.
 pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
-    encoder.write_all(raw).map_err(|_| "failed to deflate".to_string())?;
-    encoder.finish().map_err(|_| "failed to deflate".to_string())
+    backend::compress(raw)
 }
 
 /// `util::is_compressed(v)`: a gzip or zlib header (with one of the four
@@ -42,66 +57,76 @@ pub fn is_compressed(v: &[u8]) -> bool {
 /// zlib or gzip stream (zlib's header auto-detection, `MAX_WBITS + 32`). Like
 /// the C++ loop, bytes after the end of the stream are ignored, and a stream
 /// that ends early is an error. C++ throws `std::runtime_error` with zlib's
-/// message; the message here is flate2's.
+/// message; the message here is the backend's.
 pub fn decompress(raw: &[u8]) -> Result<Vec<u8>, String> {
-    if raw.len() >= 2 && raw[0] == 0x1f && raw[1] == 0x8b {
-        // gzip (rfc1952): one member; zlib checks the CRC-32 and size trailer.
-        let mut decoder = flate2::bufread::GzDecoder::new(raw);
-        let mut result = Vec::new();
-        std::io::Read::read_to_end(&mut decoder, &mut result).map_err(|e| e.to_string())?;
-        return Ok(result);
-    }
+    backend::decompress(raw)
+}
 
-    let mut inflate = flate2::Decompress::new(true);
-    let mut result = Vec::new();
-    let mut out = [0u8; 16384];
-    loop {
-        let consumed = inflate.total_in() as usize;
-        let before = inflate.total_out();
-        let status = inflate
-            .decompress(&raw[consumed.min(raw.len())..], &mut out, flate2::FlushDecompress::None)
-            .map_err(|e| e.to_string())?;
-        let produced = (inflate.total_out() - before) as usize;
-        result.extend_from_slice(&out[..produced]);
-        match status {
-            flate2::Status::StreamEnd => return Ok(result),
-            // zlib's inflate returns Z_BUF_ERROR when no progress is possible.
-            flate2::Status::BufError => return Err("decompression error".to_string()),
-            flate2::Status::Ok => {
-                if produced == 0 && inflate.total_in() as usize == consumed {
-                    return Err("decompression error".to_string());
-                }
-            }
-        }
-    }
+/// [`decompress`], handing the result to `done`.
+///
+/// On wasm32 the browser inflates the stream (`DecompressionStream`), and
+/// `done` runs later, from the event loop of the calling thread. A stream the
+/// browser rejects, which includes one with bytes after its end, goes through
+/// [`decompress`] instead, so the result and the error are the same as its.
+/// Elsewhere `done` runs before this returns.
+pub fn decompress_async(raw: Arc<Vec<u8>>, done: impl FnOnce(Result<Vec<u8>, String>) + 'static) {
+    #[cfg(target_family = "wasm")]
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = match browser::decompress(&raw).await {
+            Ok(data) => Ok(data),
+            Err(_) => decompress(&raw),
+        };
+        done(result);
+    });
+    #[cfg(not(target_family = "wasm"))]
+    done(decompress(&raw));
 }
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
-
     use super::*;
+
+    /// gzip of `raw()` (Python's gzip module, level 6, mtime 0).
+    const GZIP: [u8; 56] = [
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xed, 0xc5, 0xc1, 0x11, 0x00, 0x30, 0x04, 0x00,
+        0x30, 0xb4, 0xec, 0x3f, 0xb2, 0x39, 0xdc, 0x25, 0x9f, 0x44, 0xd6, 0xfb, 0x3d, 0x21, 0x49, 0x92, 0x24, 0x49,
+        0x92, 0x24, 0x49, 0x92, 0x24, 0x49, 0x92, 0x24, 0x49, 0xd2, 0xe5, 0x16, 0xe9, 0x1c, 0xb5, 0x68, 0x10, 0x27,
+        0x00, 0x00,
+    ];
+
+    fn raw() -> Vec<u8> {
+        (0..10_000u32).map(|i| (i % 7) as u8).collect()
+    }
 
     #[test]
     fn round_trip() {
-        let raw: Vec<u8> = (0..10_000u32).map(|i| (i % 7) as u8).collect();
+        let raw = raw();
         let compressed = compress(&raw).unwrap();
         // zlib header for the default compression level.
         assert_eq!(&compressed[..2], &[0x78, 0x9C]);
-        let mut out = Vec::new();
-        flate2::read::ZlibDecoder::new(&compressed[..]).read_to_end(&mut out).unwrap();
-        assert_eq!(out, raw);
+        assert!(compressed.len() < raw.len());
         assert_eq!(decompress(&compressed).unwrap(), raw);
         assert!(decompress(&compressed[..compressed.len() / 2]).is_err());
         let mut trailing = compressed.clone();
         trailing.extend_from_slice(b"garbage");
         assert_eq!(decompress(&trailing).unwrap(), raw);
+        assert!(decompress(&[]).is_err());
+        assert!(decompress(b"not compressed").is_err());
+        assert_eq!(decompress(&compress(&[]).unwrap()).unwrap(), Vec::<u8>::new());
+    }
 
+    #[test]
+    fn gzip() {
         // gzip is detected by its magic bytes.
-        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
-        gzip.write_all(&raw).unwrap();
-        let gzip = gzip.finish().unwrap();
-        assert_eq!(decompress(&gzip).unwrap(), raw);
-        assert!(decompress(&gzip[..gzip.len() - 4]).is_err());
+        assert_eq!(decompress(&GZIP).unwrap(), raw());
+        assert!(decompress(&GZIP[..GZIP.len() - 4]).is_err());
+    }
+
+    #[test]
+    fn decompress_async_answers_before_returning() {
+        let result = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let slot = result.clone();
+        decompress_async(Arc::new(GZIP.to_vec()), move |r| *slot.borrow_mut() = Some(r));
+        assert_eq!(result.take().unwrap().unwrap(), raw());
     }
 }
