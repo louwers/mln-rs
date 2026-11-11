@@ -49,14 +49,8 @@ impl UploadPass {
     }
 
     fn create_vertex_buffer(&self, data: &[u8], persistent: bool) -> Rc<VertexBufferResource> {
-        let buffer = BufferResource::new(
-            self.context.clone(),
-            Some(data),
-            data.len(),
-            wgpu::BufferUsages::VERTEX,
-            /*is_index_buffer=*/ false,
-            persistent,
-        );
+        let buffer =
+            BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::VERTEX, persistent);
         if buffer.get_buffer().is_none() {
             eprintln!("  Failed to create vertex buffer!");
         }
@@ -72,7 +66,6 @@ impl UploadPass {
                 self.context.clone(),
                 &data,
                 wgpu::BufferUsages::VERTEX,
-                /*is_index_buffer=*/ false,
                 /*persistent=*/ false,
             );
             return Rc::new(VertexBufferResource::new(buffer));
@@ -93,7 +86,6 @@ impl UploadPass {
                 self.context.clone(),
                 data,
                 wgpu::BufferUsages::INDEX,
-                /*is_index_buffer=*/ true,
                 /*persistent=*/ false,
             );
             return Box::new(IndexBufferResource::new(buffer));
@@ -315,14 +307,8 @@ impl upload_pass::UploadPass for UploadPass {
         _usage: BufferUsageType,
         persistent: bool,
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
-        let buffer = BufferResource::new(
-            self.context.clone(),
-            Some(data),
-            data.len(),
-            wgpu::BufferUsages::INDEX,
-            /*is_index_buffer=*/ true,
-            persistent,
-        );
+        let buffer =
+            BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::INDEX, persistent);
         Box::new(IndexBufferResource::new(buffer))
     }
 

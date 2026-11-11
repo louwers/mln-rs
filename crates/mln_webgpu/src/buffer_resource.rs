@@ -9,41 +9,26 @@ pub type VersionType = u16;
 pub struct BufferResource {
     context: Rc<Context>,
     buffer: Option<wgpu::Buffer>,
-    raw: Vec<u8>,
     size: usize,
     usage: wgpu::BufferUsages,
     version: VersionType,
-    is_index_buffer: bool,
     persistent: bool,
 }
 
 impl BufferResource {
-    /// `BufferResource(context, data, size, usage, isIndexBuffer, persistent)`;
+    /// `BufferResource(context, data, size, usage, isIndexBuffer, persistent)`,
+    /// where `usage` says whether it's an index buffer;
     /// `data == None` is the C++ null pointer (size without contents).
     pub fn new(
         context: Rc<Context>,
         data: Option<&[u8]>,
         size: usize,
         usage: wgpu::BufferUsages,
-        is_index_buffer: bool,
         persistent: bool,
     ) -> Self {
-        let mut res = BufferResource {
-            context,
-            buffer: None,
-            raw: Vec::new(),
-            size,
-            usage,
-            version: 0,
-            is_index_buffer,
-            persistent,
-        };
+        let mut res = BufferResource { context, buffer: None, size, usage, version: 0, persistent };
         if size == 0 {
             return res;
-        }
-        // Store raw data if provided
-        if let Some(data) = data {
-            res.raw = data[..size].to_vec();
         }
         let backend = res.context.get_backend();
         let Some(device) = backend.get_device() else {
@@ -72,42 +57,25 @@ impl BufferResource {
     }
 
     /// Port-only: a buffer of the bytes in the JS array `data`, written to
-    /// the GPU from there. It keeps no CPU copy of them (`contents`).
+    /// the GPU from there.
     #[cfg(target_family = "wasm")]
     pub fn new_from_host(
         context: Rc<Context>,
         data: &mln_util::host_bytes::HostBytes,
         usage: wgpu::BufferUsages,
-        is_index_buffer: bool,
         persistent: bool,
     ) -> Self {
-        let res = BufferResource::new(context, None, data.len(), usage, is_index_buffer, persistent);
+        let res = BufferResource::new(context, None, data.len(), usage, persistent);
         if let Some(buffer) = &res.buffer {
             res.context.get_backend().write_buffer_from_host(buffer, 0, data);
         }
         res
     }
 
-    /// `clone()`: a new buffer with the same raw contents.
-    pub fn clone_resource(&self) -> Self {
-        BufferResource::new(
-            self.context.clone(),
-            if self.raw.is_empty() { None } else { Some(&self.raw) },
-            self.size,
-            self.usage,
-            self.is_index_buffer,
-            self.persistent,
-        )
-    }
-
     pub fn update(&mut self, data: &[u8], offset: usize) {
         let update_size = data.len();
         if update_size == 0 {
             return;
-        }
-        // Update raw data if we have it
-        if !self.raw.is_empty() && offset + update_size <= self.raw.len() {
-            self.raw[offset..offset + update_size].copy_from_slice(data);
         }
         // Update GPU buffer if we have one
         if let Some(buffer) = &self.buffer {
@@ -120,9 +88,6 @@ impl BufferResource {
     pub fn get_size_in_bytes(&self) -> usize {
         self.size
     }
-    pub fn contents(&self) -> Option<&[u8]> {
-        if self.raw.is_empty() { None } else { Some(&self.raw) }
-    }
     pub fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
@@ -130,7 +95,7 @@ impl BufferResource {
         self.buffer.as_ref()
     }
     pub fn is_valid(&self) -> bool {
-        self.buffer.is_some() || !self.raw.is_empty()
+        self.buffer.is_some()
     }
     /// Used to detect whether buffer contents have changed
     pub fn get_version(&self) -> VersionType {
