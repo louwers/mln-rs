@@ -48,6 +48,10 @@ pub struct ImageRequestorBase {
 pub trait ImageRequestor {
     fn requestor_base(&self) -> &ImageRequestorBase;
 
+    /// An image this requestor asked for while it was missing has been
+    /// added, after the requestor's request was answered without it.
+    fn on_requested_image_added(&self) {}
+
     fn on_images_available(
         &self,
         icons: ImageMap,
@@ -84,6 +88,9 @@ struct State {
     requestors: VecMap<RequestorKey, RequestorEntry>,
     missing_image_requestors: VecMap<RequestorKey, RequestorEntry>,
     requested_images: VecMap<String, VecMap<RequestorKey, Weak<dyn ImageRequestor>>>,
+    /// Requestors that asked for an image added since, to tell in
+    /// `notify_if_missing_image_added`.
+    image_requestors_to_relayout: VecMap<RequestorKey, Weak<dyn ImageRequestor>>,
     requested_images_cache_size: usize,
     images: ImageMap,
     // Mirror of 'ImageMap images;' keys.
@@ -112,6 +119,7 @@ impl ImageManager {
                 requestors: VecMap::new(),
                 missing_image_requestors: VecMap::new(),
                 requested_images: VecMap::new(),
+                image_requestors_to_relayout: VecMap::new(),
                 requested_images_cache_size: 0,
                 images: ImageMap::new(),
                 available_images: Arc::new(VecSet::new()),
@@ -167,11 +175,19 @@ impl ImageManager {
     /// `addImage(Immutable<style::Image::Impl>)`.
     pub fn add_image(&self, image: Immutable<ImageImpl>) {
         let mut state = self.state.borrow_mut();
+        let state = &mut *state;
         debug_assert!(!state.images.contains_key(&image.id));
 
         // Increase cache size if requested image was provided.
-        if state.requested_images.contains_key(&image.id) {
+        if let Some(requestors) = state.requested_images.get(&image.id) {
             state.requested_images_cache_size += image.image.bytes();
+            for (key, requestor) in requestors {
+                // Pending requests receive the image through
+                // notify_if_missing_image_added.
+                if !state.missing_image_requestors.contains_key(key) {
+                    state.image_requestors_to_relayout.entry(*key).or_insert_with(|| requestor.clone());
+                }
+            }
         }
 
         Arc::make_mut(&mut state.available_images).insert(image.id.clone());
@@ -267,6 +283,7 @@ impl ImageManager {
     pub fn remove_requestor_key(&self, key: RequestorKey) {
         let mut state = self.state.borrow_mut();
 
+        state.image_requestors_to_relayout.remove(&key);
         state.requestors.remove(&key);
         state.missing_image_requestors.remove(&key);
         for requested_image in state.requested_images.values_mut() {
@@ -276,6 +293,23 @@ impl ImageManager {
 
     /// `notifyIfMissingImageAdded()`.
     pub fn notify_if_missing_image_added(&self) {
+        // Relayout once all of this update's images are added. A relayout
+        // through a synchronous worker can change the set, so take the
+        // requestors one at a time.
+        loop {
+            let next = {
+                let mut state = self.state.borrow_mut();
+                let key = state.image_requestors_to_relayout.keys().next().copied();
+                key.and_then(|key| state.image_requestors_to_relayout.remove(&key))
+            };
+            let Some(requestor) = next else {
+                break;
+            };
+            if let Some(requestor) = requestor.upgrade() {
+                requestor.on_requested_image_added();
+            }
+        }
+
         let mut notifications = Vec::new();
         {
             let mut state = self.state.borrow_mut();
@@ -338,6 +372,7 @@ impl ImageManager {
         state.available_images = Arc::new(VecSet::new());
         state.updated_image_versions.clear();
         state.requested_images.clear();
+        state.image_requestors_to_relayout.clear();
         state.loaded = false;
     }
 

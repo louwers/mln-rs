@@ -465,10 +465,10 @@ impl RenderOrchestrator {
         let image_diff = diff_images(&self.image_impls, &update_parameters.images);
         self.image_impls = update_parameters.images.clone();
 
-        // Adding or removing an image changes layout for tiles that already
-        // requested it. Updating an existing image only needs a relayout when
-        // its size changes.
-        let mut has_image_diff = !image_diff.added.is_empty() || !image_diff.removed.is_empty();
+        // Removing an image changes layout for tiles that use it, and
+        // updating one does when its size changes. The image manager
+        // relayouts the tiles that asked for an added image itself.
+        let mut has_image_diff = !image_diff.removed.is_empty();
 
         // Remove removed images from sprite atlas.
         for id in image_diff.removed.keys() {

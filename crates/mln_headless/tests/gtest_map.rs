@@ -2684,6 +2684,51 @@ fn late_style_image_renders_image_added_after_layout_synchronous_with_text() {
     renders_image_added_after_layout(true, true);
 }
 
+// gtest: Map.UnrelatedImagePreservesTileLayoutAndCache
+//
+// The C++ test counts StartParse tile actions; MapObserver has no
+// onTileAction here, so this counts the requests for the missing "marker"
+// image, which every layout of the point's tile makes.
+#[test]
+fn unrelated_image_preserves_tile_layout_and_cache() {
+    let test = MapTest::new();
+    test.frontend.clone().set_size(Size::new(128, 128));
+    test.map().set_size(Size::new(128, 128)).unwrap();
+    test.map().set_prefetch_zoom_delta(0);
+    test.load_json(
+        r#"{
+        "version": 8,
+        "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [-90, 40]}}},
+        "layers": [{"id": "symbol", "type": "symbol", "source": "point", "layout": {"icon-image": "marker"}}]
+    }"#,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, -90.0))).with_zoom(Some(3.0)));
+    let parses = Rc::new(Cell::new(0));
+    {
+        let parses = parses.clone();
+        test.observer.on_style_image_missing_callback.set(move |id| {
+            if id == "marker" {
+                parses.set(parses.get() + 1);
+            }
+        });
+    }
+    test.render();
+    assert!(parses.get() > 0);
+
+    // Move the original tiles into the cache and finish layout in another
+    // region.
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, 0.0))).with_zoom(Some(3.0)));
+    test.render();
+    parses.set(0);
+    test.map().get_style_mut().add_image(style_image("unrelated", red_image(16, 16), 1.0));
+    test.render();
+    assert_eq!(parses.get(), 0);
+
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, -90.0))).with_zoom(Some(3.0)));
+    test.render();
+    assert_eq!(parses.get(), 0);
+}
+
 // End-to-end: a feature-state change must alter the *rendered* output, not just
 // the value read back through the API. A fill covering the viewport is colored
 // by a data-driven expression on feature-state "active" (blue by default, red

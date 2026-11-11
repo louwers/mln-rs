@@ -427,6 +427,23 @@ impl ImageRequestor for GeometryTileInner {
         &self.image_requestor_base
     }
 
+    /// `onRequestedImageAdded()`: parses again with the added image.
+    fn on_requested_image_added(&self) {
+        if self.is_obsolete() {
+            return;
+        }
+
+        if !self.base.pending.get() {
+            self.base.pending.set(true);
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+
+        self.correlation_id.set(self.correlation_id.get() + 1);
+        let correlation_id = self.correlation_id.get();
+        let available_images = self.available_images();
+        self.worker.send(WorkerMessage::SetAvailableImages { available_images, correlation_id });
+    }
+
     /// `onImagesAvailable(images, patterns, versionMap, imageCorrelationID)`.
     fn on_images_available(
         &self,

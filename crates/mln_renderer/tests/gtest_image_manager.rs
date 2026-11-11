@@ -90,6 +90,8 @@ struct StubImageRequestor {
     image_manager: Rc<ImageManager>,
     images_available: RefCell<Option<ImagesAvailable>>,
     image_correlation_id: Cell<u64>,
+    /// The `on_requested_image_added` calls.
+    relayouts: Cell<u32>,
 }
 
 impl StubImageRequestor {
@@ -99,6 +101,7 @@ impl StubImageRequestor {
             image_manager: image_manager.clone(),
             images_available: RefCell::new(None),
             image_correlation_id: Cell::new(0),
+            relayouts: Cell::new(0),
         })
     }
 }
@@ -106,6 +109,10 @@ impl StubImageRequestor {
 impl ImageRequestor for StubImageRequestor {
     fn requestor_base(&self) -> &ImageRequestorBase {
         &self.base
+    }
+
+    fn on_requested_image_added(&self) {
+        self.relayouts.set(self.relayouts.get() + 1);
     }
 
     fn on_images_available(
@@ -614,4 +621,83 @@ fn mixed_dependencies_retain_provided_images() {
         assert!(image_manager.get_image(id).is_none(), "{id}");
     }
     assert!(image_manager.get_image("sprite").is_some());
+}
+
+// Port-only: maplibre-native-ffi's late style image layout (its patch 0030).
+// A requestor answered without an image it asked for relayouts once the
+// image is added, after all of the update's images are; one that didn't ask
+// for it doesn't.
+#[test]
+fn requestor_relayouts_when_requested_image_is_added() {
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
+    image_manager.set_loaded(true);
+    let requestor = StubImageRequestor::new(&image_manager);
+    let unrelated = StubImageRequestor::new(&image_manager);
+    let answered = Rc::new(Cell::new(0));
+    for stub in [&requestor, &unrelated] {
+        let answered = answered.clone();
+        *stub.images_available.borrow_mut() = Some(Box::new(move |_, _, _| answered.set(answered.get() + 1)));
+    }
+
+    get_images(&image_manager, &requestor, dependencies(&["marker"]), 0);
+    get_images(&image_manager, &unrelated, dependencies(&["other"]), 0);
+    run_loop.run_once();
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(answered.get(), 2);
+
+    image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
+    image_manager.add_image(make_image("unrequested", Size::new(16, 16), 1.0, false));
+    assert_eq!(requestor.relayouts.get(), 0);
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(requestor.relayouts.get(), 1);
+    assert_eq!(unrelated.relayouts.get(), 0);
+
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(requestor.relayouts.get(), 1);
+}
+
+// Port-only: as above. A requestor still waiting for its answer gets an
+// image added in the meantime with the answer, without a relayout.
+#[test]
+fn pending_requestor_gets_added_image_without_relayout() {
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
+    image_manager.set_loaded(true);
+    let requestor = StubImageRequestor::new(&image_manager);
+    let icons = Rc::new(RefCell::new(Vec::new()));
+    {
+        let icons = icons.clone();
+        *requestor.images_available.borrow_mut() =
+            Some(Box::new(move |received: ImageMap, _, _| icons.borrow_mut().extend(received.keys().cloned())));
+    }
+
+    get_images(&image_manager, &requestor, dependencies(&["marker"]), 0);
+    image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
+    run_loop.run_once();
+    image_manager.notify_if_missing_image_added();
+
+    assert_eq!(*icons.borrow(), ["marker"]);
+    assert_eq!(requestor.relayouts.get(), 0);
+}
+
+// Port-only: as above. A requestor that goes away before the update's
+// images are all added isn't told.
+#[test]
+fn removed_requestor_does_not_relayout() {
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
+    image_manager.set_loaded(true);
+    let requestor = StubImageRequestor::new(&image_manager);
+    get_images(&image_manager, &requestor, dependencies(&["marker"]), 0);
+    run_loop.run_once();
+    image_manager.notify_if_missing_image_added();
+
+    image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
+    image_manager.remove_requestor_key(Rc::as_ptr(&requestor) as *const () as usize);
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(requestor.relayouts.get(), 0);
 }

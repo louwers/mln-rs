@@ -95,6 +95,9 @@ pub enum WorkerMessage {
         available_images: Immutable<VecSet<String>>,
         correlation_id: u64,
     },
+    /// `setAvailableImages(availableImages, correlationID)`: parse again
+    /// with images added since the last parse.
+    SetAvailableImages { available_images: Immutable<VecSet<String>>, correlation_id: u64 },
     /// `reset(correlationID)`.
     Reset { correlation_id: u64 },
     /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
@@ -119,6 +122,7 @@ impl WorkerMessage {
         match self {
             WorkerMessage::SetData { correlation_id, .. }
             | WorkerMessage::SetLayers { correlation_id, .. }
+            | WorkerMessage::SetAvailableImages { correlation_id, .. }
             | WorkerMessage::Reset { correlation_id }
             | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
             WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
@@ -257,6 +261,9 @@ impl GeometryTileWorker {
             WorkerMessage::SetLayers { layers, global_state, available_images, correlation_id } => {
                 self.set_layers(layers, global_state, available_images, correlation_id)
             }
+            WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
+                self.set_available_images(available_images, correlation_id)
+            }
             WorkerMessage::Reset { correlation_id } => self.reset(correlation_id),
             WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
                 self.set_show_collision_boxes(show_collision_boxes, correlation_id)
@@ -345,6 +352,26 @@ impl GeometryTileWorker {
             this.global_state = global_state;
             this.correlation_id = correlation_id;
             this.available_images = available_images;
+
+            match this.state {
+                State::Idle => {
+                    this.parse()?;
+                    this.coalesce()?;
+                }
+                State::Coalescing | State::NeedsSymbolLayout => {
+                    this.state = State::NeedsParse;
+                }
+                State::NeedsParse => {}
+            }
+            Ok(())
+        });
+    }
+
+    /// `setAvailableImages(availableImages, correlationID)`.
+    pub fn set_available_images(&mut self, available_images: Immutable<VecSet<String>>, correlation_id: u64) {
+        self.guarded(|this| {
+            this.available_images = available_images;
+            this.correlation_id = correlation_id;
 
             match this.state {
                 State::Idle => {
