@@ -8,7 +8,7 @@
 Ports text shaping and glyphs (`src/mln/text`) on HarfRust and unicode-bidi, with the FreeType and ICU behaviour the C++ core depends on.
 
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
-([LICENSE.md](LICENSE.md)), except the ports that keep their own licenses:
+([LICENSE.md](../../LICENSE.md)), except the ports that keep their own licenses:
 the FreeType subset (`ft`, and the WOFF decoder) under the FreeType License
 ([LICENSE-FreeType](LICENSE-FreeType)), hb-ft and HarfBuzz's Unicode
 lookups under HarfBuzz's license ([LICENSE-HarfBuzz](LICENSE-HarfBuzz)),

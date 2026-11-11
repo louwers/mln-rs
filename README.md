@@ -16,5 +16,8 @@ desktop, `just desktop` opens it in a window (examples/desktop).
 
 mln-rs is under the BSD 2-Clause License ([LICENSE.md](LICENSE.md)), as
 MapLibre Native is. The code it ports from other projects keeps their
-licenses: [THIRD_PARTY.md](THIRD_PARTY.md) lists it, and what an app that
-ships mln-rs needs to reproduce.
+licenses: each package's `license` field names them, and the package ships
+their texts. An app that ships mln-rs reproduces the notices of the crates
+in its binary, which [cargo-about](https://github.com/EmbarkStudios/cargo-about)
+collects. The FreeType License also asks for a credit in the app's
+documentation.

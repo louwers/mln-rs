@@ -8,7 +8,7 @@
 Ports the utilities of the C++ core (`src/mln/util`, `include/mln/util`).
 
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
-([LICENSE.md](LICENSE.md)), except the ports that keep their own licenses:
+([LICENSE.md](../../LICENSE.md)), except the ports that keep their own licenses:
 `mat2.rs`, `mat3.rs` and `mat4.rs` from gl-matrix (zlib License) and
 `unitbezier.rs` from WebKit (BSD 2-Clause License, Apple), each in its
 header, and `parsedate.rs` from curl ([LICENSE-curl](LICENSE-curl)).
