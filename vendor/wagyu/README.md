@@ -9,7 +9,7 @@ Ports wagyu 0.5.0 (`mapbox::geometry::wagyu`), the polygon clipper the C++ core 
 
 Licensed under the Boost Software License 1.0, as wagyu is
 ([LICENSE](LICENSE)), except `almost_equal.rs`, which keeps Google Test's
-BSD 3-Clause License (in its header).
+BSD 3-Clause License ([LICENSE-googletest](LICENSE-googletest)).
 
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)

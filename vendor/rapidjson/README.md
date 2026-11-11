@@ -8,8 +8,8 @@
 Ports the parts of RapidJSON that MapLibre Native's output depends on byte for byte: its number formatting and compact writer. JSON parsing uses serde_json.
 
 Licensed under the MIT License, as RapidJSON is ([LICENSE.txt](LICENSE.txt),
-RapidJSON's own license file: the parts it puts under other licenses are
-not ported).
+the MIT part of RapidJSON's license.txt: the components it puts under other
+licenses are not ported).
 
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)

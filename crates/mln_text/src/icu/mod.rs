@@ -6,8 +6,9 @@
 //! the options bidi.cpp passes are ported.
 //!
 //! Copyright © 2016 and later Unicode, Inc. and others; portions copyright
-//! International Business Machines Corporation and others. Under ICU's
-//! license (LICENSE-ICU).
+//! International Business Machines Corporation and others. Under the Unicode
+//! License V3 (LICENSE-Unicode), and the ICU License for code from before
+//! ICU 58 (LICENSE-ICU).
 
 pub mod ubidi_props;
 #[rustfmt::skip]

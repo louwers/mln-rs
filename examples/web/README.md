@@ -146,9 +146,11 @@ in a storage worker loaded only when a page asks for them.
 mise.toml pins the tools: wasm-bindgen-cli at the version in Cargo.lock,
 binaryen's `wasm-opt`, which shrinks a release build's code with `-Oz` and
 strips the names and the other custom sections, and Node and pnpm for the
-page. `just web` builds the modules into web/pkg, then Vite builds the page
-(web/, TypeScript) around them into dist/, every asset's name hashed by its
-content so that a browser never mixes two builds' files:
+page. `just web` builds the modules into web/pkg, writes the licenses of
+what the page ships into web/public/licenses.html (cargo-about, with
+about.toml and licenses.hbs), then Vite builds the page (web/, TypeScript)
+around them into dist/, every asset's name hashed by its content so that a
+browser never mixes two builds' files:
 
 ```sh
 mise install

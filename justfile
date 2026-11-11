@@ -166,7 +166,7 @@ desktop *args:  _dev-shell
 # them into examples/web/web/pkg, and Vite builds the page around them into examples/web/dist, every asset's name hashed by
 # its content; serve that over HTTP, or run `just web-dev`.
 [doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) and its page into examples/web/dist')]
-web:
+web:  (cargo-install 'cargo-about')
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ {{quote(profile)}} == release ]]; then
@@ -188,6 +188,14 @@ web:
       fi
     done
     pnpm -C examples/web install --frozen-lockfile
+    # The page's licenses.html: the licenses of the crates in the wasm modules, beside mln-rs's own license (cargo-about
+    # doesn't find it in its crates' directories) and GL JS's, which the comparison loads.
+    public=examples/web/web/public
+    mkdir -p "$public"
+    cargo about generate --locked --fail -c examples/web/about.toml -m examples/web/Cargo.toml -o "$public/licenses.html" \
+      examples/web/licenses.hbs
+    cp LICENSE.md "$public/mln-rs-LICENSE.txt"
+    cp examples/web/node_modules/maplibre-gl/LICENSE.txt "$public/maplibre-gl-LICENSE.txt"
     pnpm -C examples/web build
 
 # Vite's dev server, which reloads the page's scripts as they change; `just web` again rebuilds the modules.

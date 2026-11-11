@@ -1,0 +1,83 @@
+# cargo-about's configuration for the page's licenses.html (`just web`): the
+# licenses of the crates in mln-rs-web's wasm module. The shaper's module
+# (mln-rs-web-shaper) holds a subset of them, and itself, which is under the
+# repository's LICENSE.md as mln-rs-web is. The accepted licenses are
+# deny.toml's.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "FTL",
+    "ICU",
+    "ISC",
+    "MIT",
+    "MIT-Modern-Variant",
+    "Unicode-3.0",
+    "Zlib",
+    "curl",
+]
+targets = ["wasm32-unknown-unknown"]
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# wagyu's LICENSE puts the Clipper and Mapbox notices before the Boost
+# license's text, which cargo-about then can't identify. A changed file fails
+# the checksum, so that it gets looked at again.
+[mln-rs-wagyu.clarify]
+license = "BSL-1.0 AND BSD-3-Clause"
+
+[[mln-rs-wagyu.clarify.files]]
+path = "LICENSE"
+license = "BSL-1.0"
+checksum = "f412b66afa64921e51900111ed77b3fb2578916023c268393b81a5732ef2a710"
+
+[[mln-rs-wagyu.clarify.files]]
+path = "LICENSE-googletest"
+license = "BSD-3-Clause"
+checksum = "3f8526d26f925b6a340faafd0433f49cbe89f9d52f3a8f92afbcd5fac9851d69"
+
+# libm's LICENSE.txt adds musl's notices to the MIT license's text.
+[libm.clarify]
+license = "MIT"
+
+[[libm.clarify.files]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7"
+
+# These crates publish no license file: theirs comes from their repository,
+# at the commit they were published from.
+[hotpath.clarify]
+license = "MIT"
+
+[[hotpath.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "15eab4bfb1ef1db36f6ff7139e58fcd84297079a50d1478639819c25b8bb7a46"
+
+[hotpath-macros.clarify]
+license = "MIT"
+
+[[hotpath-macros.clarify.git]]
+path = "LICENSE.txt"
+license = "MIT"
+checksum = "15eab4bfb1ef1db36f6ff7139e58fcd84297079a50d1478639819c25b8bb7a46"
+
+[i_key_sort.clarify]
+license = "MIT"
+
+[[i_key_sort.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "47e00f18b265d350a2860d3899f17dd1c7689b966545e929df8ffa7033f5acdc"
+
+[wuff.clarify]
+license = "MIT"
+
+[[wuff.clarify.git]]
+path = "LICENSE"
+license = "MIT"
+checksum = "4b373ba4395e35d44ba1f41202c179b57ca3c5ba5e4a1aaafa1547aede7e1eb7"
