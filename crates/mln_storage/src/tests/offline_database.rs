@@ -1936,7 +1936,10 @@ fn merge_database_with_single_region_too_many_existing_tiles() {
     check_log_empty(&log);
 }
 
+// C++ skips this one on Windows (`#ifndef WIN32`), which can't open a folder
+// to copy it as a file.
 // gtest: OfflineDatabase.MergeDatabaseWithInvalidPath
+#[cfg(not(windows))]
 #[test]
 fn merge_database_with_invalid_path() {
     let log = FixtureLog::new();

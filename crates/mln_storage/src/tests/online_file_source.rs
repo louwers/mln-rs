@@ -27,7 +27,7 @@ use crate::resource_transform::{FinishedCallback, ResourceTransform};
 use crate::response::{Error, Reason, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
-const CONNECTION_TIMEOUT: f64 = 0.0;
+const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 fn online_file_source() -> Rc<dyn FileSource> {
     Rc::new(OnlineFileSource::new(&ResourceOptions::default_options(), &ClientOptions::default()))
