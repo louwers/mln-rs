@@ -60,13 +60,21 @@ crate::paint_property_binders!(
 );
 
 /// `SymbolLayoutAttributes = gfx::Vertex<TypeList<attributes::pos_offset,
-/// attributes::data<uint16_t, 4>, attributes::pixeloffset>>`.
+/// attributes::data<uint16_t, 4>, attributes::pixeloffset>>`, and the
+/// quad's atlas origin.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 #[repr(C)]
 pub struct SymbolLayoutVertex {
     pub a1: [i16; 4],
     pub a2: [u16; 4],
     pub a3: [i16; 4],
+    /// Port-only: the top-left of the quad's atlas rectangle, the same on all
+    /// four of its vertices. The shaders interpolate the texture coordinate
+    /// relative to it and add it back per fragment, as interpolating the
+    /// absolute coordinate rounds differently at different atlas positions,
+    /// and which tile reserves an image first, and so its position, varies
+    /// from run to run.
+    pub a4: [u16; 2],
 }
 
 /// `SymbolDynamicLayoutAttributes = gfx::Vertex<TypeList<attributes::projected_pos>>`.
@@ -659,7 +667,8 @@ impl SymbolBucket {
     }
 
     /// `layoutAttributes(labelAnchor, o, glyphOffsetY, tx, ty, sizeData,
-    /// isSDF, pixelOffset, minFontScale)`.
+    /// isSDF, pixelOffset, minFontScale)`, with the quad's atlas origin
+    /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
     #[allow(clippy::too_many_arguments)]
     pub fn layout_attributes(
         label_anchor: Point<f32>,
@@ -667,6 +676,7 @@ impl SymbolBucket {
         glyph_offset_y: f32,
         tx: u16,
         ty: u16,
+        tex_origin: [u16; 2],
         size_data: &Range<f32>,
         is_sdf: bool,
         pixel_offset: Point<f32>,
@@ -691,6 +701,7 @@ impl SymbolBucket {
                 cast_i16(min_font_scale.x * 256.0),
                 cast_i16(min_font_scale.y * 256.0),
             ],
+            a4: tex_origin,
         }
     }
 
