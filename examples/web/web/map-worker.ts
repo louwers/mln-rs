@@ -338,6 +338,9 @@ async function run(
       case 'resetNorth':
         map.reset_north();
         break;
+      case 'globeFreeBearing':
+        map.set_globe_free_bearing(data.on);
+        break;
       case 'follow':
         map.follow(...data.camera);
         break;

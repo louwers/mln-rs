@@ -29,6 +29,10 @@
 //                          sans-serif); empty or `false` downloads them
 //   compare                MapLibre GL JS's map of the style beside this one
 //                          (compare.ts)
+//   freeBearing            free bearing on the globe: drags and zooms on it
+//                          turn the bearing with the planet, and a drag
+//                          carries on over a pole (default: off, north
+//                          stays up)
 //   panic=<map|tile>       the map's instance or the first tile worker's
 //                          panics once it starts, for check/check.mjs
 //   backend=<webgpu|webgl2>
@@ -582,3 +586,13 @@ async function setComparing(on: boolean) {
 }
 compareToggle.addEventListener('change', () => setComparing(compareToggle.checked));
 if (params.has('compare')) setComparing(true);
+
+// Free bearing on the globe, off as the map starts.
+const freeBearingToggle = element('free-bearing-toggle', HTMLInputElement);
+function setFreeBearing(on: boolean) {
+  freeBearingToggle.checked = on;
+  setParam('freeBearing', on ? '' : null);
+  toMap({ type: 'globeFreeBearing', on });
+}
+freeBearingToggle.addEventListener('change', () => setFreeBearing(freeBearingToggle.checked));
+if (params.has('freeBearing')) setFreeBearing(true);

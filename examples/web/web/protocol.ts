@@ -66,6 +66,9 @@ export type ToMap =
   | { type: 'style'; url: string }
   | { type: 'jumpTo'; camera: Camera }
   | { type: 'resetNorth' }
+  // Whether drags and zooms on the globe turn the bearing
+  // (WebMap::set_globe_free_bearing).
+  | { type: 'globeFreeBearing'; on: boolean }
   // Another map's camera, which this one follows.
   | { type: 'follow'; camera: Camera }
   // Stop the camera's own motion: an ease, momentum, a wheel's eased zoom.

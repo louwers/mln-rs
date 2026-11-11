@@ -279,6 +279,13 @@ impl WebMap {
         self.gestures.step_to(&mut self.map, update);
     }
 
+    /// Lets drags and zooms on the globe turn the bearing with the planet,
+    /// so that a drag carries on over a pole (`Map::set_globe_free_bearing`).
+    /// Off, as the map starts, they keep north up.
+    pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
+        self.map.set_globe_free_bearing(free_bearing);
+    }
+
     /// Jumps to another map's camera, for a comparison that this map
     /// follows: its own motion stops (an ease, momentum, a wheel's eased
     /// zoom).
