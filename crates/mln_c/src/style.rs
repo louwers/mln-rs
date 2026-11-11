@@ -621,8 +621,8 @@ impl LentLayer {
         Self {
             id: LentText::new(&info.id),
             layer_type: LentText::new(info.layer_type),
-            source_id: LentText::new(&info.source_id),
-            source_layer: LentText::new(&info.source_layer),
+            source_id: LentText::new(info.source_id.as_deref().unwrap_or_default()),
+            source_layer: LentText::new(info.source_layer.as_deref().unwrap_or_default()),
             info,
         }
     }
@@ -633,8 +633,8 @@ impl LentLayer {
             type_: self.layer_type.view(),
             source_id: self.source_id.view(),
             source_layer: self.source_layer.view(),
-            min_zoom: self.info.min_zoom,
-            max_zoom: self.info.max_zoom,
+            min_zoom: self.info.min_zoom.unwrap_or(f64::NEG_INFINITY),
+            max_zoom: self.info.max_zoom.unwrap_or(f64::INFINITY),
             visibility: if self.info.visible {
                 MLN_STYLE_LAYER_VISIBILITY_VISIBLE
             } else {

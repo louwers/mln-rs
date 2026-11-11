@@ -133,11 +133,11 @@ fn a_style_url_loads_and_names_the_style() {
     let map = map(&runtime);
     let url = server.url("/style.json");
     wait(map.set_style_url(&url));
-    assert_eq!(url, wait(map.style_url()));
+    assert_eq!(Some(url), wait(map.style_url()));
     assert_eq!(EMPTY_STYLE, wait(map.loaded_style_json()));
 
     wait(map.set_style_json(EMPTY_STYLE));
-    assert_eq!("", wait(map.style_url()));
+    assert_eq!(None, wait(map.style_url()));
     assert_eq!(ErrorKind::Native, wait_err(map.set_style_url(server.url("/missing.json"))).kind);
 }
 

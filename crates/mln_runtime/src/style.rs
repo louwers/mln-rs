@@ -208,13 +208,12 @@ pub struct LayerInfo {
     /// The layer's [type](https://maplibre.org/maplibre-style-spec/layers/#type),
     /// such as `fill`.
     pub layer_type: &'static str,
-    /// The source's ID, or empty for a layer that takes none.
-    pub source_id: String,
-    pub source_layer: String,
-    /// Negative infinity when the layer doesn't set one.
-    pub min_zoom: f64,
-    /// Infinity when the layer doesn't set one.
-    pub max_zoom: f64,
+    /// The source's ID, for a layer that takes one.
+    pub source_id: Option<String>,
+    /// The layer of a vector source that the layer draws.
+    pub source_layer: Option<String>,
+    pub min_zoom: Option<f64>,
+    pub max_zoom: Option<f64>,
     pub visible: bool,
 }
 
@@ -463,10 +462,10 @@ fn layer_info(layer: &dyn mln_style::Layer) -> LayerInfo {
     LayerInfo {
         id: layer.get_id(),
         layer_type: layer.get_type_info().type_,
-        source_id: layer.get_source_id(),
-        source_layer: layer.get_source_layer(),
-        min_zoom: layer.get_min_zoom().into(),
-        max_zoom: layer.get_max_zoom().into(),
+        source_id: Some(layer.get_source_id()).filter(|id| !id.is_empty()),
+        source_layer: Some(layer.get_source_layer()).filter(|id| !id.is_empty()),
+        min_zoom: Some(f64::from(layer.get_min_zoom())).filter(|zoom| zoom.is_finite()),
+        max_zoom: Some(f64::from(layer.get_max_zoom())).filter(|zoom| zoom.is_finite()),
         visible: layer.get_visibility() != mln_style_types::VisibilityType::None,
     }
 }

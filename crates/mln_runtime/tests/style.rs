@@ -333,8 +333,10 @@ fn layers_move_below_their_before_layer() {
     let ids: Vec<_> = wait(map.style_layers()).into_iter().map(|layer| layer.id).collect();
     assert_eq!(ids, ["dots", "paper"]);
     let dots = wait(map.style_layer("dots")).unwrap();
-    assert_eq!((dots.layer_type, dots.source_id.as_str(), dots.visible), ("circle", "points", true));
-    assert_eq!((dots.min_zoom, dots.max_zoom), (f64::NEG_INFINITY, f64::INFINITY));
+    assert_eq!((dots.layer_type, dots.source_id.as_deref(), dots.visible), ("circle", Some("points"), true));
+    assert_eq!((dots.source_layer, dots.min_zoom, dots.max_zoom), (None, None, None));
+    let paper = wait(map.style_layer("paper")).unwrap();
+    assert_eq!(paper.source_id, None);
     let missing = wait_err(map.move_style_layer("dots", Some("absent".to_owned())));
     assert_eq!(missing.message, "before_layer_id \"absent\" does not exist");
 }

@@ -774,10 +774,9 @@ impl Map {
         self.query(|map| Ok(map.get_style().get_json()))
     }
 
-    /// The URL of the map's style, or an empty string for a style loaded
-    /// from JSON.
-    pub fn style_url(&self) -> Result<Completion<String>, Error> {
-        self.query(|map| Ok(map.get_style().get_url()))
+    /// The URL of the map's style, or `None` for a style loaded from JSON.
+    pub fn style_url(&self) -> Result<Completion<Option<String>>, Error> {
+        self.query(|map| Ok(Some(map.get_style().get_url()).filter(|url| !url.is_empty())))
     }
 
     /// Adds a source to the style from its JSON. See
