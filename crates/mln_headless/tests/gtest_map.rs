@@ -714,13 +714,14 @@ fn offline() {
     // "Apple Paravirtual device", where a few labels' glyphs land on other
     // labels (image difference 0.0176). Placement is identical to a run on an
     // Apple GPU, where the image matches. Skip on that device, as C++ does.
-    let adapter = test
-        .frontend
-        .get_backend()
-        .as_any()
+    let backend = test.frontend.get_backend().as_any();
+    let device = backend
         .downcast_ref::<mln_webgpu::HeadlessBackend>()
-        .and_then(|backend| backend.get_adapter_info());
-    if adapter.is_some_and(|info| info.name == "Apple Paravirtual device") {
+        .and_then(|backend| backend.get_adapter_info())
+        .map(|info| info.name);
+    #[cfg(target_vendor = "apple")]
+    let device = device.or_else(|| backend.downcast_ref::<mln_mtl::HeadlessBackend>().map(|b| b.get_device_name()));
+    if device.is_some_and(|name| name == "Apple Paravirtual device") {
         eprintln!("Map.Offline: skipped on the Apple Paravirtual device, as in C++ CI");
         return;
     }
