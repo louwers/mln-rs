@@ -19,21 +19,12 @@ doctest = false
 bytemuck = { workspace = true, features = ["extern_crate_alloc"] }
 csscolorparser.workspace = true
 feature.workspace = true
+flate2.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
 rapidjson.workspace = true
 serde.workspace = true
 web-time.workspace = true
-
-[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
-flate2 = { workspace = true, features = ["zlib-rs"] }
-
-[target.'cfg(target_family = "wasm")'.dependencies]
-flate2 = { workspace = true, features = ["rust_backend"] }
-js-sys.workspace = true
-wasm-bindgen.workspace = true
-wasm-bindgen-futures.workspace = true
-web-sys.workspace = true
 
 # Ported C++ gtests of test/util (markers `// gtest: Group.Name`), for
 # mln_util and the low crates next to it.

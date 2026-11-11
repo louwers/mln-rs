@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::client_options::ClientOptions;
-use mln_util::compression::{decompress_async, is_compressed};
+use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
@@ -296,18 +296,22 @@ impl State {
                             return;
                         };
 
+                        let mut data: Vec<u8> = data.to_vec();
+
                         if header.internal_compression == pmtiles::COMPRESSION_GZIP {
-                            let (parse_callback, callback) = (parse_callback.clone(), callback.clone());
-                            decompress_async(data.clone(), move |decompressed| match decompressed {
-                                Ok(data) => parse_callback(&data),
+                            match decompress(&data) {
+                                Ok(decompressed) => data = decompressed,
                                 Err(e) => {
-                                    callback(error(Reason::Other, format!("Error decompressing PMTiles metadata: {e}")))
+                                    callback(error(
+                                        Reason::Other,
+                                        format!("Error decompressing PMTiles metadata: {e}"),
+                                    ));
+                                    return;
                                 }
-                            });
-                            return;
+                            }
                         }
 
-                        parse_callback(data);
+                        parse_callback(&data);
                     });
 
                     return;
@@ -409,21 +413,18 @@ impl State {
                         return;
                     };
 
-                    let (this2, url, callback) = (this2.clone(), url.clone(), callback.clone());
-                    let store = move |directory_data: Result<Vec<u8>, String>| {
-                        let result = directory_data.and_then(|directory_data| {
-                            this2.store_directory(&url, directory_offset, u64::from(directory_length), &directory_data)
-                        });
-                        match result {
-                            Ok(()) => callback(None),
-                            Err(e) => callback(error(Reason::Other, format!("Error parsing PMTiles directory: {e}"))),
-                        }
-                    };
+                    let result = (|| -> Result<(), String> {
+                        let mut directory_data: Vec<u8> = data.to_vec();
 
-                    if header.internal_compression == pmtiles::COMPRESSION_GZIP {
-                        decompress_async(data.clone(), store);
-                    } else {
-                        store(Ok(data.to_vec()));
+                        if header.internal_compression == pmtiles::COMPRESSION_GZIP {
+                            directory_data = decompress(&directory_data)?;
+                        }
+
+                        this2.store_directory(&url, directory_offset, u64::from(directory_length), &directory_data)
+                    })();
+                    match result {
+                        Ok(()) => callback(None),
+                        Err(e) => callback(error(Reason::Other, format!("Error parsing PMTiles directory: {e}"))),
                     }
                 });
             }),
@@ -629,20 +630,19 @@ impl PMTilesFileSourceThread {
                             response.expires = tile_response.expires;
                             response.etag = tile_response.etag.clone();
 
-                            // Support uncompressed tiles
-                            if header.tile_compression == pmtiles::COMPRESSION_GZIP && is_compressed(data) {
-                                let r = r.clone();
-                                decompress_async(data.clone(), move |decompressed| {
-                                    match decompressed {
+                            if header.tile_compression == pmtiles::COMPRESSION_GZIP {
+                                // Support uncompressed tiles
+                                if is_compressed(data) {
+                                    match decompress(data) {
                                         Ok(decompressed) => response.data = Some(Arc::new(decompressed)),
                                         Err(e) => {
                                             response.error =
                                                 error(Reason::Other, format!("Error decompressing PMTiles tile: {e}"))
                                         }
                                     }
-                                    send(&r, response);
-                                });
-                                return;
+                                } else {
+                                    response.data = Some(data.clone());
+                                }
                             }
 
                             send(&r, response);
