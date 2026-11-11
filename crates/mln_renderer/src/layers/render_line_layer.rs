@@ -120,7 +120,6 @@ fn capture_rendered_features(
         transform_params,
         evaluated.get::<LineTranslate>(),
         *evaluated.get::<LineTranslateAnchor>(),
-        /*pre_transformed=*/ false,
         |vertex_offset| {
             if !alpha_is_constant {
                 let opacity = binders.line_opacity.get_vertex_value(buffer, vertex_offset);
@@ -136,8 +135,13 @@ fn capture_rendered_features(
             }
             true
         },
-        // Not considering line width yet
-        |_, i| vertices.get(i).map(|vertex| [f64::from(vertex.a1[0]) / 2.0, f64::from(vertex.a1[1]) / 2.0, 0.0]),
+        |view, vertex_offset, vertex_count| {
+            view.tile_space_bound(vertex_count, |i| {
+                // Not considering line width yet
+                let vertex = vertices.get(vertex_offset.checked_add(i)?)?;
+                Some([f64::from(vertex.a1[0]) / 2.0, f64::from(vertex.a1[1]) / 2.0, 0.0])
+            })
+        },
     );
 }
 

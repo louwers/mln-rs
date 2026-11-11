@@ -9,12 +9,13 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOptions, NDCBound, NullMapObserver};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
 use mln_style::expression::Value as ExpressionValue;
-use mln_style::expression::dsl::{format, get, interpolate, linear, literal, literal_str, zoom};
+use mln_style::expression::dsl::{eq, format, get, interpolate, linear, literal, literal_str, zoom};
+use mln_style::filter::Filter;
 use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::circle_layer::CircleLayer;
@@ -22,11 +23,18 @@ use mln_style::layers::fill_extrusion_layer::FillExtrusionLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
+use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
-use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::style_impl::LayerRefMut;
-use mln_style_types::{AlignmentType, CirclePitchScaleType, SymbolAnchorType, SymbolPlacementType, VisibilityType};
+use mln_style_types::{
+    AlignmentType, CirclePitchScaleType, ProjectionDefinition, ProjectionType, SymbolAnchorType, SymbolPlacementType,
+    VisibilityType,
+};
 use mln_util::Color;
+use mln_util::geo::LatLng;
+use mln_util::image::PremultipliedImage;
+use mln_util::immutable::Immutable;
 use support::*;
 
 const SOURCE_NAME: &str = "source";
@@ -557,51 +565,232 @@ fn ndc_bound_fill_extrusion() {
     });
 }
 
+/// `GlobeFeatureTrackingTest::geometry()`: `near` faces the camera; `far` is
+/// inside the Mercator viewport and behind the globe's horizon.
+const GLOBE_GEOMETRY: &str = r#"{"type": "FeatureCollection", "features": [
+    {"type": "Feature", "id": "near", "properties": {"name": "0"},
+     "geometry": {"type": "Point", "coordinates": [60, 50]}},
+    {"type": "Feature", "id": "nearLine", "properties": {"name": "1"},
+     "geometry": {"type": "LineString", "coordinates": [[55, 45], [65, 55]]}},
+    {"type": "Feature", "id": "nearPolygon", "properties": {"name": "2"},
+     "geometry": {"type": "Polygon", "coordinates": [[[55, 45], [65, 45], [65, 55], [55, 55], [55, 45]]]}},
+    {"type": "Feature", "id": "far", "properties": {"name": "3"},
+     "geometry": {"type": "Point", "coordinates": [85, 0]}},
+    {"type": "Feature", "id": "farLine", "properties": {"name": "4"},
+     "geometry": {"type": "LineString", "coordinates": [[83, -3], [88, 3]]}},
+    {"type": "Feature", "id": "farPolygon", "properties": {"name": "5"},
+     "geometry": {"type": "Polygon", "coordinates": [[[83, -3], [88, -3], [88, 3], [83, 3], [83, -3]]]}}
+]}"#;
+
+/// `GlobeFeatureTrackingTest`: the globe at zoom 0, centered on 0, 0.
+fn globe_test() -> FeatureTrackingTest {
+    let mut test = FeatureTrackingTest::with_geojson(
+        GLOBE_GEOMETRY,
+        camera(0.0).with_center(Some(LatLng::new(0.0, 0.0).expect("LatLng"))),
+    );
+    set_projection(&mut test, ProjectionDefinition::new(ProjectionType::Globe));
+    test.with_circle_layer(|layer| layer.set_circle_radius(&constant(4.0)));
+    test
+}
+
+fn set_projection(test: &mut FeatureTrackingTest, definition: ProjectionDefinition) {
+    let mut projection = Projection::new();
+    projection.set_type(constant(definition));
+    test.map.get_style_mut().set_projection(projection);
+}
+
+/// A filter that keeps the features whose `name` is `name`.
+fn name_filter(name: &str) -> Filter {
+    Filter::new(Some(Arc::from(eq(get(literal_str("name")), literal_str(name)))), None)
+}
+
+impl FeatureTrackingTest {
+    /// Where `lat_lng` is, in NDC.
+    fn ndc(&self, lat_lng: &LatLng) -> (f64, f64) {
+        let pixel = self.map.pixel_for_lat_lng(lat_lng);
+        let size = self.frontend.get_size();
+        (pixel.x / f64::from(size.width) * 2.0 - 1.0, 1.0 - pixel.y / f64::from(size.height) * 2.0)
+    }
+
+    fn bound(&self, feature_id: &str, layer_id: &str) -> Option<NDCBound> {
+        let mut result = None;
+        self.map.get_rendered_features(Some(feature_id), Some(layer_id), None, |_, info| {
+            result = Some(info.ndc_bound);
+            true
+        });
+        result
+    }
+
+    /// Checks that the bound of `feature_id` in `layer_id` holds `lat_lng`,
+    /// within `slack` of it on each side.
+    fn expect_around(&self, feature_id: &str, layer_id: &str, lat_lng: &LatLng, slack: f64) {
+        let bound = self.bound(feature_id, layer_id).unwrap_or_else(|| panic!("{feature_id} in {layer_id}"));
+        let (x, y) = self.ndc(lat_lng);
+        let context = format!("{feature_id} in {layer_id}: {bound:?} around ({x}, {y})");
+        assert!(bound.min_x <= x && x <= bound.max_x, "{context}");
+        assert!(bound.min_y <= y && y <= bound.max_y, "{context}");
+        assert!(bound.min_x > x - slack && bound.max_x < x + slack, "{context}");
+        assert!(bound.min_y > y - slack && bound.max_y < y + slack, "{context}");
+    }
+
+    /// Checks that the capture is the box of the green pixels the feature was
+    /// drawn with, to within a pixel on each side.
+    fn expect_captured_as_drawn(&self, feature_id: &str, layer_id: &str, image: &PremultipliedImage) {
+        let rendered = green_bound(image).unwrap_or_else(|| panic!("{feature_id} in {layer_id}: nothing green"));
+        let captured = self.bound(feature_id, layer_id).unwrap_or_else(|| panic!("{feature_id} in {layer_id}"));
+        let pixel = 2.0 / f64::from(image.size.width);
+        let context = format!("{feature_id} in {layer_id}: captured {captured:?}, rendered {rendered:?}");
+        assert!((rendered.min_x - captured.min_x).abs() <= pixel, "{context}");
+        assert!((rendered.max_x - captured.max_x).abs() <= pixel, "{context}");
+        assert!((rendered.min_y - captured.min_y).abs() <= pixel, "{context}");
+        assert!((rendered.max_y - captured.max_y).abs() <= pixel, "{context}");
+    }
+}
+
+/// The NDC box of the green pixels of a rendered image.
+fn green_bound(image: &PremultipliedImage) -> Option<NDCBound> {
+    let (width, height) = (image.size.width as usize, image.size.height as usize);
+    let mut result: Option<NDCBound> = None;
+    for (i, pixel) in image.data.chunks_exact(4).enumerate() {
+        let [r, g, b] = [i32::from(pixel[0]), i32::from(pixel[1]), i32::from(pixel[2])];
+        if g > 100 && g > r + 50 && g > b + 50 {
+            let (x, y) = (i % width, i / width);
+            let ndc_x = (x as f64 + 0.5) / width as f64 * 2.0 - 1.0;
+            let ndc_y = 1.0 - (y as f64 + 0.5) / height as f64 * 2.0;
+            let bound = result.get_or_insert(NDCBound { min_x: ndc_x, max_x: ndc_x, min_y: ndc_y, max_y: ndc_y });
+            bound.min_x = bound.min_x.min(ndc_x);
+            bound.max_x = bound.max_x.max(ndc_x);
+            bound.min_y = bound.min_y.min(ndc_y);
+            bound.max_y = bound.max_y.max(ndc_y);
+        }
+    }
+    result
+}
+
+fn near() -> LatLng {
+    LatLng::new(50.0, 60.0).expect("LatLng")
+}
+
+// On the globe a feature is where the sphere puts it, which at this zoom is
+// far from its Mercator position.
 // gtest: FeatureTracking.GlobeNDCBound
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_ndc_bound() {
-    // test/renderer/feature_tracking.test.cpp:545
+    let mut test = globe_test();
+    for layer in [FILL_LAYER_NAME, LINE_LAYER_NAME, CIRCLE_LAYER_NAME, SYMBOL_LAYER_NAME] {
+        test.show(layer);
+    }
+    test.run(None, 0.0);
+
+    test.expect_around("nearPolygon", FILL_LAYER_NAME, &near(), 0.15);
+    test.expect_around("nearLine", LINE_LAYER_NAME, &near(), 0.15);
+    test.expect_around("near", CIRCLE_LAYER_NAME, &near(), 0.1);
+    test.expect_around("near", SYMBOL_LAYER_NAME, &near(), 0.5);
 }
 
 // gtest: FeatureTracking.GlobeNDCBoundCirclePitchAlignment
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_ndc_bound_circle_pitch_alignment() {
-    // test/renderer/feature_tracking.test.cpp:560
+    let mut test = globe_test();
+    test.show(CIRCLE_LAYER_NAME);
+    test.with_circle_layer(|layer| layer.set_circle_pitch_alignment(&constant(AlignmentType::Map)));
+    for scale in [CirclePitchScaleType::Map, CirclePitchScaleType::Viewport] {
+        test.with_circle_layer(|layer| layer.set_circle_pitch_scale(&constant(scale)));
+        test.run(None, 0.0);
+        test.expect_around("near", CIRCLE_LAYER_NAME, &near(), 0.1);
+        assert_eq!(0, test.count(Some("far"), Some(CIRCLE_LAYER_NAME), None), "{scale:?}");
+    }
 }
 
+// An extrusion rises along the sphere's normal, away from the globe's center
+// on screen.
 // gtest: FeatureTracking.GlobeNDCBoundFillExtrusion
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_ndc_bound_fill_extrusion() {
-    // test/renderer/feature_tracking.test.cpp:573
+    let mut test = globe_test();
+    test.show(FILL_LAYER_NAME);
+    let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
+    extrusion_layer.set_fill_extrusion_height(&constant(500000.0));
+    test.map.get_style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
+    test.run(None, 0.0);
+
+    let flat = test.bound("nearPolygon", FILL_LAYER_NAME).expect("flat");
+    let extruded = test.bound("nearPolygon", "extrusion").expect("extruded");
+    assert!((extruded.min_x - flat.min_x).abs() <= 1e-6, "{extruded:?} {flat:?}");
+    assert!((extruded.min_y - flat.min_y).abs() <= 1e-6, "{extruded:?} {flat:?}");
+    assert!(extruded.max_x > flat.max_x + 0.01, "{extruded:?} {flat:?}");
+    assert!(extruded.max_y > flat.max_y + 0.01, "{extruded:?} {flat:?}");
 }
 
+// A roof that rises above the horizon is drawn at the limb, and is captured
+// where it is drawn.
 // gtest: FeatureTracking.GlobeFillExtrusionAboveHorizon
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_fill_extrusion_above_horizon() {
-    // test/renderer/feature_tracking.test.cpp:592
+    let mut test = globe_test();
+    let mut extrusion_layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
+    extrusion_layer.set_fill_extrusion_height(&constant(500000.0));
+    extrusion_layer.set_fill_extrusion_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    extrusion_layer.set_filter(&name_filter("5"));
+    test.map.get_style_mut().add_layer(Box::new(extrusion_layer), None).expect("add layer");
+    let image = test.run(None, 0.0).image;
+    test.expect_captured_as_drawn("farPolygon", "extrusion", &image);
 }
 
+// While the projection hands over, the shaders blend the sphere with
+// Mercator and clip nothing in the first fifth.
 // gtest: FeatureTracking.GlobeCaptureDuringTransition
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_capture_during_transition() {
-    // test/renderer/feature_tracking.test.cpp:603
+    let mut test = globe_test();
+    set_projection(&mut test, ProjectionDefinition::between_names("mercator", "vertical-perspective", 0.1));
+    test.show(FILL_LAYER_NAME);
+    test.with_layer(FILL_LAYER_NAME, |layer| {
+        layer.downcast_mut::<FillLayer>().expect("FillLayer").set_fill_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    });
+    for (feature_id, name) in [("nearPolygon", "2"), ("farPolygon", "5")] {
+        test.with_layer(FILL_LAYER_NAME, |layer| layer.set_filter(&name_filter(name)));
+        let image = test.run(None, 0.0).image;
+        test.expect_captured_as_drawn(feature_id, FILL_LAYER_NAME, &image);
+    }
 }
 
+// Close up, the visible part of the planet is smaller than the sampling grid
+// of a feature from a low zoom tile.
 // gtest: FeatureTracking.GlobeCaptureCloseUp
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_capture_close_up() {
-    // test/renderer/feature_tracking.test.cpp:617
+    let mut test = globe_test();
+    let options = GeoJSONOptions { maxzoom: 0, ..GeoJSONOptions::default() };
+    let source = GeoJSONSource::new("lowZoom", Immutable::new(options));
+    let large = r#"{"type": "Feature", "id": "large", "properties": {},
+        "geometry": {"type": "Polygon", "coordinates": [[[-40, -40], [40, -40], [40, 40], [-40, 40], [-40, -40]]]}}"#;
+    source.set_geojson(&geojson::parse(large).expect("GeoJSON")).expect("set GeoJSON");
+    let mut fill_layer = FillLayer::new("lowZoomFill", "lowZoom");
+    fill_layer.set_fill_color(&constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    {
+        let mut style = test.map.get_style_mut();
+        style.add_source(Box::new(source)).expect("add source");
+        style.add_layer(Box::new(fill_layer), None).expect("add layer");
+    }
+    test.map.jump_to(&camera(11.0).with_pitch(Some(60.0)));
+    let image = test.run(None, 0.0).image;
+    test.expect_captured_as_drawn("large", "lowZoomFill", &image);
 }
 
+// What the horizon hides is not rendered, wherever Mercator would have put it.
 // gtest: FeatureTracking.GlobeOccluded
 #[test]
-#[ignore = "TODO(port): rendered-feature capture on the globe (the TileProjector overload of RenderLayer::computeFeatureNDCBound, and the fill, line, circle and fill-extrusion layers' globe capture)"]
 fn globe_occluded() {
-    // test/renderer/feature_tracking.test.cpp:633
+    let mut test = globe_test();
+    for layer in [FILL_LAYER_NAME, LINE_LAYER_NAME, CIRCLE_LAYER_NAME, SYMBOL_LAYER_NAME] {
+        test.show(layer);
+    }
+    test.run(None, 0.0);
+
+    assert_eq!(0, test.count(Some("farPolygon"), Some(FILL_LAYER_NAME), None));
+    assert_eq!(0, test.count(Some("farLine"), Some(LINE_LAYER_NAME), None));
+    assert_eq!(0, test.count(Some("far"), Some(CIRCLE_LAYER_NAME), None));
+    assert_eq!(0, test.count(Some("far"), Some(SYMBOL_LAYER_NAME), None));
+    assert_eq!(1, test.count(Some("nearPolygon"), Some(FILL_LAYER_NAME), None));
 }

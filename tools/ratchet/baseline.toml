@@ -210,7 +210,6 @@
 "crates/mln_headless/src/map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_annotations.rs" = 28
 "crates/mln_headless/tests/gtest_api.rs" = 1
-"crates/mln_headless/tests/gtest_feature_tracking.rs" = 7
 "crates/mln_headless/tests/gtest_location_indicator.rs" = 10
 "crates/mln_headless/tests/gtest_map.rs" = 9
 "crates/mln_headless/tests/gtest_map_snapshotter.rs" = 1

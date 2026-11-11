@@ -12,10 +12,11 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
+use geometry::Point;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
 use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry, UploadPass};
-use mln_map_types::TransformState;
+use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
@@ -23,11 +24,12 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{TranslateAnchorType, VisibilityType};
 use mln_tile_id::OverscaledTileID;
 use mln_util::Color;
+use mln_util::constants::EXTENT;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::interpolate::Interpolate;
 use mln_util::mat4::{Mat4, matrix};
-use mln_util::vectors::{Vec3, Vec4};
+use mln_util::vectors::{Vec2, Vec3, Vec4};
 
 use crate::bucket::BucketPtr;
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
@@ -145,29 +147,85 @@ pub fn vertex_color_alpha(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
     Some(unpack_mix_alpha(packed, zoom_fraction as f32))
 }
 
+/// Where a tile's features are drawn, for the rendered-feature capture: through
+/// the tile matrix on Mercator, through the tile's projection on the globe.
+pub enum CaptureView<'a> {
+    /// The tile matrix, translated as the layer draws.
+    Matrix(Mat4),
+    /// The tile's projection, and the layer's translation in tile units.
+    Globe { projector: Box<TileProjector<'a>>, translation: Vec2 },
+}
+
+impl<'a> CaptureView<'a> {
+    /// The view of `tile_id` translated by `translation`, as a layer draws it.
+    pub fn new(
+        tile_id: &OverscaledTileID,
+        state: &'a TransformState,
+        transform_params: &crate::paint_parameters::TransformParameters,
+        translation: &[f32; 2],
+        anchor: mln_style_types::TranslateAnchorType,
+        near_clipped: bool,
+    ) -> Self {
+        let unwrapped = tile_id.to_unwrapped();
+        if state.is_globe_rendering() {
+            let translate = RenderTile::tile_unit_translation(&unwrapped, translation, anchor, state);
+            return CaptureView::Globe {
+                projector: Box::new(TileProjector::new(state, &unwrapped)),
+                translation: [f64::from(translate[0]), f64::from(translate[1])],
+            };
+        }
+        CaptureView::Matrix(crate::layer_tweaker::get_tile_matrix_for(
+            &unwrapped,
+            state,
+            transform_params,
+            translation,
+            anchor,
+            /*origin=*/ None,
+            near_clipped,
+            /*in_viewport_pixel_units=*/ false,
+            /*aligned=*/ false,
+        ))
+    }
+
+    /// The NDC bound of `vertex_count` vertices in tile units (z in meters
+    /// above the ground) from `get_vertex`, as the view draws them.
+    pub fn tile_space_bound(
+        &self,
+        vertex_count: usize,
+        get_vertex: impl FnMut(usize) -> Option<Vec3>,
+    ) -> Option<NDCBound> {
+        match self {
+            CaptureView::Matrix(tile_matrix) => compute_feature_ndc_bound(vertex_count, tile_matrix, false, get_vertex),
+            CaptureView::Globe { projector, translation } => {
+                compute_globe_feature_ndc_bound(vertex_count, projector, translation, get_vertex)
+            }
+        }
+    }
+}
+
 /// What the fill, line, circle and fill-extrusion layers'
 /// `captureRenderedFeatures` share: the features `bucket` retained, bounded
 /// in NDC.
 ///
 /// `visible(vertex_offset)` is `false` for a feature whose data-driven
-/// paint values at its first vertex make it invisible. `get_vertex(matrix,
-/// i)` is the position of the bucket's `i`th vertex, given the tile matrix
-/// of `tile_id` translated by `translation`: in NDC if `pre_transformed`,
-/// else in tile space, to be projected through that matrix.
+/// paint values at its first vertex make it invisible.
+/// `bound(view, vertex_offset, vertex_count)` is the NDC bound of the
+/// feature whose vertices those are, drawn through `view`: the tile matrix
+/// of `tile_id` translated by `translation`, or on the globe the tile's
+/// projection.
 #[allow(clippy::too_many_arguments)]
-pub fn capture_retained_features(
+pub fn capture_retained_features<'a>(
     stats: &mut Stats,
     bucket: &dyn crate::bucket::Bucket,
     tile_id: &OverscaledTileID,
-    state: &TransformState,
+    state: &'a TransformState,
     transform_params: &crate::paint_parameters::TransformParameters,
     translation: &[f32; 2],
     anchor: mln_style_types::TranslateAnchorType,
-    pre_transformed: bool,
     mut visible: impl FnMut(usize) -> bool,
-    mut get_vertex: impl FnMut(&Mat4, usize) -> Option<Vec3>,
+    mut bound: impl FnMut(&CaptureView<'_>, usize, usize) -> Option<NDCBound>,
 ) {
-    let mut tile_matrix: Option<Mat4> = None;
+    let mut view: Option<CaptureView<'a>> = None;
     let features = bucket.get_retained_features();
     stats.rendered_features.reserve(features.len());
 
@@ -180,25 +238,12 @@ pub fn capture_retained_features(
             continue;
         }
 
-        // Compute the tile matrix once
-        let tile_matrix = tile_matrix.get_or_insert_with(|| {
-            crate::layer_tweaker::get_tile_matrix_for(
-                &tile_id.to_unwrapped(),
-                state,
-                transform_params,
-                translation,
-                anchor,
-                /*origin=*/ None,
-                /*near_clipped=*/ false,
-                /*in_viewport_pixel_units=*/ false,
-                /*aligned=*/ false,
-            )
+        // Compute the view once
+        let view = view.get_or_insert_with(|| {
+            CaptureView::new(tile_id, state, transform_params, translation, anchor, /*near_clipped=*/ false)
         });
 
-        let bound = compute_feature_ndc_bound(feature.vertex_count, tile_matrix, pre_transformed, |i| {
-            get_vertex(tile_matrix, vertex_offset.checked_add(i)?)
-        });
-        if let Some(bound) = bound {
+        if let Some(bound) = bound(view, vertex_offset, feature.vertex_count) {
             stats.add_rendered_feature(&feature.feature_id, &bound, HashSet::from([*tile_id]));
         }
     }
@@ -264,6 +309,125 @@ pub fn compute_feature_ndc_bound(
     if ndc_range_x.0 < ndc_range_x.1
         && ndc_range_y.0 < ndc_range_y.1
         && ndc_range_z.0 <= ndc_range_z.1
+        && -1.0 <= ndc_range_x.1
+        && ndc_range_x.0 <= 1.0
+        && -1.0 <= ndc_range_y.1
+        && ndc_range_y.0 <= 1.0
+    {
+        return Some(NDCBound {
+            min_x: ndc_range_x.0,
+            max_x: ndc_range_x.1,
+            min_y: ndc_range_y.0,
+            max_y: ndc_range_y.1,
+        });
+    }
+    None
+}
+
+/// `RenderLayer::computeFeatureNDCBound` on the globe: the NDC bound of
+/// `vertex_count` vertices in tile units (z in meters above the ground)
+/// from `get_vertex`, moved by `translation` and drawn through `projector`,
+/// or `None` when none of it is drawn inside the viewport.
+///
+/// The box bends with the sphere and the horizon can cut through it, so its
+/// corners don't bound it: it is sampled every few degrees, keeping what the
+/// horizon leaves visible.
+pub fn compute_globe_feature_ndc_bound(
+    vertex_count: usize,
+    projector: &TileProjector<'_>,
+    translation: &Vec2,
+    mut get_vertex: impl FnMut(usize) -> Option<Vec3>,
+) -> Option<NDCBound> {
+    const MAX_STEP_DEGREES: f64 = 10.0;
+    const MAX_STEPS: f64 = 32.0;
+
+    let init_range = (f64::MAX, f64::MIN);
+    let mut range_x = init_range;
+    let mut range_y = init_range;
+    let mut range_z = init_range;
+    for i in 0..vertex_count {
+        let vertex = get_vertex(i)?;
+        range_x = minmax(range_x, vertex[0]);
+        range_y = minmax(range_y, vertex[1]);
+        range_z = minmax(range_z, vertex[2]);
+    }
+
+    if range_x.1 <= range_x.0 || range_y.1 <= range_y.0 || range_z.1 < range_z.0 {
+        return None;
+    }
+
+    let tile_id = projector.get_tile_id();
+    let degrees_per_tile_unit = 360.0 / f64::from(EXTENT) / 2f64.powi(i32::from(tile_id.canonical.z));
+    let steps_for = |range: (f64, f64)| -> usize {
+        let degrees = (range.1 - range.0) * degrees_per_tile_unit;
+        (degrees / MAX_STEP_DEGREES).ceil().clamp(1.0, MAX_STEPS) as usize
+    };
+    let steps_x = steps_for(range_x);
+    let steps_y = steps_for(range_y);
+    let extruded = range_z.0 < range_z.1;
+
+    let mut ndc_range_x = init_range;
+    let mut ndc_range_y = init_range;
+    let mut include = |projected: &ProjectedTilePoint| {
+        if !projected.occluded && projected.signed_distance_from_camera > 0.0 {
+            ndc_range_x = minmax(ndc_range_x, projected.point.x);
+            ndc_range_y = minmax(ndc_range_y, projected.point.y);
+        }
+    };
+    for iy in 0..=steps_y {
+        let y = range_y.0.interpolate(&range_y.1, iy as f64 / steps_y as f64);
+        for ix in 0..=steps_x {
+            let x = range_x.0.interpolate(&range_x.1, ix as f64 / steps_x as f64);
+            let point = Point::new(x + translation[0], y + translation[1]);
+            let base = projector.project_as_drawn(&point, range_z.0);
+            include(&base);
+            if !extruded {
+                continue;
+            }
+            let top = projector.project_as_drawn(&point, range_z.1);
+            include(&top);
+            if base.occluded != top.occluded {
+                // The wall comes into view part way up, where it is drawn at
+                // the limb: find that height.
+                let (mut hidden, mut shown) =
+                    if base.occluded { (range_z.0, range_z.1) } else { (range_z.1, range_z.0) };
+                for _ in 0..16 {
+                    let mid = (hidden + shown) / 2.0;
+                    if projector.project_as_drawn(&point, mid).occluded {
+                        hidden = mid;
+                    } else {
+                        shown = mid;
+                    }
+                }
+                include(&projector.project_as_drawn(&point, shown));
+            }
+        }
+    }
+
+    // Close up, the visible part of the planet can be smaller than the
+    // sampling grid: the surface under the screen's corners, edges and center
+    // is drawn wherever it falls inside the box.
+    let state = projector.get_transform_state();
+    let size = state.get_size();
+    for screen_x in [0.0, 0.5, 1.0] {
+        for screen_y in [0.0, 0.5, 1.0] {
+            let screen = Point::new(screen_x * f64::from(size.width), screen_y * f64::from(size.height));
+            let tile = state.screen_coordinate_to_tile_coordinate(&screen, tile_id.canonical.z).p;
+            // The globe draws a tile on the same part of the sphere at any wrap.
+            let point = Point::new(
+                (tile.x - f64::from(tile_id.canonical.x)) * f64::from(EXTENT),
+                (tile.y - f64::from(tile_id.canonical.y)) * f64::from(EXTENT),
+            );
+            let x = point.x - translation[0];
+            let y = point.y - translation[1];
+            if range_x.0 <= x && x <= range_x.1 && range_y.0 <= y && y <= range_y.1 {
+                include(&projector.project_as_drawn(&point, range_z.0));
+            }
+        }
+    }
+
+    if ndc_range_x.0 < ndc_range_x.1
+        && ndc_range_y.0 < ndc_range_y.1
         && -1.0 <= ndc_range_x.1
         && ndc_range_x.0 <= 1.0
         && -1.0 <= ndc_range_y.1

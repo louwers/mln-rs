@@ -5,11 +5,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use geometry::Point;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
-use mln_map_types::TransformState;
+use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
@@ -36,7 +37,8 @@ use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::paint_property_binder::{PaintPropertyBinder, read_data_driven_paint_property};
 use crate::render_layer::{
-    RenderLayer, RenderLayerBase, Stats, capture_retained_features, vertex_color_alpha, vertex_opacity,
+    CaptureView, RenderLayer, RenderLayerBase, Stats, capture_retained_features, compute_feature_ndc_bound,
+    vertex_color_alpha, vertex_opacity,
 };
 use crate::render_pass::RenderPass;
 use crate::render_tile::RenderTile;
@@ -136,6 +138,46 @@ fn capture_rendered_features(
         }
     };
 
+    // The same corners in NDC on the globe: a circle on the viewport keeps its
+    // pixel radius around the projected center, a circle on the map is the
+    // ellipse its east and north radii project to.
+    let globe_corner_position =
+        |vertex: &CircleLayoutVertex, projector: &TileProjector<'_>, translation: &Vec2| -> Vec3 {
+            let pos = [f64::from(vertex.a1[0]), f64::from(vertex.a1[1])];
+            let center = Point::new((pos[0] / 2.0).trunc() + translation[0], (pos[1] / 2.0).trunc() + translation[1]);
+            let projected = projector.project_as_drawn(&center, 0.0);
+            if projected.occluded || projected.signed_distance_from_camera <= 0.0 {
+                // Not drawn; NaN stays out of the bound.
+                return [f64::NAN, f64::NAN, 0.0];
+            }
+            let w = projected.signed_distance_from_camera;
+            let half_extent: Vec2 = if pitch_with_map {
+                let tile_radius = corner_radius
+                    * f64::from(pixels_to_tile_units)
+                    * projector.pitched_text_correction(&center)
+                    * if scale_with_map { 1.0 } else { w / camera_to_center_distance };
+                let east = projector.project_as_drawn(&Point::new(center.x + tile_radius, center.y), 0.0).point;
+                let north = projector.project_as_drawn(&Point::new(center.x, center.y + tile_radius), 0.0).point;
+                let (east, north) = (
+                    [east.x - projected.point.x, east.y - projected.point.y],
+                    [north.x - projected.point.x, north.y - projected.point.y],
+                );
+                [east[0].hypot(north[0]), east[1].hypot(north[1])]
+            } else {
+                let clip_scale = if scale_with_map { camera_to_center_distance } else { w } / w;
+                [
+                    corner_radius * 2.0 / f64::from(size.width) * clip_scale,
+                    corner_radius * 2.0 / f64::from(size.height) * clip_scale,
+                ]
+            };
+            let extrude = vec2_gl_fmod(&pos, 2.0).map(|v| v * 2.0 - 1.0);
+            [projected.point.x + extrude[0] * half_extent[0], projected.point.y + extrude[1] * half_extent[1], 0.0]
+        };
+
+    // The globe's corners are already in NDC.
+    let mut identity: Mat4 = [0.0; 16];
+    matrix::identity(&mut identity);
+
     let buffer = &binders.interleaved_vertex_buffer;
     let vertices = bucket.vertices.data();
     capture_retained_features(
@@ -146,7 +188,6 @@ fn capture_rendered_features(
         transform_params,
         evaluated.get::<CircleTranslate>(),
         *evaluated.get::<CircleTranslateAnchor>(),
-        /*pre_transformed=*/ !pitch_with_map,
         |vertex_offset| {
             if !alpha_is_constant || !stroke_alpha_is_constant {
                 let interpolated = |is_constant: bool, binder: &PaintPropertyBinder<f32>| {
@@ -172,7 +213,21 @@ fn capture_rendered_features(
             }
             true
         },
-        |tile_matrix, i| vertices.get(i).map(|vertex| corner_position(vertex, tile_matrix)),
+        |view, vertex_offset, vertex_count| {
+            let vertex = |i: usize| vertices.get(vertex_offset.checked_add(i)?);
+            match view {
+                CaptureView::Matrix(tile_matrix) => {
+                    compute_feature_ndc_bound(vertex_count, tile_matrix, !pitch_with_map, |i| {
+                        vertex(i).map(|vertex| corner_position(vertex, tile_matrix))
+                    })
+                }
+                CaptureView::Globe { projector, translation } => {
+                    compute_feature_ndc_bound(vertex_count, &identity, true, |i| {
+                        vertex(i).map(|vertex| globe_corner_position(vertex, projector, translation))
+                    })
+                }
+            }
+        },
     );
 }
 

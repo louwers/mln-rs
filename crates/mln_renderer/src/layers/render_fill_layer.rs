@@ -117,7 +117,6 @@ fn capture_rendered_features(
         transform_params,
         evaluated.get::<FillTranslate>(),
         *evaluated.get::<FillTranslateAnchor>(),
-        /*pre_transformed=*/ false,
         |vertex_offset| {
             if !alpha_is_constant {
                 let opacity = binders.fill_opacity.get_vertex_value(buffer, vertex_offset);
@@ -133,7 +132,12 @@ fn capture_rendered_features(
             }
             true
         },
-        |_, i| vertices.get(i).map(|vertex| [vertex.a1[0].into(), vertex.a1[1].into(), 0.0]),
+        |view, vertex_offset, vertex_count| {
+            view.tile_space_bound(vertex_count, |i| {
+                let vertex = vertices.get(vertex_offset.checked_add(i)?)?;
+                Some([vertex.a1[0].into(), vertex.a1[1].into(), 0.0])
+            })
+        },
     );
 }
 
