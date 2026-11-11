@@ -350,16 +350,18 @@ impl ImageManager {
         notifications: &mut Vec<Notification>,
     ) {
         let mut state = self.state.borrow_mut();
-        let missing_dependencies: Vec<String> =
-            pair.0.keys().filter(|id| !state.images.contains_key(*id)).cloned().collect();
+        let mut missing_dependencies: Vec<String> = Vec::new();
+        for id in pair.0.keys() {
+            if !state.images.contains_key(id) {
+                missing_dependencies.push(id.clone());
+            } else if let Some(requestors) = state.requested_images.get_mut(id) {
+                // The missing-image path below never registers images that are
+                // already present.
+                requestors.entry(key).or_insert(requestor.clone());
+            }
+        }
 
         if missing_dependencies.is_empty() {
-            // Associate requestor with an image that was provided by the client.
-            for id in pair.0.keys() {
-                if let Some(requestors) = state.requested_images.get_mut(id) {
-                    requestors.entry(key).or_insert(requestor.clone());
-                }
-            }
             notifications.push(Self::notification(&state, requestor, pair));
             return;
         }
