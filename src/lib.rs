@@ -1,5 +1,9 @@
 //! A Rust port of the MapLibre Native map rendering core.
 //!
+//! The root holds the thread-safe handles of `mln_runtime`: a [`Runtime`]
+//! and its [`Map`]s, whose commands run on the runtime's thread and report
+//! through a [`Completion`].
+//!
 //! Every library crate of <https://github.com/louwers/mln-rs> is
 //! re-exported here under its crate name: `mln_rs::mln_map`,
 //! `mln_rs::mln_util`, `mln_rs::earcut`, and so on. They are published as
@@ -25,6 +29,11 @@ pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
 pub use mln_renderer;
+pub use mln_runtime::{
+    self, Applied, CacheDatabaseOperation, CameraQuery, CommandGroup, Completion, Error, ErrorKind, EventHandler,
+    EventMask, EventSource, EventType, Map, MapId, MapOptions, MapSnapshot, Offline, ResourceProvider, ResourceRequest,
+    Runtime, RuntimeEvent, RuntimeEventKind, RuntimeOptions,
+};
 pub use mln_sprite;
 pub use mln_storage;
 pub use mln_storage_offline;

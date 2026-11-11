@@ -1974,6 +1974,7 @@ dependencies = [
  "mln-rs-protozero",
  "mln-rs-rapidjson",
  "mln-rs-renderer",
+ "mln-rs-runtime",
  "mln-rs-shelf-pack",
  "mln-rs-sprite",
  "mln-rs-storage",
@@ -2386,6 +2387,21 @@ dependencies = [
  "proptest",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mln-rs-runtime"
+version = "0.0.10"
+dependencies = [
+ "httpmock",
+ "mln-rs-actor",
+ "mln-rs-feature",
+ "mln-rs-map",
+ "mln-rs-storage",
+ "mln-rs-storage-offline",
+ "mln-rs-style",
+ "mln-rs-util",
+ "pollster",
 ]
 
 [[package]]
