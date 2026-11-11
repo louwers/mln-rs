@@ -155,6 +155,7 @@ pub(crate) fn attach(
         driver: request.driver,
         frame_wake: Some(runtime_wake(&request.frame_wake)),
         redraw_wake: request.has_redraw_wake.then(|| runtime_wake(&request.redraw_wake)),
+        driver_work_wake: Some(runtime_wake(&request.driver_work_wake)),
     };
     // Accepted first, so that a wake that the session runs as it starts
     // reaches the caller.
