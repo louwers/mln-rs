@@ -108,6 +108,24 @@ before and after, and a software rasterizer (lavapipe) is flagged. To see
 how much your machine's numbers vary, compare a commit with itself, which
 should give no verdicts.
 
+## On an Android device
+
+`just bench-android <ndk>` (`android.py`) compares the WebGPU and Vulkan
+backends on the device adb reaches. It builds `mln-bench` for
+`aarch64-linux-android` with the NDK's clang (`rustup target add
+aarch64-linux-android` first), pushes it with the basemap fixture and the
+cache database to `/data/local/tmp/mln-bench`, and runs it there from the
+shell, headless: one process per backend per round (`--rounds`, 5) in ABBA
+order, since a phone slows down as it warms up. `MLN_BENCH_CACHE_DB` tells
+the binary where the cache database is. Without a `--filter`, it runs the
+still cases, `Frame/Throughput`, `Frame/Paced` and `Load/Style/basemap`.
+
+It prints each metric's median with its lowest and highest value over the
+rounds, and leaves the reports and the last round's frames in
+`target/bench-android`. `--pause <seconds>` lets the device cool before
+each process; the battery's temperature is logged as each starts. `--keep`
+leaves the pushed files on the device.
+
 ## Not measured yet
 
 - GPU time apart from the frame (timestamp queries), and the frame's CPU

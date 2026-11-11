@@ -5,7 +5,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -166,7 +166,12 @@ impl Scene {
     pub fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         render_test::file_source::register_proxy_file_source();
         crate::latency::register();
-        let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db");
+        // MLN_BENCH_CACHE_DB names the render suite's cache database where
+        // the binary runs without its checkout, as on an Android device.
+        let cache = std::env::var_os("MLN_BENCH_CACHE_DB").map_or_else(
+            || Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db"),
+            PathBuf::from,
+        );
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
         let client_options = ClientOptions::default();
         let frontend = HeadlessFrontend::with_glyph_cache(
@@ -271,7 +276,19 @@ impl Scene {
     /// to the device.
     fn wait_for_gpu(&self) {
         if let Some(device) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_device) {
-            device.poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");
+            // PowerVR's Vulkan driver on Android ends a wait shortly before
+            // wgpu sees the submission finished, which wgpu reports as a
+            // timeout; waiting again returns at once then.
+            let start = Instant::now();
+            loop {
+                match device.poll(wgpu::PollType::wait_indefinitely()) {
+                    Err(wgpu::PollError::Timeout) if start.elapsed() < WAIT_LIMIT => {}
+                    result => {
+                        result.expect("the GPU finishes the frame");
+                        break;
+                    }
+                }
+            }
         }
     }
 

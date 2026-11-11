@@ -35,6 +35,10 @@ export RUST_BACKTRACE := env('RUST_BACKTRACE', if ci_mode == '1' {'1'} else {'0'
 bench *args:  bench-fixtures _dev-shell
     {{dev_shell}} cargo run --release -q -p mln-rs-bench -- run {{args}}
 
+# Compare the WebGPU and Vulkan backends on the Android device adb reaches, e.g. `just bench-android $ANDROID_NDK_HOME --rounds 8`
+bench-android ndk *args:  bench-fixtures
+    python3 -I tools/bench/android.py {{quote(ndk)}} {{args}}
+
 # Compare the benchmarks of this checkout, uncommitted changes included, against a Git ref (tools/bench/README.md)
 bench-compare base='main' *args:  bench-fixtures _dev-shell
     {{dev_shell}} cargo run --release -q -p mln-rs-bench -- compare {{quote(base)}} {{args}}
