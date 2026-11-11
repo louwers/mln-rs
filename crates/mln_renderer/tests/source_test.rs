@@ -16,7 +16,7 @@ use mln_renderer::sources::render_geojson_source::RenderGeoJSONSource;
 use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::layer::{Layer, static_immutable_cast};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
@@ -39,6 +39,7 @@ use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTilese
 use mln_style_types::SourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::{Duration, milliseconds};
+use mln_util::client_options::ClientOptions;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
@@ -354,6 +355,88 @@ fn tile_cancel(kind: Tiled) {
 
     run_tile_case(&test, kind, file_source, observer);
     assert!(*requested.borrow());
+}
+
+/// A file source whose tile requests never answer, as tiles in flight: it
+/// records each request's tile and each cancellation.
+#[derive(Default)]
+struct PendingTileSource {
+    requested: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+}
+
+struct PendingTileRequest {
+    tile: (i8, i32, i32),
+    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+}
+
+impl AsyncRequest for PendingTileRequest {}
+
+impl Drop for PendingTileRequest {
+    fn drop(&mut self) {
+        self.cancelled.lock().unwrap().push(self.tile);
+    }
+}
+
+impl FileSource for PendingTileSource {
+    fn request(&self, resource: &Resource, _callback: Callback) -> Box<dyn AsyncRequest> {
+        let data = resource.tile_data.as_ref().expect("only tiles are requested");
+        let tile = (data.z, data.x, data.y);
+        self.requested.lock().unwrap().push(tile);
+        Box::new(PendingTileRequest { tile, cancelled: self.cancelled.clone() })
+    }
+
+    fn can_request(&self, _resource: &Resource) -> bool {
+        true
+    }
+
+    fn set_resource_options(&self, _options: ResourceOptions) {}
+
+    fn get_resource_options(&self) -> ResourceOptions {
+        ResourceOptions::default()
+    }
+
+    fn set_client_options(&self, _options: ClientOptions) {}
+
+    fn get_client_options(&self) -> ClientOptions {
+        ClientOptions::default()
+    }
+}
+
+/// A tile that leaves the view while it loads goes on loading, and is the
+/// one the view gets back when it turns back, as a map rotated back and
+/// forth does at its corners: its request is neither cancelled nor made
+/// again.
+#[test]
+fn tile_out_of_view_keeps_loading() {
+    let mut test = SourceTest::new();
+    test.transform.resize(Size::new(1024, 128)).unwrap();
+    let file_source = Arc::new(PendingTileSource::default());
+    let (requested, cancelled) = (file_source.requested.clone(), file_source.cancelled.clone());
+    let layers = Tiled::Vector.layers();
+    let source = Tiled::Vector.source(tiles_tileset());
+    source.load_description(&*file_source);
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let fs: Arc<dyn FileSource> = file_source;
+    // Requests made so far, after an update with the camera at `bearing`.
+    let mut turn = |test: &mut SourceTest, bearing: f64, needs_relayout: bool| {
+        test.transform.jump_to(&CameraOptions {
+            center: Some(LatLng::new(20.0, 20.0).unwrap()),
+            zoom: Some(4.0),
+            bearing: Some(bearing),
+            ..Default::default()
+        });
+        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs.clone()));
+        render_source.update(source.base_impl(), &layers, true, needs_relayout, &parameters);
+        requested.lock().unwrap().clone()
+    };
+
+    let unturned = turn(&mut test, 0.0, true);
+    let turned = turn(&mut test, 90.0, false);
+    assert!(turned.len() > unturned.len(), "turning shows other tiles");
+    let back = turn(&mut test, 0.0, false);
+    assert_eq!(turned, back, "no tile is requested again");
+    assert!(cancelled.lock().unwrap().is_empty(), "no request is cancelled");
 }
 
 // gtest: Source.RasterTileEmpty

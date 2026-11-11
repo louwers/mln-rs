@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use mln_actor::TaggedScheduler;
 use mln_tile_id::OverscaledTileID;
 
-use crate::tile::tile::Tile;
+use crate::tile::tile::{Tile, TileNecessity};
 
 /// `TileCache`.
 pub struct TileCache {
@@ -49,7 +49,7 @@ impl TileCache {
             self.remove_key(&key);
 
             if let Some(tile) = self.tiles.remove(&key) {
-                self.deferred_release(tile);
+                self.evict(tile);
             }
         }
 
@@ -64,9 +64,12 @@ impl TileCache {
     /// Add a new tile with the given ID. If a tile with the same ID is
     /// already present, it will be retained and the new one will be
     /// discarded.
+    ///
+    /// Unlike C++, which releases a tile that isn't renderable yet, a tile
+    /// that is still loading is kept, and goes on loading here.
     pub fn add(&mut self, key: OverscaledTileID, tile: Box<dyn Tile>) {
-        if !tile.is_renderable() || self.size == 0 {
-            self.deferred_release(tile);
+        if self.size == 0 {
+            self.evict(tile);
             return;
         }
 
@@ -78,7 +81,7 @@ impl TileCache {
             // remove existing tile key to move it to the end
             self.remove_key(&key);
             // release the newly-provided item
-            self.deferred_release(tile);
+            self.evict(tile);
         }
 
         // (re-)insert tile key as newest
@@ -88,7 +91,7 @@ impl TileCache {
         if self.ordered_keys.len() > self.size {
             let oldest = self.ordered_keys[0];
             if let Some(tile) = self.pop(&oldest) {
-                self.deferred_release(tile);
+                self.evict(tile);
             }
         }
 
@@ -99,7 +102,6 @@ impl TileCache {
         let tile = self.tiles.remove(key);
         if tile.is_some() {
             self.remove_key(key);
-            debug_assert!(tile.as_ref().is_some_and(|t| t.is_renderable()));
         }
         tile
     }
@@ -115,9 +117,19 @@ impl TileCache {
     pub fn clear(&mut self) {
         let tiles = std::mem::take(&mut self.tiles);
         for (_, tile) in tiles {
-            self.deferred_release(tile);
+            self.evict(tile);
         }
         self.ordered_keys.clear();
+    }
+
+    /// Port-only: releases a tile the cache doesn't keep. One still loading
+    /// is made optional first, so that its loader stops: a custom source
+    /// gets the tile's cancellation.
+    fn evict(&mut self, tile: Box<dyn Tile>) {
+        if !tile.is_renderable() {
+            tile.set_necessity(TileNecessity::Optional);
+        }
+        self.deferred_release(tile);
     }
 
     /// Set aside a tile to be destroyed later, without blocking
@@ -150,6 +162,8 @@ impl Drop for TileCache {
 #[cfg(test)]
 mod tests {
     use std::any::Any;
+    use std::cell::Cell;
+    use std::rc::Rc;
 
     use mln_actor::scheduler;
     use mln_style::layer_properties::LayerProperties;
@@ -163,13 +177,14 @@ mod tests {
     struct VectorTileMock {
         base: TileBase,
         unique_id: SimpleIdentity,
+        necessity: Rc<Cell<Option<TileNecessity>>>,
     }
 
     impl VectorTileMock {
         fn new(id: OverscaledTileID) -> Box<VectorTileMock> {
             let base = TileBase::new(Kind::Geometry, id, "source".to_owned(), None);
             base.renderable.set(true);
-            Box::new(VectorTileMock { base, unique_id: SimpleIdentity::new() })
+            Box::new(VectorTileMock { base, unique_id: SimpleIdentity::new(), necessity: Rc::default() })
         }
     }
 
@@ -184,6 +199,9 @@ mod tests {
             unreachable!()
         }
         fn cancel(&self) {}
+        fn set_necessity(&self, necessity: TileNecessity) {
+            self.necessity.set(Some(necessity));
+        }
         fn layer_properties_updated(&self, _layer_properties: &Immutable<dyn LayerProperties>) -> bool {
             false
         }
@@ -242,5 +260,28 @@ mod tests {
         // older item should be evicted
         assert!(cache.has(&id0));
         assert!(!cache.has(&id1));
+    }
+
+    /// A tile kept while it loads goes on loading in the cache; when the
+    /// cache lets it go, it is made optional so that its loader stops,
+    /// and a renderable one is left as it is.
+    #[test]
+    fn evicting_a_loading_tile_makes_it_optional() {
+        let mut cache = TileCache::new(thread_pool(), 2);
+        let (loading, loaded) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
+        let loading_tile = VectorTileMock::new(loading);
+        loading_tile.base.renderable.set(false);
+        let loading_necessity = loading_tile.necessity.clone();
+        let loaded_tile = VectorTileMock::new(loaded);
+        let loaded_necessity = loaded_tile.necessity.clone();
+
+        cache.add(loading, loading_tile);
+        cache.add(loaded, loaded_tile);
+        assert!(cache.has(&loading));
+        assert_eq!(None, loading_necessity.get());
+
+        cache.set_size(0);
+        assert_eq!(Some(TileNecessity::Optional), loading_necessity.get());
+        assert_eq!(None, loaded_necessity.get());
     }
 }

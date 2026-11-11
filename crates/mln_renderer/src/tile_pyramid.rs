@@ -194,9 +194,14 @@ impl TilePyramid {
                 if !needs_relayout {
                     // These tiles are invisible, we set optional necessity
                     // for them and thus suppress network requests on tiles
-                    // expiration (see `OnlineFileRequest`).
+                    // expiration (see `OnlineFileRequest`). One that hasn't
+                    // loaded then stops loading, and is released, as in C++.
                     tile.set_necessity(TileNecessity::Optional);
-                    self.cache.add(id, tile);
+                    if tile.is_renderable() {
+                        self.cache.add(id, tile);
+                    } else {
+                        self.cache.deferred_release(tile);
+                    }
                 } else {
                     self.cache.deferred_release(tile);
                 }
@@ -376,7 +381,14 @@ impl TilePyramid {
                 if needs_relayout {
                     self.cache.deferred_release(tile);
                 } else {
-                    tile.set_necessity(TileNecessity::Optional);
+                    // Port-only: a tile still loading keeps its necessity,
+                    // so that it goes on loading in the cache (C++ releases
+                    // it, and optional, it would stop loading). A view that
+                    // turns back and forth needs the tiles at its corners
+                    // for moments too short to load them each time.
+                    if tile.is_renderable() {
+                        tile.set_necessity(TileNecessity::Optional);
+                    }
                     self.cache.add(key, tile);
                 }
             }
