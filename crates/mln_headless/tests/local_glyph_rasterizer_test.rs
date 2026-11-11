@@ -142,7 +142,7 @@ fn no_local() {
     // Expectation: without any local fonts set, and without any CJK glyphs
     // provided, the output should just contain basic latin characters.
     let mut test = LocalGlyphRasterizerTest::new(None);
-    test.map.get_style_mut().load_json(&mixed_json());
+    test.map.style_mut().load_json(&mixed_json());
     test.check_rendering("no_local", 0.001, 0.1);
 }
 
@@ -154,7 +154,7 @@ fn no_local_with_content_insets() {
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.get_size();
-    test.map.get_style_mut().load_json(&mixed_json());
+    test.map.style_mut().load_json(&mixed_json());
 
     // Expected image was created using center offset as in the line below -
     // content insets, with no pitch defined, should produce the same output.
@@ -177,7 +177,7 @@ fn no_local_with_content_insets_and_pitch() {
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.get_size();
-    test.map.get_style_mut().load_json(&mixed_json());
+    test.map.style_mut().load_json(&mixed_json());
 
     // Expected image was verified using no-padding render, offsetted to right
     // using bitmap editor.

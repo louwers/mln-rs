@@ -60,10 +60,10 @@ pub(crate) struct Core {
     condvar: Condvar,
     /// The holder handle is unref'd (`stop()` ran).
     stopped: AtomicBool,
-    /// Port-only: told about every wake-up, for a loop that a host drives
+    /// Told about every wake-up, for a loop that a host drives
     /// with `run_once` instead of `run` (see `RunLoop::set_waker`).
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    /// Port-only: a `RunLoop` runs this queue (see `RunLoop::adopt`).
+    /// Whether a `RunLoop` runs this queue (see `RunLoop::adopt`).
     adopted: AtomicBool,
 }
 
@@ -221,7 +221,7 @@ impl RunLoop {
         Arc::new(RunLoopHandle { core: self.inner.core.clone() })
     }
 
-    /// Port-only: the loop that runs the queue `handle` (see
+    /// The loop that runs the queue `handle` (see
     /// [`RunLoopHandle::new`]) on this thread, with the tasks sent to it so
     /// far. `None` when a loop runs that queue already. Unlike `new`, it
     /// leaves this thread's current loop as it is: [`enter`](Self::enter)
@@ -233,7 +233,7 @@ impl RunLoop {
         Some(RunLoop::over(handle.core.clone()))
     }
 
-    /// Port-only: makes this loop the current loop and scheduler of this
+    /// Makes this loop the current loop and scheduler of this
     /// thread until the guard drops, which restores the ones before, so one
     /// thread can run several loops in turn. What runs meanwhile, such as
     /// a timer or a mailbox that a task creates, belongs to this loop.
@@ -275,7 +275,7 @@ impl RunLoop {
         self.inner.core.push(priority, Box::new(task));
     }
 
-    /// Port-only: calls `waker`, from the waking thread, whenever this loop
+    /// Calls `waker`, from the waking thread, whenever this loop
     /// gets work (a task or an AsyncTask send), so that a host that drives
     /// the loop with `run_once` on its own thread knows to run it. Timers
     /// don't wake: such a host runs the loop at least once a frame.
@@ -407,14 +407,14 @@ impl Scheduler for RunLoop {
 }
 
 impl RunLoopHandle {
-    /// Port-only: the task queue of a loop that no thread runs yet. Tasks
+    /// The task queue of a loop that no thread runs yet. Tasks
     /// sent to it wait until a thread makes the loop with
     /// [`RunLoop::adopt`] and runs it.
     pub fn new() -> RunLoopHandle {
         RunLoopHandle { core: Arc::new(Core::new()) }
     }
 
-    /// Port-only: [`RunLoop::set_waker`] from any thread.
+    /// [`RunLoop::set_waker`] from any thread.
     pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
         *self.core.waker.lock_unpoisoned() = waker;
     }

@@ -302,7 +302,7 @@ pub(crate) fn run(launch: Launch) {
             let families: Vec<&str> = faces.iter().map(|face| face.family.as_str()).collect();
             Log::info(Event::Setup, format!("Falling back to system fonts: {}", families.join(", ")));
         }
-        view.map.get_style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
+        view.map.style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
     }
     let style = view.style.clone();
     view.load_style(style);
@@ -416,7 +416,7 @@ impl View {
 
     /// Loads `style` and names the window after it.
     fn load_style(&mut self, style: Style) {
-        self.map.get_style_mut().load_url(&style.url);
+        self.map.style_mut().load_url(&style.url);
         let name = if style.name.is_empty() { style.url.clone() } else { style.name.clone() };
         let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
         self.style = style;
@@ -618,7 +618,7 @@ impl View {
         input.time = Some(now.saturating_duration_since(self.start).as_secs_f64());
 
         let camera = self.map.get_camera_options(None);
-        let style = self.map.get_style();
+        let style = self.map.style();
         let attributions: Vec<String> = style
             .get_sources()
             .iter()
@@ -794,7 +794,7 @@ impl View {
 /// Prints once which layers the renderer draws and which it
 /// skips (unported layer types, or sources of unported types).
 pub fn report_style(map: &Map) {
-    let style = map.get_style();
+    let style = map.style();
     let json: serde_json::Value = serde_json::from_str(&style.get_json()).unwrap_or_default();
     let declared_sources: BTreeMap<String, String> = json
         .get("sources")

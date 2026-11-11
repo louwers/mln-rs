@@ -45,8 +45,8 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32) -> HeadlessFrontend) -> (
         Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio))
             .unwrap();
     frontend.attach(&map);
-    map.get_style_mut().load_json(&json);
-    let camera = map.get_style().get_default_camera();
+    map.style_mut().load_json(&json);
+    let camera = map.style().get_default_camera();
     map.jump_to(&camera);
     let actual = frontend.render(&mut map).expect("render").image;
 

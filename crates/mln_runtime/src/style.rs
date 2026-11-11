@@ -295,7 +295,7 @@ pub(crate) struct GeoJsonUpdates(HashMap<String, GeoJsonUpdate>);
 /// from the outbox, so before the completions that follow, and with the
 /// runtime's state unborrowed.
 pub(crate) fn reconcile(entry: &mut MapEntry, outbox: &mut Outbox) {
-    let style = entry.core.get_style();
+    let style = entry.core.style();
     let present = |id: &str, source: &dyn Source| style.get_source(id).is_some_and(|found| same_source(found, source));
     let (kept, gone): (Vec<_>, Vec<_>) =
         std::mem::take(&mut entry.callback_sources.0).into_iter().partition(|held| present(&held.id, &*held.source));
@@ -535,12 +535,12 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (name, json) = (name.into(), json.into());
-        self.command(move |map| map.get_style_mut().set_global_state_property_json(&name, &json))
+        self.command(move |map| map.style_mut().set_global_state_property_json(&name, &json))
     }
 
     /// The style's global state as a JSON object.
     pub fn global_state(&self) -> Result<Completion<String>, Error> {
-        self.query(|map| Ok(map.get_style().global_state_json()))
+        self.query(|map| Ok(map.style().global_state_json()))
     }
 
     // MARK: - Sources
@@ -548,12 +548,12 @@ impl Map {
     /// A source of the style, or `None` when the style has no such source.
     pub fn style_source(&self, source_id: impl Into<String>) -> Result<Completion<Option<SourceInfo>>, Error> {
         let source_id = source_id.into();
-        self.query(move |map| Ok(map.get_style().get_source(&source_id).and_then(source_info)))
+        self.query(move |map| Ok(map.style().get_source(&source_id).and_then(source_info)))
     }
 
     /// The style's sources, in style order.
     pub fn style_sources(&self) -> Result<Completion<Vec<SourceInfo>>, Error> {
-        self.query(|map| Ok(map.get_style().get_sources().into_iter().filter_map(source_info).collect()))
+        self.query(|map| Ok(map.style().get_sources().into_iter().filter_map(source_info).collect()))
     }
 
     /// Sets whether a source keeps its tiles out of the persistent cache.
@@ -564,7 +564,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_loaded(style)?;
             set_volatile(find_source(style, &source_id)?, is_volatile);
             Ok(())
@@ -588,7 +588,7 @@ impl Map {
         let source_id = source_id.into();
         self.command(move |map| {
             let options = options.into_core()?;
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_new_source(style, &source_id)?;
             style.add_source(Box::new(GeoJSONSource::new(source_id, Arc::new(options))))
         })
@@ -605,7 +605,7 @@ impl Map {
         let (source_id, url) = (source_id.into(), url.into());
         self.send(
             move |entry, outbox| {
-                let style = entry.core.get_style();
+                let style = entry.core.style();
                 require_loaded(style)?;
                 find_source_as::<GeoJSONSource>(style, &source_id, "a GeoJSON source")?.set_url(&url);
                 if let Some((_, resolver)) =
@@ -677,7 +677,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_loaded(style)?;
             find_source_as::<GeoJSONSource>(style, &source_id, "a GeoJSON source")?
                 .set_override_synchronous_update(enabled);
@@ -754,7 +754,7 @@ impl Map {
         let (source_id, json) = (source_id.into(), json.into());
         self.command(move |map| {
             let geojson = feature_collection(parse_geojson(&json)?);
-            custom_geometry(map.get_style(), &source_id)?.set_tile_data(tile_id, geojson);
+            custom_geometry(map.style(), &source_id)?.set_tile_data(tile_id, geojson);
             Ok(())
         })
     }
@@ -768,7 +768,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, message) = (source_id.into(), message.into());
         self.command(move |map| {
-            custom_geometry(map.get_style(), &source_id)?.set_tile_error(tile_id, Error::native(message));
+            custom_geometry(map.style(), &source_id)?.set_tile_error(tile_id, Error::native(message));
             Ok(())
         })
     }
@@ -782,7 +782,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            custom_geometry(map.get_style(), &source_id)?.invalidate_tile(tile_id);
+            custom_geometry(map.style(), &source_id)?.invalidate_tile(tile_id);
             Ok(())
         })
     }
@@ -796,7 +796,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            custom_geometry(map.get_style(), &source_id)?.invalidate_region(bounds);
+            custom_geometry(map.style(), &source_id)?.invalidate_region(bounds);
             Ok(())
         })
     }
@@ -813,7 +813,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            custom_vector(map.get_style(), &source_id)?.set_tile_data(tile_id, data.map(Arc::new), format);
+            custom_vector(map.style(), &source_id)?.set_tile_data(tile_id, data.map(Arc::new), format);
             Ok(())
         })
     }
@@ -827,7 +827,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, message) = (source_id.into(), message.into());
         self.command(move |map| {
-            custom_vector(map.get_style(), &source_id)?.set_tile_error(tile_id, Error::native(message));
+            custom_vector(map.style(), &source_id)?.set_tile_error(tile_id, Error::native(message));
             Ok(())
         })
     }
@@ -841,7 +841,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            custom_vector(map.get_style(), &source_id)?.invalidate_tile(tile_id);
+            custom_vector(map.style(), &source_id)?.invalidate_tile(tile_id);
             Ok(())
         })
     }
@@ -855,7 +855,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            custom_vector(map.get_style(), &source_id)?.invalidate_region(bounds);
+            custom_vector(map.style(), &source_id)?.invalidate_region(bounds);
             Ok(())
         })
     }
@@ -865,7 +865,7 @@ impl Map {
     /// Adds `image` to the style, or replaces the image with its ID.
     pub fn set_style_image(&self, image: StyleImage) -> Result<Completion<Applied>, Error> {
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_loaded(style)?;
             style.add_image(Arc::new(image));
             Ok(())
@@ -878,7 +878,7 @@ impl Map {
     pub fn remove_style_image(&self, image_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let image_id = image_id.into();
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_loaded(style)?;
             if style.get_image(&image_id).is_none() {
                 return Err(Error::not_found(format!("style image {} does not exist", quote(&image_id))));
@@ -891,7 +891,7 @@ impl Map {
     /// An image of the style, or `None` when the style has no such image.
     pub fn style_image(&self, image_id: impl Into<String>) -> Result<Completion<Option<Immutable<StyleImage>>>, Error> {
         let image_id = image_id.into();
-        self.query(move |map| Ok(map.get_style().get_image(&image_id)))
+        self.query(move |map| Ok(map.style().get_image(&image_id)))
     }
 
     // MARK: - Image sources
@@ -906,7 +906,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_new_source(style, &source_id)?;
             let source = ImageSource::new(source_id, coordinates);
             source.set_image(image);
@@ -922,7 +922,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, url) = (source_id.into(), url.into());
         self.command(move |map| {
-            let style = map.get_style();
+            let style = map.style();
             require_loaded(style)?;
             find_source_as::<ImageSource>(style, &source_id, "an image source")?.set_url(&url);
             Ok(())
@@ -937,7 +937,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            let style = map.get_style();
+            let style = map.style();
             require_loaded(style)?;
             find_source_as::<ImageSource>(style, &source_id, "an image source")?.set_image(image);
             Ok(())
@@ -953,7 +953,7 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let source_id = source_id.into();
         self.command(move |map| {
-            let style = map.get_style();
+            let style = map.style();
             require_loaded(style)?;
             find_source_as::<ImageSource>(style, &source_id, "an image source")?.set_coordinates(coordinates);
             Ok(())
@@ -964,7 +964,7 @@ impl Map {
     pub fn image_source_coordinates(&self, source_id: impl Into<String>) -> Result<Completion<[LatLng; 4]>, Error> {
         let source_id = source_id.into();
         self.query(move |map| {
-            Ok(find_source_as::<ImageSource>(map.get_style(), &source_id, "an image source")?.get_coordinates())
+            Ok(find_source_as::<ImageSource>(map.style(), &source_id, "an image source")?.get_coordinates())
         })
     }
 
@@ -973,12 +973,12 @@ impl Map {
     /// A layer of the style, or `None` when the style has no such layer.
     pub fn style_layer(&self, layer_id: impl Into<String>) -> Result<Completion<Option<LayerInfo>>, Error> {
         let layer_id = layer_id.into();
-        self.query(move |map| Ok(map.get_style().get_layer(&layer_id).map(layer_info)))
+        self.query(move |map| Ok(map.style().get_layer(&layer_id).map(layer_info)))
     }
 
     /// The style's layers, from bottom to top.
     pub fn style_layers(&self) -> Result<Completion<Vec<LayerInfo>>, Error> {
-        self.query(|map| Ok(map.get_style().get_layers().into_iter().map(layer_info).collect()))
+        self.query(|map| Ok(map.style().get_layers().into_iter().map(layer_info).collect()))
     }
 
     /// Moves a layer below `before_layer_id`, or above every layer. See
@@ -989,7 +989,7 @@ impl Map {
         before_layer_id: Option<String>,
     ) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
-        self.command(move |map| map.get_style_mut().move_layer(&layer_id, before_layer_id.as_deref()))
+        self.command(move |map| map.style_mut().move_layer(&layer_id, before_layer_id.as_deref()))
     }
 
     // MARK: - Transitions
@@ -997,7 +997,7 @@ impl Map {
     /// Sets the default transition of the style's paint properties.
     pub fn set_style_transition_options(&self, options: TransitionOptions) -> Result<Completion<Applied>, Error> {
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             require_loaded(style)?;
             style.set_transition_options(&options);
             Ok(())
@@ -1006,7 +1006,7 @@ impl Map {
 
     /// The default transition of the style's paint properties.
     pub fn style_transition_options(&self) -> Result<Completion<TransitionOptions>, Error> {
-        self.query(|map| Ok(map.get_style().get_transition_options()))
+        self.query(|map| Ok(map.style().get_transition_options()))
     }
 }
 
@@ -1020,7 +1020,7 @@ fn add_callback_source(
     callbacks: Arc<CustomSourceCallbacks>,
     make: impl FnOnce(String, &Arc<CustomSourceCallbacks>) -> Result<Box<dyn Source>, Error>,
 ) -> Result<(), Error> {
-    let style = entry.core.get_style_mut();
+    let style = entry.core.style_mut();
     let added = require_new_source(style, &id).and_then(|()| {
         let source = make(id.clone(), &callbacks)?;
         // The style takes a handle of the source, and the map keeps another
@@ -1076,7 +1076,7 @@ fn queue_geojson(
     outbox: &mut Outbox,
 ) -> Result<Option<Resolver<Applied>>, (Error, Resolver<Applied>)> {
     let found = (|| {
-        let style = entry.core.get_style();
+        let style = entry.core.style();
         require_loaded(style)?;
         let source = find_source_as::<GeoJSONSource>(style, source_id, "a GeoJSON source")?.clone();
         let geojson = parse_geojson(json)?;
@@ -1153,7 +1153,7 @@ fn install_geojson(
     let Some(entry) = core.maps.get_mut(&map_id) else { return };
     let Some(update) = entry.geojson_updates.0.get_mut(source_id) else { return };
     let Some((_, resolver)) = update.building.take_if(|(building, _)| *building == build) else { return };
-    let current = entry.core.get_style().get_source(source_id).is_some_and(|found| same_source(found, &update.source));
+    let current = entry.core.style().get_source(source_id).is_some_and(|found| same_source(found, &update.source));
     let installed = match data {
         Err(error) => Err(error),
         Ok(_) if !current || update.source.data_generation() != generation => {

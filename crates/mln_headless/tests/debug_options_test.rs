@@ -155,7 +155,7 @@ const GLYPHS_STYLE: &str = r#"{
 
 fn has_stats_view(test: &MapTest) -> (bool, bool) {
     let map = test.map();
-    let style = map.get_style();
+    let style = map.style();
     (style.get_layer("rendering-stats").is_some(), style.get_source("rendering-stats-source").is_some())
 }
 

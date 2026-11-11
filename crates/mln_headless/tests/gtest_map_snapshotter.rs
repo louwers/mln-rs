@@ -133,7 +133,7 @@ fn runtime_styling() {
         let mut fill_layer = FillLayer::new("green_fill", "mapbox");
         fill_layer.set_source_layer("water");
         fill_layer.set_fill_color(&PropertyValue::Constant(Color::new(0.25, 0.88, 0.82, 1.0)));
-        snapshotter.map().get_style_mut().add_layer(Box::new(fill_layer), None).unwrap();
+        snapshotter.map().style_mut().add_layer(Box::new(fill_layer), None).unwrap();
         let stop = stop.clone();
         snapshotter.snapshot(Box::new(move |ptr, image, _, _, _| {
             assert!(ptr.is_none(), "{ptr:?}");

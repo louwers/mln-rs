@@ -19,8 +19,8 @@ fn loads_liberty_over_https() {
     let run_loop = RunLoop::new();
     let mut map = Map::new(MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0)).unwrap();
 
-    map.get_style_mut().load_url(LIBERTY);
-    assert!(!map.get_style().is_loaded());
+    map.style_mut().load_url(LIBERTY);
+    assert!(!map.style().is_loaded());
 
     // Give up after 60 s: the timer wakes the loop then.
     let timeout = Timer::new();
@@ -44,7 +44,7 @@ fn loads_liberty_over_https() {
     assert_eq!(None, failed);
     assert!(loaded, "the style did not load within 60 s");
 
-    let style = map.get_style();
+    let style = map.style();
     assert_eq!(LIBERTY, style.get_url());
     let json: serde_json::Value = serde_json::from_str(&style.get_json()).unwrap();
     assert_eq!(json["sources"]["openmaptiles"]["type"], "vector");

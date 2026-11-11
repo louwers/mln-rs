@@ -216,7 +216,7 @@ fn debug_empty() {
     // but since there is no annotation, we should not render them.
     let test = AnnotationTest::new();
 
-    test.map().get_style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+    test.map().style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
     test.map().set_debug(MapDebugOptions::TILE_BORDERS);
     test.map().jump_to(&CameraOptions::default().with_zoom(Some(1.0)));
 

@@ -771,12 +771,12 @@ impl Map {
     /// The JSON of the style that the map loaded, without the changes made
     /// since.
     pub fn loaded_style_json(&self) -> Result<Completion<String>, Error> {
-        self.query(|map| Ok(map.get_style().get_json()))
+        self.query(|map| Ok(map.style().get_json()))
     }
 
     /// The URL of the map's style, or `None` for a style loaded from JSON.
     pub fn style_url(&self) -> Result<Completion<Option<String>>, Error> {
-        self.query(|map| Ok(Some(map.get_style().get_url()).filter(|url| !url.is_empty())))
+        self.query(|map| Ok(Some(map.style().get_url()).filter(|url| !url.is_empty())))
     }
 
     /// Adds a source to the style from its JSON. See
@@ -787,7 +787,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (source_id, json) = (source_id.into(), json.into());
-        self.command(move |map| map.get_style_mut().add_source_json(&source_id, &json))
+        self.command(move |map| map.style_mut().add_source_json(&source_id, &json))
     }
 
     /// Removes a source from the style. Completes with
@@ -800,7 +800,7 @@ impl Map {
         let source_id = source_id.into();
         self.send(
             move |entry, _| {
-                let style = entry.core.get_style_mut();
+                let style = entry.core.style_mut();
                 if !style.is_loaded() {
                     return Err(style_not_loaded());
                 }
@@ -827,7 +827,7 @@ impl Map {
         before_layer_id: Option<String>,
     ) -> Result<Completion<Applied>, Error> {
         let json = json.into();
-        self.command(move |map| map.get_style_mut().add_layer_json(&json, before_layer_id.as_deref()))
+        self.command(move |map| map.style_mut().add_layer_json(&json, before_layer_id.as_deref()))
     }
 
     /// Removes a layer from the style. Completes with
@@ -837,7 +837,7 @@ impl Map {
     pub fn remove_style_layer(&self, layer_id: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let layer_id = layer_id.into();
         self.command(move |map| {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             if !style.is_loaded() {
                 return Err(style_not_loaded());
             }
@@ -852,7 +852,7 @@ impl Map {
     /// layer.
     pub fn style_layer_json(&self, layer_id: impl Into<String>) -> Result<Completion<Option<String>>, Error> {
         let layer_id = layer_id.into();
-        self.query(move |map| Ok(map.get_style().layer_json(&layer_id)))
+        self.query(move |map| Ok(map.style().layer_json(&layer_id)))
     }
 
     /// Sets a property of a layer to a JSON value. See
@@ -864,7 +864,7 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (layer_id, name, json) = (layer_id.into(), name.into(), json.into());
-        self.command(move |map| map.get_style_mut().set_layer_property_json(&layer_id, &name, &json))
+        self.command(move |map| map.style_mut().set_layer_property_json(&layer_id, &name, &json))
     }
 
     /// A property of a layer as JSON, or `None` when the layer doesn't set
@@ -875,13 +875,13 @@ impl Map {
         name: impl Into<String>,
     ) -> Result<Completion<Option<String>>, Error> {
         let (layer_id, name) = (layer_id.into(), name.into());
-        self.query(move |map| map.get_style().layer_property_json(&layer_id, &name))
+        self.query(move |map| map.style().layer_property_json(&layer_id, &name))
     }
 
     /// Replaces the style's light with one from JSON.
     pub fn set_style_light_json(&self, json: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let json = json.into();
-        self.command(move |map| map.get_style_mut().set_light_json(&json))
+        self.command(move |map| map.style_mut().set_light_json(&json))
     }
 
     /// Sets a property of the style's light to a JSON value.
@@ -891,14 +891,14 @@ impl Map {
         json: impl Into<String>,
     ) -> Result<Completion<Applied>, Error> {
         let (name, json) = (name.into(), json.into());
-        self.command(move |map| map.get_style_mut().set_light_property_json(&name, &json))
+        self.command(move |map| map.style_mut().set_light_property_json(&name, &json))
     }
 
     /// A property of the style's light as JSON, or `None` when the light
     /// doesn't set it.
     pub fn style_light_property(&self, name: impl Into<String>) -> Result<Completion<Option<String>>, Error> {
         let name = name.into();
-        self.query(move |map| Ok(map.get_style().light_property_json(&name)))
+        self.query(move |map| Ok(map.style().light_property_json(&name)))
     }
 
     // MARK: - Camera
@@ -1198,7 +1198,7 @@ pub(crate) fn create(
         Err(error) => return outbox.resolve(resolver, Err(error)),
     };
     if let Some(json) = &options.fallback_font_faces
-        && let Err(error) = map.get_style_mut().set_fallback_font_faces(json)
+        && let Err(error) = map.style_mut().set_fallback_font_faces(json)
     {
         return outbox.resolve(resolver, Err(error));
     }
@@ -1303,7 +1303,7 @@ fn load_style(
             if let Some(previous) = entry.pending_style.replace(resolver) {
                 outbox.resolve(previous, Err(Error::cancelled("another style load started")));
             }
-            let style = entry.core.get_style_mut();
+            let style = entry.core.style_mut();
             match load {
                 StyleLoad::Url(url) => style.load_url(&url),
                 StyleLoad::Json(json) => style.load_json(&json),

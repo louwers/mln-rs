@@ -206,11 +206,11 @@ impl Scene {
 
     /// Starts loading a style; it loads while the scene renders.
     pub fn load_url(&mut self, url: &str) {
-        self.map.get_style_mut().load_url(url);
+        self.map.style_mut().load_url(url);
     }
 
     pub fn load_json(&mut self, json: &str) {
-        self.map.get_style_mut().load_json(json);
+        self.map.style_mut().load_json(json);
     }
 
     /// Adds an image to the style, as a sprite's would be.
@@ -218,7 +218,7 @@ impl Scene {
         let image =
             mln_style::image::Impl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
                 .expect("a style image");
-        self.map.get_style_mut().add_image(Arc::new(image));
+        self.map.style_mut().add_image(Arc::new(image));
     }
 
     pub fn jump(&mut self, center: LatLng, zoom: f64) {
@@ -367,7 +367,7 @@ impl Scene {
     pub fn set_source_visible(&mut self, source: &str, visible: bool) {
         let ids: Vec<String> = self
             .map
-            .get_style()
+            .style()
             .get_layers()
             .iter()
             .filter(|layer| layer.get_source_id() == source)
@@ -376,7 +376,7 @@ impl Scene {
         assert!(!ids.is_empty(), "no layer draws {source}");
         let visibility = if visible { VisibilityType::Visible } else { VisibilityType::None };
         for id in ids {
-            self.map.get_style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
+            self.map.style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
         }
     }
 

@@ -565,7 +565,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
 
     /// `test.map.getStyle().loadJSON(json)`.
     pub fn load_json(&self, json: &str) {
-        self.map().get_style_mut().load_json(json);
+        self.map().style_mut().load_json(json);
     }
 }
 

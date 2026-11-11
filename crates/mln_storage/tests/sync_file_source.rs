@@ -73,6 +73,6 @@ fn load_sync_render() {
     let mut map = Map::with_file_source(fs, MapOptions::new()).unwrap();
     frontend.attach(&map);
     let style = String::from_utf8(read_file("test/fixtures/resources/style_vector.json")).unwrap();
-    map.get_style_mut().load_json(&style);
+    map.style_mut().load_json(&style);
     map.process_events();
 }

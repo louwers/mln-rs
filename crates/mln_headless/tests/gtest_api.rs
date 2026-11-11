@@ -62,7 +62,7 @@ fn grid() {
     )
     .unwrap();
     frontend.attach(&map);
-    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     map.jump_to(&CameraOptions {
         center: Some(LatLng::new(37.8, -122.5).unwrap()),
         zoom: Some(10.0),
@@ -95,16 +95,16 @@ fn grid() {
 
     let source = CustomGeometrySource::new("custom", options).unwrap();
     handle.set(source.handle()).unwrap();
-    map.get_style_mut().add_source(Box::new(source)).unwrap();
+    map.style_mut().add_source(Box::new(source)).unwrap();
 
     let mut fill_layer = FillLayer::new("landcover", "mapbox");
     fill_layer.set_source_layer("landcover");
     fill_layer.set_fill_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 0.0, 1.0)));
-    map.get_style_mut().add_layer(Box::new(fill_layer), None).unwrap();
+    map.style_mut().add_layer(Box::new(fill_layer), None).unwrap();
 
     let mut layer = LineLayer::new("grid", "custom");
     layer.set_line_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 1.0, 1.0)));
-    map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+    map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
     check_image(
         "test/fixtures/custom_geometry_source/grid",
@@ -150,10 +150,10 @@ fn recycle_map_update_images() {
         let mut layer = SymbolLayer::new("geometry", "geometry");
         layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new(marker_name)));
 
-        map.get_style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
-        map.get_style_mut().add_source(Box::new(source)).unwrap();
-        map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
-        map.get_style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));
+        map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+        map.style_mut().add_source(Box::new(source)).unwrap();
+        map.style_mut().add_layer(Box::new(layer), None).unwrap();
+        map.style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));
     };
 
     // default marker

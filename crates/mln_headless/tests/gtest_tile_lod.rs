@@ -42,7 +42,7 @@ impl TileLODTest {
         map.jump_to(camera_options);
 
         map.set_debug(MapDebugOptions::TILE_BORDERS);
-        map.get_style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+        map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
 
         let tile_count = Arc::new(AtomicU32::new(0));
         let handle = Arc::new(OnceLock::new());
@@ -57,11 +57,11 @@ impl TileLODTest {
         };
         let source = CustomGeometrySource::new("custom", options).unwrap();
         handle.set(source.handle()).unwrap();
-        map.get_style_mut().add_source(Box::new(source)).unwrap();
+        map.style_mut().add_source(Box::new(source)).unwrap();
 
         let mut layer = CircleLayer::new("circles", "custom");
         layer.set_circle_color(&PropertyValue::Constant(Color::new(0.0, 0.0, 1.0, 0.0)));
-        map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+        map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
         TileLODTest { _run_loop: run_loop, frontend, map, tile_count }
     }

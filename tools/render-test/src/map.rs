@@ -99,12 +99,12 @@ impl TestRunnerImpl for Impl {
                 .with_y_skew(metadata.y_skew),
         );
         self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
-        style_ops::load_json(self.map.get_style_mut(), &metadata.document_json);
+        style_ops::load_json(self.map.style_mut(), &metadata.document_json);
         Ok(())
     }
 
     fn jump_to_default_camera(&mut self) -> Result<(), MapError> {
-        let camera = style_ops::default_camera(self.map.get_style());
+        let camera = style_ops::default_camera(self.map.style());
         self.map.jump_to(&camera);
         Ok(())
     }
@@ -123,7 +123,7 @@ impl TestRunnerImpl for Impl {
 
     // query: tile mode.
     fn default_camera(&mut self) -> Result<CameraOptions, MapError> {
-        let camera = style_ops::default_camera(self.map.get_style());
+        let camera = style_ops::default_camera(self.map.style());
         Ok(CameraOptions {
             center: camera.center,
             center_altitude: camera.center_altitude,
@@ -190,37 +190,37 @@ impl TestRunnerImpl for Impl {
     }
 
     fn load_style_json(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::load_json(self.map.get_style_mut(), json);
+        style_ops::load_json(self.map.style_mut(), json);
         Ok(())
     }
 
     fn load_style_url(&mut self, url: &str) -> Result<(), MapError> {
-        style_ops::load_url(self.map.get_style_mut(), url);
+        style_ops::load_url(self.map.style_mut(), url);
         Ok(())
     }
 
     fn set_layer_property(&mut self, layer: &str, name: &str, value: &serde_json::Value) -> Result<(), MapError> {
-        style_ops::set_layer_property(self.map.get_style_mut(), layer, name, value)
+        style_ops::set_layer_property(self.map.style_mut(), layer, name, value)
     }
 
     fn set_layer_zoom_range(&mut self, layer: &str, min: f32, max: f32) -> Result<(), MapError> {
-        style_ops::set_layer_zoom_range(self.map.get_style_mut(), layer, min, max)
+        style_ops::set_layer_zoom_range(self.map.style_mut(), layer, min, max)
     }
 
     fn add_layer(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::add_layer(self.map.get_style_mut(), json)
+        style_ops::add_layer(self.map.style_mut(), json)
     }
 
     fn remove_layer(&mut self, id: &str) -> Result<bool, MapError> {
-        Ok(style_ops::remove_layer(self.map.get_style_mut(), id))
+        Ok(style_ops::remove_layer(self.map.style_mut(), id))
     }
 
     fn set_layer_filter(&mut self, layer: &str, filter: &serde_json::Value) -> Result<(), MapError> {
-        style_ops::set_layer_filter(self.map.get_style_mut(), layer, filter)
+        style_ops::set_layer_filter(self.map.style_mut(), layer, filter)
     }
 
     fn set_global_state_property(&mut self, name: &str, value: &feature::Value) -> Result<(), MapError> {
-        style_ops::set_global_state_property(self.map.get_style_mut(), name, value)
+        style_ops::set_global_state_property(self.map.style_mut(), name, value)
     }
 
     fn set_feature_state(
@@ -330,15 +330,15 @@ impl TestRunnerImpl for Impl {
 
     // query: the remaining runner operations.
     fn set_light(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::set_light(self.map.get_style_mut(), json)
+        style_ops::set_light(self.map.style_mut(), json)
     }
 
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {
-        style_ops::add_source(self.map.get_style_mut(), id, json)
+        style_ops::add_source(self.map.style_mut(), id, json)
     }
 
     fn remove_source(&mut self, id: &str) -> Result<bool, MapError> {
-        Ok(style_ops::remove_source(self.map.get_style_mut(), id))
+        Ok(style_ops::remove_source(self.map.style_mut(), id))
     }
 
     fn add_image(&mut self, name: &str, image_path: &str, pixel_ratio: f32, sdf: bool) -> Result<(), MapError> {
@@ -387,12 +387,12 @@ impl TestRunnerImpl for Impl {
             None,
         )
         .map_err(|e| MapError::Exception(e.to_string()))?;
-        self.map.get_style_mut().add_image(Arc::new(image));
+        self.map.style_mut().add_image(Arc::new(image));
         Ok(())
     }
 
     fn remove_image(&mut self, name: &str) -> Result<(), MapError> {
-        self.map.get_style_mut().remove_image(name);
+        self.map.style_mut().remove_image(name);
         Ok(())
     }
 

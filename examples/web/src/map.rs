@@ -233,12 +233,12 @@ impl WebMap {
     /// object with a `url` and an optional `unicode-range`, as in a font
     /// face of a style's `font-faces`.
     pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), JsValue> {
-        self.map.get_style_mut().set_fallback_font_faces(json).map_err(|error| JsValue::from_str(&error.to_string()))
+        self.map.style_mut().set_fallback_font_faces(json).map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
     /// Loads a style from a URL.
     pub fn set_style_url(&mut self, url: &str) {
-        self.map.get_style_mut().load_url(url);
+        self.map.style_mut().load_url(url);
     }
 
     /// Moves the camera.
@@ -300,13 +300,13 @@ impl WebMap {
     /// The attributions of the style's sources that have one, as HTML. A
     /// source that links a TileJSON has one once the TileJSON loads.
     pub fn attributions(&self) -> Vec<String> {
-        let style = self.map.get_style();
+        let style = self.map.style();
         style.get_sources().iter().filter_map(|source| source.get_attribution()).filter(|a| !a.is_empty()).collect()
     }
 
     /// The style's `name`, or an empty string.
     pub fn style_name(&self) -> String {
-        self.map.get_style().get_name()
+        self.map.style().get_name()
     }
 
     /// Resizes the map and its surface to `width` x `height` CSS pixels.

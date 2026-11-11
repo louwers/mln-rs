@@ -86,7 +86,7 @@ fn vector() {
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio);
     let mut map = test.map(&frontend, ratio);
     map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
-    map.get_style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("maptiler://maps/streets");
 
     frontend.render(&mut map).expect("render");
 }
@@ -99,7 +99,7 @@ fn raster() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio);
     let mut map = test.map(&frontend, ratio);
-    map.get_style_mut().load_url("maptiler://maps/hybrid");
+    map.style_mut().load_url("maptiler://maps/hybrid");
 
     frontend.render(&mut map).expect("render");
 }
@@ -147,7 +147,7 @@ fn footprint() {
             let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 2.0);
             let mut map = test.map(&frontend, 2.0);
             map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
-            map.get_style_mut().load_url(style);
+            map.style_mut().load_url(style);
             frontend.render(&mut map).expect("render");
             FrontendAndMap { _map: map, _frontend: frontend }
         }
@@ -221,7 +221,7 @@ fn rendering_stats_count_live_resources() {
     let mut map = test.map(&frontend, 1.0);
     map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
 
-    map.get_style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("maptiler://maps/streets");
     frontend.render(&mut map).expect("render");
     let loaded = live_resources(&frontend);
     for (name, value) in &loaded {
@@ -233,7 +233,7 @@ fn rendering_stats_count_live_resources() {
     assert!(live(&loaded, "mem_buffers") >= sum("mem"));
 
     // The tiles go with their style.
-    map.get_style_mut().load_json(EMPTY);
+    map.style_mut().load_json(EMPTY);
     frontend.render(&mut map).expect("render");
     let evicted = live_resources(&frontend);
     assert_eq!(live(&evicted, "num_index_buffers"), 0);
@@ -243,10 +243,10 @@ fn rendering_stats_count_live_resources() {
     }
 
     // Loading the tiles again and dropping them leaves the same resources.
-    map.get_style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("maptiler://maps/streets");
     frontend.render(&mut map).expect("render");
     assert!(live(&live_resources(&frontend), "num_index_buffers") > 0);
-    map.get_style_mut().load_json(EMPTY);
+    map.style_mut().load_json(EMPTY);
     frontend.render(&mut map).expect("render");
     assert_eq!(live_resources(&frontend), evicted);
 

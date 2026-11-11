@@ -138,7 +138,7 @@ impl FeatureTrackingTest {
         .expect("style::Image");
 
         {
-            let style = map.get_style_mut();
+            let style = map.style_mut();
             style.load_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
             style.add_source(Box::new(source)).expect("add source");
             style.add_layer(Box::new(background_layer), None).expect("add layer");
@@ -166,7 +166,7 @@ impl FeatureTrackingTest {
     }
 
     fn with_layer(&mut self, id: &str, f: impl FnOnce(&mut LayerRefMut<'_>)) {
-        let style = self.map.get_style_mut();
+        let style = self.map.style_mut();
         f(&mut style.get_layer_mut(id).expect("layer"));
     }
 
@@ -483,7 +483,7 @@ fn ndc_bound_fill_extrusion() {
     let mut layer = FillExtrusionLayer::new("extrusion", SOURCE_NAME);
     layer.set_fill_extrusion_color(&constant(Color::new(0.0, 0.0, 1.0, 1.0)));
     layer.set_fill_extrusion_height(&constant(1000.0));
-    test.map.get_style_mut().add_layer(Box::new(layer), None).expect("add layer");
+    test.map.style_mut().add_layer(Box::new(layer), None).expect("add layer");
     test.run(None, 0.0);
 
     assert_eq!(1, test.count(Some("poly0"), Some("extrusion"), Some(SOURCE_NAME)));

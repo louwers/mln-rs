@@ -188,8 +188,8 @@ impl<F: Frontend> SymbolRenderingTest<F> {
             Map::with_file_source(file_source, MapOptions::new().with_map_mode(mode).with_size(Size::new(256, 256)))
                 .unwrap();
         frontend.attach(&map);
-        map.get_style_mut().load_json(&colliding_symbols_style(count, spacing, kind));
-        map.get_style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
+        map.style_mut().load_json(&colliding_symbols_style(count, spacing, kind));
+        map.style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
         map.jump_to(&camera().with_center(Some(lat_lng(5.0, 5.0))).with_zoom(Some(4.0)));
         let map = Rc::new(RefCell::new(map));
         let _events = observer.observe(&map);
@@ -406,14 +406,14 @@ fn fully_hidden_layer_can_reappear() {
 
     let mut blocker = SymbolLayer::new("blocker", "points");
     blocker.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new("marker")));
-    test.map.borrow_mut().get_style_mut().add_layer(Box::new(blocker), None).unwrap();
+    test.map.borrow_mut().style_mut().add_layer(Box::new(blocker), None).unwrap();
     let hidden = test.render();
     assert_eq!(hidden.stats.num_draw_calls, 1);
     assert!(initial.image == hidden.image);
 
     test.map
         .borrow_mut()
-        .get_style_mut()
+        .style_mut()
         .get_layer_mut("blocker")
         .expect("the blocker layer")
         .set_visibility(VisibilityType::None);

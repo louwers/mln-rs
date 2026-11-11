@@ -126,7 +126,6 @@ impl TransformObserver for CameraEvents {
 /// ([`set_waker`](Self::set_waker)) that schedules those calls.
 pub struct Map {
     updates: UpdateSlot,
-    // TODO(port): std::unique_ptr<util::ActionJournal> actionJournal.
     transform: Transform,
 
     mode: MapMode,
@@ -181,7 +180,6 @@ impl Map {
     /// A map whose file source is `file_sources`' `ResourceLoader` for
     /// `resource_options`, or none when `file_sources` has no
     /// `ResourceLoader` factory.
-    // TODO(port): ActionJournalOptions.
     pub fn with_resource_options(
         map_options: MapOptions,
         file_sources: &FileSourceManager,
@@ -584,14 +582,14 @@ impl Map {
 
     // MARK: - Style
 
-    /// `const style::Style& getStyle() const`.
-    pub fn get_style(&self) -> &Style {
+    /// The map's style.
+    pub fn style(&self) -> &Style {
         &self.style
     }
 
-    /// `style::Style& getStyle()`. The map handles what the changes made
-    /// through it report at its next call that takes `&mut self`.
-    pub fn get_style_mut(&mut self) -> &mut Style {
+    /// The map's style, to change. The map handles what the changes report
+    /// at its next call that takes `&mut self`.
+    pub fn style_mut(&mut self) -> &mut Style {
         self.process_events();
         self.changed();
         &mut self.style

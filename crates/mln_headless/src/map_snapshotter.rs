@@ -158,7 +158,7 @@ impl MapSnapshotter {
 
                     // Collect all source attributions
                     let attributions: Attributions =
-                        map.get_style().get_sources().iter().filter_map(|source| source.get_attribution()).collect();
+                        map.style().get_sources().iter().filter_map(|source| source.get_attribution()).collect();
                     (point_for_fn, lat_lng_for_fn, attributions)
                 };
 
@@ -193,25 +193,25 @@ impl MapSnapshotter {
         Self::with_observer(size, pixel_ratio, resource_options, Rc::new(NullMapSnapshotterObserver))
     }
 
-    /// The map, for `getStyle()`: `snapshotter.map().get_style_mut()`.
+    /// The map, for `getStyle()`: `snapshotter.map().style_mut()`.
     pub fn map(&self) -> RefMut<'_, Map> {
         self.map.borrow_mut()
     }
 
     pub fn set_style_url(&self, style_url: &str) {
-        self.map().get_style_mut().load_url(style_url);
+        self.map().style_mut().load_url(style_url);
     }
 
     pub fn get_style_url(&self) -> String {
-        self.map.borrow().get_style().get_url()
+        self.map.borrow().style().get_url()
     }
 
     pub fn set_style_json(&self, style_json: &str) {
-        self.map().get_style_mut().load_json(style_json);
+        self.map().style_mut().load_json(style_json);
     }
 
     pub fn get_style_json(&self) -> String {
-        self.map.borrow().get_style().get_json()
+        self.map.borrow().style().get_json()
     }
 
     pub fn set_size(&self, size: Size) {

@@ -12,7 +12,7 @@ fn a_rendered_still_shows_in_the_snapshot() {
     let mut frontend = HeadlessFrontend::new(size, 1.0);
     let mut map = Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size)).unwrap();
     frontend.attach(&map);
-    map.get_style_mut().load_json(
+    map.style_mut().load_json(
         r#"{"version":8,"sources":{},"layers":[{"id":"background","type":"background","paint":{"background-color":"red"}}]}"#,
     );
 

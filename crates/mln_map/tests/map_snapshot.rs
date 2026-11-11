@@ -178,7 +178,7 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, true, "enable_rendering_stats_view");
     map.enable_rendering_stats_view(true);
     assert_changed(&map, false, "enable_rendering_stats_view when enabled");
-    map.get_style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     assert_changed(&map, true, "load_json");
     map.set_free_camera_options(&FreeCameraOptions { position: Some([0.4, 0.4, 0.1]), orientation: None });
     assert_changed(&map, true, "set_free_camera_options");
