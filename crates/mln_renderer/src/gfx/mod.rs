@@ -6,3 +6,4 @@ pub mod drawable_atlases_tweaker;
 pub mod dynamic_texture;
 pub mod dynamic_texture_atlas;
 pub mod fill_generator;
+pub mod fill_large_mesh_arrays;

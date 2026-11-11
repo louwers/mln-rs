@@ -10,12 +10,17 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use crate::context::Context;
+use crate::projection_variant::ProjectionVariant;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 
 /// `StringIDSetsPair = pair<unordered_set<string_view>, unordered_set<size_t>>`
 pub type StringIDSetsPair = (HashSet<String>, HashSet<usize>);
 
 pub type PropertyHashType = u64;
+
+/// `ShaderGroup::globeDefine`: the define that compiles a shader's globe
+/// variant.
+pub const GLOBE_DEFINE: &str = "PROJECTION_GLOBE";
 
 /// The data members of `gfx::ShaderGroup`.
 #[derive(Default)]
@@ -77,6 +82,7 @@ pub trait ShaderGroup {
         &self,
         _context: &dyn Context,
         _properties_as_uniforms: &StringIDSetsPair,
+        _variant: ProjectionVariant,
         _first_attrib_name: &str,
     ) -> Option<ShaderProgramBasePtr> {
         None

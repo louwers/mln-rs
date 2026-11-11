@@ -3,9 +3,9 @@
 
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
-    IconTextFitType, LightAnchorType, LineCapType, LineJoinType, RasterResamplingType, SymbolAnchorType,
-    SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    IconTextFitType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition, RasterResamplingType,
+    SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
+    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType, projection_type_from_name,
 };
 use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
@@ -154,6 +154,34 @@ impl Converter for Vec<Color> {
         }
 
         Some(result)
+    }
+}
+
+impl Converter for ProjectionDefinition {
+    fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<ProjectionDefinition> {
+        if let Some(name) = value.to_string() {
+            if let Some(type_) = projection_type_from_name(&name) {
+                return Some(ProjectionDefinition::new(type_));
+            }
+            error.message = "projection type must be mercator, vertical-perspective or globe".to_owned();
+            return None;
+        }
+        if value.is_array() && value.array_length() == 3 {
+            let from_name = value.array_member(0).to_string();
+            let to_name = value.array_member(1).to_string();
+            let transition = value.array_member(2).to_double();
+            if let (Some(from_name), Some(to_name), Some(transition)) = (from_name, to_name, transition) {
+                let from = projection_type_from_name(&from_name);
+                let to = projection_type_from_name(&to_name);
+                if let (Some(from), Some(to)) = (from, to) {
+                    return Some(ProjectionDefinition::between(from, to, transition));
+                }
+                error.message = "projection type must be mercator, vertical-perspective or globe".to_owned();
+                return None;
+            }
+        }
+        error.message = "value must be a string or an array of [from, to, transition]".to_owned();
+        None
     }
 }
 

@@ -32,7 +32,6 @@ bytemuck.workspace = true
 earcut.workspace = true
 feature.workspace = true
 geometry.workspace = true
-libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_expression.workspace = true
 mln_gfx.workspace = true
@@ -142,6 +141,26 @@ path = "tests/malformed_tile_test.rs"
 [[test]]
 name = "gtest_tile_range"
 path = "tests/gtest_tile_range.rs"
+
+[[test]]
+name = "gtest_tile_lod"
+path = "tests/gtest_tile_lod.rs"
+
+[[test]]
+name = "gtest_sky"
+path = "tests/gtest_sky.rs"
+
+[[test]]
+name = "gtest_subdivision"
+path = "tests/gtest_subdivision.rs"
+
+[[test]]
+name = "gtest_fill_large_mesh_arrays"
+path = "tests/gtest_fill_large_mesh_arrays.rs"
+
+[[test]]
+name = "gtest_fill_generator"
+path = "tests/gtest_fill_generator.rs"
 
 [dev-dependencies]
 geojson = { package = "mln-rs-geojson", path = "../../vendor/geojson" }

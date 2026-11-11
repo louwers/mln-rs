@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license.workspace = true
+license = "ISC"
 repository.workspace = true
 include.workspace = true
 # The [[test]]s below; tests/ also holds their modules.
@@ -19,7 +19,6 @@ doctest = false
 feature.workspace = true
 geometry.workspace = true
 kdbush.workspace = true
-libstdcxx.workspace = true
 
 # Port of supercluster/test/test.cpp over test/fixtures/places.json, read in
 # place.

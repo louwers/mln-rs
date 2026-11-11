@@ -29,6 +29,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 
 use super::envelope::{About, Encoded, MessageKind};
@@ -77,7 +78,12 @@ enum Hosted {
 #[derive(Default)]
 struct Sent {
     data: Kept<(Option<SharedTileData>, Immutable<VecSet<String>>)>,
-    layers: Kept<(Vec<Immutable<dyn LayerProperties>>, Option<Arc<GlobalStateMap>>, Immutable<VecSet<String>>)>,
+    layers: Kept<(
+        Vec<Immutable<dyn LayerProperties>>,
+        Option<Arc<GlobalStateMap>>,
+        Immutable<VecSet<String>>,
+        SubdivisionGranularitySetting,
+    )>,
 }
 
 /// The tile's data or its layers, as the worker last got them, with the
@@ -110,15 +116,26 @@ impl Sent {
                 self.data = Kept::Sent((data.clone(), available_images.clone()));
                 self.layers.error().map(|error| (error, *correlation_id))
             }
-            WorkerMessage::SetLayers { layers, global_state, available_images, correlation_id } => {
-                self.layers = Kept::Sent((layers.clone(), global_state.clone(), available_images.clone()));
+            WorkerMessage::SetLayers {
+                layers,
+                global_state,
+                available_images,
+                subdivision_granularity,
+                correlation_id,
+            } => {
+                self.layers = Kept::Sent((
+                    layers.clone(),
+                    global_state.clone(),
+                    available_images.clone(),
+                    *subdivision_granularity,
+                ));
                 self.data.error().map(|error| (error, *correlation_id))
             }
             WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
                 if let Kept::Sent((_, images)) = &mut self.data {
                     *images = available_images.clone();
                 }
-                if let Kept::Sent((_, _, images)) = &mut self.layers {
+                if let Kept::Sent((_, _, images, _)) = &mut self.layers {
                     *images = available_images.clone();
                 }
                 self.data.error().or_else(|| self.layers.error()).map(|error| (error, *correlation_id))
@@ -139,12 +156,15 @@ impl Sent {
             MessageKind::SetData => {
                 self.data = Kept::Failed(error);
                 match &self.layers {
-                    Kept::Sent((layers, global_state, available_images)) => Some(WorkerMessage::SetLayers {
-                        layers: layers.clone(),
-                        global_state: global_state.clone(),
-                        available_images: available_images.clone(),
-                        correlation_id,
-                    }),
+                    Kept::Sent((layers, global_state, available_images, subdivision_granularity)) => {
+                        Some(WorkerMessage::SetLayers {
+                            layers: layers.clone(),
+                            global_state: global_state.clone(),
+                            available_images: available_images.clone(),
+                            subdivision_granularity: *subdivision_granularity,
+                            correlation_id,
+                        })
+                    }
                     _ => None,
                 }
             }

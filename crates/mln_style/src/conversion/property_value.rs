@@ -4,8 +4,8 @@
 use mln_expression::formatted::Formatted;
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
-    LightAnchorType, LineCapType, LineJoinType, Position, RasterResamplingType, Rotation, SymbolAnchorType,
-    SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
+    LightAnchorType, LineCapType, LineJoinType, Position, ProjectionDefinition, RasterResamplingType, Rotation,
+    SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
     TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
 };
 use mln_util::{Color, Padding};
@@ -39,6 +39,7 @@ no_tokens!(
     Color,
     Padding,
     Position,
+    ProjectionDefinition,
     Rotation,
     VariableAnchorOffsetCollection,
     [f32; 2],

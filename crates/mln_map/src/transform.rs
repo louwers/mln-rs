@@ -20,10 +20,11 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_map_types::{
     AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
-    CameraVelocity, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay, MomentumDecayModel, MomentumEasing,
-    MomentumSnap, NorthOrientation, ProjectionMode, TransformState, TransformStateProperties, TransitionEnd,
-    TransitionOutcome, ViewportMode,
+    CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
+    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState,
+    TransformStateProperties, TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
 };
+use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
 use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
@@ -122,6 +123,8 @@ impl TransformObserver for NullTransformObserver {}
 /// center or padding the frame could not compute (logged), which keeps the
 /// current one.
 type FrameFn = Rc<dyn Fn(&TransformState, f64) -> CameraOptions>;
+/// `std::function<ProjectionDefinition(double zoom)>`.
+pub type ProjectionForZoomFn = Rc<dyn Fn(f64) -> ProjectionDefinition>;
 
 // `Transform::CameraField`.
 const CENTER: u16 = 1 << 0;
@@ -484,6 +487,8 @@ pub struct Transform {
     gesture: GestureState,
     /// The host's current frame time (see [`Self::set_frame_time`]).
     frame_time: Option<TimePoint>,
+    projection_for_zoom: Option<ProjectionForZoomFn>,
+    globe_free_bearing: bool,
 }
 
 /// The gesture that camera deltas and updates with a phase make, as
@@ -537,6 +542,8 @@ impl Transform {
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
             frame_time: None,
+            projection_for_zoom: None,
+            globe_free_bearing: false,
         }
     }
 
@@ -551,6 +558,8 @@ impl Transform {
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
             frame_time: None,
+            projection_for_zoom: None,
+            globe_free_bearing: false,
         }
     }
 
@@ -615,6 +624,22 @@ impl Transform {
     /// Change any combination of center, zoom, bearing, and pitch, without a
     /// transition. Omitted options keep their current animations.
     pub fn jump_to(&mut self, camera: &CameraOptions) {
+        // On the globe the zoom decides how close to a pole the center can be.
+        // GL JS's jump bounds the center by the zoom it lands on, where its
+        // ease bounds it by the zoom it starts from unless given one, so the
+        // jump settles the zoom.
+        if self.state.is_globe_rendering()
+            && let Some(center) = camera.center
+            && camera.zoom.is_none()
+        {
+            let zoom = self.get_zoom()
+                + VerticalPerspectiveProjection::zoom_adjustment(
+                    self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                    center.latitude(),
+                );
+            self.ease_to(&camera.with_zoom(Some(zoom)), &AnimationOptions::default());
+            return;
+        }
         self.ease_to(camera, &AnimationOptions::default());
     }
 
@@ -623,9 +648,11 @@ impl Transform {
     /// keep their current animations and timing.
     pub fn ease_to(&mut self, input_camera: &CameraOptions, animation: &AnimationOptions) {
         let mut camera = *input_camera;
+        let globe = self.state.is_globe_rendering();
 
         let duration = animation.duration.unwrap_or(Duration::zero());
-        if self.state.get_lat_lng_bounds() == LatLngBounds::default()
+        if !globe
+            && self.state.get_lat_lng_bounds() == LatLngBounds::default()
             && !self.is_gesture_in_progress()
             && duration != Duration::zero()
         {
@@ -636,16 +663,31 @@ impl Transform {
         }
 
         let mut zoom = camera.zoom.unwrap_or(self.get_zoom());
+        if camera.zoom.is_none()
+            && let Some(center) = camera.center
+            && globe
+        {
+            zoom += VerticalPerspectiveProjection::zoom_adjustment(
+                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                center.latitude(),
+            );
+        }
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
 
         let padding = camera.padding.unwrap_or(self.state.get_edge_insets());
         let mut start_lat_lng = self.get_lat_lng(WrapMode::Unwrapped);
         let unwrapped_lat_lng = camera.center.unwrap_or(start_lat_lng);
-        let lat_lng_end = if self.state.get_lat_lng_bounds() != LatLngBounds::default() {
-            unwrapped_lat_lng
-        } else {
-            unwrapped_lat_lng.wrapped()
-        };
+        // On the globe the ease heads for the center the zoom it was given
+        // allows, or else the zoom it starts from, as GL JS's does; its last
+        // frame is bounded by the zoom it ends on.
+        let lat_lng_end = self.state.constrained_center(
+            &if self.state.get_lat_lng_bounds() != LatLngBounds::default() {
+                unwrapped_lat_lng
+            } else {
+                unwrapped_lat_lng.wrapped()
+            },
+            if camera.zoom.is_some() { zoom } else { self.get_zoom() },
+        );
 
         let mut bearing = match camera.bearing {
             Some(b) => mln_math::deg2rad(-b),
@@ -689,7 +731,17 @@ impl Transform {
         let end_point = Projection::project(&lat_lng_end, self.state.get_scale());
 
         // Constrain camera options.
-        zoom = mln_math::clamp_f64(zoom, self.state.get_min_zoom(), self.state.get_max_zoom());
+        // The target is drawn in the projection the style gives at its zoom,
+        // which the animation may cross into.
+        let target_globe = match &self.projection_for_zoom {
+            Some(projection_for_zoom) => projection_for_zoom(zoom).transition_state() > 0.0,
+            None => globe,
+        };
+        zoom = mln_math::clamp_f64(
+            zoom,
+            self.state.get_min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
+            self.state.get_max_zoom(),
+        );
         pitch = mln_math::clamp_f64(pitch, self.state.get_min_pitch(), self.state.get_max_pitch());
         fov = mln_math::clamp_f64(fov, self.state.get_min_field_of_view(), self.state.get_max_field_of_view());
 
@@ -703,10 +755,76 @@ impl Transform {
         let start_fov = self.state.get_field_of_view() as f64;
         let start_edge_insets = self.state.get_edge_insets();
 
+        // On the globe the zoom is eased in equator terms so the planet holds
+        // its size as the latitude changes, and the center moves the way GL
+        // JS moves it: longitude paced at 1 / cos(latitude), sped up ahead of
+        // a zoom in.
+        let normalized_start_zoom = if globe {
+            start_zoom + VerticalPerspectiveProjection::zoom_adjustment(start_lat_lng.latitude(), 0.0)
+        } else {
+            start_zoom
+        };
+        let normalized_zoom = if globe {
+            zoom + VerticalPerspectiveProjection::zoom_adjustment(lat_lng_end.latitude(), 0.0)
+        } else {
+            zoom
+        };
+        let final_scale = self.state.zoom_scale(normalized_zoom - normalized_start_zoom);
+        let base =
+            if normalized_zoom > normalized_start_zoom { std_min(2.0, final_scale) } else { std_max(0.5, final_scale) };
+        let delta_latitude = if globe {
+            VerticalPerspectiveProjection::difference_of_angles_degrees(
+                start_lat_lng.latitude(),
+                lat_lng_end.latitude(),
+            )
+        } else {
+            0.0
+        };
+        let delta_longitude = if globe {
+            VerticalPerspectiveProjection::difference_of_angles_degrees(
+                start_lat_lng.longitude(),
+                lat_lng_end.longitude(),
+            )
+        } else {
+            0.0
+        };
+        let moves_around_anchor = camera.anchor.is_some() && camera.center.is_none();
+
         let frame: FrameFn = Rc::new(move |state: &TransformState, t: f64| {
-            let frame_point = interpolate(&start_point, &end_point, t);
-            let frame_lat_lng = frame_unproject(&frame_point, state.zoom_scale(start_zoom), WrapMode::Unwrapped);
-            let frame_zoom = interpolate(&start_zoom, &zoom, t);
+            let (frame_lat_lng, frame_zoom) = if globe {
+                // An anchor moves the center a frame at a time (see
+                // apply_transitions), so it stays, and the zoom follows its
+                // latitude to keep the planet's size.
+                let mut frame_lat_lng =
+                    if moves_around_anchor { state.get_lat_lng(WrapMode::Unwrapped) } else { lat_lng_end };
+                let mut frame_zoom = zoom;
+                if moves_around_anchor {
+                    frame_zoom = interpolate(&normalized_start_zoom, &normalized_zoom, t)
+                        + VerticalPerspectiveProjection::zoom_adjustment(0.0, frame_lat_lng.latitude());
+                } else if t < 1.0 {
+                    let factor = t * base.powf(1.0 - t);
+                    frame_lat_lng = VerticalPerspectiveProjection::interpolate_lat_lng(
+                        &start_lat_lng,
+                        delta_latitude,
+                        delta_longitude,
+                        factor,
+                    )
+                    .wrapped();
+                    frame_zoom = if zoom != start_zoom {
+                        interpolate(&normalized_start_zoom, &normalized_zoom, t)
+                            + VerticalPerspectiveProjection::zoom_adjustment(0.0, frame_lat_lng.latitude())
+                    } else {
+                        start_zoom
+                    };
+                }
+                (Some(frame_lat_lng), frame_zoom)
+            } else {
+                let frame_point = interpolate(&start_point, &end_point, t);
+                (
+                    frame_unproject(&frame_point, state.zoom_scale(start_zoom), WrapMode::Unwrapped),
+                    interpolate(&start_zoom, &zoom, t),
+                )
+            };
             CameraOptions::default()
                 .with_center(frame_lat_lng)
                 .with_zoom(Some(frame_zoom))
@@ -722,7 +840,19 @@ impl Transform {
                 .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))))
         });
 
-        self.start_transition(input_camera, animation, frame, duration, false);
+        // On the globe the zoom keeps the planet's size as the center's
+        // latitude changes, and a zoom moves the center when it bounds it
+        // closer to the equator, so an ease that moves the center sets both
+        // (an anchored one gets its center from the anchor).
+        let moves_center = input_camera.center.is_some() || lat_lng_end.wrapped() != start_lat_lng.wrapped();
+        let fields = if globe && moves_around_anchor {
+            input_camera.with_zoom(Some(zoom))
+        } else if globe && moves_center {
+            input_camera.with_center(Some(lat_lng_end)).with_zoom(Some(zoom))
+        } else {
+            *input_camera
+        };
+        self.start_transition(&fields, animation, frame, duration, false);
     }
 
     /// This method implements an “optimal path” animation, as detailed in:
@@ -740,12 +870,27 @@ impl Transform {
         linear_zoom_interpolation: bool,
     ) {
         let mut camera = *input_camera;
+        let globe = self.state.is_globe_rendering();
 
         let mut zoom = camera.zoom.unwrap_or(self.get_zoom());
+        if camera.zoom.is_none()
+            && let Some(center) = camera.center
+            && globe
+        {
+            zoom += VerticalPerspectiveProjection::zoom_adjustment(
+                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                center.latitude(),
+            );
+        }
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
 
         let padding = camera.padding.unwrap_or(self.state.get_edge_insets());
-        let lat_lng_end = camera.center.unwrap_or(self.get_lat_lng(WrapMode::Unwrapped)).wrapped();
+        // As in easeTo, the globe's flight heads for the center the zoom it
+        // was given, or else starts from, allows.
+        let lat_lng_end = self.state.constrained_center(
+            &camera.center.unwrap_or(self.get_lat_lng(WrapMode::Unwrapped)).wrapped(),
+            if camera.zoom.is_some() { zoom } else { self.get_zoom() },
+        );
         let center_alt = camera.center_altitude.unwrap_or(self.state.get_center_altitude());
         let mut bearing = match camera.bearing {
             Some(b) => mln_math::deg2rad(-b),
@@ -784,7 +929,17 @@ impl Transform {
         let end_point = Projection::project(&lat_lng_end, self.state.get_scale());
 
         // Constrain camera options.
-        zoom = mln_math::clamp_f64(zoom, self.state.get_min_zoom(), self.state.get_max_zoom());
+        // The target is drawn in the projection the style gives at its zoom,
+        // which the animation may cross into.
+        let target_globe = match &self.projection_for_zoom {
+            Some(projection_for_zoom) => projection_for_zoom(zoom).transition_state() > 0.0,
+            None => globe,
+        };
+        zoom = mln_math::clamp_f64(
+            zoom,
+            self.state.get_min_zoom_at_latitude_with(lat_lng_end.latitude(), target_globe),
+            self.state.get_max_zoom(),
+        );
         pitch = mln_math::clamp_f64(pitch, self.state.get_min_pitch(), self.state.get_max_pitch());
         fov = mln_math::clamp_f64(fov, self.state.get_min_field_of_view(), self.state.get_max_field_of_view());
 
@@ -803,12 +958,33 @@ impl Transform {
             size.width as f64 - padding.left - padding.right,
             size.height as f64 - padding.top - padding.bottom,
         );
+        // The globe counts zoom in equator terms and distance along the
+        // surface, so the arc is the same at any latitude.
+        let normalized_start_zoom = if globe {
+            start_zoom + VerticalPerspectiveProjection::zoom_adjustment(start_lat_lng.latitude(), 0.0)
+        } else {
+            start_zoom
+        };
+        let normalized_zoom = if globe {
+            zoom + VerticalPerspectiveProjection::zoom_adjustment(lat_lng_end.latitude(), 0.0)
+        } else {
+            zoom
+        };
         // w₁: Final visible span, measured in pixels with respect to the
         // initial scale.
-        let w1 = w0 / self.state.zoom_scale(zoom - start_zoom);
+        let w1 = w0 / self.state.zoom_scale(normalized_zoom - normalized_start_zoom);
         // Length of the flight path as projected onto the ground plane,
         // measured in pixels from the world image origin at the initial scale.
-        let u1 = (end_point.x - start_point.x).hypot(end_point.y - start_point.y);
+        let u1 = if globe {
+            VerticalPerspectiveProjection::surface_distance_pixels(
+                Projection::world_size(self.state.get_scale()),
+                start_lat_lng.latitude(),
+                &start_lat_lng,
+                &lat_lng_end,
+            )
+        } else {
+            (end_point.x - start_point.x).hypot(end_point.y - start_point.y)
+        };
 
         // ρ: The relative amount of zooming that takes place along the flight
         // path. A high value maximizes zooming for an exaggerated animation,
@@ -820,11 +996,41 @@ impl Transform {
         // equivalent to the root mean squared average velocity,
         // V<sub>RMS</sub>. A value of 1 produces a circular motion.
         let mut rho = 1.42;
-        if animation.min_zoom.is_some() || linear_zoom_interpolation {
+        if globe {
+            // GL JS: the arc may not dip below the map's or the flight's
+            // minimum zoom, and that only ever lowers ρ.
+            let floor_zoom =
+                std_max(animation.min_zoom.unwrap_or(self.state.get_min_zoom()), self.state.get_min_zoom());
+            // std::min({a, b, c}): the first of the smallest.
+            let normalized_floor_zoom = std_min(
+                std_min(
+                    floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(lat_lng_end.latitude(), 0.0),
+                    normalized_start_zoom,
+                ),
+                normalized_zoom,
+            );
+            let min_zoom = mln_math::clamp_f64(
+                normalized_floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(0.0, lat_lng_end.latitude()),
+                self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),
+                self.state.get_max_zoom(),
+            );
+            let w_max = w0
+                / self.state.zoom_scale(
+                    min_zoom + VerticalPerspectiveProjection::zoom_adjustment(lat_lng_end.latitude(), 0.0)
+                        - normalized_start_zoom,
+                );
+            if u1 != 0.0 {
+                rho = std_min(rho, (w_max / u1 * 2.0).sqrt());
+            }
+        } else if animation.min_zoom.is_some() || linear_zoom_interpolation {
             // util::min(a, b, c) = min(a, min(b, c)), fmin on doubles
             let mut min_zoom =
                 mln_math::min_f64(animation.min_zoom.unwrap_or(start_zoom), mln_math::min_f64(start_zoom, zoom));
-            min_zoom = mln_math::clamp_f64(min_zoom, self.state.get_min_zoom(), self.state.get_max_zoom());
+            min_zoom = mln_math::clamp_f64(
+                min_zoom,
+                self.state.get_min_zoom_at_latitude(lat_lng_end.latitude()),
+                self.state.get_max_zoom(),
+            );
             // w<sub>m</sub>: Maximum visible span, measured in pixels with
             // respect to the initial scale.
             let w_max = w0 / self.state.zoom_scale(min_zoom - start_zoom);
@@ -896,6 +1102,22 @@ impl Transform {
         };
         let start_scale = self.state.get_scale();
         let start_edge_insets = self.state.get_edge_insets();
+        let delta_latitude = if globe {
+            VerticalPerspectiveProjection::difference_of_angles_degrees(
+                start_lat_lng.latitude(),
+                lat_lng_end.latitude(),
+            )
+        } else {
+            0.0
+        };
+        let delta_longitude = if globe {
+            VerticalPerspectiveProjection::difference_of_angles_degrees(
+                start_lat_lng.longitude(),
+                lat_lng_end.longitude(),
+            )
+        } else {
+            0.0
+        };
 
         let frame: FrameFn = Rc::new(move |state: &TransformState, k: f64| {
             // s: The distance traveled along the flight path, measured in
@@ -903,21 +1125,47 @@ impl Transform {
             let s = k * total_s;
             let us = if k == 1.0 { 1.0 } else { u(s) };
 
-            // Calculate the current point and zoom level along the flight path.
-            let frame_point = interpolate(&start_point, &end_point, us);
-            let mut frame_zoom = if linear_zoom_interpolation {
-                interpolate(&start_zoom, &zoom, k)
+            let (frame_lat_lng, frame_zoom) = if globe {
+                let mut frame_lat_lng = lat_lng_end;
+                let mut frame_zoom = zoom;
+                if k < 1.0 {
+                    frame_lat_lng = VerticalPerspectiveProjection::interpolate_lat_lng(
+                        &start_lat_lng,
+                        delta_latitude,
+                        delta_longitude,
+                        us,
+                    )
+                    .wrapped();
+                    let frame_normalized_zoom = if linear_zoom_interpolation {
+                        interpolate(&normalized_start_zoom, &normalized_zoom, k)
+                    } else {
+                        normalized_start_zoom + state.scale_zoom(1.0 / w(s))
+                    };
+                    frame_zoom = frame_normalized_zoom
+                        + VerticalPerspectiveProjection::zoom_adjustment(0.0, frame_lat_lng.latitude());
+                    if frame_zoom.is_nan() {
+                        frame_zoom = zoom;
+                    }
+                }
+                (Some(frame_lat_lng), frame_zoom)
             } else {
-                start_zoom + state.scale_zoom(1.0 / w(s))
+                // Calculate the current point and zoom level along the flight
+                // path.
+                let frame_point = interpolate(&start_point, &end_point, us);
+                let mut frame_zoom = if linear_zoom_interpolation {
+                    interpolate(&start_zoom, &zoom, k)
+                } else {
+                    start_zoom + state.scale_zoom(1.0 / w(s))
+                };
+
+                // Zoom can be NaN if size is empty.
+                if frame_zoom.is_nan() {
+                    frame_zoom = zoom;
+                }
+
+                // Convert to geographic coordinates and set the new viewpoint.
+                (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), frame_zoom)
             };
-
-            // Zoom can be NaN if size is empty.
-            if frame_zoom.is_nan() {
-                frame_zoom = zoom;
-            }
-
-            // Convert to geographic coordinates and set the new viewpoint.
-            let frame_lat_lng = frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped);
             CameraOptions::default()
                 .with_center(frame_lat_lng)
                 .with_zoom(Some(frame_zoom))
@@ -938,10 +1186,135 @@ impl Transform {
 
     // MARK: - Position
 
+    /// Whether the globe is drawn on a sized screen, so screen points reach
+    /// it. Before the first resize, screen-point gestures are Mercator's.
+    fn globe_on_screen(&self) -> bool {
+        self.state.is_globe_rendering() && !self.state.get_size().is_empty()
+    }
+
     /// Pans the map by the given amount.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
     /// or infinite offset.
     pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
+        self.move_by_with_anchor(offset, None, animation)
+    }
+
+    /// `moveBy(offset, anchor, animation)`: a drag on the globe turns the
+    /// planet so that the location under `anchor` follows the cursor.
+    /// `Err`: as [`move_by`](Self::move_by).
+    pub fn move_by_with_anchor(
+        &mut self,
+        offset: &ScreenCoordinate,
+        anchor: Option<ScreenCoordinate>,
+        animation: &AnimationOptions,
+    ) -> Result<(), Error> {
+        let flipped = |state: &TransformState, point: &ScreenCoordinate| {
+            ScreenCoordinate::new(point.x, f64::from(state.get_size().height) - point.y)
+        };
+        let size = self.state.get_size();
+        let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
+        let fling_duration = animation.duration.filter(|duration| *duration > Duration::zero());
+        let globe = self.globe_on_screen();
+        if globe && (offset.x.is_nan() || offset.y.is_nan()) {
+            return Err(Error::invalid_argument("offset must not be NaN"));
+        }
+        if globe && (!offset.x.is_finite() || !offset.y.is_finite()) {
+            return Err(Error::invalid_argument("offset must not be infinite"));
+        }
+        if globe
+            && let Some(duration) = fling_duration
+            && self.globe_free_bearing
+        {
+            // A fling with the bearing free turns the planet on about the axis
+            // the drag turned it about, so it carries on over a pole instead
+            // of spinning round it.
+            let start = CenterAndBearing {
+                center: self.get_lat_lng(WrapMode::Unwrapped),
+                bearing: -mln_math::rad2deg(self.get_bearing()),
+            };
+            let end = VerticalPerspectiveProjection::fling_camera(
+                &self.state,
+                &flipped(&self.state, &view_center),
+                &ScreenCoordinate::new(offset.x, -offset.y),
+            );
+            let start_zoom = self.get_zoom();
+            let frame: FrameFn = Rc::new(move |state: &TransformState, t: f64| {
+                let camera = VerticalPerspectiveProjection::interpolate_camera(&start, &end, t);
+                let center = state.constrained_center(&camera.center, state.get_zoom());
+                CameraOptions::default()
+                    .with_center(Some(center))
+                    .with_zoom(Some(
+                        start_zoom
+                            + VerticalPerspectiveProjection::zoom_adjustment(
+                                start.center.latitude(),
+                                center.latitude(),
+                            ),
+                    ))
+                    .with_bearing(Some(camera.bearing))
+            });
+            // The fling sets the center, the zoom that keeps the planet's
+            // size and the bearing.
+            let fields = CameraOptions::default()
+                .with_center(Some(end.center))
+                .with_zoom(Some(start_zoom))
+                .with_bearing(Some(end.bearing));
+            self.start_transition(&fields, animation, frame, duration, false);
+            return Ok(());
+        }
+
+        if globe && fling_duration.is_some() {
+            // An animated move, a fling, turns the globe as GL JS's inertia
+            // does: the location under the far end of a long one can be off
+            // the planet or over a pole. It stops short of half a turn, which
+            // the ease would take the other way round.
+            let mut center = self
+                .state
+                .constrained_center(&VerticalPerspectiveProjection::pan_center(&self.state, offset), self.get_zoom());
+            let longitude = self.get_lat_lng(WrapMode::Unwrapped).longitude();
+            if (center.longitude() - longitude).abs() > 180.0 {
+                center = lat_lng(center.latitude(), longitude + 179.5f64.copysign(center.longitude() - longitude));
+            }
+            self.ease_to(&CameraOptions::default().with_center(Some(center)), animation);
+            return Ok(());
+        }
+
+        if globe {
+            // A drag turns the globe as GL JS's does: one rotation that brings
+            // the location under the cursor back under it with the bearing
+            // held, around the cursor when it is on the planet and around the
+            // center otherwise. With a free bearing the rotation turns the
+            // bearing too, so the location stays under the cursor.
+            let grab = match anchor {
+                Some(anchor)
+                    if VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+                        &self.state,
+                        &flipped(&self.state, &anchor),
+                    ) =>
+                {
+                    anchor
+                }
+                _ => view_center,
+            };
+            let pan_delta = ScreenCoordinate::new(offset.x, -offset.y);
+            let mut camera = CameraOptions::default();
+            let mut center = if self.globe_free_bearing {
+                let drag =
+                    VerticalPerspectiveProjection::drag_camera(&self.state, &flipped(&self.state, &grab), &pan_delta);
+                camera = camera.with_bearing(Some(drag.bearing));
+                drag.center
+            } else {
+                VerticalPerspectiveProjection::drag_center(&self.state, &flipped(&self.state, &grab), &pan_delta)
+            };
+            center = self.state.constrained_center(&center, self.get_zoom());
+            let zoom = self.get_zoom()
+                + VerticalPerspectiveProjection::zoom_adjustment(
+                    self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                    center.latitude(),
+                );
+            self.ease_to(&camera.with_center(Some(center)).with_zoom(Some(zoom)), animation);
+            return Ok(());
+        }
+
         let mut center_offset = *offset;
 
         // Reduce the offset so that it never goes past the horizon. If it
@@ -1092,6 +1465,30 @@ impl Transform {
         self.state.get_field_of_view() as f64
     }
 
+    // MARK: - Projection
+
+    pub fn set_projection_definition(&mut self, definition: &ProjectionDefinition) {
+        self.state.set_projection_definition(definition);
+    }
+
+    /// The projection the style gives at a zoom, which constrains an
+    /// animation's target as it constrains a jump.
+    pub fn set_projection_for_zoom(&mut self, projection_for_zoom: Option<ProjectionForZoomFn>) {
+        self.projection_for_zoom = projection_for_zoom;
+    }
+
+    pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
+        self.globe_free_bearing = free_bearing;
+    }
+
+    pub fn is_globe_free_bearing(&self) -> bool {
+        self.globe_free_bearing
+    }
+
+    pub fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
+        self.state.is_location_occluded(lat_lng)
+    }
+
     // MARK: - North Orientation
 
     pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
@@ -1235,7 +1632,8 @@ impl Transform {
     /// Composes the current camera with each of `active`'s cameras at `now`,
     /// for the fields it still owns, then applies the result.
     fn apply_transitions(&mut self, active: &[Rc<Transition>], now: TimePoint) {
-        // The center is unwrapped (TransformState::getCameraOptions).
+        // The center is unwrapped, or wrapped on the globe without bounds
+        // (TransformState::get_camera_options).
         let current = self.state.get_camera_options(None);
         let mut camera = current;
 
@@ -1284,6 +1682,23 @@ impl Transform {
             .find(|transition| transition.anchor.is_some() && transition.fields.get() & CENTER != 0)
             .cloned();
 
+        // On the globe the anchor is re-read every frame and the zoom around
+        // it is GL JS's blend of the exact solution and a damped heuristic;
+        // the exact solution alone jumps near the horizon. A frame can't
+        // return the C++ exception for an anchor with no LatLng; it is
+        // logged, and the anchor's location at the start stands in.
+        let globe_zoom_around = match &anchored {
+            Some(anchored) if self.globe_on_screen() => anchored.anchor.map(|anchor| {
+                let location =
+                    self.state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
+                        Log::error(Event::General, &e.message);
+                        anchored.anchor_lat_lng
+                    });
+                (location, self.state.get_zoom())
+            }),
+            _ => None,
+        };
+
         // Compose the camera before applying constraints. In particular,
         // padding and field of view determine the pitch limit, and center
         // and zoom jointly determine the geographic bounds and altitude
@@ -1311,13 +1726,28 @@ impl Transform {
         let mut zoom = camera.zoom.unwrap_or_default();
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
-        // The anchor had a LatLng at the start; a frame can't return the C++
-        // exception, so it is logged, as in frame_edge_insets.
         if let Some(anchored) = anchored
             && let Some(anchor) = anchored.anchor
-            && let Err(e) = self.state.move_lat_lng(&anchored.anchor_lat_lng, &anchor)
         {
-            Log::error(Event::General, &e.message);
+            match globe_zoom_around {
+                Some((location, zoom_before)) if self.state.get_zoom() != zoom_before => {
+                    let zoom_delta = self.state.get_zoom() - zoom_before;
+                    VerticalPerspectiveProjection::zoom_around_point(
+                        &mut self.state,
+                        &anchor,
+                        &location,
+                        zoom_delta,
+                        self.globe_free_bearing,
+                    );
+                }
+                // The anchor had a LatLng at the start; a frame can't return
+                // the C++ exception, so it is logged, as in frame_edge_insets.
+                _ => {
+                    if let Err(e) = self.state.move_lat_lng(&anchored.anchor_lat_lng, &anchor) {
+                        Log::error(Event::General, &e.message);
+                    }
+                }
+            }
         }
         self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
     }
@@ -1668,6 +2098,10 @@ impl Transform {
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.get_lat_lng_bounds() != LatLngBounds::default();
         for _ in 0..steps as u32 {
+            if self.globe_on_screen() {
+                self.step_globe_pan(&step);
+                continue;
+            }
             let size = self.state.get_size();
             let center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
             let point = ScreenCoordinate::new(center.x - step.x, center.y - step.y);
@@ -1690,12 +2124,43 @@ impl Transform {
         self.get_lat_lng(WrapMode::Unwrapped) != before
     }
 
+    /// One pan step on the globe, as a drag around the view center
+    /// ([`Self::move_by_with_anchor`] without an anchor) makes it: the
+    /// planet turns, the bearing too when it is free, and the zoom keeps the
+    /// planet's size as the latitude changes.
+    fn step_globe_pan(&mut self, step: &ScreenCoordinate) {
+        let size = self.state.get_size();
+        let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
+        let grab = ScreenCoordinate::new(view_center.x, f64::from(size.height) - view_center.y);
+        let pan_delta = ScreenCoordinate::new(step.x, -step.y);
+        let (center, bearing) = if self.globe_free_bearing {
+            let drag = VerticalPerspectiveProjection::drag_camera(&self.state, &grab, &pan_delta);
+            (drag.center, Some(drag.bearing))
+        } else {
+            (VerticalPerspectiveProjection::drag_center(&self.state, &grab, &pan_delta), None)
+        };
+        let center = self.state.constrained_center(&center, self.get_zoom());
+        let zoom = self.get_zoom()
+            + VerticalPerspectiveProjection::zoom_adjustment(
+                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                center.latitude(),
+            );
+        if let Some(bearing) = bearing {
+            self.state.set_bearing(mln_math::deg2rad(-bearing));
+        }
+        self.state.set_lat_lng_zoom(&center, zoom);
+    }
+
     fn step_zoom(&mut self, zoom: f64, anchor: Option<ScreenCoordinate>) -> bool {
         let before = self.state.get_zoom();
         let altitude = self.state.get_center_altitude();
         let anchor = self.momentum_anchor(anchor);
-        let mut target = mln_math::clamp_f64(before + zoom, self.state.get_min_zoom(), self.state.get_max_zoom());
         let center = self.get_lat_lng(WrapMode::Unwrapped);
+        let mut target = mln_math::clamp_f64(
+            before + zoom,
+            self.state.get_min_zoom_at_latitude(center.latitude()),
+            self.state.get_max_zoom(),
+        );
         let mut camera = CameraOptions::default().with_center(Some(center));
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or(center), target);
@@ -1703,7 +2168,21 @@ impl Transform {
         // reads the projection, and through the correction's change of
         // center.
         self.state.set_center_altitude(altitude);
-        self.hold_momentum_anchor(anchor);
+        match anchor {
+            // On the globe the zoom around the anchor is the globe's, as in
+            // apply_transitions.
+            Some((point, lat_lng)) if self.globe_on_screen() && self.state.get_zoom() != before => {
+                let zoom_delta = self.state.get_zoom() - before;
+                VerticalPerspectiveProjection::zoom_around_point(
+                    &mut self.state,
+                    &point,
+                    &lat_lng,
+                    zoom_delta,
+                    self.globe_free_bearing,
+                );
+            }
+            _ => self.hold_momentum_anchor(anchor),
+        }
         self.state.get_zoom() != before
     }
 
@@ -1829,8 +2308,10 @@ impl Transform {
         }
         self.with_source(source, |transform| {
             if let Some(offset) = delta.offset {
-                // Validation keeps the offset finite, so it has a LatLng.
-                let _ = transform.move_by(&offset, &parts);
+                // Validation keeps the offset finite, so it has a LatLng. The
+                // anchor is the point the drag holds, which the globe keeps
+                // under it.
+                let _ = transform.move_by_with_anchor(&offset, delta.anchor, &parts);
             }
             if eases {
                 let current = transform.get_camera_options(None);

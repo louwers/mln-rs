@@ -15,7 +15,7 @@
 // The controls lay out in egui on this thread, in the frames that have their
 // input, a repaint they asked for, or a new frame of the map. egui paints
 // them over the map's frame before it is presented
-// (`SurfaceBackend::set_overlay`); when only the controls change, the map
+// (overlay.rs); when only the controls change, the map
 // draws its last frame again under them.
 //
 // For checking frames without screenshots: `--readback <file.png>` writes the
@@ -27,30 +27,33 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::Instant;
 
 use mln_actor::{RunLoop, Timer};
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
-use mln_gfx::{BackendScope, RendererBackend, ScopeType};
+use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
     MapEvent, MapOptions, UpdateReader,
 };
 use mln_renderer::Renderer;
 use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_style::PropertyValue;
+use mln_style::projection::Projection;
+use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::chrono::{Clock, Duration};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::tile_server_options::TileServerOptions;
-use mln_webgpu::SurfaceBackend;
-use mln_webgpu::surface_backend::OverlayTarget;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
+use crate::backend::{Kind, SurfaceBackend};
 use crate::host::{Inbox, Message, UserEvent};
+use crate::overlay::Paint;
 use crate::settings::Settings;
 use crate::styles::{self, Style};
 use crate::ui::{Action, Controls, Shown};
@@ -77,70 +80,6 @@ pub(crate) struct Launch {
 /// Where the app opens without `--style` or MLN_STYLE_URL.
 const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
-/// The controls' last frame, which the overlay paints over each frame of the
-/// map until the next.
-#[derive(Default)]
-struct Paint {
-    primitives: Vec<egui::ClippedPrimitive>,
-    /// The textures to update before painting, and to free after.
-    textures: egui::TexturesDelta,
-    pixels_per_point: f32,
-}
-
-impl Drop for Paint {
-    fn drop(&mut self) {
-        // The window closes with these unpainted, which is fine.
-        self.textures.clear();
-    }
-}
-
-/// The overlay that paints the controls: egui's renderer on the map's device,
-/// made with the first frame.
-fn controls_overlay(paint: Rc<RefCell<Paint>>) -> mln_webgpu::surface_backend::Overlay {
-    let mut renderer: Option<egui_wgpu::Renderer> = None;
-    Box::new(move |target: &OverlayTarget<'_>| {
-        let renderer = renderer.get_or_insert_with(|| {
-            egui_wgpu::Renderer::new(target.device, target.format, egui_wgpu::RendererOptions::default())
-        });
-        let mut paint = paint.borrow_mut();
-        let mut textures = std::mem::take(&mut paint.textures);
-        for (id, deltas) in &textures.set {
-            for delta in deltas {
-                renderer.update_texture(target.device, target.queue, *id, delta);
-            }
-        }
-        if !paint.primitives.is_empty() {
-            let screen = egui_wgpu::ScreenDescriptor {
-                size_in_pixels: [target.size.width, target.size.height],
-                pixels_per_point: paint.pixels_per_point,
-            };
-            let mut encoder =
-                target.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("controls") });
-            let mut commands =
-                renderer.update_buffers(target.device, target.queue, &mut encoder, &paint.primitives, &screen);
-            {
-                let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("controls"),
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: target.view,
-                        depth_slice: None,
-                        resolve_target: None,
-                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
-                    })],
-                    ..Default::default()
-                });
-                renderer.render(&mut pass.forget_lifetime(), &paint.primitives, &screen);
-            }
-            commands.push(encoder.finish());
-            target.queue.submit(commands);
-        }
-        for id in &textures.free {
-            renderer.free_texture(id);
-        }
-        textures.clear();
-    })
-}
-
 /// Opens the map in the window and runs it until the window closes.
 pub(crate) fn run(launch: Launch) {
     let Launch { args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy } = launch;
@@ -153,36 +92,18 @@ pub(crate) fn run(launch: Launch) {
         .flatten();
 
     let framebuffer_size = Size::new(size.width, size.height);
-    let surface_proxy = proxy.clone();
-    let make_surface = move |instance: &wgpu::Instance| {
-        let closed = || mln_util::Error::cancelled("The window closed before it had a surface");
-        let (reply, surface) = mpsc::channel();
-        surface_proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| closed())?;
-        surface.recv().map_err(|_| closed())?.map_err(mln_util::Error::native)
-    };
     // Vsync unless benchmarking.
-    let backend = match SurfaceBackend::new(make_surface, framebuffer_size, !args.benchmark) {
-        Ok(backend) => Rc::new(backend),
+    let backend = match SurfaceBackend::new(args.backend, &proxy, framebuffer_size, !args.benchmark) {
+        Ok(backend) => backend,
         Err(e) => {
             Log::error(Event::GraphicsBackend, e.message);
             return;
         }
     };
-    let info = backend.get_adapter_info();
-    let adapter = format!("{} ({:?})", info.name, info.backend);
-    Log::info(
-        Event::Render,
-        format!(
-            "Rendering with {} ({:?}, driver {} {}), surface format {:?}",
-            info.name,
-            info.backend,
-            info.driver,
-            info.driver_info,
-            backend.get_swap_chain_format()
-        ),
-    );
+    Log::info(Event::Render, backend.describe());
+    let adapter = backend.adapter();
     let paint = Rc::new(RefCell::new(Paint::default()));
-    backend.set_overlay(Some(controls_overlay(paint.clone())));
+    backend.set_controls_overlay(paint.clone());
 
     if args.benchmark {
         Log::info(Event::General, "BENCHMARK MODE: Some optimizations are disabled.");
@@ -211,8 +132,7 @@ pub(crate) fn run(launch: Launch) {
         }
     }
 
-    let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
-    let mut renderer = Renderer::new(renderer_backend, pixel_ratio as f32, None);
+    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None);
     let map_size = logical_size(size, pixel_ratio);
 
     let mut map = match Map::with_resource_options(
@@ -243,6 +163,9 @@ pub(crate) fn run(launch: Launch) {
             .with_fov(Some(settings.fov)),
     );
     map.set_debug(MapDebugOptions(settings.debug));
+    // The window always rotates (right drag), so drags and zooms on the
+    // globe turn the bearing with the planet.
+    map.set_globe_free_bearing(true);
 
     let style_url = match &args.style {
         Some(style) if !style.contains("://") => format!("file://{style}"),
@@ -279,6 +202,7 @@ pub(crate) fn run(launch: Launch) {
         styles: styles::styles(),
         style: styles::style_for(&style_url),
         adapter,
+        next_backend: None,
         frame_report: String::new(),
         benchmark: args.benchmark,
         pixel_ratio,
@@ -353,7 +277,7 @@ struct View {
     frame_interval: std::time::Duration,
     next_frame_at: Instant,
 
-    backend: Rc<SurfaceBackend>,
+    backend: SurfaceBackend,
     renderer: Renderer,
     /// The map's updates for the renderer.
     updates: UpdateReader,
@@ -388,6 +312,8 @@ struct View {
     styles: Vec<Style>,
     style: Style,
     adapter: String,
+    /// The backend the controls asked for, which the next frame switches to.
+    next_backend: Option<Kind>,
     frame_report: String,
 
     benchmark: bool,
@@ -509,6 +435,9 @@ impl View {
     /// waiting for it, the recognizer's eases, the controls, and the map's
     /// frame.
     fn frame(&mut self) {
+        if let Some(kind) = self.next_backend.take() {
+            self.switch_backend(kind);
+        }
         // Wait for the display first, so that the frame takes the input that
         // came meanwhile.
         let drawable = (self.needs_frame() || !self.inbox.is_empty()) && self.backend.acquire_next_texture();
@@ -636,6 +565,12 @@ impl View {
             pitch: camera.pitch.unwrap_or_default(),
             attributions: &attributions,
             debug: self.map.get_debug(),
+            globe: {
+                let style = self.map.style();
+                let type_ = style.get_projection().get_type();
+                type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
+            },
+            backend: self.backend.kind(),
             status: &status,
         };
         let mut actions = Vec::new();
@@ -683,8 +618,50 @@ impl View {
                 }
             }
             Action::SetDebug(debug) => self.map.set_debug(debug),
+            Action::SetGlobe(globe) => {
+                let mut projection = Projection::new();
+                let type_ = if globe { ProjectionType::Globe } else { ProjectionType::Mercator };
+                projection.set_type(PropertyValue::Constant(ProjectionDefinition::new(type_)));
+                self.map.style_mut().set_projection(projection);
+            }
             Action::ResetCache => self.reset_cache(),
+            Action::SetBackend(kind) => {
+                self.next_backend = Some(kind);
+                self.dirty = true;
+            }
         }
+    }
+
+    /// Renders with `kind` from now on: a new backend on the window, and a
+    /// new renderer on it, which loads the tiles again (from the cache).
+    fn switch_backend(&mut self, kind: Kind) {
+        if self.backend.kind() == kind {
+            return;
+        }
+        let size = self.backend.framebuffer_size();
+        // The new backend configures the window's surface before the old one
+        // goes, which leaves it as it is.
+        let backend = match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
+            Ok(backend) => backend,
+            Err(e) => {
+                Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
+                return;
+            }
+        };
+        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None);
+        renderer.set_event_queue(Some(self.map.renderer_events()));
+        // The old renderer goes before its backend.
+        drop(std::mem::replace(&mut self.renderer, renderer));
+        drop(std::mem::replace(&mut self.backend, backend));
+        // The new renderer draws the map's last update again.
+        self.dirty = true;
+        self.backend.set_controls_overlay(self.paint.clone());
+        self.paint.borrow_mut().resend_textures(&self.ui);
+        // The controls take egui's textures before the map's next frame.
+        self.ui_repaint_at = Some(Instant::now());
+        self.adapter = self.backend.adapter();
+        Log::info(Event::Render, self.backend.describe());
+        self.map.trigger_repaint();
     }
 
     /// Empties the cache database.
@@ -712,9 +689,9 @@ impl View {
         self.drawn_update = update.generation;
         let started = Instant::now();
         {
-            let backend: &dyn RendererBackend = &*self.backend;
-            let _scope = BackendScope::new(backend, ScopeType::Explicit);
-            let _frame = BackendScope::new(backend, ScopeType::Implicit);
+            let backend = self.backend.renderer_backend();
+            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
+            let _frame = BackendScope::new(&*backend, ScopeType::Implicit);
             self.renderer.render(&update.parameters);
         }
         self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);

@@ -1,12 +1,13 @@
 //! Ports the backend-independent `gfx/` abstractions of the C++ core
 //! (`include/mln/gfx`, `src/mln/gfx`), the backend-independent `shaders/`
 //! code and the drawable-path files from `renderer/` that the backends
-//! implement. `mln_webgpu` implements the traits on `wgpu`.
+//! implement. `mln_webgpu` implements the traits on `wgpu`, and `mln_mtl` on
+//! Metal.
 //!
 //! Crate cut (the C++ include cycle): `renderer/layer_group.hpp` and
 //! `renderer/render_pass.hpp` live here (`renderer::layer_group`,
 //! `renderer::render_pass`), and `mln::PaintParameters` is seen through the
-//! `paint_parameters::PaintParameters` trait, because `mln_webgpu` cannot
+//! `paint_parameters::PaintParameters` trait, because the backends cannot
 //! depend on `mln_renderer`. `LayerTweaker` stays in the renderer.
 //!
 //! Ownership follows the single render thread of the C++ renderer: shared
@@ -27,11 +28,13 @@ pub mod drawable;
 pub mod drawable_builder;
 pub mod drawable_tweaker;
 pub mod gfx_types;
+pub mod globe_clip_mask;
 pub mod headless_backend;
 pub mod index_vector;
 pub mod offscreen_texture;
 pub mod paint_parameters;
 pub mod polyline_generator;
+pub mod projection_variant;
 pub mod render_pass;
 pub mod renderable;
 pub mod renderer;

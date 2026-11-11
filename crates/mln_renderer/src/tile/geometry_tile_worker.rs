@@ -41,6 +41,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
 use mln_util::error::Error;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
@@ -88,12 +89,14 @@ pub enum WorkerMessage {
         available_images: Immutable<VecSet<String>>,
         correlation_id: u64,
     },
-    /// `setLayers(layers, globalState, availableImages, correlationID)`.
+    /// `setLayers(layers, globalState, availableImages,
+    /// subdivisionGranularity, correlationID)`.
     SetLayers {
         #[serde(with = "fields::layers")]
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Immutable<VecSet<String>>,
+        subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     },
     /// `setAvailableImages(availableImages, correlationID)`: parse again
@@ -196,6 +199,7 @@ pub struct GeometryTileWorker {
     available_images: Immutable<VecSet<String>>,
 
     show_collision_boxes: bool,
+    subdivision_granularity: SubdivisionGranularitySetting,
     first_load: bool,
 }
 
@@ -245,6 +249,7 @@ impl GeometryTileWorker {
             version_map: ImageVersionMap::new(),
             available_images: Arc::new(VecSet::new()),
             show_collision_boxes,
+            subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
         }
     }
@@ -259,9 +264,13 @@ impl GeometryTileWorker {
             WorkerMessage::SetData { data, available_images, correlation_id } => {
                 self.set_data(data, available_images, correlation_id)
             }
-            WorkerMessage::SetLayers { layers, global_state, available_images, correlation_id } => {
-                self.set_layers(layers, global_state, available_images, correlation_id)
-            }
+            WorkerMessage::SetLayers {
+                layers,
+                global_state,
+                available_images,
+                subdivision_granularity,
+                correlation_id,
+            } => self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id),
             WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
                 self.set_available_images(available_images, correlation_id)
             }
@@ -341,12 +350,14 @@ impl GeometryTileWorker {
         });
     }
 
-    /// `setLayers(layers, globalState, availableImages, correlationID)`.
+    /// `setLayers(layers, globalState, availableImages,
+    /// subdivisionGranularity, correlationID)`.
     pub fn set_layers(
         &mut self,
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Immutable<VecSet<String>>,
+        subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     ) {
         self.guarded(|this| {
@@ -354,6 +365,7 @@ impl GeometryTileWorker {
             this.global_state = global_state;
             this.correlation_id = correlation_id;
             this.available_images = available_images;
+            this.subdivision_granularity = subdivision_granularity;
 
             match this.state {
                 State::Idle => {
@@ -677,6 +689,7 @@ impl GeometryTileWorker {
                 layer_type: leader_impl.get_type_info(),
                 global_state: self.global_state.clone(),
                 retain_features_by_id: self.capture_rendered_features,
+                subdivision_granularity: self.subdivision_granularity,
             };
 
             let Some(geometry_layer) = data.get_layer(&leader_impl.source_layer)? else {

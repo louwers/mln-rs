@@ -6,6 +6,7 @@ use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::hillshade_layer_ubo::{
     HillshadeDrawableUBO, HillshadeEvaluatedPropsUBO, HillshadeTilePropsUBO, MAX_ILLUMINATION_SOURCES,
 };
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_HILLSHADE_DRAWABLE_UBO, ID_HILLSHADE_EVALUATED_PROPS_UBO, ID_HILLSHADE_TILE_PROPS_UBO,
 };
@@ -20,7 +21,7 @@ use mln_util::geo::LatLng;
 use mln_util::immutable::Immutable;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
 /// Structure to hold processed illumination properties
@@ -185,6 +186,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
         let mut i: u32 = 0;
         let count = layer_group.get_drawable_count();
         let mut drawable_ubo_vector = vec![HillshadeDrawableUBO::default(); count];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![HillshadeTilePropsUBO::default(); count];
 
         let exaggeration = *evaluated.get::<HillshadeExaggeration>();
@@ -202,7 +204,7 @@ impl LayerTweaker for HillshadeLayerTweaker {
 
             let tile_id = tile_id.to_unwrapped();
 
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &[0.0, 0.0],
@@ -212,6 +214,8 @@ impl LayerTweaker for HillshadeLayerTweaker {
                 drawable,
                 true,
             );
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             drawable_ubo_vector[i as usize] = HillshadeDrawableUBO { matrix: cast_matrix(&matrix) };
 
@@ -248,5 +252,6 @@ impl LayerTweaker for HillshadeLayerTweaker {
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_HILLSHADE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         layer_uniforms.set(ID_HILLSHADE_TILE_PROPS_UBO, self.tile_props_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_uniforms, &projection_ubo_vector, context);
     }
 }

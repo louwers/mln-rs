@@ -12,10 +12,10 @@ use mln_renderer::util::tile_cover::{
     TileCover, TileCoverParameters, covering_zoom_level, tile_count_bounds, tile_cover, tile_cover_bounds,
     tile_cover_geometry,
 };
-use mln_style_types::SourceType;
+use mln_style_types::{ProjectionDefinition, SourceType};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
-use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds};
+use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
 use mln_util::range::Range;
 use mln_util::size::Size;
 
@@ -40,6 +40,11 @@ fn osw(overscaled_z: u8, wrap: i16, z: u8, x: u32, y: u32) -> OverscaledTileID {
     OverscaledTileID::new(overscaled_z, wrap, CanonicalTileID::new(z, x, y))
 }
 
+/// `CanonicalTileID{z, x, y}`.
+fn cn(z: u8, x: u32, y: u32) -> CanonicalTileID {
+    CanonicalTileID::new(z, x, y)
+}
+
 fn p(x: f64, y: f64) -> Point<f64> {
     Point::new(x, y)
 }
@@ -48,10 +53,14 @@ fn points(coords: &[(f64, f64)]) -> Vec<Point<f64>> {
     coords.iter().map(|&(x, y)| p(x, y)).collect()
 }
 
+/// `Transform transform;`
+fn new_transform() -> Transform {
+    Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default)
+}
+
 /// `Transform transform; transform.resize({width, height});`
 fn transform(width: u32, height: u32) -> Transform {
-    let mut transform =
-        Transform::new(Rc::new(NullTransformObserver), ConstrainMode::HeightOnly, ViewportMode::Default);
+    let mut transform = new_transform();
     transform.resize(Size::new(width, height)).unwrap();
     transform
 }
@@ -59,6 +68,11 @@ fn transform(width: u32, height: u32) -> Transform {
 /// `{transform.getState()}`.
 fn params(transform: &Transform) -> TileCoverParameters {
     TileCoverParameters::new(transform.get_state().clone())
+}
+
+/// gtest's `ASSERT_NEAR(val1, val2, abs_error)`.
+fn assert_near(val1: f64, val2: f64, abs_error: f64) {
+    assert!((val1 - val2).abs() <= abs_error, "|{val1} - {val2}| > {abs_error}");
 }
 
 fn san_francisco() -> LatLngBounds {
@@ -745,6 +759,383 @@ mod tile_cover {
             eprint!(".");
             let mut tc = TileCover::new_from_geometry(&Geometry::MultiLineString(mls), 5, true).unwrap();
             while tc.next().is_some() {}
+        }
+    }
+
+    /// `setUpGlobe(transform, size, center, zoom, pitch, bearing)` (C++
+    /// defaults `pitch` and `bearing` to 0).
+    fn set_up_globe(transform: &mut Transform, size: Size, center: LatLng, zoom: f64, pitch: f64, bearing: f64) {
+        transform.resize(size).unwrap();
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.set_max_pitch(80.0);
+        transform.jump_to(
+            &CameraOptions::default()
+                .with_center(Some(center))
+                .with_zoom(Some(zoom))
+                .with_pitch(Some(pitch))
+                .with_bearing(Some(bearing)),
+        );
+        assert!(transform.get_state().is_globe_rendering());
+    }
+
+    // The globe cases of GL JS `covering_tiles.test.ts`, same cameras, same tiles in the same order.
+    // gtest: TileCover.GlobeZoomedOut
+    #[test]
+    fn globe_zoomed_out() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(128, 128), ll(0.0, 0.0), -1.0, 0.0, 0.0);
+        assert_eq!(vec![os(0, 0, 0)], tile_cover(&params(&transform), 0, ZOOM_RANGE, None));
+    }
+
+    // gtest: TileCover.GlobeZoomedIn
+    #[test]
+    fn globe_zoomed_in() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(128, 128), ll(0.01, -0.02), 3.0, 0.0, 0.0);
+        assert_eq!(
+            vec![os(3, 3, 3), os(3, 3, 4), os(3, 4, 3), os(3, 4, 4)],
+            tile_cover(&params(&transform), 3, ZOOM_RANGE, None)
+        );
+    }
+
+    // gtest: TileCover.GlobeZoomedInLargeViewport
+    #[test]
+    fn globe_zoomed_in_large_viewport() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(512, 512), ll(0.01, -0.02), 3.0, 0.0, 0.0);
+        assert_eq!(
+            vec![
+                os(3, 3, 3),
+                os(3, 3, 4),
+                os(3, 4, 3),
+                os(3, 4, 4),
+                os(3, 2, 3),
+                os(3, 2, 4),
+                os(3, 5, 3),
+                os(3, 5, 4),
+            ],
+            tile_cover(&params(&transform), 3, ZOOM_RANGE, None)
+        );
+    }
+
+    // gtest: TileCover.GlobePitched
+    #[test]
+    fn globe_pitched() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(128, 128), ll(0.001, -0.002), 8.0, 80.0, 0.0);
+        assert_eq!(
+            vec![os(6, 32, 31), os(6, 31, 31), os(10, 511, 512), os(10, 512, 512), os(10, 511, 513), os(10, 512, 513)],
+            tile_cover(&params(&transform), 8, ZOOM_RANGE, None)
+        );
+    }
+
+    // gtest: TileCover.GlobePitchedAndRotated
+    #[test]
+    fn globe_pitched_and_rotated() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(128, 128), ll(0.001, -0.002), 8.0, 80.0, 45.0);
+        assert_eq!(
+            vec![os(7, 64, 64), os(7, 64, 63), os(7, 63, 63), os(10, 510, 512), os(10, 511, 512), os(10, 511, 513)],
+            tile_cover(&params(&transform), 8, ZOOM_RANGE, None)
+        );
+    }
+
+    // GL JS `coveringTiles` on the globe for sources whose zoom range or tile size moves the zoom they load at: the
+    // level of detail falls off from the map's zoom and only then meets the source's maximum, and raster sources round.
+    // GL JS builds its globe frustum from a float32 copy of the inverse matrix, which at these zooms drops the tile
+    // at the far top edge of the view; the lists are GL JS's with the frustum built in double precision, as here.
+    // gtest: TileCover.GlobeSourceZoomsLikeGLJS
+    #[test]
+    fn globe_source_zooms_like_gljs() {
+        struct Case {
+            name: &'static str,
+            zoom: f64,
+            pitch: f64,
+            tile_size: u16,
+            max_zoom: u8,
+            type_: SourceType,
+            expected: Vec<CanonicalTileID>,
+        }
+        let cases = vec![
+            Case {
+                name: "overzoomed",
+                zoom: 10.5,
+                pitch: 60.0,
+                tile_size: 512,
+                max_zoom: 8,
+                type_: SourceType::Vector,
+                expected: vec![cn(8, 135, 113), cn(8, 134, 113), cn(8, 134, 112)],
+            },
+            Case {
+                name: "overzoomed to the horizon",
+                zoom: 10.5,
+                pitch: 75.0,
+                tile_size: 512,
+                max_zoom: 8,
+                type_: SourceType::Vector,
+                expected: vec![cn(8, 135, 113), cn(8, 134, 113), cn(8, 135, 112), cn(8, 134, 112), cn(5, 16, 13)],
+            },
+            Case {
+                name: "low max zoom",
+                zoom: 10.0,
+                pitch: 60.0,
+                tile_size: 512,
+                max_zoom: 4,
+                type_: SourceType::Vector,
+                expected: vec![cn(4, 8, 7), cn(4, 8, 6)],
+            },
+            Case {
+                name: "raster rounding up",
+                zoom: 5.6,
+                pitch: 60.0,
+                tile_size: 256,
+                max_zoom: 22,
+                type_: SourceType::Raster,
+                expected: vec![
+                    cn(7, 67, 56),
+                    cn(7, 67, 57),
+                    cn(7, 68, 56),
+                    cn(7, 66, 56),
+                    cn(7, 68, 57),
+                    cn(7, 66, 57),
+                    cn(7, 67, 58),
+                    cn(7, 69, 56),
+                    cn(7, 68, 58),
+                    cn(7, 66, 58),
+                    cn(7, 65, 56),
+                    cn(6, 35, 26),
+                    cn(6, 34, 27),
+                    cn(6, 34, 26),
+                    cn(6, 33, 27),
+                    cn(6, 33, 26),
+                    cn(6, 32, 27),
+                    cn(6, 32, 26),
+                    cn(5, 18, 12),
+                    cn(5, 17, 12),
+                    cn(5, 16, 12),
+                    cn(5, 15, 12),
+                ],
+            },
+            Case {
+                name: "raster rounding down",
+                zoom: 5.3,
+                pitch: 60.0,
+                tile_size: 256,
+                max_zoom: 22,
+                type_: SourceType::Raster,
+                expected: vec![
+                    cn(6, 33, 28),
+                    cn(6, 34, 28),
+                    cn(6, 33, 27),
+                    cn(6, 34, 27),
+                    cn(6, 32, 28),
+                    cn(6, 32, 27),
+                    cn(6, 33, 26),
+                    cn(6, 35, 27),
+                    cn(6, 34, 26),
+                    cn(6, 32, 26),
+                    cn(6, 35, 26),
+                    cn(5, 18, 12),
+                    cn(5, 17, 12),
+                    cn(5, 16, 12),
+                    cn(5, 15, 12),
+                    cn(7, 66, 58),
+                    cn(7, 67, 58),
+                    cn(7, 68, 58),
+                ],
+            },
+        ];
+        for c in &cases {
+            // SCOPED_TRACE(c.name): every assertion below names the case.
+            let mut transform = new_transform();
+            set_up_globe(&mut transform, Size::new(512, 512), ll(20.0, 10.0), c.zoom, c.pitch, 0.0);
+            // As TilePyramid asks for them.
+            let covering_zoom: i32 = covering_zoom_level(c.zoom, c.type_, c.tile_size);
+            let ideal_zoom = std::cmp::min(i32::from(c.max_zoom), covering_zoom) as u8;
+            let raster = c.type_ == SourceType::Raster;
+            let mut parameters = TileCoverParameters::new(transform.get_state().clone());
+            parameters.requested_zoom = Some(c.zoom + mln_math::log2(512.0 / f64::from(c.tile_size)));
+            parameters.round_zoom = raster;
+            let tiles = tile_cover(
+                &parameters,
+                ideal_zoom,
+                Range::new(0, c.max_zoom),
+                Some(if raster { ideal_zoom } else { covering_zoom as u8 }),
+            );
+            let mut canonical = Vec::new();
+            for tile in &tiles {
+                canonical.push(tile.canonical);
+                assert_eq!(0, tile.wrap, "{}", c.name);
+            }
+            assert_eq!(c.expected, canonical, "{}", c.name);
+        }
+    }
+
+    // GL JS `globe_covering_tiles.test.ts` "covers the tiles around the south pole", the tiles in its order: past the
+    // Mercator range there are no tiles, so they are chosen around the center brought back to the edge of the range.
+    // gtest: TileCover.GlobeAroundThePole
+    #[test]
+    fn globe_around_the_pole() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(512, 512), ll(-90.0, 0.0), 1.6, 0.0, 0.0);
+        assert_eq!(-90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
+        assert_eq!(
+            vec![
+                os(5, 16, 31),
+                os(5, 15, 31),
+                os(5, 17, 31),
+                os(5, 14, 31),
+                os(5, 18, 31),
+                os(5, 13, 31),
+                os(5, 18, 30),
+                os(5, 13, 30),
+                os(5, 19, 31),
+                os(5, 12, 31),
+                os(5, 19, 30),
+                os(5, 12, 30),
+                os(5, 19, 29),
+                os(5, 12, 29),
+                os(5, 20, 31),
+                os(5, 11, 31),
+                os(5, 20, 30),
+                os(5, 11, 30),
+                os(5, 20, 29),
+                os(5, 11, 29),
+                os(5, 21, 31),
+                os(5, 10, 31),
+                os(5, 21, 30),
+                os(5, 10, 30),
+                os(5, 22, 31),
+                os(5, 9, 31),
+                os(5, 23, 31),
+                os(5, 8, 31),
+                os(5, 24, 31),
+                os(5, 7, 31),
+                os(5, 25, 31),
+                os(5, 6, 31),
+                os(5, 26, 31),
+                os(5, 5, 31),
+                os(5, 26, 30),
+                os(5, 5, 30),
+                os(5, 27, 31),
+                os(5, 4, 31),
+                os(5, 27, 30),
+                os(5, 4, 30),
+                os(5, 27, 29),
+                os(5, 4, 29),
+                os(5, 28, 31),
+                os(5, 3, 31),
+                os(5, 28, 30),
+                os(5, 3, 30),
+                os(5, 28, 29),
+                os(5, 3, 29),
+                os(5, 29, 31),
+                os(5, 2, 31),
+                os(5, 29, 30),
+                os(5, 2, 30),
+                os(5, 30, 31),
+                os(5, 1, 31),
+                os(5, 31, 31),
+                os(5, 0, 31),
+            ],
+            tile_cover(&params(&transform), 5, ZOOM_RANGE, None)
+        );
+    }
+
+    // gtest: TileCover.GlobeAntimeridian
+    #[test]
+    fn globe_antimeridian() {
+        let mut east = new_transform();
+        set_up_globe(&mut east, Size::new(128, 128), ll(-0.001, 179.99), 5.0, 0.0, 0.0);
+        assert_eq!(
+            vec![os(5, 31, 16), os(5, 31, 15), osw(5, 1, 5, 0, 16), osw(5, 1, 5, 0, 15)],
+            tile_cover(&params(&east), 5, ZOOM_RANGE, None)
+        );
+
+        let mut west = new_transform();
+        set_up_globe(&mut west, Size::new(128, 128), ll(0.001, -179.99), 5.0, 0.0, 0.0);
+        assert_eq!(
+            vec![os(5, 0, 15), os(5, 0, 16), osw(5, -1, 5, 31, 15), osw(5, -1, 5, 31, 16)],
+            tile_cover(&params(&west), 5, ZOOM_RANGE, None)
+        );
+    }
+
+    // gtest: TileCover.GlobeBelowZoomZero
+    #[test]
+    fn globe_below_zoom_zero() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(128, 128), ll(80.0, 0.0), -0.5, 0.0, 0.0);
+        assert_eq!(0, transform.get_state().get_integer_zoom());
+        assert_eq!(vec![os(0, 0, 0)], tile_cover(&params(&transform), 0, Range::new(0, 0), None));
+    }
+
+    // gtest: TileCover.GlobeAtTheHandOffZoom
+    #[test]
+    fn globe_at_the_hand_off_zoom() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(128, 128), ll(-0.087, -179.73), 11.0, 0.0, 0.0);
+        assert_eq!(vec![os(11, 1, 1024)], tile_cover(&params(&transform), 11, Range::new(0, 15), None));
+    }
+
+    // gtest: TileCover.GlobeHidesTheFarSide
+    #[test]
+    fn globe_hides_the_far_side() {
+        let mut transform = new_transform();
+        set_up_globe(&mut transform, Size::new(512, 512), ll(0.0, 0.0), 3.0, 0.0, 0.0);
+        let cover = tile_cover(&params(&transform), 3, ZOOM_RANGE, None);
+        let has = |x: u32, y: u32| cover.contains(&os(3, x, y));
+        assert!(has(3, 3));
+        assert!(has(4, 4));
+        // Tiles on the far side of the planet (lng 135..180 at the equator) are not covered.
+        assert!(!has(7, 3));
+        assert!(!has(0, 4));
+        assert!(cover.len() < 64);
+    }
+
+    // gtest: TileCover.GlobeZoomZeroIsTheWholePlanet
+    #[test]
+    fn globe_zoom_zero_is_the_whole_planet() {
+        let mut transform = transform(512, 512);
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(&CameraOptions::default().with_center(Some(ll(40.0, 10.0))).with_zoom(Some(0.0)));
+        assert_eq!(vec![os(0, 0, 0)], tile_cover(&params(&transform), 0, ZOOM_RANGE, None));
+    }
+
+    // gtest: TileCover.GlobeCoverSurvivesTheAntimeridian
+    #[test]
+    fn globe_cover_survives_the_antimeridian() {
+        let mut transform = transform(512, 512);
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(1.0)));
+        let mut before = tile_cover(&params(&transform), 1, Range::new(0, 14), None);
+        transform.jump_to(&CameraOptions::default().with_center(Some(ll(0.0, -179.0))).with_zoom(Some(1.0)));
+        let mut after = tile_cover(&params(&transform), 1, Range::new(0, 14), None);
+        before.sort();
+        after.sort();
+        assert_eq!(before, after);
+        assert_eq!(4, after.len());
+    }
+
+    // A center spun into another world copy covers the same tiles, in the same order, moved into that copy.
+    // gtest: TileCover.GlobeCoverFollowsTheCenterIntoOtherWorldCopies
+    #[test]
+    fn globe_cover_follows_the_center_into_other_world_copies() {
+        let mut transform = transform(512, 512);
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(
+            &CameraOptions::default().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(6.0)).with_pitch(Some(50.0)),
+        );
+        let home = tile_cover(&params(&transform), 6, Range::new(0, 14), None);
+        for step in 1..=6 {
+            transform.jump_to(&CameraOptions::default().with_center(Some(ll(10.0, 20.0 + 120.0 * f64::from(step)))));
+        }
+        assert_near(740.0, transform.get_state().get_lat_lng(WrapMode::Unwrapped).longitude(), 1e-9);
+        let spun = tile_cover(&params(&transform), 6, Range::new(0, 14), None);
+        assert_eq!(home.len(), spun.len());
+        for i in 0..home.len() {
+            assert_eq!(home[i].canonical, spun[i].canonical, "{i}");
+            assert_eq!(home[i].wrap + 2, spun[i].wrap, "{i}");
+            assert_eq!(home[i].overscaled_z, spun[i].overscaled_z, "{i}");
         }
     }
 }

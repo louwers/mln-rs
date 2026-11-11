@@ -7,6 +7,8 @@
 
 Ports `mapbox::geometry` of geometry.hpp: points, line strings, polygons, their multi variants and geometry collections.
 
+Licensed under the ISC License, as geometry.hpp is ([LICENSE](LICENSE)).
+
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)
 map rendering core. All its crates are released together, at the same version.

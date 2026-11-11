@@ -4,6 +4,8 @@
 // generated into hb_ucd_table.rs by tools/gen_hb_ucd.py). The C++ core's
 // `getUnicodeScript` (harfbuzz_impl.cpp) uses them through
 // `hb_unicode_funcs_get_default()`; HarfRust's own tables are Unicode 18.
+// Under HarfBuzz's "Old MIT" license (LICENSE-HarfBuzz); the tables' data is
+// Unicode's, under the Unicode License V3 (the first part of LICENSE-ICU).
 
 use crate::hb_ucd_table;
 

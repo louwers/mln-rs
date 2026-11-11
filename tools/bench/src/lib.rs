@@ -71,7 +71,8 @@ pub struct CaseReport {
 /// the two sides' GPUs differ.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Environment {
-    /// The adapter's name, backend and driver, as wgpu reports them.
+    /// The GPU's name and backend, and with WebGPU its driver, as wgpu
+    /// reports them.
     pub gpu: String,
     /// A software rasterizer (lavapipe, llvmpipe, SwiftShader, WARP), which
     /// measures something else than a GPU.

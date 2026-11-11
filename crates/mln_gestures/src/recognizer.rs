@@ -813,7 +813,11 @@ impl GestureRecognizer {
             }
             Mode::BoxZoom { .. } => {}
             _ => {
-                self.update(camera, CameraDelta { offset: Some(delta.into()), ..CameraDelta::default() });
+                // The pointer is the point the drag holds, which the globe
+                // turns to keep under it.
+                let step =
+                    CameraDelta { offset: Some(delta.into()), anchor: Some(to.into()), ..CameraDelta::default() };
+                self.update(camera, step);
                 self.tracking.record(now, Step { pan: delta, ..Step::default() });
             }
         }
@@ -881,9 +885,9 @@ impl GestureRecognizer {
         if pan == V2::ZERO && zoom == 0.0 && bearing == 0.0 {
             return;
         }
-        // The pan applies first, then the zoom and turn hold the fingers'
-        // middle in place.
-        let anchored = zoom != 0.0 || bearing != 0.0;
+        // The pan applies first, holding the fingers' middle, then the zoom
+        // and turn hold it in place.
+        let anchored = zoom != 0.0 || bearing != 0.0 || pan != V2::ZERO;
         self.update(
             camera,
             CameraDelta {
@@ -1045,10 +1049,10 @@ impl GestureRecognizer {
     /// gesture until it idles.
     ///
     /// A notch that arrives while earlier ones still ease retargets the ease
-    /// to the sum, starting at the zoom's current speed, so a quick train of
-    /// notches speeds up without a stutter. GL JS's `_smoothOutEasing`
-    /// approximates that speed from the previous curve's shape; this matches
-    /// it in levels per second.
+    /// to the sum, within the zoom range, starting at the zoom's current
+    /// speed, so a quick train of notches speeds up without a stutter. GL
+    /// JS's `_smoothOutEasing` approximates that speed from the previous
+    /// curve's shape; this matches it in levels per second.
     fn wheel(
         &mut self,
         camera: &mut dyn GestureCamera,
@@ -1073,10 +1077,13 @@ impl GestureRecognizer {
             WheelDelta::Notches(notches) => {
                 let step = -notches * options.notch_zoom;
                 let duration = options.notch_duration_ms;
+                // The sum stops at the zoom range, as GL JS's target does:
+                // levels past a limit would hold the zoom there once the
+                // scroll turns back, until the notches back undid them.
                 let (distance, (x1, y1)) = match scroll.ease {
                     Some(ease) if ease.progress(now, duration) < 1.0 => {
                         // Whatever the ease hasn't applied yet carries over.
-                        let distance = ease.distance - ease.applied + step;
+                        let distance = within_zoom_range(camera, ease.distance - ease.applied + step);
                         // The new curve's starting slope, dy/dx = y1/x1,
                         // times distance / duration is the current speed;
                         // its first control point stays NOTCH_EASE_HANDLE
@@ -1085,8 +1092,8 @@ impl GestureRecognizer {
                         let x1 = NOTCH_EASE_HANDLE / (1.0 + slope * slope).sqrt();
                         (distance, (x1, slope * x1))
                     }
-                    Some(ease) => (ease.distance - ease.applied + step, (EASE_X1, EASE_Y1)),
-                    None => (step, (EASE_X1, EASE_Y1)),
+                    Some(ease) => (within_zoom_range(camera, ease.distance - ease.applied + step), (EASE_X1, EASE_Y1)),
+                    None => (within_zoom_range(camera, step), (EASE_X1, EASE_Y1)),
                 };
                 scroll.ease = Some(NotchEase { start: now, distance, applied: 0.0, x1, y1 });
             }
@@ -1193,6 +1200,14 @@ fn zoom_of(camera: &dyn GestureCamera) -> f64 {
 fn clamp_zoom(camera: &dyn GestureCamera, zoom: f64) -> f64 {
     let (min, max) = camera.zoom_range();
     zoom.max(min).min(max)
+}
+
+/// `levels` of zoom from the camera's zoom, cut at its zoom range. A zoom
+/// outside the range may still move toward it.
+fn within_zoom_range(camera: &dyn GestureCamera, levels: f64) -> f64 {
+    let zoom = zoom_of(camera);
+    let (min, max) = camera.zoom_range();
+    levels.clamp((min - zoom).min(0.0), (max - zoom).max(0.0))
 }
 
 /// The clockwise angle from `a` to `b` on screen, in degrees.

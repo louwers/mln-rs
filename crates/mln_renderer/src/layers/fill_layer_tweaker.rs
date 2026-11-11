@@ -4,6 +4,7 @@
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::fill_layer_ubo::*;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{
     ID_FILL_DRAWABLE_UBO, ID_FILL_EVALUATED_PROPS_UBO, ID_FILL_IMAGE_TEXTURE, ID_FILL_TILE_PROPS_UBO,
 };
@@ -23,7 +24,7 @@ use super::render_fill_layer::FillVariant;
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::bucket::Bucket;
 use crate::buckets::fill_bucket::FillBucket;
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
 pub struct FillLayerTweaker {
@@ -95,6 +96,7 @@ impl LayerTweaker for FillLayerTweaker {
         let mut i: u32 = 0;
         let count = layer_group.get_drawable_count();
         let mut drawable_ubo_vector = vec![FillDrawableUnionUBO::default(); count];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![FillTilePropsUnionUBO::default(); count];
 
         let self_ptr: *const Self = self;
@@ -136,7 +138,7 @@ impl LayerTweaker for FillLayerTweaker {
 
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             const NEAR_CLIPPED: bool = false;
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &translation,
@@ -146,6 +148,8 @@ impl LayerTweaker for FillLayerTweaker {
                 drawable,
                 false,
             );
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             // from FillPatternProgram::layoutUniformValues
             let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, int_zoom as f32);
@@ -241,5 +245,6 @@ impl LayerTweaker for FillLayerTweaker {
         let layer_uniforms = layer_group.mutable_uniform_buffers();
         layer_uniforms.set(ID_FILL_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
         layer_uniforms.set(ID_FILL_TILE_PROPS_UBO, self.tile_props_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_uniforms, &projection_ubo_vector, context);
     }
 }

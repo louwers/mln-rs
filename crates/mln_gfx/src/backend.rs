@@ -3,7 +3,9 @@
 //
 // `Backend::Create<Type>()` is a C++ template specialised per backend; in the
 // port the backend crate's constructor is called directly (for example
-// `mln_webgpu::HeadlessBackend::new`).
+// `mln_webgpu::HeadlessBackend::new`). C++ builds one backend; the port can
+// build WebGPU and Metal both, and the renderer asks a context which one it
+// is of (`Context::backend_type`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -22,7 +24,7 @@ static ENABLE_GPU_EXPRESSION_EVAL: AtomicBool = AtomicBool::new(false);
 pub struct Backend;
 
 impl Backend {
-    /// The port has one backend (`MLN_RENDER_BACKEND_WEBGPU`).
+    /// The backend on every platform (`MLN_RENDER_BACKEND_WEBGPU`).
     pub const DEFAULT_TYPE: Type = Type::WebGPU;
 
     pub fn get_type() -> Type {

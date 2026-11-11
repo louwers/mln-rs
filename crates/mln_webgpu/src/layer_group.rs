@@ -2,8 +2,10 @@
 
 use std::any::Any;
 
+use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::renderer::layer_group::{self, LayerGroupBaseData};
+use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::uniform_buffer::UniformBufferArray;
 
 use crate::drawable::Drawable;
@@ -91,6 +93,18 @@ impl layer_group::LayerGroupBase for LayerGroup {
             let tweakers = drawable.get_tweakers().clone();
             for tweaker in tweakers {
                 tweaker.execute(drawable, parameters);
+            }
+
+            if drawable.get_is_3d() {
+                let depth = if drawable.get_enable_depth() {
+                    parameters.depth_mode_for_3d(drawable.get_depth_type())
+                } else {
+                    DepthMode::disabled()
+                };
+                if let Some(webgpu_drawable) = drawable.as_any_mut().downcast_mut::<Drawable>() {
+                    webgpu_drawable.set_depth_mode_for_3d(&depth);
+                    webgpu_drawable.set_stencil_mode_for_3d(&StencilMode::disabled());
+                }
             }
 
             drawable.draw(parameters);

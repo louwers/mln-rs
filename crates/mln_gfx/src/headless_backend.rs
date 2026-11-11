@@ -2,8 +2,9 @@
 // platform/default/src/mln/gfx/headless_backend.cpp
 //
 // `HeadlessBackend::Create(size, swapBehaviour, contextMode)` dispatches to
-// `Backend::Create<Backend::DefaultType>` in C++; with one backend in the
-// port, call `mln_webgpu::HeadlessBackend::new` directly.
+// `Backend::Create<Backend::DefaultType>` in C++. mln_gfx doesn't depend on
+// the backends: call the `new` of the backend's own `HeadlessBackend`, such
+// as `mln_webgpu::HeadlessBackend::new` or `mln_mtl::HeadlessBackend::new`.
 
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;

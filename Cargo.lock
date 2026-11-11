@@ -652,6 +652,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
+name = "data-url"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
+
+[[package]]
 name = "der"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -809,6 +815,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_extras"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "def286cf47194f3fe45b8e37c503ada7a20a64b59a903b4bc704baec943b1827"
+dependencies = [
+ "ahash",
+ "egui",
+ "enum-map",
+ "itertools",
+ "log",
+ "profiling",
+ "resvg",
+]
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -834,6 +855,26 @@ name = "embedded-io"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d"
+
+[[package]]
+name = "enum-map"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4532960034c15ba2f55e9eee631040ecc473c32e6c4b200828c759840f13a06"
+dependencies = [
+ "enum-map-derive",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7127272f64b3e098f7d81f350d672081b879bff896d219c42370dc858b1af9ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
 
 [[package]]
 name = "enum_dispatch"
@@ -999,6 +1040,12 @@ dependencies = [
  "miniz_oxide 0.9.1",
  "zlib-rs",
 ]
+
+[[package]]
+name = "float-cmp"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 
 [[package]]
 name = "float_next_after"
@@ -1667,7 +1714,7 @@ dependencies = [
  "byteorder-lite",
  "moxcms",
  "num-traits",
- "png",
+ "png 0.18.1",
  "tiff",
 ]
 
@@ -1680,6 +1727,12 @@ dependencies = [
  "byteorder-lite",
  "quick-error 2.0.1",
 ]
+
+[[package]]
+name = "imagesize"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edcd27d72f2f071c64249075f42e205ff93c9a4c5f6c6da53e79ed9f9832c285"
 
 [[package]]
 name = "indexmap"
@@ -1789,6 +1842,17 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "kurbo"
+version = "0.11.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c62026ae44756f8a599ba21140f350303d4f08dcdcc71b5ad9c9bb8128c13c62"
+dependencies = [
+ "arrayvec",
+ "euclid",
+ "smallvec",
 ]
 
 [[package]]
@@ -1947,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-cheap-ruler",
@@ -1964,10 +2028,10 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-kdbush",
- "mln-rs-libstdcxx",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-nunicode",
  "mln-rs-pmtiles",
  "mln-rs-polylabel",
@@ -1994,7 +2058,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-actor"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-util",
@@ -2002,7 +2066,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-bench"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "libc",
  "mln-rs-actor",
@@ -2011,6 +2075,7 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-map",
+ "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-render-test",
  "mln-rs-renderer",
@@ -2027,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-conversion",
  "mln-rs-expression",
@@ -2048,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-c-abi-gen"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bindgen",
  "prettyplease",
@@ -2059,14 +2124,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-cheap-ruler"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
 ]
 
 [[package]]
 name = "mln-rs-conversion"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
@@ -2075,15 +2140,16 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-csscolorparser"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-desktop"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "egui",
  "egui-wgpu",
  "egui-winit",
+ "egui_extras",
  "fontdb",
  "mln-rs-actor",
  "mln-rs-feature",
@@ -2092,12 +2158,19 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
  "mln-rs-text",
  "mln-rs-util",
  "mln-rs-webgpu",
+ "objc2 0.6.5",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+ "raw-window-metal",
  "serde_json",
  "skrifa 0.49.0",
  "wgpu",
@@ -2106,27 +2179,25 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-earcut"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-earcut-test-fixtures",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
 ]
 
 [[package]]
 name = "mln-rs-earcut-test-fixtures"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-expression"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-cheap-ruler",
  "mln-rs-conversion",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "mln-rs-math",
  "mln-rs-nunicode",
  "mln-rs-rapidjson",
@@ -2142,7 +2213,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-expression-test"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
@@ -2158,7 +2229,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-feature"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
  "mln-rs-vec-map",
@@ -2167,7 +2238,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geojson"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -2177,33 +2248,33 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-geojson-vt"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "serde_json",
 ]
 
 [[package]]
 name = "mln-rs-geometry"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "mln-rs-gestures"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-map",
+ "mln-rs-style-types",
  "mln-rs-util",
 ]
 
 [[package]]
 name = "mln-rs-gfx"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "mln-rs-geometry",
@@ -2216,7 +2287,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-headless"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-feature",
@@ -2226,6 +2297,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-renderer",
  "mln-rs-storage",
@@ -2241,13 +2313,13 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-image"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "flate2",
  "image-webp",
  "js-sys",
  "mln-rs-util",
- "png",
+ "png 0.18.1",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -2256,18 +2328,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-kdbush"
-version = "0.0.10"
-dependencies = [
- "mln-rs-libstdcxx",
-]
-
-[[package]]
-name = "mln-rs-libstdcxx"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-map"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-geojson",
@@ -2284,10 +2349,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-map-types"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
  "mln-rs-math",
+ "mln-rs-style-types",
  "mln-rs-tile-id",
  "mln-rs-util",
  "serde",
@@ -2295,40 +2361,54 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-math"
-version = "0.0.10"
+version = "0.0.11"
+
+[[package]]
+name = "mln-rs-mtl"
+version = "0.0.11"
+dependencies = [
+ "bytemuck",
+ "mln-rs-gfx",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+]
 
 [[package]]
 name = "mln-rs-nunicode"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-pixelmatch"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-pmtiles"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-polylabel"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "serde_json",
 ]
 
 [[package]]
 name = "mln-rs-protozero"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-rapidjson"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-render-test"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -2354,7 +2434,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-renderer"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "mln-rs-actor",
@@ -2366,7 +2446,6 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-gfx",
  "mln-rs-image",
- "mln-rs-libstdcxx",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
@@ -2393,7 +2472,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-runtime"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "httpmock",
  "mln-rs-actor",
@@ -2421,11 +2500,11 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-shelf-pack"
-version = "0.0.10"
+version = "0.0.11"
 
 [[package]]
 name = "mln-rs-sprite"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-geometry",
@@ -2439,7 +2518,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-storage"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "block2 0.6.2",
  "httpmock",
@@ -2467,7 +2546,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-storage-offline"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "httpmock",
  "mln-rs-actor",
@@ -2488,7 +2567,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-actor",
  "mln-rs-conversion",
@@ -2516,7 +2595,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-codegen"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-csscolorparser",
  "mln-rs-vec-map",
@@ -2525,7 +2604,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-style-types"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-math",
@@ -2537,18 +2616,17 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-supercluster"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-kdbush",
- "mln-rs-libstdcxx",
  "serde_json",
 ]
 
 [[package]]
 name = "mln-rs-test-server"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "httpmock",
  "mln-rs-util",
@@ -2556,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-text"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "flate2",
  "harfrust 0.15.0",
@@ -2576,11 +2654,10 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-tile"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
  "mln-rs-math",
  "mln-rs-protozero",
  "mln-rs-tile-id",
@@ -2594,7 +2671,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-tile-id"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -2605,7 +2682,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-util"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "flate2",
@@ -2629,14 +2706,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-vec-map"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "mln-rs-vector-tile"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -2645,15 +2722,14 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-wagyu"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "mln-rs-geometry",
- "mln-rs-libstdcxx",
 ]
 
 [[package]]
 name = "mln-rs-web"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "js-sys",
  "mln-rs-actor",
@@ -2673,7 +2749,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-web-shaper"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "js-sys",
  "mln-rs-text",
@@ -2682,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "mln-rs-webgpu"
-version = "0.0.10"
+version = "0.0.11"
 dependencies = [
  "bytemuck",
  "mln-rs-gfx",
@@ -3327,7 +3403,7 @@ checksum = "839c8299360d2e998bdb106dc0a6cd71dcc5f4df51df1b620361bf50e283cca6"
 dependencies = [
  "bytemuck",
  "color",
- "kurbo",
+ "kurbo 0.13.1",
  "linebender_resource_handle",
  "smallvec",
 ]
@@ -3348,6 +3424,12 @@ dependencies = [
  "hashbrown 0.15.5",
  "indexmap",
 ]
+
+[[package]]
+name = "pico-args"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "pin-project"
@@ -3386,6 +3468,19 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
+
+[[package]]
+name = "png"
+version = "0.17.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
+dependencies = [
+ "bitflags 1.3.2",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide 0.8.9",
+]
 
 [[package]]
 name = "png"
@@ -3725,6 +3820,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
+name = "resvg"
+version = "0.45.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8928798c0a55e03c9ca6c4c6846f76377427d2c1e1f7e6de3c06ae57942df43"
+dependencies = [
+ "log",
+ "pico-args",
+ "rgb",
+ "svgtypes",
+ "tiny-skia",
+ "usvg",
+]
+
+[[package]]
+name = "rgb"
+version = "0.8.53"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47b34b781b31e5d73e9fbc8689c70551fd1ade9a19e3e28cfec8580a79290cc4"
+dependencies = [
+ "bytemuck",
+]
+
+[[package]]
 name = "ring"
 version = "0.17.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3743,6 +3861,12 @@ name = "robust"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
+
+[[package]]
+name = "roxmltree"
+version = "0.20.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rsqlite-vfs"
@@ -4103,6 +4227,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "simplecss"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a9c6883ca9c3c7c90e888de77b7a5c849c779d25d74a1269b0218b14e8b136c"
+dependencies = [
+ "log",
+]
+
+[[package]]
+name = "siphasher"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33f4fe9184a62d842c9ef383018f3306d8ba224fd9d836f56d7288308847c256"
+
+[[package]]
 name = "skrifa"
 version = "0.44.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4235,6 +4374,9 @@ name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6637bab7722d379c8b41ba849228d680cc12d0a45ba1fa2b48f2a30577a06731"
+dependencies = [
+ "float-cmp",
+]
 
 [[package]]
 name = "strum"
@@ -4262,6 +4404,16 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
+
+[[package]]
+name = "svgtypes"
+version = "0.15.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68c7541fff44b35860c1a7a47a7cadf3e4a304c457b58f9870d9706ece028afc"
+dependencies = [
+ "kurbo 0.11.3",
+ "siphasher",
+]
 
 [[package]]
 name = "syn"
@@ -4400,6 +4552,7 @@ dependencies = [
  "bytemuck",
  "cfg-if",
  "log",
+ "png 0.17.16",
  "tiny-skia-path",
 ]
 
@@ -4651,6 +4804,28 @@ name = "usize_cast"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "810f3a98a85147e3ad2a1331aa6dac66490e802d65fa0ab283c383058e3f9751"
+
+[[package]]
+name = "usvg"
+version = "0.45.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80be9b06fbae3b8b303400ab20778c80bbaf338f563afe567cf3c9eea17b47ef"
+dependencies = [
+ "base64 0.22.1",
+ "data-url",
+ "flate2",
+ "imagesize",
+ "kurbo 0.11.3",
+ "log",
+ "pico-args",
+ "roxmltree",
+ "simplecss",
+ "siphasher",
+ "strict-num",
+ "svgtypes",
+ "tiny-skia-path",
+ "xmlwriter",
+]
 
 [[package]]
 name = "utf8-zero"
@@ -5517,6 +5692,12 @@ name = "xkeysym"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
+
+[[package]]
+name = "xmlwriter"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xxhash-rust"

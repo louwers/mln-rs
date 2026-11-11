@@ -51,3 +51,7 @@ impl SegmentBase {
 }
 
 pub type SegmentVector = Vec<SegmentBase>;
+
+/// `maxSegmentVertices`: a segment's vertices are addressed by 16-bit
+/// indices.
+pub const MAX_SEGMENT_VERTICES: usize = u16::MAX as usize;

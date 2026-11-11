@@ -5,18 +5,27 @@
 //   turns window events into messages for the render thread.
 // - view.rs: the render thread, which owns the RunLoop, the map, its
 //   renderer and the surface, applies the messages and draws.
-// - ui.rs: the controls, which view.rs lays out and paints over the map.
+// - ui.rs: the controls, which view.rs lays out and an overlay of the window's
+//   backend paints over the map (overlay.rs, metal_overlay.rs).
 //
 // Command line: -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
 // -s/--style URL, -t/--apikey KEY, -c/--cache FILE, -x/--lon, -y/--lat,
 // -a/--alt, --fov, -z/--zoom, --bearing, -p/--pitch, -r/--roll,
-// -P/--maxPitch, and for checking the app: --readback FILE.png (write the
-// presented frame once the map is idle, see view.rs), --quit-after SECONDS,
-// --gesture-test (scripted input through the view's handlers) and
-// --no-system-fonts: without it, the map falls back to system fonts for the
-// scripts that its glyph PBFs can't shape, and for CJK (system_fonts.rs).
+// -P/--maxPitch, --backend (metal, the default on macOS, or webgpu: wgpu,
+// the default elsewhere; see backend.rs), and for checking the app:
+// --readback FILE.png (write the presented frame once the map is idle, see
+// view.rs), --quit-after SECONDS, --gesture-test (scripted input through the
+// view's handlers) and --no-system-fonts: without it, the map falls back to
+// system fonts for the scripts that its glyph PBFs can't shape, and for CJK
+// (system_fonts.rs).
 
+mod backend;
 mod host;
+#[cfg(target_os = "macos")]
+mod metal_layer;
+#[cfg(target_os = "macos")]
+mod metal_overlay;
+mod overlay;
 mod settings;
 mod styles;
 mod system_fonts;
@@ -47,6 +56,7 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -p[degrees], --pitch=[degrees]    Pitch
       -r[degrees], --roll=[degrees]     Roll
       -P[degrees], --maxPitch=[degrees] Max Pitch
+      --backend=[backend]               Rendering backend: metal (macOS) or webgpu
       --readback=[file.png]             Write the frame once the map is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit
@@ -75,6 +85,7 @@ pub(crate) struct Args {
     pub(crate) quit_after: Option<f64>,
     pub(crate) gesture_test: bool,
     pub(crate) no_system_fonts: bool,
+    pub(crate) backend: backend::Kind,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -125,6 +136,7 @@ fn parse_args() -> Result<Args, String> {
             "quit-after" => args.quit_after = Some(number(value(&name)?, &name)?),
             "gesture-test" => args.gesture_test = true,
             "no-system-fonts" => args.no_system_fonts = true,
+            "backend" => args.backend = backend::Kind::parse(&value(&name)?)?,
             _ => return Err(format!("Flag could not be matched: {name}")),
         }
     }

@@ -13,12 +13,10 @@
 //!   `topology_correction.hpp`, `build_result.hpp`, `wagyu.hpp`.
 //!
 //! The pointer-linked C++ structures (points, rings, bounds) live in arenas
-//! and are referenced by index. Where the result depends on the C++ standard
-//! library, the port follows libstdc++ (Linux): `std::stable_sort` is
-//! `//vendor/libstdcxx`'s port (wagyu's ULP-tolerant comparators are not
-//! strict weak orderings, so the merge order shows), and the
-//! `std::unordered_multimap` of the topology correction keeps libstdc++'s
-//! order of equal keys. Exceptions (`std::runtime_error`)
+//! and are referenced by index. `std::stable_sort` is Rust's stable sort,
+//! except for the ULP-tolerant intersection order, which is not a strict
+//! weak ordering. The `std::unordered_multimap` of the topology correction
+//! keeps libstdc++'s order of equal keys. Exceptions (`std::runtime_error`)
 //! are `Err(message)`. `interrupt.hpp` (USE_WAGYU_INTERRUPT) and
 //! `quick_clip.hpp` are not used by the core and not ported.
 

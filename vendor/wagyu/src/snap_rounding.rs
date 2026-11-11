@@ -1,7 +1,5 @@
 // Ports vendor/wagyu/include/mapbox/geometry/wagyu/snap_rounding.hpp.
 
-use libstdcxx::stable_sort_by as stable_sort;
-
 use crate::active_bound_list::{current_edge_is_horizontal, insert_bound_into_abl, next_edge_in_bound};
 use crate::bound::{Bound, BoundPtr};
 use crate::edge::is_horizontal;
@@ -165,7 +163,7 @@ pub(crate) fn build_hot_pixels(minima: &[LocalMinimum], b: &mut [Bound], manager
     let mut scanline_y = i32::MAX;
 
     let mut minima_sorted: Vec<usize> = (0..minima.len()).collect();
-    stable_sort(&mut minima_sorted, |&a, &c| local_minimum_sorter(&minima[a], &minima[c]));
+    minima_sorted.sort_by(|&a, &c| local_minimum_sorter(&minima[a], &minima[c]));
     let mut current_lm = 0;
 
     setup_scanbeam(minima, &mut scanbeam);

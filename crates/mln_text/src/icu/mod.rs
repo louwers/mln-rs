@@ -4,6 +4,10 @@
 //! from ICU's compiled-in Bidi property data, `ubidi_props.cpp`) and Arabic
 //! letter shaping (`u_shapeArabic`, `ushape.cpp`). Only the code paths for
 //! the options bidi.cpp passes are ported.
+//!
+//! Copyright © 2016 and later Unicode, Inc. and others; portions copyright
+//! International Business Machines Corporation and others. Under ICU's
+//! license (LICENSE-ICU).
 
 pub mod ubidi_props;
 #[rustfmt::skip]

@@ -4,14 +4,16 @@
 
 use mln_gfx::LayerGroupBase;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
-use mln_gfx::shaders::shader_defines::{ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_TILE_PROPS_UBO};
+use mln_gfx::shaders::shader_defines::{
+    ID_COLLISION_DRAWABLE_UBO, ID_COLLISION_PROJECTION_UBO, ID_COLLISION_TILE_PROPS_UBO,
+};
 use mln_gfx::shaders::symbol_layer_ubo::{CollisionDrawableUBO, CollisionTilePropsUBO};
 use mln_style::layer_properties::LayerProperties;
 use mln_style_types::TranslateAnchorType;
 use mln_util::immutable::Immutable;
 
 use super::{cast_matrix, check_tweak_drawable_ptr};
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
 /// `gfx::CollisionDrawableData`.
@@ -65,7 +67,7 @@ impl LayerTweaker for CollisionLayerTweaker {
             // matrix
             const NEAR_CLIPPED: bool = false;
             const IN_VIEWPORT_PIXEL_UNITS: bool = false;
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &data.translate,
@@ -75,6 +77,8 @@ impl LayerTweaker for CollisionLayerTweaker {
                 drawable,
                 false,
             );
+            let matrix = projection.fallback_matrix;
+            let projection_ubo = to_projection_ubo(&projection);
 
             // extrude scale
             let zoom = parameters.state.get_zoom();
@@ -93,6 +97,7 @@ impl LayerTweaker for CollisionLayerTweaker {
             let drawable_uniforms = drawable.mutable_uniform_buffers();
             drawable_uniforms.create_or_update_pod(ID_COLLISION_DRAWABLE_UBO, &drawable_ubo, context);
             drawable_uniforms.create_or_update_pod(ID_COLLISION_TILE_PROPS_UBO, &tile_props_ubo, context);
+            drawable_uniforms.create_or_update_pod(ID_COLLISION_PROJECTION_UBO, &projection_ubo, context);
         });
     }
 }

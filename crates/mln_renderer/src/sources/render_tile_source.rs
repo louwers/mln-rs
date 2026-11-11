@@ -12,22 +12,25 @@
 
 use std::any::Any;
 use std::cell::RefCell;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
 use mln_actor::TaggedScheduler;
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::polyline_generator::PolylineGeneratorOptions;
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shader_group::StringIDSetsPair;
+use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::line_layer_ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
+    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
 };
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+    ID_LINE_EXPRESSION_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
+    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::{
     ColorMode, CullFaceMode, Drawable, LayerGroupBase, LayerGroupBasePtr, TileLayerGroup, UniformBufferPtr,
@@ -45,9 +48,10 @@ use mln_util::Color;
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 // layers: debug
-use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_tile_matrix};
+use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::layers::cast_matrix;
 use crate::paint_parameters::PaintParameters;
 use crate::render_pass::RenderPass;
@@ -56,6 +60,7 @@ use crate::render_tile::RenderTile;
 use crate::render_tree::{DebugLayerGroupMap, DebugType, RenderItem};
 use crate::tile::tile::Tile;
 use crate::tile_pyramid::TilePyramid;
+use crate::util::subdivision::subdivide_vertex_line;
 
 /// `TileSourceRenderItem`.
 pub struct TileSourceRenderItem {
@@ -123,6 +128,8 @@ impl RenderItem for TileSourceRenderItem {
         let render_pass = RenderPass::Translucent;
         let shaders = &*parameters.static_data.shaders;
         let drawable_name = format!("debug-{}", self.name);
+        let globe = parameters.state.is_globe_rendering();
+        let projection_variant = if globe { ProjectionVariant::Globe } else { ProjectionVariant::Mercator };
 
         // initialize polyline builder
         let Some(polyline_shader) = shaders.get_shader_group("LineShader").and_then(|shader_group| {
@@ -142,7 +149,7 @@ impl RenderItem for TileSourceRenderItem {
                 .into_iter()
                 .collect(),
             );
-            shader_group.get_or_create_shader(context, &properties_as_uniforms, "a_pos")
+            shader_group.get_or_create_shader(context, &properties_as_uniforms, projection_variant, "a_pos")
         }) else {
             return;
         };
@@ -196,11 +203,16 @@ impl RenderItem for TileSourceRenderItem {
         // build a set of tiles to cover
         let new_tiles: HashSet<OverscaledTileID> =
             self.render_tiles.iter().map(|tile| *tile.get_overscaled_tile_id()).collect();
-        // erase drawables that are not in the current tile set
+        // erase drawables that are not in the current tile set, and those
+        // built for the other projection, which keep its shader
         let remove_stale = |tile_layer_group: &mut TileLayerGroup| {
             tile_layer_group.remove_drawables_if(|drawable| {
+                let same_shader = drawable
+                    .get_shader()
+                    .as_ref()
+                    .is_some_and(|shader| std::ptr::addr_eq(Rc::as_ptr(shader), Rc::as_ptr(&polyline_shader)));
                 drawable.get_name() == drawable_name
-                    && !drawable.get_tile_id().is_some_and(|id| new_tiles.contains(&id))
+                    && (!drawable.get_tile_id().is_some_and(|id| new_tiles.contains(&id)) || !same_shader)
             });
         };
 
@@ -275,13 +287,16 @@ impl RenderItem for TileSourceRenderItem {
 
             // add new drawables
             let extent = EXTENT as i16;
-            let border: GeometryCoordinates = vec![
+            let tile_border: GeometryCoordinates = vec![
                 Point::new(0, 0),
                 Point::new(extent, 0),
                 Point::new(extent, extent),
                 Point::new(0, extent),
                 Point::new(0, 0),
             ];
+            // On the globe the edges bend with the sphere: the border
+            // subdivided at the tile mesh's granularity, one per zoom.
+            let mut globe_borders: BTreeMap<u8, GeometryCoordinates> = BTreeMap::new();
             let border_options = PolylineGeneratorOptions { type_: FeatureType::Polygon, ..Default::default() };
             for tile in self.render_tiles.iter() {
                 let tile_id = *tile.get_overscaled_tile_id();
@@ -293,10 +308,19 @@ impl RenderItem for TileSourceRenderItem {
                     drawn |= drawable.get_name() == drawable_name;
                 });
                 if !drawn {
+                    let border = if globe {
+                        let z = tile_id.canonical.z;
+                        globe_borders.entry(z).or_insert_with(|| {
+                            let steps = SubdivisionGranularitySetting::globe().tile.get_granularity_for_zoom_level(z);
+                            subdivide_vertex_line(&tile_border, steps, false)
+                        })
+                    } else {
+                        &tile_border
+                    };
                     add_polyline_drawable(
                         tile_layer_group,
                         tile_id,
-                        std::slice::from_ref(&border),
+                        std::slice::from_ref(border),
                         &border_options,
                         None,
                     );
@@ -367,6 +391,8 @@ pub struct PolylineLayerTweaker {
     props_ubo: LineEvaluatedPropsUBO,
     /// MLN_UBO_CONSOLIDATION
     drawable_uniform_buffer: Option<UniformBufferPtr>,
+    /// Port-only: the Metal line shaders' `LineExpressionUBO`.
+    expression_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl PolylineLayerTweaker {
@@ -379,6 +405,7 @@ impl PolylineLayerTweaker {
             base: LayerTweakerBase::new("debug-polyline".to_owned(), layer_properties),
             props_ubo: properties,
             drawable_uniform_buffer: None,
+            expression_uniform_buffer: None,
         }
     }
 }
@@ -407,12 +434,18 @@ impl LayerTweaker for PolylineLayerTweaker {
         // We would need to set up `idLineExpressionUBO` if the expression
         // mask isn't empty
         debug_assert!(self.props_ubo.expression_mask == line_expression_mask::NONE);
-        // C++ also stores a LineExpressionUBO of null GPU expressions; those
-        // are Metal-only and the WebGPU line shaders do not bind it (see
-        // mln_gfx::shaders::line_layer_ubo).
+        // No GPU expressions; only the Metal line shaders read it.
+        if context.backend_type() == BackendType::Metal {
+            if self.expression_uniform_buffer.is_none() {
+                self.expression_uniform_buffer =
+                    Some(context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE], false, false));
+            }
+            layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
+        }
 
         let mut i: u32 = 0;
         let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.get_drawable_count()];
+        let mut projection_ubo_vector = vec![ProjectionUBO::default(); layer_group.get_drawable_count()];
         visit_layer_group_drawables(layer_group, |drawable| {
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
@@ -422,7 +455,7 @@ impl LayerTweaker for PolylineLayerTweaker {
             let zoom = parameters.state.get_zoom();
             // C++ also computes an unused `tileMatrix` (state.matrixFor).
 
-            let matrix = get_tile_matrix(
+            let projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &[0.0, 0.0],
@@ -432,6 +465,8 @@ impl LayerTweaker for PolylineLayerTweaker {
                 drawable,
                 false,
             );
+            let matrix = projection.fallback_matrix;
+            projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             drawable_ubo_vector[i as usize].set(&LineDrawableUBO {
                 matrix: cast_matrix(&matrix),
@@ -455,6 +490,7 @@ impl LayerTweaker for PolylineLayerTweaker {
             _ => self.drawable_uniform_buffer = Some(context.create_uniform_buffer(bytes, false, true)),
         }
         layer_group.mutable_uniform_buffers().set(ID_LINE_DRAWABLE_UBO, self.drawable_uniform_buffer.clone());
+        self.base.upload_projection_ubos(layer_group.mutable_uniform_buffers(), &projection_ubo_vector, context);
     }
 }
 
@@ -619,9 +655,10 @@ impl RenderTileSource {
         if sorted.is_none() {
             let source_bearing = self.bearing;
             let tiles = &self.render_tiles;
-            let comp = |a: &usize, b: &usize| -> bool {
-                let a = &tiles[*a];
-                let b = &tiles[*b];
+            let mut indices: Vec<usize> = (0..tiles.len()).collect();
+            indices.sort_by(|&a, &b| {
+                let a = &tiles[a];
+                let b = &tiles[b];
                 let pa = Point::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
                 let pb = Point::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
 
@@ -629,21 +666,8 @@ impl RenderTileSource {
                 let pbr = rotate(pb, source_bearing);
 
                 // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
-                let (l0, l1, l2) = (b.id.canonical.z, par.y, par.x);
-                let (r0, r1, r2) = (a.id.canonical.z, pbr.y, pbr.x);
-                if l0 != r0 {
-                    return l0 < r0;
-                }
-                if l1 < r1 {
-                    return true;
-                }
-                if r1 < l1 {
-                    return false;
-                }
-                l2 < r2
-            };
-            let mut indices: Vec<usize> = (0..tiles.len()).collect();
-            libstdcxx::sort_by(&mut indices, comp);
+                b.id.canonical.z.cmp(&a.id.canonical.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
+            });
             *sorted = Some(RenderTiles::new(self.render_tiles.clone(), indices));
         }
         sorted.clone()

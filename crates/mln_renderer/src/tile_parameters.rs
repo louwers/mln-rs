@@ -7,6 +7,7 @@ use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
 use crate::image_manager::ImageManager;
@@ -28,6 +29,7 @@ pub struct TileParameters<'a> {
     pub tile_lod_pitch_threshold: f64,
     pub tile_lod_zoom_shift: f64,
     pub tile_lod_mode: TileLodMode,
+    pub subdivision_granularity: SubdivisionGranularitySetting,
     pub global_state: Option<Arc<GlobalStateMap>>,
     pub is_update_synchronous: bool,
     pub capture_rendered_features: bool,

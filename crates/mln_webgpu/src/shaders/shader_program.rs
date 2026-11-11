@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, ColorMode};
+use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::gfx_types::DrawModeType;
 use mln_gfx::shader::Shader;
@@ -24,14 +25,15 @@ use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::types::{
-    ColorBlendEquationType, ColorBlendFactorType, DepthFunctionType, DepthMaskType, StencilFunctionType, StencilOpType,
+    ColorBlendEquationType, ColorBlendFactorType, CullFaceSideType, CullFaceWindingType, DepthFunctionType,
+    DepthMaskType, StencilFunctionType, StencilOpType,
 };
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
 use mln_vec_map::VecMap;
 
 use crate::context::Context;
-use crate::shaders::shader_source::{AttributeInfo, TextureInfo, prelude};
+use crate::shaders::shader_source::{AttributeInfo, TextureInfo};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BindingType {
@@ -253,33 +255,30 @@ impl ShaderProgram {
             module.map_err(|error| eprintln!("{error}")).ok()
         };
 
-        // Get the prelude from common.hpp
-        let mut vertex_with_prelude = String::new();
+        // The shader group already prepends the common prelude and runs the
+        // preprocessor.
         if program.has_vertex_entry_point {
-            vertex_with_prelude = format!("{}\n{}", prelude(), vertex_source);
-            program.vertex_shader_module = create_module("Vertex Shader Module", &vertex_with_prelude);
+            program.vertex_shader_module = create_module("Vertex Shader Module", vertex_source);
             if program.vertex_shader_module.is_none() {
                 eprintln!("Failed to create vertex shader module for {}", program.shader_name);
-                eprintln!("Vertex shader source length: {}", vertex_with_prelude.len());
+                eprintln!("Vertex shader source length: {}", vertex_source.len());
             }
         }
 
-        let mut fragment_with_prelude = String::new();
         if program.has_fragment_entry_point {
-            fragment_with_prelude = format!("{}\n{}", prelude(), fragment_source);
-            program.fragment_shader_module = create_module("Fragment Shader Module", &fragment_with_prelude);
+            program.fragment_shader_module = create_module("Fragment Shader Module", fragment_source);
             if program.fragment_shader_module.is_none() {
                 eprintln!("Failed to create fragment shader module for {}", program.shader_name);
-                eprintln!("Fragment shader source length: {}", fragment_with_prelude.len());
+                eprintln!("Fragment shader source length: {}", fragment_source.len());
             }
         }
 
-        program.create_pipeline_layout(&vertex_with_prelude, &fragment_with_prelude);
+        program.create_pipeline_layout(vertex_source, fragment_source);
         program
     }
 
-    /// `getRenderPipeline(renderable, vertexLayouts, ..., reuseHash)`. The
-    /// renderable is unused in C++ and not passed.
+    /// `getRenderPipeline(renderable, vertexLayouts, ..., reuseHash,
+    /// cullMode)`. The renderable is unused in C++ and not passed.
     #[allow(clippy::too_many_arguments)]
     pub fn get_render_pipeline(
         &self,
@@ -289,6 +288,7 @@ impl ShaderProgram {
         stencil_mode: &StencilMode,
         draw_mode_type: DrawModeType,
         reuse_hash: Option<u64>,
+        cull_mode: &CullFaceMode,
     ) -> Option<wgpu::RenderPipeline> {
         // Check cache first
         if let Some(hash) = reuse_hash
@@ -297,7 +297,8 @@ impl ShaderProgram {
             return Some(pipeline.clone());
         }
         // Create new pipeline
-        let pipeline = self.create_pipeline(vertex_layouts, color_mode, depth_mode, stencil_mode, draw_mode_type);
+        let pipeline =
+            self.create_pipeline(vertex_layouts, color_mode, depth_mode, stencil_mode, draw_mode_type, cull_mode);
         // Cache the pipeline if we have a reuse hash
         if let (Some(hash), Some(p)) = (reuse_hash, &pipeline) {
             self.render_pipeline_cache.borrow_mut().insert(hash, p.clone());
@@ -575,6 +576,7 @@ impl ShaderProgram {
         depth_mode: &DepthMode,
         stencil_mode: &StencilMode,
         draw_mode_type: DrawModeType,
+        cull_mode: &CullFaceMode,
     ) -> Option<wgpu::RenderPipeline> {
         let device = self.context.get_backend().get_device();
         if !self.has_vertex_entry_point || !self.has_fragment_entry_point {
@@ -661,8 +663,18 @@ impl ShaderProgram {
             } else {
                 None
             },
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
+            front_face: if cull_mode.winding == CullFaceWindingType::CounterClockwise {
+                wgpu::FrontFace::Ccw
+            } else {
+                wgpu::FrontFace::Cw
+            },
+            cull_mode: if !cull_mode.enabled {
+                None
+            } else if cull_mode.side == CullFaceSideType::Front {
+                Some(wgpu::Face::Front)
+            } else {
+                Some(wgpu::Face::Back)
+            },
             ..Default::default()
         };
 

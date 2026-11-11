@@ -72,29 +72,35 @@ impl Writer {
                 key(a).cmp(&key(b))
             });
             items.dedup();
-            let one_line = if items.len() == 1 {
-                format!("use {module}::{};", items[0])
-            } else {
-                format!("use {module}::{{{}}};", items.join(", "))
-            };
-            if one_line.len() <= MAX_WIDTH {
-                self.line(&one_line);
-                continue;
-            }
-            self.line(&format!("use {module}::{{"));
-            let mut current = String::from("   ");
-            for item in &items {
-                if current.len() + 1 + item.len() + 1 > MAX_WIDTH {
-                    self.line(current.trim_end());
-                    current = String::from("   ");
-                }
-                current.push(' ');
-                current.push_str(item);
-                current.push(',');
-            }
-            self.line(&current);
-            self.line("};");
+            self.use_items("use", &module, &items);
         }
+    }
+
+    /// `{keyword} {module}::{items};` on one line, or one item group per
+    /// line, as rustfmt breaks it, when that is wider than [`MAX_WIDTH`].
+    pub fn use_items(&mut self, keyword: &str, module: &str, items: &[String]) {
+        let one_line = if items.len() == 1 {
+            format!("{keyword} {module}::{};", items[0])
+        } else {
+            format!("{keyword} {module}::{{{}}};", items.join(", "))
+        };
+        if one_line.len() <= MAX_WIDTH {
+            self.line(&one_line);
+            return;
+        }
+        self.line(&format!("{keyword} {module}::{{"));
+        let mut current = String::from("   ");
+        for item in items {
+            if current.len() + 1 + item.len() + 1 > MAX_WIDTH {
+                self.line(current.trim_end());
+                current = String::from("   ");
+            }
+            current.push(' ');
+            current.push_str(item);
+            current.push(',');
+        }
+        self.line(&current);
+        self.line("};");
     }
 
     /// Drops the blank line(s) before a closing brace.

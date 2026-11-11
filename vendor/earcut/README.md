@@ -7,6 +7,8 @@
 
 Ports earcut.hpp (`mapbox/earcut.hpp`), the polygon triangulation the C++ core uses.
 
+Licensed under the ISC License, as earcut.hpp is ([LICENSE](LICENSE)).
+
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)
 map rendering core. All its crates are released together, at the same version.

@@ -17,7 +17,6 @@ pub use geojson;
 pub use geojson_vt;
 pub use geometry;
 pub use kdbush;
-pub use libstdcxx;
 pub use mln_actor;
 pub use mln_conversion;
 pub use mln_expression;
@@ -28,6 +27,8 @@ pub use mln_image;
 pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
+/// Empty except on Apple platforms.
+pub use mln_mtl;
 pub use mln_renderer;
 // Every runtime type is at the root, so the root can't miss one that a
 // root type's methods take or return.

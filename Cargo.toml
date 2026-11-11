@@ -22,7 +22,7 @@ members = [
 [workspace.package]
 # Every package is published at this version. To release, bump it here and
 # in the in-repo [workspace.dependencies] below (RELEASING.md).
-version = "0.0.10"
+version = "0.0.11"
 edition = "2024"
 # The oldest Rust the packages build with (mlt-core 0.22 needs 1.98). CI's
 # msrv job builds the workspace with it.
@@ -30,59 +30,63 @@ rust-version = "1.98"
 description = "Part of mln-rs, a Rust port of the MapLibre Native map rendering core. Depend on mln-rs instead."
 license = "BSD-2-Clause"
 repository = "https://github.com/louwers/mln-rs"
-include = ["/src", "/tests"]
+# `/LICENSE*` ships each package's license files. A published package whose
+# code is, all or in part, under the root license has a LICENSE.md symlink to
+# it, which `cargo package` archives as a file. The ports of other projects
+# also ship their own license files.
+include = ["/src", "/tests", "/LICENSE*"]
 
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
-cheap_ruler = { package = "mln-rs-cheap-ruler", path = "vendor/cheap-ruler", version = "=0.0.10" }
-csscolorparser = { package = "mln-rs-csscolorparser", path = "vendor/csscolorparser", version = "=0.0.10" }
-earcut = { package = "mln-rs-earcut", path = "vendor/earcut", version = "=0.0.10" }
-earcut_test_fixtures = { package = "mln-rs-earcut-test-fixtures", path = "vendor/earcut/test_fixtures", version = "=0.0.10" }
-feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.10" }
-geojson = { package = "mln-rs-geojson", path = "vendor/geojson", version = "=0.0.10" }
-geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.10" }
-geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.10" }
-kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.10" }
-libstdcxx = { package = "mln-rs-libstdcxx", path = "vendor/libstdcxx", version = "=0.0.10" }
-mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.10" }
-mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.10" }
-mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.10" }
-mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.10" }
-mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.10" }
-mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.10" }
-mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.10" }
-mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.10" }
-mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.10" }
-mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.10" }
+cheap_ruler = { package = "mln-rs-cheap-ruler", path = "vendor/cheap-ruler", version = "=0.0.11" }
+csscolorparser = { package = "mln-rs-csscolorparser", path = "vendor/csscolorparser", version = "=0.0.11" }
+earcut = { package = "mln-rs-earcut", path = "vendor/earcut", version = "=0.0.11" }
+earcut_test_fixtures = { package = "mln-rs-earcut-test-fixtures", path = "vendor/earcut/test_fixtures", version = "=0.0.11" }
+feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.11" }
+geojson = { package = "mln-rs-geojson", path = "vendor/geojson", version = "=0.0.11" }
+geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.11" }
+geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.11" }
+kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.11" }
+mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.11" }
+mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.11" }
+mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.11" }
+mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.11" }
+mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.11" }
+mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.11" }
+mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.11" }
+mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.11" }
+mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.11" }
+mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.11" }
+mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.11" }
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
-mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.10", default-features = false }
-mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.10" }
-mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.10" }
+mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.11", default-features = false }
+mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.11" }
+mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.11" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
-mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.10", default-features = false }
-mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.10" }
-mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.10" }
-mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.10" }
-mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.10" }
-mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.10" }
-mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.10" }
-mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.10" }
-mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.10" }
-mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.10" }
-nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=0.0.10" }
-pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.10" }
-pmtiles = { package = "mln-rs-pmtiles", path = "vendor/pmtiles", version = "=0.0.10" }
-polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.10" }
-protozero = { package = "mln-rs-protozero", path = "vendor/protozero", version = "=0.0.10" }
-rapidjson = { package = "mln-rs-rapidjson", path = "vendor/rapidjson", version = "=0.0.10" }
-render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.10" }
-shelf_pack = { package = "mln-rs-shelf-pack", path = "vendor/shelf-pack", version = "=0.0.10" }
-style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.10" }
-supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.10" }
-vector_tile = { package = "mln-rs-vector-tile", path = "vendor/vector-tile", version = "=0.0.10" }
-wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.10" }
+mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.11", default-features = false }
+mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.11" }
+mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.11" }
+mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.11" }
+mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.11" }
+mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.11" }
+mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.11" }
+mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.11" }
+mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.11" }
+mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
+nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=0.0.11" }
+pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
+pmtiles = { package = "mln-rs-pmtiles", path = "vendor/pmtiles", version = "=0.0.11" }
+polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.11" }
+protozero = { package = "mln-rs-protozero", path = "vendor/protozero", version = "=0.0.11" }
+rapidjson = { package = "mln-rs-rapidjson", path = "vendor/rapidjson", version = "=0.0.11" }
+render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.11" }
+shelf_pack = { package = "mln-rs-shelf-pack", path = "vendor/shelf-pack", version = "=0.0.11" }
+style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.11" }
+supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.11" }
+vector_tile = { package = "mln-rs-vector-tile", path = "vendor/vector-tile", version = "=0.0.11" }
+wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.11" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
 # add a crate when nothing in the C++ core has to be ported for it.
@@ -167,6 +171,38 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSURLResponse",
     "NSURLSession",
 ] }
+# Apple platforms: the Metal backend (crates/mln_mtl) and its CAMetalLayer.
+objc2-metal = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "MTLAllocation",
+    "MTLArgument",
+    "MTLBlitCommandEncoder",
+    "MTLBuffer",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLCommandQueue",
+    "MTLDepthStencil",
+    "MTLDevice",
+    "MTLDrawable",
+    "MTLLibrary",
+    "MTLPixelFormat",
+    "MTLRenderCommandEncoder",
+    "MTLRenderPass",
+    "MTLRenderPipeline",
+    "MTLResource",
+    "MTLSampler",
+    "MTLTexture",
+    "MTLTypes",
+    "MTLVertexDescriptor",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "objc2-metal",
+    "CALayer",
+    "CAMetalLayer",
+] }
 # examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
 js-sys = { version = "0.3.107" }
@@ -185,6 +221,8 @@ web-time = { version = "1.1.0" }
 # wasm32-unknown-unknown the browser's WebGPU (examples/web). Not its
 # default GLES backend, which nothing selects.
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
+# examples/desktop: the CAMetalLayer of the window's view on macOS.
+raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland
 # libraries at run time (`wayland-dlopen`, x11-dl), so builds need no system
 # development packages.
@@ -193,6 +231,8 @@ winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "
 # device, its input from winit. `links` opens the attribution's links.
 egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
 egui-wgpu = { version = "0.37.0", default-features = false }
+# The backends' SVG logos in examples/desktop's controls.
+egui_extras = { version = "0.37.0", default-features = false, features = ["svg"] }
 egui-winit = { version = "0.37.0", default-features = false, features = ["links", "wayland", "x11"] }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
@@ -260,7 +300,6 @@ geojson.workspace = true
 geojson_vt.workspace = true
 geometry.workspace = true
 kdbush.workspace = true
-libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_conversion.workspace = true
 mln_expression.workspace = true
@@ -271,6 +310,7 @@ mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
+mln_mtl.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_runtime.workspace = true
 mln_sprite.workspace = true
@@ -303,3 +343,9 @@ workspace = true
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# Debug builds, the tests' among them, compress and decompress tiles, the
+# offline database and PNGs through zlib-rs, which is many times slower
+# unoptimized.
+[profile.dev.package.zlib-rs]
+opt-level = 3

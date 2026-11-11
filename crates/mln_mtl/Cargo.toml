@@ -1,0 +1,55 @@
+[package]
+name = "mln-rs-mtl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# The [[test]]s below.
+autotests = false
+
+[lib]
+name = "mln_mtl"
+# The doc comments have no examples to run.
+doctest = false
+
+# Metal exists on Apple platforms only; elsewhere the crate is empty.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+bytemuck.workspace = true
+mln_gfx.workspace = true
+mln_tile_id.workspace = true
+mln_util.workspace = true
+objc2.workspace = true
+objc2-core-foundation.workspace = true
+objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSObject", "NSRange"] }
+objc2-metal.workspace = true
+objc2-quartz-core.workspace = true
+
+# Compiles every MSL source extracted from include/mln/shaders/mtl/*.hpp
+# with the system's Metal compiler.
+[[test]]
+name = "msl_compile_test"
+path = "tests/msl_compile_test.rs"
+
+# The background shader end to end on the drawable path (after
+# crates/mln_webgpu/tests/background_test.rs): HeadlessBackend, a
+# DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
+# rendered into the offscreen target and read back.
+[[test]]
+name = "background_test"
+path = "tests/background_test.rs"
+
+# Ports test/renderer/metal_renderable.test.cpp.
+[[test]]
+name = "gtest_metal_renderable"
+path = "tests/gtest_metal_renderable.rs"
+
+# Ports the Metal shader test of test/util/hash.test.cpp.
+[[test]]
+name = "gtest_hash"
+path = "tests/gtest_hash.rs"
+
+[lints]
+workspace = true

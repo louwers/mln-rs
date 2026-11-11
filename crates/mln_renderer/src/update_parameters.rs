@@ -6,9 +6,10 @@ use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_style::collection::ImmutableVector;
 use mln_style::expression::GlobalStateMap;
 use mln_style::transition_options::TransitionOptions;
-use mln_style::{image, layer, light, source};
+use mln_style::{image, layer, light, sky, source};
 use mln_util::chrono::TimePoint;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 #[derive(Clone)]
 pub struct UpdateParameters {
@@ -25,6 +26,7 @@ pub struct UpdateParameters {
     pub sprite_loaded: bool,
     pub transition_options: TransitionOptions,
     pub light: Immutable<light::Impl>,
+    pub sky: Option<Immutable<sky::Impl>>,
     pub images: Immutable<Vec<Immutable<image::Impl>>>,
     pub sources: ImmutableVector<dyn source::Impl>,
     pub layers: ImmutableVector<dyn layer::Impl>,
@@ -49,6 +51,8 @@ pub struct UpdateParameters {
     pub tile_lod_pitch_threshold: f64,
     pub tile_lod_zoom_shift: f64,
     pub tile_lod_mode: TileLodMode,
+
+    pub subdivision_granularity: SubdivisionGranularitySetting,
 }
 
 // The map and a renderer on another thread share an update.

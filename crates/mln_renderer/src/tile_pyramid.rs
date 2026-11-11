@@ -15,10 +15,12 @@ use mln_style::source;
 use mln_style_types::SourceType;
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
+use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::algorithm::update_renderables::{PrefetchedTile, RenderablesContext, update_renderables};
 use crate::tile::tile::{Tile, TileNecessity, TileUpdateParameters};
@@ -46,6 +48,7 @@ pub struct TilePyramid {
 
     fading_tiles: bool,
     cache_enabled: bool,
+    last_subdivision_granularity: SubdivisionGranularitySetting,
 }
 
 /// The `TilePyramid::update` callbacks of `algorithm::updateRenderables`.
@@ -85,10 +88,15 @@ where
                 return None;
             }
         }
-        let tile = match self.cache.pop(id) {
+        let mut tile = self.cache.pop(id);
+        if tile.is_none() && self.parameters.transform_state.is_globe_rendering() {
+            tile = self.cache.pop_any_wrap(id);
+        }
+        let tile = match tile {
             Some(tile) => tile,
             None => {
                 let tile = (self.create_tile)(id, self.observer.clone())?;
+                tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
                 tile.set_layers(self.layers, self.parameters.global_state.clone());
                 tile
             }
@@ -110,6 +118,7 @@ where
         }
 
         if self.needs_relayout {
+            tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
             tile.set_layers(self.layers, self.parameters.global_state.clone());
         }
     }
@@ -159,6 +168,7 @@ impl TilePyramid {
             prev_lng: 0.0,
             fading_tiles: false,
             cache_enabled: true,
+            last_subdivision_granularity: SubdivisionGranularitySetting::none(),
         }
     }
 
@@ -181,8 +191,12 @@ impl TilePyramid {
         bounds: Option<LatLngBounds>,
         create_tile: impl FnMut(&OverscaledTileID, Rc<dyn TileObserver>) -> Option<Box<dyn Tile>>,
     ) {
+        let subdivision_granularity = parameters.subdivision_granularity;
+        let relayout = needs_relayout || subdivision_granularity != self.last_subdivision_granularity;
+        self.last_subdivision_granularity = subdivision_granularity;
+
         // If we need a relayout, abandon any cached tiles; they're now stale.
-        if needs_relayout {
+        if relayout {
             self.cache.clear();
         }
 
@@ -191,7 +205,7 @@ impl TilePyramid {
         if !needs_rendering {
             let tiles = std::mem::take(&mut self.tiles);
             for (id, tile) in tiles {
-                if !needs_relayout {
+                if !relayout {
                     // These tiles are invisible, we set optional necessity
                     // for them and thus suppress network requests on tiles
                     // expiration (see `OnlineFileRequest`). One that hasn't
@@ -242,6 +256,8 @@ impl TilePyramid {
             tile_lod_scale: parameters.tile_lod_scale,
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
             tile_lod_mode: parameters.tile_lod_mode,
+            requested_zoom: Some(zoom + mln_math::log2(constants::TILE_SIZE_D / f64::from(tile_size))),
+            round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM || type_ == SourceType::Video,
         };
 
         if overscaled_zoom >= i32::from(zoom_range.min) {
@@ -266,7 +282,12 @@ impl TilePyramid {
                 }
 
                 if pan_zoom < ideal_zoom {
-                    pan_tiles = tile_cover(&tile_cover_parameters, pan_zoom as u8, zoom_range, None);
+                    // The prefetch's level of detail falls off from its own,
+                    // coarser zoom.
+                    let mut pan_parameters = tile_cover_parameters.clone();
+                    pan_parameters.requested_zoom = None;
+                    pan_parameters.round_zoom = false;
+                    pan_tiles = tile_cover(&pan_parameters, pan_zoom as u8, zoom_range, None);
                 }
             }
 
@@ -300,14 +321,23 @@ impl TilePyramid {
         // updateRenderables algorithm. Tiles are created at the ideal tile
         // zoom or at lower zoom levels. Child tiles are used from the cache,
         // but not created.
+        // A cover that picks each tile's zoom by its distance from the camera
+        // asks for tiles finer than the nominal zoom, up to the source's
+        // maximum; the globe cover does, like `TileLodMode::Distance`.
         let mut tile_range: Option<TileRange> = None;
         if let Some(bounds) = &bounds {
-            let max_zoom: i32 = if parameters.tile_lod_mode == TileLodMode::Distance {
+            let variable_zoom =
+                parameters.tile_lod_mode == TileLodMode::Distance || parameters.transform_state.is_globe_rendering();
+            let max_zoom: i32 = if variable_zoom {
                 i32::from(zoom_range.max)
             } else {
                 std::cmp::min(tile_zoom, i32::from(zoom_range.max))
             };
             tile_range = Some(TileRange::from_lat_lng_bounds_range(bounds, zoom_range.min, max_zoom as u8));
+        }
+
+        if parameters.transform_state.is_globe_rendering() {
+            self.move_tiles_to_wanted_wraps(&ideal_tiles, &pan_tiles);
         }
 
         let mut previously_rendered_tiles = std::mem::take(&mut self.rendered_tiles);
@@ -324,7 +354,7 @@ impl TilePyramid {
             layers,
             parameters,
             tile_range,
-            needs_relayout,
+            needs_relayout: relayout,
             minimum_update_interval,
             is_volatile,
             create_tile,
@@ -378,7 +408,7 @@ impl TilePyramid {
             // Remove the tile from the map. If it requires re-layout,
             // discard it asynchronously, otherwise keep it in the cache
             if let Some(tile) = self.tiles.remove(&key) {
-                if needs_relayout {
+                if relayout {
                     self.cache.deferred_release(tile);
                 } else {
                     // Port-only: a tile still loading keeps its necessity,
@@ -460,31 +490,124 @@ impl TilePyramid {
         }
 
         let height = f64::from(transform_state.get_size().height);
-        let query_geometry: Vec<geometry::Point<f64>> = geometry
-            .iter()
-            .map(|p| {
-                TileCoordinate::from_screen_coordinate(
-                    transform_state,
-                    0,
-                    &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
-                )
-                .p
-            })
-            .collect();
+        let to_world = |p: &mln_util::geo::ScreenCoordinate| {
+            TileCoordinate::from_screen_coordinate(
+                transform_state,
+                0,
+                &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
+            )
+            .p
+        };
+        let globe = transform_state.is_globe_rendering();
+        let on_planet = |p: &mln_util::geo::ScreenCoordinate| {
+            mln_map_types::VerticalPerspectiveProjection::screen_coordinate_hits_globe(
+                transform_state,
+                &mln_util::geo::ScreenCoordinate::new(p.x, height - p.y),
+            )
+        };
 
-        // mapbox::geometry::envelope(queryGeometry)
-        let mut box_min = query_geometry[0];
-        let mut box_max = query_geometry[0];
-        for p in &query_geometry {
-            box_min.x = if p.x < box_min.x { p.x } else { box_min.x };
-            box_min.y = if p.y < box_min.y { p.y } else { box_min.y };
-            box_max.x = if box_max.x < p.x { p.x } else { box_max.x };
-            box_max.y = if box_max.y < p.y { p.y } else { box_max.y };
+        // Past the planet's edge a query meets the planet only at the horizon,
+        // and a point there stands for the nearest horizon point, so a query's
+        // corners alone would cut the planet's limb off; its edges are followed
+        // in steps.
+        let mut traced: Vec<mln_util::geo::ScreenCoordinate> = Vec::new();
+        if globe && geometry.len() > 1 && !geometry.iter().all(on_planet) {
+            const STEPS: i32 = 32;
+            for i in 0..geometry.len() - 1 {
+                for k in 0..STEPS {
+                    let t = f64::from(k) / f64::from(STEPS);
+                    traced.push(mln_util::geo::ScreenCoordinate::new(
+                        geometry[i].x + (geometry[i + 1].x - geometry[i].x) * t,
+                        geometry[i].y + (geometry[i + 1].y - geometry[i].y) * t,
+                    ));
+                }
+            }
+            traced.push(*geometry.last().expect("geometry"));
+        }
+        let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
+        let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
+
+        // `std::min(a, b)` and `std::max(a, b)`.
+        let std_min = |a: f64, b: f64| if b < a { b } else { a };
+        let std_max = |a: f64, b: f64| if a < b { b } else { a };
+        // mapbox::geometry::envelope
+        let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
+            let (x, y) = points.next().expect("points");
+            let (mut min, mut max) = ((x, y), (x, y));
+            for (x, y) in points {
+                min = (std_min(min.0, x), std_min(min.1, y));
+                max = (std_max(max.0, x), std_max(max.1, y));
+            }
+            (min, max)
+        };
+
+        if globe {
+            // GL JS's `transformBbox`: the globe has no world copies, so a box
+            // across the antimeridian lands on the rest of the world, which
+            // shows when its slightly shrunken corners fall outside it. It
+            // moves to the copy west of the main world.
+            let (mut screen_min, mut screen_max) = envelope(&mut geometry.iter().map(|p| (p.x, p.y)));
+            let shrink = std_min(screen_max.0 - screen_min.0, screen_max.1 - screen_min.1) * 0.001;
+            screen_min.0 += shrink;
+            screen_min.1 += shrink;
+            screen_max.0 -= shrink;
+            screen_max.1 -= shrink;
+            let (bounds_min, bounds_max) = envelope(&mut query_geometry.iter().map(|p| (p.x, p.y)));
+            // A corner past the planet stands for the nearest point on the
+            // horizon, which tells nothing about the antimeridian, so GL JS's
+            // check lost boxes that reach into space, such as the whole view
+            // of a small globe. Such corners are left out, and the box's
+            // center, when it is on the planet, decides by longitude for them.
+            let mut covered = true;
+            let mut reaches_into_space = false;
+            for corner in [
+                mln_util::geo::ScreenCoordinate::new(screen_min.0, screen_min.1),
+                mln_util::geo::ScreenCoordinate::new(screen_max.0, screen_min.1),
+                mln_util::geo::ScreenCoordinate::new(screen_min.0, screen_max.1),
+                mln_util::geo::ScreenCoordinate::new(screen_max.0, screen_max.1),
+            ] {
+                if !on_planet(&corner) {
+                    reaches_into_space = true;
+                    continue;
+                }
+                let c = to_world(&corner);
+                covered =
+                    covered && bounds_min.0 <= c.x && c.x <= bounds_max.0 && bounds_min.1 <= c.y && c.y <= bounds_max.1;
+            }
+            let center = mln_util::geo::ScreenCoordinate::new(
+                (screen_min.0 + screen_max.0) / 2.0,
+                (screen_min.1 + screen_max.1) / 2.0,
+            );
+            if reaches_into_space && on_planet(&center) {
+                let c = to_world(&center);
+                covered = covered && bounds_min.0 <= c.x && c.x <= bounds_max.0;
+            }
+            if !covered {
+                for c in query_geometry.iter_mut() {
+                    if c.x > 0.5 {
+                        c.x -= 1.0;
+                    }
+                }
+            }
         }
 
-        // Sorted by (z, y, wrap, x).
+        // mapbox::geometry::envelope(queryGeometry)
+        let (box_min, box_max) = envelope(&mut query_geometry.iter().map(|p| (p.x, p.y)));
+        let box_min = geometry::Point::new(box_min.0, box_min.1);
+        let box_max = geometry::Point::new(box_max.0, box_max.1);
+
+        // Sorted by (z, y, wrap, x). GL JS sorts the globe's query tiles by
+        // their copy on the main world, so there the wrap only breaks ties.
         let mut sorted_tiles: Vec<(&UnwrappedTileID, &OverscaledTileID)> = self.rendered_tiles.iter().collect();
         sorted_tiles.sort_by(|(a, _), (b, _)| {
+            if globe {
+                return (a.canonical.z, a.canonical.y, a.canonical.x, a.wrap).cmp(&(
+                    b.canonical.z,
+                    b.canonical.y,
+                    b.canonical.x,
+                    b.wrap,
+                ));
+            }
             (a.canonical.z, a.canonical.y, a.wrap, a.canonical.x).cmp(&(
                 b.canonical.z,
                 b.canonical.y,
@@ -494,6 +617,12 @@ impl TilePyramid {
         });
 
         let max_pitch_scale_factor = transform_state.max_pitch_scale_factor();
+
+        // The globe returns a feature once per tile, as GL JS does, though the
+        // tile is tested at three copies and can be rendered at two wraps:
+        // these are where this tile's features start in each layer's results.
+        let mut canonical_tile: Option<mln_tile_id::CanonicalTileID> = None;
+        let mut canonical_tile_start: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
 
         for (id, key) in sorted_tiles {
             let tile = self.tiles[key].as_ref();
@@ -505,33 +634,86 @@ impl TilePyramid {
                     / constants::TILE_SIZE_D
                     / f64::from(scale);
 
-            let tile_space_bounds_min = TileCoordinate::to_geometry_coordinate(id, &box_min);
-            if f64::from(tile_space_bounds_min.x) - query_padding >= f64::from(constants::EXTENT)
-                || f64::from(tile_space_bounds_min.y) - query_padding >= f64::from(constants::EXTENT)
-            {
-                continue;
+            if globe && canonical_tile != Some(id.canonical) {
+                canonical_tile = Some(id.canonical);
+                canonical_tile_start.clear();
+                for (layer_id, features) in &result {
+                    canonical_tile_start.insert(layer_id.clone(), features.len());
+                }
             }
 
-            let tile_space_bounds_max = TileCoordinate::to_geometry_coordinate(id, &box_max);
-            if f64::from(tile_space_bounds_max.x) + query_padding < 0.0
-                || f64::from(tile_space_bounds_max.y) + query_padding < 0.0
-            {
-                continue;
+            // The query geometry lies on the main world or, across the
+            // antimeridian, west of it, and its padding reaches past either
+            // side of it: a globe tile is tested at its copies west of, on and
+            // east of the main world. GL JS leaves out the east copy and misses
+            // features just east of the antimeridian under a query just west
+            // of it.
+            let globe_copies = [
+                UnwrappedTileID::with_wrap(-1, id.canonical),
+                UnwrappedTileID::with_wrap(0, id.canonical),
+                UnwrappedTileID::with_wrap(1, id.canonical),
+            ];
+            let copies: &[UnwrappedTileID] = if globe { &globe_copies } else { std::slice::from_ref(id) };
+            for copy in copies {
+                let tile_space_bounds_min = TileCoordinate::to_geometry_coordinate(copy, &box_min);
+                if f64::from(tile_space_bounds_min.x) - query_padding >= f64::from(constants::EXTENT)
+                    || f64::from(tile_space_bounds_min.y) - query_padding >= f64::from(constants::EXTENT)
+                {
+                    continue;
+                }
+
+                let tile_space_bounds_max = TileCoordinate::to_geometry_coordinate(copy, &box_max);
+                if f64::from(tile_space_bounds_max.x) + query_padding < 0.0
+                    || f64::from(tile_space_bounds_max.y) + query_padding < 0.0
+                {
+                    continue;
+                }
+
+                let tile_space_query_geometry: mln_tile_id::geometry_tile_data::GeometryCoordinates =
+                    query_geometry.iter().map(|c| TileCoordinate::to_geometry_coordinate(copy, c)).collect();
+
+                if !globe {
+                    tile.query_rendered_features(
+                        &mut result,
+                        &tile_space_query_geometry,
+                        transform_state,
+                        layers,
+                        options,
+                        global_state,
+                        proj_matrix,
+                        feature_state,
+                    )?;
+                    continue;
+                }
+
+                let mut found = crate::geometry::feature_index::QueryResults::new();
+                tile.query_rendered_features(
+                    &mut found,
+                    &tile_space_query_geometry,
+                    transform_state,
+                    layers,
+                    options,
+                    global_state,
+                    proj_matrix,
+                    feature_state,
+                )?;
+                for (layer_id, features) in found {
+                    let start = canonical_tile_start.get(&layer_id).copied().unwrap_or(0);
+                    let layer_result = result.entry(layer_id).or_default();
+                    let end = layer_result.len();
+                    for feature in features {
+                        // `other == feature` compares the GeoJSON feature
+                        // base: id, geometry and properties.
+                        if !layer_result[start..end].iter().any(|other| {
+                            other.id == feature.id
+                                && other.geometry == feature.geometry
+                                && other.properties == feature.properties
+                        }) {
+                            layer_result.push(feature);
+                        }
+                    }
+                }
             }
-
-            let tile_space_query_geometry: mln_tile_id::geometry_tile_data::GeometryCoordinates =
-                query_geometry.iter().map(|c| TileCoordinate::to_geometry_coordinate(id, c)).collect();
-
-            tile.query_rendered_features(
-                &mut result,
-                &tile_space_query_geometry,
-                transform_state,
-                layers,
-                options,
-                global_state,
-                proj_matrix,
-                feature_state,
-            )?;
         }
 
         Ok(result)
@@ -555,6 +737,40 @@ impl TilePyramid {
     /// `getRenderedTile(tileID)`.
     pub fn get_rendered_tile(&self, tile_id: &UnwrappedTileID) -> Option<&dyn Tile> {
         self.rendered_tiles.get(tile_id).map(|key| self.tiles[key].as_ref())
+    }
+
+    /// On the globe every wrap of a tile is the same piece of the sphere, and
+    /// the cover gives tiles the wraps of the world copy the center has
+    /// reached. A tile the cover now wants under another wrap moves there
+    /// instead of loading again, which would leave its part of the globe bare
+    /// until it did: the whole globe at the zoom-0 tile, which changes wrap
+    /// whenever the center crosses the antimeridian.
+    fn move_tiles_to_wanted_wraps(&mut self, ideal_tiles: &[OverscaledTileID], pan_tiles: &[OverscaledTileID]) {
+        let mut wanted: BTreeSet<OverscaledTileID> = ideal_tiles.iter().copied().collect();
+        wanted.extend(pan_tiles.iter().copied());
+        for id in &wanted {
+            if self.tiles.contains_key(id) {
+                continue;
+            }
+            let Some(loaded) = self
+                .tiles
+                .keys()
+                .find(|key| {
+                    key.overscaled_z == id.overscaled_z && key.canonical == id.canonical && !wanted.contains(key)
+                })
+                .copied()
+            else {
+                continue;
+            };
+            let rendered_id = loaded.to_unwrapped();
+            let tile = self.tiles.remove(&loaded).expect("loaded tile");
+            tile.base().set_id(*id);
+            self.tiles.insert(*id, tile);
+            // `renderedTiles.insert(node)` keeps an entry already at the key.
+            if self.rendered_tiles.remove(&rendered_id).is_some() {
+                self.rendered_tiles.entry(id.to_unwrapped()).or_insert(*id);
+            }
+        }
     }
 
     /// `handleWrapJump(lng)`.

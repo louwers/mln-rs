@@ -63,6 +63,11 @@ pub const fn vec3_sub(a: &Vec3, b: &Vec3) -> Vec3 {
     [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 }
 
+/// `vec3Add`.
+pub const fn vec3_add(a: &Vec3, b: &Vec3) -> Vec3 {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
 /// `mln::matrix` (mat3 overloads). C++ lets `out` alias `a`; in Rust the
 /// caller passes a copy (`let a = m; matrix::rotate(&mut m, &a, rad)`). Every
 /// function reads all of `a` before writing `out`, so the result is the same.

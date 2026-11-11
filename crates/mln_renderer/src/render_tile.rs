@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use geometry::Point;
 use mln_gfx::UploadPass;
-use mln_map_types::{MapDebugOptions, TransformState};
+use mln_map_types::{MapDebugOptions, ProjectionData, TransformState};
 use mln_style::layer;
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::ImagePosition;
@@ -35,6 +35,8 @@ fn rotate(a: Point<f32>, angle: f32) -> Point<f32> {
 /// `RenderTile`.
 pub struct RenderTile {
     pub id: UnwrappedTileID,
+    /// The projection contract for this tile; `matrix` is its main matrix.
+    pub projection: ProjectionData,
     pub matrix: Mat4,
     pub near_clipped_matrix: Mat4,
     /// layers: debug
@@ -54,6 +56,7 @@ impl RenderTile {
     pub fn new(id: UnwrappedTileID, tile: &dyn Tile) -> Self {
         RenderTile {
             id,
+            projection: ProjectionData::default(),
             // C++ default-constructs `mat4` (uninitialized); prepare sets it.
             matrix: [0.0; 16],
             near_clipped_matrix: [0.0; 16],
@@ -81,29 +84,33 @@ impl RenderTile {
 
         let mut vtx_matrix: Mat4 = [0.0; 16];
 
-        let angle = if in_viewport_pixel_units {
-            if anchor == TranslateAnchorType::Map { state.get_bearing() as f32 } else { 0.0f32 }
-        } else if anchor == TranslateAnchorType::Viewport {
-            (-state.get_bearing()) as f32
-        } else {
-            0.0f32
-        };
-
-        let translate = rotate(Point::new(translation[0], translation[1]), angle);
-
         if in_viewport_pixel_units {
+            let angle = if anchor == TranslateAnchorType::Map { state.get_bearing() as f32 } else { 0.0f32 };
+            let translate = rotate(Point::new(translation[0], translation[1]), angle);
             matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate.x), f64::from(translate.y), 0.0);
         } else {
-            matrix::translate(
-                &mut vtx_matrix,
-                tile_matrix,
-                f64::from(id.pixels_to_tile_units(translate.x, state.get_zoom() as f32)),
-                f64::from(id.pixels_to_tile_units(translate.y, state.get_zoom() as f32)),
-                0.0,
-            );
+            let translate = Self::tile_unit_translation(id, translation, anchor, state);
+            matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate[0]), f64::from(translate[1]), 0.0);
         }
 
         vtx_matrix
+    }
+
+    /// `tileUnitTranslation(id, translation, anchor, state)` (static): the
+    /// layer's translation in tile units, rotated for its anchor.
+    pub fn tile_unit_translation(
+        id: &UnwrappedTileID,
+        translation: &[f32; 2],
+        anchor: TranslateAnchorType,
+        state: &TransformState,
+    ) -> [f32; 2] {
+        if translation[0] == 0.0 && translation[1] == 0.0 {
+            return [0.0, 0.0];
+        }
+        let angle = if anchor == TranslateAnchorType::Viewport { (-state.get_bearing()) as f32 } else { 0.0f32 };
+        let translate = rotate(Point::new(translation[0], translation[1]), angle);
+        let zoom = state.get_zoom() as f32;
+        [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
     }
 
     /// `translateVtxMatrix(tileMatrix, translation, anchor, state,
@@ -224,12 +231,13 @@ impl RenderTile {
         // matrix; nearClippedMatrix has near plane moved further, to enhance
         // depth buffer precision
         let transform = parameters.transform;
-        transform.state.matrix_for(&mut self.matrix, &self.id);
-        transform.state.matrix_for(&mut self.near_clipped_matrix, &self.id);
-        let m = self.matrix;
-        matrix::multiply(&mut self.matrix, &transform.proj_matrix, &m);
-        let m = self.near_clipped_matrix;
-        matrix::multiply(&mut self.near_clipped_matrix, &transform.near_clipped_proj_matrix, &m);
+        self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
+        self.matrix = self.projection.main_matrix;
+        self.near_clipped_matrix = if transform.state.is_globe_rendering() {
+            self.matrix
+        } else {
+            transform.state.get_projection_data_with(&self.id, &transform.near_clipped_proj_matrix).main_matrix
+        };
     }
 
     // TODO(port): setFeatureState (feature state, M6).

@@ -133,10 +133,13 @@ pub struct RendererBackend {
     impl_: Rc<BackendImpl>,
 }
 
-/// The shader types registered by `initShaders`, in the C++ order.
+/// The shader types registered by `initShaders`, in the C++ order, with the
+/// instanced fill extrusion shaders after their plain ones, as on Metal.
 const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
+    BuiltIn::SkyShader,
+    BuiltIn::AtmosphereShader,
     BuiltIn::CircleShader,
     BuiltIn::ClippingMaskProgram,
     BuiltIn::CollisionBoxShader,
@@ -148,7 +151,9 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::FillOutlinePatternShader,
     BuiltIn::FillOutlineTriangulatedShader,
     BuiltIn::FillExtrusionShader,
+    BuiltIn::FillExtrusionInstancedShader,
     BuiltIn::FillExtrusionPatternShader,
+    BuiltIn::FillExtrusionPatternInstancedShader,
     BuiltIn::HeatmapShader,
     BuiltIn::HeatmapTextureShader,
     BuiltIn::HillshadeShader,
@@ -166,6 +171,7 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::SymbolSDFShader,
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::WideVectorShader,
+    BuiltIn::GlobeDepthShader,
 ];
 
 impl RendererBackend {

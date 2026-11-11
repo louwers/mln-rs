@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::shader_defines::ID_BACKGROUND_POS_VERTEX_ATTRIBUTE;
 use mln_gfx::{AttributeDataType, ColorMode, Context, DepthMaskType, DrawMode, ShaderProgramBasePtr, ShaderRegistry};
 use mln_map_types::TransformState;
@@ -18,9 +19,11 @@ use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use super::{background_crossfade, background_layer_properties};
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
+use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_tweaker::{LayerTweakerPtr, layer_tweaker_slot};
 use crate::layers::background_layer_tweaker::BackgroundLayerTweaker;
 use crate::paint_parameters::PaintParameters;
@@ -162,6 +165,8 @@ impl RenderLayer for RenderBackgroundLayer {
                 tile_lod_scale: update_parameters.tile_lod_scale,
                 tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
                 tile_lod_mode: update_parameters.tile_lod_mode,
+                requested_zoom: None,
+                round_zoom: false,
             },
             zoom,
             zoom_range,
@@ -215,11 +220,18 @@ impl RenderLayer for RenderBackgroundLayer {
             changes.push(ChangeRequest::AddLayerTweaker(layer_group.clone(), Rc::downgrade(&tweaker)));
         }
 
+        if self.update_projection_variant(state) {
+            self.plain_shader = None;
+            self.pattern_shader = None;
+        }
+
         if !has_pattern && self.plain_shader.is_none() {
-            self.plain_shader = context.get_generic_shader(shaders, BACKGROUND_PLAIN_SHADER_NAME);
+            self.plain_shader =
+                context.get_generic_shader(shaders, BACKGROUND_PLAIN_SHADER_NAME, self.base.projection_variant);
         }
         if has_pattern && self.pattern_shader.is_none() {
-            self.pattern_shader = context.get_generic_shader(shaders, BACKGROUND_PATTERN_SHADER_NAME);
+            self.pattern_shader =
+                context.get_generic_shader(shaders, BACKGROUND_PATTERN_SHADER_NAME, self.base.projection_variant);
         }
 
         let layer_tweaker = self.base.layer_tweaker.clone().expect("layer tweaker");
@@ -278,10 +290,18 @@ impl RenderLayer for RenderBackgroundLayer {
                 b
             });
 
-            let vertices_copy = raw_vertices.clone();
             builder.set_vertex_attr_id(ID_BACKGROUND_POS_VERTEX_ATTRIBUTE);
-            builder.set_raw_vertices(vertices_copy, vertex_count, AttributeDataType::Short2);
-            builder.set_segments(DrawMode::Triangles(), indexes.clone(), &segs);
+            if self.base.projection_variant == ProjectionVariant::Globe {
+                // The background is not depth tested, so it needs no tile
+                // border.
+                let mesh = raw_globe_tile_mesh(&tile_id.canonical, false, &SubdivisionGranularitySetting::globe().tile);
+                builder.set_raw_vertices(mesh.vertices, mesh.vertex_count, AttributeDataType::Short2);
+                builder.set_segments(DrawMode::Triangles(), mesh.indices, &mesh.segments);
+            } else {
+                let vertices_copy = raw_vertices.clone();
+                builder.set_raw_vertices(vertices_copy, vertex_count, AttributeDataType::Short2);
+                builder.set_segments(DrawMode::Triangles(), indexes.clone(), &segs);
+            }
             builder.flush(context);
 
             for mut drawable in builder.clear_drawables() {

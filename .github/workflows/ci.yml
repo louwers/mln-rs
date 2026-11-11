@@ -16,27 +16,35 @@ permissions:
 jobs:
   # Every test (`just ci-coverage`): the libraries' tests and the shared
   # render, query and expression suites (the render and query suites twice:
-  # also with the tile workers behind the worker codec), on Linux (wgpu
-  # renders through Vulkan/lavapipe) and macOS (through Metal), with their
-  # line coverage uploaded to Codecov (codecov.yml). The differential tests
-  # against the C++ core are in louwers/mln-rs-difftests.
+  # also with the tile workers behind the worker codec), with their line
+  # coverage uploaded to Codecov (codecov.yml). The headless renders go
+  # through each backend of a platform: WebGPU on Linux (wgpu on
+  # Vulkan/lavapipe), and on macOS WebGPU (wgpu on Metal) and the Metal
+  # backend itself (MLN_RENDER_BACKEND=metal), under Metal's API validation,
+  # which aborts on an error. The differential tests against the C++ core
+  # are in louwers/mln-rs-difftests.
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-26.04, macos-26]
+        backend: [webgpu]
+        include:
+          - os: macos-26
+            backend: metal
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      MLN_RENDER_BACKEND: ${{ matrix.backend }}
+      MTL_DEBUG_LAYER: ${{ matrix.backend == 'metal' && '1' || '0' }}
+      MTL_DEBUG_LAYER_ERROR_MODE: assert
     steps:
       - uses: actions/checkout@v7
 
       # Lavapipe for the GPU tests on Linux.
-      - name: Install system packages
+      - name: Install lavapipe
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
-          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/lavapipe
 
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-llvm-cov' }
@@ -61,7 +69,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: render-tests-${{ runner.os }}
+          name: render-tests-${{ runner.os }}-${{ matrix.backend }}
           path: |
             target/llvm-cov-target/tmp/render_tests
             target/llvm-cov-target/tmp/render_tests_through_the_codec
@@ -138,7 +146,8 @@ jobs:
   # tools/ratchet), clippy with the workspace's lints (Cargo.toml), the API
   # docs as docs.rs builds them, and clippy on the libraries and examples/web
   # for wasm32-unknown-unknown (`just check-wasm`, the browser build), all
-  # with warnings as errors (the justfile denies them in CI).
+  # with warnings as errors (the justfile denies them in CI), and the
+  # packages' licenses against deny.toml (`just licenses`).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -146,7 +155,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: taiki-e/install-action@v2
-        with: { tool: just }
+        with: { tool: 'just,cargo-deny' }
 
       - name: Install Rust
         run: |
@@ -193,11 +202,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
-          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+      # Lavapipe for the native runner's renders.
+      - name: Install lavapipe
+        uses: ./.github/actions/lavapipe
 
       - uses: actions/cache@v6
         with:

@@ -85,8 +85,8 @@ ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lco
     rm -rf {{quote(parent_directory(coverage_lcov))}}
     mkdir -p {{quote(parent_directory(coverage_lcov))}}
 
-# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy, the API docs and the wasm32-unknown-unknown build, warnings as errors
-ci-lint:  env-info test-fmt ratchet clippy test-doc check-wasm && assert-git-is-clean
+# Run the checks of CI's lint job: formatting, the panic and TODO(port) ratchet, clippy, the API docs, the wasm32-unknown-unknown build and the licenses, warnings as errors
+ci-lint:  env-info test-fmt ratchet clippy test-doc check-wasm licenses && assert-git-is-clean
 
 # Package every crate and compile every Cargo test target, as CI's release-crate job does
 ci-package:  env-info package && assert-git-is-clean
@@ -360,6 +360,10 @@ test-msrv:
     rustup toolchain install "$msrv" --profile minimal --no-self-update
     cargo "+$msrv" check --workspace --all-targets
 
+# Check that every package in the dependency graph is under a license deny.toml allows. Uses `cargo-deny`
+licenses:  (cargo-install 'cargo-deny')
+    cargo deny --locked check licenses
+
 # Find unused dependencies. Uses `cargo-udeps`
 udeps:  (cargo-install 'cargo-udeps')
     cargo +nightly udeps --workspace --all-targets
@@ -369,7 +373,7 @@ update:
     cargo update
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
-# The copies are from louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs).
+# The copies are from johncarmack1984/maplibre-native's maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe branch of maplibre/maplibre-native#4533 (phased/12h), with louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the sky branch of maplibre/maplibre-native#4534 merged in.
 [doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
     #!/usr/bin/env bash

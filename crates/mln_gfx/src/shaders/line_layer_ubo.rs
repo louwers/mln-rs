@@ -140,6 +140,12 @@ pub mod line_expression_mask {
     pub const OFFSET: u32 = 1 << 6;
 }
 
+/// The size of `LineExpressionUBO`: seven `gfx::GPUExpression`s of 224
+/// bytes each. The Metal line shaders read it for the properties set in
+/// `LineEvaluatedPropsUBO::expression_mask`; with no GPU expressions, the
+/// renderer binds zeros.
+pub const LINE_EXPRESSION_UBO_SIZE: usize = 7 * (32 + (4 + 8) * 16);
+
 /// Evaluated properties that do not depend on the tile (48 bytes).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Pod, Zeroable)]
 #[repr(C, align(16))]

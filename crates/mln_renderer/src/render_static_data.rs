@@ -1,9 +1,11 @@
 // Ports src/mln/renderer/render_static_data.hpp and src/mln/renderer/render_static_data.cpp
-// (the static geometry the background layer uses).
+// (the static geometry the layers draw with).
 
 use mln_gfx::ShaderRegistry;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_util::constants;
+
+use crate::buckets::fill_extrusion_bucket::FillExtrusionStaticVertex;
 
 pub struct RenderStaticData {
     // TODO(port): tileVertexBuffer / quadTriangleIndexBuffer (uploaded for
@@ -40,6 +42,11 @@ impl RenderStaticData {
         vec![[0, 0], [extent, 0], [0, extent], [extent, extent]]
     }
 
+    /// `tileLineStripIndices()`: the tile's outline over `tile_vertices()`.
+    pub fn tile_line_strip_indices() -> Vec<u16> {
+        vec![0, 1, 3, 2, 0]
+    }
+
     /// `quadTriangleIndices()`.
     pub fn quad_triangle_indices() -> Vec<u16> {
         vec![0, 1, 2, 1, 2, 3]
@@ -63,6 +70,26 @@ impl RenderStaticData {
     /// `rasterSegments()`.
     pub fn raster_segments() -> Vec<SegmentBase> {
         vec![SegmentBase::with_lengths(0, 0, 4, 6)]
+    }
+
+    /// `fillExtrusionVertices()`.
+    pub fn fill_extrusion_vertices() -> Vec<FillExtrusionStaticVertex> {
+        vec![[1, 0], [1, 1], [0, 0], [0, 1]]
+    }
+
+    /// `fillExtrusionTriangleIndices()`.
+    pub fn fill_extrusion_triangle_indices() -> Vec<u16> {
+        // ┌──────┐
+        // │ 0  1 │ Counter-Clockwise winding order.
+        // │      │ Triangle 1: 0 => 2 => 1
+        // │ 2  3 │ Triangle 2: 1 => 2 => 3
+        // └──────┘
+        vec![0, 2, 1, 1, 2, 3]
+    }
+
+    /// `fillExtrusionSegment()`, drawing `instance_count` walls.
+    pub fn fill_extrusion_segment(instance_count: usize) -> SegmentBase {
+        SegmentBase { instance_count, ..SegmentBase::with_lengths(0, 0, 4, 6) }
     }
 
     /// `tileTriangleSegments()`.

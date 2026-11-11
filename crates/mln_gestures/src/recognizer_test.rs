@@ -8,8 +8,10 @@ use std::rc::Rc;
 
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
+use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
 use mln_util::chrono::{TimePoint, milliseconds};
+use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
 
 use super::*;
@@ -436,6 +438,64 @@ fn a_notch_mid_ease_adds_up_without_slowing_the_zoom() {
     assert!(after >= speed - 1e-9, "{after} after {speed}");
     rig.settle();
     assert!((rig.zoom() - (zoom + 2.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
+}
+
+/// Spins the wheel at `at` faster than notches ease, 10 notches a frame for
+/// a second (`direction` 1 zooms out), then turns back a notch; returns the
+/// zoom it reached and the zoom once the notch back settles. Each notch
+/// retargets the ease to the limit, which the zoom closes in on.
+fn spin_into_a_limit_and_back(rig: &mut Rig, at: ScreenCoordinate, direction: f64) -> (f64, f64) {
+    for _ in 0..60 {
+        rig.send(notches(at, 10.0 * direction));
+        rig.frame();
+    }
+    let limit = rig.zoom();
+    rig.send(notches(at, -direction));
+    rig.settle();
+    (limit, rig.zoom())
+}
+
+#[test]
+fn notches_past_a_zoom_limit_dont_hold_the_zoom_there() {
+    let at = p(400.0, 300.0);
+    for (zoom, direction) in [(2.0, 1.0), (20.0, -1.0)] {
+        let mut rig = Rig::new();
+        rig.camera.jump_to(&CameraOptions::default().with_zoom(Some(zoom)));
+        let (limit, back) = spin_into_a_limit_and_back(&mut rig, at, direction);
+        let (min, max) = rig.camera.zoom_range();
+        assert!((limit - if direction > 0.0 { min } else { max }).abs() < 1e-6, "{limit}");
+        assert!((back - (limit + direction / 3.0)).abs() < 1e-6, "{}", back - limit);
+    }
+}
+
+#[test]
+fn notches_on_the_globe_zoom_out_to_the_floor_at_the_center_latitude() {
+    let mut rig = Rig::new();
+    rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    rig.camera
+        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(60.0, 20.0).unwrap())).with_zoom(Some(1.0)));
+    let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
+    // The floor at 60° is a level below the plain minimum.
+    assert!((limit - rig.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
+    assert!(limit < rig.camera.get_state().get_min_zoom() - 0.5, "{limit}");
+    assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
+}
+
+#[test]
+fn notches_zoom_out_to_the_floor_screen_bounds_set() {
+    let mut rig = Rig::new();
+    rig.camera.set_constrain_mode(ConstrainMode::Screen);
+    let bounds = LatLngBounds::hull(LatLng::new(52.3, 4.8).unwrap(), LatLng::new(52.4, 5.0).unwrap());
+    rig.camera.set_lat_lng_bounds(bounds).unwrap();
+    rig.camera
+        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(52.35, 4.9).unwrap())).with_zoom(Some(14.0)));
+    let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
+    // The bounds fill the 800 px width at about 11.46, far above the plain
+    // minimum.
+    let floor = rig.camera.get_state().get_min_zoom_for_screen_bounds().unwrap();
+    assert!((limit - floor).abs() < 1e-6, "{limit} {floor}");
+    assert!(limit > rig.camera.get_state().get_min_zoom() + 10.0, "{limit}");
+    assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
 }
 
 #[test]
@@ -924,4 +984,39 @@ fn a_host_step_must_be_valid() {
     let mut rig = Rig::new();
     let step = CameraDelta { scale: Some(0.0), ..CameraDelta::default() };
     assert!(rig.input.step(&mut rig.camera, step).is_err());
+}
+
+// Port-only: a mouse drag on the globe turns it around the cursor, as
+// Transform::move_by_with_anchor does with it (the C++ globe's
+// moveBy(offset, anchor)), and not around the view center.
+#[test]
+fn a_drag_on_the_globe_turns_it_around_the_cursor() {
+    let globe = |transform: &mut Transform| {
+        transform.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+        transform.jump_to(
+            &CameraOptions::default().with_center(Some(LatLng::new(30.0, 20.0).unwrap())).with_zoom(Some(1.0)),
+        );
+    };
+    let mut rig = Rig::new();
+    globe(&mut rig.camera);
+    let mut direct = transform();
+    globe(&mut direct);
+    let mut centered = transform();
+    globe(&mut centered);
+    rig.down(1, PointerKind::Mouse, 480.0, 240.0);
+    for i in 1..=10 {
+        rig.now += 16.0;
+        let cursor = p(480.0 + 6.0 * f64::from(i), 240.0 + 3.0 * f64::from(i));
+        rig.to(1, cursor.x, cursor.y);
+        direct.move_by_with_anchor(&p(6.0, 3.0), Some(cursor), &AnimationOptions::default()).unwrap();
+        centered.move_by(&p(6.0, 3.0), &AnimationOptions::default()).unwrap();
+    }
+    let center = |transform: &Transform| transform.get_lat_lng(mln_util::geo::WrapMode::Unwrapped);
+    assert_eq!(center(&rig.camera), center(&direct));
+    let (dragged, around_the_center) = (center(&rig.camera), center(&centered));
+    assert!(
+        (dragged.latitude() - around_the_center.latitude()).abs() > 0.5
+            || (dragged.longitude() - around_the_center.longitude()).abs() > 0.5,
+        "{dragged:?} {around_the_center:?}"
+    );
 }

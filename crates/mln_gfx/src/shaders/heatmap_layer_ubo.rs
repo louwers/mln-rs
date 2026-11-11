@@ -12,7 +12,7 @@ pub struct HeatmapDrawableUBO {
     // Interpolations
     /* 68 */ pub weight_t: f32,
     /* 72 */ pub radius_t: f32,
-    /* 76 */ pub pad1: f32,
+    /* 76 */ pub globe_extrude_scale: f32,
     /* 80 */
 }
 const _: () = assert!(std::mem::size_of::<HeatmapDrawableUBO>() == 5 * 16);

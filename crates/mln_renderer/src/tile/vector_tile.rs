@@ -11,6 +11,7 @@ use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
 use mln_util::immutable::Immutable;
+use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
 
 use crate::tile::geometry_tile::GeometryTile;
@@ -101,6 +102,10 @@ impl Tile for VectorTile {
 
     fn set_show_collision_boxes(&self, show: bool) {
         self.tile.set_show_collision_boxes(show);
+    }
+
+    fn set_subdivision_granularity(&self, value: &SubdivisionGranularitySetting) {
+        self.tile.set_subdivision_granularity(value);
     }
 
     // layers: feature state

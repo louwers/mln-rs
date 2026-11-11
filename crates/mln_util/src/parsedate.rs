@@ -2,6 +2,9 @@
 // vendored by the C++ core): RFC 1123, RFC 850, asctime and the other
 // free-form dates curl accepts, with the vendored copy's 32-bit `time_t`
 // limits (years before 1970 give 0, years after 2037 give INT_MAX).
+//
+// Copyright (C) 1998 - 2018, Daniel Stenberg, <daniel@haxx.se>, et al.
+// Licensed as described in LICENSE-curl (curl's COPYING).
 
 const WKDAY: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const WEEKDAY: [&str; 7] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];

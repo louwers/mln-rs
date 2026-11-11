@@ -10,6 +10,8 @@
 //
 // Not ported: the MLN_SYMBOL_GUARDS `check` (memory-corruption guards).
 
+use std::cmp::Reverse;
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
@@ -327,6 +329,13 @@ pub struct Buffer {
     pub attribute_data: GeometryVec<SymbolLayoutVertex>,
     #[serde(with = "pod")]
     pub dynamic_attribute_data: Vec<SymbolDynamicLayoutVertex>,
+    /// Positions for each layer that shares the bucket at another
+    /// translation than its leader's. A layer keeps them for the bucket's
+    /// life: drawables moved back to the shared positions would keep
+    /// bindings to these. Placement makes them once the bucket is on the
+    /// map side, so they don't cross with it from a worker.
+    #[serde(skip)]
+    pub layer_dynamic_attribute_data: BTreeMap<String, Vec<SymbolDynamicLayoutVertex>>,
     #[serde(with = "pod")]
     pub opacity_attribute_data: Vec<SymbolOpacityVertex>,
     /// `TriangleIndexVector` (3 indices per triangle).
@@ -342,6 +351,26 @@ impl Buffer {
     /// `updateModified()`.
     pub fn update_modified(&mut self) {
         self.modified += 1;
+    }
+
+    /// `dynamicAttributeDataFor(layerID)`: the positions a layer draws, its
+    /// own when it has them, the leader's otherwise.
+    pub fn dynamic_attribute_data_for(&self, layer_id: &str) -> &Vec<SymbolDynamicLayoutVertex> {
+        self.layer_dynamic_attribute_data.get(layer_id).unwrap_or(&self.dynamic_attribute_data)
+    }
+
+    /// The positions placement lays out, the leader's or, with a layer ID,
+    /// that layer's (made on first use), with the placed symbols they are
+    /// for (C++ `positions(buffer)` in `updateBucketDynamicAttributeData`).
+    pub fn positions_and_symbols(
+        &mut self,
+        layer_id: Option<&str>,
+    ) -> (&mut Vec<SymbolDynamicLayoutVertex>, &[PlacedSymbol]) {
+        let positions = match layer_id {
+            None => &mut self.dynamic_attribute_data,
+            Some(layer_id) => self.layer_dynamic_attribute_data.entry(layer_id.to_owned()).or_default(),
+        };
+        (positions, &self.placed_symbols)
     }
 
     /// `hasVisibleVertices(offset, count)`: whether any of the `count`
@@ -403,6 +432,10 @@ pub struct SymbolBucketState {
     pub just_reloaded: bool,
     pub has_variable_placement: bool,
     pub has_uninitialized_symbols: bool,
+    /// The tile-unit translations the leader's dynamic positions carry,
+    /// which layers sharing the bucket compare.
+    pub dynamic_text_translation: Point<f32>,
+    pub dynamic_icon_translation: Point<f32>,
 
     pub symbol_instances: Vec<SymbolInstance>,
 
@@ -416,6 +449,15 @@ pub struct SymbolBucketState {
     pub text_collision_circle: Option<CollisionBuffer>,
 
     pub feature_sort_order: Option<Arc<Vec<usize>>>,
+}
+
+impl SymbolBucketState {
+    /// `hasLayerDynamicAttributeData(layerID)`.
+    pub fn has_layer_dynamic_attribute_data(&self, layer_id: &str) -> bool {
+        self.text.layer_dynamic_attribute_data.contains_key(layer_id)
+            || self.icon.layer_dynamic_attribute_data.contains_key(layer_id)
+            || self.sdf_icon.layer_dynamic_attribute_data.contains_key(layer_id)
+    }
 }
 
 static MAX_BUCKET_INSTANCE_ID: AtomicU32 = AtomicU32::new(0);
@@ -707,23 +749,23 @@ impl SymbolBucket {
         min_font_scale: Point<f32>,
     ) -> SymbolLayoutVertex {
         let a_size_min =
-            (MAX_PACKED_SIZE.min(cast_u16(size_data.min * SIZE_PACK_FACTOR as f32)) << 1).wrapping_add(is_sdf as u16);
-        let a_size_max = MAX_PACKED_SIZE.min(cast_u16(size_data.max * SIZE_PACK_FACTOR as f32));
+            (MAX_PACKED_SIZE.min((size_data.min * SIZE_PACK_FACTOR as f32) as u16) << 1).wrapping_add(is_sdf as u16);
+        let a_size_max = MAX_PACKED_SIZE.min((size_data.max * SIZE_PACK_FACTOR as f32) as u16);
         SymbolLayoutVertex {
             // combining pos and offset to reduce number of vertex attributes
             // passed to shader (8 max for some devices)
             a1: [
-                cast_i16(label_anchor.x),
-                cast_i16(label_anchor.y),
-                cast_i16((o.x * 32.0).round()), // use 1/32 pixels for placement
-                cast_i16(((o.y + glyph_offset_y) * 32.0).round()),
+                label_anchor.x as i16,
+                label_anchor.y as i16,
+                (o.x * 32.0).round() as i16, // use 1/32 pixels for placement
+                ((o.y + glyph_offset_y) * 32.0).round() as i16,
             ],
             a2: [tx, ty, a_size_min, a_size_max],
             a3: [
-                cast_i16(pixel_offset.x * 16.0),
-                cast_i16(pixel_offset.y * 16.0),
-                cast_i16(min_font_scale.x * 256.0),
-                cast_i16(min_font_scale.y * 256.0),
+                (pixel_offset.x * 16.0) as i16,
+                (pixel_offset.y * 16.0) as i16,
+                (min_font_scale.x * 256.0) as i16,
+                (min_font_scale.y * 256.0) as i16,
             ],
             a4: tex_origin,
         }
@@ -736,15 +778,15 @@ impl SymbolBucket {
 
     /// `opacityAttributes(placed, opacity)`.
     pub fn opacity_attributes(placed: bool, opacity: f32) -> SymbolOpacityVertex {
-        SymbolOpacityVertex { a1: [(((cast_u8(opacity * 127.0) as u32) << 1) | placed as u32) as f32] }
+        SymbolOpacityVertex { a1: [((((opacity * 127.0) as u8 as u32) << 1) | placed as u32) as f32] }
     }
 
     /// `collisionLayoutVertex(a, anchor, o)`.
     pub fn collision_layout_vertex(a: Point<f32>, anchor: Point<f32>, o: Point<f32>) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
-            a1: [cast_i16(a.x), cast_i16(a.y)],
-            a2: [cast_i16(anchor.x), cast_i16(anchor.y)],
-            a3: [cast_i16(o.x.round()), cast_i16(o.y.round())],
+            a1: [a.x as i16, a.y as i16],
+            a2: [anchor.x as i16, anchor.y as i16],
+            a3: [o.x.round() as i16, o.y.round() as i16],
         }
     }
 
@@ -752,22 +794,6 @@ impl SymbolBucket {
     pub fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Point<f32>) -> CollisionBoxDynamicVertex {
         CollisionBoxDynamicVertex { a1: [placed as u16, not_used as u16], a2: [shift.x, shift.y] }
     }
-}
-
-/// `static_cast<int16_t>(float)` (clang x86-64: truncation toward zero; the
-/// values are in range).
-fn cast_i16(v: f32) -> i16 {
-    libstdcxx::cvt::f64_to_i32(v as f64) as i16
-}
-
-/// `static_cast<uint16_t>(float)`.
-fn cast_u16(v: f32) -> u16 {
-    libstdcxx::cvt::f64_to_i32(v as f64) as u16
-}
-
-/// `static_cast<uint8_t>(float)`.
-fn cast_u8(v: f32) -> u8 {
-    libstdcxx::cvt::f64_to_i32(v as f64) as u8
 }
 
 /// `addPlacedSymbol(triangles, placedSymbol)`.
@@ -782,24 +808,16 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
 }
 
 /// `getSortedSymbols(angle)`: indices of `symbolInstances`, sorted by
-/// viewport Y. `std::ranges::sort` is unstable, but the comparator is a
-/// strict total order on distinct data feature indices.
+/// viewport Y, then by descending data feature index. Equal keys keep their
+/// index order.
 pub fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
     let mut result: Vec<usize> = (0..symbol_instances.len()).collect();
     let sin = angle.sin();
     let cos = angle.cos();
-    let rotated = |s: &SymbolInstance| -> i64 {
+    result.sort_by_key(|&i| {
+        let s = &symbol_instances[i];
         let p = s.get_anchor().point;
-        (sin * p.x + cos * p.y).round() as i64
-    };
-    libstdcxx::sort_by(&mut result, |&a, &b| {
-        let (sa, sb) = (&symbol_instances[a], &symbol_instances[b]);
-        let a_rotated = rotated(sa);
-        let b_rotated = rotated(sb);
-        if a_rotated != b_rotated {
-            return a_rotated < b_rotated;
-        }
-        sa.get_data_feature_index() > sb.get_data_feature_index() // aRotated == bRotated
+        ((sin * p.x + cos * p.y).round() as i64, Reverse(s.get_data_feature_index()))
     });
     result
 }
