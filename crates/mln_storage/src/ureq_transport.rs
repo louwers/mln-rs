@@ -32,7 +32,7 @@ use ureq::unversioned::transport::{
 
 use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
 use crate::resource::Resource;
-use crate::response::{Error, Reason};
+use crate::response::{Reason, ResourceError};
 
 /// curl's default `CURLOPT_HAPPY_EYEBALLS_TIMEOUT_MS`.
 const HAPPY_EYEBALLS_DELAY: Duration = Duration::from_millis(200);
@@ -117,7 +117,7 @@ fn start_attempt<A: Connector>(
     let run_connector = details.run_connector.clone();
     let register_shutdown = details.register_shutdown.clone();
     let per_address = per_address.clone();
-    std::thread::Builder::new().name("HTTPFileSource connect".to_owned()).spawn(move || {
+    mln_util::thread::builder("HTTPFileSource connect").spawn(move || {
         // TcpConnector doesn't resolve; a resolver is only required.
         let resolver = DefaultResolver::default();
         let mut addrs = resolver.empty();
@@ -163,9 +163,7 @@ impl Transport {
             let client = client.clone();
             let receiver = receiver.clone();
             // Detached: a worker exits when the channel closes.
-            let _ = std::thread::Builder::new()
-                .name(format!("HTTPFileSource {i}"))
-                .spawn(move || worker(&client, &receiver));
+            let _ = mln_util::thread::builder(format!("HTTPFileSource {i}")).spawn(move || worker(&client, &receiver));
         }
         Transport { requests }
     }
@@ -207,10 +205,10 @@ fn is_connection_error(error: &ureq::Error) -> bool {
     )
 }
 
-fn error(error: ureq::Error) -> Box<Error> {
+fn error(error: ureq::Error) -> Box<ResourceError> {
     // Add human-readable error code
     let reason = if is_connection_error(&error) { Reason::Connection } else { Reason::Other };
-    Box::new(Error::new(reason, error.to_string()))
+    Box::new(ResourceError::new(reason, error.to_string()))
 }
 
 /// The system's trust store, through native-tls (SChannel).
@@ -258,7 +256,7 @@ impl Client {
     }
 
     /// Fetches `resource` with the host's `headers`.
-    fn transfer(&self, resource: &Resource, headers: &[(String, String)]) -> Result<Transfer, Box<Error>> {
+    fn transfer(&self, resource: &Resource, headers: &[(String, String)]) -> Result<Transfer, Box<ResourceError>> {
         let mut url = resource.url.clone();
         let mut headers = headers;
         let mut redirects = 0;
@@ -305,7 +303,7 @@ impl Client {
         resource: &Resource,
         url: &str,
         headers: &[(String, String)],
-    ) -> Result<ureq::http::Response<ureq::Body>, Box<Error>> {
+    ) -> Result<ureq::http::Response<ureq::Body>, Box<ResourceError>> {
         let mut request = self.agent.get(url);
         if let Some(range) = range_header(resource) {
             request = request.header("Range", range);

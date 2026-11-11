@@ -10,6 +10,7 @@ use std::fmt;
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
@@ -76,9 +77,9 @@ pub fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
 pub trait ProjectionBase: fmt::Debug + Send + Sync {
     fn project(&self, lat_lng: &LatLng, scale: f64) -> Point<f64>;
 
-    /// C++ throws `std::domain_error` when the point unprojects to an invalid
-    /// LatLng.
-    fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, String>;
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when
+    /// the point unprojects to an invalid LatLng.
+    fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, Error>;
 
     fn tile_matrix(&self, matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64);
 

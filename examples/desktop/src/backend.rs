@@ -10,6 +10,7 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use mln_gfx::RendererBackend;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use winit::event_loop::EventLoopProxy;
@@ -93,17 +94,17 @@ pub(crate) enum SurfaceBackend {
     WebGpu(Rc<mln_webgpu::SurfaceBackend>),
 }
 
-const CLOSED: &str = "The window closed before it had a surface";
+/// The window's thread ended before it answered the render thread.
+pub(crate) fn closed() -> Error {
+    Error::cancelled("The window closed before it had a surface")
+}
 
 /// A wgpu surface of the window for `instance`, which the window's thread
 /// makes when asked through `proxy`.
-fn make_surface(
-    proxy: &EventLoopProxy<UserEvent>,
-    instance: &wgpu::Instance,
-) -> Result<wgpu::Surface<'static>, String> {
+fn make_surface(proxy: &EventLoopProxy<UserEvent>, instance: &wgpu::Instance) -> Result<wgpu::Surface<'static>, Error> {
     let (reply, surface) = mpsc::channel();
-    proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| CLOSED.to_owned())?;
-    surface.recv().map_err(|_| CLOSED.to_owned())?
+    proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| closed())?;
+    surface.recv().map_err(|_| closed())?.map_err(Error::native)
 }
 
 impl SurfaceBackend {
@@ -114,13 +115,13 @@ impl SurfaceBackend {
         proxy: &EventLoopProxy<UserEvent>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<SurfaceBackend, String> {
+    ) -> Result<SurfaceBackend, Error> {
         match kind {
             #[cfg(target_os = "macos")]
             Kind::Metal => {
                 let (reply, layer) = mpsc::channel();
-                proxy.send_event(UserEvent::MakeLayer(reply)).map_err(|_| CLOSED.to_owned())?;
-                let layer = layer.recv().map_err(|_| CLOSED.to_owned())??;
+                proxy.send_event(UserEvent::MakeLayer(reply)).map_err(|_| closed())?;
+                let layer = layer.recv().map_err(|_| closed())?.map_err(Error::native)?;
                 let backend = mln_mtl::SurfaceBackend::new(layer.into_layer(), framebuffer_size, cap_frame_rate)?;
                 Ok(SurfaceBackend::Metal(Rc::new(backend)))
             }
@@ -265,7 +266,7 @@ impl SurfaceBackend {
 
     /// Takes the window back after `release_surface`, when no other backend
     /// took it.
-    pub(crate) fn restore_surface(&self, proxy: &EventLoopProxy<UserEvent>) -> Result<(), String> {
+    pub(crate) fn restore_surface(&self, proxy: &EventLoopProxy<UserEvent>) -> Result<(), Error> {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(_) => Ok(()),
@@ -278,7 +279,10 @@ impl SurfaceBackend {
                 if backend.has_surface() {
                     return Ok(());
                 }
-                let instance = backend.webgpu_backend().get_instance().ok_or("The backend has no instance")?;
+                let instance = backend
+                    .webgpu_backend()
+                    .get_instance()
+                    .ok_or_else(|| Error::invalid_state("The backend has no instance"))?;
                 backend.set_surface(make_surface(proxy, &instance)?, backend.get_framebuffer_size())
             }
         }

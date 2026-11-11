@@ -12,6 +12,7 @@ use mln_gfx::renderable::{Renderable, RenderableBase, SwapBehaviour};
 use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -30,7 +31,7 @@ pub struct HeadlessBackend {
 impl HeadlessBackend {
     /// `HeadlessBackend(size = {256, 256}, swapBehaviour = NoFlush,
     /// contextMode = Unique)`, or an error if there is no Vulkan device.
-    pub fn new(size: Size, _swap_behaviour: SwapBehaviour, mode: ContextMode) -> Result<Self, String> {
+    pub fn new(size: Size, _swap_behaviour: SwapBehaviour, mode: ContextMode) -> Result<Self, Error> {
         let (renderer_backend, _) = RendererBackend::new(mode, None)?;
         Ok(HeadlessBackend { renderer_backend, renderable: RenderableBase::new(size, None) })
     }

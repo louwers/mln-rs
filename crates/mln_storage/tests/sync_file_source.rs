@@ -4,14 +4,13 @@
 // depend on mln_storage.
 
 use std::collections::HashMap;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{Map, MapOptions, NullMapObserver};
-use mln_storage::response::{Error, Reason};
-use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Resource, ResourceOptions, Response};
+use mln_map::{Map, MapOptions};
+use mln_storage::response::{Reason, ResourceError};
+use mln_storage::{AsyncRequest, Callback, FileSource, Resource, ResourceOptions, Response};
 use mln_util::size::Size;
 
 fn read_file(relative: &str) -> Vec<u8> {
@@ -43,7 +42,8 @@ impl FileSource for SyncFileSource {
         let data = self.assets.lock().unwrap().get(&resource.url).cloned();
         match data {
             None => {
-                response.error = Some(Box::new(Error::new(Reason::NotFound, format!("Not Found: {}", resource.url))));
+                response.error =
+                    Some(Box::new(ResourceError::new(Reason::NotFound, format!("Not Found: {}", resource.url))));
             }
             Some(data) => response.data = Some(data),
         }
@@ -60,12 +60,6 @@ impl FileSource for SyncFileSource {
     fn get_resource_options(&self) -> ResourceOptions {
         ResourceOptions::default()
     }
-
-    fn set_client_options(&self, _options: ClientOptions) {}
-
-    fn get_client_options(&self) -> ClientOptions {
-        ClientOptions::default()
-    }
 }
 
 // gtest: SyncFileSource.LoadSyncRender
@@ -76,7 +70,9 @@ fn load_sync_render() {
     fs.add("maptiler://maps/streets", read_file("test/fixtures/resources/source_vector.json"));
     fs.add("maptiler://sprites/streets/sprite", read_file("test/fixtures/resources/sprite.png"));
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
-    let mut map = Map::with_file_source(&frontend, Rc::new(NullMapObserver), fs, MapOptions::new()).unwrap();
+    let mut map = Map::with_file_source(fs, MapOptions::new()).unwrap();
+    frontend.attach(&map);
     let style = String::from_utf8(read_file("test/fixtures/resources/style_vector.json")).unwrap();
-    map.get_style_mut().load_json(&style);
+    map.style_mut().load_json(&style);
+    map.process_events();
 }

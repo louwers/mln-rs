@@ -12,7 +12,7 @@ mod support;
 
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashSet};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -26,13 +26,13 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, RendererFrontend, RendererObserver, TileOperation, UpdateParameters};
+use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
-use mln_storage::response::{Error as ResponseError, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
-    ClientOptions, FileSource, FileSourceManager, FileSourceType, Kind, LoadingMethod, MainResourceLoader,
-    OnlineFileSource, Resource, ResourceOptions, Response, StoragePolicy,
+    FileSource, FileSourceManager, FileSourceType, Kind, LoadingMethod, MainResourceLoader, OnlineFileSource, Resource,
+    ResourceOptions, Response, StoragePolicy,
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
@@ -155,7 +155,7 @@ fn renderer_state() {
     }
 
     // RendererState::hasImage
-    test.map().get_style_mut().add_image(style_image(
+    test.map().style_mut().add_image(style_image(
         "default_marker",
         decode_image("test/fixtures/sprites/default_marker.png"),
         1.0,
@@ -172,7 +172,7 @@ fn renderer_state() {
     // RendererState::hasSource
     let source = GeoJSONSource::with_default_options("GeoJSONSource");
     source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(0.0, 0.0)))).unwrap();
-    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+    test.map().style_mut().add_source(Box::new(source)).unwrap();
 
     // The frontend has not yet been notified about the newly-added source.
     assert!(!test.frontend.has_source("GeoJSONSource"));
@@ -183,7 +183,7 @@ fn renderer_state() {
     assert!(test.frontend.has_source("GeoJSONSource"));
 
     // RendererState::hasLayer
-    test.map().get_style_mut().add_layer(Box::new(SymbolLayer::new("SymbolLayer", "GeoJSONSource")), None).unwrap();
+    test.map().style_mut().add_layer(Box::new(SymbolLayer::new("SymbolLayer", "GeoJSONSource")), None).unwrap();
 
     // The frontend has not yet been notified about the newly-added source.
     assert!(!test.frontend.has_layer("SymbolLayer"));
@@ -446,10 +446,10 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
 #[test]
 fn free_camera_options_place_the_camera_and_cancel_commands() {
     let test = MapTest::new();
-    let ended = Rc::new(Cell::new(None));
+    let ended = Arc::new(mln_util::sync::SyncCell::new(None));
     let record = ended.clone();
     let animation = AnimationOptions {
-        transition_end_fn: Some(Rc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
+        transition_end_fn: Some(Arc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
         ..AnimationOptions::new(Duration::from_secs(10))
     };
     test.map().ease_to(&cam().with_zoom(Some(10.0)), &animation);
@@ -681,21 +681,24 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     }
 }
 
-/// `MapTest<MainResourceLoader> test{cachePath, assetPath}`.
-fn main_resource_loader_test(cache_path: &str, asset_path: &str) -> MapTest<MainResourceLoader> {
+/// `MapTest<MainResourceLoader> test{cachePath, assetPath}`, over
+/// `file_sources`.
+fn main_resource_loader_test(
+    file_sources: &FileSourceManager,
+    cache_path: &str,
+    asset_path: &str,
+) -> MapTest<MainResourceLoader> {
     let run_loop = RunLoop::new();
     let file_source = Arc::new(MainResourceLoader::new(
+        file_sources,
         &ResourceOptions::default().with_cache_path(cache_path).with_asset_path(asset_path),
-        &ClientOptions::default(),
     ));
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
-/// `FileSourceManager::get()->getFileSource(FileSourceType::Database, ResourceOptions{})`.
-fn database_file_source() -> Arc<dyn FileSource> {
-    FileSourceManager::get()
-        .get_file_source(FileSourceType::Database, &ResourceOptions::default(), &ClientOptions::default())
-        .expect("database file source")
+/// `getFileSource(FileSourceType::Database, ResourceOptions{})`.
+fn database_file_source(file_sources: &FileSourceManager) -> Arc<dyn FileSource> {
+    file_sources.get_file_source(FileSourceType::Database, &ResourceOptions::default()).expect("database file source")
 }
 
 /// A `dbfs->forward(..., [] {})` callback.
@@ -706,7 +709,8 @@ fn no_op() -> Option<Box<dyn FnOnce() + Send>> {
 // gtest: Map.Offline
 #[test]
 fn offline() {
-    let test = main_resource_loader_test(":memory:", ".");
+    let file_sources = FileSourceManager::new();
+    let test = main_resource_loader_test(&file_sources, ":memory:", ".");
 
     // C++ CI leaves this test out on the macOS runners
     // (.github/workflows/macos-ci.yml, --gtest_filter=-...:Map.Offline, for
@@ -734,7 +738,7 @@ fn offline() {
 
     NetworkStatus::set(NetworkStatusType::Offline);
     let prefix = "http://127.0.0.1:3000/";
-    let dbfs = database_file_source();
+    let dbfs = database_file_source(&file_sources);
     dbfs.forward(&Resource::style(&format!("{prefix}style.json")), &expired_item("style.json"), no_op());
     dbfs.forward(&Resource::source(&format!("{prefix}streets.json")), &expired_item("streets.json"), no_op());
     dbfs.forward(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &expired_item("sprite.json"), no_op());
@@ -763,7 +767,7 @@ fn offline() {
         Some(Box::new(move || handle.stop())),
     );
     run_with_timeout(&test.run_loop, 60);
-    test.map().get_style_mut().load_url(&format!("{prefix}style.json"));
+    test.map().style_mut().load_url(&format!("{prefix}style.json"));
 
     check_image("test/fixtures/map/offline", &test.render().image, 0.0015, 0.1);
     NetworkStatus::set(NetworkStatusType::Online);
@@ -784,7 +788,7 @@ fn set_style_default_camera() {
     camera = test.map().get_camera_options(None);
     assert_double_eq(camera.zoom.unwrap(), 0.0);
 
-    let default_camera = test.map().get_style().get_default_camera();
+    let default_camera = test.map().style().get_default_camera();
     test.map().jump_to(&default_camera);
     camera = test.map().get_camera_options(None);
     assert_double_eq(camera.zoom.unwrap(), 0.5);
@@ -907,14 +911,14 @@ fn set_style_invalid_url() {
 
     test.file_source.set_response(Kind::Style, |_| {
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::Other, "Failed by the test case")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
 
     let run_loop = test.run_loop.clone();
     test.observer.did_fail_loading_map_callback.set(move |_| run_loop.stop());
 
-    test.map().get_style_mut().load_url("maptiler://bar");
+    test.map().style_mut().load_url("maptiler://bar");
 
     run_with_timeout(&test.run_loop, 60);
 }
@@ -945,7 +949,7 @@ fn style_fresh() {
 
     let test = MapTest::fake();
 
-    test.map().get_style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("maptiler://maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     // Timestamp::max()
@@ -962,7 +966,7 @@ fn style_expired() {
 
     let test = MapTest::fake();
 
-    test.map().get_style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("maptiler://maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let mut response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -973,21 +977,21 @@ fn style_expired() {
     // Mutate layer. From now on, sending a response to the style won't
     // overwrite it anymore, but we should continue to wait for a fresh
     // response.
-    test.map().get_style_mut().add_layer(Box::new(BackgroundLayer::new("bg")), None).unwrap();
+    test.map().style_mut().add_layer(Box::new(BackgroundLayer::new("bg")), None).unwrap();
     assert_eq!(1, test.file_source.requests_len());
 
     // Send another expired response, and confirm that we didn't overwrite the
     // style, but continue to wait for a fresh response.
     test.file_source.respond(Kind::Style, &response);
     assert_eq!(1, test.file_source.requests_len());
-    assert!(test.map().get_style().get_layer("bg").is_some());
+    assert!(test.map().style().get_layer("bg").is_some());
 
     // Send a fresh response, and confirm that we didn't overwrite the style,
     // but continue to wait for a fresh response.
     response.expires = Some(hours_from_now(1));
     test.file_source.respond(Kind::Style, &response);
     assert_eq!(1, test.file_source.requests_len());
-    assert!(test.map().get_style().get_layer("bg").is_some());
+    assert!(test.map().style().get_layer("bg").is_some());
 }
 
 // gtest: Map.StyleExpiredWithAnnotations
@@ -997,7 +1001,7 @@ fn style_expired_with_annotations() {
     // Adding an annotation should not prevent revalidation of an expired style.
     let test = MapTest::fake();
 
-    test.map().get_style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("maptiler://maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -1019,7 +1023,7 @@ fn style_expired_with_render() {
 
     let test = MapTest::fake();
 
-    test.map().get_style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("maptiler://maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -1043,25 +1047,25 @@ fn style_expired_with_projection() {
     for in_place in [false, true] {
         let test = MapTest::fake();
 
-        test.map().get_style_mut().load_url("maptiler://maps/test");
+        test.map().style_mut().load_url("maptiler://maps/test");
 
         let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
         test.file_source.respond(Kind::Style, &response);
 
         if in_place {
             test.map()
-                .get_style_mut()
+                .style_mut()
                 .get_projection_mut()
                 .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
         } else {
             let mut projection = Projection::new();
             projection.set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
-            test.map().get_style_mut().set_projection(projection);
+            test.map().style_mut().set_projection(projection);
         }
 
         test.file_source.respond(Kind::Style, &response);
         let map = test.map();
-        let type_ = map.get_style().get_projection().get_type();
+        let type_ = map.style().get_projection().get_type();
         assert!(type_.is_constant(), "{in_place}");
         assert_eq!(ProjectionType::Globe, type_.as_constant().from, "{in_place}");
     }
@@ -1074,14 +1078,14 @@ fn style_early_mutation() {
 
     let test = MapTest::fake();
 
-    test.map().get_style_mut().load_url("maptiler://maps/test");
-    test.map().get_style_mut().add_layer(Box::new(BackgroundLayer::new("bg")), None).unwrap();
+    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().add_layer(Box::new(BackgroundLayer::new("bg")), None).unwrap();
 
     let response = file_response("test/fixtures/api/water.json");
     test.file_source.respond(Kind::Style, &response);
 
     assert_eq!(1, test.file_source.requests_len());
-    assert!(test.map().get_style().get_layer("water").is_some());
+    assert!(test.map().style().get_layer("water").is_some());
 }
 
 // gtest: Map.MapLoadingSignal
@@ -1133,7 +1137,7 @@ fn style_loaded_signal() {
 /// `MapTest<OnlineFileSource> test(ResourceOptions::Default())`.
 fn online_file_source_test() -> MapTest<OnlineFileSource> {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default_options(), &ClientOptions::default()));
+    let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -1144,7 +1148,7 @@ fn style_network_error_retry() {
     let server = HttpServer::new();
     let test = online_file_source_test();
 
-    test.map().get_style_mut().load_url(&server.url("/style-fail-once-500"));
+    test.map().style_mut().load_url(&server.url("/style-fail-once-500"));
 
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_loading_style_callback.set(move |_| run_loop.stop());
@@ -1158,7 +1162,7 @@ fn style_not_found() {
     let server = HttpServer::new();
     let test = online_file_source_test();
 
-    test.map().get_style_mut().load_url(&server.url("/style-fail-once-404"));
+    test.map().style_mut().load_url(&server.url("/style-fail-once-404"));
 
     let timer = Rc::new(Timer::new());
 
@@ -1176,7 +1180,7 @@ fn style_not_found() {
     run_with_timeout(&test.run_loop, 10);
 
     // Should also not retry if the response has cache headers.
-    test.map().get_style_mut().load_url(&server.url("/style-fail-once-404-cache"));
+    test.map().style_mut().load_url(&server.url("/style-fail-once-404-cache"));
     run_with_timeout(&test.run_loop, 10);
 }
 
@@ -1187,7 +1191,7 @@ fn add_layer() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().get_style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
 
     check_image("test/fixtures/map/add_layer", &test.render().image, 0.0, 0.0);
 }
@@ -1199,8 +1203,8 @@ fn remove_layer() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().get_style_mut().add_layer(red_background("background"), None).unwrap();
-    test.map().get_style_mut().remove_layer("background");
+    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map().style_mut().remove_layer("background");
 
     check_image("test/fixtures/map/remove_layer", &test.render().image, 0.0, 0.0);
 }
@@ -1364,17 +1368,18 @@ fn continuous_rendering() {
         });
     }
 
-    let mut map = Map::with_resource_options(
-        &frontend,
-        observer.clone(),
+    let map = Map::with_resource_options(
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+        &FileSourceManager::new(),
         &ResourceOptions::default()
             .with_cache_path(":memory:")
             .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
-        &ClientOptions::default(),
     )
     .unwrap();
-    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    frontend.attach(&map);
+    let map = Rc::new(RefCell::new(map));
+    let _events = observer.observe(&map);
+    map.borrow_mut().style_mut().load_json(&read_file("test/fixtures/api/water.json"));
 
     run_loop.run();
     assert!(!did_not_stop.get(), "Did not stop rendering");
@@ -1383,13 +1388,14 @@ fn continuous_rendering() {
 // gtest: Map.NoContentTiles
 #[test]
 fn no_content_tiles() {
-    let test = main_resource_loader_test(":memory:", ".");
+    let file_sources = FileSourceManager::new();
+    let test = main_resource_loader_test(&file_sources, ":memory:", ".");
 
     // Insert a 204 No Content response for the 0/0/0 tile
     let mut response = Response::new();
     response.no_content = true;
     response.expires = Some(hours_from_now(1));
-    let dbfs = database_file_source();
+    let dbfs = database_file_source(&file_sources);
     // C++ loads the style in the callback (inside render's run loop); see
     // Map.Offline for why the port waits for it first.
     let handle = test.run_loop.handle();
@@ -1436,7 +1442,7 @@ fn glyph_range_errors_reach_the_observer() {
     test.file_source.set_response(Kind::Glyphs, |resource| {
         let mut response = Response::new();
         if resource.url.contains("/Missing/") {
-            response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found by the test")));
         } else if resource.url.contains("/Corrupt/") {
             response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
         } else {
@@ -1527,7 +1533,7 @@ fn sprite_events_reach_the_observer() {
                 Some(file_response(file))
             } else {
                 let mut response = Response::new();
-                response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+                response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found by the test")));
                 Some(response)
             }
         });
@@ -1626,7 +1632,7 @@ fn source_changes_reach_the_observer() {
 
     {
         let mut map = test.map();
-        let style = map.get_style_mut();
+        let style = map.style_mut();
         let source = style.get_source("points").unwrap().as_any().downcast_ref::<GeoJSONSource>().unwrap();
         source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.0, 1.0)))).unwrap();
         assert!(changed.borrow().is_empty());
@@ -1664,7 +1670,7 @@ fn issue12432() {
     let run_loop = test.run_loop.clone();
     test.observer.did_finish_loading_map_callback.set(move |_| {
         if let Some(map) = map.upgrade() {
-            map.borrow_mut().get_style_mut().load_json(
+            map.borrow_mut().style_mut().load_json(
                 r#"{
           "version": 8,
           "sources": {
@@ -1694,8 +1700,8 @@ fn issue12432() {
 #[test]
 fn issue15216() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.map().get_style_mut().add_source(Box::new(ImageSource::new("ImageSource", [LatLng::default(); 4]))).unwrap();
-    test.map().get_style_mut().add_layer(Box::new(RasterLayer::new("RasterLayer", "ImageSource")), None).unwrap();
+    test.map().style_mut().add_source(Box::new(ImageSource::new("ImageSource", [LatLng::default(); 4]))).unwrap();
+    test.map().style_mut().add_layer(Box::new(RasterLayer::new("RasterLayer", "ImageSource")), None).unwrap();
     // Passes, if there is no assertion hit.
     test.run_loop.run_once();
 }
@@ -1708,14 +1714,14 @@ fn globe_image_source_below_zoom_zero() {
     let test = MapTest::new();
     test.load_json(&read_file("test/fixtures/api/empty.json"));
     test.map()
-        .get_style_mut()
+        .style_mut()
         .get_projection_mut()
         .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("vertical-perspective")));
     let coords = [ll(60.0, -10.0), ll(60.0, 10.0), ll(50.0, 10.0), ll(50.0, -10.0)];
     let source = ImageSource::new("image", coords);
     source.set_image(decode_image("test/fixtures/image/no_profile.png"));
-    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
-    test.map().get_style_mut().add_layer(Box::new(RasterLayer::new("raster", "image")), None).unwrap();
+    test.map().style_mut().add_source(Box::new(source)).unwrap();
+    test.map().style_mut().add_layer(Box::new(RasterLayer::new("raster", "image")), None).unwrap();
     test.map().jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(-1.5)));
     assert_near(-1.5, test.map().get_camera_options(None).zoom.unwrap(), 1e-9);
     let image = test.render().image;
@@ -1733,8 +1739,8 @@ fn image_source_beyond_mercator_latitudes() {
 
     let source = ImageSource::new("image", [ll(88.0, -10.0), ll(88.0, 10.0), ll(86.0, 10.0), ll(86.0, -10.0)]);
     source.set_image(PremultipliedImage::new(Size::new(4, 4)));
-    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
-    test.map().get_style_mut().add_layer(Box::new(RasterLayer::new("image", "image")), None).unwrap();
+    test.map().style_mut().add_source(Box::new(source)).unwrap();
+    test.map().style_mut().add_layer(Box::new(RasterLayer::new("image", "image")), None).unwrap();
 
     // Passes, if rendering a frame doesn't crash.
     test.frontend.render_frame();
@@ -1759,7 +1765,7 @@ fn issue15342() {
         let (Some(map), Some(observer)) = (map.upgrade(), observer.upgrade()) else {
             return;
         };
-        map.borrow_mut().get_style_mut().load_json(
+        map.borrow_mut().style_mut().load_json(
             r#"{
           "version": 8,
           "sources": {
@@ -1817,7 +1823,7 @@ fn universal_style_getter() {
     );
 
     let map = test.map();
-    let style = map.get_style();
+    let style = map.style();
     let line_layer = style.get_layer("line").expect("line layer");
 
     let nonexistent = line_layer.get_property("nonexistent");
@@ -1913,7 +1919,7 @@ fn no_hang_on_missing_image() {
     test.render();
 
     test.load_json(style);
-    let default_camera = test.map().get_style().get_default_camera();
+    let default_camera = test.map().style().get_default_camera();
     test.map().jump_to(&default_camera);
     // The test passes if the following call does not hang.
     test.render();
@@ -1974,7 +1980,7 @@ fn prefetch_delta_override() {
     // Vector source
     let vector = vector_source("vector", "a/{z}/{x}/{y}");
     source::set_prefetch_zoom_delta(&vector, Some(0));
-    test.map().get_style_mut().add_source(Box::new(vector)).unwrap();
+    test.map().style_mut().add_source(Box::new(vector)).unwrap();
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
     {
@@ -1986,7 +1992,7 @@ fn prefetch_delta_override() {
     }
 
     // Custom source
-    test.map().get_style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+    test.map().style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
 
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     {
@@ -2004,7 +2010,7 @@ fn prefetch_delta_override() {
 
     for id in ["vector", "custom"] {
         let map = test.map();
-        source::set_prefetch_zoom_delta(map.get_style().get_source(id).unwrap(), None);
+        source::set_prefetch_zoom_delta(map.style().get_source(id).unwrap(), None);
     }
     test.run_loop.run();
 
@@ -2057,7 +2063,7 @@ fn globe_prefetch_requests_coarser_tiles() {
         r#"{"version": 8, "projection": {"type": "vertical-perspective"}, "sources": {},
                  "layers": [{"id": "vector", "type": "fill", "source": "vector"}]}"#,
     );
-    test.map().get_style_mut().add_source(Box::new(vector_source("vector", "a/{z}/{x}/{y}"))).unwrap();
+    test.map().style_mut().add_source(Box::new(vector_source("vector", "a/{z}/{x}/{y}"))).unwrap();
 
     // C++ guards `zooms` with a mutex; the stub file source answers on this thread.
     let zooms: Rc<RefCell<BTreeSet<i32>>> = Rc::new(RefCell::new(BTreeSet::new()));
@@ -2181,7 +2187,7 @@ fn prefetch_delta_override_custom_source() {
 
     let requested_tiles = Arc::new(AtomicI32::new(0));
 
-    test.map().get_style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+    test.map().style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
 
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     {
@@ -2196,7 +2202,7 @@ fn prefetch_delta_override_custom_source() {
 
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let layer = style.remove_layer("custom").unwrap();
         style.remove_source("custom");
         style.add_layer(layer, None).unwrap();
@@ -2209,29 +2215,6 @@ fn prefetch_delta_override_custom_source() {
     assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
 }
 
-/// The `ForwardingHeadlessFrontend` of Map.ExpiredSpriteSheet: a
-/// HeadlessFrontend whose `update` first calls `check_params`.
-#[derive(Clone)]
-struct ForwardingHeadlessFrontend {
-    frontend: HeadlessFrontend,
-    check_params: Rc<RefCell<Option<Box<dyn Fn(&UpdateParameters)>>>>,
-}
-
-impl RendererFrontend for ForwardingHeadlessFrontend {
-    fn reset(&self) {
-        self.frontend.reset();
-    }
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
-        self.frontend.set_observer(observer);
-    }
-    fn update(&self, parameters: Arc<UpdateParameters>) {
-        if let Some(check_params) = self.check_params.borrow().as_ref() {
-            check_params(&parameters);
-        }
-        self.frontend.update(parameters);
-    }
-}
-
 // Test verifies that Style::Impl::onSpriteLoaded does not create duplicate
 // images when we get new spritesheet from the server and we merge it with
 // currently used spritesheet.
@@ -2241,20 +2224,23 @@ fn expired_sprite_sheet() {
     let server = HttpServer::new();
 
     // `MapTest<MainResourceLoader, ForwardingHeadlessFrontend>
-    // test{":memory:", ".", 1, MapMode::Continuous}`.
+    // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
+    // check runs on the update each frame draws.
     let run_loop = RunLoop::new();
+    let file_sources = FileSourceManager::new();
     let file_source = Arc::new(MainResourceLoader::new(
+        &file_sources,
         &ResourceOptions::default().with_cache_path(":memory:").with_asset_path("."),
-        &ClientOptions::default(),
     ));
     let observer = Rc::new(StubMapObserver::default());
-    let frontend =
-        ForwardingHeadlessFrontend { frontend: HeadlessFrontend::with_pixel_ratio(1.0), check_params: Rc::default() };
-    let options = MapOptions::new()
-        .with_map_mode(MapMode::Continuous)
-        .with_size(frontend.frontend.get_size())
-        .with_pixel_ratio(1.0);
-    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, observer.clone(), file_source, options).unwrap()));
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let options =
+        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()).with_pixel_ratio(1.0);
+    let map = Map::with_file_source(file_source, options).unwrap();
+    frontend.attach(&map);
+    let updates = map.update_reader();
+    let map = Rc::new(RefCell::new(map));
+    let _events = observer.observe(&map);
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
     // what it serves.
@@ -2266,18 +2252,18 @@ fn expired_sprite_sheet() {
     };
 
     {
-        let check_params = frontend.check_params.clone();
         let weak_observer = Rc::downgrade(&observer);
         let run_loop = run_loop.clone();
         observer.did_finish_loading_map_callback.set(move |_| {
-            *check_params.borrow_mut() = Some(Box::new(|params: &UpdateParameters| {
-                assert!(params.images.windows(2).all(|pair| pair[0].id <= pair[1].id));
-                assert!(params.images.len() < 4);
-            }));
-
             NetworkStatus::set(NetworkStatusType::Online);
 
             if let Some(observer) = weak_observer.upgrade() {
+                let updates = updates.clone();
+                observer.did_finish_rendering_frame_callback.set(move |_| {
+                    let params = updates.latest().expect("an update").parameters;
+                    assert!(params.images.windows(2).all(|pair| pair[0].id <= pair[1].id));
+                    assert!(params.images.len() < 4);
+                });
                 let run_loop = run_loop.clone();
                 observer.did_become_idle_callback.set(move |_| run_loop.stop());
             }
@@ -2286,7 +2272,7 @@ fn expired_sprite_sheet() {
 
     NetworkStatus::set(NetworkStatusType::Offline);
     let prefix = server.url("/online/");
-    let dbfs = database_file_source();
+    let dbfs = database_file_source(&file_sources);
     dbfs.forward(&Resource::style(&format!("{prefix}style.json")), &make_response("style.json", false), no_op());
     dbfs.forward(&Resource::source(&format!("{prefix}streets.json")), &make_response("streets.json", false), no_op());
     dbfs.forward(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &make_response("sprite.json", true), no_op());
@@ -2308,7 +2294,7 @@ fn expired_sprite_sheet() {
         Some(Box::new(move || handle.stop())),
     );
     run_with_timeout(&run_loop, 60);
-    map.borrow_mut().get_style_mut().load_url(&format!("{prefix}style.json"));
+    map.borrow_mut().style_mut().load_url(&format!("{prefix}style.json"));
 
     run_with_timeout(&run_loop, 60);
 }
@@ -2340,10 +2326,10 @@ fn source_minimum_update_interval_override() {
     // Vector source
     let vector_source_a = vector_source("source-a", "a/{z}/{x}/{y}");
     mln_style::source::set_minimum_tile_update_interval(&vector_source_a, Duration::from_secs(1));
-    test.map().get_style_mut().add_source(Box::new(vector_source_a)).unwrap();
+    test.map().style_mut().add_source(Box::new(vector_source_a)).unwrap();
 
     let vector_source_b = vector_source("source-b", "b/{z}/{x}/{y}");
-    test.map().get_style_mut().add_source(Box::new(vector_source_b)).unwrap();
+    test.map().style_mut().add_source(Box::new(vector_source_b)).unwrap();
 
     let requested_tiles_a = Rc::new(Cell::new(0));
     let requested_tiles_b = Rc::new(Cell::new(0));
@@ -2400,7 +2386,7 @@ fn keep_render_data() {
     test.file_source.set_response(Kind::SpriteImage, make_response("sprite.png", None));
 
     test.map().jump_to(&cam().with_zoom(Some(10.0)));
-    test.map().get_style_mut().load_url("maptiler://maps/streets");
+    test.map().style_mut().load_url("maptiler://maps/streets");
     let iterations = 3;
     let resources_count = 4; /*tiles*/
 
@@ -2456,7 +2442,7 @@ fn disabled_placed_symbol_data() {
     // Camera options will give exactly one tile (12/1171/1566)
     test.map().jump_to(&cam().with_zoom(Some(16.0)).with_center(Some(ll(50.072317, 14.444827))));
 
-    test.map().get_style_mut().load_url("maptiler://maps/streets");
+    test.map().style_mut().load_url("maptiler://maps/streets");
     let viewport_size = test.frontend.get_size();
     test.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(true));
     test.render();
@@ -2472,7 +2458,7 @@ fn disabled_placed_symbol_data() {
 
     let symbol_layers: HashSet<String> = test
         .map()
-        .get_style()
+        .style()
         .get_layers()
         .iter()
         .filter(|l| l.base_impl().get_type_info().type_ == "symbol")
@@ -2544,7 +2530,7 @@ fn volatile_source() {
     );
     let source = vector_source("vector", "a/{z}/{x}/{y}");
     mln_style::source::set_volatile(&source, is_volatile);
-    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+    test.map().style_mut().add_source(Box::new(source)).unwrap();
 
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     let run_loop = test.run_loop.clone();
@@ -2573,7 +2559,7 @@ fn resource_error() {
     let test = MapTest::new();
     test.file_source.set_response(Kind::Glyphs, |_| {
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::Server, "Font file Server failed")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Server, "Font file Server failed")));
         Some(response)
     });
 
@@ -2640,7 +2626,7 @@ fn resource_error() {
     );
     // C++: try { render } catch (...) { EXPECT_EQ(toString(error), "Font file Server failed"); }
     if let Err(error) = test.try_render() {
-        assert_eq!(error, "Font file Server failed");
+        assert_eq!(error.message, "Font file Server failed");
     }
 }
 
@@ -2655,7 +2641,7 @@ fn fail_requests(test: &MapTest, kind: Kind, response: Response) -> (Rc<Cell<boo
         c.set(c.get() + 1);
         if f.get() {
             let mut failed = Response::new();
-            failed.error = Some(Box::new(ResponseError::new(Reason::Server, "failed")));
+            failed.error = Some(Box::new(ResourceError::new(Reason::Server, "failed")));
             Some(failed)
         } else {
             Some(response.clone())
@@ -2671,7 +2657,7 @@ fn assert_still_image_retries_failed_tile(source: &str, layer: &str) {
     let (failing, requests) = fail_requests(&test, Kind::Tile, empty);
     test.load_json(&format!(r#"{{"version": 8, "sources": {{"tiles": {source}}}, "layers": [{layer}]}}"#));
 
-    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
     assert_eq!(requests.get(), 1);
 
     failing.set(false);
@@ -2723,7 +2709,7 @@ fn still_image_retries_failed_glyph_range() {
             .len()
     };
 
-    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
     assert_eq!(requests.get(), 1);
     assert_eq!(labels(&test), 0);
 
@@ -2760,8 +2746,8 @@ fn stencil_overflow() {
     let custom = CustomGeometrySource::new("custom", options).unwrap();
     handle.set(custom.handle()).unwrap();
 
-    test.map().get_style_mut().add_source(Box::new(custom)).unwrap();
-    test.map().get_style_mut().add_layer(Box::new(FillLayer::new("fill", "custom")), None).unwrap();
+    test.map().style_mut().add_source(Box::new(custom)).unwrap();
+    test.map().style_mut().add_layer(Box::new(FillLayer::new("fill", "custom")), None).unwrap();
 
     test.map().jump_to(&cam().with_zoom(Some(5.0)));
     let result = test.render();
@@ -2867,22 +2853,24 @@ fn observe_tile_lifecycle() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
     let mut map = Map::with_resource_options(
-        &frontend,
-        observer.clone(),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+        &FileSourceManager::new(),
         &ResourceOptions::default()
             .with_cache_path(":memory:")
             .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
-        &ClientOptions::default(),
     )
     .unwrap();
-    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    frontend.attach(&map);
+    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     let mut layer = FillLayer::new("landcover", "mapbox");
     layer.set_source_layer("landcover");
     layer.set_fill_color(&PropertyValue::Constant(Color::new(0.0, 1.0, 0.0, 1.0)));
-    map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+    map.style_mut().add_layer(Box::new(layer), None).unwrap();
     map.jump_to(&cam().with_center(Some(ll(37.8, -122.5))).with_zoom(Some(10.0)));
     frontend.render(&mut map).unwrap();
+    for event in map.drain_events() {
+        observer.dispatch(event);
+    }
 
     use TileOperation::*;
     let tile_ops = tile_ops.borrow();
@@ -2973,17 +2961,18 @@ fn empty_placement_does_not_request_repaint() {
     for frame in 0..2 {
         status.set(None);
         test.frontend.render_frame();
+        test.observer.dispatch_events(&test.map);
         let value = status.take().expect("rendered a frame");
         assert!(!value.needs_repaint, "frame {frame}");
     }
 
-    test.map().get_style_mut().set_transition_options(&TransitionOptions {
+    test.map().style_mut().set_transition_options(&TransitionOptions {
         duration: Some(Duration::from_millis(300)),
         ..TransitionOptions::default()
     });
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer
             .downcast_mut::<BackgroundLayer>()
@@ -2993,6 +2982,7 @@ fn empty_placement_does_not_request_repaint() {
     test.run_loop.run_once();
     status.set(None);
     test.frontend.render_frame();
+    test.observer.dispatch_events(&test.map);
     let value = status.take().expect("rendered a frame");
     assert!(value.needs_repaint);
 }
@@ -3012,7 +3002,7 @@ fn immediate_style_replacement_retains_color() {
         );
         let mut layer = BackgroundLayer::new("background");
         layer.set_background_color(&PropertyValue::Constant(Color::red()));
-        test.map().get_style_mut().add_layer(Box::new(layer), None).unwrap();
+        test.map().style_mut().add_layer(Box::new(layer), None).unwrap();
 
         let image = test.render().image;
         assert_eq!(center_pixel(&image), [255, 0, 0, 255], "iteration {iteration}");
@@ -3035,10 +3025,10 @@ fn switches_between_solid_and_patterned_drawables() {
     }"#,
     );
     let blue = vec![0u8, 0, 255, 255];
-    test.map().get_style_mut().add_image(style_image("blue", PremultipliedImage::from_vec(Size::new(1, 1), blue), 1.0));
+    test.map().style_mut().add_image(style_image("blue", PremultipliedImage::from_vec(Size::new(1, 1), blue), 1.0));
     let set_pattern = |value: PropertyValue<mln_style::expression::Image>| {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_pattern(&value);
     };
@@ -3070,7 +3060,7 @@ fn style_update_zoom_dependency() {
     // Update background layer to use zoom-dependent color
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_color(
             &PropertyValue::Expression(PropertyExpression::from_box(
@@ -3116,25 +3106,22 @@ fn globe_hand_off_keeps_tiles() {
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
-        &frontend,
-        observer.clone(),
         Arc::new(MainResourceLoader::new(
+            &FileSourceManager::new(),
             &ResourceOptions::default()
                 .with_cache_path(":memory:")
                 .with_asset_path(asset_path.to_str().expect("asset path")),
-            &ClientOptions::default(),
         )),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )
     .unwrap();
 
-    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
-    map.get_style_mut()
-        .get_projection_mut()
-        .set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
+    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    map.style_mut().get_projection_mut().set_type(PropertyValue::Constant(ProjectionDefinition::from_name("globe")));
     let center = ll(37.8, -122.5); // the fixture has tile 10/163/395
     map.jump_to(&cam().with_center(Some(center)).with_zoom(Some(10.5)));
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
+    map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
     assert!(map.get_transform_state().is_globe_rendering());
     let first_visit = std::mem::take(&mut *parsed.borrow_mut());
     assert!(!first_visit.is_empty());
@@ -3143,6 +3130,7 @@ fn globe_hand_off_keeps_tiles() {
     // again.
     map.jump_to(&cam().with_center(Some(center)).with_zoom(Some(12.5)));
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
+    map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
     assert!(!map.get_transform_state().is_globe_rendering());
     let parsed = parsed.borrow();
     let reparsed: Vec<&OverscaledTileID> = parsed.iter().filter(|id| first_visit.contains(id)).collect();
@@ -3333,20 +3321,18 @@ fn globe_bounded_source_loads_finer_tiles() {
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
-        &frontend,
-        observer.clone(),
         Arc::new(MainResourceLoader::new(
+            &FileSourceManager::new(),
             &ResourceOptions::default()
                 .with_cache_path(":memory:")
                 .with_asset_path(asset_path.to_str().expect("asset path")),
-            &ClientOptions::default(),
         )),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )
     .unwrap();
 
     // The same tile answers every request, so the cover alone decides what loads.
-    map.get_style_mut().load_json(
+    map.style_mut().load_json(
         r#"{
         "version": 8,
         "projection": {"type": "globe"},
@@ -3363,6 +3349,7 @@ fn globe_bounded_source_loads_finer_tiles() {
     );
     map.jump_to(&cam().with_center(Some(ll(37.8, -122.5))).with_zoom(Some(10.95)));
     frontend.render(&mut map).unwrap_or_else(|e| panic!("render: {e}"));
+    map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
     assert!(map.get_transform_state().is_globe_rendering());
 
     let parsed = parsed.borrow();
@@ -3381,7 +3368,7 @@ fn line_layer_depth_distribution() {
 
     let mut background_layer = BackgroundLayer::new("Background");
     background_layer.set_background_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 0.0, 1.0)));
-    test.map().get_style_mut().add_layer(Box::new(background_layer), None).unwrap();
+    test.map().style_mut().add_layer(Box::new(background_layer), None).unwrap();
 
     const LAYER_COUNT: u32 = 1 << 11;
     let colors = [Color::red(), Color::green(), Color::blue()];
@@ -3406,12 +3393,12 @@ fn line_layer_depth_distribution() {
 
     for i in 0..LAYER_COUNT {
         // add one source per layer
-        test.map().get_style_mut().add_source(Box::new(get_source(i))).unwrap();
+        test.map().style_mut().add_source(Box::new(get_source(i))).unwrap();
 
         let mut layer = LineLayer::new(&format!("LineLayer{i}"), &format!("GeoJSONSource_{i}"));
         layer.set_line_color(&PropertyValue::Constant(colors[i as usize % colors.len()]));
 
-        test.map().get_style_mut().add_layer(Box::new(layer), None).unwrap();
+        test.map().style_mut().add_layer(Box::new(layer), None).unwrap();
     }
 
     check_image("test/fixtures/map/layer_depth_distribution/line", &test.render().image, 0.0006, 0.1);
@@ -3425,7 +3412,7 @@ fn set_frustum_offset() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().get_style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
 
     check_image("test/fixtures/map/setFrustumOffset/before", &test.render().image, 0.0006, 0.1);
 
@@ -3472,7 +3459,7 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     let options = GeoJSONOptions { synchronous_update: synchronous, ..GeoJSONOptions::default() };
     let source = GeoJSONSource::new(source_id.clone(), Arc::new(options));
     source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(longitude, 0.0)))).unwrap();
-    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+    test.map().style_mut().add_source(Box::new(source)).unwrap();
 
     let text = if with_text { "New place" } else { "" };
     let layer_json = format!(
@@ -3490,13 +3477,13 @@ fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous:
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
-    test.map().get_style_mut().add_layer(layer, None).unwrap();
+    test.map().style_mut().add_layer(layer, None).unwrap();
 }
 
 // gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom
 fn retains_icons_and_text_across_zoom(synchronous: bool, with_text: bool) {
     let (test, glyph_requests) = geojson_symbol_map();
-    test.map().get_style_mut().add_image(style_image("marker", red_image(40, 48), 1.0));
+    test.map().style_mut().add_image(style_image("marker", red_image(40, 48), 1.0));
     for i in 0..3 {
         add_geojson_symbol(&test, i, (i as f64 - 1.0) * 0.01, synchronous, with_text);
     }
@@ -3561,7 +3548,7 @@ fn renders_image_added_after_layout(synchronous: bool, with_text: bool) {
     let y = before.size.height / 2 - icon_size.height / 2;
     assert_eq!(pixel_at(&before, x, y)[..3], [255, 255, 255]);
 
-    test.map().get_style_mut().add_image(style_image("marker", red_image(icon_size.width, icon_size.height), 1.0));
+    test.map().style_mut().add_image(style_image("marker", red_image(icon_size.width, icon_size.height), 1.0));
     let after = test.render().image;
     assert_eq!(pixel_at(&after, x, y), [255, 0, 0, 255]);
 }
@@ -3622,7 +3609,7 @@ fn unrelated_image_preserves_tile_layout_and_cache() {
     test.map().jump_to(&cam().with_center(Some(ll(40.0, 0.0))).with_zoom(Some(3.0)));
     test.render();
     parses.set(0);
-    test.map().get_style_mut().add_image(style_image("unrelated", red_image(16, 16), 1.0));
+    test.map().style_mut().add_image(style_image("unrelated", red_image(16, 16), 1.0));
     test.render();
     assert_eq!(parses.get(), 0);
 
@@ -3653,7 +3640,7 @@ fn coalesced_image_added_after_layout_replaces_fallback() {
     }"#,
     );
     let blue = PremultipliedImage::from_vec(Size::new(32, 32), [0, 0, 255, 255].repeat(32 * 32));
-    test.map().get_style_mut().add_image(style_image("fallback", blue, 1.0));
+    test.map().style_mut().add_image(style_image("fallback", blue, 1.0));
     let parses = Rc::new(Cell::new(0));
     {
         let parses = parses.clone();
@@ -3667,7 +3654,7 @@ fn coalesced_image_added_after_layout_replaces_fallback() {
     assert_eq!(pixel_at(&before, 64, 64), [0, 0, 255, 255]);
 
     parses.set(0);
-    test.map().get_style_mut().add_image(style_image("late", red_image(32, 32), 1.0));
+    test.map().style_mut().add_image(style_image("late", red_image(32, 32), 1.0));
     let after = test.render().image;
     assert!(parses.get() > 0);
     assert_eq!(pixel_at(&after, 64, 64), [255, 0, 0, 255]);
@@ -3980,7 +3967,7 @@ fn location_indicator_accuracy_colors_transition() {
 
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let mut layer = style.get_layer_mut("location").expect("location layer");
         let layer = layer.downcast_mut::<LocationIndicatorLayer>().expect("LocationIndicatorLayer");
         let transition =
@@ -4016,7 +4003,7 @@ fn rendering_statistics_track_draws_across_frames() {
     assert!(second.num_draw_calls > 0);
     assert_eq!(first.total_draw_calls + second.num_draw_calls, second.total_draw_calls);
 
-    test.map().get_style_mut().get_layer_mut("circle").expect("circle layer").set_visibility(VisibilityType::None);
+    test.map().style_mut().get_layer_mut("circle").expect("circle layer").set_visibility(VisibilityType::None);
     let empty = test.render().stats;
     assert_eq!(second.num_frames + 1, empty.num_frames);
     assert_eq!(0, empty.num_draw_calls);
@@ -4074,27 +4061,6 @@ fn location_indicator_without_images() {
     assert_eq!(test.render().stats.num_draw_calls, 0);
 }
 
-/// The capturing `RendererFrontend` of TileSelectionOptionsPublishUpdates.
-#[derive(Clone, Default)]
-struct CapturingFrontend {
-    parameters: Rc<RefCell<Option<Arc<UpdateParameters>>>>,
-}
-
-impl CapturingFrontend {
-    fn parameters(&self) -> Arc<UpdateParameters> {
-        self.parameters.borrow().clone().expect("parameters")
-    }
-}
-
-impl RendererFrontend for CapturingFrontend {
-    fn reset(&self) {}
-    fn set_observer(&self, _observer: Weak<dyn RendererObserver>) {}
-    fn update(&self, value: Arc<UpdateParameters>) {
-        *self.parameters.borrow_mut() = Some(value);
-    }
-    // TODO(port): getThreadPool() (not in the Rust RendererFrontend yet).
-}
-
 /// Renders a frame and returns the RGB of the pixel at the centre of the map.
 fn render_center_pixel(test: &MapTest) -> [u8; 3] {
     test.map().trigger_repaint();
@@ -4118,7 +4084,7 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
                              "layout": {"icon-image": "square", "icon-allow-overlap": true}}]}"#,
     );
     const SIDE: u32 = 24;
-    test.map().get_style_mut().add_image(style_image("square", red_image(SIDE, SIDE), 1.0));
+    test.map().style_mut().add_image(style_image("square", red_image(SIDE, SIDE), 1.0));
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(1.0)));
 
     let red_pixels = |test: &MapTest| {
@@ -4140,7 +4106,7 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
     // Turn the planet so the icon's anchor is 130 degrees from the center. A
     // long fade keeps placement showing it at full opacity on the next frame,
     // so only the horizon test in the shader can hide it there.
-    test.map().get_style_mut().set_transition_options(&TransitionOptions {
+    test.map().style_mut().set_transition_options(&TransitionOptions {
         duration: Some(Duration::from_secs(30)),
         ..TransitionOptions::default()
     });
@@ -4175,7 +4141,7 @@ fn global_state_change_transitions_paint_property() {
     assert!(initial[0] > 240, "{initial:?}");
     assert!(initial[2] < 10, "{initial:?}");
 
-    test.map().get_style_mut().set_global_state_property("color", &Value::String("#0000ff".to_owned())).unwrap();
+    test.map().style_mut().set_global_state_property("color", &Value::String("#0000ff".to_owned())).unwrap();
 
     // The frame that picks up the change starts the transition at its own time point, so it still shows red.
     let changed = render_center_pixel(&test);
@@ -4212,7 +4178,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     assert!(initial[1] < 10, "{initial:?}");
 
     // The state changes and a layer reading it is added before the next frame.
-    test.map().get_style_mut().set_global_state_property("color", &Value::String("#00ff00".to_owned())).unwrap();
+    test.map().style_mut().set_global_state_property("color", &Value::String("#00ff00".to_owned())).unwrap();
 
     let layer_value: serde_json::Value = serde_json::from_str(
         r#"{"id": "added", "type": "background", "paint": {"background-color": ["global-state", "color"]}}"#,
@@ -4221,7 +4187,7 @@ fn layer_added_with_global_state_change_shows_new_state() {
     let mut error = ConversionError::default();
     let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
     let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
-    test.map().get_style_mut().add_layer(layer, None).unwrap();
+    test.map().style_mut().add_layer(layer, None).unwrap();
 
     // The new layer never showed the prior state, so it must show the current one at once.
     let added = render_center_pixel(&test);
@@ -4234,39 +4200,38 @@ fn layer_added_with_global_state_change_shows_new_state() {
 #[test]
 fn tile_selection_options_publish_updates() {
     let _loop = RunLoop::new();
-    let frontend = CapturingFrontend::default();
-    let observer = Rc::new(StubMapObserver::default());
     let mut map = Map::with_file_source(
-        &frontend,
-        observer,
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Continuous),
     )
     .unwrap();
-    map.get_style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    assert!(frontend.parameters.borrow().is_some());
+    let updates = map.update_reader();
+    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    map.process_events();
+    assert!(updates.latest().is_some());
 
     fn check<T: PartialEq + std::fmt::Debug + Copy>(
         map: &mut Map,
-        frontend: &CapturingFrontend,
+        updates: &UpdateReader,
         setter: impl Fn(&mut Map, T),
         member: impl Fn(&UpdateParameters) -> T,
         value: T,
     ) {
-        let before = frontend.parameters();
+        let parameters = || updates.latest().expect("parameters").parameters;
+        let before = parameters();
         setter(map, value);
-        assert!(!Arc::ptr_eq(&before, &frontend.parameters()));
-        assert_eq!(value, member(&frontend.parameters()));
-        let after = frontend.parameters();
+        assert!(!Arc::ptr_eq(&before, &parameters()));
+        assert_eq!(value, member(&parameters()));
+        let after = parameters();
         setter(map, value);
-        assert!(Arc::ptr_eq(&after, &frontend.parameters()));
+        assert!(Arc::ptr_eq(&after, &parameters()));
     }
-    check(&mut map, &frontend, Map::set_prefetch_zoom_delta, |p| p.prefetch_zoom_delta, 2u8);
-    check(&mut map, &frontend, Map::set_tile_lod_min_radius, |p| p.tile_lod_min_radius, 4.0);
-    check(&mut map, &frontend, Map::set_tile_lod_scale, |p| p.tile_lod_scale, 2.0);
-    check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
-    check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
-    check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+    check(&mut map, &updates, Map::set_prefetch_zoom_delta, |p| p.prefetch_zoom_delta, 2u8);
+    check(&mut map, &updates, Map::set_tile_lod_min_radius, |p| p.tile_lod_min_radius, 4.0);
+    check(&mut map, &updates, Map::set_tile_lod_scale, |p| p.tile_lod_scale, 2.0);
+    check(&mut map, &updates, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
+    check(&mut map, &updates, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
+    check(&mut map, &updates, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
 }
 
 // gtest: Map.FallbackFontFacesCoverEveryFontStack
@@ -4278,12 +4243,12 @@ fn fallback_font_faces_cover_every_font_stack() {
     test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
         r.borrow_mut().push(resource.url.clone());
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "not found")));
+        response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "not found")));
         Some(response)
     });
 
     test.map()
-        .get_style_mut()
+        .style_mut()
         .set_fallback_font_faces(r#"[{"url": "fallback.ttf", "unicode-range": ["U+1000-109F"]}]"#)
         .unwrap();
     test.load_json(
@@ -4355,12 +4320,12 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     let set_ramp = |color: &str| {
         let value: serde_json::Value = serde_json::from_str(&ramp(color)).unwrap();
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let mut layer = style.get_layer_mut("ramp").unwrap();
         assert!(layer.set_property(&ramp_property, &Convertible::from(&value), None).is_none());
     };
     let set_state = |name: &str, value: Value| {
-        test.map().get_style_mut().set_global_state_property(name, &value).unwrap();
+        test.map().style_mut().set_global_state_property(name, &value).unwrap();
     };
 
     let extra_paint = match type_ {
@@ -4379,7 +4344,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
 
     // The layer joins the render tree in the same update as a write to a key its ramp does not read.
     set_state("unrelated", Value::Double(1.0));
-    test.map().get_style_mut().add_layer(layer, None).unwrap();
+    test.map().style_mut().add_layer(layer, None).unwrap();
     expect_center(Color::red());
 
     // While the ramp reads no state, the layer skips evaluation for state changes.
@@ -4418,15 +4383,15 @@ fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() 
 #[test]
 fn empty_size_is_an_error() {
     let _loop = RunLoop::new();
-    let frontend = CapturingFrontend::default();
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
-            &frontend,
-            Rc::new(StubMapObserver::default()),
             Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
             MapOptions::new().with_size(size),
         );
-        assert_eq!(result.err().as_deref(), Some("failed to resize: size is empty"));
+        assert_eq!(
+            result.err().map(|e| (e.kind, e.message)),
+            Some((mln_util::ErrorKind::InvalidArgument, "failed to resize: size is empty".to_owned()))
+        );
     }
 }
 

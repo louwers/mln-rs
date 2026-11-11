@@ -8,6 +8,7 @@
 //! readback are Orbis's (github.com/sargunv/orbis, crates/orb-web's host).
 
 use js_sys::{Reflect, Uint8Array};
+use mln_util::error::Error;
 use mln_util::image::{PremultipliedImage, UnassociatedImage};
 use mln_util::logging::{Event, Log};
 use mln_util::premultiply::premultiply;
@@ -45,11 +46,11 @@ impl ImageDecoder for BrowserDecoder {
                 }
                 Err(error) => {
                     let error = error.as_string().unwrap_or_else(|| format!("{error:?}"));
-                    Err(match kind {
+                    Err(Error::invalid_argument(match kind {
                         // `decodePNG`'s prefix.
                         ImageType::Png => format!("failed to read invalid png: '{error}'"),
                         _ => format!("failed to read invalid {kind:?} image: '{error}'"),
-                    })
+                    }))
                 }
             });
         });

@@ -7,13 +7,12 @@
 // Qt-on-Linux-only (platform fonts and expectations), so they stay ignored.
 
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_image::{decode_image, encode_png};
-use mln_map::{Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{Map, MapMode, MapOptions};
 use mln_map_types::CameraOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
@@ -94,12 +93,11 @@ impl LocalGlyphRasterizerTest {
         let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0);
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
-            &frontend,
-            Rc::new(NullMapObserver),
             file_source,
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         )
         .unwrap();
+        frontend.attach(&map);
         LocalGlyphRasterizerTest { _run_loop: run_loop, frontend, map }
     }
 
@@ -144,7 +142,7 @@ fn no_local() {
     // Expectation: without any local fonts set, and without any CJK glyphs
     // provided, the output should just contain basic latin characters.
     let mut test = LocalGlyphRasterizerTest::new(None);
-    test.map.get_style_mut().load_json(&mixed_json());
+    test.map.style_mut().load_json(&mixed_json());
     test.check_rendering("no_local", 0.001, 0.1);
 }
 
@@ -156,7 +154,7 @@ fn no_local_with_content_insets() {
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.get_size();
-    test.map.get_style_mut().load_json(&mixed_json());
+    test.map.style_mut().load_json(&mixed_json());
 
     // Expected image was created using center offset as in the line below -
     // content insets, with no pitch defined, should produce the same output.
@@ -179,7 +177,7 @@ fn no_local_with_content_insets_and_pitch() {
     // size as with no offset.
     let mut test = LocalGlyphRasterizerTest::new(None);
     let view_size = test.frontend.get_size();
-    test.map.get_style_mut().load_json(&mixed_json());
+    test.map.style_mut().load_json(&mixed_json());
 
     // Expected image was verified using no-padding render, offsetted to right
     // using bitmap editor.

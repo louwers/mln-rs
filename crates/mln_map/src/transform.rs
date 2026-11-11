@@ -15,6 +15,7 @@
 use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use geometry::Point;
 use mln_map_types::{
@@ -27,13 +28,15 @@ use mln_style_types::ProjectionDefinition;
 use mln_util::UnitBezier;
 use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
+use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
+use mln_util::sync::SyncCell;
 
-use crate::map_observer::{CameraChange, CameraChangeMode, CameraChangeSource};
+use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// A frame time older than this is stale (see [`Transform::frame_time`]):
 /// longer than a frame at 10 fps, so any host that draws sets a fresh one
@@ -88,14 +91,14 @@ fn lat_lng(lat: f64, lon: f64) -> LatLng {
 /// the frame, and nothing catches it; the port logs it, and the frame keeps
 /// the insets.
 fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<EdgeInsets> {
-    EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e)).ok()
+    EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e.message)).ok()
 }
 
 /// An animation frame's `Projection::unproject`, which constructs a LatLng
 /// and so can throw std::domain_error (NaN); handled as
 /// [`frame_edge_insets`]: the frame keeps the center and zoom.
 fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
-    Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e)).ok()
+    Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e.message)).ok()
 }
 
 /// `std::to_string(double)`: `%f`.
@@ -105,7 +108,7 @@ fn std_to_string(value: f64) -> String {
 
 /// `TransformObserver` (src/mln/map/transform.hpp).
 ///
-/// The camera callbacks take a [`CameraChange`] (see `MapObserver`).
+/// The camera callbacks take a [`CameraChange`].
 pub trait TransformObserver {
     fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}
@@ -230,7 +233,7 @@ impl Transition {
         } else {
             TransitionOutcome::Completed
         });
-        TransitionEnd { outcome, velocity }
+        TransitionEnd { outcome, velocity, generation: 0 }
     }
 
     /// The elapsed share of the duration, in [0, 1]; 1 for an immediate
@@ -562,9 +565,9 @@ impl Transform {
 
     // MARK: - Map View
 
-    pub fn resize(&mut self, size: Size) -> Result<(), String> {
+    pub fn resize(&mut self, size: Size) -> Result<(), Error> {
         if size.is_empty() {
-            return Err("failed to resize: size is empty".to_owned());
+            return Err(Error::invalid_argument("failed to resize: size is empty"));
         }
 
         if self.state.get_size() == size {
@@ -1190,9 +1193,9 @@ impl Transform {
     }
 
     /// Pans the map by the given amount.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
-    /// infinite offset).
-    pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
+    /// or infinite offset.
+    pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
         self.move_by_with_anchor(offset, None, animation)
     }
 
@@ -1204,7 +1207,7 @@ impl Transform {
         offset: &ScreenCoordinate,
         anchor: Option<ScreenCoordinate>,
         animation: &AnimationOptions,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         let flipped = |state: &TransformState, point: &ScreenCoordinate| {
             ScreenCoordinate::new(point.x, f64::from(state.get_size().height) - point.y)
         };
@@ -1213,10 +1216,10 @@ impl Transform {
         let fling_duration = animation.duration.filter(|duration| *duration > Duration::zero());
         let globe = self.globe_on_screen();
         if globe && (offset.x.is_nan() || offset.y.is_nan()) {
-            return Err("offset must not be NaN".to_owned());
+            return Err(Error::invalid_argument("offset must not be NaN"));
         }
         if globe && (!offset.x.is_finite() || !offset.y.is_finite()) {
-            return Err("offset must not be infinite".to_owned());
+            return Err(Error::invalid_argument("offset must not be infinite"));
         }
         if globe
             && let Some(duration) = fling_duration
@@ -1353,9 +1356,9 @@ impl Transform {
 
     // MARK: - Bounds
 
-    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) -> Result<(), String> {
+    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) -> Result<(), Error> {
         if !bounds.valid() {
-            return Err("failed to set bounds: bounds are invalid".to_owned());
+            return Err(Error::invalid_argument("failed to set bounds: bounds are invalid"));
         }
         self.state.set_lat_lng_bounds(bounds);
         Ok(())
@@ -1586,7 +1589,7 @@ impl Transform {
                     coupled_fields = fields;
                 }
                 Err(e) => {
-                    Log::error(Event::General, &e);
+                    Log::error(Event::General, &e.message);
                     anchor = None;
                 }
             }
@@ -1688,7 +1691,7 @@ impl Transform {
             Some(anchored) if self.globe_on_screen() => anchored.anchor.map(|anchor| {
                 let location =
                     self.state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
-                        Log::error(Event::General, &e);
+                        Log::error(Event::General, &e.message);
                         anchored.anchor_lat_lng
                     });
                 (location, self.state.get_zoom())
@@ -1741,7 +1744,7 @@ impl Transform {
                 // the C++ exception, so it is logged, as in frame_edge_insets.
                 _ => {
                     if let Err(e) = self.state.move_lat_lng(&anchored.anchor_lat_lng, &anchor) {
-                        Log::error(Event::General, &e);
+                        Log::error(Event::General, &e.message);
                     }
                 }
             }
@@ -2058,7 +2061,7 @@ impl Transform {
         match self.state.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
             Ok(lat_lng) => Some((point, lat_lng)),
             Err(e) => {
-                Log::error(Event::General, &e);
+                Log::error(Event::General, &e.message);
                 None
             }
         }
@@ -2070,7 +2073,7 @@ impl Transform {
         let Some((point, lat_lng)) = anchor else { return };
         let altitude = self.state.get_center_altitude();
         if let Err(e) = self.state.move_lat_lng(&lat_lng, &point) {
-            Log::error(Event::General, &e);
+            Log::error(Event::General, &e.message);
         }
         self.state.set_center_altitude(altitude);
     }
@@ -2107,7 +2110,7 @@ impl Transform {
             let unwrapped = match self.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
                 Ok(lat_lng) => lat_lng,
                 Err(e) => {
-                    Log::error(Event::General, &e);
+                    Log::error(Event::General, &e.message);
                     break;
                 }
             };
@@ -2441,12 +2444,9 @@ impl Transform {
     }
 
     /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Wrapped)`.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor.
-    pub fn screen_coordinate_to_lat_lng(
-        &self,
-        point: &ScreenCoordinate,
-        wrap_mode: WrapMode,
-    ) -> Result<LatLng, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
+    /// or infinite point.
+    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         let mut flipped_point = *point;
         flipped_point.y = self.state.get_size().height as f64 - flipped_point.y;
         self.state.screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
@@ -2468,8 +2468,7 @@ impl Drop for Transform {
     fn drop(&mut self) {
         for transition in std::mem::take(&mut self.transitions) {
             if let Some(end_fn) = &transition.animation.transition_end_fn {
-                let TransitionEnd { velocity, .. } = transition.end();
-                end_fn(&TransitionEnd { outcome: TransitionOutcome::Closed, velocity });
+                end_fn(&TransitionEnd { outcome: TransitionOutcome::Closed, ..transition.end() });
             }
         }
     }
@@ -2488,22 +2487,22 @@ fn joint_end(animation: &AnimationOptions, count: u32) -> AnimationOptions {
     let Some(end_fn) = animation.transition_end_fn.clone().filter(|_| count > 1) else {
         return animation.clone();
     };
-    let remaining = Cell::new(count);
-    let outcome = Cell::new(TransitionOutcome::Completed);
+    // The remaining commands and the outcome so far.
+    let state = SyncCell::new((count, TransitionOutcome::Completed));
     let joint = move |end: &TransitionEnd| {
-        let worst = match (outcome.get(), end.outcome) {
+        let (remaining, outcome) = state.get();
+        let worst = match (outcome, end.outcome) {
             (TransitionOutcome::Cancelled, _) | (_, TransitionOutcome::Cancelled) => TransitionOutcome::Cancelled,
             (TransitionOutcome::Closed, _) | (_, TransitionOutcome::Closed) => TransitionOutcome::Closed,
             (TransitionOutcome::Replaced, _) | (_, TransitionOutcome::Replaced) => TransitionOutcome::Replaced,
             _ => TransitionOutcome::Completed,
         };
-        outcome.set(worst);
-        remaining.set(remaining.get() - 1);
-        if remaining.get() == 0 {
-            end_fn(&TransitionEnd { outcome: worst, velocity: end.velocity });
+        state.set((remaining - 1, worst));
+        if remaining == 1 {
+            end_fn(&TransitionEnd { outcome: worst, ..*end });
         }
     };
-    AnimationOptions { transition_end_fn: Some(Rc::new(joint)), ..animation.clone() }
+    AnimationOptions { transition_end_fn: Some(Arc::new(joint)), ..animation.clone() }
 }
 
 /// Ends a command that started no transition: one that failed before it

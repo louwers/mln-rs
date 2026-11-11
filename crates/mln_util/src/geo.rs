@@ -9,6 +9,7 @@ use geometry::Point;
 use mln_math::{clamp_f64, rad2deg, wrap};
 
 use crate::constants;
+use crate::error::Error;
 
 pub type ScreenCoordinate = Point<f64>;
 pub type ScreenLineString = Vec<Point<f64>>;
@@ -43,24 +44,24 @@ fn lon_(z: u8, x: i64) -> f64 {
 }
 
 impl LatLng {
-    /// C++ throws std::domain_error from the constructor; the port returns
-    /// the same messages as an error.
-    pub fn new(lat: f64, lon: f64) -> Result<Self, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::ErrorKind) for a NaN
+    /// coordinate, a latitude outside -90 to 90, or an infinite longitude.
+    pub fn new(lat: f64, lon: f64) -> Result<Self, Error> {
         Self::with_mode(lat, lon, WrapMode::Unwrapped)
     }
 
-    pub fn with_mode(lat: f64, lon: f64, mode: WrapMode) -> Result<Self, String> {
+    pub fn with_mode(lat: f64, lon: f64, mode: WrapMode) -> Result<Self, Error> {
         if lat.is_nan() {
-            return Err("latitude must not be NaN".to_owned());
+            return Err(Error::invalid_argument("latitude must not be NaN"));
         }
         if lon.is_nan() {
-            return Err("longitude must not be NaN".to_owned());
+            return Err(Error::invalid_argument("longitude must not be NaN"));
         }
         if lat.abs() > 90.0 {
-            return Err("latitude must be between -90 and 90".to_owned());
+            return Err(Error::invalid_argument("latitude must be between -90 and 90"));
         }
         if !lon.is_finite() {
-            return Err("longitude must not be infinite".to_owned());
+            return Err(Error::invalid_argument("longitude must not be infinite"));
         }
         let mut result = LatLng { lat, lon };
         if mode == WrapMode::Wrapped {
@@ -391,19 +392,20 @@ pub struct EdgeInsets {
 }
 
 impl EdgeInsets {
-    /// C++ throws std::domain_error; same messages.
-    pub fn new(top: f64, left: f64, bottom: f64, right: f64) -> Result<Self, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::ErrorKind) for a NaN
+    /// inset.
+    pub fn new(top: f64, left: f64, bottom: f64, right: f64) -> Result<Self, Error> {
         if top.is_nan() {
-            return Err("top must not be NaN".to_owned());
+            return Err(Error::invalid_argument("top must not be NaN"));
         }
         if left.is_nan() {
-            return Err("left must not be NaN".to_owned());
+            return Err(Error::invalid_argument("left must not be NaN"));
         }
         if bottom.is_nan() {
-            return Err("bottom must not be NaN".to_owned());
+            return Err(Error::invalid_argument("bottom must not be NaN"));
         }
         if right.is_nan() {
-            return Err("right must not be NaN".to_owned());
+            return Err(Error::invalid_argument("right must not be NaN"));
         }
         Ok(EdgeInsets { top, left, bottom, right })
     }

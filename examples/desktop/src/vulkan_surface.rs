@@ -10,14 +10,14 @@ use std::ffi::CStr;
 use std::sync::mpsc;
 
 use ash::vk;
+use mln_util::error::Error;
 use mln_vulkan::renderer_backend::SurfaceProvider;
 use winit::event_loop::EventLoopProxy;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use winit::window::Window;
 
+use crate::backend::closed;
 use crate::host::UserEvent;
-
-const CLOSED: &str = "The window closed before it had a surface";
 
 /// The instance extensions a surface of `window` needs: VK_KHR_surface and
 /// the one of the window's display.
@@ -85,10 +85,10 @@ pub(crate) struct WindowSurface {
 }
 
 impl WindowSurface {
-    pub(crate) fn new(proxy: &EventLoopProxy<UserEvent>) -> Result<WindowSurface, String> {
+    pub(crate) fn new(proxy: &EventLoopProxy<UserEvent>) -> Result<WindowSurface, Error> {
         let (reply, extensions) = mpsc::channel();
-        proxy.send_event(UserEvent::VulkanExtensions(reply)).map_err(|_| CLOSED.to_owned())?;
-        let extensions = extensions.recv().map_err(|_| CLOSED.to_owned())??;
+        proxy.send_event(UserEvent::VulkanExtensions(reply)).map_err(|_| closed())?;
+        let extensions = extensions.recv().map_err(|_| closed())?.map_err(Error::unsupported)?;
         Ok(WindowSurface { proxy: proxy.clone(), extensions })
     }
 }
@@ -98,11 +98,11 @@ impl SurfaceProvider for WindowSurface {
         self.extensions.clone()
     }
 
-    fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, String> {
+    fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, Error> {
         let (reply, surface) = mpsc::channel();
         self.proxy
             .send_event(UserEvent::MakeVulkanSurface(Box::new((entry.clone(), instance.clone())), reply))
-            .map_err(|_| CLOSED.to_owned())?;
-        surface.recv().map_err(|_| CLOSED.to_owned())?
+            .map_err(|_| closed())?;
+        surface.recv().map_err(|_| closed())?.map_err(Error::native)
     }
 }

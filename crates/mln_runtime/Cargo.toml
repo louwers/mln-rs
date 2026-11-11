@@ -1,0 +1,49 @@
+[package]
+name = "mln-rs-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_runtime"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+feature.workspace = true
+geojson.workspace = true
+geometry.workspace = true
+mln_actor.workspace = true
+mln_conversion.workspace = true
+mln_gfx.workspace = true
+mln_map.workspace = true
+mln_math.workspace = true
+mln_renderer.workspace = true
+# The cache database and offline regions.
+mln_storage = { workspace = true, features = ["sqlite"] }
+mln_storage_offline.workspace = true
+mln_style.workspace = true
+mln_style_types.workspace = true
+mln_text.workspace = true
+mln_tile_id.workspace = true
+mln_util.workspace = true
+mln_webgpu.workspace = true
+serde_json.workspace = true
+# The devices of offscreen sessions, and the surfaces of surface sessions.
+wgpu.workspace = true
+
+[dev-dependencies]
+# Serves the styles of the resource tests.
+httpmock.workspace = true
+pollster.workspace = true
+
+# The X11 windows of the surface tests.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+winit.workspace = true
+
+[lints]
+workspace = true

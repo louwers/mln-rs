@@ -16,11 +16,9 @@ use mln_storage::offline::{
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
 use mln_storage::online_file_source::OnlineFileSource;
 use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::{Error, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{
-    AsyncRequest, Callback, ClientOptions, FileSource, Kind, LoadingMethod, Resource, ResourceOptions, Response,
-};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, LoadingMethod, Resource, ResourceOptions, Response};
 use mln_text::glyph::NON_IDEOGRAPH_GLYPH_RANGES_PER_FONT_STACK;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::compress;
@@ -35,7 +33,7 @@ use crate::offline_download::{OfflineDownload, WeakOfflineDownload};
 #[derive(Default)]
 struct MockObserver {
     status_changed_fn: Option<Box<dyn Fn(OfflineRegionStatus)>>,
-    response_error_fn: Option<Box<dyn Fn(Error)>>,
+    response_error_fn: Option<Box<dyn Fn(ResourceError)>>,
     mapbox_tile_count_limit_exceeded_fn: Option<Box<dyn Fn(u64)>>,
 }
 
@@ -46,7 +44,7 @@ impl OfflineRegionObserver for MockObserver {
         }
     }
 
-    fn response_error(&self, error: Error) {
+    fn response_error(&self, error: ResourceError) {
         if let Some(f) = &self.response_error_fn {
             f(error);
         }
@@ -422,7 +420,6 @@ struct FakeOnlineFileSource {
     next_id: std::sync::atomic::AtomicU64,
     online_fs: OnlineFileSource,
     resource_options: Mutex<ResourceOptions>,
-    client_options: Mutex<ClientOptions>,
 }
 
 impl FakeOnlineFileSource {
@@ -430,9 +427,8 @@ impl FakeOnlineFileSource {
         FakeOnlineFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
             next_id: std::sync::atomic::AtomicU64::new(0),
-            online_fs: OnlineFileSource::new(&ResourceOptions::default_options(), &ClientOptions::default()),
+            online_fs: OnlineFileSource::new(&ResourceOptions::default_options()),
             resource_options: Mutex::new(ResourceOptions::default_options()),
-            client_options: Mutex::new(ClientOptions::default()),
         }
     }
 
@@ -487,14 +483,6 @@ impl FileSource for FakeOnlineFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.resource_options.lock().unwrap().clone()
-    }
-
-    fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
-    }
-
-    fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
     }
 }
 
@@ -626,7 +614,7 @@ fn get_status_infinite_max_zoom() {
 
 fn connection_error() -> Response {
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(Reason::Connection, "connection error")));
+    response.error = Some(Box::new(ResourceError::new(Reason::Connection, "connection error")));
     response
 }
 
@@ -641,7 +629,7 @@ fn request_error() {
 
     let stop = test.run_loop.clone();
     let observer = MockObserver {
-        response_error_fn: Some(Box::new(move |error: Error| {
+        response_error_fn: Some(Box::new(move |error: ResourceError| {
             assert_eq!(Reason::Connection, error.reason);
             assert_eq!("connection error", error.message);
             stop.stop();
@@ -1049,14 +1037,14 @@ fn no_freezing_on_not_found_error() {
     respond_to_full_style(&test, false);
     test.respond(Kind::SpriteJSON, |_| {
         let mut response = Response::new();
-        response.error = Some(Box::new(Error::new(Reason::NotFound, "")));
+        response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "")));
         response
     });
 
     let error_reported = Rc::new(Cell::new(false));
     let (reported, reported2, stop) = (error_reported.clone(), error_reported.clone(), test.run_loop.clone());
     let observer = MockObserver {
-        response_error_fn: Some(Box::new(move |error: Error| {
+        response_error_fn: Some(Box::new(move |error: ResourceError| {
             assert_eq!(Reason::NotFound, error.reason);
             reported.set(true);
         })),
@@ -1100,7 +1088,7 @@ fn no_content() -> Response {
 
 fn not_found() -> Response {
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(Reason::NotFound, "")));
+    response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "")));
     response
 }
 
@@ -1122,12 +1110,12 @@ fn world_at_zoom(max_zoom: f64) -> OfflineRegionDefinition {
 fn run_until_inactive(
     test: &OfflineTest,
     download: &OfflineDownload,
-    errors: Option<Rc<RefCell<Vec<Error>>>>,
+    errors: Option<Rc<RefCell<Vec<ResourceError>>>>,
 ) -> OfflineRegionStatus {
     let completed = Rc::new(Cell::new(OfflineRegionStatus::default()));
     let (last, stop) = (completed.clone(), test.run_loop.clone());
     let observer = MockObserver {
-        response_error_fn: Some(Box::new(move |error: Error| match &errors {
+        response_error_fn: Some(Box::new(move |error: ResourceError| match &errors {
             Some(errors) => errors.borrow_mut().push(error),
             None => panic!("unexpected error: {}", error.message),
         })),
@@ -1153,7 +1141,7 @@ fn download_until_inactive(
     test: &OfflineTest,
     region_id: i64,
     definition: &OfflineRegionDefinition,
-    errors: Option<Rc<RefCell<Vec<Error>>>>,
+    errors: Option<Rc<RefCell<Vec<ResourceError>>>>,
 ) -> OfflineRegionStatus {
     let download = OfflineDownload::new(region_id, definition.clone(), test.db.clone(), test.file_source.clone());
     let completed = run_until_inactive(test, &download, errors);
@@ -1331,7 +1319,7 @@ fn stored_status(test: &OfflineTest, region_id: i64) -> OfflineRegionStatus {
     OfflineDownload::new(region_id, world_at_zoom(0.0), test.db.clone(), test.file_source.clone()).get_status()
 }
 
-fn collect_errors() -> Rc<RefCell<Vec<Error>>> {
+fn collect_errors() -> Rc<RefCell<Vec<ResourceError>>> {
     Rc::new(RefCell::new(Vec::new()))
 }
 

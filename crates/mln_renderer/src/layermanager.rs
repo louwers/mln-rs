@@ -17,7 +17,7 @@ use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style::layers::symbol_layer_impl::Impl as SymbolLayerImpl;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 
@@ -128,7 +128,7 @@ pub fn create_layout(
     parameters: &mut LayoutParameters<'_>,
     tile_layer: SourceLayer,
     layers: &[Immutable<dyn LayerProperties>],
-) -> Result<Option<Box<dyn Layout>>, ExceptionPtr> {
+) -> Result<Option<Box<dyn Layout>>, Error> {
     debug_assert!(!layers.is_empty());
     debug_assert!(parameters.bucket_parameters.layer_type.layout == layer_type_info::Layout::Required);
     let type_info = parameters.bucket_parameters.layer_type;

@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use mln_actor::TaggedScheduler;
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -274,7 +274,7 @@ impl TileWorkerHost {
         let Some((error, correlation_id)) = error else {
             return;
         };
-        let error = RuntimeError::ptr(error);
+        let error = Error::native(error);
         let endpoint = self.tile(tile);
         match self.hosted.borrow().get(&tile) {
             Some(Hosted::Geometry { .. }) => endpoint.send(TileMessage::Error { error, correlation_id }),

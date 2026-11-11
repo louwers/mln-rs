@@ -8,15 +8,14 @@ mod gtest_location_indicator;
 mod gtest_query;
 mod support;
 
-use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, GeoJSON, Geometry, Point};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{ClientOptions, ResourceOptions};
+use mln_storage::{FileSourceManager, ResourceOptions};
 use mln_style::PropertyValue;
 use mln_style::layer::Layer;
 use mln_style::layers::fill_layer::FillLayer;
@@ -42,7 +41,7 @@ pub fn style_image(
 
 // gtest: API.RenderWithoutCallback
 #[test]
-#[ignore = "not applicable as written: the Rust StillImageCallback is a Box<dyn FnOnce>, so there is no null callback to pass (C++ renderStill(nullptr) logs \"StillImageCallback not set\"); see api_misuse.test.cpp:16"]
+#[ignore = "not applicable as written: the Rust still image callback is a Box<dyn FnOnce>, so there is no null callback to pass (C++ renderStill(nullptr) logs \"StillImageCallback not set\"); see api_misuse.test.cpp:16"]
 fn render_without_callback() {
     // C++: map->renderStill(nullptr); map.reset(); expects one Error/General
     // log "StillImageCallback not set". The Rust type system rules the
@@ -56,16 +55,15 @@ fn grid() {
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_resource_options(
-        &frontend,
-        Rc::new(NullMapObserver),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+        &FileSourceManager::new(),
         &ResourceOptions::default()
             .with_cache_path(":memory:")
             .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
-        &ClientOptions::default(),
     )
     .unwrap();
-    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    frontend.attach(&map);
+    map.style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     map.jump_to(&CameraOptions {
         center: Some(LatLng::new(37.8, -122.5).unwrap()),
         zoom: Some(10.0),
@@ -98,16 +96,16 @@ fn grid() {
 
     let source = CustomGeometrySource::new("custom", options).unwrap();
     handle.set(source.handle()).unwrap();
-    map.get_style_mut().add_source(Box::new(source)).unwrap();
+    map.style_mut().add_source(Box::new(source)).unwrap();
 
     let mut fill_layer = FillLayer::new("landcover", "mapbox");
     fill_layer.set_source_layer("landcover");
     fill_layer.set_fill_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 0.0, 1.0)));
-    map.get_style_mut().add_layer(Box::new(fill_layer), None).unwrap();
+    map.style_mut().add_layer(Box::new(fill_layer), None).unwrap();
 
     let mut layer = LineLayer::new("grid", "custom");
     layer.set_line_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 1.0, 1.0)));
-    map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+    map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
     check_image(
         "test/fixtures/custom_geometry_source/grid",
@@ -140,12 +138,11 @@ fn recycle_map_update_images() {
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_file_source(
-        &frontend,
-        Rc::new(NullMapObserver),
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )
     .unwrap();
+    frontend.attach(&map);
 
     let load_style = |map: &mut Map, marker_name: &str, marker_path: &str| {
         let source = GeoJSONSource::with_default_options("geometry");
@@ -154,10 +151,10 @@ fn recycle_map_update_images() {
         let mut layer = SymbolLayer::new("geometry", "geometry");
         layer.set_icon_image(&PropertyValue::Constant(mln_style::expression::Image::new(marker_name)));
 
-        map.get_style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
-        map.get_style_mut().add_source(Box::new(source)).unwrap();
-        map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
-        map.get_style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));
+        map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+        map.style_mut().add_source(Box::new(source)).unwrap();
+        map.style_mut().add_layer(Box::new(layer), None).unwrap();
+        map.style_mut().add_image(style_image(marker_name, decode_image(marker_path), 1.0));
     };
 
     // default marker

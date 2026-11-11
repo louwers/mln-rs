@@ -602,7 +602,7 @@ impl SurfaceRenderableResource {
                 match provider.create_surface(self.backend.entry(), self.backend.get_instance()) {
                     Ok(surface) => state.surface = surface,
                     Err(error) => {
-                        Log::error(Event::Render, error);
+                        Log::error(Event::Render, error.message);
                         return false;
                     }
                 }

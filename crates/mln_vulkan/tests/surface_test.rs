@@ -50,6 +50,7 @@ use mln_gfx::texture2d::Texture2D as _;
 use mln_gfx::types::{DepthMaskType, TextureChannelDataType, TexturePixelType};
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_vulkan::SurfaceBackend;
@@ -71,15 +72,15 @@ impl SurfaceProvider for HeadlessSurface {
         vec![ash::khr::surface::NAME, ash::ext::headless_surface::NAME]
     }
 
-    fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, String> {
+    fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, Error> {
         let loader = ash::ext::headless_surface::Instance::new(entry, instance);
         self.made.set(self.made.get() + 1);
         if self.fail.get() {
-            return Err("no surface now".to_owned());
+            return Err(Error::native("no surface now"));
         }
         // SAFETY: the instance was created with VK_EXT_headless_surface.
         unsafe { loader.create_headless_surface(&vk::HeadlessSurfaceCreateInfoEXT::default(), None) }
-            .map_err(|e| format!("Failed to create a headless surface: {e}"))
+            .map_err(|e| Error::native(format!("Failed to create a headless surface: {e}")))
     }
 }
 

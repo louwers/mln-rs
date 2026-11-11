@@ -18,7 +18,7 @@ use mln_tile_id::{
     EncodedTileData, FeatureGroups, GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer,
 };
 use mln_util::constants::EXTENT;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error as MlnError;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecMap;
@@ -35,7 +35,7 @@ pub struct VectorMVTTileFeature<'l> {
     lines: OnceCell<GeometryCollection>,
     properties: OnceCell<PropertyMap>,
     /// The first exception of an accessor (`GeometryTileFeature::error`).
-    error: OnceCell<ExceptionPtr>,
+    error: OnceCell<MlnError>,
 }
 
 impl<'l> VectorMVTTileFeature<'l> {
@@ -51,7 +51,7 @@ impl<'l> VectorMVTTileFeature<'l> {
 
     /// Keeps the first exception a trait accessor would have thrown.
     fn keep_error(&self, error: Error) {
-        let _ = self.error.set(Arc::new(error));
+        let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
     /// `getValue`: `nullopt` for a null value.
@@ -152,7 +152,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
         }
     }
 
-    fn error(&self) -> Option<ExceptionPtr> {
+    fn error(&self) -> Option<MlnError> {
         self.error.get().cloned()
     }
 }
@@ -186,10 +186,10 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
         self.layer.feature_count()
     }
 
-    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr> {
+    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, MlnError> {
         match self.try_get_feature(index) {
             Ok(feature) => Ok(Box::new(feature)),
-            Err(e) => Err(Arc::new(e)),
+            Err(e) => Err(MlnError::native(e.to_string())),
         }
     }
 
@@ -309,10 +309,10 @@ impl GeometryTileData for VectorMVTTileData {
         Box::new(VectorMVTTileData::new(self.data.clone()))
     }
 
-    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
+    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, MlnError> {
         match self.try_get_layer(name) {
             Ok(layer) => Ok(layer.map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>)),
-            Err(e) => Err(Arc::new(e)),
+            Err(e) => Err(MlnError::native(e.to_string())),
         }
     }
 

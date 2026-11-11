@@ -120,10 +120,15 @@ mod tests {
 
     #[test]
     fn png_reader_errors() {
-        assert_eq!(crate::png_reader::decode_png(b"\x89PNG").unwrap_err(), "PNG reader: Could not read image");
-        assert_eq!(crate::png_reader::decode_png(b"\x89PNGxxxxxxxx").unwrap_err(), "File or stream is not a png");
+        assert_eq!(crate::png_reader::decode_png(b"\x89PNG").unwrap_err().message, "PNG reader: Could not read image");
+        assert_eq!(
+            crate::png_reader::decode_png(b"\x89PNGxxxxxxxx").unwrap_err().message,
+            "File or stream is not a png"
+        );
         let truncated = &encode_png(&PremultipliedImage::new(Size::new(4, 4)))[..40];
-        assert!(crate::png_reader::decode_png(truncated).unwrap_err().starts_with("failed to read invalid png: '"));
+        assert!(
+            crate::png_reader::decode_png(truncated).unwrap_err().message.starts_with("failed to read invalid png: '")
+        );
     }
 
     // Decodes every expected.png of the M1 render tests: they are 8-bit RGBA

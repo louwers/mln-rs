@@ -24,7 +24,7 @@ use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
 use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 
 use super::RasterTileTest;
@@ -66,7 +66,7 @@ fn tile(
 #[derive(Default)]
 struct StubTileObserver {
     tile_changed: RefCell<Option<Box<dyn Fn(&TileBase)>>>,
-    tile_error: RefCell<Option<Box<dyn Fn(&TileBase, ExceptionPtr)>>>,
+    tile_error: RefCell<Option<Box<dyn Fn(&TileBase, Error)>>>,
 }
 
 impl TileObserver for StubTileObserver {
@@ -76,7 +76,7 @@ impl TileObserver for StubTileObserver {
         }
     }
 
-    fn on_tile_error(&self, tile: &TileBase, error: ExceptionPtr) {
+    fn on_tile_error(&self, tile: &TileBase, error: Error) {
         if let Some(f) = &*self.tile_error.borrow() {
             f(tile, error);
         }
@@ -157,7 +157,7 @@ fn invalidate_failed_tile() {
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, RuntimeError::ptr("failed")));
+    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, Error::native("failed")));
     test.run_loop.wait_for_empty();
     assert!(failed.get());
 

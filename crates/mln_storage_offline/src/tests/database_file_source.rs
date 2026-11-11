@@ -11,7 +11,7 @@ use mln_storage::offline::{
     OfflineTilePyramidRegionDefinition,
 };
 use mln_storage::offline_database::{DatabaseError, OfflineDatabase};
-use mln_storage::{ClientOptions, DatabaseFileSource, ResourceOptions};
+use mln_storage::{DatabaseFileSource, FileSourceManager, ResourceOptions};
 use mln_util::geo::{LatLng, LatLngBounds};
 
 use super::TempDir;
@@ -29,8 +29,8 @@ fn wait<T: Send + 'static>(operation: impl FnOnce(Box<dyn FnOnce(T) + Send>)) ->
 /// A database file source with its database in `dir`.
 fn database_file_source(dir: &TempDir) -> DatabaseFileSource {
     DatabaseFileSource::new(
+        &FileSourceManager::new(),
         &ResourceOptions::default().with_cache_path(dir.path("cache.db")),
-        &ClientOptions::default(),
     )
 }
 
@@ -60,7 +60,7 @@ impl OfflineRegionObserver for StatusObserver {
 
 fn observe(source: &DatabaseFileSource, region: &OfflineRegion) -> Receiver<OfflineRegionStatus> {
     let (tx, rx) = channel();
-    source.set_offline_region_observer(region, Some(Box::new(StatusObserver(tx))));
+    wait(|done| source.set_offline_region_observer(region.get_id(), Some(Box::new(StatusObserver(tx))), done)).unwrap();
     rx
 }
 
@@ -87,27 +87,39 @@ fn a_region_lives_from_creation_to_deletion() {
     assert_eq!(Some(region.clone()), wait(|done| source.get_offline_region(region.get_id(), done)).unwrap());
     assert_eq!(None, wait(|done| source.get_offline_region(region.get_id() + 1, done)).unwrap());
 
-    let metadata = wait(|done| source.update_offline_metadata(region.get_id(), &b"two".to_vec(), done)).unwrap();
-    assert_eq!(b"two", metadata.as_slice());
-    let updated = wait(|done| source.get_offline_region(region.get_id(), done)).unwrap().unwrap();
+    let updated = wait(|done| source.update_offline_metadata(region.get_id(), &b"two".to_vec(), done)).unwrap();
     assert_eq!(b"two", updated.get_metadata().as_slice());
+    assert_eq!(Some(updated), wait(|done| source.get_offline_region(region.get_id(), done)).unwrap());
 
-    let status = wait(|done| source.get_offline_region_status(&region, done)).unwrap();
+    let status = wait(|done| source.get_offline_region_status(region.get_id(), done)).unwrap();
     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
     assert_eq!(0, status.completed_resource_count);
 
     let statuses = observe(&source, &region);
-    source.set_offline_region_download_state(&region, OfflineRegionDownloadState::Active);
+    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
+        .unwrap();
     let status = wait_until_complete(&statuses);
     assert_eq!(1, status.completed_resource_count);
-    let status = wait(|done| source.get_offline_region_status(&region, done)).unwrap();
+    let status = wait(|done| source.get_offline_region_status(region.get_id(), done)).unwrap();
     assert_eq!(1, status.completed_resource_count);
     assert!(status.complete());
 
-    wait(|done| source.invalidate_offline_region(&region, done)).unwrap();
-    wait(|done| source.delete_offline_region(&region, done)).unwrap();
+    wait(|done| source.invalidate_offline_region(region.get_id(), done)).unwrap();
+    wait(|done| source.delete_offline_region(region.get_id(), done)).unwrap();
     assert!(wait(|done| source.list_offline_regions(done)).unwrap().is_empty());
-    assert!(wait(|done| source.get_offline_region_status(&region, done)).is_err());
+    let id = region.get_id();
+    let not_found =
+        |result: Result<(), DatabaseError>| matches!(result, Err(DatabaseError::RegionNotFound(i)) if i == id);
+    assert!(not_found(wait(|done| source.get_offline_region_status(id, done)).map(|_| ())));
+    assert!(not_found(wait(|done| source.set_offline_region_download_state(
+        id,
+        OfflineRegionDownloadState::Active,
+        done
+    ))));
+    assert!(not_found(wait(|done| source.set_offline_region_observer(id, None, done))));
+    assert!(not_found(wait(|done| source.invalidate_offline_region(id, done))));
+    assert!(not_found(wait(|done| source.delete_offline_region(id, done))));
+    assert!(not_found(wait(|done| source.update_offline_metadata(id, &Vec::new(), done)).map(|_| ())));
 }
 
 #[test]
@@ -123,9 +135,10 @@ fn a_deleted_region_stops_downloading() {
     let region =
         wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
     let statuses = observe(&source, &region);
-    source.set_offline_region_download_state(&region, OfflineRegionDownloadState::Active);
+    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
+        .unwrap();
     assert_eq!(OfflineRegionDownloadState::Active, statuses.recv_timeout(TIMEOUT).unwrap().download_state);
-    wait(|done| source.delete_offline_region(&region, done)).unwrap();
+    wait(|done| source.delete_offline_region(region.get_id(), done)).unwrap();
 
     // The style answers after the deletion; the download it belonged to is
     // gone, so the observer hears nothing more.
@@ -154,12 +167,14 @@ fn a_download_refreshes_an_invalidated_region() {
     let region =
         wait(|done| source.create_offline_region(&definition(&server.url("/style.json")), &Vec::new(), done)).unwrap();
     let statuses = observe(&source, &region);
-    source.set_offline_region_download_state(&region, OfflineRegionDownloadState::Active);
+    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
+        .unwrap();
     let downloaded = wait_until_complete(&statuses);
     assert_eq!((1, 0), (fetched.calls(), revalidated.calls()));
 
-    wait(|done| source.invalidate_offline_region(&region, done)).unwrap();
-    source.set_offline_region_download_state(&region, OfflineRegionDownloadState::Active);
+    wait(|done| source.invalidate_offline_region(region.get_id(), done)).unwrap();
+    wait(|done| source.set_offline_region_download_state(region.get_id(), OfflineRegionDownloadState::Active, done))
+        .unwrap();
     let refreshed = wait_until_complete(&statuses);
     assert_eq!((1, 1), (fetched.calls(), revalidated.calls()));
     assert_eq!(downloaded.completed_resource_count, refreshed.completed_resource_count);

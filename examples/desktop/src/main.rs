@@ -22,7 +22,6 @@
 // (system_fonts.rs).
 
 mod backend;
-mod frontend;
 mod host;
 #[cfg(target_os = "macos")]
 mod metal_layer;

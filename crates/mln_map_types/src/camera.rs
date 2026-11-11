@@ -80,12 +80,20 @@ impl CameraOptions {
     }
 }
 
+/// [`AnimationOptions::transition_frame_fn`].
+pub type TransitionFrameFn = std::sync::Arc<dyn Fn(f64) + Send + Sync>;
+
+/// [`AnimationOptions::transition_end_fn`].
+pub type TransitionEndFn = std::sync::Arc<dyn Fn(&TransitionEnd) + Send + Sync>;
+
 /// Various options for describing a transition between viewpoints with
 /// animation. All fields are optional; the default values depend on how
 /// this struct is used.
 ///
-/// The callbacks are `Rc<dyn Fn>` so the struct can be copied into the
-/// transition closures, as the C++ lambdas copy their `std::function`s.
+/// The callbacks are shared so the struct can be copied into the transition
+/// closures, as the C++ lambdas copy their `std::function`s, and are `Send +
+/// Sync` so a command can cross to the thread of the map it moves. They run
+/// on that thread.
 #[derive(Clone, Default)]
 pub struct AnimationOptions {
     /// Time to animate to the viewpoint defined herein.
@@ -107,13 +115,13 @@ pub struct AnimationOptions {
     /// A function that is called on each frame of the transition, just before
     /// a screen update, except on the last frame. The first parameter
     /// indicates the elapsed time as a percentage of the duration.
-    pub transition_frame_fn: Option<std::rc::Rc<dyn Fn(f64)>>,
+    pub transition_frame_fn: Option<TransitionFrameFn>,
     /// Called once when every field of the command has ended, with how it
     /// ended: completed, cancelled, replaced by later commands, or closed with
     /// the map. Other commands may still be animating when this callback runs.
     /// It replaces C++'s `transitionFinishFn`, which can't tell those apart;
     /// maplibre-native-ffi's C API reports the same outcomes.
-    pub transition_end_fn: Option<std::rc::Rc<dyn Fn(&TransitionEnd)>>,
+    pub transition_end_fn: Option<TransitionEndFn>,
     /// Caller-chosen identity of the command, which
     /// `Map::cancel_transitions_with_id` matches. Several commands may share
     /// one.
@@ -165,6 +173,11 @@ pub struct TransitionEnd {
     /// frame that moved the camera, which the next gesture can add to its own
     /// release. Zero for every other end.
     pub velocity: CameraVelocity,
+    /// The generation of the first snapshot of the map that shows where the
+    /// change left the camera, as `mln_runtime`'s map handles report it. 0
+    /// when the map closed first, and from the map itself, which ends a
+    /// change before it counts the change's generation.
+    pub generation: u64,
 }
 
 impl AnimationOptions {
@@ -294,7 +307,9 @@ impl std::fmt::Display for CameraError {
         f.write_str(match self {
             CameraError::NotFinite => "camera delta offset, anchor, bearing and pitch must be finite",
             CameraError::InvalidScale => "camera delta scale must be finite and positive",
-            CameraError::AnchorWithoutChange => "a camera delta anchor requires offset, scale, bearing, or pitch",
+            CameraError::AnchorWithoutChange => {
+                "a camera delta anchor requires scale, bearing, or pitch, or an offset to hold"
+            }
             CameraError::MomentumOutsideEnd => "only a camera delta in the end phase carries momentum",
             CameraError::MomentumWithAnimation => {
                 "a camera delta with momentum sets only the transition ID and end function of its animation"

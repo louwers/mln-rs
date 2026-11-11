@@ -11,7 +11,7 @@ use feature::{Feature, Identifier, PropertyMap, Value};
 use mln_tile::{fixup_polygons, to_geometry_collection};
 use mln_tile_id::EncodedTileData;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::geometry::{FeatureType, to_feature_type};
 
 /// `mapbox::feature::feature_collection<int16_t>`.
@@ -23,7 +23,7 @@ pub struct GeoJSONTileFeature<'a> {
     /// `mutable std::optional<GeometryCollection> geometry`.
     geometry: OnceCell<GeometryCollection>,
     /// The wagyu exception of `getGeometries` (`GeometryTileFeature::error`).
-    error: OnceCell<ExceptionPtr>,
+    error: OnceCell<Error>,
 }
 
 static EMPTY_GEOMETRIES: GeometryCollection = GeometryCollection::new();
@@ -60,7 +60,7 @@ impl GeometryTileFeature for GeoJSONTileFeature<'_> {
             match fixup_polygons(&geometry) {
                 Ok(fixed) => geometry = fixed,
                 Err(e) => {
-                    let _ = self.error.set(Arc::new(e));
+                    let _ = self.error.set(Error::native(e.to_string()));
                     return &EMPTY_GEOMETRIES;
                 }
             }
@@ -68,7 +68,7 @@ impl GeometryTileFeature for GeoJSONTileFeature<'_> {
         self.geometry.get_or_init(|| geometry)
     }
 
-    fn error(&self) -> Option<ExceptionPtr> {
+    fn error(&self) -> Option<Error> {
         self.error.get().cloned()
     }
 
@@ -93,7 +93,7 @@ impl GeometryTileLayer for GeoJSONTileLayer {
         self.features.len()
     }
 
-    fn get_feature(&self, i: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr> {
+    fn get_feature(&self, i: usize) -> Result<Box<dyn GeometryTileFeature + '_>, Error> {
         Ok(Box::new(GeoJSONTileFeature::new(&self.features[i])))
     }
 
@@ -127,7 +127,7 @@ impl GeometryTileData for GeoJSONTileData {
         Box::new(GeoJSONTileData::from_shared(self.features.clone()))
     }
 
-    fn get_layer(&self, _name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
+    fn get_layer(&self, _name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error> {
         Ok(Some(Box::new(GeoJSONTileLayer::new(self.features.clone()))))
     }
 

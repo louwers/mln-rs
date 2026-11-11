@@ -7,7 +7,7 @@ use mln_util::chrono::{Timestamp, now};
 /// `std::shared_ptr<const std::string>`: response bodies are bytes.
 pub type Data = Arc<Vec<u8>>;
 
-/// `Response::Error::Reason`.
+/// What made a resource request fail.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Reason {
@@ -20,9 +20,9 @@ pub enum Reason {
     Other = 6,
 }
 
-/// `Response::Error`.
+/// Why a resource request failed.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Error {
+pub struct ResourceError {
     pub reason: Reason,
     /// An error message from the request handler, e.g. a server message or a
     /// system message informing the user about the reason for the failure.
@@ -30,23 +30,30 @@ pub struct Error {
     pub retry_after: Option<Timestamp>,
 }
 
-impl Error {
-    /// `Error(Reason, std::string = "", std::optional<Timestamp> = std::nullopt)`.
+impl ResourceError {
     pub fn new(reason: Reason, message: impl Into<String>) -> Self {
-        Error { reason, message: message.into(), retry_after: None }
+        ResourceError { reason, message: message.into(), retry_after: None }
     }
 
     pub fn with_retry_after(reason: Reason, message: impl Into<String>, retry_after: Option<Timestamp>) -> Self {
-        Error { reason, message: message.into(), retry_after }
+        ResourceError { reason, message: message.into(), retry_after }
     }
 }
+
+impl std::fmt::Display for ResourceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ResourceError {}
 
 /// `Response`. `Clone` is the C++ copy constructor (the error is copied,
 /// the data shared).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Response {
     /// When this object is empty, the response was successful.
-    pub error: Option<Box<Error>>,
+    pub error: Option<Box<ResourceError>>,
 
     /// This is set to true for 204 Not Modified responses, and, for backward
     /// compatibility, for 404 Not Found responses for tiles.

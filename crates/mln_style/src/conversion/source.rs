@@ -153,7 +153,7 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
         if let Err(e) = result.set_geojson(&geojson) {
             // TODO(port): C++ lets the Supercluster exception (a clustered
             // non-point feature) propagate out of the style parse.
-            error.message = e;
+            error.message = e.message;
             return None;
         }
     } else if let Some(url) = data_value.to_string() {

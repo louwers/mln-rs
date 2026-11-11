@@ -33,7 +33,7 @@ use mln_text::{BiDi, TaggedString, apply_arabic_shaping, starts_right_to_left};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::{EXTENT, ONE_EM, TILE_SIZE_D};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::geometry::FeatureType;
 use mln_util::i18n;
@@ -279,7 +279,7 @@ impl SymbolLayout {
         layers: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
         layout_parameters: &mut LayoutParameters<'_>,
-    ) -> Result<Self, ExceptionPtr> {
+    ) -> Result<Self, Error> {
         let leader = layers[0]
             .base_impl
             .downcast_ref::<mln_style::layers::symbol_layer_impl::Impl>()
@@ -1670,7 +1670,7 @@ impl Layout for SymbolLayout {
         first_load: bool,
         show_collision_boxes: bool,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let mut bucket = SymbolBucket::new(
             self.layout.clone(),
             &self.layer_paint_properties,

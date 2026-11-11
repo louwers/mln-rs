@@ -19,7 +19,7 @@ use mln_style::util::AsAny;
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::feature::feature_id_to_string;
 use mln_util::identity::SimpleIdentity;
 use serde::{Deserialize, Serialize};
@@ -74,19 +74,11 @@ impl Default for BucketBase {
     }
 }
 
-/// The C++ `GeometryTooLongException` (gfx/fill_generator.cpp), thrown when
-/// a polygon has more vertices than a `uint16_t` index can address. It
-/// derives from `std::exception` without overriding `what()`.
-#[derive(Debug)]
-pub struct GeometryTooLongException;
-
-impl std::fmt::Display for GeometryTooLongException {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("std::exception")
-    }
+/// The error of a polygon with more vertices than a 16-bit index can
+/// address. The tile that holds it fails to lay out.
+pub fn geometry_too_long() -> Error {
+    Error::native("a polygon has more vertices than a 16-bit index can address")
 }
-
-impl std::error::Error for GeometryTooLongException {}
 
 pub trait Bucket: AsAny + Send + Sync {
     fn base(&self) -> &BucketBase;
@@ -100,8 +92,8 @@ pub trait Bucket: AsAny + Send + Sync {
     /// Obtaining these is a costly operation, so we do it only once, and
     /// pass-by-const-ref the geometries as a second parameter.
     ///
-    /// C++ lets `GeometryTooLongException` propagate (the worker reports
-    /// it as the tile's error); here it is the `Err`.
+    /// Fails with [`geometry_too_long`] for a polygon that a bucket can't
+    /// index; the worker reports it as the tile's error.
     fn add_feature(
         &mut self,
         _feature: &dyn GeometryTileFeature,
@@ -110,7 +102,7 @@ pub trait Bucket: AsAny + Send + Sync {
         _patterns: &PatternLayerMap,
         _index: usize,
         _canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         Ok(())
     }
 

@@ -10,7 +10,7 @@ use mln_renderer::tile::tile_loader::{LoaderTile, VectorTileEncoding};
 use mln_style::layer::Layer;
 use mln_style::layers::RasterLayer;
 use mln_tile_id::OverscaledTileID;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -31,7 +31,7 @@ fn tile(test: &RasterTileTest) -> RasterTile {
 fn set_error() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    LoaderTile::set_error(&**tile.inner(), RuntimeError::ptr("test"));
+    LoaderTile::set_error(&**tile.inner(), Error::native("test"));
     assert!(!tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -42,7 +42,7 @@ fn set_error() {
 fn on_error() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    tile.inner().on_error(RuntimeError::ptr("test"), 0);
+    tile.inner().on_error(Error::native("test"), 0);
     assert!(!tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -61,14 +61,14 @@ fn on_parsed() {
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the tile
     // renderable.
-    LoaderTile::set_error(&**tile.inner(), RuntimeError::ptr("Connection offline"));
+    LoaderTile::set_error(&**tile.inner(), Error::native("Connection offline"));
     assert!(tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
 
     // Then simulate a parsing failure and make sure that we keep it renderable
     // in this situation as well.
-    tile.inner().on_error(RuntimeError::ptr("Parse error"), 0);
+    tile.inner().on_error(Error::native("Parse error"), 0);
     assert!(tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());

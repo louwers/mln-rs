@@ -4,7 +4,8 @@
 // - test/src/mln/test/util.cpp: `checkImage` / `getImageDiff` (pixelmatch
 //   against `<base>/expected.png`; actual and diff images go to
 //   target/tmp/<base>/, never next to the fixture);
-// - test/include/mln/test/stub_map_observer.hpp (`StubMapObserver`);
+// - test/include/mln/test/stub_map_observer.hpp (`StubMapObserver`, which
+//   gets the map's events as C++ observers get the calls);
 // - test/include/mln/test/fake_file_source.hpp (`FakeFileSource`);
 // - test/include/mln/test/fixture_log_observer.hpp (`FixtureLog`, per
 //   thread: Rust runs tests on parallel threads of one process);
@@ -18,20 +19,22 @@
 #![allow(dead_code)]
 
 use std::cell::{Cell, RefCell, RefMut};
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use mln_actor::{LocalObject, RunLoop, Timer};
+use mln_actor::{AsyncTask, LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_map::{Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus};
-use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, TileOperation};
+use mln_map::{Map, MapEvent, MapMode, MapOptions, RenderFrameStatus};
+use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
 use mln_tile_id::CanonicalTileID;
+use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
 
@@ -225,60 +228,71 @@ pub struct StubMapObserver {
     pub did_become_idle_callback: CallbackSlot<()>,
     pub on_style_image_missing_callback: CallbackSlot<String>,
     pub on_glyphs_loaded_callback: CallbackSlot<(FontStack, GlyphRange)>,
-    pub on_glyphs_error_callback: CallbackSlot<(FontStack, GlyphRange, ExceptionPtr)>,
+    pub on_glyphs_error_callback: CallbackSlot<(FontStack, GlyphRange, Error)>,
     pub on_glyphs_requested_callback: CallbackSlot<(FontStack, GlyphRange)>,
     pub on_tile_action_callback: CallbackSlot<(TileOperation, OverscaledTileID, String)>,
     pub on_source_changed_callback: CallbackSlot<String>,
     pub on_sprite_loaded_callback: CallbackSlot<Option<Sprite>>,
-    pub on_sprite_error_callback: CallbackSlot<(Option<Sprite>, ExceptionPtr)>,
+    pub on_sprite_error_callback: CallbackSlot<(Option<Sprite>, Error)>,
     pub on_sprite_requested_callback: CallbackSlot<Option<Sprite>>,
 }
 
-impl MapObserver for StubMapObserver {
-    fn on_will_start_loading_map(&self) {
-        self.will_start_loading_map_callback.call(());
+impl StubMapObserver {
+    /// Calls the callback of `event`.
+    pub fn dispatch(&self, event: MapEvent) {
+        match event {
+            MapEvent::LoadingStarted => self.will_start_loading_map_callback.call(()),
+            MapEvent::LoadingFinished => self.did_finish_loading_map_callback.call(()),
+            MapEvent::LoadingFailed(_) => self.did_fail_loading_map_callback.call(()),
+            MapEvent::StyleLoaded => self.did_finish_loading_style_callback.call(()),
+            MapEvent::RenderFrameFinished(status) => self.did_finish_rendering_frame_callback.call(status),
+            MapEvent::Idle => self.did_become_idle_callback.call(()),
+            MapEvent::StyleImageMissing { id } => self.on_style_image_missing_callback.call(id),
+            MapEvent::GlyphsLoaded { font_stack, range } => self.on_glyphs_loaded_callback.call((font_stack, range)),
+            MapEvent::GlyphsError { font_stack, range, error } => {
+                self.on_glyphs_error_callback.call((font_stack, range, error));
+            }
+            MapEvent::GlyphsRequested { font_stack, range } => {
+                self.on_glyphs_requested_callback.call((font_stack, range));
+            }
+            MapEvent::TileAction { op, id, source_id } => self.on_tile_action_callback.call((op, id, source_id)),
+            MapEvent::SourceChanged { source_id } => self.on_source_changed_callback.call(source_id),
+            MapEvent::SpriteLoaded(sprite) => self.on_sprite_loaded_callback.call(sprite),
+            MapEvent::SpriteError(sprite, error) => self.on_sprite_error_callback.call((sprite, error)),
+            MapEvent::SpriteRequested(sprite) => self.on_sprite_requested_callback.call(sprite),
+            _ => {}
+        }
     }
-    fn on_did_finish_loading_map(&self) {
-        self.did_finish_loading_map_callback.call(());
+
+    /// Takes the map's events and calls their callbacks, which may use the
+    /// map. Does nothing while someone holds the map: they dispatch the
+    /// events when they let go of it.
+    pub fn dispatch_events(&self, map: &RefCell<Map>) {
+        let Ok(mut map) = map.try_borrow_mut() else {
+            return;
+        };
+        let events = map.drain_events();
+        drop(map);
+        for event in events {
+            self.dispatch(event);
+        }
     }
-    fn on_did_fail_loading_map(&self, _error: MapLoadError, _what: &str) {
-        self.did_fail_loading_map_callback.call(());
-    }
-    fn on_did_finish_loading_style(&self) {
-        self.did_finish_loading_style_callback.call(());
-    }
-    fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
-        self.did_finish_rendering_frame_callback.call(status.clone());
-    }
-    fn on_did_become_idle(&self) {
-        self.did_become_idle_callback.call(());
-    }
-    fn on_style_image_missing(&self, id: &str) {
-        self.on_style_image_missing_callback.call(id.to_owned());
-    }
-    fn on_glyphs_loaded(&self, font_stack: &FontStack, range: &GlyphRange) {
-        self.on_glyphs_loaded_callback.call((font_stack.clone(), *range));
-    }
-    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
-        self.on_glyphs_error_callback.call((font_stack.clone(), *range, error));
-    }
-    fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
-        self.on_glyphs_requested_callback.call((font_stack.clone(), *range));
-    }
-    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
-        self.on_tile_action_callback.call((op, *id, source_id.to_owned()));
-    }
-    fn on_source_changed(&self, source_id: &str) {
-        self.on_source_changed_callback.call(source_id.to_owned());
-    }
-    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
-        self.on_sprite_loaded_callback.call(sprite.cloned());
-    }
-    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
-        self.on_sprite_error_callback.call((sprite.cloned(), error));
-    }
-    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
-        self.on_sprite_requested_callback.call(sprite.cloned());
+
+    /// Dispatches `map`'s events from the run loop whenever the map has
+    /// some, while the returned task lives.
+    pub fn observe(self: &Rc<Self>, map: &Rc<RefCell<Map>>) -> AsyncTask {
+        let task = {
+            let observer = Rc::downgrade(self);
+            let map = Rc::downgrade(map);
+            AsyncTask::new(move || {
+                if let (Some(observer), Some(map)) = (observer.upgrade(), map.upgrade()) {
+                    observer.dispatch_events(&map);
+                }
+            })
+        };
+        let sender = task.sender();
+        map.borrow_mut().set_waker(Some(Arc::new(move || sender.send())));
+        task
     }
 }
 
@@ -314,17 +328,15 @@ pub struct FakeFileSource {
     requests: LocalObject<FakeRequests>,
     next_id: Mutex<u64>,
     resource_options: Mutex<ResourceOptions>,
-    client_options: Mutex<ClientOptions>,
 }
 
 impl FakeFileSource {
-    /// `FakeFileSource()`: `ResourceOptions::Default()`, `ClientOptions()`.
+    /// `FakeFileSource()`: `ResourceOptions::Default()`.
     pub fn new() -> Self {
         FakeFileSource {
             requests: LocalObject::new(RefCell::new(Vec::new())),
             next_id: Mutex::new(0),
             resource_options: Mutex::new(ResourceOptions::default()),
-            client_options: Mutex::new(ClientOptions::default()),
         }
     }
 
@@ -388,14 +400,6 @@ impl FileSource for FakeFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.resource_options.lock().unwrap().clone()
-    }
-
-    fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock().unwrap() = options;
-    }
-
-    fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock().unwrap().clone()
     }
 }
 
@@ -483,7 +487,13 @@ pub fn run_with_timeout(run_loop: &RunLoop, seconds: i64) {
 /// C++ destruction order (reverse of declaration there). The map is shared
 /// (`Rc<RefCell<..>>`) so observer callbacks can reach it through a `Weak`
 /// as C++ lambdas capture `test`.
+///
+/// [`map`](Self::map) hands out the map once it has handled what its style
+/// and renderer reported, and the observer gets the map's events when the
+/// call through it, or through [`render`](Self::render), returns, as C++
+/// observers get the calls at once. Otherwise they come from the run loop.
 pub struct MapTest<FS: FileSource + 'static = StubFileSource> {
+    events: AsyncTask,
     pub map: Rc<RefCell<Map>>,
     pub frontend: HeadlessFrontend,
     pub observer: Rc<StubMapObserver>,
@@ -523,13 +533,19 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         let frontend = HeadlessFrontend::with_pixel_ratio(pixel_ratio);
         let options =
             MapOptions::new().with_map_mode(mode).with_size(frontend.get_size()).with_pixel_ratio(pixel_ratio);
-        let map = Map::with_file_source(&frontend, observer.clone(), file_source.clone(), options).unwrap();
-        MapTest { map: Rc::new(RefCell::new(map)), frontend, observer, file_source, run_loop }
+        let map = Map::with_file_source(file_source.clone(), options).unwrap();
+        frontend.attach(&map);
+        let map = Rc::new(RefCell::new(map));
+        let events = observer.observe(&map);
+        MapTest { events, map, frontend, observer, file_source, run_loop }
     }
 
-    /// `test.map`.
-    pub fn map(&self) -> RefMut<'_, Map> {
-        self.map.borrow_mut()
+    /// `test.map`: the map, whose events reach the observer when the
+    /// guard drops.
+    pub fn map(&self) -> MapGuard<'_> {
+        let mut map = self.map.borrow_mut();
+        map.process_events();
+        MapGuard { map: Some(map), cell: &self.map, observer: &self.observer }
     }
 
     /// A handle for callbacks (no reference cycle through the observer).
@@ -542,14 +558,41 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         self.try_render().unwrap_or_else(|e| panic!("render: {e}"))
     }
 
-    pub fn try_render(&self) -> Result<RenderResult, String> {
+    pub fn try_render(&self) -> Result<RenderResult, Error> {
         let mut frontend = self.frontend.clone();
-        let mut map = self.map.borrow_mut();
-        frontend.render(&mut map)
+        frontend.render(&mut self.map())
     }
 
     /// `test.map.getStyle().loadJSON(json)`.
     pub fn load_json(&self, json: &str) {
-        self.map().get_style_mut().load_json(json);
+        self.map().style_mut().load_json(json);
+    }
+}
+
+/// The map of a [`MapTest`], borrowed. When it drops, the observer gets the
+/// map's events.
+pub struct MapGuard<'a> {
+    map: Option<RefMut<'a, Map>>,
+    cell: &'a RefCell<Map>,
+    observer: &'a StubMapObserver,
+}
+
+impl Deref for MapGuard<'_> {
+    type Target = Map;
+    fn deref(&self) -> &Map {
+        self.map.as_deref().expect("the map")
+    }
+}
+
+impl DerefMut for MapGuard<'_> {
+    fn deref_mut(&mut self) -> &mut Map {
+        self.map.as_deref_mut().expect("the map")
+    }
+}
+
+impl Drop for MapGuard<'_> {
+    fn drop(&mut self) {
+        drop(self.map.take());
+        self.observer.dispatch_events(self.cell);
     }
 }

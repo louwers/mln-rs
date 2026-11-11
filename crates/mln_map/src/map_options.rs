@@ -6,6 +6,18 @@
 use mln_map_types::{ConstrainMode, MapMode, NorthOrientation, ViewportMode};
 use mln_util::size::Size;
 
+/// What a map does with a style image once no layer uses it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnusedStyleImagePolicy {
+    /// Remove it from the style, unless the image sets `keep_unused`. A
+    /// layer that uses it again reports it missing with
+    /// [`MapEvent::StyleImageMissing`](crate::MapEvent::StyleImageMissing).
+    #[default]
+    Remove,
+    /// Keep it in the style.
+    Keep,
+}
+
 /// Holds values for Map options.
 #[derive(Clone, Debug)]
 pub struct MapOptions {
@@ -18,6 +30,7 @@ pub struct MapOptions {
     size: Size,
     pixel_ratio: f32,
     fast_pfor_enabled: bool,
+    unused_style_image_policy: UnusedStyleImagePolicy,
 }
 
 impl Default for MapOptions {
@@ -32,6 +45,7 @@ impl Default for MapOptions {
             size: Size::new(64, 64),
             pixel_ratio: 1.0,
             fast_pfor_enabled: false,
+            unused_style_image_policy: UnusedStyleImagePolicy::Remove,
         }
     }
 }
@@ -135,5 +149,16 @@ impl MapOptions {
 
     pub fn fast_pfor_enabled(&self) -> bool {
         self.fast_pfor_enabled
+    }
+
+    /// Sets what the map does with a style image once no layer uses it. By
+    /// default, it removes the image.
+    pub fn with_unused_style_image_policy(mut self, policy: UnusedStyleImagePolicy) -> Self {
+        self.unused_style_image_policy = policy;
+        self
+    }
+
+    pub fn unused_style_image_policy(&self) -> UnusedStyleImagePolicy {
+        self.unused_style_image_policy
     }
 }

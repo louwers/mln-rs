@@ -3,6 +3,7 @@
 
 use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, WrapMode};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
@@ -21,7 +22,7 @@ impl ProjectionBase for MercatorProjection {
         Projection::project(lat_lng, scale)
     }
 
-    fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, String> {
+    fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         Projection::unproject(point, scale, wrap_mode)
     }
 

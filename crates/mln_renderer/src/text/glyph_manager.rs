@@ -43,7 +43,7 @@ use mln_text::glyph_cache::{GlyphCache, GlyphCacheRange};
 use mln_text::glyph_pbf::parse_glyph_pbf;
 use mln_text::local_glyph_rasterizer::{DefaultLocalGlyphRasterizer, LocalGlyphRasterizer};
 use mln_text::tagged_string::font_stack_hash;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -68,7 +68,7 @@ pub type HBShapeResults = VecMap<FontStack, VecMap<GlyphIDType, BTreeMap<Vec<u16
 /// `GlyphManagerObserver`.
 pub trait GlyphManagerObserver {
     fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
-    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: ExceptionPtr) {}
+    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: Error) {}
     fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
 }
 
@@ -374,7 +374,7 @@ impl GlyphManager {
         }
 
         let data = match &res.error {
-            Some(error) => Err(RuntimeError::ptr(error.message.clone())),
+            Some(error) => Err(Error::native(error.message.clone())),
             None => Ok((!res.no_content).then(|| FontData::from(res.data.clone().unwrap_or_default()))),
         };
         self.process_data(data, font_stack, range);
@@ -382,7 +382,7 @@ impl GlyphManager {
 
     /// The rest of `processResponse`, for a glyph PBF or font file: `None`
     /// when the response had no content, an error when the request failed.
-    fn process_data(&self, data: Result<Option<FontData>, ExceptionPtr>, font_stack: &FontStack, range: &GlyphRange) {
+    fn process_data(&self, data: Result<Option<FontData>, Error>, font_stack: &FontStack, range: &GlyphRange) {
         let observer = self.observer.borrow().clone();
         let (data, mut error) = match data {
             Ok(data) => (data, None),
@@ -415,7 +415,7 @@ impl GlyphManager {
                             }
                             range_glyphs = Some(self.glyph_cache.intern_range(interned));
                         }
-                        Err(parse_error) => error = Some(RuntimeError::ptr(parse_error.to_string())),
+                        Err(parse_error) => error = Some(Error::native(parse_error.to_string())),
                     }
                 } else if self.load_hb_shaper(font_stack, range.type_, data.clone()) {
                     let id = GlyphID::with_type(0, range.type_);

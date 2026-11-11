@@ -19,7 +19,7 @@ use mln_style::layers::fill_layer::Impl as FillLayerImpl;
 use mln_style::layers::{FillLayer, FillLayerProperties};
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::immutable::Immutable;
 
@@ -58,7 +58,7 @@ struct NullSubscriber;
 
 impl CustomTileSubscriber<CustomVectorTileData> for NullSubscriber {
     fn set_tile_data(&self, _data: CustomVectorTileData) {}
-    fn set_tile_error(&self, _error: ExceptionPtr) {}
+    fn set_tile_error(&self, _error: Error) {}
     fn invalidate_tile_data(&self) {}
 }
 
@@ -75,7 +75,7 @@ fn invalidate_failed_tile() {
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
 
     let id = CanonicalTileID::new(0, 0, 0);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, RuntimeError::ptr("failed")));
+    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id, Error::native("failed")));
     test.run_loop.wait_for_empty();
 
     loader.self_ref().invoke(move |loader| loader.invalidate_tile(&id));
@@ -98,7 +98,7 @@ fn fetch_failed_tile_again() {
     loader.self_ref().invoke(move |loader| loader.fetch_tile(&id, 0, Box::new(NullSubscriber)));
     test.run_loop.wait_for_empty();
     assert_eq!(fetches.load(Ordering::SeqCst), 1);
-    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id.canonical, RuntimeError::ptr("failed")));
+    loader.self_ref().invoke(move |loader| loader.set_tile_error(&id.canonical, Error::native("failed")));
 
     // A tile that still shows older data doesn't cancel when it leaves the
     // view, so the next request for it has to ask the host again.

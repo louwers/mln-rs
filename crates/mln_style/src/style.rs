@@ -1,7 +1,7 @@
 // Ports include/mln/style/style.hpp + src/mln/style/style.cpp.
 
 use feature::Value;
-use mln_util::exception::{ExceptionPtr, MisuseException};
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 
 use crate::expression::GlobalStateMap;
@@ -14,6 +14,32 @@ use crate::sky::Sky;
 use crate::source::Source;
 pub use crate::style_impl::{Impl, LayerRefMut, LightRefMut, ProjectionRefMut, SkyRefMut};
 use crate::transition_options::TransitionOptions;
+
+/// Why a style failed to load.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum StyleLoadError {
+    /// The style document isn't a valid style.
+    Parse(String),
+    /// The style's request failed, such as with a 404 or a missing file.
+    Load(String),
+}
+
+impl StyleLoadError {
+    /// What failed, for people.
+    pub fn message(&self) -> &str {
+        match self {
+            StyleLoadError::Parse(message) | StyleLoadError::Load(message) => message,
+        }
+    }
+}
+
+impl std::fmt::Display for StyleLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for StyleLoadError {}
 
 #[derive(Debug)]
 pub struct Style {
@@ -80,10 +106,11 @@ impl Style {
     /// stack falls back to after the style's own, for the styles that load
     /// after this call. `json` is an array of font files, each an object
     /// with a `url` and an optional `unicode-range`, as in a font face of a
-    /// style's `font-faces`. C++ throws `std::runtime_error` if `json` isn't
+    /// style's `font-faces`. It fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't
     /// such an array. Without a font-face shaper, the map ignores them, as it
     /// ignores a style's `font-faces`.
-    pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), ExceptionPtr> {
+    pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), Error> {
         let faces = crate::parser::parse_fallback_font_faces(json)?;
         self.set_fallback_font_face_list(faces);
         Ok(())
@@ -146,10 +173,11 @@ impl Style {
         self.impl_.get_global_state()
     }
 
-    /// C++ throws `util::MisuseException` if the style has not finished loading.
-    pub fn set_global_state_property(&mut self, name: &str, value: &Value) -> Result<(), ExceptionPtr> {
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) if the
+    /// style has not finished loading.
+    pub fn set_global_state_property(&mut self, name: &str, value: &Value) -> Result<(), Error> {
         if !self.impl_.loaded {
-            return Err(MisuseException::ptr("Style is not done loading."));
+            return Err(Error::invalid_state("Style is not done loading."));
         }
 
         self.impl_.mutated = true;
@@ -181,7 +209,9 @@ impl Style {
         self.impl_.get_source(id)
     }
 
-    pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), ExceptionPtr> {
+    /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
+    /// style has a source with the same ID.
+    pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
         self.impl_.mutated = true;
         self.impl_.add_source(source)
     }
@@ -207,7 +237,11 @@ impl Style {
         self.impl_.get_layer_mut(layer_id)
     }
 
-    pub fn add_layer(&mut self, layer: Box<dyn Layer>, before_layer_id: Option<&str>) -> Result<(), ExceptionPtr> {
+    /// Fails with [`ErrorKind::AlreadyExists`](mln_util::ErrorKind) if the
+    /// style has a layer with the same ID, and with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if the layer's
+    /// type doesn't fit its source.
+    pub fn add_layer(&mut self, layer: Box<dyn Layer>, before_layer_id: Option<&str>) -> Result<(), Error> {
         self.impl_.mutated = true;
         self.impl_.add_layer(layer, before_layer_id).map(|_| ())
     }

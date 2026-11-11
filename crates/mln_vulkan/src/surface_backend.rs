@@ -33,6 +33,7 @@ use mln_gfx::renderable::{Renderable, RenderableBase};
 use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -102,11 +103,11 @@ impl SurfaceBackend {
     /// of `framebuffer_size`. With `cap_frame_rate` off, frames are
     /// presented without waiting for the display where the surface can
     /// (`present_mode`).
-    pub fn new(
-        provider: Rc<dyn SurfaceProvider>,
-        framebuffer_size: Size,
-        cap_frame_rate: bool,
-    ) -> Result<Self, String> {
+    ///
+    /// Fails as [`RendererBackend::new`] does, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the window gets no
+    /// swapchain.
+    pub fn new(provider: Rc<dyn SurfaceProvider>, framebuffer_size: Size, cap_frame_rate: bool) -> Result<Self, Error> {
         let (renderer_backend, surface) = RendererBackend::new(ContextMode::Unique, Some(&*provider))?;
         let context = renderer_backend.create_context();
         let backend_impl = renderer_backend.backend_impl();
@@ -128,11 +129,11 @@ impl SurfaceBackend {
             /*read_every_frame=*/ false,
         );
         if !resource.has_platform_surface() {
-            return Err("The window has no Vulkan surface".to_owned());
+            return Err(Error::native("The window has no Vulkan surface"));
         }
         // A window without a size yet gets its swapchain with one.
         if resource.get_image_count() == 0 && framebuffer_size.width > 0 && framebuffer_size.height > 0 {
-            return Err("Failed to create a swapchain for the window".to_owned());
+            return Err(Error::native("Failed to create a swapchain for the window"));
         }
         context.set_surface(&resource);
         Ok(SurfaceBackend {

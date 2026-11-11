@@ -16,7 +16,7 @@ use mln_image::decoder;
 use mln_storage::{AsyncRequest, Data, FileSource, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_vec_map::VecMap;
 
@@ -47,7 +47,7 @@ pub struct SpriteLoader {
 /// The result `parseSprite` hands back from the thread pool.
 struct ParseResult {
     images: Vec<Immutable<Impl>>,
-    error: Option<ExceptionPtr>,
+    error: Option<Error>,
 }
 
 /// Which response a request callback handles.
@@ -65,7 +65,7 @@ impl Inner {
     /// The body of the two request callbacks in `load`.
     fn on_response(self: &Rc<Self>, sprite: &Sprite, part: Part, res: Response) {
         if let Some(error) = &res.error {
-            self.observer().on_sprite_error(Some(sprite.clone()), RuntimeError::ptr(error.message.clone()));
+            self.observer().on_sprite_error(Some(sprite.clone()), Error::native(error.message.clone()));
             return;
         } else if res.not_modified {
             return;
@@ -108,9 +108,7 @@ impl Inner {
             /* parseClosure */
             move |respond: Respond<ParseResult>| {
                 decoder::decode(&image, move |raster| {
-                    let parsed = raster
-                        .map_err(RuntimeError::ptr)
-                        .and_then(|raster| parse_sprite_images(&parse_sprite_copy.id, &raster, &json));
+                    let parsed = raster.and_then(|raster| parse_sprite_images(&parse_sprite_copy.id, &raster, &json));
                     respond(match parsed {
                         Ok(images) => ParseResult { images, error: None },
                         Err(error) => ParseResult { images: Vec::new(), error: Some(error) },

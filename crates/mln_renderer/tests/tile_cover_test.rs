@@ -667,7 +667,7 @@ mod tile_cover {
         // EXPECT_THROW(..., std::domain_error): the LatLng constructor's error.
         let point = p(-122.5744, 97.6609);
         assert_eq!(
-            Err("latitude must be between -90 and 90".to_owned()),
+            Err(mln_util::Error::invalid_argument("latitude must be between -90 and 90")),
             tile_cover_geometry(&Geometry::Point(point), 2)
         );
 

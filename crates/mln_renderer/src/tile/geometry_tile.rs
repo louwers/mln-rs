@@ -46,7 +46,7 @@ use mln_style_types::image::{ImageMap, ImagePosition};
 use mln_text::BiDi;
 use mln_text::glyph::{GlyphDependencies, GlyphMap, HBShapeRequests};
 use mln_tile_id::OverscaledTileID;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_vec_map::VecSet;
@@ -263,7 +263,7 @@ impl GeometryTileInner {
     }
 
     /// `setError(std::exception_ptr)`.
-    pub fn set_error(&self, err: ExceptionPtr) {
+    pub fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
         self.base.observer().on_tile_error(&self.base, err);
     }
@@ -318,7 +318,8 @@ impl GeometryTileInner {
             self.base.on_tile_action(TileOperation::EndParse);
         }
 
-        // TODO(port): ErrorScope, bucket->check (symbol guards).
+        // TODO(port): bucket->check (symbol guards), whose failures go to
+        // the log.
 
         *self.layout_result.borrow_mut() = Some(Rc::new(result));
         *self.bucket_geometry.borrow_mut() = Rc::default();
@@ -331,7 +332,7 @@ impl GeometryTileInner {
     }
 
     /// `onError(std::exception_ptr, correlationID)`.
-    pub fn on_error(&self, err: ExceptionPtr, result_correlation_id: u64) {
+    pub fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
             self.base.pending.set(false);
@@ -546,7 +547,7 @@ impl GeometryTile {
         &self.inner
     }
 
-    pub fn set_error(&self, err: ExceptionPtr) {
+    pub fn set_error(&self, err: Error) {
         self.inner.set_error(err);
     }
 
@@ -787,7 +788,7 @@ impl Tile for GeometryTile {
         global_state: Option<&GlobalStateMap>,
         proj_matrix: &Mat4,
         feature_state: &SourceFeatureState,
-    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+    ) -> Result<(), mln_util::error::Error> {
         let layout_result = self.inner.layout_result.borrow().clone();
         // `if (!getData()) return;`
         let Some(layout_result) = layout_result else {
@@ -827,7 +828,7 @@ impl Tile for GeometryTile {
         result: &mut Vec<Feature>,
         options: &SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
-    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+    ) -> Result<(), mln_util::error::Error> {
         let layout_result = self.inner.layout_result.borrow().clone();
         // Data not yet available, or tile is empty
         let Some(layout_result) = layout_result else {
@@ -875,7 +876,7 @@ pub fn query_layer_source_features(
     options: &SourceQueryOptions,
     global_state: Option<&GlobalStateMap>,
     id: &OverscaledTileID,
-) -> Result<(), ExceptionPtr> {
+) -> Result<(), Error> {
     let feature_count = layer.feature_count();
     for i in 0..feature_count {
         let feature = layer.get_feature(i)?;
@@ -897,7 +898,7 @@ pub fn query_layer_source_features(
         // C++ throws out of the query for a malformed geometry (from
         // `convertFeature`) or value.
         let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, &id.canonical)
-            .map_err(|e| Arc::new(e) as ExceptionPtr)?;
+            .map_err(|e| Error::native(e.to_string()))?;
         feature.check()?;
         result.push(Feature::from(converted));
     }

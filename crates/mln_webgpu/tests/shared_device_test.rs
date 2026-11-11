@@ -107,5 +107,6 @@ fn the_first_named_adapter_renders() {
 #[test]
 fn requesting_a_missing_adapter_fails() {
     let error = HeadlessBackend::request_device(Some(usize::MAX)).expect_err("no such adapter");
-    assert!(error.contains("past the"), "{error}");
+    assert_eq!(error.kind, mln_util::ErrorKind::NotFound, "{error}");
+    assert!(error.message.contains("past the"), "{error}");
 }

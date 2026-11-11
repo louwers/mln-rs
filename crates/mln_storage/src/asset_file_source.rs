@@ -2,7 +2,7 @@
 // platform/default/src/mln/storage/asset_file_source.cpp.
 //
 // The requests run on the "AssetFileSource" thread (`util::Thread`) as in
-// C++. The resource and client options are kept next to the thread behind a
+// C++. The resource options are kept next to the thread behind a
 // mutex (C++ keeps them in the thread object and reads them back with a
 // blocking `ask`); the values returned are the same.
 //
@@ -11,7 +11,6 @@
 use std::sync::Mutex;
 
 use mln_actor::{ActorRef, Thread};
-use mln_util::client_options::ClientOptions;
 use mln_util::constants::ASSET_PROTOCOL;
 use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
@@ -22,7 +21,7 @@ use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::local_file_request::request_local_file;
 use crate::resource::Resource;
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 fn accepts_url(url: &str) -> bool {
     url.starts_with(ASSET_PROTOCOL)
@@ -38,7 +37,7 @@ impl AssetFileSourceThread {
     pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         if !accepts_url(&resource.url) {
             let mut response = Response::new();
-            response.error = Some(Box::new(Error::new(Reason::Other, "Invalid asset URL")));
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, "Invalid asset URL")));
             req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
             return;
         }
@@ -55,17 +54,14 @@ impl AssetFileSourceThread {
 pub struct AssetFileSource {
     thread: Thread<AssetFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
-    client_options: Mutex<ClientOptions>,
 }
 
 impl AssetFileSource {
-    /// `AssetFileSource(const ResourceOptions&, const ClientOptions&)`.
-    pub fn new(resource_options: &ResourceOptions, client_options: &ClientOptions) -> Self {
+    pub fn new(resource_options: &ResourceOptions) -> Self {
         let root = resource_options.asset_path().to_owned();
         AssetFileSource {
             thread: Thread::new("AssetFileSource", move |_| AssetFileSourceThread { root }),
             resource_options: Mutex::new(resource_options.clone()),
-            client_options: Mutex::new(client_options.clone()),
         }
     }
 }
@@ -97,13 +93,5 @@ impl FileSource for AssetFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.resource_options.lock_unpoisoned().clone()
-    }
-
-    fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock_unpoisoned() = options;
-    }
-
-    fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock_unpoisoned().clone()
     }
 }

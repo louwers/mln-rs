@@ -22,7 +22,7 @@ use mln_style_types::TranslateAnchorType;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData};
 use mln_util::constants;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::feature::{Feature, feature_id_to_string};
 use mln_util::grid_index::{BBox, GridIndex};
 use mln_vec_map::VecMap;
@@ -229,7 +229,7 @@ impl FeatureIndex {
         layers: &QueryLayers<'_>,
         additional_query_padding: f32,
         source_feature_state: &SourceFeatureState,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         if self.tile_data.is_none() {
             return Ok(());
         }
@@ -297,7 +297,7 @@ impl FeatureIndex {
         layers: &QueryLayers<'_>,
         tile_id: &OverscaledTileID,
         feature_sort_order: &FeatureSortOrder,
-    ) -> Result<QueryResults, ExceptionPtr> {
+    ) -> Result<QueryResults, Error> {
         let mut result = QueryResults::new();
         if self.tile_data.is_none() {
             return Ok(result);
@@ -369,7 +369,7 @@ impl FeatureIndex {
         pixels_to_tile_units: f32,
         projector: &TileProjector<'_>,
         source_feature_state: Option<&SourceFeatureState>,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let Some(tile_data) = &self.tile_data else {
             return Ok(());
         };
@@ -437,7 +437,7 @@ impl FeatureIndex {
             // C++ throws out of the query for a malformed geometry (from
             // `convertFeature`) or value.
             let converted = mln_tile::geometry_tile_data::convert_feature(&*feature, &tile_id.canonical)
-                .map_err(|e| Arc::new(e) as ExceptionPtr)?;
+                .map_err(|e| Error::native(e.to_string()))?;
             feature.check()?;
             let mut converted = Feature::from(converted);
             converted.source = render_layer.base().base_impl.source.clone();

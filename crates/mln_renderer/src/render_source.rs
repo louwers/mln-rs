@@ -20,7 +20,7 @@ use mln_style::sources::{geojson_source_impl, tile_source};
 use mln_style_types::SourceType;
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 
 use crate::image_manager::ImageManager;
@@ -82,10 +82,9 @@ impl RenderTiles {
 /// only reads its id.
 pub trait RenderSourceObserver {
     fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {}
-    fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, _error: ExceptionPtr) {}
+    fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, _error: Error) {}
     fn on_tile_action(&self, _source_id: &str, _op: TileOperation, _tile_id: &OverscaledTileID, _tile_source_id: &str) {
     }
-    // TODO(port): onSymbolError (M5).
 }
 
 /// `RenderSourceObserver nullObserver`.
@@ -111,7 +110,7 @@ impl TileObserver for RenderSourceTileObserver {
     }
 
     /// `RenderSource::onTileError(Tile&, std::exception_ptr)`.
-    fn on_tile_error(&self, tile: &TileBase, error: ExceptionPtr) {
+    fn on_tile_error(&self, tile: &TileBase, error: Error) {
         self.observer().on_tile_error(&self.source_id, &tile.id(), error);
     }
 
@@ -245,7 +244,7 @@ pub trait RenderSource {
         _options: &crate::query::RenderedQueryOptions,
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
         _proj_matrix: &mln_util::mat4::Mat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::exception::ExceptionPtr> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
         Ok(Default::default())
     }
 
@@ -254,7 +253,7 @@ pub trait RenderSource {
         &self,
         _options: &crate::query::SourceQueryOptions,
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         Ok(Vec::new())
     }
 
@@ -266,7 +265,7 @@ pub trait RenderSource {
         _extension: &str,
         _extension_field: &str,
         _args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
         Ok(Default::default())
     }
 

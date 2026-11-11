@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
+use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
@@ -45,15 +45,6 @@ struct StatusObserver<F: Fn(OfflineRegionStatus)>(F);
 
 impl<F: Fn(OfflineRegionStatus)> OfflineRegionObserver for StatusObserver<F> {
     fn status_changed(&self, status: OfflineRegionStatus) {
-        (self.0)(status);
-    }
-}
-
-/// `StubMapObserver` with `didFinishRenderingFrameCallback`.
-struct FrameObserver<F: Fn(&RenderFrameStatus)>(F);
-
-impl<F: Fn(&RenderFrameStatus)> MapObserver for FrameObserver<F> {
-    fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
         (self.0)(status);
     }
 }
@@ -145,23 +136,27 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let stop = run_loop.clone();
-    let map_observer = Rc::new(FrameObserver(move |status: &RenderFrameStatus| {
-        if status.mode == RenderMode::Full {
-            stop.stop();
-        }
-    }));
-
     let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_file_source(
-        &frontend,
-        map_observer,
         stubfile_source,
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
     )
     .unwrap();
+    frontend.attach(&map);
 
-    map.get_style_mut().load_url("http://127.0.0.1:3000/inline_source.style.json");
+    map.style_mut().load_url("http://127.0.0.1:3000/inline_source.style.json");
     map.jump_to(&CameraOptions::default().with_center(Some(LatLng::new(0.0, 0.0).unwrap())).with_zoom(Some(0.0)));
-    run_loop.run();
+    // `didFinishRenderingFrameCallback` stops the loop at the first full
+    // frame.
+    loop {
+        let full_frame = map.drain_events().into_iter().any(|event| {
+            matches!(event, MapEvent::RenderFrameFinished(RenderFrameStatus { mode: RenderMode::Full, .. }))
+        });
+        if full_frame {
+            break;
+        }
+        if !run_loop.run_once() {
+            run_loop.wait_for_work();
+        }
+    }
 }

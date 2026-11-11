@@ -16,7 +16,7 @@ use mln_actor::scheduler;
 use mln_storage::{Data, FileSource};
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
@@ -93,7 +93,7 @@ impl CustomVectorSourceHandle {
 
     /// `setTileError(tileID, error)`: the host failed to load the tile.
     /// Invalidating the tile, or needing it again, asks for it again.
-    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: ExceptionPtr) {
+    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, error));
     }
 
@@ -212,7 +212,7 @@ impl CustomVectorSource {
     }
 
     /// `setTileError(tileID, error)`; see [`CustomVectorSourceHandle`].
-    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: ExceptionPtr) {
+    pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
         self.handle().set_tile_error(tile_id, error);
     }
 

@@ -25,7 +25,7 @@ use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
 use mln_style_types::image::Impl as ImageImpl;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, milliseconds, seconds};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::image::PremultipliedImage;
@@ -65,7 +65,7 @@ impl RenderSourceObserver for Observer {
         self.report(Outcome::Loaded);
     }
 
-    fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, error: ExceptionPtr) {
+    fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, error: Error) {
         self.report(Outcome::Error(error.to_string()));
     }
 }

@@ -152,7 +152,7 @@ impl Tile for GeoJSONTile {
         global_state: Option<&GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
         feature_state: &crate::source_state::SourceFeatureState,
-    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+    ) -> Result<(), mln_util::error::Error> {
         self.tile.query_rendered_features(
             result,
             query_geometry,
@@ -175,7 +175,7 @@ impl Tile for GeoJSONTile {
         result: &mut Vec<mln_util::feature::Feature>,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
-    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+    ) -> Result<(), mln_util::error::Error> {
         // Ignore the sourceLayer, there is only one
         if let Some(feature_index) = self.tile.get_feature_index() {
             if let Some(tile_data) = feature_index.get_data() {

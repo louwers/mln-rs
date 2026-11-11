@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_util::size::Size;
@@ -63,17 +63,17 @@ impl MemoryTest {
         MemoryTest { file_source, run_loop }
     }
 
-    /// `MapAdapter map(frontend, MapObserver::nullObserver(), test.fileSource,
+    /// `MapAdapter map(frontend, test.fileSource,
     /// MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize())
     /// .withPixelRatio(ratio))`.
     fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
-        Map::with_file_source(
-            frontend,
-            Rc::new(NullMapObserver),
+        let map = Map::with_file_source(
             self.file_source.clone(),
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()).with_pixel_ratio(ratio),
         )
-        .unwrap()
+        .unwrap();
+        frontend.attach(&map);
+        map
     }
 }
 
@@ -86,7 +86,7 @@ fn vector() {
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio);
     let mut map = test.map(&frontend, ratio);
     map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
-    map.get_style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("maptiler://maps/streets");
 
     frontend.render(&mut map).expect("render");
 }
@@ -99,7 +99,7 @@ fn raster() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio);
     let mut map = test.map(&frontend, ratio);
-    map.get_style_mut().load_url("maptiler://maps/hybrid");
+    map.style_mut().load_url("maptiler://maps/hybrid");
 
     frontend.render(&mut map).expect("render");
 }
@@ -147,7 +147,7 @@ fn footprint() {
             let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 2.0);
             let mut map = test.map(&frontend, 2.0);
             map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
-            map.get_style_mut().load_url(style);
+            map.style_mut().load_url(style);
             frontend.render(&mut map).expect("render");
             FrontendAndMap { _map: map, _frontend: frontend }
         }
@@ -221,7 +221,7 @@ fn rendering_stats_count_live_resources() {
     let mut map = test.map(&frontend, 1.0);
     map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
 
-    map.get_style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("maptiler://maps/streets");
     frontend.render(&mut map).expect("render");
     let loaded = live_resources(&frontend);
     for (name, value) in &loaded {
@@ -233,7 +233,7 @@ fn rendering_stats_count_live_resources() {
     assert!(live(&loaded, "mem_buffers") >= sum("mem"));
 
     // The tiles go with their style.
-    map.get_style_mut().load_json(EMPTY);
+    map.style_mut().load_json(EMPTY);
     frontend.render(&mut map).expect("render");
     let evicted = live_resources(&frontend);
     assert_eq!(live(&evicted, "num_index_buffers"), 0);
@@ -243,14 +243,16 @@ fn rendering_stats_count_live_resources() {
     }
 
     // Loading the tiles again and dropping them leaves the same resources.
-    map.get_style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("maptiler://maps/streets");
     frontend.render(&mut map).expect("render");
     assert!(live(&live_resources(&frontend), "num_index_buffers") > 0);
-    map.get_style_mut().load_json(EMPTY);
+    map.style_mut().load_json(EMPTY);
     frontend.render(&mut map).expect("render");
     assert_eq!(live_resources(&frontend), evicted);
 
+    // The frontend drops its renderer on the run loop once the map goes.
     drop(map);
+    test.run_loop.run_once();
     let torn_down = live_resources(&frontend);
     assert!(live(&torn_down, "num_active_textures") < live(&loaded, "num_active_textures"));
     assert!(live(&torn_down, "mem_textures") < live(&loaded, "mem_textures"));
@@ -264,7 +266,7 @@ fn rendering_stats_count_one_frame_of_globe_clip_masks() {
     let test = MemoryTest::new();
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0);
     let mut map = test.map(&frontend, 1.0);
-    map.get_style_mut().load_json(
+    map.style_mut().load_json(
         r#"{"version": 8, "projection": {"type": "vertical-perspective"},
             "sources": {"shape": {"type": "geojson", "data": {"type": "Polygon",
                 "coordinates": [[[-60, -40], [60, -40], [60, 40], [-60, 40], [-60, -40]]]}}},

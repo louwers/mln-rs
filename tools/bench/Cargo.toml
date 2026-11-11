@@ -22,7 +22,6 @@ test = false
 
 [dependencies]
 feature.workspace = true
-libc.workspace = true
 mln_actor.workspace = true
 mln_gfx.workspace = true
 mln_headless.workspace = true
@@ -52,6 +51,12 @@ mln_mtl.workspace = true
 # The Vulkan backend, which MLN_RENDER_BACKEND=vulkan picks there.
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 mln_vulkan.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [lints]
 workspace = true

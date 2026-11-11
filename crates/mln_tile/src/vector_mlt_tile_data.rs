@@ -20,7 +20,7 @@ use mln_tile_id::{
     GeometryTileFeature, GeometryTileLayer,
 };
 use mln_util::constants::EXTENT;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error as MlnError;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
 use mln_util::sync::MutexExt;
@@ -63,7 +63,7 @@ pub struct VectorMLTTileFeature<'l> {
     lines: OnceCell<GeometryCollection>,
     properties: OnceCell<PropertyMap>,
     /// The first exception of an accessor (`GeometryTileFeature::error`).
-    error: OnceCell<ExceptionPtr>,
+    error: OnceCell<MlnError>,
 }
 
 impl<'l> VectorMLTTileFeature<'l> {
@@ -80,7 +80,7 @@ impl<'l> VectorMLTTileFeature<'l> {
 
     /// Keeps the first exception a trait accessor would have thrown.
     fn keep_error(&self, error: mlt::Error) {
-        let _ = self.error.set(Arc::new(error));
+        let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
     /// The `mlt::Feature` (for the difftest).
@@ -148,7 +148,7 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
         }
     }
 
-    fn error(&self) -> Option<ExceptionPtr> {
+    fn error(&self) -> Option<MlnError> {
         self.error.get().cloned()
     }
 
@@ -217,7 +217,7 @@ impl GeometryTileLayer for VectorMLTTileLayer {
         self.layer().get_features().len()
     }
 
-    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr> {
+    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, MlnError> {
         Ok(Box::new(self.feature(index)))
     }
 
@@ -340,7 +340,7 @@ impl GeometryTileData for VectorMLTTileData {
         Box::new(self.clone())
     }
 
-    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr> {
+    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, MlnError> {
         Ok(self.get_mlt_layer(name).map(|layer| Box::new(layer) as Box<dyn GeometryTileLayer + '_>))
     }
 

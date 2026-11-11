@@ -14,7 +14,6 @@ use mln_actor::scheduler::{self, SchedulerPtr};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
-use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -120,22 +119,41 @@ pub trait GeoJSONData: Send + Sync {
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
 
     // SuperclusterData: data that isn't clustered has no clusters, and
-    // gives empty results. `Err` is the `std::runtime_error` C++ throws for
-    // a cluster ID the data doesn't have.
-    fn get_children(&self, cluster_id: u32) -> Result<Features, RuntimeError>;
-    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, RuntimeError>;
-    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, RuntimeError>;
+    // gives empty results. A cluster ID the data doesn't have fails with
+    // `ErrorKind::NotFound`.
+    fn get_children(&self, cluster_id: u32) -> Result<Features, mln_util::Error>;
+    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, mln_util::Error>;
+    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, mln_util::Error>;
 }
 
-/// `GeoJSONData::create(geoJSON, sequencedScheduler, options)`. C++ lets a
-/// Supercluster construction error (a non-point feature) propagate as an
-/// exception; it is the `Err` here.
+/// `GeoJSONData::create(geoJSON, sequencedScheduler, options)`. GeoJSON that
+/// can't be clustered, such as a non-point feature, fails with
+/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
 pub fn create_geojson_data(
     geojson: &GeoJSON,
     sequenced_scheduler: SchedulerPtr,
     options: &Immutable<GeoJSONOptions>,
-) -> Result<Arc<dyn GeoJSONData>, String> {
+) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
     geojson_source_impl::create(geojson, sequenced_scheduler, options)
+}
+
+/// Builds the data of a [`GeoJSONSource`] with the source's options. It is
+/// `Send`, so the work can leave the source's thread.
+#[derive(Clone)]
+pub struct GeoJSONDataBuilder {
+    options: Immutable<GeoJSONOptions>,
+    sequenced_scheduler: SchedulerPtr,
+}
+
+impl GeoJSONDataBuilder {
+    pub fn options(&self) -> &Immutable<GeoJSONOptions> {
+        &self.options
+    }
+
+    /// Fails as [`create_geojson_data`] does.
+    pub fn build(&self, geojson: &GeoJSON) -> Result<Arc<dyn GeoJSONData>, mln_util::Error> {
+        create_geojson_data(geojson, self.sequenced_scheduler.clone(), &self.options)
+    }
 }
 
 struct Inner {
@@ -203,12 +221,28 @@ impl GeoJSONSource {
         }
     }
 
-    /// `setGeoJSON(geoJSON)`. `Err`: see `create_geojson_data`.
-    pub fn set_geojson(&self, geojson: &GeoJSON) -> Result<(), String> {
+    /// `setGeoJSON(geoJSON)`. Fails as [`create_geojson_data`] does.
+    pub fn set_geojson(&self, geojson: &GeoJSON) -> Result<(), mln_util::Error> {
         let data =
             create_geojson_data(geojson, self.inner.sequenced_scheduler.clone(), &self.impl_().get_options().clone())?;
         self.set_geojson_data(Some(data));
         Ok(())
+    }
+
+    /// What builds data for this source with its options, on any thread,
+    /// for [`set_geojson_data`](Self::set_geojson_data) to take.
+    pub fn data_builder(&self) -> GeoJSONDataBuilder {
+        GeoJSONDataBuilder {
+            options: self.impl_().get_options().clone(),
+            sequenced_scheduler: self.inner.sequenced_scheduler.clone(),
+        }
+    }
+
+    /// A count that goes up each time new data, a URL, or a URL's response
+    /// replaces the source's data or starts to: data built while it stays
+    /// the same is still the newest.
+    pub fn data_generation(&self) -> u64 {
+        self.inner.request_generation.get()
     }
 
     /// `setGeoJSONData(data)`.
@@ -251,11 +285,11 @@ fn on_description_response(weak: &Weak<Inner>, res: Response) {
     };
     let this = GeoJSONSource { inner };
     if let Some(error) = &res.error {
-        this.inner.base.observer().on_source_error(&this, RuntimeError::ptr(error.message.clone()));
+        this.inner.base.observer().on_source_error(&this, mln_util::Error::native(error.message.clone()));
     } else if res.not_modified {
         // return
     } else if res.no_content {
-        this.inner.base.observer().on_source_error(&this, RuntimeError::ptr("unexpectedly empty GeoJSON"));
+        this.inner.base.observer().on_source_error(&this, mln_util::Error::native("unexpectedly empty GeoJSON"));
     } else {
         // Note: This task appears to be safe enough to schedule on the
         // generic background queue. This task does not reference other

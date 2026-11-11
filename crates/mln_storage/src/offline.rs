@@ -8,49 +8,21 @@
 // too large for 64 bits). Encoding writes through //vendor/rapidjson's
 // `Writer`, so the stored definitions are byte-identical to C++'s.
 
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::geometry::Geometry;
 use rapidjson::Writer;
 use rapidjson::writer::Type;
 use serde_json::Value as Json;
 
-use crate::response::Error as ResponseError;
+use crate::response::ResourceError;
 
-/// The exceptions the definition code throws: `std::runtime_error`
-/// ("Malformed offline region definition", geojson errors) and the logic
-/// errors (`std::invalid_argument` from the constructors, `std::domain_error`
-/// from `LatLng`).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RegionDefinitionError {
-    Runtime(String),
-    Logic(String),
-}
-
-impl RegionDefinitionError {
-    /// `what()`.
-    pub fn what(&self) -> &str {
-        match self {
-            RegionDefinitionError::Runtime(message) | RegionDefinitionError::Logic(message) => message,
-        }
+fn check_definition(min_zoom: f64, max_zoom: f64, pixel_ratio: f32) -> Result<(), Error> {
+    if !min_zoom.is_finite() || min_zoom < 0.0 || max_zoom.is_nan() || max_zoom < min_zoom {
+        return Err(Error::invalid_argument("offline region zoom range is invalid"));
     }
-}
-
-impl std::fmt::Display for RegionDefinitionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.what())
-    }
-}
-
-fn check_definition(min_zoom: f64, max_zoom: f64, pixel_ratio: f32) -> Result<(), RegionDefinitionError> {
-    if min_zoom < 0.0
-        || max_zoom < 0.0
-        || max_zoom < min_zoom
-        || pixel_ratio < 0.0
-        || !min_zoom.is_finite()
-        || max_zoom.is_nan()
-        || !pixel_ratio.is_finite()
-    {
-        return Err(RegionDefinitionError::Logic("Invalid offline region definition".to_owned()));
+    if !pixel_ratio.is_finite() || pixel_ratio < 0.0 {
+        return Err(Error::invalid_argument("offline region pixel ratio is invalid"));
     }
     Ok(())
 }
@@ -76,8 +48,8 @@ pub struct OfflineTilePyramidRegionDefinition {
 }
 
 impl OfflineTilePyramidRegionDefinition {
-    /// The constructor (throws `std::invalid_argument("Invalid offline
-    /// region definition")`).
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// negative or reversed zoom range, or a negative or infinite pixel ratio.
     pub fn new(
         style_url: impl Into<String>,
         bounds: LatLngBounds,
@@ -85,7 +57,7 @@ impl OfflineTilePyramidRegionDefinition {
         max_zoom: f64,
         pixel_ratio: f32,
         include_ideographs: bool,
-    ) -> Result<Self, RegionDefinitionError> {
+    ) -> Result<Self, Error> {
         check_definition(min_zoom, max_zoom, pixel_ratio)?;
         Ok(OfflineTilePyramidRegionDefinition {
             style_url: style_url.into(),
@@ -119,8 +91,8 @@ pub struct OfflineGeometryRegionDefinition {
 }
 
 impl OfflineGeometryRegionDefinition {
-    /// The constructor (throws `std::invalid_argument("Invalid offline
-    /// region definition")`).
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// negative or reversed zoom range, or a negative or infinite pixel ratio.
     pub fn new(
         style_url: impl Into<String>,
         geometry: Geometry<f64>,
@@ -128,7 +100,7 @@ impl OfflineGeometryRegionDefinition {
         max_zoom: f64,
         pixel_ratio: f32,
         include_ideographs: bool,
-    ) -> Result<Self, RegionDefinitionError> {
+    ) -> Result<Self, Error> {
         check_definition(min_zoom, max_zoom, pixel_ratio)?;
         Ok(OfflineGeometryRegionDefinition {
             style_url: style_url.into(),
@@ -200,9 +172,11 @@ impl OfflineRegionDefinition {
     }
 }
 
-/// `decodeOfflineRegionDefinition(const std::string&)`.
-pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, RegionDefinitionError> {
-    let malformed = || RegionDefinitionError::Runtime("Malformed offline region definition".to_owned());
+/// `decodeOfflineRegionDefinition(const std::string&)`. A definition that
+/// isn't one fails with [`ErrorKind::Native`](mln_util::ErrorKind), and one
+/// with invalid values with the constructors' error.
+pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDefinition, Error> {
+    let malformed = || Error::native("Malformed offline region definition");
 
     // `doc.Parse<0>(region.c_str())` (stops at the first NUL byte).
     let end = region.iter().position(|&b| b == 0).unwrap_or(region.len());
@@ -246,7 +220,7 @@ pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDe
         // non-array); the port treats that as malformed.
         let bounds = bounds.as_array().filter(|b| b.len() == 4).ok_or_else(malformed)?;
         let get = |i: usize| bounds[i].as_f64().unwrap_or_default();
-        let latlng = |lat: f64, lon: f64| LatLng::new(lat, lon).map_err(RegionDefinitionError::Logic);
+        let latlng = |lat: f64, lon: f64| LatLng::new(lat, lon);
         Ok(OfflineTilePyramidRegionDefinition::new(
             style_url,
             LatLngBounds::hull(latlng(get(0), get(1))?, latlng(get(2), get(3))?),
@@ -258,7 +232,7 @@ pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDe
         .into())
     } else {
         let geometry = geojson::convert_geometry(member("geometry").expect("validated geometry"))
-            .map_err(|e| RegionDefinitionError::Runtime(e.message().to_owned()))?;
+            .map_err(|e| Error::native(e.message()))?;
         Ok(OfflineGeometryRegionDefinition::new(
             style_url,
             geometry,
@@ -384,7 +358,7 @@ pub trait OfflineRegionObserver {
     fn status_changed(&self, _status: OfflineRegionStatus) {}
 
     /// Notified of errors encountered while downloading regional resources.
-    fn response_error(&self, _error: ResponseError) {}
+    fn response_error(&self, _error: ResourceError) {}
 
     /// Notified when the limit on the number of Mapbox tiles stored for
     /// offline regions has been reached.

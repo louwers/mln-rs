@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_conversion::Convertible;
-use mln_storage::response::{Error as ResponseError, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
-use mln_util::exception::ExceptionPtr;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -34,7 +33,7 @@ use crate::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, V
 struct StubStyleObserver {
     source_loaded: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
     source_changed: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
-    source_error: RefCell<Option<Box<dyn Fn(&dyn Source, ExceptionPtr)>>>,
+    source_error: RefCell<Option<Box<dyn Fn(&dyn Source, mln_util::Error)>>>,
 }
 
 impl SourceObserver for StubStyleObserver {
@@ -50,7 +49,7 @@ impl SourceObserver for StubStyleObserver {
         }
     }
 
-    fn on_source_error(&self, source: &dyn Source, error: ExceptionPtr) {
+    fn on_source_error(&self, source: &dyn Source, error: mln_util::Error) {
         if let Some(f) = &*self.source_error.borrow() {
             f(source, error);
         }
@@ -65,7 +64,7 @@ fn loading_fail() {
     file_source.set_response(Kind::Source, |resource| {
         assert_eq!("url", resource.url);
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::Other, "Failed by the test case")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
 

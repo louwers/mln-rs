@@ -1,0 +1,160 @@
+//! The map's update slot: the updates it publishes for its renderer, their
+//! readers, and command groups.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use mln_actor::RunLoop;
+use mln_map::{CameraOptions, ErrorKind, Map, MapOptions, UpdateReader};
+use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_util::size::Size;
+
+fn map() -> Map {
+    let options = MapOptions::new().with_size(Size::new(256, 256));
+    Map::with_file_source(Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
+}
+
+/// A reader of `map`'s updates, and the times that it woke.
+fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
+    let reader = map.update_reader();
+    let wakes = Arc::new(AtomicU64::new(0));
+    let counter = wakes.clone();
+    reader.set_waker(Some(Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    })));
+    (reader, wakes)
+}
+
+fn assert_near(actual: f64, expected: f64) {
+    assert!((actual - expected).abs() < 1e-9, "{actual} is not {expected}");
+}
+
+#[test]
+fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.drain_events();
+    let reader = map.update_reader();
+    let before = map.update_generation();
+    let (_reader, wakes) = count_wakes(&map);
+
+    map.begin_command_group();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.begin_command_group();
+    assert_eq!(map.command_group_depth(), 2);
+    map.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    map.end_command_group().expect("the inner group ends");
+    map.set_prefetch_zoom_delta(1);
+    assert_eq!(map.update_generation(), before);
+    assert_eq!(wakes.load(Ordering::SeqCst), 0);
+
+    map.end_command_group().expect("the outer group ends");
+    assert_eq!(map.command_group_depth(), 0);
+    assert_eq!(map.update_generation(), before + 1);
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+    let update = reader.latest().expect("an update");
+    assert_eq!(update.generation, before + 1);
+    assert_near(update.parameters.transform_state.get_zoom(), 3.0);
+    assert_eq!(update.parameters.prefetch_zoom_delta, 1);
+
+    let error = map.end_command_group().expect_err("no group is open");
+    assert_eq!(error.kind, ErrorKind::InvalidState);
+    assert_eq!(map.update_generation(), before + 1);
+}
+
+#[test]
+fn a_hold_keeps_updates_back_apart_from_the_groups() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.drain_events();
+    let before = map.update_generation();
+    let (_reader, wakes) = count_wakes(&map);
+
+    map.hold_updates();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    assert_eq!(map.command_group_depth(), 0);
+    assert_eq!(map.end_command_group().expect_err("the hold is no group").kind, ErrorKind::InvalidState);
+    map.begin_command_group();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    map.end_command_group().expect("the group ends");
+    assert_eq!((map.update_generation(), map.pending_update_generation()), (before, before + 1));
+
+    // A group open at the release keeps the update until it ends.
+    map.begin_command_group();
+    map.release_updates();
+    assert_eq!(map.update_generation(), before);
+    map.end_command_group().expect("the group ends");
+    assert_eq!(map.update_generation(), before + 1);
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+
+    map.hold_updates();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(4.0)));
+    map.release_updates();
+    assert_eq!(map.update_generation(), before + 2);
+}
+
+#[test]
+fn a_group_without_changes_publishes_nothing() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.drain_events();
+    let before = map.update_generation();
+    map.begin_command_group();
+    map.end_command_group().expect("the group ends");
+    assert_eq!(map.update_generation(), before);
+}
+
+#[test]
+fn the_update_reader_sees_the_map_go() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    let reader = map.update_reader();
+    let generation = reader.generation();
+    let (_reader, wakes) = count_wakes(&map);
+    assert!(reader.latest().is_some());
+    assert!(!reader.is_closed());
+
+    drop(map);
+    assert!(reader.is_closed());
+    assert!(reader.latest().is_none());
+    assert_eq!(reader.generation(), generation);
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn an_update_reaches_a_reader_on_another_thread() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    let reader = map.update_reader();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let waker_sender = std::sync::Mutex::new(sender);
+    reader.set_waker(Some(Arc::new(move || {
+        let _ = waker_sender.lock().map(|sender| sender.send(()));
+    })));
+    let thread = std::thread::spawn(move || {
+        receiver.recv().expect("a wake");
+        reader.latest().map(|update| update.parameters.transform_state.get_zoom())
+    });
+    map.jump_to(&CameraOptions::default().with_zoom(Some(4.0)));
+    let zoom = thread.join().expect("the reader thread").expect("an update");
+    assert_near(zoom, 4.0);
+}
+
+#[test]
+fn each_reader_wakes_until_it_drops() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    let (first, first_wakes) = count_wakes(&map);
+    let (second, second_wakes) = count_wakes(&map);
+    map.set_prefetch_zoom_delta(1);
+    assert_eq!(first_wakes.load(Ordering::SeqCst), 1);
+    assert_eq!(second_wakes.load(Ordering::SeqCst), 1);
+
+    drop(first);
+    // A clone starts without a waker.
+    let _clone = second.clone();
+    map.set_prefetch_zoom_delta(2);
+    assert_eq!(first_wakes.load(Ordering::SeqCst), 1);
+    assert_eq!(second_wakes.load(Ordering::SeqCst), 2);
+}

@@ -39,6 +39,7 @@ use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_util::error::Error;
 use mln_util::logging::{Event, EventSeverity, Log};
 
 use crate::context::Context;
@@ -59,7 +60,7 @@ pub trait SurfaceProvider {
     fn instance_extensions(&self) -> Vec<&'static CStr>;
 
     /// Creates the window's surface.
-    fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, String>;
+    fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, Error>;
 }
 
 /// What MLN_VULKAN_VALIDATION asks for.
@@ -217,18 +218,20 @@ impl BackendImpl {
     /// `init()`: the instance, the debug messenger, the platform's surface,
     /// the device, the allocator and the command pool. Returns the surface
     /// for the renderable resource to own.
-    fn new(provider: Option<&dyn SurfaceProvider>) -> Result<(BackendImpl, Option<vk::SurfaceKHR>), String> {
+    fn new(provider: Option<&dyn SurfaceProvider>) -> Result<(BackendImpl, Option<vk::SurfaceKHR>), Error> {
         // SAFETY: the Vulkan library's initializers have no preconditions.
-        let entry = unsafe { ash::Entry::load() }.map_err(|e| format!("No Vulkan library: {e}"))?;
+        let entry = unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?;
 
         // initInstance
         // SAFETY: plain queries of the loader.
         let (available_layers, available_extensions) = unsafe {
             (
-                entry.enumerate_instance_layer_properties().map_err(|e| format!("Vulkan layers: {e}"))?,
+                entry
+                    .enumerate_instance_layer_properties()
+                    .map_err(|e| Error::native(format!("Vulkan layers: {e}")))?,
                 entry
                     .enumerate_instance_extension_properties(None)
-                    .map_err(|e| format!("Vulkan instance extensions: {e}"))?,
+                    .map_err(|e| Error::native(format!("Vulkan instance extensions: {e}")))?,
             )
         };
         let available_extensions = extension_names(&available_extensions);
@@ -239,7 +242,7 @@ impl BackendImpl {
             let has_debug_utils = available_extensions.contains(&ash::ext::debug_utils::NAME);
             if !has_layer || !has_debug_utils {
                 if validation == Validation::Abort {
-                    return Err("Vulkan layers not found".to_owned());
+                    return Err(Error::unsupported("Vulkan layers not found"));
                 }
                 if validation_required {
                     Log::error(Event::Render, "Vulkan layers not found");
@@ -251,7 +254,7 @@ impl BackendImpl {
 
         let mut extensions = provider.map(SurfaceProvider::instance_extensions).unwrap_or_default();
         if !check_availability(&available_extensions, &extensions) {
-            return Err("Vulkan extensions not found".to_owned());
+            return Err(Error::unsupported("Vulkan extensions not found"));
         }
         if validation != Validation::Off {
             extensions.push(ash::ext::debug_utils::NAME);
@@ -274,7 +277,7 @@ impl BackendImpl {
         // SAFETY: the create info points at live names, and the layers and
         // extensions are available.
         let instance = unsafe { entry.create_instance(&create_info, None) }
-            .map_err(|e| format!("Failed to create a Vulkan instance: {e}"))?;
+            .map_err(|e| Error::native(format!("Failed to create a Vulkan instance: {e}")))?;
 
         // From here on, an error destroys what was made.
         let surface_loader = ash::khr::surface::Instance::new(&entry, &instance);
@@ -316,9 +319,9 @@ impl BackendImpl {
             }
             // SAFETY: a plain query of the instance.
             let physical_devices = unsafe { instance.enumerate_physical_devices() }
-                .map_err(|e| format!("Vulkan physical devices: {e}"))?;
+                .map_err(|e| Error::native(format!("Vulkan physical devices: {e}")))?;
             if physical_devices.is_empty() {
-                return Err("No Vulkan compatible GPU found".to_owned());
+                return Err(Error::unsupported("No Vulkan compatible GPU found"));
             }
             let (physical_device, graphics_queue_index, present_queue_index) = physical_devices
                 .iter()
@@ -326,7 +329,7 @@ impl BackendImpl {
                     compatible_queues(&instance, &surface_loader, candidate, &device_extensions, surface)
                         .map(|(graphics, present)| (candidate, graphics, present))
                 })
-                .ok_or("No suitable GPU found")?;
+                .ok_or_else(|| Error::unsupported("No suitable GPU found"))?;
 
             let queue_priority = [1.0f32];
             let mut queue_create_infos = vec![
@@ -374,7 +377,7 @@ impl BackendImpl {
             // families are the physical device's and the features are
             // supported.
             let device = unsafe { instance.create_device(physical_device, &create_info, None) }
-                .map_err(|e| format!("Failed to create a Vulkan device: {e}"))?;
+                .map_err(|e| Error::native(format!("Failed to create a Vulkan device: {e}")))?;
 
             // SAFETY: the device was created with a queue of each family.
             let (device_properties, graphics_queue, present_queue) = unsafe {
@@ -420,7 +423,7 @@ impl BackendImpl {
                         }
                         device.destroy_device(None);
                     }
-                    return Err(error);
+                    return Err(Error::native(error));
                 }
             };
 
@@ -691,11 +694,17 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 impl RendererBackend {
     /// `RendererBackend(contextMode)` and `init()`: a device that renders to
     /// the surface `provider` makes, or offscreen without one. Returns the
-    /// surface, or an error if there is no Vulkan device to render with.
+    /// surface.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
+    /// Vulkan library, a device that can render (and present to the
+    /// surface), or what the surface or MLN_VULKAN_VALIDATION=abort needs of
+    /// the instance, with [`ErrorKind::Native`](mln_util::ErrorKind) when a
+    /// Vulkan call fails, and with `provider`'s error.
     pub fn new(
         context_mode: ContextMode,
         provider: Option<&dyn SurfaceProvider>,
-    ) -> Result<(Self, Option<vk::SurfaceKHR>), String> {
+    ) -> Result<(Self, Option<vk::SurfaceKHR>), Error> {
         let (impl_, surface) = BackendImpl::new(provider)?;
         let impl_ = Rc::new(impl_);
         let context = match Context::new(impl_.clone()) {
@@ -705,7 +714,7 @@ impl RendererBackend {
                     // SAFETY: nothing was made on the surface.
                     unsafe { impl_.get_surface_loader().destroy_surface(surface, None) };
                 }
-                return Err(error);
+                return Err(Error::native(error));
             }
         };
         let backend = RendererBackend {
