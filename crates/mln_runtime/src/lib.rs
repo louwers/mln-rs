@@ -14,6 +14,7 @@
 //! The synchronous, single-thread core that these handles drive is
 //! `mln_map`'s; [`Map::with_core`] runs a closure on it.
 
+mod camera;
 mod completion;
 mod event;
 mod feature_state;
@@ -23,6 +24,7 @@ mod render;
 mod resources;
 mod runtime;
 
+pub use camera::{CameraFitArea, CameraFitOptions, CameraFitUpdate, TileOptions, ViewportOptions};
 pub use completion::Completion;
 pub use event::{EventHandler, EventMask, EventSource, EventType, RuntimeEvent, RuntimeEventKind};
 pub use feature_state::{FeatureState, FeatureStateSelector};
