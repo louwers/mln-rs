@@ -1,7 +1,7 @@
 // Smoke tests for the HeadlessFrontend + Map still-image path (the C++
 // tree tests this through test/api/*.test.cpp and the render tests).
 
-use mln_map::{MapMode, MapOptions, NullMapObserver};
+use mln_map::{MapMode, MapOptions};
 
 use super::*;
 
@@ -15,7 +15,6 @@ fn render_style(style: &str, size: Size, pixel_ratio: f32) -> PremultipliedImage
     let mut frontend = HeadlessFrontend::new(size, pixel_ratio);
     let mut map = Map::new(
         &frontend,
-        Rc::new(NullMapObserver),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
     )
     .unwrap();
@@ -36,7 +35,7 @@ fn render_still_in_continuous_mode_is_an_error() {
     let _run_loop = RunLoop::new();
     let size = Size::new(16, 16);
     let mut frontend = HeadlessFrontend::new(size, 1.0);
-    let mut map = Map::new(&frontend, Rc::new(NullMapObserver), MapOptions::new().with_size(size)).unwrap();
+    let mut map = Map::new(&frontend, MapOptions::new().with_size(size)).unwrap();
     let error = frontend.render(&mut map).err().expect("error");
     assert_eq!(error, mln_util::Error::invalid_state("Map is not in static or tile image render modes"));
 }

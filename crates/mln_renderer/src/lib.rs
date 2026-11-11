@@ -31,9 +31,9 @@ pub mod render_target;
 pub mod render_tile;
 pub mod render_tree;
 pub mod renderer;
+pub mod renderer_event;
 pub mod renderer_frontend;
 pub mod renderer_impl;
-pub mod renderer_observer;
 pub mod source_state;
 pub mod sources;
 pub mod style_diff;
@@ -47,9 +47,9 @@ pub mod update_parameters;
 pub mod util;
 
 pub use renderer::Renderer;
-pub use renderer_frontend::RendererFrontend;
-pub use renderer_observer::{
+pub use renderer_event::{
     FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, OverscaledTileID,
-    RenderMode, RendererObserver, RenderingStats, SourceLayerID, TileOperation,
+    RenderMode, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, TileOperation,
 };
+pub use renderer_frontend::RendererFrontend;
 pub use update_parameters::UpdateParameters;

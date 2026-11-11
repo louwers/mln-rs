@@ -22,6 +22,7 @@ pub mod bounding_volumes;
 pub mod chrono;
 pub mod enum_;
 pub mod error;
+pub mod event_queue;
 pub mod feature;
 pub mod font_stack;
 pub mod geometry;

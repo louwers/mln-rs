@@ -12,7 +12,7 @@ mod support;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
 
@@ -25,7 +25,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, RendererFrontend, RendererObserver, TileOperation, UpdateParameters};
+use mln_renderer::{OverscaledTileID, RendererEvents, RendererFrontend, TileOperation, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -1332,17 +1332,19 @@ fn continuous_rendering() {
         });
     }
 
-    let mut map = Map::with_resource_options(
-        &frontend,
-        observer.clone(),
-        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
-        &FileSourceManager::new(),
-        &ResourceOptions::default()
-            .with_cache_path(":memory:")
-            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
-    )
-    .unwrap();
-    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    let map = Rc::new(RefCell::new(
+        Map::with_resource_options(
+            &frontend,
+            MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+            &FileSourceManager::new(),
+            &ResourceOptions::default()
+                .with_cache_path(":memory:")
+                .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        )
+        .unwrap(),
+    ));
+    let _events = observer.observe(&map);
+    map.borrow_mut().get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
 
     run_loop.run();
     assert!(!did_not_stop.get(), "Did not stop rendering");
@@ -2033,7 +2035,7 @@ fn prefetch_delta_override_custom_source() {
 
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let layer = style.remove_layer("custom").unwrap();
         style.remove_source("custom");
         style.add_layer(layer, None).unwrap();
@@ -2058,8 +2060,8 @@ impl RendererFrontend for ForwardingHeadlessFrontend {
     fn reset(&self) {
         self.frontend.reset();
     }
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
-        self.frontend.set_observer(observer);
+    fn set_event_queue(&self, events: RendererEvents) {
+        self.frontend.set_event_queue(events);
     }
     fn update(&self, parameters: Arc<UpdateParameters>) {
         if let Some(check_params) = self.check_params.borrow().as_ref() {
@@ -2092,7 +2094,8 @@ fn expired_sprite_sheet() {
         .with_map_mode(MapMode::Continuous)
         .with_size(frontend.frontend.get_size())
         .with_pixel_ratio(1.0);
-    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, observer.clone(), file_source, options).unwrap()));
+    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, file_source, options).unwrap()));
+    let _events = observer.observe(&map);
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
     // what it serves.
@@ -2700,7 +2703,6 @@ fn observe_tile_lifecycle() {
     let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
     let mut map = Map::with_resource_options(
         &frontend,
-        observer.clone(),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
         &ResourceOptions::default()
@@ -2715,6 +2717,9 @@ fn observe_tile_lifecycle() {
     map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
     map.jump_to(&cam().with_center(Some(ll(37.8, -122.5))).with_zoom(Some(10.0)));
     frontend.render(&mut map).unwrap();
+    for event in map.drain_events() {
+        observer.dispatch(event);
+    }
 
     use TileOperation::*;
     let tile_ops = tile_ops.borrow();
@@ -2805,6 +2810,7 @@ fn empty_placement_does_not_request_repaint() {
     for frame in 0..2 {
         status.set(None);
         test.frontend.render_frame();
+        test.observer.dispatch_events(&test.map);
         let value = status.take().expect("rendered a frame");
         assert!(!value.needs_repaint, "frame {frame}");
     }
@@ -2815,7 +2821,7 @@ fn empty_placement_does_not_request_repaint() {
     });
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer
             .downcast_mut::<BackgroundLayer>()
@@ -2825,6 +2831,7 @@ fn empty_placement_does_not_request_repaint() {
     test.run_loop.run_once();
     status.set(None);
     test.frontend.render_frame();
+    test.observer.dispatch_events(&test.map);
     let value = status.take().expect("rendered a frame");
     assert!(value.needs_repaint);
 }
@@ -2870,7 +2877,7 @@ fn switches_between_solid_and_patterned_drawables() {
     test.map().get_style_mut().add_image(style_image("blue", PremultipliedImage::from_vec(Size::new(1, 1), blue), 1.0));
     let set_pattern = |value: PropertyValue<mln_style::expression::Image>| {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_pattern(&value);
     };
@@ -2902,7 +2909,7 @@ fn style_update_zoom_dependency() {
     // Update background layer to use zoom-dependent color
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let mut layer = style.get_layer_mut("background").expect("background");
         layer.downcast_mut::<BackgroundLayer>().expect("BackgroundLayer").set_background_color(
             &PropertyValue::Expression(PropertyExpression::from_box(
@@ -3537,7 +3544,7 @@ fn location_indicator_accuracy_colors_transition() {
 
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let mut layer = style.get_layer_mut("location").expect("location layer");
         let layer = layer.downcast_mut::<LocationIndicatorLayer>().expect("LocationIndicatorLayer");
         let transition =
@@ -3645,7 +3652,7 @@ impl CapturingFrontend {
 
 impl RendererFrontend for CapturingFrontend {
     fn reset(&self) {}
-    fn set_observer(&self, _observer: Weak<dyn RendererObserver>) {}
+    fn set_event_queue(&self, _events: RendererEvents) {}
     fn update(&self, value: Arc<UpdateParameters>) {
         *self.parameters.borrow_mut() = Some(value);
     }
@@ -3743,15 +3750,14 @@ fn layer_added_with_global_state_change_shows_new_state() {
 fn tile_selection_options_publish_updates() {
     let _loop = RunLoop::new();
     let frontend = CapturingFrontend::default();
-    let observer = Rc::new(StubMapObserver::default());
     let mut map = Map::with_file_source(
         &frontend,
-        observer,
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Continuous),
     )
     .unwrap();
     map.get_style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    map.process_events();
     assert!(frontend.parameters.borrow().is_some());
 
     fn check<T: PartialEq + std::fmt::Debug + Copy>(
@@ -3863,7 +3869,7 @@ fn color_ramp_renders_current_state_after_unrelated_state_change(type_: &str) {
     let set_ramp = |color: &str| {
         let value: serde_json::Value = serde_json::from_str(&ramp(color)).unwrap();
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let mut layer = style.get_layer_mut("ramp").unwrap();
         assert!(layer.set_property(&ramp_property, &Convertible::from(&value), None).is_none());
     };
@@ -3930,7 +3936,6 @@ fn empty_size_is_an_error() {
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
             &frontend,
-            Rc::new(StubMapObserver::default()),
             Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
             MapOptions::new().with_size(size),
         );

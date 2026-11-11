@@ -1,9 +1,8 @@
 // Ports include/mln/renderer/renderer_frontend.hpp
 
-use std::rc::Weak;
 use std::sync::Arc;
 
-use crate::renderer_observer::RendererObserver;
+use crate::renderer_event::RendererEvents;
 use crate::update_parameters::UpdateParameters;
 
 /// The RenderFrontend is the bridge between the Map and platform used to
@@ -19,11 +18,8 @@ pub trait RendererFrontend {
     /// Must synchronously clean up the Renderer if set.
     fn reset(&self);
 
-    /// Implementer must bind the renderer observer to the renderer in a
-    /// appropriate manner so that the callbacks occur on the main thread.
-    /// C++ passes a reference that must outlive the renderer; the port passes
-    /// a non-owning `Weak`.
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>);
+    /// Gives the renderer the map's queue for its events.
+    fn set_event_queue(&self, events: RendererEvents);
 
     /// Coalescing updates is up to the implementer.
     fn update(&self, parameters: Arc<UpdateParameters>);

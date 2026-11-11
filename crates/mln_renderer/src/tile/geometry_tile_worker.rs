@@ -21,7 +21,7 @@
 // (tile_worker_transport.rs), so that a worker can also run in another
 // wasm instance.
 //
-// TODO(port): the ErrorScope for symbol errors, `setObserver`, font faces
+// TODO(port): `setObserver`, font faces
 // (HarfBuzz shaping results for complex scripts).
 
 use std::collections::HashMap;

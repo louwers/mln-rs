@@ -14,7 +14,7 @@ use mln_gfx::headless_backend::HeadlessBackend as GfxHeadlessBackend;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, ContextMode, RendererBackend, ScopeType, SwapBehaviour};
 use mln_map::{CameraOptions, Map, TransformState};
-use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{Renderer, RendererEvents, RendererFrontend, UpdateParameters};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -223,7 +223,8 @@ impl HeadlessFrontend {
     }
 
     /// `render(Map&)`: renders a still image, or fails with the map's still
-    /// image error.
+    /// image error. The map handles its renderer's events meanwhile, and
+    /// keeps its own events for its owner.
     pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
         let backend = self.shared.backend.clone();
         let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
@@ -242,6 +243,7 @@ impl HeadlessFrontend {
         let mut idle_since = mln_util::time::Instant::now();
         let mut image = PremultipliedImage::new(Size::default());
         loop {
+            map.process_events();
             // C++ reads the image inside the callback, which runs at the end
             // of the frame; nothing renders in between.
             match outcome.borrow_mut().take() {
@@ -264,8 +266,9 @@ impl HeadlessFrontend {
     }
 
     /// `renderOnce(Map&)`.
-    pub fn render_once(&mut self, _map: &mut Map) {
+    pub fn render_once(&mut self, map: &mut Map) {
         RunLoop::get().run_once();
+        map.process_events();
     }
 
     pub fn render_frame(&self) {
@@ -307,9 +310,9 @@ impl RendererFrontend for HeadlessFrontend {
         drop(renderer);
     }
 
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
+    fn set_event_queue(&self, events: RendererEvents) {
         if let Some(renderer) = self.shared.renderer.borrow_mut().as_mut() {
-            renderer.set_observer(Some(observer));
+            renderer.set_event_queue(Some(events));
         }
     }
 

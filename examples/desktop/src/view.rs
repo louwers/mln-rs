@@ -35,7 +35,7 @@ use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase,
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
-    MapObserver, MapOptions,
+    MapEvent, MapOptions,
 };
 use mln_renderer::Renderer;
 use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
@@ -75,32 +75,15 @@ pub(crate) struct Launch {
     pub proxy: EventLoopProxy<UserEvent>,
 }
 
-/// What the frontend and the map observer reach while the view is busy.
+/// What the frontend reaches while the view is busy.
 pub struct ViewShared {
     dirty: Cell<bool>,
-    style_loaded: Cell<bool>,
-    idle: Cell<bool>,
 }
 
 impl ViewShared {
     /// `invalidate()`: the map has a new frame to draw.
     pub fn invalidate(&self) {
         self.dirty.set(true);
-    }
-}
-
-/// The view's `MapObserver`.
-struct Observer {
-    shared: Rc<ViewShared>,
-}
-
-impl MapObserver for Observer {
-    fn on_did_finish_loading_style(&self) {
-        self.shared.style_loaded.set(true);
-    }
-
-    fn on_did_become_idle(&self) {
-        self.shared.idle.set(true);
     }
 }
 
@@ -239,8 +222,7 @@ pub(crate) fn run(launch: Launch) {
         }
     }
 
-    let shared =
-        Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
+    let shared = Rc::new(ViewShared { dirty: Cell::new(false) });
     let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
     let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32, None);
     let frontend = Frontend::new(renderer, renderer_backend, shared.clone());
@@ -248,7 +230,6 @@ pub(crate) fn run(launch: Launch) {
 
     let mut map = match Map::with_resource_options(
         &frontend,
-        Rc::new(Observer { shared: shared.clone() }),
         MapOptions::new().with_size(map_size).with_pixel_ratio(pixel_ratio as f32),
         &file_sources,
         &resource_options,
@@ -293,6 +274,8 @@ pub(crate) fn run(launch: Launch) {
         frontend,
         map,
         shared,
+        style_loaded: false,
+        idle: false,
         gestures: GestureRecognizer::default(),
         gestures_animating: false,
         ui,
@@ -384,6 +367,10 @@ struct View {
     frontend: Frontend,
     map: Map,
     shared: Rc<ViewShared>,
+    /// The map loaded the current style.
+    style_loaded: bool,
+    /// The map has become idle since the view opened.
+    idle: bool,
     gestures: GestureRecognizer,
     /// The recognizer eases a scroll, and wants frames.
     gestures_animating: bool,
@@ -439,7 +426,7 @@ impl View {
         let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
         self.style = style;
         self.style_reported = false;
-        self.shared.style_loaded.set(false);
+        self.style_loaded = false;
     }
 
     /// Frames and work until the window closes. A readback that never
@@ -447,6 +434,7 @@ impl View {
     fn run(&mut self) {
         while !self.quit {
             self.run_loop.run_once();
+            self.handle_map_events();
             if self.quit {
                 break;
             }
@@ -470,6 +458,18 @@ impl View {
         }
     }
 
+    /// Lets the map handle what its renderer and its style reported, and
+    /// notes what the view waits for.
+    fn handle_map_events(&mut self) {
+        for event in self.map.drain_events() {
+            match event {
+                MapEvent::StyleLoaded => self.style_loaded = true,
+                MapEvent::Idle => self.idle = true,
+                _ => {}
+            }
+        }
+    }
+
     /// Whether a frame has something to do.
     fn frame_due(&self, now: Instant) -> bool {
         self.shared.dirty.get()
@@ -478,7 +478,7 @@ impl View {
             || !self.inbox.is_empty()
             || self.ui_input.is_some()
             || self.next_deadline().is_some_and(|at| at <= now)
-            || (self.readback_path.is_some() && (self.readback_requested || self.shared.idle.get()))
+            || (self.readback_path.is_some() && (self.readback_requested || self.idle))
     }
 
     /// When a frame is due without input: the controls' repaint, the gesture
@@ -625,7 +625,6 @@ impl View {
             .filter(|attribution| !attribution.is_empty())
             .collect();
         let style_name = style.get_name();
-        drop(style);
         let status = [self.adapter.clone(), self.frame_report.clone()];
         let shown = Shown {
             styles: &self.styles,
@@ -740,7 +739,7 @@ impl View {
             self.run_gesture_test();
         }
 
-        if self.shared.style_loaded.get() && !self.style_reported {
+        if self.style_loaded && !self.style_reported {
             self.style_reported = true;
             report_style(&self.map);
         }
@@ -748,7 +747,7 @@ impl View {
         if self.readback_path.is_some() {
             if self.readback_requested {
                 self.save_readback();
-            } else if self.shared.idle.get() && self.style_reported {
+            } else if self.idle && self.style_reported {
                 self.backend.request_readback();
                 self.readback_requested = true;
                 self.shared.invalidate();

@@ -33,7 +33,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 
-use crate::map_observer::{CameraChange, CameraChangeMode, CameraChangeSource};
+use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 
 /// A frame time older than this is stale (see [`Transform::frame_time`]):
 /// longer than a frame at 10 fps, so any host that draws sets a fresh one
@@ -105,7 +105,7 @@ fn std_to_string(value: f64) -> String {
 
 /// `TransformObserver` (src/mln/map/transform.hpp).
 ///
-/// The camera callbacks take a [`CameraChange`] (see `MapObserver`).
+/// The camera callbacks take a [`CameraChange`].
 pub trait TransformObserver {
     fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}

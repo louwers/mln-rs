@@ -6,7 +6,7 @@
 // The orchestrator is the RenderSourceObserver of its render sources; their
 // tiles call it from asynchronous replies while the orchestrator is owned by
 // the renderer, so that half is `OrchestratorSourceObserver`, an `Rc` that
-// shares the orchestrator's observer.
+// shares the orchestrator's event sink.
 //
 // Not yet ported (TODO(port) at each use): annotations, glyph eviction,
 // image-manager memory trimming, DynamicFeatureIndex (location indicator),
@@ -51,7 +51,7 @@ use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, RenderLayerPtr};
 use crate::render_source::{self, RenderSource, RenderSourceObserver, SourcePrepareParameters};
 use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
-use crate::renderer_observer::RendererObserver;
+use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
 use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
 use crate::text::glyph_manager::GlyphManager;
@@ -81,45 +81,27 @@ fn diff_global_state_keys(previous: &GlobalStateMap, current: &GlobalStateMap) -
     keys
 }
 
-/// The orchestrator's `observer` member, shared with its
-/// RenderSourceObserver half.
-type SharedObserver = Rc<RefCell<Option<Weak<dyn RendererObserver>>>>;
-
-fn shared_observer(observer: &SharedObserver) -> Option<Rc<dyn RendererObserver>> {
-    observer.borrow().as_ref().and_then(Weak::upgrade)
-}
-
-/// The ImageManagerObserver half of `RenderOrchestrator`
-/// (`onStyleImageMissing`, `onRemoveUnusedStyleImages` forward to the
-/// renderer observer, which re-renders after `done`, as Map::Impl does).
+/// The ImageManagerObserver half of `RenderOrchestrator`.
 struct OrchestratorImageObserver {
-    observer: SharedObserver,
+    events: EventSink,
 }
 
 impl crate::image_manager::ImageManagerObserver for OrchestratorImageObserver {
+    /// The map hears of the image and may add it to the style. Meanwhile
+    /// the requestors lay out without it, and relayout when it arrives.
     fn on_style_image_missing(&self, id: &str, done: Box<dyn FnOnce()>) {
-        let mut done = Some(done);
-        let mut call_done = || {
-            if let Some(done) = done.take() {
-                done();
-            }
-        };
-        match shared_observer(&self.observer) {
-            Some(observer) => observer.on_style_image_missing(id, &mut call_done),
-            None => call_done(),
-        }
+        self.events.emit(RendererEvent::StyleImageMissing(id.to_owned()));
+        done();
     }
 
     fn on_remove_unused_style_images(&self, ids: &[String]) {
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_remove_unused_style_images(ids);
-        }
+        self.events.emit(RendererEvent::UnusedStyleImages(ids.to_vec()));
     }
 }
 
 /// symbols: the GlyphManagerObserver half of `RenderOrchestrator`.
 struct OrchestratorGlyphObserver {
-    observer: SharedObserver,
+    events: EventSink,
 }
 
 impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObserver {
@@ -142,54 +124,46 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
                 mln_util::font_stack::font_stack_to_string(font_stack)
             ),
         );
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_glyphs_error(font_stack, glyph_range, error.clone());
-            observer.on_resource_error(error);
-        }
+        self.events.emit(RendererEvent::GlyphsError {
+            font_stack: font_stack.clone(),
+            range: *glyph_range,
+            error: error.clone(),
+        });
+        self.events.emit(RendererEvent::ResourceError(error));
     }
 
     /// `onGlyphsLoaded(fontStack, range)`.
     fn on_glyphs_loaded(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_glyphs_loaded(font_stack, range);
-        }
+        self.events.emit(RendererEvent::GlyphsLoaded { font_stack: font_stack.clone(), range: *range });
     }
 
     /// `onGlyphsRequested(fontStack, range)`.
     fn on_glyphs_requested(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_glyphs_requested(font_stack, range);
-        }
+        self.events.emit(RendererEvent::GlyphsRequested { font_stack: font_stack.clone(), range: *range });
     }
 }
 
 /// The RenderSourceObserver half of `RenderOrchestrator`.
 struct OrchestratorSourceObserver {
-    observer: SharedObserver,
+    events: EventSink,
 }
 
 impl RenderSourceObserver for OrchestratorSourceObserver {
     /// `onTileChanged(RenderSource&, const OverscaledTileID&)`.
     fn on_tile_changed(&self, _source_id: &str, _tile_id: &OverscaledTileID) {
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_invalidate();
-        }
+        self.events.emit(RendererEvent::Invalidate);
     }
 
     /// `onTileError(RenderSource&, const OverscaledTileID&, std::exception_ptr)`.
     fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         Log::error(Event::Style, format!("Failed to load tile {tile_id} for source {source_id}: {error}"));
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_resource_error(error);
-        }
+        self.events.emit(RendererEvent::ResourceError(error));
     }
 
     /// `onTileAction(RenderSource&, TileOperation, const OverscaledTileID&,
     /// const std::string&)`.
     fn on_tile_action(&self, _source_id: &str, op: TileOperation, tile_id: &OverscaledTileID, tile_source_id: &str) {
-        if let Some(observer) = shared_observer(&self.observer) {
-            observer.on_tile_action(op, tile_id, tile_source_id);
-        }
+        self.events.emit(RendererEvent::TileAction { op, id: *tile_id, source_id: tile_source_id.to_owned() });
     }
 }
 
@@ -202,7 +176,7 @@ fn ptr_eq_option<T: ?Sized>(a: &Option<Arc<T>>, b: &Option<Arc<T>>) -> bool {
 }
 
 pub struct RenderOrchestrator {
-    observer: SharedObserver,
+    events: EventSink,
     source_observer: Rc<OrchestratorSourceObserver>,
 
     zoom_history: ZoomHistory,
@@ -283,20 +257,20 @@ impl RenderOrchestrator {
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
-        let observer: SharedObserver = Rc::new(RefCell::new(None));
+        let events = EventSink::default();
         // `imageManager->setObserver(this)`.
         let image_manager = ImageManager::create();
-        image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { observer: observer.clone() })));
+        image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { events: events.clone() })));
         // symbols: `glyphManager->setObserver(this)`.
         let glyph_manager = GlyphManager::with_glyph_cache(
             Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
             glyph_cache,
         );
-        glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { observer: observer.clone() })));
+        glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { events: events.clone() })));
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         RenderOrchestrator {
-            observer: observer.clone(),
-            source_observer: Rc::new(OrchestratorSourceObserver { observer }),
+            events: events.clone(),
+            source_observer: Rc::new(OrchestratorSourceObserver { events }),
             zoom_history: ZoomHistory::default(),
             still_image_request_id: 0,
             transform_state: TransformState::default(),
@@ -344,12 +318,13 @@ impl RenderOrchestrator {
         self.tile_worker_transport = transport;
     }
 
-    pub fn set_observer(&mut self, observer: Option<Weak<dyn RendererObserver>>) {
-        *self.observer.borrow_mut() = observer;
+    /// Sets the queue the orchestrator and its parts push their events to.
+    pub fn set_event_queue(&mut self, events: Option<RendererEvents>) {
+        self.events.set(events);
     }
 
-    fn observer(&self) -> Option<Rc<dyn RendererObserver>> {
-        shared_observer(&self.observer)
+    pub(crate) fn emit(&self, event: RendererEvent) {
+        self.events.emit(event);
     }
 
     /// `getRenderSource(id)`.
@@ -1507,10 +1482,6 @@ impl RenderOrchestrator {
 
     pub fn get_tile_cache_enabled(&self) -> bool {
         self.tile_cache_enabled
-    }
-
-    pub fn get_observer(&self) -> Option<Rc<dyn RendererObserver>> {
-        self.observer()
     }
 }
 

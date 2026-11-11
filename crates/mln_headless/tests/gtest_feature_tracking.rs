@@ -4,12 +4,11 @@
 
 mod support;
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, FeatureInfo, Map, MapDebugOptions, MapMode, MapOptions};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
@@ -80,7 +79,6 @@ impl FeatureTrackingTest {
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
             &frontend,
-            Rc::new(NullMapObserver),
             file_source,
             MapOptions::new()
                 .with_map_mode(MapMode::Static)
@@ -140,7 +138,7 @@ impl FeatureTrackingTest {
         .expect("style::Image");
 
         {
-            let mut style = map.get_style_mut();
+            let style = map.get_style_mut();
             style.load_json(&read_file(&format!("{FIXTURE_BASE}api/empty.json")));
             style.add_source(Box::new(source)).expect("add source");
             style.add_layer(Box::new(background_layer), None).expect("add layer");
@@ -168,7 +166,7 @@ impl FeatureTrackingTest {
     }
 
     fn with_layer(&mut self, id: &str, f: impl FnOnce(&mut LayerRefMut<'_>)) {
-        let mut style = self.map.get_style_mut();
+        let style = self.map.get_style_mut();
         f(&mut style.get_layer_mut(id).expect("layer"));
     }
 

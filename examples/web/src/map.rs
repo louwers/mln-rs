@@ -3,7 +3,7 @@
 //! page's input through a gesture recognizer (mln_gestures).
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
@@ -11,12 +11,11 @@ use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
-    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapObserver, MapOptions,
-    StyleLoadError,
+    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
 };
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
-use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{Renderer, RendererEvents, RendererFrontend, UpdateParameters};
 use mln_util::LatLng;
 use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
@@ -65,21 +64,6 @@ fn wake_host() {
     });
 }
 
-#[derive(Default)]
-struct ConsoleMapObserver {
-    loaded: Cell<bool>,
-}
-
-impl MapObserver for ConsoleMapObserver {
-    fn on_did_fail_loading_map(&self, error: &StyleLoadError) {
-        web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load: {error:?}")));
-    }
-
-    fn on_did_finish_loading_map(&self) {
-        self.loaded.set(true);
-    }
-}
-
 /// What `GLFWRendererFrontend` holds: the renderer and the map's latest
 /// update until the next frame draws it.
 struct FrontendState {
@@ -121,9 +105,9 @@ impl RendererFrontend for Frontend {
         drop(renderer);
     }
 
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
+    fn set_event_queue(&self, events: RendererEvents) {
         if let Some(renderer) = self.0.renderer.borrow_mut().as_mut() {
-            renderer.set_observer(Some(observer));
+            renderer.set_event_queue(Some(events));
         }
     }
 
@@ -156,7 +140,8 @@ pub struct WebMap {
     // Dropped first: the map resets the renderer through the frontend.
     map: Map,
     frontend: Frontend,
-    observer: Rc<ConsoleMapObserver>,
+    /// The map finished loading its style.
+    loaded: bool,
     run_loop: RunLoop,
     scheduler: Arc<CooperativeScheduler>,
     transport: Rc<SerializingTransport>,
@@ -251,17 +236,13 @@ impl WebMap {
             parameters: RefCell::new(None),
             dirty: Cell::new(false),
         }));
-        let observer = Rc::new(ConsoleMapObserver::default());
-        let map = Map::new(
-            &frontend,
-            observer.clone(),
-            MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32),
-        )
-        .map_err(js_error)?;
+        let mut map = Map::new(&frontend, MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32))
+            .map_err(js_error)?;
+        map.set_waker(Some(Arc::new(wake_host)));
         Ok(WebMap {
             map,
             frontend,
-            observer,
+            loaded: false,
             run_loop,
             scheduler,
             transport,
@@ -388,8 +369,10 @@ impl WebMap {
         self.map.set_frame_time(Some(mln_util::chrono::Clock::now()));
         self.gestures.frame(&mut self.map, now);
         self.run_loop.run_once();
+        self.handle_map_events();
         let drew = self.frontend.render();
         self.run_tasks(budget_ms);
+        self.handle_map_events();
         drew
     }
 
@@ -399,7 +382,10 @@ impl WebMap {
     /// whether tasks remain, for another `tick`. Drawing waits for `frame`.
     pub fn tick(&mut self, budget_ms: f64) -> bool {
         self.run_loop.run_once();
-        self.run_tasks(budget_ms)
+        self.handle_map_events();
+        let more = self.run_tasks(budget_ms);
+        self.handle_map_events();
+        more
     }
 
     /// A pointer went down on the canvas, at `x`, `y` CSS pixels from its
@@ -494,7 +480,7 @@ impl WebMap {
     /// Whether the style loaded and every tile and resource the map needs
     /// is loaded.
     pub fn is_fully_loaded(&self) -> bool {
-        self.observer.loaded.get() && self.map.is_fully_loaded()
+        self.loaded && self.map.is_fully_loaded()
     }
 
     /// Draws the map's latest update again with the next frame and copies
@@ -522,6 +508,20 @@ fn modifiers_from_bits(bits: u32) -> Modifiers {
 }
 
 impl WebMap {
+    /// Lets the map handle what its renderer and its style reported, and
+    /// notes what the page asks about.
+    fn handle_map_events(&mut self) {
+        for event in self.map.drain_events() {
+            match event {
+                MapEvent::LoadingFailed(error) => {
+                    web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load: {error:?}")));
+                }
+                MapEvent::LoadingFinished => self.loaded = true,
+                _ => {}
+            }
+        }
+    }
+
     /// Runs the cooperative scheduler's tasks for up to `budget_ms`, then the
     /// RunLoop's for what they delivered. Returns whether tasks remain.
     fn run_tasks(&self, budget_ms: f64) -> bool {

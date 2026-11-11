@@ -48,7 +48,7 @@ impl QueryTest {
         test
     }
 
-    fn map(&self) -> std::cell::RefMut<'_, mln_map::Map> {
+    fn map(&self) -> crate::support::MapGuard<'_> {
         self.0.map()
     }
 
@@ -181,7 +181,7 @@ fn global_state_change_relayouts_source_filter() {
     let test = QueryTest::new();
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.get_style_mut();
         let mut layer = style.get_layer_mut("layer4").expect("layer4");
         layer.set_filter(&parse_filter(r#"["==", ["get", "key1"], ["global-state", "filterValue"]]"#));
     }
@@ -325,7 +325,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         let test = QueryTest::new();
         {
             let mut map = test.map();
-            let mut style = map.get_style_mut();
+            let style = map.get_style_mut();
             // Keep the point away from tile boundaries so source queries return one copy.
             let source = style.get_source("source1").expect("source1");
             let source = source.as_any().downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
@@ -342,7 +342,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         // Cover both the collision-index symbol path and the geometry-index circle path.
         for layer_id in ["layer1", "circle_layer"] {
             let mut map = test.map();
-            let mut style = map.get_style_mut();
+            let style = map.get_style_mut();
             style.get_layer_mut(layer_id).expect("layer").set_filter(&equal_zoom);
         }
         test.map().jump_to(&CameraOptions::default().with_center(Some(ll(1.003, 1.003))).with_zoom(Some(camera_zoom)));

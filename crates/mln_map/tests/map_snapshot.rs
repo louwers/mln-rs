@@ -2,16 +2,16 @@
 //! snapshot's view.
 
 use std::cell::Cell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraBounds, CameraOptions, ConstrainMode, FreeCamera, FreeCameraOptions, Map,
-    MapDebugOptions, MapMode, MapOptions, MapProjection, MapView, NorthOrientation, NullMapObserver, ProjectionMode,
-    TileLodMode, ViewportMode,
+    MapDebugOptions, MapMode, MapOptions, MapProjection, MapView, NorthOrientation, ProjectionMode, TileLodMode,
+    ViewportMode,
 };
-use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{RendererEvents, RendererFrontend, UpdateParameters};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::chrono::Duration;
 use mln_util::error::ErrorKind;
@@ -26,20 +26,14 @@ struct CountingFrontend {
 
 impl RendererFrontend for CountingFrontend {
     fn reset(&self) {}
-    fn set_observer(&self, _observer: Weak<dyn RendererObserver>) {}
+    fn set_event_queue(&self, _events: RendererEvents) {}
     fn update(&self, _parameters: Arc<UpdateParameters>) {
         self.updates.set(self.updates.get() + 1);
     }
 }
 
 fn map(frontend: &CountingFrontend, options: MapOptions) -> Map {
-    Map::with_file_source(
-        frontend,
-        Rc::new(NullMapObserver),
-        Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
-        options,
-    )
-    .expect("map")
+    Map::with_file_source(frontend, Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
 }
 
 fn ll(lat: f64, lon: f64) -> LatLng {

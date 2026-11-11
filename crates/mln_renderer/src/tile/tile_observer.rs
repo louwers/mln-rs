@@ -9,7 +9,6 @@ use mln_util::error::Error;
 use crate::tile::tile::{TileBase, TileOperation};
 
 /// `TileObserver`. All methods have the C++ default (empty) bodies.
-// TODO(port): the SymbolErrorObserver base (`onSymbolError`, M5).
 pub trait TileObserver {
     fn on_tile_changed(&self, _tile: &TileBase) {}
     fn on_tile_error(&self, _tile: &TileBase, _error: Error) {}

@@ -9,7 +9,7 @@ use mln_style::Style;
 
 use crate::runner::MapError;
 
-/// `map.getStyle().loadJSON(json)`. Errors reach the map observer, as in C++.
+/// `map.getStyle().loadJSON(json)`. Errors reach the map's events, as in C++.
 pub fn load_json(style: &mut Style, json: &str) {
     style.load_json(json);
 }

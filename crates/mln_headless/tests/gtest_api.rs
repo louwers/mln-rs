@@ -7,13 +7,12 @@ mod gtest_annotations;
 mod gtest_query;
 mod support;
 
-use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, GeoJSON, Geometry, Point};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSourceManager, ResourceOptions};
 use mln_style::PropertyValue;
@@ -56,7 +55,6 @@ fn grid() {
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_resource_options(
         &frontend,
-        Rc::new(NullMapObserver),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
         &ResourceOptions::default()
@@ -140,7 +138,6 @@ fn recycle_map_update_images() {
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_file_source(
         &frontend,
-        Rc::new(NullMapObserver),
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )

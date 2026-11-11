@@ -7,13 +7,12 @@
 // Qt-on-Linux-only (platform fonts and expectations), so they stay ignored.
 
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_image::{decode_image, encode_png};
-use mln_map::{Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{Map, MapMode, MapOptions};
 use mln_map_types::CameraOptions;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
@@ -95,7 +94,6 @@ impl LocalGlyphRasterizerTest {
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
             &frontend,
-            Rc::new(NullMapObserver),
             file_source,
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         )

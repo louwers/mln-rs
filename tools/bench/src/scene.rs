@@ -15,7 +15,7 @@ use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode, StyleLoadError};
+use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_renderer::query::SourceQueryOptions;
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style_types::VisibilityType;
@@ -132,19 +132,23 @@ pub enum Mode {
 /// The frames the map reports, and why it failed, if it did.
 #[derive(Default)]
 struct Observer {
-    frames: Cell<u64>,
-    last_frame: RefCell<Option<RenderFrameStatus>>,
-    failure: RefCell<Option<String>>,
+    frames: u64,
+    last_frame: Option<RenderFrameStatus>,
+    failure: Option<String>,
 }
 
-impl MapObserver for Observer {
-    fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
-        self.frames.set(self.frames.get() + 1);
-        *self.last_frame.borrow_mut() = Some(status.clone());
-    }
-
-    fn on_did_fail_loading_map(&self, error: &StyleLoadError) {
-        *self.failure.borrow_mut() = Some(error.to_string());
+impl Observer {
+    fn observe(&mut self, events: Vec<MapEvent>) {
+        for event in events {
+            match event {
+                MapEvent::RenderFrameFinished(status) => {
+                    self.frames += 1;
+                    self.last_frame = Some(status);
+                }
+                MapEvent::LoadingFailed(error) => self.failure = Some(error.to_string()),
+                _ => {}
+            }
+        }
     }
 }
 
@@ -164,7 +168,7 @@ fn file_sources() -> FileSourceManager {
 pub struct Scene {
     frontend: HeadlessFrontend,
     map: Map,
-    observer: Rc<Observer>,
+    observer: Observer,
     _file_source: Option<Arc<dyn FileSource>>,
 }
 
@@ -189,17 +193,15 @@ impl Scene {
             glyph_cache,
         );
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
-        let observer = Rc::new(Observer::default());
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let map = Map::with_resource_options(
             &frontend,
-            observer.clone(),
             MapOptions::new().with_map_mode(map_mode).with_size(size).with_pixel_ratio(1.0),
             &file_sources,
             &resource_options,
         )
         .expect("the map");
-        Scene { frontend, map, observer, _file_source: file_source }
+        Scene { frontend, map, observer: Observer::default(), _file_source: file_source }
     }
 
     /// Starts loading a style; it loads while the scene renders.
@@ -238,13 +240,8 @@ impl Scene {
         let done = outcome.clone();
         self.map.render_still(Box::new(move |error| {
             *done.borrow_mut() = Some(error.map(|error| error.to_string()));
-            RunLoop::get().stop();
         }));
-        // The callback can run before the loop starts; `run` would then
-        // wait for a stop that already happened.
-        if outcome.borrow().is_none() {
-            RunLoop::get().run();
-        }
+        self.run_until(|| outcome.borrow().is_some());
         if let Some(Some(error)) = outcome.take() {
             panic!("still: {error}");
         }
@@ -254,15 +251,39 @@ impl Scene {
     /// A complete still frame through `HeadlessFrontend::render`, as the
     /// render tests draw one.
     pub fn render(&mut self) -> PremultipliedImage {
-        match self.frontend.render(&mut self.map) {
+        let result = self.frontend.render(&mut self.map);
+        self.observe();
+        match result {
             Ok(result) => result.image,
             Err(error) => panic!("still: {error}"),
         }
     }
 
     /// Delivers what the map's workers have finished, without waiting.
-    pub fn pump(&self) {
+    pub fn pump(&mut self) {
         RunLoop::get().run_once();
+        self.observe();
+    }
+
+    /// Runs the run loop, and the map's events, until `done`. The loop
+    /// sleeps until there is work, rather than polling it, so the wait
+    /// costs no CPU time.
+    fn run_until(&mut self, done: impl Fn() -> bool) {
+        let run_loop = RunLoop::get();
+        loop {
+            self.observe();
+            if done() {
+                return;
+            }
+            if !run_loop.run_once() {
+                run_loop.wait_for_work();
+            }
+        }
+    }
+
+    /// Hands the map's events to the observer.
+    fn observe(&mut self) {
+        self.observer.observe(self.map.drain_events());
     }
 
     /// Draws a frame of what has loaded and waits for the GPU to finish
@@ -270,7 +291,8 @@ impl Scene {
     pub fn render_frame(&mut self) -> RenderFrameStatus {
         self.frontend.render_frame();
         self.wait_for_gpu();
-        self.observer.last_frame.borrow().clone().expect("the renderer reports each frame")
+        self.observe();
+        self.observer.last_frame.clone().expect("the renderer reports each frame")
     }
 
     fn wait_for_gpu(&self) {
@@ -313,7 +335,7 @@ impl Scene {
 
     /// Panics when the map failed, or took longer than its limit.
     fn check(&self, start: Instant) {
-        if let Some(failure) = self.observer.failure.borrow().as_ref() {
+        if let Some(failure) = self.observer.failure.as_ref() {
             panic!("the map failed to load: {failure}");
         }
         assert!(start.elapsed() < WAIT_LIMIT, "the view isn't complete after {WAIT_LIMIT:?}");
@@ -321,26 +343,24 @@ impl Scene {
 
     /// Lets the run loop work for `duration`, drawing as the map asks
     /// (`Mode::Driven`).
-    pub fn run_for(&self, duration: Duration) {
+    pub fn run_for(&mut self, duration: Duration) {
         let timer = Timer::new();
         let timeout = mln_util::chrono::Duration::from_nanos(duration.as_nanos() as i64);
-        timer.start(timeout, mln_util::chrono::Duration::zero(), || RunLoop::get().stop());
-        RunLoop::get().run();
+        let elapsed = Rc::new(Cell::new(false));
+        let done = elapsed.clone();
+        timer.start(timeout, mln_util::chrono::Duration::zero(), move || done.set(true));
+        self.run_until(|| elapsed.get());
     }
 
     /// The frames the renderer has drawn.
     pub fn frames(&self) -> u64 {
-        self.observer.frames.get()
+        self.observer.frames
     }
 
     /// Whether the last frame showed the view complete with nothing left to
     /// animate.
     pub fn is_settled(&self) -> bool {
-        self.observer
-            .last_frame
-            .borrow()
-            .as_ref()
-            .is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
+        self.observer.last_frame.as_ref().is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
     }
 
     /// Shows or hides every layer that draws `source`.
@@ -363,8 +383,7 @@ impl Scene {
     /// The vertex and index buffers the GPU held after the last frame, in
     /// MiB.
     pub fn gpu_buffers_mib(&self) -> f64 {
-        let last_frame = self.observer.last_frame.borrow();
-        let stats = &last_frame.as_ref().expect("a frame").rendering_stats;
+        let stats = &self.observer.last_frame.as_ref().expect("a frame").rendering_stats;
         f64::from(stats.mem_vertex_buffers + stats.mem_index_buffers) / (1024.0 * 1024.0)
     }
 

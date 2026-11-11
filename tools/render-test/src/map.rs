@@ -1,5 +1,5 @@
-// Ports the map side of render-test/runner.{hpp,cpp}: `TestRunnerMapObserver`,
-// `TestRunner::Impl` (observer, HeadlessFrontend, Map), `swapBehavior`,
+// Ports the map side of render-test/runner.{hpp,cpp}: `TestRunner::Impl`
+// (HeadlessFrontend, Map), `swapBehavior`,
 // `resetContext` and the map/style calls of the operations, over mln_map and
 // mln_headless.
 
@@ -10,7 +10,7 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
-use mln_map::{BoundOptions, Map, MapObserver, MapOptions, ProjectionMode, RenderMode, StyleLoadError};
+use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
 use mln_storage::{FileSource, FileSourceManager, FileSourceType};
 use mln_util::image::PremultipliedImage;
@@ -21,38 +21,6 @@ use crate::runner::{
     CameraOptions, ImplFactory, ImplOptions, MapError, QueryGeometry, ResourceOptions, TestRunnerImpl,
 };
 use crate::style_ops;
-
-/// `TestRunnerMapObserver` (runner.hpp).
-#[derive(Default)]
-pub struct TestRunnerMapObserver {
-    pub map_load_failure: Cell<bool>,
-    pub finish_rendering_map: Cell<bool>,
-    pub idle: Cell<bool>,
-}
-
-impl TestRunnerMapObserver {
-    pub fn reset(&self) {
-        self.map_load_failure.set(false);
-        self.finish_rendering_map.set(false);
-        self.idle.set(false);
-    }
-}
-
-impl MapObserver for TestRunnerMapObserver {
-    fn on_did_fail_loading_map(&self, _error: &StyleLoadError) {
-        self.map_load_failure.set(true);
-    }
-
-    fn on_did_finish_rendering_map(&self, mode: RenderMode) {
-        if !self.finish_rendering_map.get() {
-            self.finish_rendering_map.set(mode == RenderMode::Full);
-        }
-    }
-
-    fn on_did_become_idle(&self) {
-        self.idle.set(true);
-    }
-}
 
 fn map_mode(mode: MapMode) -> mln_map::MapMode {
     match mode {
@@ -69,7 +37,6 @@ fn swap_behavior(mode: MapMode) -> SwapBehaviour {
 
 /// `TestRunner::Impl`.
 pub struct Impl {
-    pub observer: Rc<TestRunnerMapObserver>,
     pub frontend: HeadlessFrontend,
     /// `std::shared_ptr<FileSource> fileSource`: the ProxyFileSource over
     /// the cache database of ResourceOptions::cachePath.
@@ -89,7 +56,6 @@ impl Impl {
         let resource_options = mln_storage::ResourceOptions::default()
             .with_cache_path(resource_options.cache_path.clone())
             .with_api_key(resource_options.api_key.clone());
-        let observer = Rc::new(TestRunnerMapObserver::default());
         let frontend = HeadlessFrontend::with_options(
             metadata.size,
             metadata.pixel_ratio,
@@ -105,7 +71,6 @@ impl Impl {
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let mut map = Map::with_resource_options(
             &frontend,
-            observer.clone(),
             MapOptions::new()
                 .with_map_mode(map_mode(metadata.map_mode))
                 .with_size(metadata.size)
@@ -118,7 +83,7 @@ impl Impl {
         if let Some(max_pitch) = metadata.max_pitch {
             map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch))).map_err(|e| e.to_string())?;
         }
-        Ok(Impl { observer, frontend, file_source, map })
+        Ok(Impl { frontend, file_source, map })
     }
 }
 
@@ -134,18 +99,21 @@ impl TestRunnerImpl for Impl {
                 .with_y_skew(metadata.y_skew),
         );
         self.map.set_debug(mln_map::MapDebugOptions(metadata.debug.0));
-        style_ops::load_json(&mut self.map.get_style_mut(), &metadata.document_json);
+        style_ops::load_json(self.map.get_style_mut(), &metadata.document_json);
         Ok(())
     }
 
     fn jump_to_default_camera(&mut self) -> Result<(), MapError> {
-        let camera = style_ops::default_camera(&self.map.get_style());
+        let camera = style_ops::default_camera(self.map.get_style());
         self.map.jump_to(&camera);
         Ok(())
     }
 
     fn render(&mut self) -> Result<PremultipliedImage, String> {
-        self.frontend.render(&mut self.map).map(|result| result.image).map_err(|e| e.to_string())
+        let result = self.frontend.render(&mut self.map);
+        // No operation reads the map's events.
+        self.map.drain_events();
+        result.map(|result| result.image).map_err(|e| e.to_string())
     }
 
     fn dump_debug_logs(&self) {
@@ -155,7 +123,7 @@ impl TestRunnerImpl for Impl {
 
     // query: tile mode.
     fn default_camera(&mut self) -> Result<CameraOptions, MapError> {
-        let camera = style_ops::default_camera(&self.map.get_style());
+        let camera = style_ops::default_camera(self.map.get_style());
         Ok(CameraOptions {
             center: camera.center,
             center_altitude: camera.center_altitude,
@@ -222,37 +190,37 @@ impl TestRunnerImpl for Impl {
     }
 
     fn load_style_json(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::load_json(&mut self.map.get_style_mut(), json);
+        style_ops::load_json(self.map.get_style_mut(), json);
         Ok(())
     }
 
     fn load_style_url(&mut self, url: &str) -> Result<(), MapError> {
-        style_ops::load_url(&mut self.map.get_style_mut(), url);
+        style_ops::load_url(self.map.get_style_mut(), url);
         Ok(())
     }
 
     fn set_layer_property(&mut self, layer: &str, name: &str, value: &serde_json::Value) -> Result<(), MapError> {
-        style_ops::set_layer_property(&mut self.map.get_style_mut(), layer, name, value)
+        style_ops::set_layer_property(self.map.get_style_mut(), layer, name, value)
     }
 
     fn set_layer_zoom_range(&mut self, layer: &str, min: f32, max: f32) -> Result<(), MapError> {
-        style_ops::set_layer_zoom_range(&mut self.map.get_style_mut(), layer, min, max)
+        style_ops::set_layer_zoom_range(self.map.get_style_mut(), layer, min, max)
     }
 
     fn add_layer(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::add_layer(&mut self.map.get_style_mut(), json)
+        style_ops::add_layer(self.map.get_style_mut(), json)
     }
 
     fn remove_layer(&mut self, id: &str) -> Result<bool, MapError> {
-        Ok(style_ops::remove_layer(&mut self.map.get_style_mut(), id))
+        Ok(style_ops::remove_layer(self.map.get_style_mut(), id))
     }
 
     fn set_layer_filter(&mut self, layer: &str, filter: &serde_json::Value) -> Result<(), MapError> {
-        style_ops::set_layer_filter(&mut self.map.get_style_mut(), layer, filter)
+        style_ops::set_layer_filter(self.map.get_style_mut(), layer, filter)
     }
 
     fn set_global_state_property(&mut self, name: &str, value: &feature::Value) -> Result<(), MapError> {
-        style_ops::set_global_state_property(&mut self.map.get_style_mut(), name, value)
+        style_ops::set_global_state_property(self.map.get_style_mut(), name, value)
     }
 
     fn set_feature_state(
@@ -362,15 +330,15 @@ impl TestRunnerImpl for Impl {
 
     // query: the remaining runner operations.
     fn set_light(&mut self, json: &str) -> Result<(), MapError> {
-        style_ops::set_light(&mut self.map.get_style_mut(), json)
+        style_ops::set_light(self.map.get_style_mut(), json)
     }
 
     fn add_source(&mut self, id: &str, json: &str) -> Result<(), MapError> {
-        style_ops::add_source(&mut self.map.get_style_mut(), id, json)
+        style_ops::add_source(self.map.get_style_mut(), id, json)
     }
 
     fn remove_source(&mut self, id: &str) -> Result<bool, MapError> {
-        Ok(style_ops::remove_source(&mut self.map.get_style_mut(), id))
+        Ok(style_ops::remove_source(self.map.get_style_mut(), id))
     }
 
     fn add_image(&mut self, name: &str, image_path: &str, pixel_ratio: f32, sdf: bool) -> Result<(), MapError> {
@@ -397,6 +365,7 @@ impl TestRunnerImpl for Impl {
 
         while !request_completed.get() {
             RunLoop::get().run_once();
+            self.map.process_events();
         }
 
         let Some(bytes) = maybe_image.borrow_mut().take() else {
@@ -442,6 +411,7 @@ impl TestRunnerImpl for Impl {
         }
         while sleeping.get() {
             RunLoop::get().run_once();
+            self.map.process_events();
         }
         Ok(())
     }

@@ -5,16 +5,16 @@
 mod support;
 
 use std::cell::{Cell, RefCell};
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration as StdDuration, Instant};
 
-use mln_actor::RunLoop;
+use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, ContextMode, ScopeType, SwapBehaviour};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
-use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{RendererEvents, RendererFrontend, UpdateParameters};
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
@@ -130,8 +130,8 @@ impl RendererFrontend for TimedHeadlessFrontend {
     fn reset(&self) {
         self.frontend.reset();
     }
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
-        self.frontend.set_observer(observer);
+    fn set_event_queue(&self, events: RendererEvents) {
+        self.frontend.set_event_queue(events);
     }
     fn update(&self, parameters: Arc<UpdateParameters>) {
         *self.latest_parameters.borrow_mut() = Some(parameters.clone());
@@ -146,6 +146,7 @@ fn stats(frontend: &HeadlessFrontend) -> RenderingStats {
 
 /// `SymbolRenderingTest`.
 struct SymbolRenderingTest<F> {
+    _events: AsyncTask,
     run_loop: RunLoop,
     frontend: F,
     observer: Rc<StubMapObserver>,
@@ -158,7 +159,9 @@ impl SymbolRenderingTest<HeadlessFrontend> {
     }
 
     fn render(&self) -> RenderResult {
-        self.frontend.clone().render(&mut self.map.borrow_mut()).expect("render")
+        let result = self.frontend.clone().render(&mut self.map.borrow_mut()).expect("render");
+        self.observer.dispatch_events(&self.map);
+        result
     }
 }
 
@@ -179,7 +182,6 @@ impl<F: RendererFrontend + Clone + 'static> SymbolRenderingTest<F> {
         let observer = Rc::new(StubMapObserver::default());
         let mut map = Map::with_file_source(
             &frontend,
-            observer.clone(),
             file_source,
             MapOptions::new().with_map_mode(mode).with_size(Size::new(256, 256)),
         )
@@ -187,7 +189,9 @@ impl<F: RendererFrontend + Clone + 'static> SymbolRenderingTest<F> {
         map.get_style_mut().load_json(&colliding_symbols_style(count, spacing, kind));
         map.get_style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
         map.jump_to(&camera().with_center(Some(lat_lng(5.0, 5.0))).with_zoom(Some(4.0)));
-        SymbolRenderingTest { run_loop, frontend, observer, map: Rc::new(RefCell::new(map)) }
+        let map = Rc::new(RefCell::new(map));
+        let _events = observer.observe(&map);
+        SymbolRenderingTest { _events, run_loop, frontend, observer, map }
     }
 
     fn jump_to(&self, camera: CameraOptions) {

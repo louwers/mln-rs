@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, Map, MapMode, MapOptions};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_util::size::Size;
@@ -63,13 +63,12 @@ impl MemoryTest {
         MemoryTest { file_source, run_loop }
     }
 
-    /// `MapAdapter map(frontend, MapObserver::nullObserver(), test.fileSource,
+    /// `MapAdapter map(frontend, test.fileSource,
     /// MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize())
     /// .withPixelRatio(ratio))`.
     fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
         Map::with_file_source(
             frontend,
-            Rc::new(NullMapObserver),
             self.file_source.clone(),
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()).with_pixel_ratio(ratio),
         )

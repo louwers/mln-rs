@@ -24,7 +24,7 @@ impl AnnotationTest {
         AnnotationTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static))
     }
 
-    fn map(&self) -> std::cell::RefMut<'_, mln_map::Map> {
+    fn map(&self) -> crate::support::MapGuard<'_> {
         self.0.map()
     }
 

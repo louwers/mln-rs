@@ -316,7 +316,8 @@ impl GeometryTileInner {
             self.base.on_tile_action(TileOperation::EndParse);
         }
 
-        // TODO(port): ErrorScope, bucket->check (symbol guards).
+        // TODO(port): bucket->check (symbol guards), whose failures go to
+        // the log.
 
         *self.layout_result.borrow_mut() = Some(Rc::new(result));
         *self.bucket_geometry.borrow_mut() = Rc::default();

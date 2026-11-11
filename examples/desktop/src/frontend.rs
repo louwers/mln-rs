@@ -5,11 +5,11 @@
 // state to mark it dirty when the map has a new frame to draw.
 
 use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
-use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{Renderer, RendererEvents, RendererFrontend, UpdateParameters};
 
 use crate::view::ViewShared;
 
@@ -67,9 +67,9 @@ impl RendererFrontend for Frontend {
         drop(renderer);
     }
 
-    fn set_observer(&self, observer: Weak<dyn RendererObserver>) {
+    fn set_event_queue(&self, events: RendererEvents) {
         if let Some(renderer) = self.shared.renderer.borrow_mut().as_mut() {
-            renderer.set_observer(Some(observer));
+            renderer.set_event_queue(Some(events));
         }
     }
 

@@ -85,7 +85,6 @@ pub trait RenderSourceObserver {
     fn on_tile_error(&self, _source_id: &str, _tile_id: &OverscaledTileID, _error: Error) {}
     fn on_tile_action(&self, _source_id: &str, _op: TileOperation, _tile_id: &OverscaledTileID, _tile_source_id: &str) {
     }
-    // TODO(port): onSymbolError (M5).
 }
 
 /// `RenderSourceObserver nullObserver`.

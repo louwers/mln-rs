@@ -3,14 +3,13 @@
 mod support;
 
 use std::f64::consts::PI;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry, Point};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, NullMapObserver};
+use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions};
 use mln_storage::{FileSourceManager, ResourceOptions};
 use mln_style::PropertyValue;
 use mln_style::layers::circle_layer::CircleLayer;
@@ -33,7 +32,6 @@ impl TileLODTest {
         let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
         let mut map = Map::with_resource_options(
             &frontend,
-            Rc::new(NullMapObserver),
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
             &FileSourceManager::new(),
             &ResourceOptions::default()
