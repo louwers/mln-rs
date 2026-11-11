@@ -16,7 +16,6 @@
 // --no-system-fonts: without it, the map falls back to system fonts for the
 // scripts that its glyph PBFs can't shape, and for CJK (system_fonts.rs).
 
-mod frontend;
 mod host;
 mod settings;
 mod styles;

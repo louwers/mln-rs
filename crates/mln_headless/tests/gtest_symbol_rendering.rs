@@ -14,7 +14,7 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, ContextMode, ScopeType, SwapBehaviour};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
-use mln_renderer::{RendererEvents, RendererFrontend, UpdateParameters};
+use mln_renderer::UpdateReader;
 use mln_storage::Kind;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style::PropertyValue;
@@ -97,7 +97,7 @@ fn lat_lng(latitude: f64, longitude: f64) -> LatLng {
 #[derive(Clone)]
 struct TimedHeadlessFrontend {
     frontend: HeadlessFrontend,
-    latest_parameters: Rc<RefCell<Option<Arc<UpdateParameters>>>>,
+    updates: Rc<RefCell<Option<UpdateReader>>>,
 }
 
 impl TimedHeadlessFrontend {
@@ -110,15 +110,14 @@ impl TimedHeadlessFrontend {
                 ContextMode::Unique,
                 false,
             ),
-            latest_parameters: Rc::default(),
+            updates: Rc::default(),
         }
     }
 
     fn render_at(&self, time: TimePoint) -> RenderResult {
-        let mut parameters = (**self.latest_parameters.borrow().as_ref().expect("update parameters")).clone();
+        let update = self.updates.borrow().as_ref().and_then(UpdateReader::latest).expect("update parameters");
+        let mut parameters = (*update.parameters).clone();
         parameters.time_point = time;
-        // The renderer takes the parameters as the map sends them.
-        #[allow(clippy::arc_with_non_send_sync)]
         let parameters = Arc::new(parameters);
         let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
         self.frontend.with_renderer(|renderer| renderer.render(&parameters));
@@ -126,16 +125,21 @@ impl TimedHeadlessFrontend {
     }
 }
 
-impl RendererFrontend for TimedHeadlessFrontend {
-    fn reset(&self) {
-        self.frontend.reset();
+/// A frontend that renders the map it's attached to.
+trait Frontend: Clone + 'static {
+    fn attach(&self, map: &Map);
+}
+
+impl Frontend for HeadlessFrontend {
+    fn attach(&self, map: &Map) {
+        HeadlessFrontend::attach(self, map);
     }
-    fn set_event_queue(&self, events: RendererEvents) {
-        self.frontend.set_event_queue(events);
-    }
-    fn update(&self, parameters: Arc<UpdateParameters>) {
-        *self.latest_parameters.borrow_mut() = Some(parameters.clone());
-        self.frontend.update(parameters);
+}
+
+impl Frontend for TimedHeadlessFrontend {
+    fn attach(&self, map: &Map) {
+        self.frontend.attach(map);
+        *self.updates.borrow_mut() = Some(map.update_reader());
     }
 }
 
@@ -165,7 +169,7 @@ impl SymbolRenderingTest<HeadlessFrontend> {
     }
 }
 
-impl<F: RendererFrontend + Clone + 'static> SymbolRenderingTest<F> {
+impl<F: Frontend> SymbolRenderingTest<F> {
     /// The frontend's tasks run on the test's run loop, so `frontend` makes
     /// it after the loop exists.
     fn with_frontend(
@@ -180,12 +184,10 @@ impl<F: RendererFrontend + Clone + 'static> SymbolRenderingTest<F> {
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
         let observer = Rc::new(StubMapObserver::default());
-        let mut map = Map::with_file_source(
-            &frontend,
-            file_source,
-            MapOptions::new().with_map_mode(mode).with_size(Size::new(256, 256)),
-        )
-        .unwrap();
+        let mut map =
+            Map::with_file_source(file_source, MapOptions::new().with_map_mode(mode).with_size(Size::new(256, 256)))
+                .unwrap();
+        frontend.attach(&map);
         map.get_style_mut().load_json(&colliding_symbols_style(count, spacing, kind));
         map.get_style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
         map.jump_to(&camera().with_center(Some(lat_lng(5.0, 5.0))).with_zoom(Some(4.0)));

@@ -42,5 +42,9 @@ path = "tests/map_events.rs"
 name = "map_snapshot"
 path = "tests/map_snapshot.rs"
 
+[[test]]
+name = "map_updates"
+path = "tests/map_updates.rs"
+
 [lints]
 workspace = true

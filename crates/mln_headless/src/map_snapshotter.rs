@@ -101,12 +101,13 @@ impl MapSnapshotter {
     ) -> Result<Self, Error> {
         let frontend =
             HeadlessFrontend::with_options(size, pixel_ratio, SwapBehaviour::NoFlush, ContextMode::Unique, true);
-        let map = Rc::new(RefCell::new(Map::with_resource_options(
-            &frontend,
+        let map = Map::with_resource_options(
             MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
             &FileSourceManager::new(),
             resource_options,
-        )?));
+        )?;
+        frontend.attach(&map);
+        let map = Rc::new(RefCell::new(map));
         let forward = {
             let map = Rc::downgrade(&map);
             AsyncTask::new(move || {

@@ -54,7 +54,6 @@ fn grid() {
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_resource_options(
-        &frontend,
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
         &ResourceOptions::default()
@@ -62,6 +61,7 @@ fn grid() {
             .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
     )
     .unwrap();
+    frontend.attach(&map);
     map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     map.jump_to(&CameraOptions {
         center: Some(LatLng::new(37.8, -122.5).unwrap()),
@@ -137,11 +137,11 @@ fn recycle_map_update_images() {
 
     let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_file_source(
-        &frontend,
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
     )
     .unwrap();
+    frontend.attach(&map);
 
     let load_style = |map: &mut Map, marker_name: &str, marker_path: &str| {
         let source = GeoJSONSource::with_default_options("geometry");

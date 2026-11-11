@@ -31,7 +31,6 @@ impl TileLODTest {
         let run_loop = RunLoop::new();
         let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
         let mut map = Map::with_resource_options(
-            &frontend,
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
             &FileSourceManager::new(),
             &ResourceOptions::default()
@@ -39,6 +38,7 @@ impl TileLODTest {
                 .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
         )
         .unwrap();
+        frontend.attach(&map);
         map.jump_to(camera_options);
 
         map.set_debug(MapDebugOptions::TILE_BORDERS);

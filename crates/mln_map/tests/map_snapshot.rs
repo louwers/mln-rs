@@ -1,39 +1,23 @@
 //! `Map::snapshot`, the map's generation counters, and projections from a
 //! snapshot's view.
 
-use std::cell::Cell;
-use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_actor::RunLoop;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraBounds, CameraOptions, ConstrainMode, FreeCamera, FreeCameraOptions, Map,
     MapDebugOptions, MapMode, MapOptions, MapProjection, MapView, NorthOrientation, ProjectionMode, TileLodMode,
-    ViewportMode,
+    UpdateReader, ViewportMode,
 };
-use mln_renderer::{RendererEvents, RendererFrontend, UpdateParameters};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::chrono::Duration;
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
 
-/// Counts the updates that the map sends.
-#[derive(Clone, Default)]
-struct CountingFrontend {
-    updates: Rc<Cell<u64>>,
-}
-
-impl RendererFrontend for CountingFrontend {
-    fn reset(&self) {}
-    fn set_event_queue(&self, _events: RendererEvents) {}
-    fn update(&self, _parameters: Arc<UpdateParameters>) {
-        self.updates.set(self.updates.get() + 1);
-    }
-}
-
-fn map(frontend: &CountingFrontend, options: MapOptions) -> Map {
-    Map::with_file_source(frontend, Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
+fn map(options: MapOptions) -> Map {
+    Map::with_file_source(Arc::new(StubFileSource::new(ResponseType::Asynchronous)), options).expect("map")
 }
 
 fn ll(lat: f64, lon: f64) -> LatLng {
@@ -51,14 +35,10 @@ fn assert_near(actual: f64, expected: f64) {
 #[test]
 fn snapshot_reports_every_member() {
     let _loop = RunLoop::new();
-    let frontend = CountingFrontend::default();
-    let mut map = map(
-        &frontend,
-        MapOptions::new()
-            .with_size(Size::new(512, 256))
-            .with_pixel_ratio(2.0)
-            .with_constrain_mode(ConstrainMode::WidthAndHeight),
-    );
+    let mut map = map(MapOptions::new()
+        .with_size(Size::new(512, 256))
+        .with_pixel_ratio(2.0)
+        .with_constrain_mode(ConstrainMode::WidthAndHeight));
 
     let snapshot = map.snapshot();
     assert_eq!(snapshot.debug, MapDebugOptions::NO_DEBUG);
@@ -164,8 +144,7 @@ fn snapshot_reports_every_member() {
 #[test]
 fn generation_grows_with_each_change() {
     let _loop = RunLoop::new();
-    let frontend = CountingFrontend::default();
-    let mut map = map(&frontend, MapOptions::new().with_size(Size::new(256, 256)));
+    let mut map = map(MapOptions::new().with_size(Size::new(256, 256)));
 
     let mut last = map.generation();
     let mut assert_changed = |map: &Map, changed: bool, what: &str| {
@@ -205,24 +184,40 @@ fn generation_grows_with_each_change() {
     assert_changed(&map, true, "set_free_camera_options");
 }
 
-#[test]
-fn update_generation_counts_the_updates_sent() {
-    let _loop = RunLoop::new();
-    let frontend = CountingFrontend::default();
-    let mut map = map(&frontend, MapOptions::new().with_size(Size::new(256, 256)));
-
-    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
-    map.set_prefetch_zoom_delta(1);
-    assert!(frontend.updates.get() >= 2);
-    assert_eq!(map.update_generation(), frontend.updates.get());
-    assert_eq!(map.snapshot().update_generation, frontend.updates.get());
+/// A reader of `map`'s updates, and the times that it woke.
+fn count_wakes(map: &Map) -> (UpdateReader, Arc<AtomicU64>) {
+    let reader = map.update_reader();
+    let wakes = Arc::new(AtomicU64::new(0));
+    let counter = wakes.clone();
+    reader.set_waker(Some(Arc::new(move || {
+        counter.fetch_add(1, Ordering::SeqCst);
+    })));
+    (reader, wakes)
 }
 
 #[test]
-fn a_static_map_changes_without_sending_updates() {
+fn update_generation_counts_the_updates_published() {
     let _loop = RunLoop::new();
-    let frontend = CountingFrontend::default();
-    let mut map = map(&frontend, MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(MapMode::Static));
+    let mut map = map(MapOptions::new().with_size(Size::new(256, 256)));
+    let before = map.update_generation();
+    let (_reader, wakes) = count_wakes(&map);
+
+    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    map.set_prefetch_zoom_delta(1);
+    let published = wakes.load(Ordering::SeqCst);
+    assert!(published >= 2);
+    assert_eq!(map.update_generation(), before + published);
+    assert_eq!(map.snapshot().update_generation, map.update_generation());
+    let update = map.update_reader().latest().expect("an update");
+    assert_eq!(update.generation, map.update_generation());
+    assert_eq!(update.parameters.prefetch_zoom_delta, 1);
+}
+
+#[test]
+fn a_static_map_changes_without_publishing_updates() {
+    let _loop = RunLoop::new();
+    let mut map = map(MapOptions::new().with_size(Size::new(256, 256)).with_map_mode(MapMode::Static));
+    let (_reader, wakes) = count_wakes(&map);
 
     let before = map.snapshot();
     map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
@@ -230,14 +225,14 @@ fn a_static_map_changes_without_sending_updates() {
     let after = map.snapshot();
     assert!(after.generation > before.generation);
     assert_eq!(after.update_generation, 0);
-    assert_eq!(frontend.updates.get(), 0);
+    assert_eq!(wakes.load(Ordering::SeqCst), 0);
+    assert!(map.update_reader().latest().is_none());
 }
 
 #[test]
 fn projection_from_a_view_matches_the_map() {
     let _loop = RunLoop::new();
-    let frontend = CountingFrontend::default();
-    let mut map = map(&frontend, MapOptions::new().with_size(Size::new(400, 300)).with_pixel_ratio(1.5));
+    let mut map = map(MapOptions::new().with_size(Size::new(400, 300)).with_pixel_ratio(1.5));
     // Bounds past the antimeridian keep the center's copy of the world, which
     // the view keeps too.
     map.set_bounds(&BoundOptions::default().with_lat_lng_bounds(LatLngBounds::hull(ll(-20.0, 170.0), ll(20.0, 200.0))))
@@ -278,8 +273,7 @@ fn projection_from_a_view_matches_the_map() {
 #[test]
 fn projection_from_a_view_rejects_views_no_map_shows() {
     let _loop = RunLoop::new();
-    let frontend = CountingFrontend::default();
-    let map = map(&frontend, MapOptions::new().with_size(Size::new(256, 256)));
+    let map = map(MapOptions::new().with_size(Size::new(256, 256)));
     let view = map.snapshot().view;
     assert!(MapProjection::from_view(&view).is_ok());
 

@@ -78,7 +78,6 @@ impl FeatureTrackingTest {
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         file_source.set_response(Kind::Glyphs, |_| Some(file_response(GLYPH_PATH)));
         let mut map = Map::with_file_source(
-            &frontend,
             file_source,
             MapOptions::new()
                 .with_map_mode(MapMode::Static)
@@ -86,6 +85,7 @@ impl FeatureTrackingTest {
                 .with_rendered_feature_info(true),
         )
         .expect("map");
+        frontend.attach(&map);
 
         let source = GeoJSONSource::with_default_options(SOURCE_NAME);
         source.set_geojson(&geojson::parse(geojson).expect("GeoJSON")).expect("set GeoJSON");

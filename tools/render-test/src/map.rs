@@ -70,7 +70,6 @@ impl Impl {
         }
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let mut map = Map::with_resource_options(
-            &frontend,
             MapOptions::new()
                 .with_map_mode(map_mode(metadata.map_mode))
                 .with_size(metadata.size)
@@ -80,6 +79,7 @@ impl Impl {
             &resource_options,
         )
         .map_err(|e| e.to_string())?;
+        frontend.attach(&map);
         if let Some(max_pitch) = metadata.max_pitch {
             map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch))).map_err(|e| e.to_string())?;
         }

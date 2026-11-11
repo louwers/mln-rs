@@ -67,12 +67,13 @@ impl MemoryTest {
     /// MapOptions().withMapMode(MapMode::Static).withSize(frontend.getSize())
     /// .withPixelRatio(ratio))`.
     fn map(&self, frontend: &HeadlessFrontend, ratio: f32) -> Map {
-        Map::with_file_source(
-            frontend,
+        let map = Map::with_file_source(
             self.file_source.clone(),
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()).with_pixel_ratio(ratio),
         )
-        .unwrap()
+        .unwrap();
+        frontend.attach(&map);
+        map
     }
 }
 
@@ -249,7 +250,9 @@ fn rendering_stats_count_live_resources() {
     frontend.render(&mut map).expect("render");
     assert_eq!(live_resources(&frontend), evicted);
 
+    // The frontend drops its renderer on the run loop once the map goes.
     drop(map);
+    test.run_loop.run_once();
     let torn_down = live_resources(&frontend);
     assert!(live(&torn_down, "num_active_textures") < live(&loaded, "num_active_textures"));
     assert!(live(&torn_down, "mem_textures") < live(&loaded, "mem_textures"));

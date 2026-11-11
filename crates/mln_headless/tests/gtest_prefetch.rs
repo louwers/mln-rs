@@ -40,14 +40,13 @@ fn prefetch_tiles() {
     }
 
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
-    let map = Rc::new(RefCell::new(
-        Map::with_file_source(
-            &frontend,
-            file_source.clone(),
-            MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
-        )
-        .unwrap(),
-    ));
+    let map = Map::with_file_source(
+        file_source.clone(),
+        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+    )
+    .unwrap();
+    frontend.attach(&map);
+    let map = Rc::new(RefCell::new(map));
     let _events = observer.observe(&map);
 
     let tiles: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));

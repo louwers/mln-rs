@@ -195,12 +195,12 @@ impl Scene {
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let map = Map::with_resource_options(
-            &frontend,
             MapOptions::new().with_map_mode(map_mode).with_size(size).with_pixel_ratio(1.0),
             &file_sources,
             &resource_options,
         )
         .expect("the map");
+        frontend.attach(&map);
         Scene { frontend, map, observer: Observer::default(), _file_source: file_source }
     }
 

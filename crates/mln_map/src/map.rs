@@ -16,8 +16,8 @@ use mln_map_types::{
     ViewportMode,
 };
 use mln_renderer::{
-    FeatureInfo, LayerFeaturesMap, RendererEvent, RendererEvents, RendererFrontend, RenderingStats, SourceLayerID,
-    UpdateParameters,
+    FeatureInfo, LayerFeaturesMap, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, UpdateParameters,
+    UpdateReader, UpdateSlot,
 };
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
@@ -111,8 +111,12 @@ impl TransformObserver for CameraEvents {
     }
 }
 
-/// A map: its style, its camera, and the updates it sends its renderer.
+/// A map: its style, its camera, and the updates it publishes for its
+/// renderer.
 ///
+/// The map publishes its state for a renderer in an update slot, which a
+/// renderer reads through [`update_reader`](Self::update_reader) and
+/// reports back to through [`renderer_events`](Self::renderer_events).
 /// The style and the renderer report to the map through queues, which the
 /// map handles in [`process_events`](Self::process_events) and at the start
 /// of each of its calls that take `&mut self`. What the map reports to its
@@ -120,7 +124,7 @@ impl TransformObserver for CameraEvents {
 /// An owner that runs a `RunLoop` sets a waker
 /// ([`set_waker`](Self::set_waker)) that schedules those calls.
 pub struct Map {
-    frontend: Box<dyn RendererFrontend>,
+    updates: UpdateSlot,
     // TODO(port): std::unique_ptr<util::ActionJournal> actionJournal.
     transform: Transform,
 
@@ -154,8 +158,6 @@ pub struct Map {
 
     /// Grows with each change to the map's state.
     generation: u64,
-    /// Counts the updates sent to the renderer frontend.
-    update_generation: u64,
 
     style_events: EventQueue<StyleEvent>,
     renderer_events: RendererEvents,
@@ -167,66 +169,44 @@ pub struct Map {
 }
 
 impl Map {
-    /// A map that renders through `frontend`, with a `ResourceLoader` of its
-    /// own for the default `ResourceOptions`.
-    ///
-    /// C++ keeps a reference to the frontend; frontends are handles here
-    /// (`Clone` shares the same renderer), so the map keeps a clone.
+    /// A map with a `ResourceLoader` of its own for the default
+    /// `ResourceOptions`.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size()`.
-    pub fn new<F>(frontend: &F, map_options: MapOptions) -> Result<Map, Error>
-    where
-        F: RendererFrontend + Clone + 'static,
-    {
-        Self::with_resource_options(frontend, map_options, &FileSourceManager::new(), &ResourceOptions::default())
+    pub fn new(map_options: MapOptions) -> Result<Map, Error> {
+        Self::with_resource_options(map_options, &FileSourceManager::new(), &ResourceOptions::default())
     }
 
     /// A map whose file source is `file_sources`' `ResourceLoader` for
     /// `resource_options`, or none when `file_sources` has no
     /// `ResourceLoader` factory.
     // TODO(port): ActionJournalOptions.
-    pub fn with_resource_options<F>(
-        frontend: &F,
+    pub fn with_resource_options(
         map_options: MapOptions,
         file_sources: &FileSourceManager,
         resource_options: &ResourceOptions,
-    ) -> Result<Map, Error>
-    where
-        F: RendererFrontend + Clone + 'static,
-    {
+    ) -> Result<Map, Error> {
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, resource_options);
-        Self::create(Box::new(frontend.clone()), file_source, &map_options)
+        Self::create(file_source, &map_options)
     }
 
     // gtests-core: the C++ tests' `MapAdapter` (test/include/mln/test/
     // map_adapter.hpp): a map over a given file source.
     /// A map whose resources come from `file_source`.
-    pub fn with_file_source<F>(
-        frontend: &F,
-        file_source: Arc<dyn FileSource>,
-        map_options: MapOptions,
-    ) -> Result<Map, Error>
-    where
-        F: RendererFrontend + Clone + 'static,
-    {
-        Self::create(Box::new(frontend.clone()), Some(file_source), &map_options)
+    pub fn with_file_source(file_source: Arc<dyn FileSource>, map_options: MapOptions) -> Result<Map, Error> {
+        Self::create(Some(file_source), &map_options)
     }
 
-    fn create(
-        frontend: Box<dyn RendererFrontend>,
-        file_source: Option<Arc<dyn FileSource>>,
-        map_options: &MapOptions,
-    ) -> Result<Map, Error> {
+    fn create(file_source: Option<Arc<dyn FileSource>>, map_options: &MapOptions) -> Result<Map, Error> {
         let events = EventQueue::new();
         let style_events = EventQueue::new();
         let renderer_events = RendererEvents::new();
         let pixel_ratio = map_options.pixel_ratio();
-        // TODO(port): `frontend_.getThreadPool()` (RendererFrontend has no
-        // thread pool yet); the background pool with a fresh tag instead.
+        // The style's sources work on the background pool, under a tag of
+        // their own.
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         let mut style = Style::with_file_source(file_source.clone(), pixel_ratio, thread_pool);
         style.impl_.set_observer(Some(Rc::new(StyleEvents(style_events.clone()))));
-        frontend.set_event_queue(renderer_events.clone());
         let mut transform = Transform::new(
             Rc::new(CameraEvents(events.clone())),
             map_options.constrain_mode(),
@@ -234,7 +214,7 @@ impl Map {
         );
         transform.set_north_orientation(map_options.north_orientation());
         let mut map = Map {
-            frontend,
+            updates: UpdateSlot::new(),
             transform,
             mode: map_options.map_mode(),
             pixel_ratio,
@@ -259,7 +239,6 @@ impl Map {
             tile_lod_zoom_shift: 0.0,
             tile_lod_mode: TileLodMode::Default,
             generation: 1,
-            update_generation: 0,
             style_events,
             renderer_events,
             events,
@@ -267,6 +246,40 @@ impl Map {
         };
         map.transform.resize(map_options.size())?;
         Ok(map)
+    }
+
+    // MARK: - Renderer
+
+    /// A reader of the updates that the map publishes for its renderer.
+    pub fn update_reader(&self) -> UpdateReader {
+        self.updates.reader()
+    }
+
+    /// The queue that the map's renderer reports its events to.
+    pub fn renderer_events(&self) -> RendererEvents {
+        self.renderer_events.clone()
+    }
+
+    /// Holds the map's updates back from its renderer until the matching
+    /// [`end_command_group`](Self::end_command_group), so the changes in
+    /// between show in the same frame. Groups nest, and the changes show
+    /// when the outermost group ends.
+    pub fn begin_command_group(&mut self) {
+        self.process_events();
+        self.updates.begin_group();
+    }
+
+    /// Ends the group that [`begin_command_group`](Self::begin_command_group)
+    /// began. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// when no group is open.
+    pub fn end_command_group(&mut self) -> Result<(), Error> {
+        self.process_events();
+        self.updates.end_group()
+    }
+
+    /// How many command groups are open.
+    pub fn command_group_depth(&self) -> u32 {
+        self.updates.group_depth()
     }
 
     // MARK: - Events
@@ -449,7 +462,7 @@ impl Map {
         self.generation += 1;
     }
 
-    /// Sends the renderer an update of the map's state.
+    /// Publishes an update of the map's state for the renderer.
     fn on_update(&mut self) {
         // Each update request comes from a change, so the generation grows
         // even in still mode, where no update goes out.
@@ -499,10 +512,7 @@ impl Map {
             tile_lod_mode: self.tile_lod_mode,
         };
 
-        self.update_generation += 1;
-        // `update` takes C++'s `std::shared_ptr<UpdateParameters>` as an `Arc`.
-        #[allow(clippy::arc_with_non_send_sync)]
-        self.frontend.update(Arc::new(params));
+        self.updates.publish(Arc::new(params));
     }
 
     /// Jumps the camera without handling the queued events first.
@@ -1247,9 +1257,10 @@ impl Map {
         self.generation
     }
 
-    /// Counts the updates that the map has sent to its renderer frontend.
+    /// Counts the updates that the map has published for its renderer.
+    /// An update that a command group holds back counts when it shows.
     pub fn update_generation(&self) -> u64 {
-        self.update_generation
+        self.updates.generation()
     }
 
     /// Copies the map's state.
@@ -1260,7 +1271,7 @@ impl Map {
         let free_camera = state.get_free_camera_options();
         MapSnapshot {
             generation: self.generation,
-            update_generation: self.update_generation,
+            update_generation: self.updates.generation(),
             debug: self.debug_options,
             fully_loaded: self.is_fully_loaded(),
             rendering_stats_view_enabled: self.is_rendering_stats_view_enabled(),
@@ -1300,14 +1311,6 @@ impl Map {
         Log::info(Event::General, &rule);
         self.style.impl_.dump_debug_logs();
         Log::info(Event::General, &rule);
-    }
-}
-
-impl Drop for Map {
-    fn drop(&mut self) {
-        // Reset the RendererFrontend first, so that it releases the
-        // renderer's resources before the style and the file source go.
-        self.frontend.reset();
     }
 }
 

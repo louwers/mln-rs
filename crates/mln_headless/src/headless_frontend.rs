@@ -1,11 +1,7 @@
 // Ports platform/default/include/mln/gfx/headless_frontend.hpp and
 // platform/default/src/mln/gfx/headless_frontend.cpp.
-//
-// `HeadlessFrontend` is a handle: the state lives in an `Rc`, and `Clone`
-// shares it. The Map keeps a clone as its `RendererFrontend` (C++: a
-// reference), so `frontend.render(&mut map)` works while the map holds it.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -14,7 +10,7 @@ use mln_gfx::headless_backend::HeadlessBackend as GfxHeadlessBackend;
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, ContextMode, RendererBackend, ScopeType, SwapBehaviour};
 use mln_map::{CameraOptions, Map, TransformState};
-use mln_renderer::{Renderer, RendererEvents, RendererFrontend, UpdateParameters};
+use mln_renderer::{Renderer, UpdateParameters, UpdateReader};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -34,10 +30,21 @@ struct Shared {
     backend: Rc<HeadlessBackend>,
     async_invalidate: RefCell<Option<AsyncTask>>,
     invalidate_on_update: bool,
+    glyph_cache: Arc<GlyphCache>,
+    /// Made when first used, and dropped when the attached map goes.
     renderer: RefCell<Option<Renderer>>,
-    update_parameters: RefCell<Option<Arc<UpdateParameters>>>,
+    /// The updates of the map that the frontend renders.
+    updates: RefCell<Option<UpdateReader>>,
 }
 
+/// Renders a map into an offscreen texture on the calling thread.
+///
+/// The frontend draws the latest update of the map it is attached to
+/// ([`attach`](Self::attach), which [`render`](Self::render) does too). With
+/// `invalidate_on_update`, it draws each update the map publishes on the
+/// thread's `RunLoop`. When the map goes, the frontend drops its renderer
+/// and what it held on the `RunLoop`, and makes another when next used.
+/// Clones share the renderer.
 #[derive(Clone)]
 pub struct HeadlessFrontend {
     shared: Rc<Shared>,
@@ -98,7 +105,6 @@ impl HeadlessFrontend {
     ) -> Self {
         backend.set_size(physical_size(size, pixel_ratio));
         let backend = Rc::new(backend);
-        let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
         let shared = Rc::new(Shared {
             size: Cell::new(size),
             pixel_ratio,
@@ -106,13 +112,14 @@ impl HeadlessFrontend {
             backend,
             async_invalidate: RefCell::new(None),
             invalidate_on_update,
-            renderer: RefCell::new(Some(Renderer::with_glyph_cache(renderer_backend, pixel_ratio, None, glyph_cache))),
-            update_parameters: RefCell::new(None),
+            glyph_cache,
+            renderer: RefCell::new(None),
+            updates: RefCell::new(None),
         });
         let weak: Weak<Shared> = Rc::downgrade(&shared);
         *shared.async_invalidate.borrow_mut() = Some(AsyncTask::new(move || {
             if let Some(shared) = weak.upgrade() {
-                Shared::render_frame(&shared);
+                Shared::on_wake(&shared);
             }
         }));
         HeadlessFrontend { shared }
@@ -138,10 +145,28 @@ impl HeadlessFrontend {
         }
     }
 
+    /// Renders `map` from now on: the frontend reads the map's updates, and
+    /// its renderer reports to the map. Attaching to the map it renders
+    /// already does nothing.
+    pub fn attach(&self, map: &Map) {
+        let reader = map.update_reader();
+        if self.shared.updates.borrow().as_ref().is_some_and(|updates| updates.ptr_eq(&reader)) {
+            return;
+        }
+        self.shared.renderer().set_event_queue(Some(map.renderer_events()));
+        if let Some(task) = self.shared.async_invalidate.borrow().as_ref() {
+            let sender = task.sender();
+            reader.set_waker(Some(Arc::new(move || sender.send())));
+            if self.shared.invalidate_on_update && reader.latest().is_some() {
+                task.send();
+            }
+        }
+        *self.shared.updates.borrow_mut() = Some(reader);
+    }
+
     /// `getRenderer()`: runs `f` with the renderer (C++ returns a pointer).
     pub fn with_renderer<R>(&self, f: impl FnOnce(&mut Renderer) -> R) -> R {
-        let mut renderer = self.shared.renderer.borrow_mut();
-        f(renderer.as_mut().expect("renderer"))
+        f(&mut self.shared.renderer())
     }
 
     /// `getBackend()`.
@@ -151,7 +176,7 @@ impl HeadlessFrontend {
 
     /// `getCameraOptions()`.
     pub fn get_camera_options(&self) -> CameraOptions {
-        match self.shared.update_parameters.borrow().as_ref() {
+        match self.shared.latest_parameters().as_ref() {
             // RendererState::getCameraOptions(updateParameters, padding = {})
             Some(parameters) => {
                 parameters.transform_state.get_camera_options(Some(mln_util::geo::EdgeInsets::default()))
@@ -162,7 +187,7 @@ impl HeadlessFrontend {
 
     /// `hasLayer(id)` (RendererState::hasLayer).
     pub fn has_layer(&self, id: &str) -> bool {
-        match self.shared.update_parameters.borrow().as_ref() {
+        match self.shared.latest_parameters().as_ref() {
             Some(parameters) => parameters.layers.iter().any(|layer| layer.id == id),
             None => false,
         }
@@ -170,7 +195,7 @@ impl HeadlessFrontend {
 
     /// `hasSource(id)` (RendererState::hasSource).
     pub fn has_source(&self, id: &str) -> bool {
-        match self.shared.update_parameters.borrow().as_ref() {
+        match self.shared.latest_parameters().as_ref() {
             Some(parameters) => parameters.sources.iter().any(|source| source.base().id == id),
             None => false,
         }
@@ -178,7 +203,7 @@ impl HeadlessFrontend {
 
     /// `hasImage(id)` (RendererState::hasImage).
     pub fn has_image(&self, id: &str) -> bool {
-        match self.shared.update_parameters.borrow().as_ref() {
+        match self.shared.latest_parameters().as_ref() {
             Some(parameters) => parameters.images.iter().any(|image| image.id == id),
             None => false,
         }
@@ -188,7 +213,7 @@ impl HeadlessFrontend {
     // with RendererState::pixelForLatLng/latLngForPixel inlined.
     /// `pixelForLatLng(coordinate)`.
     pub fn pixel_for_lat_lng(&self, coordinate: &mln_util::geo::LatLng) -> mln_util::geo::ScreenCoordinate {
-        match self.shared.update_parameters.borrow().as_ref() {
+        match self.shared.latest_parameters().as_ref() {
             Some(parameters) => {
                 let state = &parameters.transform_state;
                 // C++ computes the unwrapped LatLng but projects `latLng`
@@ -207,7 +232,7 @@ impl HeadlessFrontend {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
     /// infinite point.
     pub fn lat_lng_for_pixel(&self, point: &mln_util::geo::ScreenCoordinate) -> Result<mln_util::geo::LatLng, Error> {
-        match self.shared.update_parameters.borrow().as_ref() {
+        match self.shared.latest_parameters().as_ref() {
             Some(parameters) => {
                 let state = &parameters.transform_state;
                 let mut flipped_point = *point;
@@ -226,6 +251,7 @@ impl HeadlessFrontend {
     /// image error. The map handles its renderer's events meanwhile, and
     /// keeps its own events for its owner.
     pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
+        self.attach(map);
         let backend = self.shared.backend.clone();
         let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
 
@@ -267,6 +293,7 @@ impl HeadlessFrontend {
 
     /// `renderOnce(Map&)`.
     pub fn render_once(&mut self, map: &mut Map) {
+        self.attach(map);
         RunLoop::get().run_once();
         map.process_events();
     }
@@ -276,52 +303,44 @@ impl HeadlessFrontend {
     }
 
     pub fn get_transform_state(&self) -> Option<TransformState> {
-        self.shared.update_parameters.borrow().as_ref().map(|p| p.transform_state.clone())
+        self.shared.latest_parameters().map(|p| p.transform_state.clone())
     }
 }
 
 impl Shared {
+    fn renderer(&self) -> RefMut<'_, Renderer> {
+        RefMut::map(self.renderer.borrow_mut(), |renderer| {
+            renderer.get_or_insert_with(|| {
+                let backend: Rc<dyn RendererBackend> = self.backend.clone();
+                Renderer::with_glyph_cache(backend, self.pixel_ratio, None, self.glyph_cache.clone())
+            })
+        })
+    }
+
+    /// The map published an update or went.
+    fn on_wake(shared: &Rc<Shared>) {
+        let gone = shared.updates.borrow().as_ref().is_some_and(UpdateReader::is_closed);
+        if gone {
+            shared.updates.borrow_mut().take();
+            let renderer = shared.renderer.borrow_mut().take();
+            drop(renderer);
+        } else if shared.invalidate_on_update {
+            Shared::render_frame(shared);
+        }
+    }
+
+    /// The map's latest update, once the frontend is attached to a map.
+    fn latest_parameters(&self) -> Option<Arc<UpdateParameters>> {
+        Some(self.updates.borrow().as_ref()?.latest()?.parameters)
+    }
+
     fn render_frame(shared: &Rc<Shared>) {
-        let update_parameters = shared.update_parameters.borrow().clone();
-        if let Some(update_parameters) = update_parameters {
-            let mut renderer = shared.renderer.borrow_mut();
-            if let Some(renderer) = renderer.as_mut() {
-                let start_time = mln_util::time::Instant::now();
-                let backend = shared.backend.clone();
-                let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
-
-                // onStyleImageMissing might be called during a render. The
-                // user implemented method could trigger a call to
-                // MLNRenderFrontend#update which overwrites
-                // `updateParameters`. Keep our own reference so that the
-                // parameters aren't destroyed while `render(...)` is still
-                // using them.
-                renderer.render(&update_parameters);
-
-                shared.frame_time.set(start_time.elapsed().as_secs_f64());
-            }
-        }
-    }
-}
-
-impl RendererFrontend for HeadlessFrontend {
-    fn reset(&self) {
-        let renderer = self.shared.renderer.borrow_mut().take();
-        drop(renderer);
-    }
-
-    fn set_event_queue(&self, events: RendererEvents) {
-        if let Some(renderer) = self.shared.renderer.borrow_mut().as_mut() {
-            renderer.set_event_queue(Some(events));
-        }
-    }
-
-    fn update(&self, parameters: Arc<UpdateParameters>) {
-        *self.shared.update_parameters.borrow_mut() = Some(parameters);
-        if self.shared.invalidate_on_update {
-            if let Some(task) = self.shared.async_invalidate.borrow().as_ref() {
-                task.send();
-            }
+        if let Some(update_parameters) = shared.latest_parameters() {
+            let start_time = mln_util::time::Instant::now();
+            let backend = shared.backend.clone();
+            let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
+            shared.renderer().render(&update_parameters);
+            shared.frame_time.set(start_time.elapsed().as_secs_f64());
         }
     }
 }

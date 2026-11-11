@@ -4,39 +4,20 @@
 // `Style::loadURL`, the Map's style-response event and the parser. Needs
 // network access.
 
-use std::cell::Cell;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Instant;
 
 use mln_actor::{RunLoop, Timer};
 use mln_map::{Map, MapEvent, MapOptions};
-use mln_renderer::{RendererEvents, RendererFrontend, UpdateParameters};
 use mln_util::chrono::Duration;
 use mln_util::size::Size;
 
 const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
 
-/// A frontend that only records updates (no renderer).
-#[derive(Clone, Default)]
-struct RecordingFrontend {
-    updates: Rc<Cell<usize>>,
-}
-
-impl RendererFrontend for RecordingFrontend {
-    fn reset(&self) {}
-    fn set_event_queue(&self, _events: RendererEvents) {}
-    fn update(&self, _parameters: Arc<UpdateParameters>) {
-        self.updates.set(self.updates.get() + 1);
-    }
-}
-
 #[test]
 #[ignore = "needs network access"]
 fn loads_liberty_over_https() {
     let run_loop = RunLoop::new();
-    let frontend = RecordingFrontend::default();
-    let mut map = Map::new(&frontend, MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0)).unwrap();
+    let mut map = Map::new(MapOptions::new().with_size(Size::new(256, 256)).with_pixel_ratio(1.0)).unwrap();
 
     map.get_style_mut().load_url(LIBERTY);
     assert!(!map.get_style().is_loaded());
@@ -71,5 +52,5 @@ fn loads_liberty_over_https() {
     assert!(layers.len() > 100, "{} layers", layers.len());
     assert_eq!("background", layers[0].get_id());
     assert!(style.get_sources().iter().any(|s| s.get_id() == "openmaptiles"));
-    assert!(frontend.updates.get() > 0);
+    assert!(map.update_generation() > 0);
 }

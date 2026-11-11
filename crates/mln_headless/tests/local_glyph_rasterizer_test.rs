@@ -93,11 +93,11 @@ impl LocalGlyphRasterizerTest {
         let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0);
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
-            &frontend,
             file_source,
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         )
         .unwrap();
+        frontend.attach(&map);
         LocalGlyphRasterizerTest { _run_loop: run_loop, frontend, map }
     }
 

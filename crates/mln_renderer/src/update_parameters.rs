@@ -10,8 +10,6 @@ use mln_style::{image, layer, light, source};
 use mln_util::chrono::TimePoint;
 use mln_util::immutable::Immutable;
 
-// Port-only Clone: a renderer on another thread than the map (a host's
-// graphics thread) receives a copy, since TransformState's caches aren't Sync.
 #[derive(Clone)]
 pub struct UpdateParameters {
     pub style_loaded: bool,
@@ -52,3 +50,9 @@ pub struct UpdateParameters {
     pub tile_lod_zoom_shift: f64,
     pub tile_lod_mode: TileLodMode,
 }
+
+// The map and a renderer on another thread share an update.
+const _: () = {
+    const fn assert_send_sync<T: Send + Sync>() {}
+    assert_send_sync::<UpdateParameters>();
+};

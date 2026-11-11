@@ -25,7 +25,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_renderer::{OverscaledTileID, RendererEvents, RendererFrontend, TileOperation, UpdateParameters};
+use mln_renderer::{OverscaledTileID, TileOperation, UpdateParameters, UpdateReader};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -1332,17 +1332,16 @@ fn continuous_rendering() {
         });
     }
 
-    let map = Rc::new(RefCell::new(
-        Map::with_resource_options(
-            &frontend,
-            MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
-            &FileSourceManager::new(),
-            &ResourceOptions::default()
-                .with_cache_path(":memory:")
-                .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
-        )
-        .unwrap(),
-    ));
+    let map = Map::with_resource_options(
+        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+        &FileSourceManager::new(),
+        &ResourceOptions::default()
+            .with_cache_path(":memory:")
+            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+    )
+    .unwrap();
+    frontend.attach(&map);
+    let map = Rc::new(RefCell::new(map));
     let _events = observer.observe(&map);
     map.borrow_mut().get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
 
@@ -2048,29 +2047,6 @@ fn prefetch_delta_override_custom_source() {
     assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
 }
 
-/// The `ForwardingHeadlessFrontend` of Map.ExpiredSpriteSheet: a
-/// HeadlessFrontend whose `update` first calls `check_params`.
-#[derive(Clone)]
-struct ForwardingHeadlessFrontend {
-    frontend: HeadlessFrontend,
-    check_params: Rc<RefCell<Option<Box<dyn Fn(&UpdateParameters)>>>>,
-}
-
-impl RendererFrontend for ForwardingHeadlessFrontend {
-    fn reset(&self) {
-        self.frontend.reset();
-    }
-    fn set_event_queue(&self, events: RendererEvents) {
-        self.frontend.set_event_queue(events);
-    }
-    fn update(&self, parameters: Arc<UpdateParameters>) {
-        if let Some(check_params) = self.check_params.borrow().as_ref() {
-            check_params(&parameters);
-        }
-        self.frontend.update(parameters);
-    }
-}
-
 // Test verifies that Style::Impl::onSpriteLoaded does not create duplicate
 // images when we get new spritesheet from the server and we merge it with
 // currently used spritesheet.
@@ -2080,7 +2056,8 @@ fn expired_sprite_sheet() {
     let server = HttpServer::new();
 
     // `MapTest<MainResourceLoader, ForwardingHeadlessFrontend>
-    // test{":memory:", ".", 1, MapMode::Continuous}`.
+    // test{":memory:", ".", 1, MapMode::Continuous}`: the frontend's
+    // check runs on the update each frame draws.
     let run_loop = RunLoop::new();
     let file_sources = FileSourceManager::new();
     let file_source = Arc::new(MainResourceLoader::new(
@@ -2088,13 +2065,13 @@ fn expired_sprite_sheet() {
         &ResourceOptions::default().with_cache_path(":memory:").with_asset_path("."),
     ));
     let observer = Rc::new(StubMapObserver::default());
-    let frontend =
-        ForwardingHeadlessFrontend { frontend: HeadlessFrontend::with_pixel_ratio(1.0), check_params: Rc::default() };
-    let options = MapOptions::new()
-        .with_map_mode(MapMode::Continuous)
-        .with_size(frontend.frontend.get_size())
-        .with_pixel_ratio(1.0);
-    let map = Rc::new(RefCell::new(Map::with_file_source(&frontend, file_source, options).unwrap()));
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let options =
+        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()).with_pixel_ratio(1.0);
+    let map = Map::with_file_source(file_source, options).unwrap();
+    frontend.attach(&map);
+    let updates = map.update_reader();
+    let map = Rc::new(RefCell::new(map));
     let _events = observer.observe(&map);
 
     // The server's own address replaces 127.0.0.1:3000 in the fixtures, as in
@@ -2107,18 +2084,18 @@ fn expired_sprite_sheet() {
     };
 
     {
-        let check_params = frontend.check_params.clone();
         let weak_observer = Rc::downgrade(&observer);
         let run_loop = run_loop.clone();
         observer.did_finish_loading_map_callback.set(move |_| {
-            *check_params.borrow_mut() = Some(Box::new(|params: &UpdateParameters| {
-                assert!(params.images.windows(2).all(|pair| pair[0].id <= pair[1].id));
-                assert!(params.images.len() < 4);
-            }));
-
             NetworkStatus::set(NetworkStatusType::Online);
 
             if let Some(observer) = weak_observer.upgrade() {
+                let updates = updates.clone();
+                observer.did_finish_rendering_frame_callback.set(move |_| {
+                    let params = updates.latest().expect("an update").parameters;
+                    assert!(params.images.windows(2).all(|pair| pair[0].id <= pair[1].id));
+                    assert!(params.images.len() < 4);
+                });
                 let run_loop = run_loop.clone();
                 observer.did_become_idle_callback.set(move |_| run_loop.stop());
             }
@@ -2702,7 +2679,6 @@ fn observe_tile_lifecycle() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
     let mut map = Map::with_resource_options(
-        &frontend,
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
         &ResourceOptions::default()
@@ -2710,6 +2686,7 @@ fn observe_tile_lifecycle() {
             .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
     )
     .unwrap();
+    frontend.attach(&map);
     map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
     let mut layer = FillLayer::new("landcover", "mapbox");
     layer.set_source_layer("landcover");
@@ -3638,27 +3615,6 @@ fn location_indicator_without_images() {
     assert_eq!(test.render().stats.num_draw_calls, 0);
 }
 
-/// The capturing `RendererFrontend` of TileSelectionOptionsPublishUpdates.
-#[derive(Clone, Default)]
-struct CapturingFrontend {
-    parameters: Rc<RefCell<Option<Arc<UpdateParameters>>>>,
-}
-
-impl CapturingFrontend {
-    fn parameters(&self) -> Arc<UpdateParameters> {
-        self.parameters.borrow().clone().expect("parameters")
-    }
-}
-
-impl RendererFrontend for CapturingFrontend {
-    fn reset(&self) {}
-    fn set_event_queue(&self, _events: RendererEvents) {}
-    fn update(&self, value: Arc<UpdateParameters>) {
-        *self.parameters.borrow_mut() = Some(value);
-    }
-    // TODO(port): getThreadPool() (not in the Rust RendererFrontend yet).
-}
-
 /// Renders a frame and returns the RGB of the pixel at the centre of the map.
 fn render_center_pixel(test: &MapTest) -> [u8; 3] {
     test.map().trigger_repaint();
@@ -3749,38 +3705,38 @@ fn layer_added_with_global_state_change_shows_new_state() {
 #[test]
 fn tile_selection_options_publish_updates() {
     let _loop = RunLoop::new();
-    let frontend = CapturingFrontend::default();
     let mut map = Map::with_file_source(
-        &frontend,
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Continuous),
     )
     .unwrap();
+    let updates = map.update_reader();
     map.get_style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
     map.process_events();
-    assert!(frontend.parameters.borrow().is_some());
+    assert!(updates.latest().is_some());
 
     fn check<T: PartialEq + std::fmt::Debug + Copy>(
         map: &mut Map,
-        frontend: &CapturingFrontend,
+        updates: &UpdateReader,
         setter: impl Fn(&mut Map, T),
         member: impl Fn(&UpdateParameters) -> T,
         value: T,
     ) {
-        let before = frontend.parameters();
+        let parameters = || updates.latest().expect("parameters").parameters;
+        let before = parameters();
         setter(map, value);
-        assert!(!Arc::ptr_eq(&before, &frontend.parameters()));
-        assert_eq!(value, member(&frontend.parameters()));
-        let after = frontend.parameters();
+        assert!(!Arc::ptr_eq(&before, &parameters()));
+        assert_eq!(value, member(&parameters()));
+        let after = parameters();
         setter(map, value);
-        assert!(Arc::ptr_eq(&after, &frontend.parameters()));
+        assert!(Arc::ptr_eq(&after, &parameters()));
     }
-    check(&mut map, &frontend, Map::set_prefetch_zoom_delta, |p| p.prefetch_zoom_delta, 2u8);
-    check(&mut map, &frontend, Map::set_tile_lod_min_radius, |p| p.tile_lod_min_radius, 4.0);
-    check(&mut map, &frontend, Map::set_tile_lod_scale, |p| p.tile_lod_scale, 2.0);
-    check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
-    check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
-    check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+    check(&mut map, &updates, Map::set_prefetch_zoom_delta, |p| p.prefetch_zoom_delta, 2u8);
+    check(&mut map, &updates, Map::set_tile_lod_min_radius, |p| p.tile_lod_min_radius, 4.0);
+    check(&mut map, &updates, Map::set_tile_lod_scale, |p| p.tile_lod_scale, 2.0);
+    check(&mut map, &updates, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
+    check(&mut map, &updates, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
+    check(&mut map, &updates, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
 }
 
 // gtest: Map.FallbackFontFacesCoverEveryFontStack
@@ -3932,10 +3888,8 @@ fn color_ramp_renders_current_state_after_unrelated_state_change_color_relief() 
 #[test]
 fn empty_size_is_an_error() {
     let _loop = RunLoop::new();
-    let frontend = CapturingFrontend::default();
     for size in [Size::new(0, 0), Size::new(256, 0), Size::new(0, 256)] {
         let result = Map::with_file_source(
-            &frontend,
             Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
             MapOptions::new().with_size(size),
         );

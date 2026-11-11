@@ -32,7 +32,6 @@ pub mod render_tile;
 pub mod render_tree;
 pub mod renderer;
 pub mod renderer_event;
-pub mod renderer_frontend;
 pub mod renderer_impl;
 pub mod source_state;
 pub mod sources;
@@ -44,6 +43,7 @@ pub mod tile_parameters;
 pub mod tile_pyramid;
 pub mod tile_render_data;
 pub mod update_parameters;
+pub mod update_slot;
 pub mod util;
 
 pub use renderer::Renderer;
@@ -51,5 +51,5 @@ pub use renderer_event::{
     FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, OverscaledTileID,
     RenderMode, RendererEvent, RendererEvents, RenderingStats, SourceLayerID, TileOperation,
 };
-pub use renderer_frontend::RendererFrontend;
 pub use update_parameters::UpdateParameters;
+pub use update_slot::{Update, UpdateReader, UpdateSlot};

@@ -138,11 +138,11 @@ fn resource_offline_usage_unset() {
 
     let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
     let mut map = Map::with_file_source(
-        &frontend,
         stubfile_source,
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
     )
     .unwrap();
+    frontend.attach(&map);
 
     map.get_style_mut().load_url("http://127.0.0.1:3000/inline_source.style.json");
     map.jump_to(&CameraOptions::default().with_center(Some(LatLng::new(0.0, 0.0).unwrap())).with_zoom(Some(0.0)));

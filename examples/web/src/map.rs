@@ -12,10 +12,11 @@ use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
     AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapEvent, MapOptions,
+    UpdateReader,
 };
+use mln_renderer::Renderer;
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
-use mln_renderer::{Renderer, RendererEvents, RendererFrontend, UpdateParameters};
 use mln_util::LatLng;
 use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
@@ -64,56 +65,35 @@ fn wake_host() {
     });
 }
 
-/// What `GLFWRendererFrontend` holds: the renderer and the map's latest
-/// update until the next frame draws it.
-struct FrontendState {
+/// Draws the map's updates on the canvas.
+struct Frontend {
     backend: Rc<SurfaceBackend>,
-    renderer: RefCell<Option<Renderer>>,
-    parameters: RefCell<Option<Arc<UpdateParameters>>>,
-    dirty: Cell<bool>,
+    renderer: Renderer,
+    updates: UpdateReader,
+    /// The generation of the update the renderer drew last.
+    drawn_update: u64,
+    /// Draw the latest update again, though the renderer drew it.
+    redraw: bool,
 }
-
-#[derive(Clone)]
-struct Frontend(Rc<FrontendState>);
 
 impl Frontend {
     /// Draws the latest update if it is new; returns whether it drew.
-    fn render(&self) -> bool {
-        let state = &self.0;
-        if !state.dirty.get() {
-            return false;
-        }
-        let Some(parameters) = state.parameters.borrow().clone() else {
+    fn render(&mut self) -> bool {
+        let Some(update) = self.updates.latest() else {
             return false;
         };
-        if !state.backend.acquire_next_texture() {
+        if !self.redraw && update.generation == self.drawn_update {
             return false;
         }
-        state.dirty.set(false);
-        let backend: &dyn RendererBackend = &*state.backend;
+        if !self.backend.acquire_next_texture() {
+            return false;
+        }
+        self.redraw = false;
+        self.drawn_update = update.generation;
+        let backend: &dyn RendererBackend = &*self.backend;
         let _scope = BackendScope::new(backend, ScopeType::Implicit);
-        if let Some(renderer) = state.renderer.borrow_mut().as_mut() {
-            renderer.render(&parameters);
-        }
+        self.renderer.render(&update.parameters);
         true
-    }
-}
-
-impl RendererFrontend for Frontend {
-    fn reset(&self) {
-        let renderer = self.0.renderer.borrow_mut().take();
-        drop(renderer);
-    }
-
-    fn set_event_queue(&self, events: RendererEvents) {
-        if let Some(renderer) = self.0.renderer.borrow_mut().as_mut() {
-            renderer.set_event_queue(Some(events));
-        }
-    }
-
-    fn update(&self, parameters: Arc<UpdateParameters>) {
-        *self.0.parameters.borrow_mut() = Some(parameters);
-        self.0.dirty.set(true);
     }
 }
 
@@ -137,9 +117,9 @@ pub fn set_preloads(take: js_sys::Function) {
 /// (web/map-worker.ts).
 #[wasm_bindgen]
 pub struct WebMap {
-    // Dropped first: the map resets the renderer through the frontend.
-    map: Map,
+    // Dropped first, before the map.
     frontend: Frontend,
+    map: Map,
     /// The map finished loading its style.
     loaded: bool,
     run_loop: RunLoop,
@@ -230,18 +210,14 @@ impl WebMap {
         let count = workers as usize;
         let transport = SerializingTransport::new(|_| Box::new(WebWorkers { count, post }));
         renderer.set_tile_worker_transport(transport.clone());
-        let frontend = Frontend(Rc::new(FrontendState {
-            backend,
-            renderer: RefCell::new(Some(renderer)),
-            parameters: RefCell::new(None),
-            dirty: Cell::new(false),
-        }));
-        let mut map = Map::new(&frontend, MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32))
-            .map_err(js_error)?;
+        let mut map =
+            Map::new(MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32)).map_err(js_error)?;
         map.set_waker(Some(Arc::new(wake_host)));
+        renderer.set_event_queue(Some(map.renderer_events()));
+        let frontend = Frontend { backend, renderer, updates: map.update_reader(), drawn_update: 0, redraw: false };
         Ok(WebMap {
-            map,
             frontend,
+            map,
             loaded: false,
             run_loop,
             scheduler,
@@ -336,7 +312,7 @@ impl WebMap {
     /// Resizes the map and its surface to `width` x `height` CSS pixels.
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
         let size = Size::new(width.max(1), height.max(1));
-        self.frontend.0.backend.set_framebuffer_size(physical(size, self.pixel_ratio));
+        self.frontend.backend.set_framebuffer_size(physical(size, self.pixel_ratio));
         self.map.set_size(size).map_err(js_error)
     }
 
@@ -485,15 +461,15 @@ impl WebMap {
 
     /// Draws the map's latest update again with the next frame and copies
     /// it (see `take_pixels`).
-    pub fn request_pixels(&self) {
-        self.frontend.0.backend.request_readback();
-        self.frontend.0.dirty.set(true);
+    pub fn request_pixels(&mut self) {
+        self.frontend.backend.request_readback();
+        self.frontend.redraw = true;
     }
 
     /// The frame `request_pixels` asked for, as RGBA rows of the canvas's
     /// physical size, once the GPU has copied it; until then undefined.
     pub fn take_pixels(&self) -> Option<Vec<u8>> {
-        self.frontend.0.backend.take_readback().map(|image| image.data.to_vec())
+        self.frontend.backend.take_readback().map(|image| image.data.to_vec())
     }
 }
 
