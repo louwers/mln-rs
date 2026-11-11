@@ -10,9 +10,6 @@
 // TileJSON response handler applies the overrides) and `VectorSource` /
 // `RasterSource` wrap it. Like GeoJSONSource, a TileSource is a handle to
 // an `Rc`'d state (see source.rs).
-//
-// TODO(port): `util::mapbox::canonicalizeSourceURL` / `canonicalizeTileset`
-// (only change URLs with the tile server's scheme alias, e.g. mapbox://).
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -24,6 +21,8 @@ use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::exception::{RuntimeError, StyleParseException};
 use mln_util::immutable::Immutable;
+use mln_util::mapbox::{canonicalize_source_url, canonicalize_tileset};
+use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
 use crate::conversion::Error;
@@ -186,16 +185,23 @@ fn with_derived(this: &TileSource, f: impl FnOnce(&dyn Source)) {
     }
 }
 
-/// `loadDescription`'s response handler.
-fn on_description_response(weak: &Weak<Inner>, res: Response) {
+/// `loadDescription`'s response handler, for the TileJSON at `url` (already
+/// canonicalized).
+fn on_description_response(weak: &Weak<Inner>, url: &str, tile_server_options: &TileServerOptions, res: Response) {
     let Some(inner) = weak.upgrade() else {
         return;
     };
     let this = TileSource { inner };
-    with_derived(&this, |derived| on_description_response_for(&this, derived, res));
+    with_derived(&this, |derived| on_description_response_for(&this, derived, url, tile_server_options, res));
 }
 
-fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: Response) {
+fn on_description_response_for(
+    this: &TileSource,
+    derived: &dyn Source,
+    url: &str,
+    tile_server_options: &TileServerOptions,
+    res: Response,
+) {
     let observer = this.inner.base.observer();
     let this_source = derived;
     if let Some(error) = &res.error {
@@ -211,7 +217,10 @@ fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: Res
             observer.on_source_error(this_source, StyleParseException::ptr(error.message));
             return;
         };
-        // TODO(port): canonicalizeTileset for the "mapbox" scheme alias.
+        if tile_server_options.uri_scheme_alias() == "mapbox" {
+            let raster = matches!(this.get_type(), SourceType::Raster | SourceType::RasterDEM);
+            canonicalize_tileset(tile_server_options, &mut tileset, url, raster, this.get_tile_size());
+        }
 
         this.set_tileset_overrides(&mut tileset);
 
@@ -257,13 +266,17 @@ impl Source for TileSource {
             return;
         }
 
-        // TODO(port): util::mapbox::canonicalizeSourceURL(tileServerOptions,
-        // rawURL).
-        let url = raw_url;
+        // C++ reads the tile server options again when the TileJSON arrives;
+        // the callback can't borrow the file source, so it gets them as they
+        // are now.
+        let tile_server_options = file_source.get_resource_options().tile_server_options();
+        let url = canonicalize_source_url(&tile_server_options, &raw_url);
 
         let weak = Rc::downgrade(&self.inner);
-        let req = file_source
-            .request(&Resource::source(&url), Box::new(move |res: Response| on_description_response(&weak, res)));
+        let req = file_source.request(
+            &Resource::source(&url),
+            Box::new(move |res: Response| on_description_response(&weak, &url, &tile_server_options, res)),
+        );
         *self.inner.req.borrow_mut() = Some(req);
     }
 

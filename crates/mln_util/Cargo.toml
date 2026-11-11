@@ -23,6 +23,7 @@ flate2.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
 rapidjson.workspace = true
+regex-lite.workspace = true
 serde.workspace = true
 web-time.workspace = true
 

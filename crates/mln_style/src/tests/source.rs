@@ -6,14 +6,16 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
+use mln_storage::resource_options::ResourceOptions;
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{Kind, Response};
+use mln_storage::{FileSource, Kind, Response};
 use mln_style_types::SourceType;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
+use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
 use crate::conversion::tileset::SourceOptions;
@@ -305,6 +307,112 @@ fn raster_dem_tile_json_zoom_kept_without_inline_override() {
     let tileset = tileset_loaded_from_tilejson(&source);
     assert_eq!(4, tileset.zoom_range.min);
     assert_eq!(12, tileset.zoom_range.max);
+}
+
+/// Loads `source`'s description, with `tile_server_options`, from a TileJSON
+/// whose only tile URL is `tile_url`; returns the URL the TileJSON was
+/// requested from and the tile URLs the source has once it's loaded.
+fn load_tilejson_tiles(
+    source: &dyn Source,
+    tile_server_options: TileServerOptions,
+    tile_url: &str,
+) -> (String, Vec<String>) {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    file_source.set_resource_options(ResourceOptions::new().with_tile_server_options(tile_server_options));
+    let requested = Rc::new(RefCell::new(String::new()));
+    {
+        let requested = requested.clone();
+        let tile_json = format!(r#"{{ "tilejson": "2.1.0", "tiles": [ "{tile_url}" ] }}"#);
+        file_source.set_response(Kind::Source, move |resource| {
+            *requested.borrow_mut() = resource.url.clone();
+            let mut response = Response::new();
+            response.data = Some(Arc::new(tile_json.clone().into_bytes()));
+            Some(response)
+        });
+    }
+
+    let tiles = Rc::new(RefCell::new(None));
+    let observer = Rc::new(StubStyleObserver::default());
+    {
+        let tiles = tiles.clone();
+        let handle = run_loop.handle();
+        *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
+            let impl_ = source.base_impl();
+            let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
+            *tiles.borrow_mut() = impl_.tileset.as_ref().map(|tileset| tileset.tiles.clone());
+            handle.stop();
+        }));
+    }
+
+    source.set_observer(Some(observer.clone()));
+    source.load_description(&file_source);
+    run_loop.run();
+    (requested.take(), tiles.take().expect("a tileset"))
+}
+
+#[test]
+fn vector_source_canonicalizes_mapbox_tile_urls() {
+    let source = VectorSource::new(
+        "source",
+        UrlOrTileset::Url("mapbox://mapbox.streets".to_owned()),
+        None,
+        None,
+        VectorEncoding::Mapbox,
+    );
+    let (requested, tiles) = load_tilejson_tiles(
+        &source,
+        TileServerOptions::mapbox_configuration(),
+        "https://a.tiles.mapbox.com/v4/mapbox.streets/{z}/{x}/{y}.vector.pbf?access_token=key",
+    );
+    assert_eq!("mapbox://mapbox.streets", requested);
+    assert_eq!(vec!["mapbox://tiles/mapbox.streets/{z}/{x}/{y}.vector.pbf".to_owned()], tiles);
+}
+
+#[test]
+fn raster_sources_canonicalize_mapbox_tiles_by_tile_size() {
+    let tile_url = "https://a.tiles.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.png?access_token=key";
+    for (source_type, tile_size, expected) in [
+        (SourceType::Raster, 256, "mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png"),
+        (SourceType::Raster, 512, "mapbox://tiles/mapbox.satellite/{z}/{x}/{y}@2x.png"),
+    ] {
+        let source = RasterSource::new(
+            "source",
+            UrlOrTileset::Url("mapbox://mapbox.satellite".to_owned()),
+            tile_size,
+            source_type,
+            None,
+            None,
+        );
+        let (requested, tiles) = load_tilejson_tiles(&source, TileServerOptions::mapbox_configuration(), tile_url);
+        assert_eq!("mapbox://mapbox.satellite", requested);
+        assert_eq!(vec![expected.to_owned()], tiles);
+    }
+
+    let source = RasterDEMSource::new("source", UrlOrTileset::Url("mapbox://mapbox.terrain-rgb".to_owned()), 256, None);
+    let (_, tiles) = load_tilejson_tiles(
+        &source,
+        TileServerOptions::mapbox_configuration(),
+        "https://a.tiles.mapbox.com/v4/mapbox.terrain-rgb/{z}/{x}/{y}.pngraw?access_token=key",
+    );
+    assert_eq!(vec!["mapbox://tiles/mapbox.terrain-rgb/{z}/{x}/{y}{ratio}.pngraw".to_owned()], tiles);
+}
+
+/// The source URL is canonicalized with any tile server, the TileJSON's tile
+/// URLs only with the "mapbox" scheme alias.
+#[test]
+fn vector_source_keeps_maptiler_tile_urls() {
+    let tile_url = "https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=abc";
+    let source = VectorSource::new(
+        "source",
+        UrlOrTileset::Url("https://api.maptiler.com/tiles/streets/tiles.json?key=abc".to_owned()),
+        None,
+        None,
+        VectorEncoding::Mapbox,
+    );
+    let (requested, tiles) = load_tilejson_tiles(&source, TileServerOptions::map_tiler_configuration(), tile_url);
+    assert_eq!("maptiler://sources/streets", requested);
+    assert_eq!(vec![tile_url.to_owned()], tiles);
 }
 
 // gtest: Source.ImageSourceImageUpdate

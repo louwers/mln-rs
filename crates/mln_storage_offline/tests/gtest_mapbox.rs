@@ -1,5 +1,6 @@
-// Ports test/util/mapbox.test.cpp: the normalize* half of util/mapbox.cpp
-// is mln_util::mapbox, the canonicalize* half this crate's mapbox module.
+// Ports test/util/mapbox.test.cpp (util/mapbox.cpp is mln_util::mapbox). The
+// canonicalize* calls go through this crate's mapbox module, which takes a
+// `SourceType` as C++ does.
 
 use mln_storage_offline::mapbox::{
     canonicalize_glyph_url, canonicalize_source_url, canonicalize_sprite_url, canonicalize_tile_url,
