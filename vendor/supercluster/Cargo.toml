@@ -19,7 +19,6 @@ doctest = false
 feature.workspace = true
 geometry.workspace = true
 kdbush.workspace = true
-libstdcxx.workspace = true
 
 # Port of supercluster/test/test.cpp over test/fixtures/places.json, read in
 # place.

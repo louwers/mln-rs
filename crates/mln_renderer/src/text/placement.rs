@@ -1516,19 +1516,12 @@ impl Placement {
             && self.is_tilted_view()
         {
             let symbols = &state.symbol_instances;
-            libstdcxx::stable_sort_by(&mut sorted_symbols, |&a, &b| {
-                let a_placement = previous_placement.get_symbol_placement(&symbols[a]);
-                let b_placement = previous_placement.get_symbol_placement(&symbols[b]);
-                let Some(a_placement) = a_placement else {
-                    // a < b, if 'a' is new and if 'b' was previously hidden.
-                    return b_placement.is_some_and(|b| !b.placed());
-                };
-                let Some(b_placement) = b_placement else {
-                    // a < b, if 'b' is new and 'a' was previously shown.
-                    return a_placement.placed();
-                };
-                // a < b, if 'a' was shown and 'b' was hidden.
-                a_placement.placed() && !b_placement.placed()
+            // The symbols shown before first, then the new ones, then the
+            // ones hidden before.
+            sorted_symbols.sort_by_key(|&i| match previous_placement.get_symbol_placement(&symbols[i]) {
+                Some(placement) if placement.placed() => 0,
+                None => 1,
+                Some(_) => 2,
             });
         }
         sorted_symbols
@@ -2460,32 +2453,21 @@ impl Placement {
 
         let intersections = std::mem::take(&mut self.tile_state().intersections);
         let mut order: Vec<usize> = (0..intersections.len()).collect();
-        libstdcxx::sort_by(&mut order, |&ia, &ib| {
+        order.sort_by(|&ia, &ib| {
             let a = &intersections[ia];
             let b = &intersections[ib];
-            if a.priority != b.priority {
-                return a.priority < b.priority;
-            }
-            let flags_a = a.status.flags;
-            let flags_b = b.status.flags;
-            // Items arranged as: VerticalBorders & HorizontalBorders (3) ->
-            // VerticalBorders (2) -> HorizontalBorders (1)
-            if flags_a != flags_b {
-                return flags_a > flags_b;
-            }
-            // If both intersects the same border(s), look for a more noticeable cut-off.
-            if a.status.min_section_length != b.status.min_section_length {
-                return a.status.min_section_length > b.status.min_section_length;
-            }
-            // Look at the anchor coordinates
-            if a.anchor_point.y != b.anchor_point.y {
-                return a.anchor_point.y < b.anchor_point.y;
-            }
-            if a.anchor_point.x != b.anchor_point.x {
-                return a.anchor_point.x < b.anchor_point.x;
-            }
-            // Finally, looking at the key hashes.
-            hash_u16string(&a.key) < hash_u16string(&b.key)
+            a.priority
+                .cmp(&b.priority)
+                // Items arranged as: VerticalBorders & HorizontalBorders (3) ->
+                // VerticalBorders (2) -> HorizontalBorders (1)
+                .then(b.status.flags.cmp(&a.status.flags))
+                // If both intersects the same border(s), look for a more noticeable cut-off.
+                .then(b.status.min_section_length.cmp(&a.status.min_section_length))
+                // Look at the anchor coordinates
+                .then(a.anchor_point.y.total_cmp(&b.anchor_point.y))
+                .then(a.anchor_point.x.total_cmp(&b.anchor_point.x))
+                // Finally, looking at the key hashes.
+                .then_with(|| hash_u16string(&a.key).cmp(&hash_u16string(&b.key)))
         });
         // Place intersections.
         let transform_state = self.collision_index.get_transform_state().clone();

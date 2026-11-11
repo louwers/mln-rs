@@ -655,9 +655,10 @@ impl RenderTileSource {
         if sorted.is_none() {
             let source_bearing = self.bearing;
             let tiles = &self.render_tiles;
-            let comp = |a: &usize, b: &usize| -> bool {
-                let a = &tiles[*a];
-                let b = &tiles[*b];
+            let mut indices: Vec<usize> = (0..tiles.len()).collect();
+            indices.sort_by(|&a, &b| {
+                let a = &tiles[a];
+                let b = &tiles[b];
                 let pa = Point::new(a.id.canonical.x as f32, a.id.canonical.y as f32);
                 let pb = Point::new(b.id.canonical.x as f32, b.id.canonical.y as f32);
 
@@ -665,21 +666,8 @@ impl RenderTileSource {
                 let pbr = rotate(pb, source_bearing);
 
                 // std::tie(b.z, par.y, par.x) < std::tie(a.z, pbr.y, pbr.x)
-                let (l0, l1, l2) = (b.id.canonical.z, par.y, par.x);
-                let (r0, r1, r2) = (a.id.canonical.z, pbr.y, pbr.x);
-                if l0 != r0 {
-                    return l0 < r0;
-                }
-                if l1 < r1 {
-                    return true;
-                }
-                if r1 < l1 {
-                    return false;
-                }
-                l2 < r2
-            };
-            let mut indices: Vec<usize> = (0..tiles.len()).collect();
-            libstdcxx::sort_by(&mut indices, comp);
+                b.id.canonical.z.cmp(&a.id.canonical.z).then(par.y.total_cmp(&pbr.y)).then(par.x.total_cmp(&pbr.x))
+            });
             *sorted = Some(RenderTiles::new(self.render_tiles.clone(), indices));
         }
         sorted.clone()

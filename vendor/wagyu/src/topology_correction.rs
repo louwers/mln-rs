@@ -10,9 +10,8 @@
 // `for (auto c : ring->children)` captures the vector's length first, as the
 // range-for captures end().
 
+use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet, VecDeque};
-
-use libstdcxx::stable_sort_by as stable_sort;
 
 use crate::point::{NIL, PointPtr, RingPtr};
 use crate::ring::{
@@ -140,19 +139,14 @@ fn find_intersect_loop(
     false
 }
 
-/// `point_ptr_cmp`.
-fn point_ptr_cmp(rings: &RingManager, op1: PointPtr, op2: PointPtr) -> bool {
+/// `point_ptr_cmp`: by descending y, ascending x, then descending ring
+/// depth.
+fn point_ptr_cmp(rings: &RingManager, op1: PointPtr, op2: PointPtr) -> Ordering {
     let (x1, y1) = rings.xy(op1);
     let (x2, y2) = rings.xy(op2);
-    if y1 != y2 {
-        y1 > y2
-    } else if x1 != x2 {
-        x1 < x2
-    } else {
-        let depth_1 = ring_depth(rings.ring_of(op1), rings);
-        let depth_2 = ring_depth(rings.ring_of(op2), rings);
-        depth_1 > depth_2
-    }
+    y2.cmp(&y1)
+        .then(x1.cmp(&x2))
+        .then_with(|| ring_depth(rings.ring_of(op2), rings).cmp(&ring_depth(rings.ring_of(op1), rings)))
 }
 
 /// `correct_orientations`.
@@ -184,13 +178,9 @@ fn sort_ring_points(r: RingPtr, rings: &RingManager) -> Vec<PointPtr> {
         point_itr = rings.next(point_itr);
     }
     sorted_points.push(last_point);
-    stable_sort(&mut sorted_points, |&pt1, &pt2| {
-        let (x1, y1) = rings.xy(pt1);
-        let (x2, y2) = rings.xy(pt2);
-        if y1 != y2 {
-            return y1 > y2;
-        }
-        x1 < x2
+    sorted_points.sort_by_key(|&pt| {
+        let (x, y) = rings.xy(pt);
+        (Reverse(y), x)
     });
     sorted_points
 }
@@ -393,7 +383,7 @@ fn assign_new_ring_parents(manager: &mut RingManager, original_ring: RingPtr, ne
 
     // Now we want to sort rings from the largest in absolute area to the smallest
     // as we will assign the rings with the largest areas first
-    stable_sort(new_rings, |&r1, &r2| manager.area(r1).abs() > manager.area(r2).abs());
+    new_rings.sort_by(|&r1, &r2| manager.area(r2).abs().total_cmp(&manager.area(r1).abs()));
 
     for r_itr in 0..new_rings.len() {
         let r = new_rings[r_itr];
@@ -793,26 +783,28 @@ fn correct_chained_rings(manager: &mut RingManager) -> R<()> {
     })
 }
 
-/// `sort_rings_largest_to_smallest`.
+/// `sort_rings_largest_to_smallest`: the rings without points last.
 fn sort_rings_largest_to_smallest(manager: &mut RingManager) -> Vec<RingPtr> {
     let mut sorted_rings: Vec<RingPtr> = (0..manager.rings.len()).collect();
-    stable_sort(&mut sorted_rings, |&r1, &r2| {
-        if manager.rings[r1].points == NIL || manager.rings[r2].points == NIL {
-            return manager.rings[r1].points != NIL;
+    sorted_rings.sort_by(|&r1, &r2| {
+        let (empty_1, empty_2) = (manager.rings[r1].points == NIL, manager.rings[r2].points == NIL);
+        if empty_1 || empty_2 {
+            return empty_1.cmp(&empty_2);
         }
-        manager.area(r1).abs() > manager.area(r2).abs()
+        manager.area(r2).abs().total_cmp(&manager.area(r1).abs())
     });
     sorted_rings
 }
 
-/// `sort_rings_smallest_to_largest`.
+/// `sort_rings_smallest_to_largest`: the rings without points last.
 fn sort_rings_smallest_to_largest(manager: &mut RingManager) -> Vec<RingPtr> {
     let mut sorted_rings: Vec<RingPtr> = (0..manager.rings.len()).collect();
-    stable_sort(&mut sorted_rings, |&r1, &r2| {
-        if manager.rings[r1].points == NIL || manager.rings[r2].points == NIL {
-            return manager.rings[r1].points != NIL;
+    sorted_rings.sort_by(|&r1, &r2| {
+        let (empty_1, empty_2) = (manager.rings[r1].points == NIL, manager.rings[r2].points == NIL);
+        if empty_1 || empty_2 {
+            return empty_1.cmp(&empty_2);
         }
-        manager.area(r1).abs() < manager.area(r2).abs()
+        manager.area(r1).abs().total_cmp(&manager.area(r2).abs())
     });
     sorted_rings
 }
@@ -1281,7 +1273,7 @@ pub(crate) fn correct_topology(manager: &mut RingManager) -> R<()> {
     // Sort all the points, this will be used for the locating of chained rings
     // and the collinear edges and only needs to be done once.
     let mut all_points = std::mem::take(&mut manager.all_points);
-    stable_sort(&mut all_points, |&a, &b| point_ptr_cmp(manager, a, b));
+    all_points.sort_by(|&a, &b| point_ptr_cmp(manager, a, b));
     manager.all_points = all_points;
 
     // Initially the orientations of the rings

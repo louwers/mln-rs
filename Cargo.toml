@@ -46,7 +46,6 @@ geojson = { package = "mln-rs-geojson", path = "vendor/geojson", version = "=0.0
 geojson_vt = { package = "mln-rs-geojson-vt", path = "vendor/geojson-vt", version = "=0.0.11" }
 geometry = { package = "mln-rs-geometry", path = "vendor/geometry", version = "=0.0.11" }
 kdbush = { package = "mln-rs-kdbush", path = "vendor/kdbush", version = "=0.0.11" }
-libstdcxx = { package = "mln-rs-libstdcxx", path = "vendor/libstdcxx", version = "=0.0.11" }
 mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.11" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.11" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.11" }
@@ -299,7 +298,6 @@ geojson.workspace = true
 geojson_vt.workspace = true
 geometry.workspace = true
 kdbush.workspace = true
-libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_conversion.workspace = true
 mln_expression.workspace = true

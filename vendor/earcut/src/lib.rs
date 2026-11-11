@@ -11,10 +11,6 @@
 // The C++ nodes are pool-allocated and linked by pointers; here they live in
 // a `Vec` and link by index (`NIL` = `nullptr`). Pointer comparisons become
 // index comparisons, which is the same identity.
-//
-// `eliminateHoles` sorts the holes with `std::sort`, which is not stable:
-// holes whose leftmost points have the same x come out in libstdc++'s
-// introsort order, ported in //vendor/libstdcxx.
 
 use geometry::Point;
 
@@ -121,10 +117,6 @@ impl<N: Index> Default for Earcut<N> {
         Self::new()
     }
 }
-
-/// `static_cast<int32_t>(double)` as clang emits it on x86-64 (only
-/// reachable with in-range values from `zOrder`'s normalized inputs).
-use libstdcxx::cvt::f64_to_i32 as cast_i32;
 
 impl<N: Index> Earcut<N> {
     pub fn new() -> Self {
@@ -511,7 +503,7 @@ impl<N: Index> Earcut<N> {
             }
         }
         let nodes = &self.nodes;
-        libstdcxx::sort_by(&mut queue, |a, b| nodes[*a].x < nodes[*b].x);
+        queue.sort_by(|a, b| nodes[*a].x.total_cmp(&nodes[*b].x));
 
         // process holes from left to right
         for hole in queue {
@@ -731,8 +723,8 @@ impl<N: Index> Earcut<N> {
     // z-order of a Vertex given coords and size of the data bounding box
     fn z_order(&self, x_: f64, y_: f64) -> i32 {
         // coords are transformed into non-negative 15-bit integer range
-        let mut x = cast_i32(32767.0 * (x_ - self.min_x) * self.inv_size);
-        let mut y = cast_i32(32767.0 * (y_ - self.min_y) * self.inv_size);
+        let mut x = (32767.0 * (x_ - self.min_x) * self.inv_size) as i32;
+        let mut y = (32767.0 * (y_ - self.min_y) * self.inv_size) as i32;
 
         x = (x | (x << 8)) & 0x00FF00FF;
         x = (x | (x << 4)) & 0x0F0F0F0F;

@@ -3,7 +3,6 @@
 use feature::{Feature, Identifier, PropertyMap, Value};
 use geojson::FeatureCollection;
 use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
-use libstdcxx::cvt::f64_to_i16;
 
 use crate::types::*;
 
@@ -141,10 +140,7 @@ impl InternalTile {
         let x = f64::from(self.x);
         let y = f64::from(self.y);
         let extent = f64::from(self.extent);
-        Point::new(
-            f64_to_i16(((p.x * self.z2 - x) * extent).round()),
-            f64_to_i16(((p.y * self.z2 - y) * extent).round()),
-        )
+        Point::new(((p.x * self.z2 - x) * extent).round() as i16, ((p.y * self.z2 - y) * extent).round() as i16)
     }
 
     fn transform_multi_point(&mut self, points: &VtMultiPoint) -> MultiPoint<i16> {
