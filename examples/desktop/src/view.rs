@@ -216,7 +216,7 @@ pub(crate) fn run(launch: Launch) {
     let shared =
         Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
     let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
-    let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32);
+    let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32, None);
     let frontend = Frontend::new(renderer, renderer_backend, shared.clone());
     let map_size = logical_size(size, pixel_ratio);
 
