@@ -6,16 +6,12 @@
 // `std::set<LayerRenderItem>` (ordered and deduplicated by `index`) is a
 // `VecMap<u32, LayerRenderItem>`.
 
-use std::cell::RefCell; // layers: debug
-use std::rc::Weak;
-
 use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
 use mln_map_types::{MapDebugOptions, MapMode, TransformState};
 use mln_util::Color;
 use mln_util::chrono::TimePoint;
 use mln_vec_map::VecMap;
 
-use crate::layer_tweaker::LayerTweaker; // layers: debug
 use crate::paint_parameters::{PaintParameters, TransformParameters};
 use crate::render_layer::RenderLayerPtr;
 use crate::render_pass::RenderPass; // layers: debug
@@ -31,11 +27,6 @@ pub enum DebugType {
 /// `RenderItem::DebugLayerGroupMap` (layers: debug).
 pub type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
 
-/// The `layerGroup->addLayerTweaker(tweaker)` calls of
-/// `updateDebugDrawables`: Rust layer groups keep no tweaker list (see
-/// layer_group.rs), the orchestrator registers these (layers: debug).
-pub type DebugLayerTweakers = Vec<(LayerGroupBasePtr, Weak<RefCell<dyn LayerTweaker>>)>;
-
 /// `RenderItem`: the render items of sources (`sourceRenderItems`). The
 /// layer render items are the concrete `LayerRenderItem`.
 pub trait RenderItem {
@@ -45,14 +36,9 @@ pub trait RenderItem {
     fn get_name(&self) -> &str;
     /// `updateDebugDrawables(DebugLayerGroupMap&, PaintParameters&)`; a
     /// no-op for the items that have none (LayerRenderItem, the image
-    /// source) (layers: debug).
-    fn update_debug_drawables(
-        &self,
-        _debug_layer_groups: &mut DebugLayerGroupMap,
-        _parameters: &PaintParameters<'_>,
-        _tweakers: &mut DebugLayerTweakers,
-    ) {
-    }
+    /// source). The orchestrator gives each debug layer group its tweaker
+    /// (layers: debug).
+    fn update_debug_drawables(&self, _debug_layer_groups: &mut DebugLayerGroupMap, _parameters: &PaintParameters<'_>) {}
 }
 
 /// `LayerRenderItem`.

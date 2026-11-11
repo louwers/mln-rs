@@ -36,6 +36,7 @@ use mln_util::identity::SimpleIdentity;
 
 use crate::map_observer::{CameraChange, MapLoadError, MapObserver, RenderFrameStatus};
 use crate::map_options::MapOptions;
+use crate::rendering_stats_view::RenderingStatsView;
 use crate::transform::{Transform, TransformObserver};
 
 /// `Map::StillImageCallback`: called with `None` on success, or the error.
@@ -141,7 +142,8 @@ pub struct MapImpl {
     pub(crate) capture_rendered_features: bool,
 
     pub(crate) debug_options: Cell<MapDebugOptions>,
-    // TODO(port): renderingStatsView, annotationManager.
+    pub(crate) rendering_stats_view: RefCell<Option<RenderingStatsView>>,
+    // TODO(port): annotationManager.
     /// The stats of the last frame the renderer finished.
     pub(crate) last_frame_stats: RefCell<Option<Arc<RenderingStats>>>,
     pub(crate) style: RefCell<Style>,
@@ -197,6 +199,7 @@ impl MapImpl {
             fast_pfor_enabled: map_options.fast_pfor_enabled(),
             capture_rendered_features: map_options.rendered_feature_info(),
             debug_options: Cell::new(MapDebugOptions::NO_DEBUG),
+            rendering_stats_view: RefCell::new(None),
             last_frame_stats: RefCell::new(None),
             style: RefCell::new(Style::with_file_source(file_source.clone(), pixel_ratio, thread_pool)),
             pending_style_events: RefCell::new(Vec::new()),
@@ -427,7 +430,16 @@ impl RendererObserver for MapImpl {
     ) {
         self.renderer_fully_loaded.set(render_mode == RenderMode::Full);
 
-        // TODO(port): renderingStatsView->update(*style, *stats).
+        let stats_view_updated = match (self.rendering_stats_view.borrow_mut().as_mut(), self.style.try_borrow_mut()) {
+            (Some(view), Ok(mut style)) => {
+                view.update(&mut style, &stats);
+                true
+            }
+            _ => false,
+        };
+        if stats_view_updated {
+            self.process_pending_style_events();
+        }
 
         if self.mode == MapMode::Continuous {
             let frame_status = RenderFrameStatus {

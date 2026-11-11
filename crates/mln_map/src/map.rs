@@ -21,6 +21,7 @@ use mln_util::size::Size;
 use crate::map_impl::{MapImpl, StillImageCallback, StillImageRequest, StyleMut};
 use crate::map_observer::MapObserver;
 use crate::map_options::MapOptions;
+use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 
 pub struct Map {
     impl_: Rc<MapImpl>,
@@ -741,7 +742,7 @@ impl Map {
         self.impl_.on_update();
     }
 
-    // TODO(port): annotations, rendering stats view, rendered features.
+    // TODO(port): annotations, rendered features.
 
     // MARK: - Debug
 
@@ -752,6 +753,32 @@ impl Map {
 
     pub fn get_debug(&self) -> MapDebugOptions {
         self.impl_.debug_options.get()
+    }
+
+    /// `isRenderingStatsViewEnabled()`.
+    pub fn is_rendering_stats_view_enabled(&self) -> bool {
+        self.impl_.rendering_stats_view.borrow().is_some()
+    }
+
+    /// `enableRenderingStatsView(value)`: shows the rendering stats of the
+    /// last frames in the top right corner, with a symbol layer (and its
+    /// source) that the view adds to the style and keeps there, even when
+    /// the style is replaced. The text needs the style's glyphs. Disabling
+    /// the view removes them.
+    pub fn enable_rendering_stats_view(&mut self, value: bool) {
+        if value {
+            if self.is_rendering_stats_view_enabled() {
+                return;
+            }
+            let view = RenderingStatsView::new(RenderingStatsViewOptions::default());
+            view.create(&mut self.get_style_mut());
+            *self.impl_.rendering_stats_view.borrow_mut() = Some(view);
+        } else {
+            let view = self.impl_.rendering_stats_view.borrow_mut().take();
+            if let Some(view) = view {
+                view.destroy(&mut self.get_style_mut());
+            }
+        }
     }
 
     pub fn is_fully_loaded(&self) -> bool {

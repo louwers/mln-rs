@@ -73,6 +73,12 @@ path = "tests/gtest_memory.rs"
 name = "gtest_symbol_rendering"
 path = "tests/gtest_symbol_rendering.rs"
 
+# Map::set_debug's tile overlays and the rendering stats view. Shared fixture
+# in tests/support/mod.rs.
+[[test]]
+name = "debug_options_test"
+path = "tests/debug_options_test.rs"
+
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }

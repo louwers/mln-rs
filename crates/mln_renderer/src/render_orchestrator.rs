@@ -50,8 +50,9 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, RenderLayerPtr};
 use crate::render_source::{self, RenderSource, RenderSourceObserver, SourcePrepareParameters};
-use crate::render_tree::{LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
+use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_observer::RendererObserver;
+use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
 use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile::TileOperation;
@@ -257,6 +258,10 @@ pub struct RenderOrchestrator {
 
     /// `RenderItem::DebugLayerGroupMap debugLayerGroups` (layers: debug).
     debug_layer_groups: crate::render_tree::DebugLayerGroupMap,
+    /// The tweaker of each debug layer group, with the group it was made
+    /// for. The render items that fill the groups last one frame, so the
+    /// orchestrator owns the tweakers (layers: debug).
+    debug_layer_tweakers: VecMap<DebugType, (LayerGroupBasePtr, Rc<RefCell<PolylineLayerTweaker>>)>,
 
     // dem-heatmap: `std::vector<RenderTargetPtr> renderTargets`.
     render_targets: Vec<crate::render_target::RenderTargetPtr>,
@@ -320,8 +325,9 @@ impl RenderOrchestrator {
             global_state: None,
             layer_groups_by_layer_index: VecMap::new(),
             layer_group_tweakers: HashMap::new(),
-            debug_layer_groups: VecMap::new(), // layers: debug
-            render_targets: Vec::new(),        // dem-heatmap
+            debug_layer_groups: VecMap::new(),   // layers: debug
+            debug_layer_tweakers: VecMap::new(), // layers: debug
+            render_targets: Vec::new(),          // dem-heatmap
             pending_changes: Vec::new(),
             frame_rendered_features: FrameRenderedFeaturesMap::new(),
         }
@@ -975,6 +981,7 @@ impl RenderOrchestrator {
         self.add_changes(&mut changes);
 
         self.debug_layer_groups.clear(); // layers: debug
+        self.debug_layer_tweakers.clear(); // layers: debug
         self.render_sources.clear();
         self.render_layers.clear();
         // C++ keeps orderedLayers here and rebuilds it on the next
@@ -1084,14 +1091,28 @@ impl RenderOrchestrator {
 
     /// `updateDebugLayerGroups(renderTree, parameters)` (layers: debug).
     pub fn update_debug_layer_groups(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
-        let mut tweakers: crate::render_tree::DebugLayerTweakers = Vec::new();
         for item in render_tree.get_source_render_items() {
-            item.update_debug_drawables(&mut self.debug_layer_groups, parameters, &mut tweakers);
+            item.update_debug_drawables(&mut self.debug_layer_groups, parameters);
         }
-        // `layerGroup->addLayerTweaker(tweaker)`
-        for (layer_group, tweaker) in tweakers {
-            let id = layer_group.borrow().get_id();
-            self.layer_group_tweakers.entry(id).or_default().push(tweaker);
+
+        // `layerGroup->addLayerTweaker(tweaker)`, once per group.
+        let groups = &self.debug_layer_groups;
+        let group_tweakers = &mut self.layer_group_tweakers;
+        self.debug_layer_tweakers.retain(|type_, (group, _)| {
+            let live = groups.get(type_).is_some_and(|g| Rc::ptr_eq(g, group));
+            if !live {
+                group_tweakers.remove(&group.borrow().get_id());
+            }
+            live
+        });
+        for (type_, group) in self.debug_layer_groups.iter() {
+            if self.debug_layer_tweakers.contains_key(type_) {
+                continue;
+            }
+            let tweaker = Rc::new(RefCell::new(PolylineLayerTweaker::new(debug_line_properties(*type_))));
+            let weak: Weak<RefCell<dyn LayerTweaker>> = Rc::downgrade(&tweaker) as _;
+            self.layer_group_tweakers.entry(group.borrow().get_id()).or_default().push(weak);
+            self.debug_layer_tweakers.insert(*type_, (group.clone(), tweaker));
         }
     }
 

@@ -81,7 +81,6 @@
 "crates/mln_renderer/src/renderer_impl.rs" = 7
 "crates/mln_renderer/src/sources/render_image_source.rs" = 2
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
-"crates/mln_renderer/src/sources/render_tile_source.rs" = 1
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 3
 "crates/mln_renderer/src/text/cross_tile_symbol_index.rs" = 2
@@ -210,12 +209,11 @@
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
 "crates/mln_map/src/map.rs" = 3
-"crates/mln_map/src/map_impl.rs" = 6
+"crates/mln_map/src/map_impl.rs" = 5
 "crates/mln_map/src/map_observer.rs" = 1
 "crates/mln_map/tests/gtest_action_journal.rs" = 7
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
 "crates/mln_renderer/src/bucket.rs" = 1
-"crates/mln_renderer/src/buckets/debug_bucket.rs" = 2
 "crates/mln_renderer/src/geometry/feature_index.rs" = 1
 "crates/mln_renderer/src/gfx/fill_generator.rs" = 1
 "crates/mln_renderer/src/layermanager.rs" = 4
@@ -234,7 +232,7 @@
 "crates/mln_renderer/src/sources/mod.rs" = 1
 "crates/mln_renderer/src/sources/render_image_source.rs" = 1
 "crates/mln_renderer/src/sources/render_raster_dem_source.rs" = 1
-"crates/mln_renderer/src/sources/render_tile_source.rs" = 5
+"crates/mln_renderer/src/sources/render_tile_source.rs" = 1
 "crates/mln_renderer/src/text/placement.rs" = 2
 "crates/mln_renderer/src/tile/geometry_tile.rs" = 6
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 1

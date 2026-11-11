@@ -1,6 +1,6 @@
 // Ports include/mln/util/chrono.hpp: `Clock` (= std::chrono::steady_clock),
-// `TimePoint`, `Duration`, `Seconds`, `Milliseconds`. The wall-clock
-// timestamp helpers (rfc1123, iso8601, parseTimestamp) arrive with storage.
+// `TimePoint`, `Duration`, `Seconds`, `Milliseconds`, and the wall-clock
+// `Timestamp` with its helpers (rfc1123, iso8601, parseTimestamp).
 //
 // `Duration` is `steady_clock::duration`, i.e. `std::chrono::nanoseconds`: a
 // *signed* 64-bit count of nanoseconds. `TimePoint` is a time since the clock's
@@ -286,6 +286,12 @@ pub fn rfc1123(timestamp: Timestamp) -> String {
     format!("{}, {:02} {} {:4} {:02}:{:02}:{:02} GMT", WEEK[wday], mday, MONTHS[month], year, hour, min, sec)
 }
 
+/// `util::iso8601(Timestamp)`: e.g. "1994-11-06 08:49:37" (UTC).
+pub fn iso8601(timestamp: Timestamp) -> String {
+    let (_, mday, month, year, hour, min, sec) = gmtime(timestamp.secs_since_epoch());
+    format!("{year:04}-{:02}-{mday:02} {hour:02}:{min:02}:{sec:02}", month + 1)
+}
+
 /// `util::parseTimestamp(const char*)`: vendor/parsedate's `parse_date`
 /// (-1 when the date does not parse).
 pub fn parse_timestamp_str(timestamp: &str) -> Timestamp {
@@ -308,5 +314,12 @@ mod wall_clock_tests {
         assert_eq!(rfc1123(Timestamp::from_secs(0)), "Thu, 01 Jan 1970 00:00:00 GMT");
         assert_eq!(rfc1123(Timestamp::from_secs(951782400)), "Tue, 29 Feb 2000 00:00:00 GMT");
         assert_eq!(parse_timestamp_str(&rfc1123(Timestamp::from_secs(1445412480))), Timestamp::from_secs(1445412480));
+    }
+
+    #[test]
+    fn iso8601_format() {
+        assert_eq!(iso8601(Timestamp::from_secs(784111777)), "1994-11-06 08:49:37");
+        assert_eq!(iso8601(Timestamp::from_secs(0)), "1970-01-01 00:00:00");
+        assert_eq!(iso8601(Timestamp::from_secs(951782400)), "2000-02-29 00:00:00");
     }
 }

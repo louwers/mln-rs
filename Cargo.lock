@@ -1787,12 +1787,15 @@ name = "mln-rs-map"
 version = "0.0.10"
 dependencies = [
  "mln-rs-actor",
+ "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-map-types",
  "mln-rs-math",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
+ "mln-rs-tile-id",
  "mln-rs-util",
 ]
 
