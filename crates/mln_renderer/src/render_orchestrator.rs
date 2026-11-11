@@ -1346,7 +1346,10 @@ impl RenderOrchestrator {
             if !filtered_layers.contains_key(&layer_impl.id) {
                 continue;
             }
-            if let Some(features) = results_by_layer.remove(&layer_impl.id) {
+            if let Some(mut features) = results_by_layer.remove(&layer_impl.id) {
+                for feature in &mut features {
+                    feature.layer.clone_from(&layer_impl.id);
+                }
                 result.extend(features);
             }
         }

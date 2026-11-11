@@ -27,14 +27,21 @@ pub fn feature_id_to_string(id: &Identifier) -> Option<String> {
 }
 
 /// `mln::Feature`: a `GeoJSONFeature` (`mapbox::feature::feature<double>`)
-/// plus the source, source layer and feature state a query fills in.
+/// plus the source, source layer, style layer and feature state a query
+/// fills in.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Feature {
     pub geometry: geometry::Geometry<f64>,
     pub properties: feature::PropertyMap,
     pub id: Identifier,
     pub source: String,
+    /// The source layer a vector tile feature came from. Empty for sources
+    /// without source layers, such as GeoJSON.
     pub source_layer: String,
+    /// The style layer a rendered-feature query matched. A feature that
+    /// several layers render is returned once per layer. Empty for features
+    /// from a source-feature query.
+    pub layer: String,
     pub state: feature::PropertyMap,
 }
 

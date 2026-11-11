@@ -800,7 +800,11 @@ impl Tile for GeometryTile {
             // Go through all sourceLayers, if any
             // to gather all the features
             if let Some(layer) = data.get_layer(source_layer)? {
+                let start = result.len();
                 query_layer_source_features(&*layer, result, options, global_state, &id)?;
+                for feature in &mut result[start..] {
+                    feature.source_layer.clone_from(source_layer);
+                }
             }
         }
         Ok(())
