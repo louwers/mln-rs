@@ -346,6 +346,26 @@ impl Scene {
         });
     }
 
+    /// Sets the `selected` state of one feature.
+    pub fn select_feature(&self, source: &str, source_layer: &str, id: &str, selected: bool) {
+        self.frontend.with_renderer(|renderer| {
+            let mut state = ValueObject::new();
+            state.insert("selected".to_string(), Value::Bool(selected));
+            renderer.set_feature_state(source, Some(source_layer), id, &state);
+        });
+    }
+
+    /// The ids of the loaded features of a source layer.
+    pub fn feature_ids(&self, source: &str, source_layer: &str) -> Vec<String> {
+        self.frontend.with_renderer(|renderer| {
+            let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
+            let features = renderer.query_source_features(source, &options).expect("the source's features");
+            let ids: BTreeSet<String> =
+                features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
+            ids.into_iter().collect()
+        })
+    }
+
     fn webgpu(&self) -> &mln_webgpu::HeadlessBackend {
         self.frontend
             .get_backend()

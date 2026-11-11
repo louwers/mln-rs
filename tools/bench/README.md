@@ -33,6 +33,7 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 | `Frame/Paced` | a two-second flight from the block's north-west corner at zoom 14 to its south-east corner at zoom 15.5, past the tiles' zoom, on a 60 Hz display's clock, with only the first view loaded |
 | `Frame/Idle` | 100 ms of a settled map whose run loop draws whenever the map asks |
 | `Frame/FeatureState` | a frame of `Frame/Throughput` over the basemap with its buildings and a street overlay colored by feature state, every building and street of the loaded tiles given a state |
+| `Frame/FeatureStateHover` | a frame of `Frame/Throughput` over the basemap with its buildings colored by feature state, one building's state changing in every frame as hover highlighting does |
 | `Frame/SettleWithoutSymbols` | from a camera nudge on the basemap with its symbol layers left out, which has nothing to place, until the map stops asking for frames |
 | `Load/Concurrent` | 16 renderers on threads of their own, each from loading a real-world style on a new map to its first complete still through `HeadlessFrontend::render`, as the render tests' workers draw; the GPU devices are set up before |
 | `Load/GlyphCache/Private`, `Load/GlyphCache/Shared` | `Load/Concurrent` over the render suite's `text-font/chinese` style (500 labels, about 2,500 CJK characters over 80 glyph ranges), each renderer with a glyph cache of its own, or all sharing one `GlyphCache` |
