@@ -10,7 +10,7 @@ use mln_actor::{RunLoop, Timer};
 use mln_util::chrono::Duration;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use super::{delete_file, local_callback, req, serial, temp_path};
+use super::{local_callback, req, serial, temp_path};
 use crate::ClientOptions;
 use crate::database_file_source::DatabaseFileSource;
 use crate::file_source::{FileSource, FileSourceType};
@@ -180,28 +180,6 @@ impl Observer for FlushFailures {
 }
 
 /// Deletes a database and its journals, now and when dropped.
-struct DeleteDatabase(String);
-
-impl DeleteDatabase {
-    fn new(path: String) -> Self {
-        let cleanup = DeleteDatabase(path);
-        cleanup.delete();
-        cleanup
-    }
-
-    fn delete(&self) {
-        delete_file(&self.0);
-        delete_file(&format!("{}-wal", self.0));
-        delete_file(&format!("{}-journal", self.0));
-    }
-}
-
-impl Drop for DeleteDatabase {
-    fn drop(&mut self) {
-        self.delete();
-    }
-}
-
 struct RemoveObserver;
 
 impl Drop for RemoveObserver {
@@ -240,7 +218,6 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 fn failed_accessed_flush_waits_for_next_read() {
     let run_loop = RunLoop::new();
     let path = temp_path("maintenance.db");
-    let _delete_database = DeleteDatabase::new(path.clone());
     let resource =
         Resource::with_tile_data(Kind::Unknown, "https://example.com/maintenance", None, LoadingMethod::CacheOnly);
     let mut response = Response::new();

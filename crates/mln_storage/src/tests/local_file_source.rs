@@ -107,17 +107,8 @@ fn non_empty_file() {
 #[test]
 fn non_ascii_path() {
     // C++: <temp_directory_path>/mln-local-file-source-non-ascii.
-    let root = PathBuf::from(temp_path("mln-local-file-source-non-ascii"));
-
-    struct Cleanup(PathBuf);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-    let _cleanup = Cleanup(root.clone());
-
-    let _ = std::fs::remove_dir_all(&root);
+    let temp = temp_path("mln-local-file-source-non-ascii");
+    let root = PathBuf::from(&*temp);
 
     let directory = root.join("ké 地図");
     std::fs::create_dir_all(&directory).unwrap();

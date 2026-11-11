@@ -18,7 +18,8 @@ use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Scheme;
 
 use super::{
-    FixtureLog, Message, copy_file, cpp_path, delete_file, error, file_size, random_string, temp_path, warning,
+    FixtureLog, Message, TempPath, copy_file, cpp_path, delete_file, error, file_size, random_string, temp_path,
+    warning,
 };
 use crate::offline::{
     OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus,
@@ -34,12 +35,12 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// `filename` ("test/fixtures/offline_database/offline.db"): a fresh path.
-fn filename() -> String {
+fn filename() -> TempPath {
     temp_path("offline.db")
 }
 
 /// `filename_sideload` ("test/fixtures/offline_database/offline_sideload.db").
-fn filename_sideload() -> String {
+fn filename_sideload() -> TempPath {
     temp_path("offline_sideload.db")
 }
 
