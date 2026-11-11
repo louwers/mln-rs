@@ -255,3 +255,26 @@ fn rendering_stats_count_live_resources() {
     assert!(live(&torn_down, "num_active_textures") < live(&loaded, "num_active_textures"));
     assert!(live(&torn_down, "mem_textures") < live(&loaded, "mem_textures"));
 }
+
+// Port-only: on the globe, each frame's clip masks take the place of the
+// last frame's in the rendering stats, as the flat clip masks do, rather
+// than adding to them.
+#[test]
+fn rendering_stats_count_one_frame_of_globe_clip_masks() {
+    let test = MemoryTest::new();
+    let mut frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0);
+    let mut map = test.map(&frontend, 1.0);
+    map.get_style_mut().load_json(
+        r#"{"version": 8, "projection": {"type": "vertical-perspective"},
+            "sources": {"shape": {"type": "geojson", "data": {"type": "Polygon",
+                "coordinates": [[[-60, -40], [60, -40], [60, 40], [-60, 40], [-60, -40]]]}}},
+            "layers": [{"id": "shape", "type": "fill", "source": "shape"}]}"#,
+    );
+    frontend.render(&mut map).expect("render");
+    let first = live_resources(&frontend);
+    frontend.render(&mut map).expect("render");
+    let second = live_resources(&frontend);
+    for name in ["num_buffers", "mem_buffers"] {
+        assert_eq!(live(&second, name), live(&first, name), "{name} after the same view again");
+    }
+}
