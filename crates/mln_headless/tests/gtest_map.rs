@@ -3142,10 +3142,6 @@ fn late_style_image_renders_image_added_after_layout_synchronous_with_text() {
 }
 
 // gtest: Map.UnrelatedImagePreservesTileLayoutAndCache
-//
-// The C++ test counts StartParse tile actions; MapObserver has no
-// onTileAction here, so this counts the requests for the missing "marker"
-// image, which every layout of the point's tile makes.
 #[test]
 fn unrelated_image_preserves_tile_layout_and_cache() {
     let test = MapTest::new();
@@ -3163,8 +3159,8 @@ fn unrelated_image_preserves_tile_layout_and_cache() {
     let parses = Rc::new(Cell::new(0));
     {
         let parses = parses.clone();
-        test.observer.on_style_image_missing_callback.set(move |id| {
-            if id == "marker" {
+        test.observer.on_tile_action_callback.set(move |(op, _, _)| {
+            if op == TileOperation::StartParse {
                 parses.set(parses.get() + 1);
             }
         });
