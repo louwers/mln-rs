@@ -40,13 +40,14 @@ fn prefetch_tiles() {
     }
 
     let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
-    let mut map = Map::with_file_source(
-        &frontend,
-        observer.clone(),
+    let map = Map::with_file_source(
         file_source.clone(),
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
     )
     .unwrap();
+    frontend.attach(&map);
+    let map = Rc::new(RefCell::new(map));
+    let _events = observer.observe(&map);
 
     let tiles: Rc<RefCell<Vec<i32>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -63,17 +64,20 @@ fn prefetch_tiles() {
         });
     }
 
-    let check_tiles_for_zoom = |map: &mut Map, zoom: i32, expected: &[i32]| {
+    let check_tiles_for_zoom = |map: &RefCell<Map>, zoom: i32, expected: &[i32]| {
         tiles.borrow_mut().clear();
 
-        // Force tile reloading.
-        map.get_style_mut().load_json(&read_file("test/fixtures/map/prefetch/empty.json"));
-        map.get_style_mut().load_json(&read_file("test/fixtures/map/prefetch/style.json"));
-        map.jump_to(
-            &CameraOptions::default()
-                .with_center(Some(LatLng::new(40.726989, -73.992857).unwrap()))
-                .with_zoom(Some(f64::from(zoom))),
-        ); // Manhattan
+        {
+            let mut map = map.borrow_mut();
+            // Force tile reloading.
+            map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/empty.json"));
+            map.style_mut().load_json(&read_file("test/fixtures/map/prefetch/style.json"));
+            map.jump_to(
+                &CameraOptions::default()
+                    .with_center(Some(LatLng::new(40.726989, -73.992857).unwrap()))
+                    .with_zoom(Some(f64::from(zoom))),
+            ); // Manhattan
+        }
         run_with_timeout(&run_loop, 10);
 
         let mut actual = tiles.borrow().clone();
@@ -86,26 +90,26 @@ fn prefetch_tiles() {
     };
 
     // Check defaults, should be 4.
-    assert_eq!(map.get_prefetch_zoom_delta(), 4);
-    check_tiles_for_zoom(&mut map, 12, &[13, 13, 13, 13, 13, 13, 13, 13, 13, 9]);
+    assert_eq!(map.borrow().get_prefetch_zoom_delta(), 4);
+    check_tiles_for_zoom(&map, 12, &[13, 13, 13, 13, 13, 13, 13, 13, 13, 9]);
 
     // Setting it to 0 disables prefetching.
-    map.set_prefetch_zoom_delta(0);
+    map.borrow_mut().set_prefetch_zoom_delta(0);
 
     // No prefetching, raster tiles will use ideal
     // tiles instead of the actual zoom level, that is
     // why the zoom levels for non-prefetched tiles are
     // not the same.
-    check_tiles_for_zoom(&mut map, 10, &[11, 11, 11, 11, 11, 11, 11, 11, 11]);
+    check_tiles_for_zoom(&map, 10, &[11, 11, 11, 11, 11, 11, 11, 11, 11]);
 
-    map.set_prefetch_zoom_delta(5);
-    check_tiles_for_zoom(&mut map, 12, &[13, 13, 13, 13, 13, 13, 13, 13, 13, 8]);
+    map.borrow_mut().set_prefetch_zoom_delta(5);
+    check_tiles_for_zoom(&map, 12, &[13, 13, 13, 13, 13, 13, 13, 13, 13, 8]);
 
     // Should clamp at `minzoom`.
-    map.set_prefetch_zoom_delta(20);
-    check_tiles_for_zoom(&mut map, 10, &[11, 11, 11, 11, 11, 11, 11, 11, 11, 0]);
+    map.borrow_mut().set_prefetch_zoom_delta(20);
+    check_tiles_for_zoom(&map, 10, &[11, 11, 11, 11, 11, 11, 11, 11, 11, 0]);
 
     // Disabled again.
-    map.set_prefetch_zoom_delta(0);
-    check_tiles_for_zoom(&mut map, 13, &[14, 14, 14, 14, 14, 14, 14, 14, 14]);
+    map.borrow_mut().set_prefetch_zoom_delta(0);
+    check_tiles_for_zoom(&map, 13, &[14, 14, 14, 14, 14, 14, 14, 14, 14]);
 }

@@ -15,9 +15,15 @@ name = "mln_headless"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+# The OpenGL backend (crates/mln_gl), which MLN_RENDER_BACKEND=gl then picks
+# (headless_frontend.rs).
+gl = ["dep:mln_gl"]
+
 [dependencies]
 mln_actor.workspace = true
 mln_gfx.workspace = true
+mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
 mln_renderer.workspace = true
 mln_storage.workspace = true
@@ -41,6 +47,10 @@ path = "tests/m1_background_render_test.rs"
 [[test]]
 name = "local_glyph_rasterizer_test"
 path = "tests/local_glyph_rasterizer_test.rs"
+
+[[test]]
+name = "map_snapshot_test"
+path = "tests/map_snapshot_test.rs"
 
 # gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]

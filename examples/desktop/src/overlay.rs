@@ -1,7 +1,7 @@
 // The controls' paint, which an overlay of the window's backend draws over
-// each frame of the map (`set_overlay`): egui's own renderer on WebGPU, and
-// on Metal egui's meshes drawn in the frame's command buffer
-// (metal_overlay.rs).
+// each frame of the map (`set_overlay`): egui's own renderer on WebGPU, its
+// own painter on OpenGL ES (gl_overlay.rs), and on Metal egui's meshes drawn
+// in the frame's command buffer (metal_overlay.rs).
 
 use std::cell::RefCell;
 use std::rc::Rc;

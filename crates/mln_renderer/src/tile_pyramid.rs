@@ -480,7 +480,7 @@ impl TilePyramid {
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
         feature_state: &crate::source_state::SourceFeatureState,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::exception::ExceptionPtr> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
         use mln_map_types::tile_coordinate::TileCoordinate;
         use mln_util::constants;
 
@@ -724,7 +724,7 @@ impl TilePyramid {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         let mut result = Vec::new();
 
         for tile in self.tiles.values() {

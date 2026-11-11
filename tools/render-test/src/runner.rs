@@ -1,7 +1,7 @@
 // Ports render-test/runner.{hpp,cpp}, and `TestContext` / `TestOperation`
 // from render-test/metadata.hpp.
 //
-// C++ `TestRunner::Impl` holds the observer, `HeadlessFrontend`,
+// C++ `TestRunner::Impl` holds the `HeadlessFrontend`,
 // `FileSource` and `Map` of one map configuration, and the operations reach
 // them through `TestContext::getFrontend()` / `getMap()`. Here that pair is
 // the `TestRunnerImpl` trait: map.rs implements it over `mln_map::Map` +
@@ -76,7 +76,7 @@ pub struct ResourceOptions {
     pub api_key: String,
 }
 
-/// `TestRunner::Impl` (observer, frontend, file source and map for one
+/// `TestRunner::Impl` (frontend, file source and map for one
 /// `mapMode`/`pixelRatio`/`crossSourceCollisions` key), seen through the
 /// calls the runner and the operations make. The provided methods return
 /// `MapError::NotPorted`; implementations override what they support.
@@ -269,7 +269,7 @@ pub enum QueryGeometry {
 
 /// Creates the `TestRunner::Impl` for a test: `HeadlessFrontend(size,
 /// pixelRatio, swapBehavior(mapMode))`, the file source, and
-/// `Map(frontend, observer, MapOptions().withMapMode(..).withSize(..)
+/// `Map(frontend, MapOptions().withMapMode(..).withSize(..)
 /// .withPixelRatio(..).withCrossSourceCollisions(..), resourceOptions)`, plus
 /// `map.setBounds(BoundOptions().withMaxPitch(..))` when `maxPitch` is set.
 pub type ImplFactory =
@@ -378,7 +378,6 @@ impl TestRunner {
         self_check: bool,
         output_path: PathBuf,
     ) -> Self {
-        crate::file_source::register_proxy_file_source();
         TestRunner {
             maps: HashMap::new(),
             manifest,
@@ -1312,7 +1311,7 @@ fn self_check_image(metadata: &TestMetadata) -> PremultipliedImage {
         if filesystem::exists(dir) {
             let entries = read_expected_image_entries(dir);
             if let Some(first) = entries.first() {
-                if let Ok(image) = std::fs::read(first).map_err(|e| e.to_string()).and_then(|b| decode_image(&b)) {
+                if let Some(image) = std::fs::read(first).ok().and_then(|b| decode_image(&b).ok()) {
                     return image;
                 }
                 break;

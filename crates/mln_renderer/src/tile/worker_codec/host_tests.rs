@@ -13,7 +13,7 @@ use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer
 use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -63,7 +63,7 @@ impl WorkerInstances for Corrupting {
 struct Errors(Cell<usize>);
 
 impl TileObserver for Errors {
-    fn on_tile_error(&self, _tile: &TileBase, _error: ExceptionPtr) {
+    fn on_tile_error(&self, _tile: &TileBase, _error: Error) {
         self.0.set(self.0.get() + 1);
     }
 }

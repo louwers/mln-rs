@@ -8,7 +8,6 @@ use std::sync::Arc;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::shared_layer_properties;
 use mln_tile_id::EncodedTileData;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::serialization::shared::{self, Kind};
 use serde::ser::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -95,21 +94,6 @@ pub mod texture {
 
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Arc<DynamicTexture>>, D::Error> {
         shared::deserialize_option::<SharedTexture, D>(deserializer)
-    }
-}
-
-/// `#[serde(with)]` for an `ExceptionPtr`: its message, which the other side
-/// gets as a `RuntimeError` (as the C++ `std::exception_ptr` of a worker's
-/// `onError` would only be read for its `what()`).
-pub mod exception {
-    use super::*;
-
-    pub fn serialize<S: Serializer>(error: &ExceptionPtr, serializer: S) -> Result<S::Ok, S::Error> {
-        error.to_string().serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<ExceptionPtr, D::Error> {
-        String::deserialize(deserializer).map(RuntimeError::ptr)
     }
 }
 

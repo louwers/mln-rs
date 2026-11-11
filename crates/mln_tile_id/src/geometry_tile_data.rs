@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
 use geometry::Point;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 use mln_util::serialization::payload::shared_bytes;
 use serde::{Deserialize, Serialize};
@@ -121,12 +121,12 @@ pub trait GeometryTileFeature {
 
     /// The first exception a C++ `getValue`, `getProperties` or
     /// `getGeometries` call on this feature would have thrown (port-only).
-    fn error(&self) -> Option<ExceptionPtr> {
+    fn error(&self) -> Option<Error> {
         None
     }
 
     /// `Err` with [`error`](Self::error): where the C++ exception escapes.
-    fn check(&self) -> Result<(), ExceptionPtr> {
+    fn check(&self) -> Result<(), Error> {
         self.error().map_or(Ok(()), Err)
     }
 }
@@ -137,7 +137,7 @@ pub trait GeometryTileLayer {
 
     /// Returns the feature object at the given position within the layer.
     /// `Err`: the exception C++ throws (malformed tile, index past the end).
-    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr>;
+    fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, Error>;
 
     fn get_name(&self) -> String;
 
@@ -167,7 +167,7 @@ pub trait GeometryTileData {
 
     /// Returns the layer with the given name. `Err`: the exception C++
     /// throws (malformed tile).
-    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, ExceptionPtr>;
+    fn get_layer(&self, name: &str) -> Result<Option<Box<dyn GeometryTileLayer + '_>>, Error>;
 
     /// Port-only: what the data is made from, for a tile worker in another
     /// wasm instance, which makes the data again (mln_renderer's

@@ -28,7 +28,7 @@ use mln_storage::offline::{
 };
 use mln_storage::offline_database::OfflineDatabase;
 use mln_storage::resource::{Priority, Usage};
-use mln_storage::response::{Error as ResponseError, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{AsyncRequest, FileSource, Kind, LoadingMethod, Resource, Response};
 use mln_style::conversion::tileset::convert_json_tileset;
 use mln_style::parser::Parser;
@@ -984,7 +984,7 @@ impl Inner {
 
     fn report_unparsable(&self, resource: &Resource, error: &str) {
         let message = format!("Can't parse {}: {error}", resource.url);
-        self.observer().response_error(ResponseError::new(Reason::Other, message));
+        self.observer().response_error(ResourceError::new(Reason::Other, message));
     }
 
     fn on_mapbox_tile_count_limit_exceeded(self: &Rc<Self>) {

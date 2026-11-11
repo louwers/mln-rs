@@ -102,7 +102,7 @@ pub fn png(width: u32, height: u32) -> mln_storage::Data {
 pub struct ErrorObserver(pub std::cell::RefCell<Vec<String>>);
 
 impl mln_renderer::tile::tile_observer::TileObserver for ErrorObserver {
-    fn on_tile_error(&self, _tile: &mln_renderer::tile::TileBase, error: mln_util::exception::ExceptionPtr) {
+    fn on_tile_error(&self, _tile: &mln_renderer::tile::TileBase, error: mln_util::error::Error) {
         self.0.borrow_mut().push(error.to_string());
     }
 }

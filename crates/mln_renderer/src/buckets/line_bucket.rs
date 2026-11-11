@@ -16,7 +16,7 @@ use mln_style_types::{LineCapType, LineJoinType};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::feature::numeric_value_f64;
 use mln_util::geometry::FeatureType;
 use mln_util::immutable::Immutable;
@@ -275,7 +275,7 @@ impl Bucket for LineBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let vertex_offset = self.vertices.len();
 
         for line in geometry_collection.iter() {

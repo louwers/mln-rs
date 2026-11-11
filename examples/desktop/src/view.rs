@@ -23,7 +23,7 @@
 // closes the window; the style report prints once which layers and sources
 // the renderer skips.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -35,10 +35,10 @@ use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase,
 use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
-    MapObserver, MapOptions,
+    MapEvent, MapOptions, UpdateReader,
 };
 use mln_renderer::Renderer;
-use mln_storage::{ClientOptions, DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::PropertyValue;
 use mln_style::projection::Projection;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -52,7 +52,6 @@ use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
 use crate::backend::{Kind, SurfaceBackend};
-use crate::frontend::Frontend;
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
 use crate::settings::Settings;
@@ -78,35 +77,6 @@ pub(crate) struct Launch {
     pub proxy: EventLoopProxy<UserEvent>,
 }
 
-/// What the frontend and the map observer reach while the view is busy.
-pub struct ViewShared {
-    dirty: Cell<bool>,
-    style_loaded: Cell<bool>,
-    idle: Cell<bool>,
-}
-
-impl ViewShared {
-    /// `invalidate()`: the map has a new frame to draw.
-    pub fn invalidate(&self) {
-        self.dirty.set(true);
-    }
-}
-
-/// The view's `MapObserver`.
-struct Observer {
-    shared: Rc<ViewShared>,
-}
-
-impl MapObserver for Observer {
-    fn on_did_finish_loading_style(&self) {
-        self.shared.style_loaded.set(true);
-    }
-
-    fn on_did_become_idle(&self) {
-        self.shared.idle.set(true);
-    }
-}
-
 /// Where the app opens without `--style` or MLN_STYLE_URL.
 const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
@@ -117,14 +87,16 @@ pub(crate) fn run(launch: Launch) {
     inbox.set_waker(run_loop.handle());
 
     // Finds the system fonts while the surface and the map get ready.
-    let font_discovery = (!args.no_system_fonts).then(|| std::thread::spawn(system_fonts::fallback_font_faces));
+    let font_discovery = (!args.no_system_fonts)
+        .then(|| mln_util::thread::builder("font discovery").spawn(system_fonts::fallback_font_faces).ok())
+        .flatten();
 
     let framebuffer_size = Size::new(size.width, size.height);
     // Vsync unless benchmarking.
     let backend = match SurfaceBackend::new(args.backend, &proxy, framebuffer_size, !args.benchmark) {
         Ok(backend) => backend,
         Err(e) => {
-            Log::error(Event::GraphicsBackend, &e);
+            Log::error(Event::GraphicsBackend, e.message);
             return;
         }
     };
@@ -144,12 +116,11 @@ pub(crate) fn run(launch: Launch) {
         .with_cache_path(cache_db)
         .with_api_key(apikey)
         .with_tile_server_options(TileServerOptions::map_tiler_configuration());
-    let client_options = ClientOptions::default();
 
-    let manager = FileSourceManager::get();
-    let database_file_source = manager.get_file_source(FileSourceType::Database, &resource_options, &client_options);
+    let file_sources = FileSourceManager::new();
+    let database_file_source = file_sources.get_file_source(FileSourceType::Database, &resource_options);
     if !settings.online {
-        match manager.get_file_source(FileSourceType::Network, &resource_options, &client_options) {
+        match file_sources.get_file_source(FileSourceType::Network, &resource_options) {
             Some(online) => {
                 online.set_property("online-status", &feature::Value::Bool(false));
                 Log::warning(Event::Setup, "Application is offline.");
@@ -161,29 +132,25 @@ pub(crate) fn run(launch: Launch) {
         }
     }
 
-    let shared =
-        Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
-    let renderer_backend = backend.renderer_backend();
-    let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32, None);
-    let frontend = Frontend::new(renderer, renderer_backend, shared.clone());
+    let mut renderer = Renderer::new(backend.renderer_backend(), pixel_ratio as f32, None);
     let map_size = logical_size(size, pixel_ratio);
 
     let mut map = match Map::with_resource_options(
-        &frontend,
-        Rc::new(Observer { shared: shared.clone() }),
         MapOptions::new().with_size(map_size).with_pixel_ratio(pixel_ratio as f32),
+        &file_sources,
         &resource_options,
-        &client_options,
     ) {
         Ok(map) => map,
         Err(e) => {
-            Log::error(Event::Setup, e);
+            Log::error(Event::Setup, e.message);
             return;
         }
     };
+    renderer.set_event_queue(Some(map.renderer_events()));
+    let updates = map.update_reader();
 
     if let Err(e) = map.set_bounds(&BoundOptions::default().with_max_pitch(settings.max_pitch)) {
-        Log::warning(Event::Setup, e);
+        Log::warning(Event::Setup, e.message);
     }
     map.jump_to(
         &CameraOptions::default()
@@ -215,9 +182,13 @@ pub(crate) fn run(launch: Launch) {
         frame_interval,
         next_frame_at: Instant::now(),
         backend,
-        frontend,
+        renderer,
+        updates,
+        drawn_update: 0,
+        dirty: false,
         map,
-        shared,
+        style_loaded: false,
+        idle: false,
         gestures: GestureRecognizer::default(),
         gestures_animating: false,
         ui,
@@ -255,7 +226,7 @@ pub(crate) fn run(launch: Launch) {
             let families: Vec<&str> = faces.iter().map(|face| face.family.as_str()).collect();
             Log::info(Event::Setup, format!("Falling back to system fonts: {}", families.join(", ")));
         }
-        view.map.get_style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
+        view.map.style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
     }
     let style = view.style.clone();
     view.load_style(style);
@@ -275,11 +246,11 @@ pub(crate) fn run(launch: Launch) {
             camera.pitch.unwrap_or_default(),
         ),
     );
-    // Drop order: the map resets the renderer, then the frontend, then the
-    // backend's surface, while the window is still open.
-    let View { map, frontend, backend, .. } = view;
+    // Drop order: the renderer, then the map, then the backend's surface,
+    // while the window is still open.
+    let View { renderer, map, backend, .. } = view;
+    drop(renderer);
     drop(map);
-    drop(frontend);
     drop(backend);
 }
 
@@ -290,9 +261,9 @@ fn logical_size(size: PhysicalSize<u32>, pixel_ratio: f64) -> Size {
 }
 
 /// Logs a camera change's error (a NaN pan from the input).
-fn log_error(result: Result<(), String>) {
+fn log_error(result: Result<(), mln_util::Error>) {
     if let Err(e) = result {
-        Log::error(Event::General, &e);
+        Log::error(Event::General, e.message);
     }
 }
 
@@ -307,9 +278,18 @@ struct View {
     next_frame_at: Instant,
 
     backend: SurfaceBackend,
-    frontend: Frontend,
+    renderer: Renderer,
+    /// The map's updates for the renderer.
+    updates: UpdateReader,
+    /// The generation of the update the renderer drew last.
+    drawn_update: u64,
+    /// The view has something new to draw besides the map's updates.
+    dirty: bool,
     map: Map,
-    shared: Rc<ViewShared>,
+    /// The map loaded the current style.
+    style_loaded: bool,
+    /// The map has become idle since the view opened.
+    idle: bool,
     gestures: GestureRecognizer,
     /// The recognizer eases a scroll, and wants frames.
     gestures_animating: bool,
@@ -362,12 +342,12 @@ impl View {
 
     /// Loads `style` and names the window after it.
     fn load_style(&mut self, style: Style) {
-        self.map.get_style_mut().load_url(&style.url);
+        self.map.style_mut().load_url(&style.url);
         let name = if style.name.is_empty() { style.url.clone() } else { style.name.clone() };
         let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
         self.style = style;
         self.style_reported = false;
-        self.shared.style_loaded.set(false);
+        self.style_loaded = false;
     }
 
     /// Frames and work until the window closes. A readback that never
@@ -375,6 +355,7 @@ impl View {
     fn run(&mut self) {
         while !self.quit {
             self.run_loop.run_once();
+            self.handle_map_events();
             if self.quit {
                 break;
             }
@@ -392,21 +373,39 @@ impl View {
         }
         if self.readback_path.is_some() {
             self.backend.request_readback();
-            self.shared.dirty.set(true);
+            self.dirty = true;
             self.render();
             self.save_readback();
         }
     }
 
+    /// Lets the map handle what its renderer and its style reported, and
+    /// notes what the view waits for.
+    fn handle_map_events(&mut self) {
+        for event in self.map.drain_events() {
+            match event {
+                MapEvent::StyleLoaded => self.style_loaded = true,
+                MapEvent::Idle => self.idle = true,
+                _ => {}
+            }
+        }
+    }
+
+    /// Whether the map has a frame to draw: a new update, or what the view
+    /// marked.
+    fn needs_frame(&self) -> bool {
+        self.dirty || self.updates.generation() != self.drawn_update
+    }
+
     /// Whether a frame has something to do.
     fn frame_due(&self, now: Instant) -> bool {
-        self.shared.dirty.get()
+        self.needs_frame()
             || self.gestures_animating
             || self.benchmark
             || !self.inbox.is_empty()
             || self.ui_input.is_some()
             || self.next_deadline().is_some_and(|at| at <= now)
-            || (self.readback_path.is_some() && (self.readback_requested || self.shared.idle.get()))
+            || (self.readback_path.is_some() && (self.readback_requested || self.idle))
     }
 
     /// When a frame is due without input: the controls' repaint, the gesture
@@ -441,7 +440,7 @@ impl View {
         }
         // Wait for the display first, so that the frame takes the input that
         // came meanwhile.
-        let drawable = (self.shared.dirty.get() || !self.inbox.is_empty()) && self.backend.acquire_next_texture();
+        let drawable = (self.needs_frame() || !self.inbox.is_empty()) && self.backend.acquire_next_texture();
 
         // The map samples its animations at this frame's time.
         self.map.set_frame_time(Some(Clock::now()));
@@ -458,16 +457,16 @@ impl View {
         if let Some(dx) = std::env::var("MLN_PAN_PX").ok().and_then(|v| v.parse::<f64>().ok()) {
             let dx = if (ms / 2000.0) as i64 % 2 == 0 { dx } else { -dx };
             log_error(self.map.move_by(&ScreenCoordinate::new(dx, 0.0), &AnimationOptions::default()));
-            self.shared.invalidate();
+            self.dirty = true;
         }
 
-        if self.ui_input.is_some() || self.shared.dirty.get() || self.ui_repaint_at.is_some_and(|at| at <= now) {
+        if self.ui_input.is_some() || self.needs_frame() || self.ui_repaint_at.is_some_and(|at| at <= now) {
             self.controls_frame(now);
         }
 
         // No texture right now (e.g. a timeout while the compositor is busy,
         // or a hidden window): try again on the next frame.
-        if drawable || (self.shared.dirty.get() && self.backend.acquire_next_texture()) {
+        if drawable || (self.needs_frame() && self.backend.acquire_next_texture()) {
             self.render();
         }
         self.after_frame();
@@ -487,7 +486,7 @@ impl View {
                 if !focused {
                     // A drag the window can't see the end of ends here.
                     self.gesture(Input::Blur, at);
-                    self.frontend.with_renderer(|renderer| renderer.reduce_memory_use());
+                    self.renderer.reduce_memory_use();
                 }
             }
             Message::Close => self.quit = true,
@@ -505,11 +504,11 @@ impl View {
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
         self.backend.set_framebuffer_size(Size::new(size.width, size.height));
         self.size = logical_size(size, self.pixel_ratio);
-        // C++ throws for an empty size (a minimized window).
+        // An empty size (a minimized window) fails.
         if let Err(e) = self.map.set_size(self.size) {
-            Log::warning(Event::General, e);
+            Log::warning(Event::General, e.message);
         }
-        self.shared.invalidate();
+        self.dirty = true;
     }
 
     /// The keys the map takes, which the controls didn't: the arrows pan
@@ -548,7 +547,7 @@ impl View {
         input.time = Some(now.saturating_duration_since(self.start).as_secs_f64());
 
         let camera = self.map.get_camera_options(None);
-        let style = self.map.get_style();
+        let style = self.map.style();
         let attributions: Vec<String> = style
             .get_sources()
             .iter()
@@ -556,7 +555,6 @@ impl View {
             .filter(|attribution| !attribution.is_empty())
             .collect();
         let style_name = style.get_name();
-        drop(style);
         let status = [self.adapter.clone(), self.frame_report.clone()];
         let shown = Shown {
             styles: &self.styles,
@@ -568,7 +566,7 @@ impl View {
             attributions: &attributions,
             debug: self.map.get_debug(),
             globe: {
-                let style = self.map.get_style();
+                let style = self.map.style();
                 let type_ = style.get_projection().get_type();
                 type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
             },
@@ -593,7 +591,7 @@ impl View {
             paint.pixels_per_point = output.pixels_per_point;
             paint.textures.append(output.textures_delta);
             self.ui_shapes = output.shapes;
-            self.shared.invalidate();
+            self.dirty = true;
         }
         for action in actions {
             self.apply(action, now);
@@ -624,12 +622,12 @@ impl View {
                 let mut projection = Projection::new();
                 let type_ = if globe { ProjectionType::Globe } else { ProjectionType::Mercator };
                 projection.set_type(PropertyValue::Constant(ProjectionDefinition::new(type_)));
-                self.map.get_style_mut().set_projection(projection);
+                self.map.style_mut().set_projection(projection);
             }
             Action::ResetCache => self.reset_cache(),
             Action::SetBackend(kind) => {
                 self.next_backend = Some(kind);
-                self.shared.invalidate();
+                self.dirty = true;
             }
         }
     }
@@ -641,17 +639,23 @@ impl View {
             return;
         }
         let size = self.backend.framebuffer_size();
-        // The renderer goes before its backend. The new backend configures
-        // the window's surface before the old one goes, which leaves it as
-        // it is.
-        self.frontend.release();
-        match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
-            Ok(backend) => self.backend = backend,
-            Err(e) => Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name())),
-        }
-        let renderer_backend = self.backend.renderer_backend();
-        let renderer = Renderer::new(renderer_backend.clone(), self.pixel_ratio as f32, None);
-        self.frontend.attach(renderer, renderer_backend);
+        // The new backend configures the window's surface before the old one
+        // goes, which leaves it as it is, or has given it up.
+        self.backend.release_surface();
+        let backend = match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
+            Ok(backend) => backend,
+            Err(e) => {
+                Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
+                return;
+            }
+        };
+        let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None);
+        renderer.set_event_queue(Some(self.map.renderer_events()));
+        // The old renderer goes before its backend.
+        drop(std::mem::replace(&mut self.renderer, renderer));
+        drop(std::mem::replace(&mut self.backend, backend));
+        // The new renderer draws the map's last update again.
+        self.dirty = true;
         self.backend.set_controls_overlay(self.paint.clone());
         self.paint.borrow_mut().resend_textures(&self.ui);
         // The controls take egui's textures before the map's next frame.
@@ -676,19 +680,24 @@ impl View {
 
     /// `render()`
     fn render(&mut self) {
-        if !self.shared.dirty.get() {
+        if !self.needs_frame() {
             return;
         }
-        self.shared.dirty.set(false);
+        self.dirty = false;
+        let Some(update) = self.updates.latest() else {
+            return;
+        };
+        self.drawn_update = update.generation;
         let started = Instant::now();
         {
             let backend = self.backend.renderer_backend();
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-            self.frontend.render();
+            let _frame = BackendScope::new(&*backend, ScopeType::Implicit);
+            self.renderer.render(&update.parameters);
         }
         self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);
         if self.benchmark {
-            self.shared.invalidate();
+            self.dirty = true;
         }
     }
 
@@ -714,7 +723,7 @@ impl View {
             self.run_gesture_test();
         }
 
-        if self.shared.style_loaded.get() && !self.style_reported {
+        if self.style_loaded && !self.style_reported {
             self.style_reported = true;
             report_style(&self.map);
         }
@@ -722,10 +731,10 @@ impl View {
         if self.readback_path.is_some() {
             if self.readback_requested {
                 self.save_readback();
-            } else if self.shared.idle.get() && self.style_reported {
+            } else if self.idle && self.style_reported {
                 self.backend.request_readback();
                 self.readback_requested = true;
-                self.shared.invalidate();
+                self.dirty = true;
             }
         }
 
@@ -763,7 +772,7 @@ impl View {
 /// Prints once which layers the renderer draws and which it
 /// skips (unported layer types, or sources of unported types).
 pub fn report_style(map: &Map) {
-    let style = map.get_style();
+    let style = map.style();
     let json: serde_json::Value = serde_json::from_str(&style.get_json()).unwrap_or_default();
     let declared_sources: BTreeMap<String, String> = json
         .get("sources")

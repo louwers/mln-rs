@@ -23,7 +23,6 @@ use std::sync::{Arc, Mutex};
 use feature::Value;
 use mln_actor::{ActorRef, Thread, Timer, scheduler};
 use mln_util::chrono::Duration;
-use mln_util::client_options::ClientOptions;
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
 use mln_util::sync::MutexExt;
@@ -36,7 +35,7 @@ use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// How long cache hits' `accessed` timestamps wait, so that the reads of a
 /// map load share one write.
@@ -104,12 +103,13 @@ impl DatabaseFileSourceThread {
             None => {
                 let mut response = Response::new();
                 response.no_content = true;
-                response.error = Some(Box::new(Error::new(Reason::NotFound, "Not found in offline database")));
+                response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found in offline database")));
                 offline_response = Some(response);
             }
             Some(response) => {
                 if !response.is_usable() {
-                    response.error = Some(Box::new(Error::new(Reason::NotFound, "Cached resource is unusable")));
+                    response.error =
+                        Some(Box::new(ResourceError::new(Reason::NotFound, "Cached resource is unusable")));
                 }
             }
         }
@@ -210,7 +210,6 @@ fn into_result(error: Option<DatabaseError>) -> Result<(), DatabaseError> {
 struct Impl {
     thread: Thread<DatabaseFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
-    client_options: Mutex<ClientOptions>,
 }
 
 impl Impl {
@@ -225,23 +224,17 @@ pub struct DatabaseFileSource {
 }
 
 impl DatabaseFileSource {
-    /// `DatabaseFileSource(const ResourceOptions&, const ClientOptions&)`.
-    pub fn new(resource_options: &ResourceOptions, client_options: &ClientOptions) -> Self {
-        let online_file_source =
-            FileSourceManager::get().get_file_source(FileSourceType::Network, resource_options, client_options);
+    /// A database at `resource_options`' cache path. Offline downloads go
+    /// through `file_sources`' network file source.
+    pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
+        let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
         let cache_path = resource_options.cache_path().to_owned();
         let tile_server_options = resource_options.tile_server_options();
         // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_DATABASE).
         let thread = Thread::new("DatabaseFileSource", move |self_ref| {
             DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path, &tile_server_options)
         });
-        DatabaseFileSource {
-            impl_: Impl {
-                thread,
-                resource_options: Mutex::new(resource_options.clone()),
-                client_options: Mutex::new(client_options.clone()),
-            },
-        }
+        DatabaseFileSource { impl_: Impl { thread, resource_options: Mutex::new(resource_options.clone()) } }
     }
 
     /// `setDatabasePath(path, callback)`. The callback runs on the database
@@ -368,14 +361,6 @@ impl FileSource for DatabaseFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.impl_.resource_options.lock_unpoisoned().clone()
-    }
-
-    fn set_client_options(&self, options: ClientOptions) {
-        *self.impl_.client_options.lock_unpoisoned() = options;
-    }
-
-    fn get_client_options(&self) -> ClientOptions {
-        self.impl_.client_options.lock_unpoisoned().clone()
     }
 
     fn as_any(&self) -> Option<&dyn std::any::Any> {

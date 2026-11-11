@@ -27,6 +27,7 @@ use mln_gfx::renderable::{Renderable, RenderableBase};
 use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use objc2::rc::{Retained, autoreleasepool};
@@ -246,7 +247,7 @@ impl SurfaceBackend {
     /// whose drawables it sizes to `framebuffer_size`. With
     /// `cap_frame_rate` off, frames are presented without waiting for the
     /// display.
-    pub fn new(layer: Retained<CAMetalLayer>, framebuffer_size: Size, cap_frame_rate: bool) -> Result<Self, String> {
+    pub fn new(layer: Retained<CAMetalLayer>, framebuffer_size: Size, cap_frame_rate: bool) -> Result<Self, Error> {
         let renderer_backend = RendererBackend::new(ContextMode::Unique)?;
         layer.setDevice(Some(renderer_backend.get_device()));
         layer.setPixelFormat(COLOR_FORMAT);

@@ -12,6 +12,8 @@ coverage_lcov := 'target/llvm-cov/lcov.info'
 # The C++ core the port is ported from, for the recipes that read its sources (update-testdata, vendor-shaders, the
 # generate-* and the analysis recipes).
 cpp := justfile_directory() / '..' / 'maplibre-native'
+# maplibre-native-ffi, whose C headers and ABI suite crates/mln_c and tools/c-abi-test copy (update-ffi-abi).
+ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
 
 # The Cargo profile `just desktop` builds the app with, e.g. `just profile=release desktop`
 profile := 'dev'
@@ -20,6 +22,10 @@ profile := 'dev'
 # libraries they load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
 nixos := path_exists('/etc/NIXOS')
 dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
+
+# The tests render headless with WebGPU, or with the backend MLN_RENDER_BACKEND names. The OpenGL one (crates/mln_gl, OpenGL
+# ES 3.0 through EGL) is a Cargo feature: `MLN_RENDER_BACKEND=gl just test` builds it in.
+gl_features := if env('MLN_RENDER_BACKEND', '') == 'gl' {'--features mln-rs-headless/gl'} else {''}
 
 # if running in CI, treat warnings as errors by setting CARGO_BUILD_WARNINGS to 'deny' unless it is already set
 # Use `CI=true just ci-lint` to run the same checks as in GitHub CI.
@@ -43,6 +49,21 @@ bench-compare base='main' *args:  bench-fixtures _dev-shell
 bench-fixtures:
     python3 -I tools/bench/fixtures.py target/bench-fixtures
 
+# Configures and builds tools/c-abi-test in target/c-abi-test, against crates/mln_c's shared library, then runs it with
+# tools/c-abi-test/run.py, whose arguments follow: `--update` rewrites expected-failures.txt, `-v` prints each failure. Needs
+# CMake, a C23 and C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as lavapipe (VK_DRIVER_FILES), and
+# libwayland-server and libwayland-client, which the Wayland cases load.
+[doc("Run maplibre-native-ffi's ABI suite against crates/mln_c, and compare its failures with tools/c-abi-test/expected-failures.txt")]
+[positional-arguments]
+c-abi-test *args:  _dev-shell
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="${CARGO_TARGET_DIR:-target}"
+    {{dev_shell}} cargo build -p mln-rs-c
+    {{dev_shell}} cmake -S tools/c-abi-test -B "$target/c-abi-test" -DMLN_C_LIBRARY="$PWD/$target/debug/libmaplibre_native_c.so"
+    {{dev_shell}} cmake --build "$target/c-abi-test" --parallel
+    {{dev_shell}} python3 -I tools/c-abi-test/run.py "$target/c-abi-test/mln_native_abi_tests" "$@"
+
 # Build every package and test target
 build:  _dev-shell
     {{dev_shell}} cargo build --workspace --all-targets
@@ -53,16 +74,20 @@ check:
 
 # The browser build (wasm32-unknown-unknown, no atomics: one wasm instance per Web Worker, each with its own memory)
 # needs the target, which rust-toolchain.toml installs. Clippy, so that examples/web, which only builds there, is linted
-# too. Two runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
+# too. Three runs, since one would unify their features: the libraries as published (mln_storage's `sqlite` feature
 # on, its SQLite built through sqlite-wasm-rs, which needs a clang that targets wasm32, and the in-process font-face
-# shaper), and the browser build's two modules as `just web` builds them, which leave both out; the check fails if
-# anything turns SQLite back on there, or brings in a C build (`cc`) that would need that clang.
+# shaper), the browser build's two modules as `just web` builds them, which leave both out, and the map's module with
+# its `webgl` feature. The check fails if anything turns SQLite back on in the browser build, or brings in a C build
+# (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
+# GL bindings), which only the `webgl` module needs.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
 check-wasm:
     cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+    cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal,build --prefix none | grep -q '^cc '
+    ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -Eq '^(mln-rs-gl|glow) '
 
 # Run the Cargo tests as CI does (Linux and macOS), writing their coverage as LCOV for CI to upload to codecov.io
 ci-coverage:  env-info && (_coverage '--lcov' '--output-path' quote(coverage_lcov))
@@ -123,6 +148,11 @@ fmt *args:
     fi
     rustfmt +{{fmt_toolchain}} --config imports_granularity=Module,group_imports=StdExternalCrate {{args}} "${files[@]}"
 
+# Needs libclang, which bindgen loads at run time (LIBCLANG_PATH names its directory if it isn't found).
+[doc("Regenerate crates/mln_c's declarations (src/generated) from its C headers, with tools/c-abi-gen")]
+generate-c-abi:
+    cargo run -q -p mln-rs-c-abi-gen
+
 # Regenerate the HarfBuzz Unicode tables (crates/mln_text's, and a difftest's) from the C++ core's HarfBuzz
 generate-hb-ucd-tables:
     python3 -I crates/mln_text/tools/gen_hb_ucd.py {{quote(cpp)}} > crates/mln_text/src/hb_ucd_table.rs
@@ -162,9 +192,11 @@ desktop *args:  _dev-shell
 # shrinks it with -Oz and strips its names and other custom sections. It inlines a function with one caller only when that
 # function is small: binaryen's default inlines them at any size, which made the module bigger after brotli and slower to
 # start. Two modules, from one cargo run: the map and its tile workers (examples/web, mln_web), and the font-face shaper
-# (crates/mln_web_shaper) that the map's Web Worker loads the first time a style declares font faces. wasm-bindgen writes
-# them into examples/web/web/pkg, and Vite builds the page around them into examples/web/dist, every asset's name hashed by
-# its content; serve that over HTTP, or run `just web-dev`.
+# (crates/mln_web_shaper) that the map's Web Worker loads the first time a style declares font faces. A second cargo run
+# builds the map's module again with its `webgl` feature, for browsers without WebGPU: it draws with WebGL2, and only
+# those browsers download it. wasm-bindgen writes the modules into examples/web/web/pkg (the WebGL2 one into pkg/webgl),
+# and Vite builds the page around them into examples/web/dist, every asset's name hashed by its content; serve that over
+# HTTP, or run `just web-dev`.
 [doc('Build the browser build (the map and its tile workers in Web Workers, and its font-face shaper) and its page into examples/web/dist')]
 web:
     #!/usr/bin/env bash
@@ -173,20 +205,26 @@ web:
       # For this build only: the wasm32 target has its own directory, so native release builds keep theirs.
       export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
     fi
-    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
     target="${CARGO_TARGET_DIR:-target}/wasm32-unknown-unknown/{{if profile == 'dev' {'debug'} else {profile} }}"
     pkg=examples/web/web/pkg
     if [[ {{quote(profile)}} != dev ]]; then
       command -v wasm-opt > /dev/null ||
         { echo "error: wasm-opt not found: put binaryen's wasm-opt on the PATH (examples/web/README.md)" >&2; exit 1; }
     fi
-    for module in mln_web mln_web_shaper; do
-      wasm-bindgen --target web --out-dir "$pkg" "$target/$module.wasm"
+    # wasm-bindgen's output for a module cargo built, into a directory.
+    bind() {
+      wasm-bindgen --target web --out-dir "$2" "$target/$1.wasm"
       if [[ {{quote(profile)}} != dev ]]; then
         wasm-opt -Oz --converge --one-caller-inline-max-function-size=20 --zero-filled-memory --low-memory-unused \
-          --strip-debug --strip-producers --strip-target-features "$pkg/${module}_bg.wasm" -o "$pkg/${module}_bg.wasm"
+          --strip-debug --strip-producers --strip-target-features "$2/$1_bg.wasm" -o "$2/$1_bg.wasm"
       fi
-    done
+    }
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
+    bind mln_web "$pkg"
+    bind mln_web_shaper "$pkg"
+    # The same file again, with the feature.
+    cargo build --profile {{profile}} --target wasm32-unknown-unknown -p mln-rs-web --features webgl
+    bind mln_web "$pkg/webgl"
     pnpm -C examples/web install --frozen-lockfile
     pnpm -C examples/web build
 
@@ -323,7 +361,7 @@ release:
 # Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`.
 [positional-arguments]
 test *args:  _dev-shell
-    {{dev_shell}} cargo test --workspace "$@"
+    {{dev_shell}} cargo test --workspace {{gl_features}} "$@"
 
 # Test documentation generation
 test-doc:  (docs '')
@@ -351,7 +389,8 @@ udeps:  (cargo-install 'cargo-udeps')
 update:
     cargo update
 
-# The shared suites' directories are copied whole, so new tests come along; every other file that is there is copied again.
+# The shared suites' directories are copied whole, so new tests come along; every other file that is there, outside
+# tools/c-abi-test (update-ffi-abi), is copied again.
 # The copies are from johncarmack1984/maplibre-native's maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe branch of maplibre/maplibre-native#4533 (phased/12h), with louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the sky branch of maplibre/maplibre-native#4534 merged in.
 [doc("Refresh the copies of maplibre-native's files in the packages' testdata/ from a checkout of it")]
 update-testdata checkout=cpp:
@@ -361,9 +400,31 @@ update-testdata checkout=cpp:
             tools/expression-test/testdata/metrics/integration/expression-tests; do
         rsync -a --delete {{quote(checkout)}}/"${dir#*/testdata/}"/ "$dir"/
     done
-    git ls-files -z '*/testdata/*' | while IFS= read -r -d '' file; do
+    git ls-files -z '*/testdata/*' ':!tools/c-abi-test/testdata' | while IFS= read -r -d '' file; do
         cp {{quote(checkout)}}/"${file#*/testdata/}" "$file"
     done
+    echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
+
+# The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
+# builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
+# fix the suite's own bugs, and the declarations are regenerated. The copies are from maplibre/maplibre-native-ffi at
+# b20632a6145a.
+[doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
+update-ffi-abi checkout=ffi:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rsync -a --delete {{quote(checkout)}}/include/maplibre_native_c/ crates/mln_c/include/maplibre_native_c/
+    rsync -a --delete {{quote(checkout)}}/include/mln/ crates/mln_c/include/mln/
+    cp {{quote(checkout)}}/include/maplibre_native_c.h {{quote(checkout)}}/LICENSE crates/mln_c/include/
+    for dir in tests/native/abi tests/native/support tests/native/plugin tests/native/fixtures tests/graphics; do
+        mkdir -p "tools/c-abi-test/testdata/$dir"
+        rsync -a --delete {{quote(checkout)}}/"$dir"/ "tools/c-abi-test/testdata/$dir"/
+    done
+    cp {{quote(checkout)}}/LICENSE tools/c-abi-test/testdata/
+    for patch in tools/c-abi-test/patches/*.patch; do
+        git apply --directory=tools/c-abi-test/testdata "$patch"
+    done
+    {{just}} generate-c-abi
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
 # Rerun it when the C++ shaders change, and commit the result.
@@ -386,7 +447,7 @@ vendor-shaders checkout=cpp:
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
 _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
     cargo llvm-cov clean --workspace
-    {{dev_shell}} cargo llvm-cov --no-report --workspace
+    {{dev_shell}} cargo llvm-cov --no-report --workspace {{gl_features}}
     cargo llvm-cov report --workspace {{report_args}}
 
 # The dev shell flake (nix/flake.nix, which wraps the C++ repo's), used from a copy in .nix-shell: `nix develop path:<repo>` would copy

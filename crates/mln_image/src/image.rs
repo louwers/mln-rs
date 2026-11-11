@@ -1,5 +1,6 @@
 // Ports platform/default/src/mln/util/image.cpp
 
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 
 /// The image formats `decode_image` recognizes, by their magic bytes.
@@ -46,11 +47,14 @@ pub fn image_type(data: &[u8]) -> Option<ImageType> {
     None
 }
 
-/// The error `mln::decodeImage` throws for data it doesn't recognize.
+/// The message of the error for data of no type `decode_image` recognizes.
 pub const UNSUPPORTED: &str = "unsupported image type";
 
 /// `mln::decodeImage(const std::string&)`: dispatches on the magic bytes.
-pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, String> {
+/// Data of no type it recognizes fails with
+/// [`ErrorKind::Unsupported`](mln_util::ErrorKind), and an image that
+/// doesn't decode with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
+pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, Error> {
     match image_type(data) {
         Some(ImageType::Webp) => Ok(crate::webp_reader::decode_webp(data)),
         Some(ImageType::Png) => crate::png_reader::decode_png(data),
@@ -58,8 +62,8 @@ pub fn decode_image(data: &[u8]) -> Result<PremultipliedImage, String> {
         Some(ImageType::Jpeg) => crate::jpeg_reader::decode_jpeg(data),
         // The browser build decodes JPEG with the browser (`decoder::decode`).
         #[cfg(target_family = "wasm")]
-        Some(ImageType::Jpeg) => Err("JPEG Reader: JPEG is decoded by the browser".to_string()),
-        None => Err(UNSUPPORTED.to_string()),
+        Some(ImageType::Jpeg) => Err(Error::unsupported("JPEG Reader: JPEG is decoded by the browser")),
+        None => Err(Error::unsupported(UNSUPPORTED)),
     }
 }
 
@@ -69,8 +73,8 @@ mod tests {
 
     #[test]
     fn unsupported() {
-        assert_eq!(decode_image(b"").unwrap_err(), "unsupported image type");
-        assert_eq!(decode_image(b"GIF89a").unwrap_err(), "unsupported image type");
+        assert_eq!(decode_image(b"").unwrap_err(), Error::unsupported("unsupported image type"));
+        assert_eq!(decode_image(b"GIF89a").unwrap_err(), Error::unsupported("unsupported image type"));
     }
 }
 

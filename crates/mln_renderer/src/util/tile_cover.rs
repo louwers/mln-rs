@@ -22,6 +22,7 @@ use mln_style_types::SourceType;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::bounding_volumes::{AABB, Frustum, IntersectionResult};
 use mln_util::constants;
+use mln_util::error::Error;
 use mln_util::geo::{LatLng, LatLngBounds, ScreenCoordinate};
 use mln_util::geometry::{Geometry, Polygon};
 use mln_util::mat3::{vec3_length, vec3_scale, vec3_sub};
@@ -231,8 +232,10 @@ impl TileCover {
 
     /// `TileCover(const Geometry<double>&, uint8_t z, bool project = true)`.
     /// When project == true, projects the geometry points to tile
-    /// coordinates.
-    pub fn new_from_geometry(geom: &Geometry<f64>, z: u8, project: bool) -> Result<TileCover, String> {
+    /// coordinates, and fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a point that
+    /// isn't a valid `LatLng`.
+    pub fn new_from_geometry(geom: &Geometry<f64>, z: u8, project: bool) -> Result<TileCover, Error> {
         Ok(TileCover { impl_: Box::new(Impl::new(z as i32, geom, project)?) })
     }
 
@@ -989,7 +992,7 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
 }
 
 /// `tileCover(const Geometry<double>&, uint8_t z)`.
-pub fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, String> {
+pub fn tile_cover_geometry(geometry: &Geometry<f64>, z: u8) -> Result<Vec<UnwrappedTileID>, Error> {
     let mut result = Vec::new();
     let mut tc = TileCover::new_from_geometry(geometry, z, true)?;
     while tc.has_next() {
@@ -1024,7 +1027,7 @@ pub fn tile_count_bounds(bounds: &LatLngBounds, zoom: u8) -> u64 {
 }
 
 /// `tileCount(const Geometry<double>&, uint8_t z)`.
-pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, String> {
+pub fn tile_count_geometry(geometry: &Geometry<f64>, z: u8) -> Result<u64, Error> {
     let mut tile_count: u64 = 0;
 
     let mut tc = TileCover::new_from_geometry(geometry, z, true)?;

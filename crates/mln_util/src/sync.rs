@@ -72,6 +72,41 @@ impl CondvarExt for Condvar {
     }
 }
 
+/// A [`std::cell::Cell`] that threads can share: each call takes a lock
+/// for as long as it reads or writes the value.
+#[derive(Debug, Default)]
+pub struct SyncCell<T> {
+    value: Mutex<T>,
+}
+
+impl<T> SyncCell<T> {
+    pub const fn new(value: T) -> Self {
+        SyncCell { value: Mutex::new(value) }
+    }
+
+    pub fn set(&self, value: T) {
+        *self.value.lock_unpoisoned() = value;
+    }
+
+    pub fn replace(&self, value: T) -> T {
+        std::mem::replace(&mut *self.value.lock_unpoisoned(), value)
+    }
+
+    pub fn get(&self) -> T
+    where
+        T: Copy,
+    {
+        *self.value.lock_unpoisoned()
+    }
+
+    pub fn take(&self) -> T
+    where
+        T: Default,
+    {
+        std::mem::take(&mut *self.value.lock_unpoisoned())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Condvar, Mutex, RwLock};

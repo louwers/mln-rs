@@ -1,14 +1,9 @@
 // Ports platform/default/include/mln/storage/offline_database.hpp and
 // platform/default/src/mln/storage/offline_database.cpp.
 //
-// C++ throws and catches `mapbox::sqlite::Exception`, `util::IOException`,
-// `MapboxTileLimitExceededException`, `std::runtime_error` and logic errors
-// (`catch (...)`); here they are the `DatabaseError` variants, returned
-// through `Result` and handled by `handle_error` as in C++. Methods that
-// return a `std::exception_ptr` return `Option<DatabaseError>`; methods that
-// return `expected<T, std::exception_ptr>` return `Result<T, DatabaseError>`.
-// `putRegionResource(s)`, which let `MapboxTileLimitExceededException`
-// escape, return it as `Err`.
+// Failures are `DatabaseError`s, returned through `Result` and handled by
+// `handle_error`. `put_region_resource(s)` report only the tile count limit,
+// as `TileCountLimitExceeded`, and handle every other error themselves.
 //
 // Prepared statements are rusqlite's per-connection statement cache
 // (`prepare_cached`) instead of the `statements` map; both are dropped with
@@ -27,6 +22,7 @@ use std::sync::Arc;
 use mln_util::chrono::{Timestamp, now};
 use mln_util::compression::{compress, decompress};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
+use mln_util::error::{Error, ErrorKind};
 use mln_util::logging::{Event, EventSeverity, Log};
 use mln_util::mapbox::is_canonical_url;
 use mln_util::tile_server_options::TileServerOptions;
@@ -35,13 +31,13 @@ use rusqlite::params;
 use crate::merge_sideloaded::MERGE_SIDELOADED_DATABASE_SQL;
 use crate::offline::{
     OfflineRegion, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus, OfflineRegions,
-    RegionDefinitionError, decode_offline_region_definition, encode_offline_region_definition,
+    decode_offline_region_definition, encode_offline_region_definition,
 };
 use crate::offline_schema::OFFLINE_DATABASE_SCHEMA;
 use crate::resource::{Kind, Resource, TileData};
 use crate::response::Response;
 use crate::sqlite3::{
-    self, Database, Exception, OpenFlag, Transaction, TransactionMode, extended_result_code, get_bool, get_bytes,
+    self, Database, OpenFlag, SqliteError, Transaction, TransactionMode, extended_result_code, get_bool, get_bytes,
     get_i64, get_optional_bytes, get_optional_i64, get_optional_string, result_code,
 };
 
@@ -52,37 +48,41 @@ pub const DEFAULT_OFFLINE_TILE_COUNT_LIMIT: u64 = 6000;
 /// other rows while the queue is full don't update their timestamps.
 pub const MAX_PENDING_ACCESSED: usize = 4096;
 
-/// `MapboxTileLimitExceededException` (`util::Exception("Mapbox tile limit
-/// exceeded")`).
+/// The offline regions would hold more tiles from MapLibre's demo tile server
+/// than the database's limit allows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MapboxTileLimitExceededException;
+pub struct TileCountLimitExceeded;
 
-impl std::fmt::Display for MapboxTileLimitExceededException {
+impl std::fmt::Display for TileCountLimitExceeded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Mapbox tile limit exceeded")
     }
 }
 
-/// The exceptions the C++ code throws and `handleError` catches.
+impl std::error::Error for TileCountLimitExceeded {}
+
+/// Why a database operation failed.
 #[derive(Clone, Debug)]
 pub enum DatabaseError {
-    Sqlite(Exception),
-    /// `util::IOException { code }` with its `what()`.
+    Sqlite(SqliteError),
+    /// A file operation failed with the OS error `code`.
     Io {
         code: i32,
         message: String,
     },
-    /// `MapboxTileLimitExceededException` (a `std::runtime_error`).
-    MapboxTileLimitExceeded,
-    /// `std::runtime_error`.
+    /// See [`TileCountLimitExceeded`].
+    TileCountLimitExceeded,
+    /// The operation failed, such as on a malformed region definition in the
+    /// database.
     Runtime(String),
-    /// Exceptions that are not `std::runtime_error`s (`std::invalid_argument`,
-    /// `std::domain_error`): `handleError`'s `catch (...)`.
+    /// An argument was invalid, such as a region definition's zoom range.
     Logic(String),
+    /// The database has no offline region with this ID.
+    RegionNotFound(i64),
 }
 
-impl From<Exception> for DatabaseError {
-    fn from(e: Exception) -> Self {
+impl From<SqliteError> for DatabaseError {
+    fn from(e: SqliteError) -> Self {
         DatabaseError::Sqlite(e)
     }
 }
@@ -93,11 +93,11 @@ impl From<rusqlite::Error> for DatabaseError {
     }
 }
 
-impl From<RegionDefinitionError> for DatabaseError {
-    fn from(e: RegionDefinitionError) -> Self {
-        match e {
-            RegionDefinitionError::Runtime(message) => DatabaseError::Runtime(message),
-            RegionDefinitionError::Logic(message) => DatabaseError::Logic(message),
+impl From<Error> for DatabaseError {
+    fn from(e: Error) -> Self {
+        match e.kind {
+            ErrorKind::InvalidArgument => DatabaseError::Logic(e.message),
+            _ => DatabaseError::Runtime(e.message),
         }
     }
 }
@@ -107,9 +107,23 @@ impl std::fmt::Display for DatabaseError {
         match self {
             DatabaseError::Sqlite(e) => f.write_str(&e.message),
             DatabaseError::Io { message, .. } => f.write_str(message),
-            DatabaseError::MapboxTileLimitExceeded => MapboxTileLimitExceededException.fmt(f),
+            DatabaseError::TileCountLimitExceeded => TileCountLimitExceeded.fmt(f),
             DatabaseError::Runtime(message) | DatabaseError::Logic(message) => f.write_str(message),
+            DatabaseError::RegionNotFound(region_id) => write!(f, "no offline region has ID {region_id}"),
         }
+    }
+}
+
+impl From<DatabaseError> for Error {
+    /// An invalid argument for [`DatabaseError::Logic`], not found for
+    /// [`DatabaseError::RegionNotFound`], and a native error otherwise.
+    fn from(error: DatabaseError) -> Self {
+        let kind = match error {
+            DatabaseError::Logic(_) => ErrorKind::InvalidArgument,
+            DatabaseError::RegionNotFound(_) => ErrorKind::NotFound,
+            _ => ErrorKind::Native,
+        };
+        Error::new(kind, error.to_string())
     }
 }
 
@@ -446,7 +460,7 @@ impl OfflineDatabase {
                 // We failed to delete the database file.
                 Log::record(EventSeverity::Error, Event::Database, *code as i64, &format!("Can't {action}: {message}"));
             }
-            DatabaseError::MapboxTileLimitExceeded => {
+            DatabaseError::TileCountLimitExceeded => {
                 // This is ours and must be handled on client side (C++
                 // rethrows; the callers that can see it return it).
             }
@@ -456,6 +470,9 @@ impl OfflineDatabase {
             DatabaseError::Logic(_) => {
                 // C++: assert(false) in debug builds.
                 Log::error(Event::Database, format!("Can't {action}"));
+            }
+            DatabaseError::RegionNotFound(_) => {
+                // The caller's to report.
             }
         }
     }
@@ -1133,7 +1150,7 @@ impl OfflineDatabase {
                     Err(ex) => {
                         // Catch errors from malformed offline region
                         // definitions and skip them.
-                        Log::error(Event::General, ex.what());
+                        Log::error(Event::General, &ex.message);
                     }
                 }
             }
@@ -1232,7 +1249,7 @@ impl OfflineDatabase {
             // (int64_t + uint64_t: uint64_t arithmetic).
             if (count_of_tiles_to_merge as u64).wrapping_add(current_tile_count) > self.offline_mapbox_tile_count_limit
             {
-                return Err(DatabaseError::MapboxTileLimitExceeded);
+                return Err(DatabaseError::TileCountLimitExceeded);
             }
 
             self.with_transaction(TransactionMode::Deferred, |this| {
@@ -1352,7 +1369,7 @@ impl OfflineDatabase {
         region_id: i64,
         resource: &Resource,
         response: &Response,
-    ) -> Result<u64, MapboxTileLimitExceededException> {
+    ) -> Result<u64, TileCountLimitExceeded> {
         let result = (|| -> DbResult<u64> {
             self.check_flags()?;
 
@@ -1365,7 +1382,7 @@ impl OfflineDatabase {
         })();
         match result {
             Ok(size) => Ok(size),
-            Err(DatabaseError::MapboxTileLimitExceeded) => Err(MapboxTileLimitExceededException),
+            Err(DatabaseError::TileCountLimitExceeded) => Err(TileCountLimitExceeded),
             Err(e) => {
                 self.handle_error(&e, "write region resource");
                 Ok(0)
@@ -1380,7 +1397,7 @@ impl OfflineDatabase {
         region_id: i64,
         resources: &[(Resource, Response)],
         status: &mut OfflineRegionStatus,
-    ) -> Result<(), MapboxTileLimitExceededException> {
+    ) -> Result<(), TileCountLimitExceeded> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
 
@@ -1407,10 +1424,10 @@ impl OfflineDatabase {
                             completed_tile_size += resource_size;
                         }
                     }
-                    Err(DatabaseError::MapboxTileLimitExceeded) => {
+                    Err(DatabaseError::TileCountLimitExceeded) => {
                         // Commit the rest of the batch and rethrow
                         transaction.commit()?;
-                        return Err(DatabaseError::MapboxTileLimitExceeded);
+                        return Err(DatabaseError::TileCountLimitExceeded);
                     }
                     Err(e) => return Err(e),
                 }
@@ -1427,7 +1444,7 @@ impl OfflineDatabase {
         })();
         match result {
             Ok(()) => Ok(()),
-            Err(DatabaseError::MapboxTileLimitExceeded) => Err(MapboxTileLimitExceededException),
+            Err(DatabaseError::TileCountLimitExceeded) => Err(TileCountLimitExceeded),
             Err(e) => {
                 self.handle_error(&e, "write region resources");
                 Ok(())
@@ -1451,7 +1468,7 @@ impl OfflineDatabase {
         let previously_unused = self.mark_used(region_id, resource)?;
 
         if previously_unused && self.exceeds_offline_mapbox_tile_count_limit(resource) {
-            return Err(DatabaseError::MapboxTileLimitExceeded);
+            return Err(DatabaseError::TileCountLimitExceeded);
         }
 
         if let Some(count) = self.offline_mapbox_tile_count.as_mut()

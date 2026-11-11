@@ -233,7 +233,7 @@ impl Expression for CollatorComparison {
         let collator_result = self.collator.evaluate(params)?;
 
         let Value::Collator(c) = &collator_result else { panic!("collator operand") };
-        // TODO(port): util::LocaleException from the platform collator.
+        // TODO(port): an error from the platform collator for a locale it lacks.
         Ok(Value::Bool((self.compare)(
             lhs_value.as_str().expect("string operand"),
             rhs_value.as_str().expect("string operand"),

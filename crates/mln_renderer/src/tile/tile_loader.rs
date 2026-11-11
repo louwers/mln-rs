@@ -14,7 +14,7 @@ use mln_storage::response::Reason;
 use mln_storage::{AsyncRequest, Data, FileSource, LoadingMethod, Resource, Response, StoragePolicy};
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Duration;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::tileset::Tileset;
 
 use crate::tile::geometry_tile::GeometryTileInner;
@@ -23,8 +23,8 @@ use crate::tile::tile::{TileNecessity, TileOperation, TileUpdateParameters};
 use crate::tile_parameters::TileParameters;
 
 /// `getCantLoadTileError()`.
-fn get_cant_load_tile_error() -> ExceptionPtr {
-    RuntimeError::ptr("Can't load tile.")
+fn get_cant_load_tile_error() -> Error {
+    Error::native("Can't load tile.")
 }
 
 /// The tile data encoding of a vector tile: VectorMVTTile or VectorMLTTile
@@ -40,7 +40,7 @@ pub enum VectorTileEncoding {
 
 /// What a loader does with the tile it loads (`T` in C++).
 pub trait LoaderTile {
-    fn set_error(&self, err: ExceptionPtr);
+    fn set_error(&self, err: Error);
     /// `setLoading()`: the tile waits for data again.
     fn set_loading(&self);
     fn set_tried_cache(&self);
@@ -52,7 +52,7 @@ pub trait LoaderTile {
 /// VectorTile's half of the loader interface (vector_tile.cpp,
 /// vector_mvt_tile.cpp, vector_mlt_tile.cpp).
 impl LoaderTile for GeometryTileInner {
-    fn set_error(&self, err: ExceptionPtr) {
+    fn set_error(&self, err: Error) {
         GeometryTileInner::set_error(self, err);
     }
 
@@ -325,7 +325,7 @@ fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMet
         if error.reason != Reason::NotFound {
             state_rc.borrow_mut().failed = true;
             if let Some(tile) = &tile {
-                tile.set_error(RuntimeError::ptr(error.message.clone()));
+                tile.set_error(Error::native(error.message.clone()));
                 tile.on_tile_action(TileOperation::Error);
             }
             return;

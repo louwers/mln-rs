@@ -12,6 +12,7 @@ use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::types::TextureChannelDataType;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use objc2_metal::MTLDevice;
@@ -66,7 +67,7 @@ pub struct HeadlessBackend {
 impl HeadlessBackend {
     /// `HeadlessBackend(size = {256, 256}, swapBehaviour = NoFlush,
     /// contextMode = Unique)`, or an error if there is no Metal device.
-    pub fn new(size: Size, _swap_behaviour: SwapBehaviour, mode: ContextMode) -> Result<Self, String> {
+    pub fn new(size: Size, _swap_behaviour: SwapBehaviour, mode: ContextMode) -> Result<Self, Error> {
         Ok(HeadlessBackend {
             renderer_backend: RendererBackend::new(mode)?,
             renderable: RenderableBase::new(size, None),

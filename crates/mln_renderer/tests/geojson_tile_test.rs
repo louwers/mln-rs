@@ -21,7 +21,7 @@ use mln_style::layers::{CircleLayer, CircleLayerProperties};
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_style::sources::geojson_source::{Features, GeoJSONData, TileFeatures};
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -83,15 +83,15 @@ impl GeoJSONData for FakeGeoJSONData {
         callback(self.features.clone());
     }
 
-    fn get_children(&self, _cluster_id: u32) -> Result<Features, RuntimeError> {
+    fn get_children(&self, _cluster_id: u32) -> Result<Features, Error> {
         Ok(Features::new())
     }
 
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, RuntimeError> {
+    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, Error> {
         Ok(Features::new())
     }
 
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, RuntimeError> {
+    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, Error> {
         Ok(0)
     }
 }
@@ -205,7 +205,7 @@ fn issue_9927() {
     // Make sure that once we've had a renderable tile and then receive
     // erroneous data, we retain the previously rendered data and keep the
     // tile renderable.
-    tile.geometry_tile().set_error(RuntimeError::ptr("Connection offline"));
+    tile.geometry_tile().set_error(Error::native("Connection offline"));
     assert!(tile.is_renderable());
     assert!(tile.layer_properties_updated(&layer_properties));
 
@@ -213,7 +213,7 @@ fn issue_9927() {
     // renderable in this situation as well. We're using 3 as a correlationID
     // since we've done two three calls that increment this counter (as part
     // of the GeoJSONTile constructor, setLayers, and setPlacementConfig).
-    tile.geometry_tile().inner().on_error(RuntimeError::ptr("Parse error"), 3);
+    tile.geometry_tile().inner().on_error(Error::native("Parse error"), 3);
     assert!(tile.is_renderable());
     assert!(tile.layer_properties_updated(&layer_properties));
 }

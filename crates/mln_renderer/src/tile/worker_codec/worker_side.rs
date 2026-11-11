@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_style_types::image::SharedImage;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::serialization::{payload, shared};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -124,7 +124,7 @@ impl WorkerCodec {
             TileMessage::GetGlyphs(_) | TileMessage::GetImages(_) => (0, None),
         };
         let encoded = self.encode_reply(tile, correlation_id, atlases.as_deref(), &message, |error| {
-            TileMessage::Error { error: RuntimeError::ptr(error), correlation_id }
+            TileMessage::Error { error: Error::native(error), correlation_id }
         });
         drop(atlases);
         if let TileMessage::Layout { result, .. } = message {
@@ -139,7 +139,7 @@ impl WorkerCodec {
         let (RasterTileMessage::Parsed { correlation_id, .. } | RasterTileMessage::Error { correlation_id, .. }) =
             message;
         self.encode_reply(tile, correlation_id, None, &message, |error| RasterTileMessage::Error {
-            error: RuntimeError::ptr(error),
+            error: Error::native(error),
             correlation_id,
         })
     }
@@ -149,7 +149,7 @@ impl WorkerCodec {
         let (RasterDEMTileMessage::Parsed { correlation_id, .. } | RasterDEMTileMessage::Error { correlation_id, .. }) =
             message;
         self.encode_reply(tile, correlation_id, None, &message, |error| RasterDEMTileMessage::Error {
-            error: RuntimeError::ptr(error),
+            error: Error::native(error),
             correlation_id,
         })
     }

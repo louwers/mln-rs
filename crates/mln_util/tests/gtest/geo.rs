@@ -6,6 +6,7 @@
 // sits below mln_tile_id), called with the tile ids' fields.
 
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
+use mln_util::Error;
 use mln_util::constants::{LATITUDE_MAX, LONGITUDE_MAX};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, WrapMode};
 
@@ -30,19 +31,22 @@ fn bounds_from_canonical(id: CanonicalTileID) -> LatLngBounds {
 // gtest: LatLng.InvalidLatLng
 #[test]
 fn invalid_lat_lng() {
-    assert_eq!(LatLng::new(f64::NAN, 0.0).unwrap_err(), "latitude must not be NaN");
-    assert_eq!(LatLng::new(0.0, f64::NAN).unwrap_err(), "longitude must not be NaN");
-    assert_eq!(LatLng::new(91.0, 0.0).unwrap_err(), "latitude must be between -90 and 90");
-    assert_eq!(LatLng::new(0.0, f64::INFINITY).unwrap_err(), "longitude must not be infinite");
+    assert_eq!(LatLng::new(f64::NAN, 0.0).unwrap_err(), Error::invalid_argument("latitude must not be NaN"));
+    assert_eq!(LatLng::new(0.0, f64::NAN).unwrap_err(), Error::invalid_argument("longitude must not be NaN"));
+    assert_eq!(LatLng::new(91.0, 0.0).unwrap_err(), Error::invalid_argument("latitude must be between -90 and 90"));
+    assert_eq!(LatLng::new(0.0, f64::INFINITY).unwrap_err(), Error::invalid_argument("longitude must not be infinite"));
 }
 
 // gtest: EdgeInsets.InvalidEdgeInsets
 #[test]
 fn invalid_edge_insets() {
-    assert_eq!(EdgeInsets::new(f64::NAN, 0.0, 0.0, 0.0).unwrap_err(), "top must not be NaN");
-    assert_eq!(EdgeInsets::new(0.0, f64::NAN, 0.0, 0.0).unwrap_err(), "left must not be NaN");
-    assert_eq!(EdgeInsets::new(0.0, 0.0, f64::NAN, 0.0).unwrap_err(), "bottom must not be NaN");
-    assert_eq!(EdgeInsets::new(0.0, 0.0, 0.0, f64::NAN).unwrap_err(), "right must not be NaN");
+    assert_eq!(EdgeInsets::new(f64::NAN, 0.0, 0.0, 0.0).unwrap_err(), Error::invalid_argument("top must not be NaN"));
+    assert_eq!(EdgeInsets::new(0.0, f64::NAN, 0.0, 0.0).unwrap_err(), Error::invalid_argument("left must not be NaN"));
+    assert_eq!(
+        EdgeInsets::new(0.0, 0.0, f64::NAN, 0.0).unwrap_err(),
+        Error::invalid_argument("bottom must not be NaN")
+    );
+    assert_eq!(EdgeInsets::new(0.0, 0.0, 0.0, f64::NAN).unwrap_err(), Error::invalid_argument("right must not be NaN"));
 }
 
 // gtest: LatLngBounds.World

@@ -18,7 +18,7 @@ use mln_storage::Data;
 use mln_style::layer_properties::LayerProperties;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Timestamp;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::serialization::payload::shared_bytes;
 use mln_util::tileset::Tileset;
@@ -31,7 +31,6 @@ use crate::tile::tile::{Kind, Tile, TileBase, TileNecessity, TileOperation, Tile
 use crate::tile::tile_loader::{LoaderTile, TileLoader, VectorTileEncoding};
 use crate::tile::tile_observer::TileObserver;
 use crate::tile::tile_worker_transport::{TileEndpoint, WorkerEndpoint};
-use crate::tile::worker_codec::fields;
 use crate::tile_mask::TileMask;
 use crate::tile_parameters::TileParameters;
 use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
@@ -57,11 +56,7 @@ pub enum RasterTileMessage {
     /// `onParsed(std::move(bucket), correlationID)`.
     Parsed { bucket: Option<Arc<RasterBucket>>, correlation_id: u64 },
     /// `onError(std::current_exception(), correlationID)`.
-    Error {
-        #[serde(with = "fields::exception")]
-        error: ExceptionPtr,
-        correlation_id: u64,
-    },
+    Error { error: Error, correlation_id: u64 },
 }
 
 /// `RasterTileWorker`.
@@ -101,7 +96,7 @@ impl RasterTileWorker {
                 parent.send(RasterTileMessage::Parsed { bucket: Some(bucket), correlation_id });
             }
             Err(error) => {
-                parent.send(RasterTileMessage::Error { error: RuntimeError::ptr(error), correlation_id });
+                parent.send(RasterTileMessage::Error { error, correlation_id });
             }
         });
     }
@@ -143,7 +138,7 @@ impl RasterTileInner {
     }
 
     /// `onError(std::exception_ptr, correlationID)`.
-    pub fn on_error(&self, err: ExceptionPtr, result_correlation_id: u64) {
+    pub fn on_error(&self, err: Error, result_correlation_id: u64) {
         self.base.loaded.set(true);
         if result_correlation_id == self.correlation_id.get() {
             self.base.pending.set(false);
@@ -166,7 +161,7 @@ impl RasterTileInner {
 
 impl LoaderTile for RasterTileInner {
     /// `setError(std::exception_ptr)`.
-    fn set_error(&self, err: ExceptionPtr) {
+    fn set_error(&self, err: Error) {
         self.base.loaded.set(true);
         self.base.observer().on_tile_error(&self.base, err);
     }

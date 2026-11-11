@@ -20,7 +20,7 @@ use mln_renderer::tile::vector_tile::VectorTile;
 use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_tile_id::OverscaledTileID;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::tileset::Tileset;
@@ -93,7 +93,7 @@ fn mvt_tile(test: &VectorTileTest) -> VectorTile {
 fn set_error() {
     let test = VectorTileTest::new();
     let tile = mvt_tile(&test);
-    LoaderTile::set_error(&**tile.geometry_tile().inner(), RuntimeError::ptr("test"));
+    LoaderTile::set_error(&**tile.geometry_tile().inner(), Error::native("test"));
     assert!(!tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
@@ -104,7 +104,7 @@ fn set_error() {
 fn on_error() {
     let test = VectorTileTest::new();
     let tile = mvt_tile(&test);
-    tile.geometry_tile().inner().on_error(RuntimeError::ptr("test"), 0);
+    tile.geometry_tile().inner().on_error(Error::native("test"), 0);
 
     assert!(!tile.is_renderable());
     assert!(tile.is_loaded());

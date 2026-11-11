@@ -98,13 +98,13 @@ impl ConversionTraits for Value {
     /// The JSON front end's conversion of the JSON the value stringifies to
     /// (the GeoJSON argument of "within" and "distance").
     fn to_geojson(&self, error: &mut Error) -> Option<geojson::GeoJSON> {
-        crate::json_conversion::to_geojson(&to_json(self), error)
+        crate::json_conversion::to_geojson(&value_to_json(self), error)
     }
 }
 
-/// rapidjson's `stringify(Value)`, as a `serde_json::Value`; a non-finite
-/// double has no JSON form and becomes `null`.
-fn to_json(value: &Value) -> serde_json::Value {
+/// The JSON form of a value. A non-finite double has no JSON form and
+/// becomes `null`.
+pub fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
         Value::Null => serde_json::Value::Null,
         Value::Bool(b) => serde_json::Value::Bool(*b),
@@ -112,8 +112,27 @@ fn to_json(value: &Value) -> serde_json::Value {
         Value::Int(i) => serde_json::Value::from(*i),
         Value::Double(d) => serde_json::Number::from_f64(*d).map_or(serde_json::Value::Null, serde_json::Value::Number),
         Value::String(s) => serde_json::Value::String(s.clone()),
-        Value::Array(a) => serde_json::Value::Array(a.iter().map(to_json).collect()),
-        Value::Object(o) => serde_json::Value::Object(o.iter().map(|(k, v)| (k.clone(), to_json(v))).collect()),
+        Value::Array(a) => serde_json::Value::Array(a.iter().map(value_to_json).collect()),
+        Value::Object(o) => serde_json::Value::Object(o.iter().map(|(k, v)| (k.clone(), value_to_json(v))).collect()),
+    }
+}
+
+/// The value of a JSON value, arrays and objects included. A number is the
+/// first of an unsigned integer, a signed one and a double that holds it.
+pub fn json_to_value(json: &serde_json::Value) -> Value {
+    match json {
+        serde_json::Value::Null => Value::Null,
+        serde_json::Value::Bool(b) => Value::Bool(*b),
+        serde_json::Value::String(s) => Value::String(s.clone()),
+        serde_json::Value::Number(n) => match (n.as_u64(), n.as_i64()) {
+            (Some(u), _) => Value::Uint(u),
+            (None, Some(i)) => Value::Int(i),
+            (None, None) => Value::Double(n.as_f64().unwrap_or_default()),
+        },
+        serde_json::Value::Array(array) => Value::Array(array.iter().map(json_to_value).collect()),
+        serde_json::Value::Object(object) => {
+            Value::Object(object.iter().map(|(key, member)| (key.clone(), json_to_value(member))).collect())
+        }
     }
 }
 
@@ -164,6 +183,12 @@ mod tests {
             None
         });
         assert_eq!(names, ["a", "b"]);
+    }
+
+    #[test]
+    fn json_round_trips_through_values() {
+        let json = json!({"a": [1, -2, 3.5, "s", true, null], "b": {"c": {"d": []}}});
+        assert_eq!(value_to_json(&json_to_value(&json)), json);
     }
 
     #[test]

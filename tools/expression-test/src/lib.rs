@@ -27,7 +27,10 @@ pub fn run(metrics: &Path, test_names: &[String], filter: Option<&str>, verbose:
     let mut stats = TestStats::default();
     for path in &test_paths {
         let expectation = path.parent().expect("test directory");
-        let id = expectation.strip_prefix(&root_path).expect("test under the root").to_string_lossy().into_owned();
+        // The parts joined with `/` on every platform, as the ignore list
+        // names its tests.
+        let relative = expectation.strip_prefix(&root_path).expect("test under the root");
+        let id = relative.iter().map(|part| part.to_string_lossy()).collect::<Vec<_>>().join("/");
         stats.ids.push(id.clone());
 
         let ignore_name = format!("expression-tests/{id}");

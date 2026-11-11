@@ -9,7 +9,7 @@
 // A database that doesn't open or query, metadata whose zooms or scale don't
 // parse (`std::stoi`/`std::stod` throw), and data that doesn't decompress
 // answer the request with an `Other` error carrying the message, as in
-// maplibre-native-ffi's patched C++. The resource and client options are kept
+// maplibre-native-ffi's patched C++. The resource options are kept
 // next to the thread behind a mutex (C++: in the thread object, read back
 // with a blocking `ask`).
 //
@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
 use mln_util::chrono::Timestamp;
-use mln_util::client_options::ClientOptions;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
 use mln_util::sync::MutexExt;
@@ -35,7 +34,7 @@ use crate::json_document::Document;
 use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 use crate::sqlite3::{Database, OpenFlag, Query, Statement};
 
 fn accepts_url(url: &str) -> bool {
@@ -119,7 +118,7 @@ fn db_path(path: &[u8]) -> &[u8] {
 
 fn error_response(reason: Reason, message: impl Into<String>) -> Response {
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(reason, message)));
+    response.error = Some(Box::new(ResourceError::new(reason, message)));
     response
 }
 
@@ -223,7 +222,7 @@ impl MBTilesFileSourceThread {
             } else if name == "bounds" {
                 let bounds_values = split(value, ',');
                 if bounds_values.len() != 4 {
-                    response.error = Some(Box::new(Error::new(Reason::Other, "")));
+                    response.error = Some(Box::new(ResourceError::new(Reason::Other, "")));
                     return Ok(response);
                 }
                 let c_lon = (bounds_values[0] + bounds_values[2]) / 2.0;
@@ -308,18 +307,15 @@ impl MBTilesFileSourceThread {
 pub struct MBTilesFileSource {
     thread: Thread<MBTilesFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,
-    client_options: Mutex<ClientOptions>,
 }
 
 impl MBTilesFileSource {
-    /// `MBTilesFileSource(const ResourceOptions&, const ClientOptions&)`.
-    pub fn new(resource_options: &ResourceOptions, client_options: &ClientOptions) -> Self {
+    pub fn new(resource_options: &ResourceOptions) -> Self {
         MBTilesFileSource {
             thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
                 db_cache: RefCell::new(VecMap::new()),
             }),
             resource_options: Mutex::new(resource_options.clone()),
-            client_options: Mutex::new(client_options.clone()),
         }
     }
 }
@@ -342,7 +338,7 @@ impl FileSource for MBTilesFileSource {
             let mut response = Response::new();
             response.no_content = true;
             response.error =
-                Some(Box::new(Error::new(Reason::Other, "MBTilesFileSource only supports absolute path urls")));
+                Some(Box::new(ResourceError::new(Reason::Other, "MBTilesFileSource only supports absolute path urls")));
             req_ref.invoke(move |request: &FileSourceRequestState| request.set_response(response));
             return Box::new(req);
         }
@@ -356,7 +352,7 @@ impl FileSource for MBTilesFileSource {
         if not_found {
             let mut response = Response::new();
             response.no_content = true;
-            response.error = Some(Box::new(Error::new(
+            response.error = Some(Box::new(ResourceError::new(
                 Reason::NotFound,
                 format!("path not found: {}", String::from_utf8_lossy(&path)),
             )));
@@ -380,14 +376,6 @@ impl FileSource for MBTilesFileSource {
 
     fn get_resource_options(&self) -> ResourceOptions {
         self.resource_options.lock_unpoisoned().clone()
-    }
-
-    fn set_client_options(&self, options: ClientOptions) {
-        *self.client_options.lock_unpoisoned() = options;
-    }
-
-    fn get_client_options(&self) -> ClientOptions {
-        self.client_options.lock_unpoisoned().clone()
     }
 }
 

@@ -40,7 +40,7 @@ fn load(test: &str) -> Impl {
         mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Synchronous);
     let failed = |_: &mln_storage::Resource| {
         let mut response = mln_storage::Response::new();
-        response.error = Some(Box::new(mln_storage::response::Error::new(
+        response.error = Some(Box::new(mln_storage::response::ResourceError::new(
             mln_storage::response::Reason::Other,
             "no sprites in this test",
         )));

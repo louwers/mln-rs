@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mln_actor::ActorRef;
 
 use crate::file_source_request::FileSourceRequestState;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// `util::pathFromUTF8`: the path bytes as they are (POSIX paths are bytes;
 /// on other platforms invalid UTF-8 is an error, as std::filesystem's UTF-8
@@ -64,7 +64,7 @@ pub fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, d
         Ok(path) => path,
         Err(message) => {
             // `catch (const std::filesystem::filesystem_error& exception)`.
-            response.error = Some(Box::new(Error::new(Reason::Other, message)));
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, message)));
             req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
             return;
         }
@@ -77,13 +77,16 @@ pub fn request_local_file(path: &[u8], req: &ActorRef<FileSourceRequestState>, d
     let is_directory = matches!(&status, Ok(metadata) if metadata.is_dir());
 
     if not_found {
-        response.error = Some(Box::new(Error::new(Reason::NotFound, format!("Cannot find file {path_display}"))));
+        response.error =
+            Some(Box::new(ResourceError::new(Reason::NotFound, format!("Cannot find file {path_display}"))));
     } else if is_directory {
-        response.error = Some(Box::new(Error::new(Reason::NotFound, format!("Cannot read directory {path_display}"))));
+        response.error =
+            Some(Box::new(ResourceError::new(Reason::NotFound, format!("Cannot read directory {path_display}"))));
     } else {
         match read_file(&path, data_range) {
             None => {
-                response.error = Some(Box::new(Error::new(Reason::Other, format!("Cannot read file {path_display}"))));
+                response.error =
+                    Some(Box::new(ResourceError::new(Reason::Other, format!("Cannot read file {path_display}"))));
             }
             Some(data) => response.data = Some(Arc::new(data)),
         }

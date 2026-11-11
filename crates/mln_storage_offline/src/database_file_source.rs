@@ -37,7 +37,7 @@ fn get_download(thread: &DatabaseFileSourceThread, region_id: i64) -> Result<Rc<
     if let Some(download) = downloads.downloads.borrow().get(&region_id) {
         return Ok(download.clone());
     }
-    let definition = thread.database().borrow_mut().get_region_definition(region_id)?;
+    let definition = require_region(thread, region_id)?.get_definition().clone();
     let download =
         Rc::new(OfflineDownload::new(region_id, definition, thread.database().clone(), online_file_source.clone()));
     downloads.downloads.borrow_mut().insert(region_id, download.clone());
@@ -68,31 +68,41 @@ pub trait DatabaseFileSourceExt {
         callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     );
 
-    /// `updateOfflineMetadata(regionID, metadata, callback)`.
+    /// `updateOfflineMetadata(regionID, metadata, callback)`: replaces the
+    /// region's metadata, and gives the updated region. Fails when the
+    /// database has no region `region_id`.
     fn update_offline_metadata(
         &self,
         region_id: i64,
         metadata: &OfflineRegionMetadata,
-        callback: impl FnOnce(Result<OfflineRegionMetadata, DatabaseError>) + Send + 'static,
+        callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     );
 
     /// `setOfflineRegionObserver(region, observer)`: the region's only
     /// observer, replacing the previous one; `None` removes it. Its methods
-    /// run on the database thread.
+    /// run on the database thread. Fails when the database has no region
+    /// `region_id`.
     fn set_offline_region_observer(
         &self,
-        region: &OfflineRegion,
+        region_id: i64,
         observer: Option<Box<dyn OfflineRegionObserver + Send>>,
+        callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     );
 
     /// `setOfflineRegionDownloadState(region, state)`: starts or stops the
-    /// region's download.
-    fn set_offline_region_download_state(&self, region: &OfflineRegion, state: OfflineRegionDownloadState);
+    /// region's download. Fails when the database has no region
+    /// `region_id`.
+    fn set_offline_region_download_state(
+        &self,
+        region_id: i64,
+        state: OfflineRegionDownloadState,
+        callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
+    );
 
     /// `getOfflineRegionStatus(region, callback)`.
     fn get_offline_region_status(
         &self,
-        region: &OfflineRegion,
+        region_id: i64,
         callback: impl FnOnce(Result<OfflineRegionStatus, DatabaseError>) + Send + 'static,
     );
 
@@ -100,7 +110,7 @@ pub trait DatabaseFileSourceExt {
     /// of another database, and the resources and tiles they use, into this
     /// one. Identical regions become one. The side database is upgraded to
     /// the current schema in place, so it must be writable. Fails with
-    /// `DatabaseError::MapboxTileLimitExceeded` if the merge would exceed
+    /// `DatabaseError::TileCountLimitExceeded` if the merge would exceed
     /// the offline Mapbox tile limit.
     fn merge_offline_regions(
         &self,
@@ -110,18 +120,15 @@ pub trait DatabaseFileSourceExt {
 
     /// `deleteOfflineRegion(region, callback)`: stops the region's download
     /// and deletes the region, evicting the resources no other region uses.
-    fn delete_offline_region(
-        &self,
-        region: &OfflineRegion,
-        callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
-    );
+    /// Fails when the database has no region `region_id`.
+    fn delete_offline_region(&self, region_id: i64, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static);
 
     /// `invalidateOfflineRegion(region, callback)`: makes the region's
     /// resources revalidate with their server before use, which transfers
     /// nothing for resources that haven't changed.
     fn invalidate_offline_region(
         &self,
-        region: &OfflineRegion,
+        region_id: i64,
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     );
 }
@@ -153,44 +160,48 @@ impl DatabaseFileSourceExt for DatabaseFileSource {
         &self,
         region_id: i64,
         metadata: &OfflineRegionMetadata,
-        callback: impl FnOnce(Result<OfflineRegionMetadata, DatabaseError>) + Send + 'static,
+        callback: impl FnOnce(Result<OfflineRegion, DatabaseError>) + Send + 'static,
     ) {
         let metadata = metadata.clone();
-        self.invoke(move |t| callback(t.database().borrow_mut().update_metadata(region_id, &metadata)));
+        self.invoke(move |t| {
+            callback(require_region(t, region_id).and_then(|_| {
+                t.database().borrow_mut().update_metadata(region_id, &metadata)?;
+                require_region(t, region_id)
+            }));
+        });
     }
 
     fn set_offline_region_observer(
         &self,
-        region: &OfflineRegion,
+        region_id: i64,
         observer: Option<Box<dyn OfflineRegionObserver + Send>>,
+        callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
-        let region_id = region.get_id();
         self.invoke(move |t| {
-            if let Ok(download) = get_download(t, region_id) {
+            callback(get_download(t, region_id).map(|download| {
                 let observer = observer.map(|observer| -> Rc<dyn OfflineRegionObserver> {
                     let observer: Rc<dyn OfflineRegionObserver + Send> = Rc::from(observer);
                     observer
                 });
                 download.set_observer(observer);
-            }
+            }));
         });
     }
 
-    fn set_offline_region_download_state(&self, region: &OfflineRegion, state: OfflineRegionDownloadState) {
-        let region_id = region.get_id();
-        self.invoke(move |t| {
-            if let Ok(download) = get_download(t, region_id) {
-                download.set_state(state);
-            }
-        });
+    fn set_offline_region_download_state(
+        &self,
+        region_id: i64,
+        state: OfflineRegionDownloadState,
+        callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
+    ) {
+        self.invoke(move |t| callback(get_download(t, region_id).map(|download| download.set_state(state))));
     }
 
     fn get_offline_region_status(
         &self,
-        region: &OfflineRegion,
+        region_id: i64,
         callback: impl FnOnce(Result<OfflineRegionStatus, DatabaseError>) + Send + 'static,
     ) {
-        let region_id = region.get_id();
         self.invoke(move |t| callback(get_download(t, region_id).map(|download| download.get_status())));
     }
 
@@ -203,29 +214,32 @@ impl DatabaseFileSourceExt for DatabaseFileSource {
         self.invoke(move |t| callback(t.database().borrow_mut().merge_database(&side_database_path)));
     }
 
-    fn delete_offline_region(
-        &self,
-        region: &OfflineRegion,
-        callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
-    ) {
-        let region = region.clone();
+    fn delete_offline_region(&self, region_id: i64, callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static) {
         self.invoke(move |t| {
-            let download = t.extension::<Downloads>().downloads.borrow_mut().remove(&region.get_id());
-            drop(download);
-            let error = t.database().borrow_mut().delete_region(region);
-            callback(error.map_or(Ok(()), Err));
+            callback(require_region(t, region_id).and_then(|region| {
+                let download = t.extension::<Downloads>().downloads.borrow_mut().remove(&region_id);
+                drop(download);
+                t.database().borrow_mut().delete_region(region).map_or(Ok(()), Err)
+            }));
         });
     }
 
     fn invalidate_offline_region(
         &self,
-        region: &OfflineRegion,
+        region_id: i64,
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
-        let region_id = region.get_id();
         self.invoke(move |t| {
-            let error = t.database().borrow_mut().invalidate_region(region_id);
-            callback(error.map_or(Ok(()), Err));
+            callback(
+                require_region(t, region_id)
+                    .and_then(|_| t.database().borrow_mut().invalidate_region(region_id).map_or(Ok(()), Err)),
+            );
         });
     }
+}
+
+/// The region `region_id`, or [`DatabaseError::RegionNotFound`] when the
+/// database has none with that ID.
+fn require_region(thread: &DatabaseFileSourceThread, region_id: i64) -> Result<OfflineRegion, DatabaseError> {
+    thread.database().borrow_mut().get_region(region_id)?.ok_or(DatabaseError::RegionNotFound(region_id))
 }

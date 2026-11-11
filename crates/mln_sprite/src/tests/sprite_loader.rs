@@ -5,12 +5,12 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::{RunLoop, TaggedScheduler, scheduler};
-use mln_storage::response::{Error, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_style_types::image::Impl;
 use mln_style_types::sprite::Sprite;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 
@@ -19,7 +19,7 @@ use crate::sprite_loader::SpriteLoader;
 use crate::sprite_loader_observer::SpriteLoaderObserver;
 
 type Loaded = Box<dyn FnMut(Vec<Immutable<Impl>>)>;
-type Failed = Box<dyn FnMut(ExceptionPtr)>;
+type Failed = Box<dyn FnMut(Error)>;
 
 #[derive(Default)]
 struct StubSpriteLoaderObserver {
@@ -34,7 +34,7 @@ impl SpriteLoaderObserver for StubSpriteLoaderObserver {
         }
     }
 
-    fn on_sprite_error(&self, _sprite: Option<Sprite>, error: ExceptionPtr) {
+    fn on_sprite_error(&self, _sprite: Option<Sprite>, error: Error) {
         if let Some(f) = self.sprite_error.borrow_mut().as_mut() {
             f(error);
         }
@@ -106,7 +106,7 @@ fn successful_response(
 
 fn failed_sprite_response(_: &Resource) -> Option<Response> {
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(Reason::Other, "Failed by the test case")));
+    response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
     Some(response)
 }
 

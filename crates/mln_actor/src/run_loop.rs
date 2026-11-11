@@ -60,9 +60,11 @@ pub(crate) struct Core {
     condvar: Condvar,
     /// The holder handle is unref'd (`stop()` ran).
     stopped: AtomicBool,
-    /// Port-only: told about every wake-up, for a loop that a host drives
+    /// Told about every wake-up, for a loop that a host drives
     /// with `run_once` instead of `run` (see `RunLoop::set_waker`).
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Whether a `RunLoop` runs this queue (see `RunLoop::adopt`).
+    adopted: AtomicBool,
 }
 
 impl Core {
@@ -74,6 +76,7 @@ impl Core {
             condvar: Condvar::new(),
             stopped: AtomicBool::new(false),
             waker: Mutex::new(None),
+            adopted: AtomicBool::new(false),
         }
     }
 
@@ -168,6 +171,21 @@ thread_local! {
     static CURRENT: RefCell<Option<Rc<Inner>>> = const { RefCell::new(None) };
 }
 
+/// Makes a loop the current loop and scheduler of its thread until it drops,
+/// then restores the ones before (see `RunLoop::enter`).
+#[must_use = "the loop is current only until the guard drops"]
+pub struct EnteredRunLoop {
+    previous: Option<Rc<Inner>>,
+    previous_scheduler: Option<scheduler::SchedulerPtr>,
+}
+
+impl Drop for EnteredRunLoop {
+    fn drop(&mut self) {
+        CURRENT.with(|c| *c.borrow_mut() = self.previous.take());
+        scheduler::set_current(self.previous_scheduler.take());
+    }
+}
+
 /// `util::RunLoop`. Cheap to clone: clones refer to the same loop.
 #[derive(Clone)]
 pub struct RunLoop {
@@ -187,15 +205,43 @@ impl RunLoop {
     /// makes it the current scheduler of this thread
     /// (`Scheduler::SetCurrent(this)`).
     pub fn new() -> Self {
-        let inner = Rc::new(Inner {
-            core: Arc::new(Core::new()),
-            handles: RefCell::new(Vec::new()),
-            timers: RefCell::new(Vec::new()),
-        });
-        CURRENT.with(|c| *c.borrow_mut() = Some(inner.clone()));
-        let scheduler: Arc<dyn Scheduler + Send + Sync> = Arc::new(RunLoopHandle { core: inner.core.clone() });
-        scheduler::set_current(Some(scheduler));
-        RunLoop { inner }
+        let core = Arc::new(Core::new());
+        core.adopted.store(true, Ordering::SeqCst);
+        let run_loop = RunLoop::over(core);
+        CURRENT.with(|c| *c.borrow_mut() = Some(run_loop.inner.clone()));
+        scheduler::set_current(Some(run_loop.scheduler()));
+        run_loop
+    }
+
+    fn over(core: Arc<Core>) -> Self {
+        RunLoop { inner: Rc::new(Inner { core, handles: RefCell::new(Vec::new()), timers: RefCell::new(Vec::new()) }) }
+    }
+
+    fn scheduler(&self) -> scheduler::SchedulerPtr {
+        Arc::new(RunLoopHandle { core: self.inner.core.clone() })
+    }
+
+    /// The loop that runs the queue `handle` (see
+    /// [`RunLoopHandle::new`]) on this thread, with the tasks sent to it so
+    /// far. `None` when a loop runs that queue already. Unlike `new`, it
+    /// leaves this thread's current loop as it is: [`enter`](Self::enter)
+    /// makes the loop current while it runs.
+    pub fn adopt(handle: &RunLoopHandle) -> Option<RunLoop> {
+        if handle.core.adopted.swap(true, Ordering::SeqCst) {
+            return None;
+        }
+        Some(RunLoop::over(handle.core.clone()))
+    }
+
+    /// Makes this loop the current loop and scheduler of this
+    /// thread until the guard drops, which restores the ones before, so one
+    /// thread can run several loops in turn. What runs meanwhile, such as
+    /// a timer or a mailbox that a task creates, belongs to this loop.
+    pub fn enter(&self) -> EnteredRunLoop {
+        let previous = CURRENT.with(|c| c.borrow_mut().replace(self.inner.clone()));
+        let previous_scheduler = scheduler::try_get_current();
+        scheduler::set_current(Some(self.scheduler()));
+        EnteredRunLoop { previous, previous_scheduler }
     }
 
     /// `RunLoop::Get()`. C++ asserts that the thread has a current RunLoop;
@@ -229,7 +275,7 @@ impl RunLoop {
         self.inner.core.push(priority, Box::new(task));
     }
 
-    /// Port-only: calls `waker`, from the waking thread, whenever this loop
+    /// Calls `waker`, from the waking thread, whenever this loop
     /// gets work (a task or an AsyncTask send), so that a host that drives
     /// the loop with `run_once` on its own thread knows to run it. Timers
     /// don't wake: such a host runs the loop at least once a frame.
@@ -361,6 +407,18 @@ impl Scheduler for RunLoop {
 }
 
 impl RunLoopHandle {
+    /// The task queue of a loop that no thread runs yet. Tasks
+    /// sent to it wait until a thread makes the loop with
+    /// [`RunLoop::adopt`] and runs it.
+    pub fn new() -> RunLoopHandle {
+        RunLoopHandle { core: Arc::new(Core::new()) }
+    }
+
+    /// [`RunLoop::set_waker`] from any thread.
+    pub fn set_waker(&self, waker: Option<Arc<dyn Fn() + Send + Sync>>) {
+        *self.core.waker.lock_unpoisoned() = waker;
+    }
+
     /// `RunLoop::invoke` from any thread.
     pub fn invoke(&self, task: impl FnOnce() + Send + 'static) {
         self.core.push(Priority::Default, Box::new(task));
@@ -431,6 +489,42 @@ mod tests {
         run_loop.invoke_with_priority(Priority::High, move || b.lock().unwrap().push(2));
         run_loop.wait_for_empty();
         assert_eq!(*order.lock().unwrap(), vec![2, 1]);
+    }
+
+    #[test]
+    fn an_adopted_loop_runs_what_was_sent_before() {
+        let handle = RunLoopHandle::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        handle.invoke(move || tx.send(std::thread::current().id()).unwrap());
+        let thread = std::thread::spawn(move || {
+            let run_loop = RunLoop::adopt(&handle).unwrap();
+            assert!(RunLoop::adopt(&handle).is_none());
+            run_loop.run_once();
+            std::thread::current().id()
+        });
+        let ran_on = thread.join().unwrap();
+        assert_eq!(ran_on, rx.recv().unwrap());
+    }
+
+    #[test]
+    fn entering_a_loop_makes_it_current_until_the_guard_drops() {
+        let outer = RunLoop::new();
+        let inner = RunLoop::adopt(&RunLoopHandle::new()).unwrap();
+        let current = || RunLoop::try_get().map(|run_loop| Arc::as_ptr(&run_loop.inner.core));
+        assert_eq!(Some(Arc::as_ptr(&outer.inner.core)), current());
+        {
+            let _entered = inner.enter();
+            assert_eq!(Some(Arc::as_ptr(&inner.inner.core)), current());
+            // The ambient scheduler posts to the entered loop.
+            let ran = Arc::new(AtomicUsize::new(0));
+            let counter = ran.clone();
+            scheduler::get_current().schedule(Box::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            }));
+            inner.run_once();
+            assert_eq!(1, ran.load(Ordering::SeqCst));
+        }
+        assert_eq!(Some(Arc::as_ptr(&outer.inner.core)), current());
     }
 
     #[test]

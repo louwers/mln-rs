@@ -22,7 +22,6 @@ use std::sync::Arc;
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::constants;
-use mln_util::exception::{RuntimeError, StyleParseException};
 use mln_util::immutable::Immutable;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
@@ -199,16 +198,16 @@ fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: Res
     let observer = this.inner.base.observer();
     let this_source = derived;
     if let Some(error) = &res.error {
-        observer.on_source_error(this_source, RuntimeError::ptr(error.message.clone()));
+        observer.on_source_error(this_source, mln_util::Error::native(error.message.clone()));
     } else if res.not_modified {
         // return
     } else if res.no_content {
-        observer.on_source_error(this_source, RuntimeError::ptr("unexpectedly empty TileJSON"));
+        observer.on_source_error(this_source, mln_util::Error::native("unexpectedly empty TileJSON"));
     } else {
         let mut error = Error::default();
         let data = res.data.clone().unwrap_or_default();
         let Some(mut tileset) = convert_json_tileset(&data, &mut error) else {
-            observer.on_source_error(this_source, StyleParseException::ptr(error.message));
+            observer.on_source_error(this_source, mln_util::Error::native(error.message));
             return;
         };
         // TODO(port): canonicalizeTileset for the "mapbox" scheme alias.

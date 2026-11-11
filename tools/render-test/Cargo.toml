@@ -20,6 +20,10 @@ name = "render_test"
 name = "render-test"
 path = "src/main.rs"
 
+[features]
+# Builds the OpenGL backend in, for runs with MLN_RENDER_BACKEND=gl.
+gl = ["mln_headless/gl"]
+
 [dependencies]
 csscolorparser.workspace = true
 feature.workspace = true

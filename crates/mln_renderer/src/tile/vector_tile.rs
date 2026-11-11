@@ -144,7 +144,7 @@ impl Tile for VectorTile {
         global_state: Option<&GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
         feature_state: &crate::source_state::SourceFeatureState,
-    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+    ) -> Result<(), mln_util::error::Error> {
         self.tile.query_rendered_features(
             result,
             query_geometry,
@@ -162,7 +162,7 @@ impl Tile for VectorTile {
         result: &mut Vec<mln_util::feature::Feature>,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
-    ) -> Result<(), mln_util::exception::ExceptionPtr> {
+    ) -> Result<(), mln_util::error::Error> {
         self.tile.query_source_features(result, options, global_state)
     }
 

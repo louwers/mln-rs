@@ -107,7 +107,7 @@ fn decode_rejects_malformed_definitions() {
     ] {
         assert_eq!(
             "Malformed offline region definition",
-            decode_offline_region_definition(malformed.as_bytes()).unwrap_err().what(),
+            decode_offline_region_definition(malformed.as_bytes()).unwrap_err().message,
             "{malformed}"
         );
     }

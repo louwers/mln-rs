@@ -5,12 +5,12 @@
 use std::sync::Arc;
 
 use crate::resource::Kind;
-use crate::response::Error;
+use crate::response::ResourceError;
 
 /// `ResourceTransform::Result`: the URL to load instead, or the error to fail
 /// the request with. A failed request is never sent. When the error's reason
 /// allows a retry, the retry calls the transform again.
-pub type TransformResult = Result<String, Error>;
+pub type TransformResult = Result<String, ResourceError>;
 
 /// `ResourceTransform::FinishedCallback` (`std::function<void(Result)>`).
 pub type FinishedCallback = Box<dyn FnOnce(TransformResult) + Send>;

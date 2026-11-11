@@ -1,28 +1,49 @@
-name: Lavapipe
+name: Mesa's software rasterizers
 description: >-
   Installs Mesa's Vulkan drivers and points the Vulkan loader at lavapipe,
-  the software rasterizer the GPU tests on Linux run on.
+  the software rasterizer the GPU tests on Linux run on. With `egl`, also
+  Mesa's EGL, for OpenGL ES on llvmpipe.
 
-# The packages are the Ubuntu ones that packages.sha256 pins, downloaded from
-# a release of this repository (mirror.sh uploads them) rather than from the
-# Ubuntu archive, which is at times out of reach of the runners for hours.
-# The runner image has everything they depend on, so dpkg installs them
-# without apt.
+inputs:
+  egl:
+    description: >-
+      Also install Mesa's EGL (packages-egl.sha256), which the runner image
+      lacks, and have Mesa render with llvmpipe: for the tests of the OpenGL
+      backend.
+    default: 'false'
+
+# The packages are the Ubuntu ones that packages.sha256 pins, and with `egl`
+# the ones that packages-egl.sha256 pins, downloaded from a release of this
+# repository (mirror.sh uploads them) rather than from the Ubuntu archive,
+# which is at times out of reach of the runners for hours. The runner image
+# has everything they depend on, so dpkg installs them without apt.
+#
+# Mesa's EGL depends on its gallium drivers and its GBM at exactly its own
+# version. The runner image has both, but packages-egl.sha256 pins them too,
+# so that an image with another Mesa gets the EGL's.
 runs:
   using: composite
   steps:
     - shell: bash
       env:
         RELEASE: https://github.com/louwers/mln-rs/releases/download/ci-lavapipe
+        EGL: ${{ inputs.egl }}
       run: |
         dir="$RUNNER_TEMP/lavapipe"
         mkdir -p "$dir"
+        lists=("$GITHUB_ACTION_PATH/packages.sha256")
+        if [ "$EGL" = true ]; then
+          lists+=("$GITHUB_ACTION_PATH/packages-egl.sha256")
+        fi
         debs=()
         while read -r sha256 path; do
           deb="$dir/${path##*/}"
           curl -fsSL --retry 5 --retry-all-errors --max-time 120 -o "$deb" "$RELEASE/${path##*/}"
           echo "$sha256  $deb" | sha256sum --check --quiet
           debs+=("$deb")
-        done < "$GITHUB_ACTION_PATH/packages.sha256"
+        done < <(cat "${lists[@]}")
         sudo dpkg --install "${debs[@]}"
         echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+        if [ "$EGL" = true ]; then
+          echo "LIBGL_ALWAYS_SOFTWARE=1" >> "$GITHUB_ENV"
+        fi

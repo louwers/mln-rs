@@ -705,7 +705,7 @@ fn source_impls_order() {
 #[derive(Default)]
 struct ResponseObserver {
     responses: Cell<usize>,
-    errors: std::cell::RefCell<Vec<String>>,
+    errors: std::cell::RefCell<Vec<crate::StyleLoadError>>,
 }
 
 impl SourceObserver for ResponseObserver {}
@@ -714,8 +714,8 @@ impl Observer for ResponseObserver {
     fn on_style_response(&self) {
         self.responses.set(self.responses.get() + 1);
     }
-    fn on_style_error(&self, error: mln_util::exception::ExceptionPtr) {
-        self.errors.borrow_mut().push(error.to_string());
+    fn on_style_error(&self, error: crate::StyleLoadError) {
+        self.errors.borrow_mut().push(error);
     }
 }
 
@@ -761,7 +761,7 @@ fn load_url_parses_the_response() {
 fn load_url_error() {
     let (mut style, observer, run_loop) = stub_with_style_response(|_| {
         let mut response = mln_storage::Response::new();
-        response.error = Some(Box::new(mln_storage::response::Error::new(
+        response.error = Some(Box::new(mln_storage::response::ResourceError::new(
             mln_storage::response::Reason::NotFound,
             "HTTP status code 404",
         )));
@@ -770,7 +770,21 @@ fn load_url_error() {
     style.load_url("http://some-url");
     run_loop.run_once();
     style.process_style_responses();
-    assert_eq!(vec!["loading style failed: HTTP status code 404".to_owned()], *observer.errors.borrow());
+    assert_eq!(
+        vec![crate::StyleLoadError::Load("loading style failed: HTTP status code 404".to_owned())],
+        *observer.errors.borrow()
+    );
+    assert!(!style.is_loaded());
+}
+
+#[test]
+fn load_json_parse_error() {
+    let (mut style, observer, _run_loop) = stub_with_style_response(|_| None);
+    style.load_json("[]");
+    assert_eq!(
+        vec![crate::StyleLoadError::Parse("Failed to parse style: style must be an object".to_owned())],
+        *observer.errors.borrow()
+    );
     assert!(!style.is_loaded());
 }
 

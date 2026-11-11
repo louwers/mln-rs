@@ -14,7 +14,7 @@ use mln_image::decoder;
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::LatLng;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 
@@ -164,11 +164,11 @@ fn on_image_response(weak: &Weak<Inner>, res: Response) {
     let this = ImageSource { inner };
     let observer = this.inner.base.observer();
     if let Some(error) = &res.error {
-        observer.on_source_error(&this, RuntimeError::ptr(error.message.clone()));
+        observer.on_source_error(&this, Error::native(error.message.clone()));
     } else if res.not_modified {
         // return
     } else if res.no_content {
-        observer.on_source_error(&this, RuntimeError::ptr("unexpectedly empty image url"));
+        observer.on_source_error(&this, Error::native("unexpectedly empty image url"));
     } else {
         let data = res.data.clone().unwrap_or_default();
         let weak = weak.clone();
@@ -184,10 +184,7 @@ fn on_image_response(weak: &Weak<Inner>, res: Response) {
                     let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_image(&this.impl_(), image));
                     this.inner.base.set_base_impl(new_impl);
                 }
-                Err(message) => {
-                    let error: ExceptionPtr = RuntimeError::ptr(message);
-                    observer.on_source_error(&this, error);
-                }
+                Err(error) => observer.on_source_error(&this, Error::native(error.message)),
             }
             this.inner.base.set_loaded(true);
             observer.on_source_loaded(&this);

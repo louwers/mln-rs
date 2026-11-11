@@ -1,0 +1,3 @@
+# Every text file is stored with LF; check them out with LF on every platform
+# too, since tests compare fixtures and generated code byte for byte.
+* text=auto eol=lf

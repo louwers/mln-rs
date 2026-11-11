@@ -7,14 +7,13 @@
 // `//tools/render-test:m1_render_tests` is the authoritative run.
 
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
 use mln_gfx::ContextMode;
 use mln_headless::HeadlessFrontend;
 use mln_image::decode_image;
-use mln_map::{Map, MapMode, MapOptions, NullMapObserver};
+use mln_map::{Map, MapMode, MapOptions};
 use mln_util::size::Size;
 use mln_webgpu::HeadlessBackend;
 
@@ -42,14 +41,12 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32) -> HeadlessFrontend) -> (
 
     let _run_loop = RunLoop::new();
     let mut frontend = frontend(size, pixel_ratio);
-    let mut map = Map::new(
-        &frontend,
-        Rc::new(NullMapObserver),
-        MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
-    )
-    .unwrap();
-    map.get_style_mut().load_json(&json);
-    let camera = map.get_style().get_default_camera();
+    let mut map =
+        Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio))
+            .unwrap();
+    frontend.attach(&map);
+    map.style_mut().load_json(&json);
+    let camera = map.style().get_default_camera();
     map.jump_to(&camera);
     let actual = frontend.render(&mut map).expect("render").image;
 

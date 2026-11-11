@@ -20,12 +20,20 @@ autotests = false
 name = "mln_web"
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# The module for browsers without WebGPU, which draws with WebGL2 through
+# mln_gl (src/map_webgl.rs). `just web` builds it beside the WebGPU one; the
+# page loads one of the two. Nothing in it calls mln_webgpu or wgpu, so the
+# linker leaves them out of it.
+webgl = ["dep:mln_gl"]
+
 # Only the browser target has anything to build.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
 mln_actor.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
+mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
 mln_renderer.workspace = true
 mln_storage.workspace = true

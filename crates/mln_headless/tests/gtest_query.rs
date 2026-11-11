@@ -19,7 +19,7 @@ use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::source::Source;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use mln_util::exception::RuntimeError;
+use mln_util::ErrorKind;
 use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 
@@ -37,8 +37,8 @@ impl QueryTest {
         // TODO(port): `StubFileSource()` uses the MapTiler tile server options.
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
-        test.map().get_style_mut().load_json(&read_file("test/fixtures/api/query_style.json"));
-        test.map().get_style_mut().add_image(style_image(
+        test.map().style_mut().load_json(&read_file("test/fixtures/api/query_style.json"));
+        test.map().style_mut().add_image(style_image(
             "test-icon",
             decode_image("test/fixtures/sprites/default_marker.png"),
             1.0,
@@ -48,7 +48,7 @@ impl QueryTest {
         test
     }
 
-    fn map(&self) -> std::cell::RefMut<'_, mln_map::Map> {
+    fn map(&self) -> crate::support::MapGuard<'_> {
         self.0.map()
     }
 
@@ -67,7 +67,7 @@ impl QueryTest {
     }
 
     fn set_global_state_property(&self, name: &str, value: &str) {
-        self.map().get_style_mut().set_global_state_property(name, &Value::String(value.to_owned())).unwrap();
+        self.map().style_mut().set_global_state_property(name, &Value::String(value.to_owned())).unwrap();
     }
 }
 
@@ -181,7 +181,7 @@ fn global_state_change_relayouts_source_filter() {
     let test = QueryTest::new();
     {
         let mut map = test.map();
-        let mut style = map.get_style_mut();
+        let style = map.style_mut();
         let mut layer = style.get_layer_mut("layer4").expect("layer4");
         layer.set_filter(&parse_filter(r#"["==", ["get", "key1"], ["global-state", "filterValue"]]"#));
     }
@@ -228,7 +228,7 @@ fn query_rendered_features_line_offset_endpoint() {
     for offset in [22.0f64, -22.0] {
         let test = QueryTest::new();
         // std::to_string(double): "%f".
-        test.map().get_style_mut().load_json(&format!(
+        test.map().style_mut().load_json(&format!(
             r#"{{"version":8,"sources":{{"source":{{"type":"geojson","data":{{
                 "type":"LineString","coordinates":[[1.0025,1],[1.0035,1]]
             }}}}}},"layers":[{{"id":"layer","type":"line","source":"source","paint":{{
@@ -291,7 +291,7 @@ fn query_rendered_features_composite_paint_zoom() {
             // std::to_string(int).
             let lower_zoom = zoom as i32;
             let upper_zoom = zoom as i32 + 1;
-            test.map().get_style_mut().load_json(&format!(
+            test.map().style_mut().load_json(&format!(
                 r#"{{"version":8,"sources":{{"source":{{"type":"geojson","data":{{
                     "type":"Feature","properties":{{"small":4,"large":40}},"geometry":{geometry}
                 }}}}}},"layers":[{{"id":"layer","type":"{layer_type}","source":"source","paint":{{{paint}
@@ -325,7 +325,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         let test = QueryTest::new();
         {
             let mut map = test.map();
-            let mut style = map.get_style_mut();
+            let style = map.style_mut();
             // Keep the point away from tile boundaries so source queries return one copy.
             let source = style.get_source("source1").expect("source1");
             let source = source.as_any().downcast_ref::<GeoJSONSource>().expect("GeoJSONSource");
@@ -342,7 +342,7 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         // Cover both the collision-index symbol path and the geometry-index circle path.
         for layer_id in ["layer1", "circle_layer"] {
             let mut map = test.map();
-            let mut style = map.get_style_mut();
+            let style = map.style_mut();
             style.get_layer_mut(layer_id).expect("layer").set_filter(&equal_zoom);
         }
         test.map().jump_to(&CameraOptions::default().with_center(Some(ll(1.003, 1.003))).with_zoom(Some(camera_zoom)));
@@ -572,8 +572,8 @@ fn get_top_cluster_feature(test: &QueryTest) -> Vec<Feature> {
     cluster_layer.set_icon_size(&PropertyValue::Constant(12.0));
 
     test.map().jump_to(&CameraOptions::default().with_center(Some(coordinate)).with_zoom(Some(0.0)));
-    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
-    test.map().get_style_mut().add_layer(Box::new(cluster_layer), None).unwrap();
+    test.map().style_mut().add_source(Box::new(source)).unwrap();
+    test.map().style_mut().add_layer(Box::new(cluster_layer), None).unwrap();
     test.0.run_loop.run_once();
     test.render();
 
@@ -701,7 +701,7 @@ fn query_feature_extensions_supercluster_leaves() {
 
 #[test]
 fn query_feature_extensions_unknown_cluster() {
-    // A cluster ID the source doesn't have is the error C++ throws.
+    // A cluster ID the source doesn't have isn't found.
     let test = QueryTest::new();
     let mut top_cluster_feature = get_top_cluster_feature(&test);
     assert_eq!(top_cluster_feature.len(), 1);
@@ -711,5 +711,5 @@ fn query_feature_extensions_unknown_cluster() {
         renderer.query_feature_extensions("cluster_source", &top_cluster_feature[0], "supercluster", "children", None)
     });
     let error = result.expect_err("unknown cluster");
-    assert!(error.downcast_ref::<RuntimeError>().is_some(), "{error}");
+    assert_eq!(error.kind, ErrorKind::NotFound, "{error}");
 }

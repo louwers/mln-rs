@@ -16,7 +16,6 @@ use mln_util::tile_server_options::TileServerOptions;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
-use crate::ClientOptions;
 use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
@@ -24,16 +23,15 @@ use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{FinishedCallback, ResourceTransform};
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
-const CONNECTION_TIMEOUT: f64 = 0.0;
+const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 /// An online file source whose thread has set up its HTTP transport, so that
 /// the tests that time their requests don't count that setup.
 fn online_file_source() -> Rc<dyn FileSource> {
-    let fs: Rc<dyn FileSource> =
-        Rc::new(OnlineFileSource::new(&ResourceOptions::default_options(), &ClientOptions::default()));
+    let fs: Rc<dyn FileSource> = Rc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
     // `pause` returns once the thread runs.
     fs.pause();
     fs.resume();
@@ -825,7 +823,7 @@ fn failed_resource_transform() {
     let fs = online_file_source();
     fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
         |_kind: Kind, _url: &str, finished: FinishedCallback| {
-            finished(Err(Error::new(Reason::Other, "No credential")));
+            finished(Err(ResourceError::new(Reason::Other, "No credential")));
         },
     ))));
 
@@ -861,7 +859,7 @@ fn retry_failed_resource_transform() {
         move |_kind: Kind, url: &str, finished: FinishedCallback| {
             assert_eq!(delayed, url);
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                finished(Err(Error::new(Reason::Connection, "Offline")));
+                finished(Err(ResourceError::new(Reason::Connection, "Offline")));
             } else {
                 finished(Ok(test.clone()));
             }

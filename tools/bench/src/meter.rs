@@ -6,7 +6,7 @@
 //! A [`Meter`] times the timed part of each iteration of a case and leaves
 //! its setup out.
 
-// The allocator and clock_gettime are the FFI here.
+// The allocator and the process CPU clock are the FFI here.
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -76,12 +76,32 @@ pub fn live_heap_mib() -> f64 {
 }
 
 /// The CPU time of every thread of the process so far.
+#[cfg(unix)]
 pub fn process_cpu() -> Duration {
     let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: `time` is a valid timespec for the call to fill.
     let status = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut time) };
     assert_eq!(status, 0, "clock_gettime(CLOCK_PROCESS_CPUTIME_ID)");
     Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
+/// The CPU time of every thread of the process so far. Windows adds to it a
+/// clock tick at a time (15.625 ms by default), so an iteration shorter than
+/// a few ticks reads as zero or a whole tick.
+#[cfg(windows)]
+pub fn process_cpu() -> Duration {
+    use windows_sys::Win32::Foundation::FILETIME;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes};
+
+    let zero = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 };
+    let (mut creation, mut exit, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: the current process's pseudo handle needs no closing, and each
+    // FILETIME is valid for the call to fill.
+    let status = unsafe { GetProcessTimes(GetCurrentProcess(), &mut creation, &mut exit, &mut kernel, &mut user) };
+    assert_ne!(status, 0, "GetProcessTimes");
+    // FILETIME counts 100 ns intervals.
+    let hundred_ns = |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    Duration::from_nanos((hundred_ns(kernel) + hundred_ns(user)) * 100)
 }
 
 #[derive(Clone, Copy)]

@@ -11,6 +11,7 @@ use std::iter::Peekable;
 use geometry::Point;
 use mln_math::clamp_f64;
 use mln_tile_id::UnwrappedTileID;
+use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::geometry::{FeatureType, Geometry, MultiPoint, Polygon, to_feature_type};
 use mln_util::projection::Projection;
@@ -272,11 +273,11 @@ impl BuildBoundsMap {
     }
 
     /// `Projection::project(LatLng{p.y, p.x}, zoom)`.
-    fn project_point(&self, p: &Point<f64>) -> Result<Point<f64>, String> {
+    fn project_point(&self, p: &Point<f64>) -> Result<Point<f64>, Error> {
         Ok(Projection::project_zoom(&LatLng::new(p.y, p.x)?, self.zoom))
     }
 
-    fn build_table(&self, points: &[Point<f64>], et: &mut BoundsMap, closed: bool) -> Result<(), String> {
+    fn build_table(&self, points: &[Point<f64>], et: &mut BoundsMap, closed: bool) -> Result<(), Error> {
         let mut projected_points: PointList = Vec::new();
         if self.project {
             projected_points.reserve(points.len());
@@ -290,7 +291,7 @@ impl BuildBoundsMap {
         Ok(())
     }
 
-    fn build_polygon_table(&self, polygon: &Polygon<f64>, et: &mut BoundsMap) -> Result<(), String> {
+    fn build_polygon_table(&self, polygon: &Polygon<f64>, et: &mut BoundsMap) -> Result<(), Error> {
         for ring in polygon {
             self.build_table(ring, et, true)?;
         }
@@ -299,7 +300,7 @@ impl BuildBoundsMap {
 
     /// The body of `operator()(const Point<double>&)`, which
     /// `operator()(const MultiPoint<double>&)` repeats per point.
-    fn point(&self, p: &Point<f64>, et: &mut BoundsMap) -> Result<(), String> {
+    fn point(&self, p: &Point<f64>, et: &mut BoundsMap) -> Result<(), Error> {
         let mut bnd = Bound::default();
         let mut point = *p;
         if self.project {
@@ -312,7 +313,7 @@ impl BuildBoundsMap {
         Ok(())
     }
 
-    fn multi_point(&self, points: &MultiPoint<f64>, et: &mut BoundsMap) -> Result<(), String> {
+    fn multi_point(&self, points: &MultiPoint<f64>, et: &mut BoundsMap) -> Result<(), Error> {
         for p in points {
             self.point(p, et)?;
         }
@@ -320,7 +321,7 @@ impl BuildBoundsMap {
     }
 
     /// `apply_visitor(toBoundsMap, geom)`.
-    fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, String> {
+    fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, Error> {
         let mut et = BoundsMap::new();
         match geom {
             Geometry::Empty => {}
@@ -382,7 +383,7 @@ pub struct Impl {
 impl Impl {
     /// C++ default: `project = true`. Errors where C++ throws (a point with
     /// an out-of-range latitude while projecting).
-    pub fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, String> {
+    pub fn new(z: i32, geom: &Geometry<f64>, project: bool) -> Result<Impl, Error> {
         let is_closed = to_feature_type(geom) == FeatureType::Polygon;
 
         let to_bounds_map = BuildBoundsMap::new(z, project);

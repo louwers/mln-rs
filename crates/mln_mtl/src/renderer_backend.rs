@@ -21,6 +21,7 @@ use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
+use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice, MTLGPUFamily};
 
@@ -105,9 +106,10 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 impl RendererBackend {
     /// `RendererBackend(contextMode)`: the system's default device and a
     /// command queue on it, or an error if there is no Metal device.
-    pub fn new(context_mode: ContextMode) -> Result<Self, String> {
-        let device = MTLCreateSystemDefaultDevice().ok_or("No Metal device")?;
-        let command_queue = device.newCommandQueue().ok_or("Failed to create a Metal command queue")?;
+    pub fn new(context_mode: ContextMode) -> Result<Self, Error> {
+        let device = MTLCreateSystemDefaultDevice().ok_or_else(|| Error::unsupported("No Metal device"))?;
+        let command_queue =
+            device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
         // C++ checks Apple3 only, which no Mac GPU but Apple silicon is in;
         // every Mac2 GPU supports base vertex and instance too.
         let base_vertex_instance_drawing_supported =

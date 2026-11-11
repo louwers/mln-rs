@@ -10,6 +10,7 @@ members = [
     "crates/*",
     "examples/*",
     "tools/bench",
+    "tools/c-abi-gen",
     "tools/expression-test",
     "tools/render-test",
     "tools/style-codegen",
@@ -51,6 +52,7 @@ mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion"
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.11" }
 mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.11" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.11" }
+mln_gl = { package = "mln-rs-gl", path = "crates/mln_gl", version = "=0.0.11" }
 mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.11" }
 mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.11" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.11" }
@@ -60,6 +62,7 @@ mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.11"
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.11", default-features = false }
+mln_runtime = { package = "mln-rs-runtime", path = "crates/mln_runtime", version = "=0.0.11" }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.11" }
 # Without SQLite (its `sqlite` feature) unless a package asks for it, so
 # that examples/web leaves it out.
@@ -102,13 +105,22 @@ flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] 
 # examples/desktop: finds the system fonts it gives the map as fallback font
 # faces, and reads their names and coverage through short-lived maps.
 fontdb = { version = "0.24.0", default-features = false, features = ["fs", "memmap"] }
+# crates/mln_gl: OpenGL ES 3.0 and WebGL2 through one set of bindings.
+glow = { version = "0.17.0" }
 harfrust = { version = "0.15.0" }
 # The HTTP test server of the tests (tools/test-server).
 httpmock = { version = "0.9.0", default-features = false }
 # decodeWEBP (platform/default/src/mln/util/webp_reader.cpp); pure Rust.
 image-webp = { version = "0.2.4" }
-# tools/bench: the process's CPU time (clock_gettime), which std lacks.
+# crates/mln_gl's headless backend: an EGL context. `dynamic` loads libEGL at
+# run time, so builds need no system development packages.
+khronos-egl = { version = "6.0.0", features = ["dynamic"] }
+# tools/bench: the process's CPU time, which std lacks: clock_gettime on Unix,
+# GetProcessTimes on Windows.
 libc = { version = "0.2.191" }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+# crates/mln_gl's window backend: loads libwayland-egl at run time.
+libloading = { version = "0.8.9" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of
 # porting the C++ decoder (vendor/maplibre-tile-spec/cpp). Assumed correct
 # (user decision, 2026-11-04); the differential test against the C++ decoder
@@ -122,6 +134,8 @@ pollster = { version = "1.0.1" }
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 # The difftests' property tests.
 proptest = { version = "1.12.0" }
+# crates/mln_gl's window backend: the window, as winit and others hand it out.
+raw-window-handle = { version = "0.6.2" }
 regex = { version = "1.13.1" }
 # tools/render-test's JSON (with serde_json), and the types that cross to a
 # tile worker in another wasm instance (rc: the values behind their `Arc`s).
@@ -226,9 +240,11 @@ raw-window-metal = { version = "1.1.0" }
 # development packages.
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
 # examples/desktop's controls over the map: egui, drawn with the map's wgpu
-# device, its input from winit. `links` opens the attribution's links.
+# device or in its OpenGL ES context, its input from winit. `links` opens the
+# attribution's links.
 egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
 egui-wgpu = { version = "0.37.0", default-features = false }
+egui_glow = { version = "0.37.0", default-features = false }
 # The backends' SVG logos in examples/desktop's controls.
 egui_extras = { version = "0.37.0", default-features = false, features = ["svg"] }
 egui-winit = { version = "0.37.0", default-features = false, features = ["links", "wayland", "x11"] }
@@ -289,6 +305,11 @@ include = ["/src", "/LICENSE.md"]
 keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
+[features]
+# The OpenGL backend (crates/mln_gl): OpenGL ES 3.0 natively, where
+# mln_headless then renders with it on request, and WebGL2 in a browser.
+gl = ["dep:mln_gl", "mln_headless/gl"]
+
 [dependencies]
 cheap_ruler.workspace = true
 csscolorparser.workspace = true
@@ -303,6 +324,7 @@ mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
+mln_gl = { workspace = true, optional = true }
 mln_headless.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
@@ -310,6 +332,7 @@ mln_map_types.workspace = true
 mln_math.workspace = true
 mln_mtl.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
+mln_runtime.workspace = true
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.
 mln_storage = { workspace = true, features = ["sqlite"] }

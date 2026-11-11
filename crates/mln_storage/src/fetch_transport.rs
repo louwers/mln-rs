@@ -14,7 +14,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::http_file_source::{self, HttpTransport, Transfer, TransferRequest};
-use crate::response::{Error, Reason};
+use crate::response::{Reason, ResourceError};
 
 #[wasm_bindgen]
 extern "C" {
@@ -58,10 +58,10 @@ impl HttpTransport for FetchTransport {
     }
 }
 
-async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<Error>> {
+async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<ResourceError>> {
     let connection_error = |error: JsValue| {
         let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
-        Box::new(Error::new(Reason::Connection, message))
+        Box::new(ResourceError::new(Reason::Connection, message))
     };
     let url = &request.resource().url;
     let range = http_file_source::range_header(request.resource());
@@ -74,7 +74,7 @@ async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<Error>> {
         None => send(url, range.as_deref(), request.headers()).await.map_err(connection_error)?,
     };
     if response.type_() == web_sys::ResponseType::Opaqueredirect {
-        return Err(Box::new(Error::new(
+        return Err(Box::new(ResourceError::new(
             Reason::Other,
             "A request with the host's HTTP headers can't follow a redirect in the browser",
         )));
@@ -94,9 +94,9 @@ async fn transfer(response: &web_sys::Response) -> Result<Transfer, JsValue> {
     let body = match response.array_buffer() {
         Ok(promise) => match JsFuture::from(promise).await {
             Ok(buffer) => Ok(js_sys::Uint8Array::new(&buffer).to_vec()),
-            Err(error) => Err(Box::new(Error::new(Reason::Connection, format!("{error:?}")))),
+            Err(error) => Err(Box::new(ResourceError::new(Reason::Connection, format!("{error:?}")))),
         },
-        Err(error) => Err(Box::new(Error::new(Reason::Connection, format!("{error:?}")))),
+        Err(error) => Err(Box::new(ResourceError::new(Reason::Connection, format!("{error:?}")))),
     };
     Ok(Transfer { status, headers, body })
 }

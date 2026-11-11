@@ -3,7 +3,7 @@
 // backend's (mln_mtl renderer_backend.rs), and its frame capture, off in
 // C++, is not ported.
 
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
@@ -19,7 +19,7 @@ use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
 use crate::render_static_data::RenderStaticData;
 use crate::render_tree::RenderTree;
-use crate::renderer_observer::{RenderMode, RendererObserver};
+use crate::renderer_event::{RenderMode, RendererEvent};
 use crate::update_parameters::UpdateParameters;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,7 +32,6 @@ enum RenderState {
 pub struct RendererImpl {
     pub orchestrator: RenderOrchestrator,
     pub backend: Rc<dyn RendererBackend>,
-    observer: Option<Weak<dyn RendererObserver>>,
     pixel_ratio: f32,
     static_data: Option<RenderStaticData>,
     render_state: RenderState,
@@ -55,21 +54,12 @@ impl RendererImpl {
         RendererImpl {
             orchestrator: RenderOrchestrator::new(background_layer_as_color, local_font_family, glyph_cache),
             backend,
-            observer: None,
             pixel_ratio,
             static_data: None,
             render_state: RenderState::Never,
             frame_count: 0,
             style_loaded: false,
         }
-    }
-
-    pub fn set_observer(&mut self, observer: Option<Weak<dyn RendererObserver>>) {
-        self.observer = observer;
-    }
-
-    fn observer(&self) -> Option<Rc<dyn RendererObserver>> {
-        self.observer.as_ref().and_then(Weak::upgrade)
     }
 
     pub fn render(&mut self, render_tree: &RenderTree, update_parameters: &Arc<UpdateParameters>) {
@@ -93,22 +83,16 @@ impl RendererImpl {
             self.static_data = Some(static_data);
         }
 
-        let observer = self.observer();
-
         let render_tree_parameters = render_tree.get_parameters();
         let static_data = self.static_data.as_mut().expect("static data");
         static_data.has_3d = render_tree_parameters.has_3d;
         let renderable_size = backend.get_default_renderable().get_size();
 
         if self.render_state == RenderState::Never {
-            if let Some(observer) = &observer {
-                observer.on_will_start_rendering_map();
-            }
+            self.orchestrator.emit(RendererEvent::RenderMapStarted);
         }
 
-        if let Some(observer) = &observer {
-            observer.on_will_start_rendering_frame();
-        }
+        self.orchestrator.emit(RendererEvent::RenderFrameStarted);
 
         let state = &render_tree_parameters.transform_params.state;
         let frustum_offset = state.get_frustum_offset();
@@ -421,22 +405,23 @@ impl RendererImpl {
         let stats = Arc::new(stats);
         drop(parameters);
 
-        if let Some(observer) = &observer {
-            observer.on_did_finish_rendering_frame(
-                if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
-                render_tree_parameters.needs_repaint,
-                render_tree_parameters.placement_changed,
-                stats,
-            );
-        }
+        self.orchestrator.emit(RendererEvent::RenderFrameFinished {
+            mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
+            needs_repaint: render_tree_parameters.needs_repaint,
+            placement_changed: render_tree_parameters.placement_changed,
+            still_image_request_id: if update_parameters.still_image_request {
+                update_parameters.still_image_request_id
+            } else {
+                0
+            },
+            stats,
+        });
 
         if !render_tree_parameters.loaded {
             self.render_state = RenderState::Partial;
         } else if self.render_state != RenderState::Fully {
             self.render_state = RenderState::Fully;
-            if let Some(observer) = &observer {
-                observer.on_did_finish_rendering_map();
-            }
+            self.orchestrator.emit(RendererEvent::RenderMapFinished);
         }
 
         self.frame_count += 1;

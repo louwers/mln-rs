@@ -11,22 +11,23 @@
 // Neither applies gamma, sRGB or ICC profile conversions (libpng only does when
 // asked). Interlaced images are deinterlaced by both.
 
+use mln_util::error::Error;
 use mln_util::image::{PremultipliedImage, UnassociatedImage};
 use mln_util::premultiply::premultiply;
 use mln_util::size::Size;
 
 /// `mln::decodePNG(const uint8_t*, size_t)`.
-pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, String> {
+pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, Error> {
     if data.len() < 8 {
-        return Err("PNG reader: Could not read image".to_string());
+        return Err(Error::invalid_argument("PNG reader: Could not read image"));
     }
     const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
     if data[..8] != SIGNATURE {
-        return Err("File or stream is not a png".to_string());
+        return Err(Error::invalid_argument("File or stream is not a png"));
     }
 
     // libpng's messages differ from the png crate's; the prefix is kept.
-    let invalid = |e: png::DecodingError| format!("failed to read invalid png: '{e}'");
+    let invalid = |e: png::DecodingError| Error::invalid_argument(format!("failed to read invalid png: '{e}'"));
 
     let mut decoder = png::Decoder::new(std::io::Cursor::new(data));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
@@ -37,8 +38,9 @@ pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, String> {
         (info.width, info.height)
     };
 
-    let buffer_size =
-        reader.output_buffer_size().ok_or_else(|| "failed to read invalid png: 'image too large'".to_string())?;
+    let buffer_size = reader
+        .output_buffer_size()
+        .ok_or_else(|| Error::invalid_argument("failed to read invalid png: 'image too large'"))?;
     let mut buffer = vec![0u8; buffer_size];
     let output = reader.next_frame(&mut buffer).map_err(invalid)?;
     debug_assert_eq!(output.bit_depth, png::BitDepth::Eight);
@@ -72,7 +74,7 @@ pub fn decode_png(data: &[u8]) -> Result<PremultipliedImage, String> {
             }
             png::ColorType::Indexed => {
                 // EXPAND always turns palette images into RGB(A).
-                return Err("failed to read invalid png: 'unexpanded palette'".to_string());
+                return Err(Error::invalid_argument("failed to read invalid png: 'unexpanded palette'"));
             }
         }
     }

@@ -12,9 +12,10 @@ use mln_tile::geometry_tile_data::{classify_rings, limit_holes};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryCoordinates};
 use mln_util::constants::EXTENT;
+use mln_util::error::Error;
 use mln_util::geometry::FeatureType;
 
-use crate::bucket::GeometryTooLongException;
+use crate::bucket::geometry_too_long;
 use crate::buckets::fill_bucket::{FillBucket, FillLayoutVertex};
 use crate::buckets::line_bucket::{LineBucket, LineLayoutVertex};
 use crate::gfx::fill_large_mesh_arrays::{MeshLines, fill_large_mesh_arrays};
@@ -27,13 +28,13 @@ fn add_ring_vertices(vertices: &mut Vec<FillLayoutVertex>, ring: &GeometryCoordi
     ring.len()
 }
 
-fn total_vertices_check(polygon: &GeometryCollection) -> Result<usize, GeometryTooLongException> {
+fn total_vertices_check(polygon: &GeometryCollection) -> Result<usize, Error> {
     let mut total_vertices = 0;
     for ring in polygon.iter() {
         total_vertices += ring.len();
     }
     if total_vertices > u16::MAX as usize {
-        return Err(GeometryTooLongException);
+        return Err(geometry_too_long());
     }
     Ok(total_vertices)
 }
@@ -182,7 +183,7 @@ pub fn generate_fill_and_outline_buffers(
     basic_line_segments: &mut Vec<SegmentBase>,
     canonical: &CanonicalTileID,
     subdivision_granularity: u32,
-) -> Result<(), GeometryTooLongException> {
+) -> Result<(), Error> {
     let mut line_generator = PolylineGenerator::new(
         line_vertices,
         LineBucket::layout_vertex,

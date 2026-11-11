@@ -14,10 +14,11 @@
 // moves the closures back.
 
 use std::cell::{Cell, RefCell};
+use std::sync::{Arc, Mutex};
 
 use mln_map_types::projection_base::ProjectionBase;
 use mln_map_types::util_camera::Camera as UtilCamera;
-use mln_map_types::{MercatorProjection, TileProjector};
+use mln_map_types::{MercatorProjection, TileProjector, TransitionEndFn};
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::UnitBezier;
@@ -25,6 +26,7 @@ use mln_util::chrono::{milliseconds, seconds};
 use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::quaternion::Quaternion;
+use mln_util::sync::SyncCell;
 use mln_util::vectors::{Vec3, Vec4};
 
 use super::*;
@@ -137,23 +139,23 @@ fn rotated_frame(quaternion: &Vec4) -> (Vec3, Vec3, Vec3) {
 
 /// Records the AnimationOptions callbacks (see the file comment).
 struct CallbackLog {
-    frames: Rc<RefCell<Vec<f64>>>,
-    finishes: Rc<Cell<u32>>,
+    frames: Arc<Mutex<Vec<f64>>>,
+    finishes: Arc<SyncCell<u32>>,
 }
 
 impl CallbackLog {
     fn install(options: &mut AnimationOptions) -> CallbackLog {
-        let log = CallbackLog { frames: Rc::default(), finishes: Rc::default() };
+        let log = CallbackLog { frames: Arc::default(), finishes: Arc::default() };
         let frames = log.frames.clone();
-        options.transition_frame_fn = Some(Rc::new(move |t: f64| frames.borrow_mut().push(t)));
+        options.transition_frame_fn = Some(Arc::new(move |t: f64| frames.lock().unwrap().push(t)));
         let finishes = log.finishes.clone();
-        options.transition_end_fn = Some(Rc::new(move |_: &TransitionEnd| finishes.set(finishes.get() + 1)));
+        options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| finishes.set(finishes.get() + 1)));
         log
     }
 
     /// The `t` arguments of the frame callbacks since the last call.
     fn take_frames(&self) -> Vec<f64> {
-        std::mem::take(&mut *self.frames.borrow_mut())
+        std::mem::take(&mut *self.frames.lock().unwrap())
     }
 
     /// Whether the finish callback ran since the last call.
@@ -3863,7 +3865,8 @@ fn nan_screen_coordinates_are_errors() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     let nan = sc(f64::NAN, 500.0);
     let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
-    assert!(error.ends_with("must not be NaN"), "{error}");
+    assert_eq!(error.kind, mln_util::ErrorKind::InvalidArgument);
+    assert!(error.message.ends_with("must not be NaN"), "{error}");
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
     assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);
@@ -3881,7 +3884,8 @@ fn nan_screen_coordinates_are_errors_on_the_globe() {
     set_up_globe_camera(&mut transform, &ll(10.0, 10.0), 3.0);
     let nan = sc(f64::NAN, 0.0);
     let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
-    assert!(error.ends_with("must not be NaN"), "{error}");
+    assert_eq!(error.kind, mln_util::ErrorKind::InvalidArgument);
+    assert!(error.message.ends_with("must not be NaN"), "{error}");
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
     assert!(transform.move_by(&nan, &AnimationOptions::new(seconds(1))).is_err());
@@ -3918,10 +3922,10 @@ fn unsized_globe_moves_as_mercator() {
 const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
 
 /// An end function that counts its calls.
-fn counting_end(options: &mut AnimationOptions) -> Rc<Cell<u32>> {
-    let count = Rc::new(Cell::new(0));
+fn counting_end(options: &mut AnimationOptions) -> Arc<SyncCell<u32>> {
+    let count = Arc::new(SyncCell::new(0));
     let finished = count.clone();
-    options.transition_end_fn = Some(Rc::new(move |_: &TransitionEnd| finished.set(finished.get() + 1)));
+    options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| finished.set(finished.get() + 1)));
     count
 }
 
@@ -4071,13 +4075,13 @@ fn compose_padding_pitch_and_field_of_view() {
 #[derive(Default)]
 struct EventObserver {
     /// 0 for each did-change notification, and what the tests push.
-    events: RefCell<Vec<i32>>,
+    events: Arc<Mutex<Vec<i32>>>,
     changes: Cell<u32>,
 }
 
 impl TransformObserver for EventObserver {
     fn on_camera_did_change(&self, _change: CameraChange) {
-        self.events.borrow_mut().push(0);
+        self.events.lock().unwrap().push(0);
         self.changes.set(self.changes.get() + 1);
     }
 }
@@ -4089,30 +4093,30 @@ fn partial_camera_commands_finish_together_for_still_image() {
     let mut transform = Transform::new(observer.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
     transform.resize(Size::new(512, 512)).unwrap();
     let push = |event: i32| {
-        let observer = observer.clone();
-        Some(Rc::new(move |_: &TransitionEnd| observer.events.borrow_mut().push(event)) as Rc<dyn Fn(&TransitionEnd)>)
+        let events = observer.events.clone();
+        Some(Arc::new(move |_: &TransitionEnd| events.lock().unwrap().push(event)) as TransitionEndFn)
     };
     let position = AnimationOptions { transition_end_fn: push(1), ..AnimationOptions::new(seconds(5)) };
     let bearing = AnimationOptions { transition_end_fn: push(2), ..AnimationOptions::new(seconds(10)) };
     transform.ease_to(&cam().with_center(Some(ll(20.0, 30.0))).with_zoom(Some(12.0)), &position);
     transform.ease_to(&cam().with_bearing(Some(60.0)), &bearing);
-    observer.events.borrow_mut().clear();
+    observer.events.lock().unwrap().clear();
     transform.jump_to(&cam().with_zoom(Some(10.0)));
-    assert_eq!(*observer.events.borrow(), [0]);
+    assert_eq!(*observer.events.lock().unwrap(), [0]);
 
     // Static maps advance to the maximum time point for a still image. Each
     // command finishes before its own did-change notification, even when
     // another command has replaced one of its properties.
-    observer.events.borrow_mut().clear();
+    observer.events.lock().unwrap().clear();
     transform.update_transitions(TimePoint::max());
-    assert_eq!(*observer.events.borrow(), [1, 0, 2, 0]);
+    assert_eq!(*observer.events.lock().unwrap(), [1, 0, 2, 0]);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 20.0, 1e-5);
     assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 30.0, 1e-5);
     assert_near(transform.get_zoom(), 10.0, 1e-5);
     assert_near(bearing_degrees(&transform), 60.0, 1e-5);
     assert!(!transform.in_transition());
     transform.cancel_transitions();
-    assert_eq!(*observer.events.borrow(), [1, 0, 2, 0]);
+    assert_eq!(*observer.events.lock().unwrap(), [1, 0, 2, 0]);
 }
 
 // gtest: Transform.CancelTransitionsByIdLeavesOthersRunning
@@ -4268,11 +4272,11 @@ fn header_momentum() -> CameraMomentum {
 }
 
 /// Animation options whose end function keeps how the command ended.
-fn record_end() -> (AnimationOptions, Rc<Cell<Option<TransitionEnd>>>) {
-    let ended = Rc::new(Cell::new(None));
+fn record_end() -> (AnimationOptions, Arc<SyncCell<Option<TransitionEnd>>>) {
+    let ended = Arc::new(SyncCell::new(None));
     let record = ended.clone();
     let animation = AnimationOptions {
-        transition_end_fn: Some(Rc::new(move |end: &TransitionEnd| {
+        transition_end_fn: Some(Arc::new(move |end: &TransitionEnd| {
             assert!(record.replace(Some(*end)).is_none(), "a command ends once");
         })),
         ..AnimationOptions::default()
@@ -4662,7 +4666,7 @@ fn outcome_transform() -> Transform {
     transform
 }
 
-fn outcome(ended: &Rc<Cell<Option<TransitionEnd>>>) -> Option<TransitionOutcome> {
+fn outcome(ended: &Arc<SyncCell<Option<TransitionEnd>>>) -> Option<TransitionOutcome> {
     ended.get().map(|end| end.outcome)
 }
 

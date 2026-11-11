@@ -3,15 +3,14 @@
 mod support;
 
 use std::f64::consts::PI;
-use std::rc::Rc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use geojson::{Feature, Geometry, Point};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions, NullMapObserver};
-use mln_storage::{ClientOptions, ResourceOptions};
+use mln_map::{CameraOptions, Map, MapDebugOptions, MapMode, MapOptions};
+use mln_storage::{FileSourceManager, ResourceOptions};
 use mln_style::PropertyValue;
 use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
@@ -32,19 +31,18 @@ impl TileLODTest {
         let run_loop = RunLoop::new();
         let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
         let mut map = Map::with_resource_options(
-            &frontend,
-            Rc::new(NullMapObserver),
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+            &FileSourceManager::new(),
             &ResourceOptions::default()
                 .with_cache_path(":memory:")
                 .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
-            &ClientOptions::default(),
         )
         .unwrap();
+        frontend.attach(&map);
         map.jump_to(camera_options);
 
         map.set_debug(MapDebugOptions::TILE_BORDERS);
-        map.get_style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
+        map.style_mut().load_json(&read_file("test/fixtures/api/empty.json"));
 
         let tile_count = Arc::new(AtomicU32::new(0));
         let handle = Arc::new(OnceLock::new());
@@ -59,11 +57,11 @@ impl TileLODTest {
         };
         let source = CustomGeometrySource::new("custom", options).unwrap();
         handle.set(source.handle()).unwrap();
-        map.get_style_mut().add_source(Box::new(source)).unwrap();
+        map.style_mut().add_source(Box::new(source)).unwrap();
 
         let mut layer = CircleLayer::new("circles", "custom");
         layer.set_circle_color(&PropertyValue::Constant(Color::new(0.0, 0.0, 1.0, 0.0)));
-        map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+        map.style_mut().add_layer(Box::new(layer), None).unwrap();
 
         TileLODTest { _run_loop: run_loop, frontend, map, tile_count }
     }

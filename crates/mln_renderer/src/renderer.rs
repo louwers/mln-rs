@@ -3,14 +3,14 @@
 // C++ keeps a `gfx::RendererBackend&`; the frontend owns the backend, so the
 // renderer shares it through an `Rc`.
 
-use std::rc::{Rc, Weak};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_text::GlyphCache;
 
+use crate::renderer_event::RendererEvents;
 use crate::renderer_impl::RendererImpl;
-use crate::renderer_observer::RendererObserver;
 use crate::tile::tile_worker_transport::TileWorkerTransport;
 use crate::update_parameters::UpdateParameters;
 
@@ -60,15 +60,13 @@ impl Renderer {
         self.impl_mut().orchestrator.set_tile_worker_transport(transport);
     }
 
-    pub fn set_observer(&mut self, observer: Option<Weak<dyn RendererObserver>>) {
-        let impl_ = self.impl_mut();
-        impl_.set_observer(observer.clone());
-        impl_.orchestrator.set_observer(observer);
+    /// Sets the queue the renderer pushes its events to: the map's, which
+    /// the map's frontend passes on.
+    pub fn set_event_queue(&mut self, events: Option<RendererEvents>) {
+        self.impl_mut().orchestrator.set_event_queue(events);
     }
 
     pub fn render(&mut self, update_parameters: &Arc<UpdateParameters>) {
-        // TODO(port): ErrorScope (SymbolErrorObserver routing).
-
         let impl_ = self.impl_mut();
         let style_changed = impl_.style_loaded && !update_parameters.style_loaded;
         impl_.style_loaded = update_parameters.style_loaded;
@@ -88,7 +86,7 @@ impl Renderer {
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_rendered_features(geometry, options)
     }
 
@@ -97,7 +95,7 @@ impl Renderer {
         &self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_rendered_features(&[*point], options)
     }
 
@@ -107,7 +105,7 @@ impl Renderer {
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         use mln_util::geo::ScreenCoordinate;
         self.impl_ref().orchestrator.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
@@ -120,7 +118,7 @@ impl Renderer {
         &self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_source_features(source_id, options)
     }
 
@@ -137,7 +135,7 @@ impl Renderer {
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 

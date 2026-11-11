@@ -15,9 +15,11 @@
         {
           linux = shells.linux.overrideAttrs (old: {
             # winit (examples/desktop) loads the Wayland and X11 libraries at
-            # run time.
+            # run time, and mln_gl's headless backend loads EGL (libglvnd,
+            # which finds the system's Mesa).
             LD_LIBRARY_PATH = "${old.LD_LIBRARY_PATH}:${
               pkgs.lib.makeLibraryPath [
+                pkgs.libglvnd
                 pkgs.libxkbcommon
                 pkgs.wayland
                 pkgs.xorg.libX11

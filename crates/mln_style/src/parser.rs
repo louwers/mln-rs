@@ -7,11 +7,9 @@
 
 use std::collections::{HashMap, HashSet};
 
-use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::logging::{Event, Log};
 use mln_vec_map::VecSet;
 
@@ -26,8 +24,9 @@ use crate::source::Source;
 use crate::sprite::Sprite;
 use crate::transition_options::TransitionOptions;
 
-/// `using StyleParseResult = std::exception_ptr`: `Err` holds the exception.
-pub type StyleParseResult = Result<(), ExceptionPtr>;
+/// What `Parser::parse` returns: a style that isn't one fails with
+/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind).
+pub type StyleParseResult = Result<(), mln_util::Error>;
 
 pub struct Parser {
     pub sprites: Vec<Sprite>,
@@ -91,11 +90,11 @@ impl Parser {
     pub fn parse(&mut self, json: &str) -> StyleParseResult {
         let document: serde_json::Value = match serde_json::from_str(json) {
             Ok(document) => document,
-            Err(error) => return Err(RuntimeError::ptr(format_json_parse_error(&error))),
+            Err(error) => return Err(mln_util::Error::invalid_argument(format_json_parse_error(&error))),
         };
 
         let Some(object) = document.as_object() else {
-            return Err(RuntimeError::ptr("style must be an object"));
+            return Err(mln_util::Error::invalid_argument("style must be an object"));
         };
 
         if let Some(version_value) = object.get("version") {
@@ -263,7 +262,9 @@ impl Parser {
                 continue;
             };
             // emplace: the first definition wins.
-            self.global_state_defaults.entry(property_name.clone()).or_insert_with(|| parse_state_value(default));
+            self.global_state_defaults
+                .entry(property_name.clone())
+                .or_insert_with(|| mln_conversion::json_to_value(default));
         }
     }
 
@@ -442,33 +443,6 @@ fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack
     }
 }
 
-/// Deep conversion of a style JSON value to an mln::Value (unlike
-/// conversion::toValue, which only handles scalar values).
-fn parse_state_value(value: &serde_json::Value) -> Value {
-    match value {
-        serde_json::Value::Null => Value::Null,
-        serde_json::Value::Bool(b) => Value::Bool(*b),
-        serde_json::Value::String(s) => Value::String(s.clone()),
-        serde_json::Value::Number(n) => {
-            if let Some(u) = n.as_u64() {
-                Value::Uint(u)
-            } else if let Some(i) = n.as_i64() {
-                Value::Int(i)
-            } else {
-                Value::Double(n.as_f64().unwrap_or(0.0))
-            }
-        }
-        serde_json::Value::Array(array) => Value::Array(array.iter().map(parse_state_value).collect()),
-        serde_json::Value::Object(object) => {
-            let mut result = ValueObject::new();
-            for (key, member) in object {
-                result.entry(key.clone()).or_insert_with(|| parse_state_value(member));
-            }
-            Value::Object(result)
-        }
-    }
-}
-
 /// `formatJSONParseError` (src/mln/util/rapidjson.cpp), with serde_json's
 /// message instead of rapidjson's (see the file comment).
 fn format_json_parse_error(error: &serde_json::Error) -> String {
@@ -526,30 +500,31 @@ fn parse_font_file(
 
 /// `parseFallbackFontFaces(json)`: fallback font faces from `json`, an
 /// array of font files in the format of a font face in a style's
-/// `font-faces`, without a font name. C++ throws `std::runtime_error` if
-/// `json` isn't such an array.
-pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFaces, ExceptionPtr> {
-    let document: serde_json::Value =
-        serde_json::from_str(json).map_err(|error| RuntimeError::ptr(format_json_parse_error(&error)))?;
+/// `font-faces`, without a font name. It fails with
+/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if `json` isn't such
+/// an array.
+pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFaces, mln_util::Error> {
+    let document: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| mln_util::Error::invalid_argument(format_json_parse_error(&error)))?;
     let Some(files) = document.as_array() else {
-        return Err(RuntimeError::ptr("fallback font faces must be an array"));
+        return Err(mln_util::Error::invalid_argument("fallback font faces must be an array"));
     };
 
     let mut font_faces = mln_text::glyph::FontFaces::new();
     for font_file in files {
         let Some(font_file) = font_file.as_object() else {
-            return Err(RuntimeError::ptr("each fallback font face must be an object"));
+            return Err(mln_util::Error::invalid_argument("each fallback font face must be an object"));
         };
         let mut warnings = Vec::new();
         let font_face = parse_font_file("", font_file, &mut warnings);
         if let Some(warning) = warnings.into_iter().next() {
-            return Err(RuntimeError::ptr(warning));
+            return Err(mln_util::Error::invalid_argument(warning));
         }
         if font_face.url.is_empty() {
-            return Err(RuntimeError::ptr("each fallback font face must have a url"));
+            return Err(mln_util::Error::invalid_argument("each fallback font face must have a url"));
         }
         if font_face.ranges.is_empty() {
-            return Err(RuntimeError::ptr("each fallback font face must cover a unicode-range"));
+            return Err(mln_util::Error::invalid_argument("each fallback font face must cover a unicode-range"));
         }
         font_faces.push(mln_text::glyph::FontFace::fallback(&font_face.url, font_face.ranges));
     }

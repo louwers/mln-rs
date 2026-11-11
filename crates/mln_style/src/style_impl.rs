@@ -39,7 +39,7 @@ use feature::Value;
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_sprite::{SpriteLoader, SpriteLoaderObserver};
 use mln_storage::{AsyncRequest, FileSource, Resource, Response};
-use mln_util::exception::{ExceptionPtr, RuntimeError, StyleLoadException, StyleParseException};
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -56,6 +56,7 @@ use crate::projection::{self, Projection};
 use crate::sky::{self, Sky};
 use crate::source::{self, Source};
 use crate::sprite::Sprite;
+use crate::style::StyleLoadError;
 use crate::transition_options::TransitionOptions;
 
 pub type ImageImpls = Vec<Immutable<image::Impl>>;
@@ -64,7 +65,7 @@ pub type ImageImpls = Vec<Immutable<image::Impl>>;
 struct SpriteShared {
     images: Immutable<ImageImpls>,
     sprites_loading_status: HashMap<String, bool>,
-    last_error: Option<ExceptionPtr>,
+    last_error: Option<Error>,
     observer: Option<Rc<dyn Observer>>,
 }
 
@@ -111,7 +112,7 @@ fn on_sprite_loaded(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, ima
 }
 
 /// `Style::Impl::onSpriteError`.
-fn on_sprite_error(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, error: ExceptionPtr) {
+fn on_sprite_error(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>, error: Error) {
     shared.borrow_mut().last_error = Some(error.clone());
     Log::error(Event::Style, format!("Failed to load sprite: {error}"));
     let observer = shared_observer(shared);
@@ -142,7 +143,7 @@ impl SpriteLoaderObserver for StyleSpriteObserver {
         }
     }
 
-    fn on_sprite_error(&self, sprite: Option<Sprite>, error: ExceptionPtr) {
+    fn on_sprite_error(&self, sprite: Option<Sprite>, error: Error) {
         if let Some(shared) = self.shared.upgrade() {
             on_sprite_error(&shared, sprite.as_ref(), error);
         }
@@ -187,7 +188,7 @@ impl SourceObserver for StyleSourceObserver {
     }
 
     /// `onSourceError(Source&, std::exception_ptr)`.
-    fn on_source_error(&self, source: &dyn Source, error: ExceptionPtr) {
+    fn on_source_error(&self, source: &dyn Source, error: Error) {
         let Some(shared) = self.shared.upgrade() else {
             return;
         };
@@ -348,7 +349,8 @@ impl Impl {
 
     pub fn load_url(&mut self, url: &str) {
         let Some(file_source) = self.file_source.clone() else {
-            self.observer().on_style_error(StyleLoadException::ptr("Unable to find resource provider for style url."));
+            self.observer()
+                .on_style_error(StyleLoadError::Load("Unable to find resource provider for style url.".to_owned()));
             return;
         };
 
@@ -390,8 +392,8 @@ impl Impl {
                 let message = format!("loading style failed: {}", error.message);
                 Log::error(Event::Setup, &message);
                 let observer = self.observer();
-                observer.on_style_error(StyleLoadException::ptr(message));
-                observer.on_resource_error(RuntimeError::ptr(error.message.clone()));
+                observer.on_style_error(StyleLoadError::Load(message));
+                observer.on_resource_error(Error::native(error.message.clone()));
             } else if res.not_modified || res.no_content {
                 continue;
             } else if let Some(data) = &res.data {
@@ -408,7 +410,7 @@ impl Impl {
             let message = format!("Failed to parse style: {error}");
             Log::error(Event::ParseStyle, &message);
             let observer = self.observer();
-            observer.on_style_error(StyleParseException::ptr(message));
+            observer.on_style_error(StyleLoadError::Parse(message));
             observer.on_resource_error(error);
             return;
         }
@@ -469,7 +471,7 @@ impl Impl {
         } else {
             // We identify no sprite with 'default' as string in the sprite loading status.
             self.shared.borrow_mut().sprites_loading_status.insert("default".to_owned(), false);
-            self.on_sprite_error(None, RuntimeError::ptr("Unable to find resource provider for sprite url."));
+            self.on_sprite_error(None, Error::native("Unable to find resource provider for sprite url."));
         }
         self.glyph_url = parser.glyph_url.clone();
         self.font_faces = parser.font_faces.clone();
@@ -495,7 +497,7 @@ impl Impl {
         self.shared.borrow_mut().observer = observer;
     }
 
-    pub fn get_last_error(&self) -> Option<ExceptionPtr> {
+    pub fn get_last_error(&self) -> Option<Error> {
         self.shared.borrow().last_error.clone()
     }
 
@@ -575,11 +577,10 @@ impl Impl {
         self.sources.get(id)
     }
 
-    /// C++ throws `std::runtime_error("Source <id> already exists")`.
-    pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), ExceptionPtr> {
+    /// See [`Style::add_source`](crate::Style::add_source).
+    pub fn add_source(&mut self, source: Box<dyn Source>) -> Result<(), Error> {
         if self.sources.get(&source.get_id()).is_some() {
-            let msg = format!("Source {} already exists", source.get_id());
-            return Err(RuntimeError::ptr(msg));
+            return Err(Error::already_exists(format!("Source {} already exists", source.get_id())));
         }
 
         source.set_observer(Some(self.source_observer.clone()));
@@ -627,20 +628,20 @@ impl Impl {
         Some(LayerRefMut { style: self, id: id.to_owned(), before })
     }
 
-    /// `addLayer(std::unique_ptr<Layer>, before)`. C++ throws
-    /// `std::runtime_error` for a duplicate id or an incompatible source.
-    pub fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, ExceptionPtr> {
+    /// `addLayer(std::unique_ptr<Layer>, before)`. See
+    /// [`Style::add_layer`](crate::Style::add_layer).
+    pub fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, Error> {
         // TODO: verify source
         if let Some(source) = self.sources.get(&layer.get_source_id()) {
             if !source.supports_layer_type(layer.base_impl().get_type_info()) {
                 let message =
                     format!("Layer '{}' is not compatible with source '{}'", layer.get_id(), layer.get_source_id());
-                return Err(RuntimeError::ptr(message));
+                return Err(Error::invalid_argument(message));
             }
         }
 
         if self.layers.get(&layer.get_id()).is_some() {
-            return Err(RuntimeError::ptr(format!("Layer {} already exists", layer.get_id())));
+            return Err(Error::already_exists(format!("Layer {} already exists", layer.get_id())));
         }
 
         let id = layer.get_id();
@@ -659,6 +660,15 @@ impl Impl {
         self.observer().on_update();
 
         Ok(self.layers.get_mut(&id).expect("layer just added"))
+    }
+
+    /// Moves the layer `id` below the layer `before`, or above every layer,
+    /// as one change. Returns false when the style has no layer `id`.
+    pub fn move_layer(&mut self, id: &str, before: Option<&str>) -> bool {
+        let Some(layer) = self.layers.remove(id) else { return false };
+        self.layers.add(layer, before);
+        self.observer().on_update();
+        true
     }
 
     pub fn remove_layer(&mut self, id: &str) -> Option<Box<dyn Layer>> {
@@ -861,7 +871,7 @@ impl Impl {
         on_sprite_loaded(&self.shared, sprite, images);
     }
 
-    pub fn on_sprite_error(&mut self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+    pub fn on_sprite_error(&mut self, sprite: Option<&Sprite>, error: Error) {
         on_sprite_error(&self.shared, sprite, error);
     }
 

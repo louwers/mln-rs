@@ -21,6 +21,7 @@ use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -152,9 +153,12 @@ impl HeadlessBackend {
     /// takes the backends `WGPU_BACKEND` names (Vulkan on Linux by
     /// default), and the device logs its uncaptured errors.
     ///
-    /// Errors when there is no such adapter, or the adapter can't create
-    /// the device.
-    pub fn request_device(adapter_index: Option<usize>) -> Result<(wgpu::Device, wgpu::Queue), String> {
+    /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is
+    /// no adapter at `adapter_index`, with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there is no
+    /// adapter at all, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// when the adapter can't create the device.
+    pub fn request_device(adapter_index: Option<usize>) -> Result<(wgpu::Device, wgpu::Queue), Error> {
         let backends = instance_backends();
         let instance = create_instance(backends);
         let adapter = match adapter_index {
@@ -162,7 +166,7 @@ impl HeadlessBackend {
                 let mut adapters = pollster::block_on(instance.enumerate_adapters(backends));
                 let count = adapters.len();
                 if index >= count {
-                    return Err(format!("adapter_index {index} is past the {count} adapters"));
+                    return Err(Error::not_found(format!("adapter_index {index} is past the {count} adapters")));
                 }
                 adapters.swap_remove(index)
             }
@@ -170,7 +174,7 @@ impl HeadlessBackend {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 ..Default::default()
             }))
-            .map_err(|e| format!("No adapter found: {e}"))?,
+            .map_err(|e| Error::unsupported(format!("No adapter found: {e}")))?,
         };
 
         // The WebGPU default limits lowered to what the adapter supports:
@@ -180,7 +184,7 @@ impl HeadlessBackend {
         let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor { required_limits, ..Default::default() }),
         )
-        .map_err(|e| format!("Failed to create device: {e}"))?;
+        .map_err(|e| Error::native(format!("Failed to create device: {e}")))?;
 
         // C++ sets no uncaptured-error callback, and Dawn logs the error
         // and invalidates the object. wgpu's default handler panics; log as

@@ -675,7 +675,7 @@ fn frame_oscillate(cx: &Context, name: &str, path: fn(f64) -> Camera) -> Metrics
 /// it draws when nothing changes.
 fn frame_idle(cx: &Context) -> Metrics {
     const SLICE: Duration = Duration::from_millis(100);
-    let scene = basemap(cx, Mode::Driven);
+    let mut scene = basemap(cx, Mode::Driven);
     let start = Instant::now();
     while !scene.is_settled() {
         scene.run_for(REFRESH);
@@ -705,21 +705,21 @@ fn frame_settle_without_symbols(cx: &Context) -> Metrics {
     scene.jump(basemap_center(), BASEMAP_ZOOM);
     scene.load_json(&style.to_string());
     // Until a frame after `before` finishes without asking for another.
-    let settle = |scene: &Scene, before: u64| {
+    let settle = |scene: &mut Scene, before: u64| {
         let start = Instant::now();
         while scene.frames() == before || !scene.is_settled() {
             scene.run_for(REFRESH);
             assert!(start.elapsed() < Duration::from_secs(60), "the basemap doesn't settle");
         }
     };
-    settle(&scene, 0);
+    settle(&mut scene, 0);
     let mut meter = Meter::new();
     let mut frames = Vec::new();
     for index in 0..cx.iterations(10) {
         let before = scene.frames();
         meter.start();
         scene.jump(basemap_center(), BASEMAP_ZOOM + 0.001 * (index % 2) as f64);
-        settle(&scene, before);
+        settle(&mut scene, before);
         meter.stop();
         frames.push((scene.frames() - before) as f64);
     }
