@@ -42,6 +42,8 @@ const PITCH_DECIDE_MS: f64 = 100.0;
 /// The length of a retargeted notch ease's first control point from the
 /// curve's origin, as GL JS's `_smoothOutEasing` keeps it.
 const NOTCH_EASE_HANDLE: f64 = 0.27;
+/// A notch ease that has this few levels left to zoom has arrived.
+const NOTCH_EASE_DONE: f64 = 1e-9;
 
 /// A screen point or offset, for the arithmetic `ScreenCoordinate` lacks.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -529,7 +531,7 @@ impl GestureRecognizer {
                 ease.applied += step;
                 self.zoom(camera, step, scroll.anchor);
             }
-            let done = ease.progress(now, duration) >= 1.0 && ease.applied == ease.distance;
+            let done = ease.progress(now, duration) >= 1.0 && (ease.distance - ease.applied).abs() <= NOTCH_EASE_DONE;
             scroll.ease = (!done).then_some(ease);
             if done {
                 scroll.idle_until = scroll.idle_until.max(now + self.options.scroll_idle_ms);

@@ -765,10 +765,9 @@ impl ViewState {
     }
 
     /// `onScroll`
-    fn on_scroll(&mut self, x_offset: f64, y_offset: f64, time: f64) {
+    fn on_scroll(&mut self, _x_offset: f64, y_offset: f64, time: f64) {
         // Port: the recognizer zooms by notches or by pixels, as the platform
         // reports them. GLFW's positive y scrolls up, which zooms in.
-        let _ = x_offset;
         if y_offset == 0.0 {
             return;
         }

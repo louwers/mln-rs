@@ -370,11 +370,12 @@ impl WebMap {
     }
 
     /// A DOM `wheel` event, as the page classifies it (web/main.js): at
-    /// (`x`, `y`), `amount` notches of a mouse wheel when `kind` is 1, or
-    /// `amount` pixels of continuous scrolling when it is 0; positive
-    /// scrolls down.
+    /// (`x`, `y`), `amount` notches of a mouse wheel when `kind` is
+    /// [`WHEEL_NOTCHES`], or `amount` pixels of continuous scrolling when it
+    /// is [`WHEEL_PIXELS`]; positive scrolls down.
     pub fn wheel(&mut self, x: f64, y: f64, kind: u32, amount: f64, modifiers: u32, time: f64) -> bool {
-        let delta = if kind == 1 { WheelDelta::Notches(amount) } else { WheelDelta::Pixels(amount) };
+        debug_assert!(kind == WHEEL_NOTCHES || kind == WHEEL_PIXELS, "wheel kind {kind}");
+        let delta = if kind == WHEEL_NOTCHES { WheelDelta::Notches(amount) } else { WheelDelta::Pixels(amount) };
         let input =
             Input::Wheel { position: ScreenCoordinate::new(x, y), delta, modifiers: modifiers_from_bits(modifiers) };
         self.gestures.handle(&mut self.map, input, time)
@@ -426,6 +427,11 @@ impl WebMap {
         self.frontend.0.backend.take_readback().map(|image| image.data.to_vec())
     }
 }
+
+/// `WebMap::wheel`'s `kind`, as web/main.js's `WHEEL_PIXELS` and
+/// `WHEEL_NOTCHES` send it.
+const WHEEL_PIXELS: u32 = 0;
+const WHEEL_NOTCHES: u32 = 1;
 
 /// The input methods' `modifiers`: Shift 1, Ctrl 2, Alt 4, Meta 8.
 fn modifiers_from_bits(bits: u32) -> Modifiers {
