@@ -74,6 +74,12 @@ round, in ABBA order so that drift hits both sides alike: `--rounds` (6)
 processes per side. A process's value of a metric is one sample, since
 iterations in one process share its caches and heap.
 
+A case may use API that older commits lack. When this checkout's harness
+doesn't build over the ref, the ref runs its own harness instead, the
+report says so, and the cases only this checkout has show as "only in the
+candidate". A case that changed between the two harnesses then compares
+different work.
+
 A lead metric gets a verdict when a two-sided Mann-Whitney U test,
 Holm-corrected over the case's lead metrics, gives p < 0.05 and the medians
 differ by at least `--threshold` percent (5). There are no verdicts when the
