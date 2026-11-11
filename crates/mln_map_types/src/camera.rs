@@ -117,8 +117,8 @@ pub struct AnimationOptions {
 /// How a camera command ended, as maplibre-native-ffi's
 /// `mln_camera_transition_outcome` reports it. A command that ended in more
 /// than one way reports [`Cancelled`](Self::Cancelled) if any of it was
-/// cancelled, and otherwise [`Replaced`](Self::Replaced) if any of it was
-/// replaced.
+/// cancelled, otherwise [`Closed`](Self::Closed) if any of it was closed,
+/// and otherwise [`Replaced`](Self::Replaced) if any of it was replaced.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum TransitionOutcome {
     /// The camera finished the change.

@@ -65,9 +65,9 @@ pub struct RenderFrameStatus {
     // TODO(port): rendering_stats: Arc<gfx::RenderingStats>.
 }
 
-/// `MapObserver`. All methods have the C++ default (empty) bodies.
 // TODO(port): onSourceChanged(style::Source&), onRegisterShaders, shader
 // compile callbacks, glyph/tile/sprite request callbacks.
+/// `MapObserver`. All methods have the C++ default (empty) bodies.
 ///
 /// The camera callbacks take a [`CameraChange`], where C++ passes only its
 /// mode, so that observers can tell a gesture and its momentum from a

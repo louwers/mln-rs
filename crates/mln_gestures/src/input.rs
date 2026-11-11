@@ -45,10 +45,10 @@ pub enum Key {
 /// How far a scroll went, as its host classifies it. Positive scrolls down,
 /// as the DOM's `deltaY` does, which zooms out.
 ///
-/// The host knows which device scrolled (macOS's `hasPreciseScrollingDeltas`,
-/// winit's line and pixel deltas, the DOM's `deltaMode`), so the recognizer
-/// doesn't guess from the deltas' sizes and timing, which GL JS does and
-/// which read a slow trackpad start as a wheel.
+/// The host knows best which device scrolled (macOS's
+/// `hasPreciseScrollingDeltas`, the DOM's `deltaMode`, the platform's wheel
+/// units), so the recognizer doesn't guess from the deltas' sizes and timing,
+/// which GL JS does and which read a slow trackpad start as a wheel.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WheelDelta {
     /// Detents of a mouse wheel, fractional for high-resolution wheels: each

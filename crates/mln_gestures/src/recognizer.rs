@@ -1,5 +1,6 @@
 //! The gesture recognizers for one map, ported from Orbis's orb-camera
-//! `input/mod.rs` onto MapLibre Native's camera commands.
+//! `input/mod.rs` onto maplibre-native-ffi's camera calls
+//! ([`GestureCamera`]).
 
 use std::cell::Cell;
 use std::ops::{Add, AddAssign, Div, Mul, Sub};

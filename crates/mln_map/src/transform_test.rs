@@ -1587,8 +1587,8 @@ fn nan_screen_coordinates_are_errors() {
 
 const LINEAR: UnitBezier = UnitBezier::new(1.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0);
 
-/// A finish callback that counts its calls.
-fn counting_finish(options: &mut AnimationOptions) -> Rc<Cell<u32>> {
+/// An end function that counts its calls.
+fn counting_end(options: &mut AnimationOptions) -> Rc<Cell<u32>> {
     let count = Rc::new(Cell::new(0));
     let finished = count.clone();
     options.transition_end_fn = Some(Rc::new(move |_: &TransitionEnd| finished.set(finished.get() + 1)));
@@ -1606,14 +1606,14 @@ fn independent_camera_tracks() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&cam().with_zoom(Some(8.0)).with_center_altitude(Some(120.0)));
     let mut zoom = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(2)) };
-    let zoom_finished = counting_finish(&mut zoom);
+    let zoom_finished = counting_end(&mut zoom);
     transform.ease_to(&cam().with_zoom(Some(12.0)), &zoom);
     let zoom_start = transform.get_latest_transition_start();
     transform.update_transitions(zoom_start + milliseconds(500));
     assert_near(transform.get_zoom(), 9.0, 1e-5);
 
     let mut center = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(8)) };
-    let center_finished = counting_finish(&mut center);
+    let center_finished = counting_end(&mut center);
     transform.ease_to(&cam().with_center(Some(ll(20.0, 30.0))), &center);
     let center_start = transform.get_latest_transition_start();
     assert_eq!(zoom_finished.get(), 0);
@@ -1642,7 +1642,7 @@ fn partial_replacement_keeps_command_and_timing() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&cam().with_zoom(Some(8.0)));
     let mut animation = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
-    let finished = counting_finish(&mut animation);
+    let finished = counting_end(&mut animation);
     transform.ease_to(&cam().with_zoom(Some(12.0)).with_bearing(Some(80.0)), &animation);
     let start = transform.get_latest_transition_start();
     transform.update_transitions(start + seconds(1));
@@ -1669,7 +1669,7 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&cam().with_zoom(Some(8.0)));
     let mut flight = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
-    let flight_finished = counting_finish(&mut flight);
+    let flight_finished = counting_end(&mut flight);
     transform.fly_to(
         &cam().with_center(Some(ll(20.0, 30.0))).with_zoom(Some(12.0)).with_roll(Some(20.0)),
         &flight,
@@ -1689,7 +1689,7 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     assert_eq!(flight_finished.get(), 1);
 
     let mut anchor_animation = AnimationOptions::new(seconds(4));
-    let anchor_finished = counting_finish(&mut anchor_animation);
+    let anchor_finished = counting_end(&mut anchor_animation);
     let anchor = sc(200.0, 300.0);
     let fixed = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped).unwrap();
     transform.ease_to(&cam().with_zoom(Some(12.0)).with_anchor(Some(anchor)), &anchor_animation);
@@ -1793,9 +1793,9 @@ fn cancel_transitions_by_id_leaves_others_running() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&cam().with_zoom(Some(8.0)));
     let mut zoom = AnimationOptions { transition_id: Some(1), ..AnimationOptions::new(seconds(4)) };
-    let zoom_finished = counting_finish(&mut zoom);
+    let zoom_finished = counting_end(&mut zoom);
     let mut bearing = AnimationOptions { transition_id: Some(2), ..AnimationOptions::new(seconds(4)) };
-    let bearing_finished = counting_finish(&mut bearing);
+    let bearing_finished = counting_end(&mut bearing);
     transform.ease_to(&cam().with_zoom(Some(12.0)), &zoom);
     transform.ease_to(&cam().with_bearing(Some(80.0)), &bearing);
     let start = transform.get_latest_transition_start();
@@ -2081,7 +2081,7 @@ fn momentum_settles_on_targets() {
         ..header_momentum()
     };
     let mut animation = AnimationOptions::default();
-    let finished = counting_finish(&mut animation);
+    let finished = counting_end(&mut animation);
     transform.start_momentum(&momentum, &animation);
     let start = transform.get_latest_transition_start();
     transform.update_transitions(start + seconds(1));
