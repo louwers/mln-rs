@@ -1,9 +1,9 @@
 // Ports the window-surface part of platform/glfw/glfw_webgpu_backend.hpp and
 // platform/glfw/glfw_webgpu_backend_impl.ipp (the Linux, wgpu-native branch):
 // a `webgpu::RendererBackend` that is its own default `gfx::Renderable` and
-// presents to a `wgpu::Surface`. The GLFW specifics (window, raw handles,
-// framebuffer size queries) stay in //examples/glfw, which creates the
-// surface and reports framebuffer resizes through `set_framebuffer_size`.
+// presents to a `wgpu::Surface`. The window stays with the host (such as
+// examples/desktop), which creates the surface and reports framebuffer
+// resizes through `set_framebuffer_size`.
 //
 // Differences from C++, all structural:
 // - The C++ backend reads `glfwGetFramebufferSize` where it needs the size;

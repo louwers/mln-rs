@@ -15,7 +15,7 @@ use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
 
 use crate::camera::GestureCamera;
-use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PointerKind, WheelDelta};
+use crate::input::{Button, GestureEvent, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use crate::options::GestureOptions;
 use crate::velocity::VelocityTracker;
 
@@ -171,6 +171,8 @@ enum Mode {
         origin: V2,
         moved: bool,
     },
+    /// A pinch the platform recognized ([`Input::Pinch`]).
+    Platform,
     /// Buttons or pointers the map doesn't use are down.
     Ignored,
 }
@@ -410,7 +412,8 @@ enum Finish {
 /// - Wheel and trackpad zoom.
 /// - Double-click or double-tap to zoom in, Shift-double-click or a
 ///   two-finger tap to zoom out, and double-tap-and-drag to zoom.
-/// - Two-finger pinch, twist and vertical tilt.
+/// - Two-finger pinch, twist and vertical tilt, and pinches the platform
+///   recognized ([`Input::Pinch`]).
 /// - The arrow keys pan, Shift-arrows rotate and tilt, and `+`/`=` and `-`
 ///   zoom.
 ///
@@ -495,7 +498,7 @@ impl GestureRecognizer {
         std::mem::take(&mut self.events)
     }
 
-    /// A host's own eased step, such as the GLFW app's `+` and `-`: it gets
+    /// A host's own eased step, such as the desktop app's `+` and `-`: it gets
     /// the phase the recognizer's own steps get (an update of a gesture under
     /// way, or a gesture of its own), and a step that zooms takes over a
     /// running notch ease. `delta.phase` is ignored.
@@ -559,6 +562,9 @@ impl GestureRecognizer {
             Input::PointerUp { id, position } => self.up(camera, id, Some(position.into()), now),
             Input::PointerCancel { id } => self.up(camera, id, None, now),
             Input::Wheel { position, delta, modifiers } => self.wheel(camera, position.into(), delta, modifiers, now),
+            Input::Pinch { center, scale, rotation, phase } => {
+                self.platform_pinch(camera, center.into(), scale, rotation, phase, now)
+            }
             Input::Key { key, modifiers } => self.key(camera, key, modifiers),
             Input::Blur => {
                 self.pointers.clear();
@@ -693,6 +699,10 @@ impl GestureRecognizer {
         if !touch && (!self.pointers.is_empty() || button == Button::Middle) {
             return false;
         }
+        if matches!(self.mode, Mode::Platform) {
+            // A press during a platform pinch takes over from it.
+            self.finish(camera, now, Finish::Cancel);
+        }
         self.pointers.push(Pointer { id, kind, position, down: position, down_at: now });
         // A press takes over from a scroll, and stops its easing.
         self.scroll = None;
@@ -785,7 +795,7 @@ impl GestureRecognizer {
                 self.pinch_step(camera, &mut pinch, points, now);
                 self.mode = Mode::Pinch(pinch);
             }
-            Mode::Idle | Mode::Ignored => {}
+            Mode::Idle | Mode::Ignored | Mode::Platform => {}
         }
         true
     }
@@ -945,7 +955,7 @@ impl GestureRecognizer {
             Mode::Pan | Mode::Rotate => {
                 self.finish(camera, now, unless_cancelled(Finish::Glide));
             }
-            Mode::Ignored | Mode::Idle => {
+            Mode::Ignored | Mode::Idle | Mode::Platform => {
                 if self.pointers.is_empty() {
                     self.finish(camera, now, unless_cancelled(Finish::Stop));
                 }
@@ -1120,6 +1130,58 @@ impl GestureRecognizer {
             (Key::Escape, _) => return false,
         }
         self.eased_step(camera, step);
+        true
+    }
+
+    /// A pinch the platform recognized: it zooms and turns around its center
+    /// as a touch pinch does, and glides on when it ends.
+    fn platform_pinch(
+        &mut self,
+        camera: &mut dyn GestureCamera,
+        center: V2,
+        scale: f64,
+        rotation: f64,
+        phase: PinchPhase,
+        now: f64,
+    ) -> bool {
+        let pinching = matches!(self.mode, Mode::Platform);
+        match phase {
+            PinchPhase::End | PinchPhase::Cancel => {
+                if !pinching {
+                    return false;
+                }
+                let finish = if phase == PinchPhase::End { Finish::Glide } else { Finish::Cancel };
+                self.finish(camera, now, finish);
+                return true;
+            }
+            PinchPhase::Begin | PinchPhase::Update if !pinching => {
+                if !matches!(self.mode, Mode::Idle) {
+                    return false;
+                }
+                // A pinch takes over from a scroll, and stops its easing.
+                self.scroll = None;
+                self.begin(camera);
+                self.tracking.reset(now);
+                self.mode = Mode::Platform;
+            }
+            PinchPhase::Begin | PinchPhase::Update => {}
+        }
+        let zoom = if scale > 0.0 && scale.is_finite() { scale.log2() } else { 0.0 };
+        // Fingers turning clockwise turn the map clockwise.
+        let bearing = if rotation.is_finite() { -rotation } else { 0.0 };
+        if zoom == 0.0 && bearing == 0.0 {
+            return true;
+        }
+        self.update(
+            camera,
+            CameraDelta {
+                scale: (zoom != 0.0).then_some(scale),
+                bearing: (bearing != 0.0).then_some(bearing),
+                anchor: Some(center.into()),
+                ..CameraDelta::default()
+            },
+        );
+        self.tracking.record(now, Step { zoom, bearing, around: Some(center), ..Step::default() });
         true
     }
 }

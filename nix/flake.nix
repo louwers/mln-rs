@@ -14,12 +14,18 @@
         in
         {
           linux = shells.linux.overrideAttrs (old: {
-            # glfw-sys's `wayland` feature (examples/glfw) asks pkg-config for
-            # wayland-client.
-            buildInputs = old.buildInputs ++ [ pkgs.wayland ];
-            # rustc links with its own lld, past the Nix ld wrapper that would
-            # add the GLFW the app links to its rpath.
-            LD_LIBRARY_PATH = "${old.LD_LIBRARY_PATH}:${pkgs.lib.makeLibraryPath [ pkgs.glfw ]}";
+            # winit (examples/desktop) loads the Wayland and X11 libraries at
+            # run time.
+            LD_LIBRARY_PATH = "${old.LD_LIBRARY_PATH}:${
+              pkgs.lib.makeLibraryPath [
+                pkgs.libxkbcommon
+                pkgs.wayland
+                pkgs.xorg.libX11
+                pkgs.xorg.libXcursor
+                pkgs.xorg.libXi
+                pkgs.xorg.libXrandr
+              ]
+            }";
           });
         }
       ) cpp.devShells;

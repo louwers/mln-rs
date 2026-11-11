@@ -5,10 +5,10 @@
 > any release without notice. Depend on [`mln-rs`](https://crates.io/crates/mln-rs)
 > instead: it re-exports this crate as `mln_rs::mln_gestures`.
 
-Turns pointer, touch, wheel and keyboard input into camera moves and gesture
-momentum, for hosts that have no gesture recognizer of their own (the GLFW app,
-the browser build). MapLibre Native has no counterpart: its platform SDKs each
-recognize gestures. This one is ported from
+Turns pointer, touch, wheel, platform pinch and keyboard input into camera
+moves and gesture momentum, for hosts that have no gesture recognizer of their
+own (the desktop app, the browser build). MapLibre Native has no counterpart:
+its platform SDKs each recognize gestures. This one is ported from
 [Orbis](https://github.com/sargunv/orbis)'s `orb-camera` input, and drives the
 map through maplibre-native-ffi's camera calls (`Map::apply_camera_delta` and
 `Map::update_camera`, with their gesture phases), which mln-rs implements in its
@@ -77,6 +77,7 @@ read in its source.
 | Drag rotate | 0.5° per px | 0.5° per px | n/a | 0.8 | 0.8° per dp | 0.8 | ffi demo |
 | Drag pitch | 0.5° per px, upward tilts | 0.5° per px | n/a | 0.5 | 0.5° per dp | 0.5 | All |
 | Pinch and twist | Follow the fingers, after 0.1 levels of spread or 25 px of arc | Follow the fingers at once | n/a | As mln-rs | After 7 dp of span or 3° | As mln-rs | GL JS: a resting second finger doesn't jitter the map |
+| Platform pinch (macOS trackpad magnify and rotate) | The platform's scale and turn, at once, around the cursor; glides as a touch pinch does | n/a | n/a | As mln-rs | unverified | unverified | Orbis |
 | Two-finger tilt | Both fingers up or down: 0.5° per px | n/a | n/a | As mln-rs | 0.3° per dp past 16 dp | 0.5° per px | GL JS |
 | Double-tap-and-drag zoom | 1/128 level per px | n/a | n/a | 1/128 | 4 levels per viewport height | 1/128 | GL JS |
 | Double-click, two-finger tap | ±1 level, 300 ms | ±1, 300 ms (double-click only) | n/a | ±1, 300 ms | ±1 | ±1, 300 ms | All |
