@@ -12,7 +12,7 @@ use crate::expression::Image;
 use crate::filter::Filter;
 use crate::layer::Layer;
 use crate::layers::background_layer::BackgroundLayer;
-use crate::layers::{CircleLayer, FillLayer, LineLayer, RasterLayer};
+use crate::layers::{CircleLayer, FillExtrusionLayer, FillLayer, LineLayer, RasterLayer};
 use crate::property_value::PropertyValue;
 use crate::style_impl::Impl as StyleImpl;
 
@@ -128,6 +128,16 @@ fn fill_properties() {
 
     layer.set_fill_translate_anchor(&c(TRANSLATE_ANCHOR));
     assert_eq!(*layer.get_fill_translate_anchor(), c(TRANSLATE_ANCHOR));
+}
+
+// gtest: Layer.FillExtrusionLayoutDifference
+#[test]
+fn fill_extrusion_layout_difference() {
+    let mut layer = FillExtrusionLayer::new("fill-extrusion", "source");
+    let original = layer.base_impl();
+
+    layer.set_fill_extrusion_rounded_corner_distance(&c(2.0));
+    assert!(layer.base_impl().has_layout_difference(&*original));
 }
 
 // gtest: Layer.LineProperties
