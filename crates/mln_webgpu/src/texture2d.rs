@@ -117,6 +117,12 @@ impl Texture2D {
         let Some(queue) = self.context.get_backend().get_queue() else {
             return;
         };
+        {
+            let mut stats = self.context.rendering_stats_mut();
+            stats.num_texture_updates += 1;
+            let bytes = region.width as usize * region.height as usize * texture2d::Texture2D::get_pixel_stride(self);
+            stats.texture_update_bytes = stats.texture_update_bytes.wrapping_add(bytes);
+        }
         queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin, aspect: wgpu::TextureAspect::All },
             &copy.data,

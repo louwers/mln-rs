@@ -52,6 +52,7 @@ impl BufferResource {
                 backend.write_buffer(&buffer, 0, &padded);
             }
         }
+        res.context.count_buffer_created(buffer.size());
         res.buffer = Some(buffer);
         res
     }
@@ -80,6 +81,7 @@ impl BufferResource {
         // Update GPU buffer if we have one
         if let Some(buffer) = &self.buffer {
             self.context.get_backend().write_buffer(buffer, offset as u64, data);
+            self.context.count_buffer_update(update_size);
         }
         // Increment version to indicate change
         self.version = self.version.wrapping_add(1);
@@ -87,6 +89,10 @@ impl BufferResource {
 
     pub fn get_size_in_bytes(&self) -> usize {
         self.size
+    }
+    /// The bytes of the GPU buffer, padded from the data size; 0 without one.
+    pub fn get_allocated_size(&self) -> u64 {
+        self.buffer.as_ref().map_or(0, wgpu::Buffer::size)
     }
     pub fn get_context(&self) -> &Rc<Context> {
         &self.context
@@ -111,5 +117,13 @@ impl BufferResource {
     }
     pub fn is_persistent(&self) -> bool {
         self.persistent
+    }
+}
+
+impl Drop for BufferResource {
+    fn drop(&mut self) {
+        if let Some(buffer) = &self.buffer {
+            self.context.count_buffer_released(buffer.size());
+        }
     }
 }

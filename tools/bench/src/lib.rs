@@ -8,6 +8,7 @@
 
 pub mod cases;
 pub mod compare;
+pub mod latency;
 pub mod meter;
 pub mod scene;
 pub mod stats;

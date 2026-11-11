@@ -43,9 +43,12 @@
 // `window.mln` is for scripts (check/check.mjs): `loaded` resolves with the
 // load time and the number of worker replies once the map is fully loaded,
 // and `readPixels()` draws the frame again and resolves with its RGBA
-// pixels, read back from the GPU. A panic in any of the Web Workers' wasm
-// instances stops the map: the page shows its message, `fatal` resolves
-// with it as an Error, and `loaded` and `readPixels()` reject with it.
+// pixels, read back from the GPU. `fetches()` resolves with every URL the
+// map's Web Worker fetched and how many times, and `idle()` with the camera
+// once the map is fully loaded and has stopped moving. A panic in any of
+// the Web Workers' wasm instances stops the map: the page shows its
+// message, `fatal` resolves with it as an Error, and `loaded` and the
+// methods reject with it.
 
 import wasmUrl from './pkg/mln_web_bg.wasm?url';
 import type { Comparison } from './compare.ts';
@@ -69,6 +72,8 @@ declare global {
       loaded: Promise<Loaded>;
       fatal: Promise<Error>;
       readPixels(): Promise<Pixels>;
+      fetches(): Promise<Record<string, number>>;
+      idle(): Promise<Camera>;
     };
   }
 }
@@ -160,7 +165,24 @@ let markLoaded: (loaded: Loaded) => void = () => {};
 let failLoaded: (error: Error) => void = () => {};
 let markFatal: (error: Error) => void = () => {};
 let fatal: Error | null = null;
-const pixelRequests: { resolve: (pixels: Pixels) => void; reject: (error: Error) => void }[] = [];
+interface Pending<T> {
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+}
+const pixelRequests: Pending<Pixels>[] = [];
+const fetchesRequests: Pending<Record<string, number>>[] = [];
+const idleRequests: Pending<Camera>[] = [];
+/** Asks the map's Web Worker with `message`; its answer resolves the first of `queue`. */
+function ask<T>(queue: Pending<T>[], message: ToMap): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (fatal) {
+      reject(fatal);
+      return;
+    }
+    queue.push({ resolve, reject });
+    toMap(message);
+  });
+}
 window.mln = {
   loaded: new Promise((resolve, reject) => {
     markLoaded = resolve;
@@ -169,16 +191,9 @@ window.mln = {
   fatal: new Promise((resolve) => {
     markFatal = resolve;
   }),
-  readPixels() {
-    return new Promise((resolve, reject) => {
-      if (fatal) {
-        reject(fatal);
-        return;
-      }
-      pixelRequests.push({ resolve, reject });
-      toMap({ type: 'readPixels' });
-    });
-  },
+  readPixels: () => ask(pixelRequests, { type: 'readPixels' }),
+  fetches: () => ask(fetchesRequests, { type: 'fetches' }),
+  idle: () => ask(idleRequests, { type: 'idle' }),
 };
 // Rejected on a panic, which the page reports itself.
 window.mln.loaded.catch(() => {});
@@ -198,6 +213,12 @@ map.onmessage = ({ data }: MessageEvent<FromMap>) => {
       break;
     case 'pixels':
       pixelRequests.shift()?.resolve(data.pixels);
+      break;
+    case 'fetches':
+      fetchesRequests.shift()?.resolve(data.fetches);
+      break;
+    case 'idle':
+      idleRequests.shift()?.resolve(data.camera);
       break;
     case 'fatal':
       stop(data.message);
@@ -224,7 +245,9 @@ function stop(message: string) {
   showStyle();
   failLoaded(error);
   markFatal(error);
-  for (const request of pixelRequests.splice(0)) request.reject(error);
+  for (const queue of [pixelRequests, fetchesRequests, idleRequests]) {
+    for (const request of queue.splice(0)) request.reject(error);
+  }
 }
 
 const send = (input: Input) => toMap({ type: 'input', input });

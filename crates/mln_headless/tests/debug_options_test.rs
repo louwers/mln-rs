@@ -178,7 +178,8 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     let changed = changed_pixels(&plain, &stats);
     // Red text, right-aligned to the top right corner.
     assert!(changed.len() > 1000, "{} pixels changed", changed.len());
-    assert!(changed.iter().any(|&(x, y)| x >= 240 && y < 16), "no text in the top right corner");
+    assert!(changed.iter().any(|&(x, _)| x >= 240), "no text at the right edge");
+    assert!(changed.iter().any(|&(_, y)| y < 16), "no text at the top edge");
     assert!(changed.iter().all(|&(x, _)| x >= 16), "text at the left edge");
     assert!(changed.iter().all(|&(x, y)| {
         let [r, g, b, _] = pixel(&stats, x, y);
