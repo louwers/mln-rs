@@ -11,6 +11,7 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
+use crate::latency::{set_tile_latency, take_tile_requests};
 use crate::meter::{Meter, live_heap_mib, ms};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
@@ -103,6 +104,8 @@ pub fn all() -> Vec<Case> {
     }
     cases.push(Case::new("Frame/Throughput", frame_throughput));
     cases.push(Case::new("Frame/Paced", frame_paced));
+    cases.push(Case::new("Frame/Oscillate", |cx| frame_oscillate(cx, "Frame/Oscillate", rotate_swing)));
+    cases.push(Case::new("Frame/OscillatePanZoom", |cx| frame_oscillate(cx, "Frame/OscillatePanZoom", pan_zoom_swing)));
     cases.push(Case::new("Frame/Idle", frame_idle));
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
     cases.push(Case::new("Frame/AddImages", frame_add_images));
@@ -521,6 +524,95 @@ fn frame_paced(cx: &Context) -> Metrics {
     metrics.lead("longest_stall_ms", median(&stalls));
     metrics.lead("complete_after_ms", median(&complete_after));
     metrics.other("frames", frames.len() as f64 / complete_after.len() as f64);
+    metrics
+}
+
+/// A swing back and forth from 0 at `seconds`: to 1, then between -1 and
+/// 1, each swing half a second, back to 0 after each second.
+fn swing(seconds: f64) -> f64 {
+    4.0 * ((seconds - 0.25).rem_euclid(1.0) - 0.5).abs() - 1.0
+}
+
+/// A camera of the basemap's: its center, zoom and bearing.
+type Camera = (LatLng, f64, f64);
+
+/// Frame/Oscillate's camera at `seconds`: the bearing swings between -90°
+/// and 90°. The center is 0.23 of a tile south-east of a tile corner, so
+/// that the view reaches the column and the row of tiles two west and two
+/// north of that corner only near its widest, around 37° and 53°: they
+/// come into view for about a sixth of a second's swing each time one
+/// passes, less than a tile takes to load.
+fn rotate_swing(seconds: f64) -> Camera {
+    (basemap_point(2620.23, 6332.23), BASEMAP_ZOOM, 90.0 * swing(seconds))
+}
+
+/// Frame/OscillatePanZoom's camera at `seconds`: the center swings 0.65 of
+/// a tile east and west of a tile's center while the zoom goes from 14.9
+/// out to 14 at each end, so that the view's edges reach the next tiles
+/// only in the last eighth of a swing.
+fn pan_zoom_swing(seconds: f64) -> Camera {
+    let swing = swing(seconds);
+    (basemap_point(2620.5 + 0.65 * swing, 6332.0), BASEMAP_ZOOM + 0.9 * (1.0 - swing.abs()), 0.0)
+}
+
+/// Three seconds of a camera swinging back and forth (`path`) on a 60 Hz
+/// display's clock, as a drag back and forth does, over the basemap, each
+/// tile request answered 100 ms late, as over a network
+/// ([`set_tile_latency`]). Only the first view is loaded at the start; the
+/// frames are paced as in Frame/Paced. The tile requests are the tiles it
+/// loads, and loads again after dropping them.
+fn frame_oscillate(cx: &Context, name: &str, path: fn(f64) -> Camera) -> Metrics {
+    const LATENCY: Duration = Duration::from_millis(100);
+    const SECONDS: f64 = 3.0;
+    let ticks = (SECONDS / REFRESH.as_secs_f64()).round() as usize;
+    let jump = |scene: &mut Scene, seconds: f64| {
+        let (center, zoom, bearing) = path(seconds);
+        scene.jump_rotated(center, zoom, bearing);
+    };
+    let mut scene = basemap(cx, Mode::OnDemand);
+    set_tile_latency(LATENCY);
+    let mut meter = Meter::new();
+    let (mut frames, mut partial, mut requests) = (Vec::new(), 0, Vec::new());
+    for _ in 0..cx.iterations(3) {
+        scene.clear_data();
+        jump(&mut scene, 0.0);
+        scene.settle();
+        take_tile_requests();
+        meter.start();
+        let start = Instant::now();
+        let refresh = |tick: usize| start + REFRESH * tick as u32;
+        let mut tick = 0;
+        while tick < ticks {
+            std::thread::sleep(refresh(tick).saturating_duration_since(Instant::now()));
+            scene.pump();
+            jump(&mut scene, (tick + 1).min(ticks) as f64 / ticks as f64 * SECONDS);
+            let demanded = Instant::now();
+            let status = scene.render_frame();
+            let finished = Instant::now();
+            frames.push(ms(finished - demanded));
+            partial += usize::from(status.mode != RenderMode::Full);
+            // Shown at the first refresh after it finished, where the next
+            // frame starts.
+            let next = ((finished - start).as_secs_f64() / REFRESH.as_secs_f64()).ceil() as usize;
+            tick = next.max(tick + 1);
+        }
+        meter.stop();
+        requests.push(take_tile_requests() as f64);
+    }
+    set_tile_latency(Duration::ZERO);
+    if let Some(dir) = &cx.frames {
+        scene.settle();
+        write_frame(dir, name, &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.demote("time_ms");
+    metrics.lead("tile_requests", median(&requests));
+    metrics.lead("partial_pct", 100.0 * partial as f64 / frames.len() as f64);
+    metrics.other("frame_p50_ms", percentile(&frames, 50.0));
+    metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
+    metrics.lead("frame_p99_ms", percentile(&frames, 99.0));
+    metrics.other("frame_max_ms", percentile(&frames, 100.0));
+    metrics.other("frames", frames.len() as f64 / requests.len() as f64);
     metrics
 }
 

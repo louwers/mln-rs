@@ -31,6 +31,8 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 | `Load/Style/<scene>` | from loading the style on a new map to its first complete still; the GPU device is set up before |
 | `Frame/Throughput` | a camera jump around a 200-pixel circle until the GPU has finished the frame that shows it, over tiles an untimed lap loaded |
 | `Frame/Paced` | a two-second flight from the block's north-west corner at zoom 14 to its south-east corner at zoom 15.5, past the tiles' zoom, on a 60 Hz display's clock, with only the first view loaded |
+| `Frame/Oscillate` | three seconds of the bearing swinging between -90° and 90°, each swing half a second, as a rotate drag back and forth turns the map, on a 60 Hz display's clock, with only the first view loaded and every tile answered 100 ms late, as over a network |
+| `Frame/OscillatePanZoom` | as `Frame/Oscillate`, with the center swinging 0.65 of a tile east and west while the zoom goes from 14.9 out to 14 at each end, as a pinch back and forth does |
 | `Frame/Idle` | 100 ms of a settled map whose run loop draws whenever the map asks |
 | `Frame/FeatureState` | a frame of `Frame/Throughput` over the basemap with its buildings and a street overlay colored by feature state, every building and street of the loaded tiles given a state |
 | `Frame/FeatureStateHover` | a frame of `Frame/Throughput` over the basemap with its buildings colored by feature state, one building's state changing in every frame as hover highlighting does |
@@ -45,7 +47,11 @@ In `Frame/Paced`, refreshes are absolute deadlines, and at each refresh
 with no frame in flight the camera moves to where the flight will be at the
 next refresh, so every run draws the same cameras however slow it is. A
 frame is shown at the first refresh after the GPU finishes it, and the next
-frame starts there.
+frame starts there. The `Frame/Oscillate` cases pace their frames the same
+way. Their swings bring some tiles into view only for moments, shorter than
+the 100 ms a tile takes to come; the file source answers each tile fresh for
+an hour, as a tile server does, so the map fetches a tile again only after
+it dropped it.
 
 ## Metrics
 
@@ -66,6 +72,9 @@ metrics only; `--verbose` also shows the others.
   loading; **`longest_stall_ms`**, the longest time between two shown
   frames; **`complete_after_ms`**, how long after the flight's end the final
   view shows complete.
+- In `Frame/Oscillate` and `Frame/OscillatePanZoom`: **`tile_requests`**,
+  the tile requests of the swinging, **`partial_pct`** as in `Frame/Paced`,
+  and `frame_max_ms`, the longest frame.
 - In `Frame/Idle`: **`frames_per_s`**, frames drawn while nothing changes.
 - In `Frame/SettleWithoutSymbols`: **`frames`**, frames drawn until the map stops asking for them.
 - In `Frame/HideLayers`: **`hidden_heap_mib`** and **`hidden_gpu_mib`**, the heap and the GPU's vertex and index buffers live while the layers are hidden.

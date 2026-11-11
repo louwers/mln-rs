@@ -165,6 +165,7 @@ impl Scene {
     /// A map whose renderer shares `glyph_cache`.
     pub fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         render_test::file_source::register_proxy_file_source();
+        crate::latency::register();
         let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db");
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
         let client_options = ClientOptions::default();
@@ -212,7 +213,14 @@ impl Scene {
     }
 
     pub fn jump(&mut self, center: LatLng, zoom: f64) {
-        self.map.jump_to(&CameraOptions::default().with_center(Some(center)).with_zoom(Some(zoom)));
+        self.jump_rotated(center, zoom, 0.0);
+    }
+
+    /// Jumps to a camera with `bearing` in degrees.
+    pub fn jump_rotated(&mut self, center: LatLng, zoom: f64, bearing: f64) {
+        self.map.jump_to(
+            &CameraOptions::default().with_center(Some(center)).with_zoom(Some(zoom)).with_bearing(Some(bearing)),
+        );
     }
 
     /// A complete still frame, read back. Waits on the run loop, which
