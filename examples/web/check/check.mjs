@@ -4,7 +4,9 @@
 // render of the same view (pixelmatch, as the render tests compare). It
 // fails when a frame differs by more than its threshold, when the page, one of
 // its Web Workers (the map's or a tile worker's) or the native runner reports
-// an error, or when a view's tiles got no worker replies. It also makes the
+// an error, or when a view's tiles got no worker replies. The interaction
+// views drag on the map back and forth before their frame, over a slow
+// network, and also fail when the map fetches URLs again. It also makes the
 // map's wasm instance and a tile worker's panic (the page's `panic`), and
 // fails unless the page stops and shows the panic, and opens a comparison
 // with GL JS (the page's `compare`), and fails unless GL JS's map covers
@@ -13,7 +15,7 @@
 //
 //   node examples/web/check/check.mjs [options]
 //
-//   --filter <regex>     the views of VIEWS to load, by id (default: all)
+//   --filter <regex>     the views of VIEWS to load, by name (default: all)
 //   --workers <n>        Web Workers for the tiles (default 2)
 //   --out <dir>          where the views, frames and results go
 //                        (default: a new temporary directory)
@@ -74,7 +76,38 @@ const VIEWS = [
   { id: 'text-font/khmer' },
   { id: 'text-font/font-faces-bidi' },
   { id: 'is-supported-script/font-faces-layout' },
+  // Interactions (interact()): a right-drag that turns the map back and
+  // forth, and a pinch that pans and zooms it back and forth, as
+  // mln-bench's Frame/Oscillate and Frame/OscillatePanZoom move their
+  // cameras. Each starts where some tiles come into view only for moments
+  // of each swing, shorter than a tile takes to load.
+  {
+    id: 'real-world/chicago',
+    name: 'interaction/rotate',
+    interaction: 'rotate',
+    width: 1024,
+    height: 768,
+    center: [-87.704736328125, 41.86203372809279], // z13 x 2100.23, y 3045.23
+  },
+  {
+    id: 'real-world/sanfrancisco',
+    name: 'interaction/pan-zoom',
+    interaction: 'pan-zoom',
+    width: 1024,
+    height: 768,
+    center: [-122.4591064453125, 37.77071473849609], // z15 x 5237.5, y 12666
+    zoom: 15.9,
+  },
 ];
+
+// In the interaction views every fixture comes this late, and fresh for an
+// hour, as over a network, so the map fetches each URL once unless it drops
+// what it fetched. A tile it drops while it loads is fetched again on its
+// next swing into view, which the browser answers from the first fetch,
+// so it loads then. Such a view fails when the map fetches more than
+// MAX_REPEATS URLs again.
+const LATENCY_MS = 100;
+const MAX_REPEATS = 1;
 
 // Playwright 1.61.1's Chromium (Chrome for Testing 149), as CI installs it.
 const CHROMIUM_BUILD = 'chromium-1228';
@@ -157,7 +190,7 @@ function cachedJson(url) {
  * the camera is in the style. The page can't follow other operations or
  * test options, so a view must not have them.
  */
-function view({ id, allowed = THRESHOLD }) {
+function view({ id, name = id, interaction, allowed = THRESHOLD, ...camera }) {
   const test = JSON.parse(readFileSync(path.join(metrics, 'integration/render-tests', id, 'style.json'), 'utf8'));
   const metadata = test.metadata?.test ?? {};
   for (const key of Object.keys(metadata)) {
@@ -173,18 +206,20 @@ function view({ id, allowed = THRESHOLD }) {
     else if (operation !== 'wait') throw new Error(`${id}: the page can't follow the operation ${operation}`);
   }
   style = structuredClone(style);
+  if (camera.center) style.center = camera.center;
+  if (camera.zoom !== undefined) style.zoom = camera.zoom;
   style.center ??= [0, 0];
   style.zoom ??= 0;
   style.bearing ??= 0;
   style.pitch ??= 0;
-  const width = metadata.width ?? 512;
-  const height = metadata.height ?? 512;
+  const width = camera.width ?? metadata.width ?? 512;
+  const height = camera.height ?? metadata.height ?? 512;
   const ratio = metadata.pixelRatio ?? 1;
   style.metadata = { test: { width, height, pixelRatio: ratio, allowed } };
-  return { id, style, width, height, ratio, allowed };
+  return { id, name, interaction, style, width, height, ratio, allowed };
 }
 
-const views = VIEWS.filter(({ id }) => new RegExp(options.filter).test(id)).map(view);
+const views = VIEWS.filter(({ id, name = id }) => new RegExp(options.filter).test(name)).map(view);
 if (views.length === 0) throw new Error(`no view matches ${options.filter}`);
 
 // MARK: - The page, served from web/, and the fixtures
@@ -235,21 +270,32 @@ const SOURCE = 2; // Resource::Kind::Source: a TileJSON
 // runner's cache-only file source answers those with no content, and so
 // does this server (204, as HTTPFileSource reads it).
 let missing = [];
+// Whether the current view's fixtures come as over a network (LATENCY_MS).
+let slow = false;
+
+function serveFixture(url, response) {
+  const entry = cached(url);
+  if (!entry) {
+    missing.push(url);
+    response.writeHead(204).end();
+  } else if (entry.kind === SOURCE) {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(served(JSON.parse(entry.data.toString('utf8')))));
+  } else {
+    response.writeHead(200, { 'content-type': 'application/octet-stream' }).end(entry.data);
+  }
+}
 
 const server = createServer((request, response) => {
   const url = new URL(request.url, 'http://x');
   const fixture = /^\/fixtures\/([a-z]+)\/(.*)$/.exec(request.url);
+  if (fixture && slow) {
+    response.setHeader('cache-control', 'max-age=3600');
+    setTimeout(() => serveFixture(`${fixture[1]}://${fixture[2]}`, response), LATENCY_MS);
+    return;
+  }
   if (fixture) {
-    const entry = cached(`${fixture[1]}://${fixture[2]}`);
-    if (!entry) {
-      missing.push(`${fixture[1]}://${fixture[2]}`);
-      response.writeHead(204).end();
-    } else if (entry.kind === SOURCE) {
-      response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify(served(JSON.parse(entry.data.toString('utf8')))));
-    } else {
-      response.writeHead(200, { 'content-type': 'application/octet-stream' }).end(entry.data);
-    }
+    serveFixture(`${fixture[1]}://${fixture[2]}`, response);
     return;
   }
   const style = /^\/style\/(\d+)$/.exec(url.pathname);
@@ -485,6 +531,19 @@ async function load(browser, view, count) {
         ]);
       })()`,
     );
+    let interaction;
+    if (view.interaction) {
+      await interact(browser, session, view.interaction);
+      const camera = await evaluate(
+        browser,
+        session,
+        `Promise.race([
+          window.mln.idle(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('not idle after 60 s')), 60000)),
+        ])`,
+      );
+      interaction = { camera, fetches: await evaluate(browser, session, 'window.mln.fetches()') };
+    }
     // Let the labels fade in, then draw the frame again and read it back.
     await evaluate(browser, session, 'new Promise((resolve) => setTimeout(resolve, 1500))');
     const pixels = await evaluate(
@@ -499,7 +558,7 @@ async function load(browser, view, count) {
         return { width, height, base64: btoa(binary) };
       })()`,
     );
-    return { stats, pixels };
+    return { stats, pixels, interaction };
   };
   try {
     return { ...(await Promise.race([run(), failed])), errors: session.errors };
@@ -508,6 +567,86 @@ async function load(browser, view, count) {
   } finally {
     await session.close();
   }
+}
+
+// MARK: - Interactions
+
+// How long an interaction drags back and forth, and how often it moves.
+const INTERACTION_MS = 2000;
+const FRAME_MS = 1000 / 60;
+
+/** From 0 at `ms`: to 1, then between -1 and 1, each swing half a second, back to 0 after each second. */
+function swing(ms) {
+  const phase = (((ms / 1000 - 0.25) % 1) + 1) % 1;
+  return 4 * Math.abs(phase - 0.5) - 1;
+}
+
+/**
+ * Drags on the canvas back and forth for INTERACTION_MS through the page's
+ * input, as the browser delivers a user's (the DevTools protocol's mouse
+ * and touch events), one move a frame, and releases where it started:
+ * - `rotate`: a right-drag from the center, which turns the map between
+ *   -90° and 90° (mln_gestures' 0.5° a pixel);
+ * - `pan-zoom`: a two-finger pinch that pans the map 0.65 of a tile east
+ *   and west of where it started while it zooms out by 0.9 at each end.
+ * It holds still before the release, longer than the recognizer's 40 ms,
+ * so that the release starts no momentum.
+ */
+async function interact(browser, session, interaction) {
+  const { x, y } = await evaluate(
+    browser,
+    session,
+    `(() => {
+      const rect = document.getElementById('map').getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    })()`,
+  );
+  const send = (method, params) => browser.send(method, params, session.sessionId);
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let event, release;
+  if (interaction === 'rotate') {
+    const mouse = (type, at) =>
+      send('Input.dispatchMouseEvent', {
+        type,
+        x: at,
+        y,
+        button: 'right',
+        buttons: type === 'mouseReleased' ? 0 : 2,
+        clickCount: type === 'mouseMoved' ? 0 : 1,
+      });
+    await mouse('mousePressed', x);
+    event = (ms) => mouse('mouseMoved', x + 180 * swing(ms));
+    release = () => mouse('mouseReleased', x);
+  } else {
+    await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 2 });
+    // The fingers 200 pixels apart where they start, closer by up to 2^-0.9.
+    // The map's center follows the fingers' midpoint, at the zoom's scale:
+    // 0.65 of a tile a swing, 333 pixels at the zoom of its ends.
+    const fingers = (ms) => {
+      const out = Math.abs(swing(ms));
+      const at = x + 333 * swing(ms) * 2 ** (0.9 * (1 - out));
+      const apart = 100 * 2 ** (-0.9 * out);
+      return [{ x: at - apart, y, id: 0 }, { x: at + apart, y, id: 1 }];
+    };
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: fingers(0) });
+    event = (ms) => send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: fingers(ms) });
+    release = () => send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+  // A move a frame, at 60 Hz deadlines.
+  const start = performance.now();
+  for (let frame = 0; frame * FRAME_MS < INTERACTION_MS; frame++) {
+    await event(performance.now() - start);
+    await sleep(Math.max(0, start + (frame + 1) * FRAME_MS - performance.now()));
+  }
+  await event(INTERACTION_MS);
+  await sleep(200);
+  await release();
+}
+
+/** The fetches beyond the first of each URL, the URLs fetched most first. */
+function refetches(fetches) {
+  const again = Object.entries(fetches).filter(([, count]) => count > 1).sort(([, a], [, b]) => b - a);
+  return { count: again.reduce((sum, [, count]) => sum + count - 1, 0), urls: again };
 }
 
 // MARK: - PNG
@@ -672,23 +811,38 @@ async function compare() {
   const failures = [];
   for (const view of views) {
     missing = [];
-    const { stats, pixels, errors, failure } = await load(browser, view, workers);
-    console.log(`${view.id}: ` +
+    slow = view.interaction !== undefined;
+    const { stats, pixels, interaction, errors, failure } = await load(browser, view, workers);
+    slow = false;
+    const again = interaction && refetches(interaction.fetches);
+    if (process.env.MLN_WEB_CHECK_LOG && again) console.error(`  fetched again: ${JSON.stringify(again.urls)}`);
+    console.log(`${view.name}: ` +
       (failure ? failure : `loaded in ${Math.round(stats.loadedMs)} ms, ${stats.replies} worker replies`) +
+      (again ? `, after the ${view.interaction} ${again.count} fetches again (at most ${MAX_REPEATS})` : '') +
       (missing.length ? `, ${missing.length} tiles or resources not in the cache (no content)` : '') +
       (errors.length ? `, ${errors.length} errors:\n  ${errors.map(firstLines).join('\n  ')}` : ''));
     if (process.env.MLN_WEB_CHECK_LOG && missing.length) console.error(`  not in the cache: ${missing.join(', ')}`);
     if (failure) {
-      failures.push(`${view.id}: ${failure}`);
+      failures.push(`${view.name}: ${failure}`);
       continue;
     }
-    if (errors.length) failures.push(`${view.id}: ${errors.length} errors in the page or its workers`);
+    if (errors.length) failures.push(`${view.name}: ${errors.length} errors in the page or its workers`);
     // Every view has tiles, and only their workers reply: the raster and
     // raster-dem tiles' too, in the views that have nothing else.
-    if (stats.replies === 0) failures.push(`${view.id}: no worker replies`);
-    const dir = path.join(out, 'tests/render-tests', view.id);
+    if (stats.replies === 0) failures.push(`${view.name}: no worker replies`);
+    if (again && again.count > MAX_REPEATS) {
+      const urls = again.urls.slice(0, 3).map(([url, count]) => `${url.replace(origin, '')} ${count} times`);
+      failures.push(`${view.name}: ${again.count} fetches again after the ${view.interaction}, of ${urls.join(', ')}`);
+    }
+    // An interaction's frame is of the camera it left the map at.
+    let style = view.style;
+    if (interaction) {
+      const [lat, lon, zoom, bearing, pitch] = interaction.camera;
+      style = { ...style, center: [lon, lat], zoom, bearing, pitch };
+    }
+    const dir = path.join(out, 'tests/render-tests', view.name);
     await mkdir(dir, { recursive: true });
-    await writeFile(path.join(dir, 'style.json'), JSON.stringify(view.style, null, 1));
+    await writeFile(path.join(dir, 'style.json'), JSON.stringify(style, null, 1));
     await writeFile(path.join(dir, 'expected.png'), png(pixels.width, pixels.height, Buffer.from(pixels.base64, 'base64')));
   }
   if (!existsSync(path.join(out, 'tests'))) return failures;
@@ -723,19 +877,19 @@ async function compare() {
     results.set(id, { status, diff, error });
   }
   for (const view of views) {
-    if (!existsSync(path.join(out, 'tests/render-tests', view.id))) continue;
-    const result = results.get(view.id);
+    if (!existsSync(path.join(out, 'tests/render-tests', view.name))) continue;
+    const result = results.get(view.name);
     if (!result) {
-      console.log(`  ${view.id}: not rendered`);
-      failures.push(`${view.id}: the native runner didn't render it`);
+      console.log(`  ${view.name}: not rendered`);
+      failures.push(`${view.name}: the native runner didn't render it`);
     } else if (result.error) {
-      console.log(`  ${view.id}: error: ${result.error}`);
-      failures.push(`${view.id}: the native runner: ${result.error}`);
+      console.log(`  ${view.name}: error: ${result.error}`);
+      failures.push(`${view.name}: the native runner: ${result.error}`);
     } else {
-      console.log(`  ${view.id}: ${(result.diff * 100).toFixed(3)}% of the pixels differ ` +
+      console.log(`  ${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ ` +
         `(at most ${(view.allowed * 100).toFixed(1)}%)`);
       if (result.status !== 'passed' || result.diff > view.allowed) {
-        failures.push(`${view.id}: ${(result.diff * 100).toFixed(3)}% of the pixels differ (${result.status})`);
+        failures.push(`${view.name}: ${(result.diff * 100).toFixed(3)}% of the pixels differ (${result.status})`);
       }
     }
   }

@@ -50,6 +50,8 @@ export type ToMap =
   | { type: 'preload'; style: string; ratio: number; zoom: number }
   | Start
   | { type: 'readPixels' }
+  | { type: 'fetches' }
+  | { type: 'idle' }
   | { type: 'resize'; width: number; height: number }
   | { type: 'style'; url: string }
   | { type: 'jumpTo'; camera: Camera }
@@ -81,6 +83,10 @@ export type FromMap =
   // Once the map is fully loaded, and again once each later style is.
   | { type: 'loaded'; loaded: Loaded }
   | { type: 'pixels'; pixels: Pixels }
+  // Every URL the map's Web Worker fetched, and how many times.
+  | { type: 'fetches'; fetches: Record<string, number> }
+  // The camera, once the map is fully loaded and has stopped moving.
+  | { type: 'idle'; camera: Camera }
   | { type: 'box'; box: Box | null }
   | { type: 'camera'; camera: Camera }
   | { type: 'attribution'; attribution: string[] }

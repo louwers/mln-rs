@@ -14,10 +14,21 @@
 // a fatal message goes to the page, with the message the panic hook left in
 // `mlnPanic` (src/lib.rs) or a tile worker sent. `panic`, if given, is a
 // message to panic with once the map exists (`panic_for_check`), for
-// check/check.mjs.
+// check/check.mjs. So is the count of every URL this worker fetched, which
+// the page asks for with `fetches`.
 
 import type { WebMap } from './pkg/mln_web.js';
-import type { Box, FromMap, FromTileWorker, Input, Loaded, Start, ToMap } from './protocol.ts';
+import type { Box, Camera, FromMap, FromTileWorker, Input, Loaded, Start, ToMap } from './protocol.ts';
+
+// Every URL this worker fetched, and how many times: the map's fetches look
+// the global `fetch` up at each call, and so do the preloads below.
+const fetches = new Map<string, number>();
+const globalFetch = globalThis.fetch.bind(globalThis);
+globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
+  const url = input instanceof Request ? input.url : String(input);
+  fetches.set(url, (fetches.get(url) ?? 0) + 1);
+  return globalFetch(input, init);
+};
 
 // Imported rather than a static import, so that the preloads below don't
 // wait for it.
@@ -25,10 +36,14 @@ const bindings = import('./pkg/mln_web.js');
 
 type Handle = (message: ToMap) => void;
 
+// Frames without a camera change after which the map has stopped moving.
+const IDLE_FRAMES = 10;
+
 let start: Promise<Handle | undefined> | null = null;
 const early: ToMap[] = []; // messages before the map exists
 onmessage = ({ data }: MessageEvent<ToMap>) => {
   if (data.type === 'preload') preloadStyle(data.style, data.ratio, data.zoom);
+  else if (data.type === 'fetches') post({ type: 'fetches', fetches: Object.fromEntries(fetches) });
   else if (data.type === 'start') start = run(data).catch((error: unknown) => fatal('map', error));
   else if (start) start.then((handle) => handle?.(data));
   else early.push(data);
@@ -214,6 +229,8 @@ async function run(
   let started = performance.now();
   let loaded: Loaded | null = null;
   let readPixels = 0;
+  let idle = 0; // `idle` requests to answer
+  let stillFrames = 0;
   let reported = 0;
   let attribution = '';
   let styleName = '';
@@ -247,9 +264,18 @@ async function run(
     map.frame(8, performance.now());
     const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
     const next = [lat, lon, zoom, bearing, pitch].join();
+    const camera: Camera = [lat, lon, zoom, bearing, pitch];
     if (next !== shownCamera) {
       shownCamera = next;
-      post({ type: 'camera', camera: [lat, lon, zoom, bearing, pitch] });
+      stillFrames = 0;
+      post({ type: 'camera', camera });
+    } else {
+      stillFrames++;
+    }
+    // Stopped: the camera hasn't moved for a few frames, past any ease the
+    // last gesture started.
+    if (idle > 0 && stillFrames >= IDLE_FRAMES && map.is_fully_loaded()) {
+      for (; idle > 0; idle--) post({ type: 'idle', camera });
     }
     if (loaded === null && map.is_fully_loaded()) {
       loaded = { loadedMs: performance.now() - started, replies: map.received() };
@@ -273,6 +299,9 @@ async function run(
     switch (data.type) {
       case 'readPixels':
         if (readPixels++ === 0) map.request_pixels();
+        break;
+      case 'idle':
+        idle++;
         break;
       case 'resize':
         map.resize(data.width, data.height);
@@ -315,6 +344,7 @@ async function run(
       }
       case 'preload':
       case 'start':
+      case 'fetches':
         break;
     }
   });
