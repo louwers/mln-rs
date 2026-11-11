@@ -36,10 +36,20 @@ default = ["sqlite"]
 # C++ MainResourceLoader without them).
 sqlite = ["dep:rusqlite"]
 
-# ureq's TLS (rustls, ring) doesn't build for wasm, where the browser's fetch
-# is the transport.
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-ureq.workspace = true
+# The HTTP transport: the platform's HTTP stack where it has one (NSURLSession
+# on Apple platforms, the browser's fetch on wasm), else ureq, with the
+# system's trust store.
+[target.'cfg(target_vendor = "apple")'.dependencies]
+block2.workspace = true
+objc2.workspace = true
+objc2-foundation.workspace = true
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ureq = { workspace = true, features = ["gzip", "native-tls-no-default"] }
+
+[target.'cfg(not(any(target_family = "wasm", target_vendor = "apple", target_os = "windows")))'.dependencies]
+rustls.workspace = true
+ureq = { workspace = true, features = ["gzip", "platform-verifier", "rustls-no-provider"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true

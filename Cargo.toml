@@ -135,8 +135,31 @@ skrifa = { version = "0.49.0" }
 # Candidate for ICU's ubidi (platform/default/src/mln/text/bidi.cpp); kept only
 # if //difftest/shaping shows it matches ICU on the test corpus.
 unicode-bidi = { version = "0.3.18" }
-# HTTP for the online file source (the C++ default platform uses curl).
-ureq = { version = "3.5.1" }
+# HTTP for the online file source where the platform has no HTTP stack of
+# its own (the C++ default platform uses curl). mln_storage picks the TLS
+# features per target.
+ureq = { version = "3.5.1", default-features = false }
+# ureq's rustls, with ring's cryptography (ureq's own `rustls` feature would
+# also bring webpki-roots).
+rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
+# Apple platforms: Foundation's NSURLSession for the online file source.
+block2 = { version = "0.6.2" }
+objc2 = { version = "0.6.5" }
+objc2-foundation = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "block2",
+    "NSData",
+    "NSDate",
+    "NSError",
+    "NSObjCRuntime",
+    "NSString",
+    "NSURL",
+    "NSURLCache",
+    "NSURLError",
+    "NSURLRequest",
+    "NSURLResponse",
+    "NSURLSession",
+] }
 # examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
 js-sys = { version = "0.3.107" }
