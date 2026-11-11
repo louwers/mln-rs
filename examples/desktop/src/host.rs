@@ -468,7 +468,11 @@ impl ApplicationHandler<UserEvent> for Host {
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),
             UserEvent::RequestSize(size) => {
-                let _ = open.window.request_inner_size(size);
+                // A size that is applied at once (Wayland) comes back here
+                // and not as a `Resized` event.
+                if let Some(size) = open.window.request_inner_size(size) {
+                    open.inbox.send(Message::Resized(size));
+                }
             }
             UserEvent::Ended => event_loop.exit(),
         }
