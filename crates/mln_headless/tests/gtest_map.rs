@@ -367,6 +367,45 @@ fn geometry_to_camera() {
     assert!(test.map().camera_for_geometry(&bad, &EdgeInsets::default(), None, None).is_err());
 }
 
+/// A style with no sources publishes an update once it loads: a continuous
+/// map whose camera was set first (so the style's default camera doesn't
+/// jump it) still renders the style and finishes loading
+/// (maplibre/maplibre-native#4674).
+#[test]
+fn a_sourceless_style_loaded_after_the_camera_renders() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.map().jump_to(&cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(3.0)));
+    test.load_json(
+        r##"{"version": 8, "sources": {}, "layers": [
+            {"id": "bg", "type": "background", "paint": {"background-color": "#00ff00"}}
+        ]}"##,
+    );
+
+    let loaded = Rc::new(Cell::new(false));
+    let timeout = Timer::new();
+    {
+        let run_loop = test.run_loop.clone();
+        timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+    }
+    {
+        let loaded = loaded.clone();
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| {
+            loaded.set(true);
+            run_loop.stop();
+        });
+    }
+    test.run_loop.run();
+    test.observer.did_finish_loading_map_callback.clear();
+    assert!(loaded.get(), "the map never finished loading");
+
+    let image = {
+        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+        test.frontend.read_still_image()
+    };
+    assert_eq!(center_pixel(&image), [0, 255, 0, 255]);
+}
+
 /// A flight too slow for its duration to be held jumps, so the map goes idle
 /// rather than animating for centuries.
 #[test]
