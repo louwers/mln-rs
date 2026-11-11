@@ -37,7 +37,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, shared
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileData;
+use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
@@ -51,6 +51,7 @@ use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, Imag
 use crate::group_by_layout::group_layers;
 use crate::image_manager::ImageRequestPair;
 use crate::layermanager;
+use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::LayerRenderData;
@@ -97,10 +98,16 @@ pub enum WorkerMessage {
         subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     },
+    /// `setAvailableImages(availableImages, correlationID)`: parse again
+    /// with images added since the last parse.
+    SetAvailableImages { available_images: Immutable<VecSet<String>>, correlation_id: u64 },
     /// `reset(correlationID)`.
     Reset { correlation_id: u64 },
     /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
     SetShowCollisionBoxes { show_collision_boxes: bool, correlation_id: u64 },
+    /// Forget the glyphs that came back missing and lay out again, which
+    /// requests them again.
+    RetryMissingGlyphs { correlation_id: u64 },
     /// `onGlyphsAvailable(newGlyphMap, results)`.
     GlyphsAvailable { glyph_map: GlyphMap, results: HBShapeResults },
     /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
@@ -121,8 +128,10 @@ impl WorkerMessage {
         match self {
             WorkerMessage::SetData { correlation_id, .. }
             | WorkerMessage::SetLayers { correlation_id, .. }
+            | WorkerMessage::SetAvailableImages { correlation_id, .. }
             | WorkerMessage::Reset { correlation_id }
-            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
+            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. }
+            | WorkerMessage::RetryMissingGlyphs { correlation_id } => *correlation_id,
             WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
         }
     }
@@ -265,10 +274,14 @@ impl GeometryTileWorker {
                 subdivision_granularity,
                 correlation_id,
             } => self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id),
+            WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
+                self.set_available_images(available_images, correlation_id)
+            }
             WorkerMessage::Reset { correlation_id } => self.reset(correlation_id),
             WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
                 self.set_show_collision_boxes(show_collision_boxes, correlation_id)
             }
+            WorkerMessage::RetryMissingGlyphs { correlation_id } => self.retry_missing_glyphs(correlation_id),
             WorkerMessage::GlyphsAvailable { glyph_map, results } => self.on_glyphs_available(glyph_map, results),
             WorkerMessage::ImagesAvailable { icon_map, pattern_map, version_map, image_correlation_id } => {
                 self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id)
@@ -371,6 +384,26 @@ impl GeometryTileWorker {
         });
     }
 
+    /// `setAvailableImages(availableImages, correlationID)`.
+    pub fn set_available_images(&mut self, available_images: Immutable<VecSet<String>>, correlation_id: u64) {
+        self.guarded(|this| {
+            this.available_images = available_images;
+            this.correlation_id = correlation_id;
+
+            match this.state {
+                State::Idle => {
+                    this.parse()?;
+                    this.coalesce()?;
+                }
+                State::Coalescing | State::NeedsSymbolLayout => {
+                    this.state = State::NeedsParse;
+                }
+                State::NeedsParse => {}
+            }
+            Ok(())
+        });
+    }
+
     /// `reset(correlationID)`.
     pub fn reset(&mut self, correlation_id: u64) {
         self.layers = None;
@@ -404,6 +437,29 @@ impl GeometryTileWorker {
                     this.state = State::NeedsSymbolLayout;
                 }
                 State::NeedsSymbolLayout | State::NeedsParse => {}
+            }
+            Ok(())
+        });
+    }
+
+    /// Forgets the glyphs that came back missing and parses again, so the
+    /// layout requests them again.
+    pub fn retry_missing_glyphs(&mut self, correlation_id: u64) {
+        self.guarded(|this| {
+            for glyphs in this.glyph_map.values_mut() {
+                glyphs.retain(|_, glyph| glyph.is_some());
+            }
+            this.correlation_id = correlation_id;
+
+            match this.state {
+                State::Idle => {
+                    this.parse()?;
+                    this.coalesce()?;
+                }
+                State::Coalescing | State::NeedsSymbolLayout => {
+                    this.state = State::NeedsParse;
+                }
+                State::NeedsParse => {}
             }
             Ok(())
         });
@@ -529,8 +585,12 @@ impl GeometryTileWorker {
         self.symbol_dependencies_changed();
     }
 
-    /// `requestNewGlyphs(glyphDependencies)`.
-    fn request_new_glyphs(&mut self, glyph_dependencies: &GlyphDependencies) {
+    /// `requestNewDependencies(glyphDependencies, imageDependencies)`.
+    fn request_new_dependencies(
+        &mut self,
+        glyph_dependencies: &GlyphDependencies,
+        image_dependencies: ImageDependencies,
+    ) {
         for (font_stack, glyph_ids) in &glyph_dependencies.glyphs {
             let font_glyphs = self.glyph_map.get(&font_stack_hash(font_stack));
             for glyph_id in glyph_ids {
@@ -552,8 +612,21 @@ impl GeometryTileWorker {
                 }
             }
         }
+        // Record both before requesting either, so that a glyph answer
+        // handled before the image request goes out can't finalize the layout
+        // with an empty icon map.
+        self.pending_image_dependencies = image_dependencies;
+        // An empty image name means no image, as in the style spec, so don't
+        // request it.
+        self.pending_image_dependencies.remove("");
+
         if !self.pending_glyph_dependencies.glyphs.is_empty() {
             self.parent.send(TileMessage::GetGlyphs(self.pending_glyph_dependencies.clone()));
+        }
+        if !self.pending_image_dependencies.is_empty() {
+            self.image_correlation_id += 1;
+            let pair = (self.pending_image_dependencies.clone(), self.image_correlation_id);
+            self.parent.send(TileMessage::GetImages(pair));
         }
     }
 
@@ -573,20 +646,6 @@ impl GeometryTileWorker {
         self.version_map = new_version_map;
         self.pending_image_dependencies.clear();
         self.symbol_dependencies_changed();
-    }
-
-    /// `requestNewImages(imageDependencies)`.
-    fn request_new_images(&mut self, image_dependencies: ImageDependencies) {
-        self.pending_image_dependencies = image_dependencies;
-        // An empty image name means no image, as in the style spec, so don't
-        // request it.
-        self.pending_image_dependencies.remove("");
-
-        if !self.pending_image_dependencies.is_empty() {
-            self.image_correlation_id += 1;
-            let pair = (self.pending_image_dependencies.clone(), self.image_correlation_id);
-            self.parent.send(TileMessage::GetImages(pair));
-        }
     }
 
     /// `parse()`.
@@ -610,6 +669,7 @@ impl GeometryTileWorker {
 
         let mut glyph_dependencies = GlyphDependencies::default();
         let mut image_dependencies = ImageDependencies::new();
+        let mut filter_groups = FilterGroups::default();
 
         // Create render layers and group by layout
         let group_map = group_layers(&layers);
@@ -659,6 +719,7 @@ impl GeometryTileWorker {
                         glyph_dependencies: &mut glyph_dependencies,
                         image_dependencies: &mut image_dependencies,
                         available_images: &self.available_images,
+                        filter_groups: &mut filter_groups,
                     },
                     SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
                     group,
@@ -691,20 +752,30 @@ impl GeometryTileWorker {
                 bucket.set_retain_features_by_id(self.capture_rendered_features);
                 bucket.reserve_features(geometry_layer.feature_count());
 
-                let mut i = 0;
-                while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
-                    let feature = geometry_layer.get_feature(i)?;
-
-                    let effective_z = f32::from(self.id.overscaled_z);
-                    let passes = filter.evaluate(
-                        &EvaluationContext::with_zoom_feature(effective_z, Some(&*feature))
+                let effective_z = f32::from(self.id.overscaled_z);
+                let passes = |feature: &dyn GeometryTileFeature| {
+                    filter.evaluate(
+                        &EvaluationContext::with_zoom_feature(effective_z, Some(feature))
                             .with_canonical_tile_id(Some(&self.id.canonical))
                             .with_global_state(self.global_state.as_deref()),
-                    );
-                    feature.check()?;
-                    if !passes {
+                    )
+                };
+                let selected = filter_groups.select(source_layer_id, &*geometry_layer, filter, passes);
+
+                let mut i = 0;
+                while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
+                    if selected.as_ref().is_some_and(|selected| !selected[i]) {
                         i += 1;
                         continue;
+                    }
+                    let feature = geometry_layer.get_feature(i)?;
+                    if selected.is_none() {
+                        let passes = passes(&*feature);
+                        feature.check()?;
+                        if !passes {
+                            i += 1;
+                            continue;
+                        }
                     }
 
                     let geometries = feature.get_geometries();
@@ -736,8 +807,7 @@ impl GeometryTileWorker {
             }
         }
 
-        self.request_new_glyphs(&glyph_dependencies);
-        self.request_new_images(image_dependencies);
+        self.request_new_dependencies(&glyph_dependencies, image_dependencies);
 
         self.finalize_layout()
     }

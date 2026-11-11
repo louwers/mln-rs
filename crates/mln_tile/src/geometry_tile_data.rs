@@ -1,11 +1,9 @@
 // Ports the free functions of src/mln/tile/geometry_tile_data.cpp
 // (signedArea, toWagyuPath, toGeometryCollection, fixupPolygons,
-// classifyRings, limitHoles, both convertGeometry overloads, convertFeature)
-// and `ToGeometryCollection` from geometry_tile_data.hpp. The interfaces
-// (GeometryTileFeature & co.) are in mln_tile_id::geometry_tile_data.
-//
-// TODO(port): roundPolygonCorners (fill-extrusion rounded corners; needs
-// util/math.hpp dist/normal/perp/crossProduct/angle_between).
+// classifyRings, limitHoles, both convertGeometry overloads, convertFeature,
+// roundPolygonCorners) and `ToGeometryCollection` from
+// geometry_tile_data.hpp. The interfaces (GeometryTileFeature & co.) are in
+// mln_tile_id::geometry_tile_data.
 
 use std::f64::consts::PI;
 
@@ -14,6 +12,7 @@ use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, Mu
 use mln_tile_id::{CanonicalTileID, GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
+use mln_util::math::{angle_between, cross_product, dist_f64, normal, perp};
 use vector_tile::Error;
 
 use crate::stl_algo::nth_element;
@@ -274,6 +273,108 @@ pub fn to_geometry_collection(geom: &Geometry<i16>) -> GeometryCollection {
     }
 }
 
+/// `GeometryCoordinateFloat`.
+pub type GeometryCoordinateFloat = Point<f32>;
+/// `GeometryCoordinatesFloat`.
+pub type GeometryCoordinatesFloat = Vec<GeometryCoordinateFloat>;
+/// `GeometryCollectionFloat`.
+pub type GeometryCollectionFloat = Vec<GeometryCoordinatesFloat>;
+
+/// `roundPolygonCorners`: replaces each corner of the closed rings of
+/// `polygon` with an arc that starts and ends `desired_corner_distance` tile
+/// units from the corner, or 20% of the shorter adjacent edge if that is
+/// less. Corners next to a zero-length edge, and corners turning by less than
+/// 5° (or nearly reversing), stay sharp. Each output ring is closed.
+///
+/// A ring needs its closing point: the last point is dropped before rounding.
+/// A ring of fewer than two points comes out empty.
+pub fn round_polygon_corners(polygon: &GeometryCollection, desired_corner_distance: f64) -> GeometryCollectionFloat {
+    const ARC_POINTS: i32 = 3;
+    const MAX_EDGE_LEN_PERCENT: f64 = 0.2;
+    let sin_parallel_threshold = mln_math::deg2rad(5.0).sin();
+
+    let to_f64 = |p: Point<i16>| Point::new(f64::from(p.x), f64::from(p.y));
+    let to_f32 = |p: Point<f64>| Point::new(p.x as f32, p.y as f32);
+    let sub = |a: Point<f64>, b: Point<f64>| Point::new(a.x - b.x, a.y - b.y);
+    let add_scaled = |a: Point<f64>, v: Point<f64>, s: f64| Point::new(a.x + v.x * s, a.y + v.y * s);
+
+    let mut rounded_corner_polygon = GeometryCollectionFloat::with_capacity(polygon.len());
+
+    for ring in polygon.iter() {
+        let mut rounded_corner_ring = GeometryCoordinatesFloat::new();
+
+        let n_vertices = ring.len().saturating_sub(1);
+        for i in 0..n_vertices {
+            let prev_point = to_f64(ring[(i + n_vertices - 1) % n_vertices]);
+            let corner_point = to_f64(ring[i]);
+            let next_point = to_f64(ring[(i + 1) % n_vertices]);
+
+            let edge1_len = dist_f64(corner_point, prev_point);
+            let edge2_len = dist_f64(corner_point, next_point);
+            if edge1_len == 0.0 || edge2_len == 0.0 {
+                // Duplicate vertex: no direction to round, keep it as-is.
+                rounded_corner_ring.push(to_f32(corner_point));
+                continue;
+            }
+
+            // Compute the start and end points of the rounded corner
+            let edge1_vector = normal(prev_point, corner_point);
+            let edge2_vector = normal(corner_point, next_point);
+
+            let edge1_max_corner_distance = edge1_len * MAX_EDGE_LEN_PERCENT;
+            let edge2_max_corner_distance = edge2_len * MAX_EDGE_LEN_PERCENT;
+            let corner_distance = desired_corner_distance.min(edge1_max_corner_distance).min(edge2_max_corner_distance);
+
+            let start_point = add_scaled(corner_point, edge1_vector, -corner_distance);
+            let end_point = add_scaled(corner_point, edge2_vector, corner_distance);
+
+            // Perpendicular directions
+            let mut perp1_vector = perp(edge1_vector);
+            let mut perp2_vector = perp(edge2_vector);
+
+            // Ensure perpendiculars point toward same side
+            if cross_product(edge1_vector, edge2_vector) < 0.0 {
+                perp1_vector = Point::new(-perp1_vector.x, -perp1_vector.y);
+                perp2_vector = Point::new(-perp2_vector.x, -perp2_vector.y);
+            }
+
+            // Center = intersection of perpendiculars
+            let perp_cross_product = cross_product(perp1_vector, perp2_vector);
+            if perp_cross_product.abs() < sin_parallel_threshold {
+                rounded_corner_ring.push(to_f32(corner_point));
+                continue;
+            }
+            let t = cross_product(sub(end_point, start_point), perp2_vector) / perp_cross_product;
+            let center_point = add_scaled(start_point, perp1_vector, t);
+
+            // Add the start point of the rounded corner
+            rounded_corner_ring.push(to_f32(start_point));
+
+            // Generate points along the arc
+            let radius = dist_f64(start_point, center_point);
+            let start_angle = (start_point.y - center_point.y).atan2(start_point.x - center_point.x);
+            let arc_angle = angle_between(sub(start_point, center_point), sub(end_point, center_point));
+            for k in 1..=ARC_POINTS {
+                let angle = start_angle + arc_angle * f64::from(k) / f64::from(ARC_POINTS + 1);
+                let arc_point =
+                    Point::new(center_point.x + angle.cos() * radius, center_point.y + angle.sin() * radius);
+                rounded_corner_ring.push(to_f32(arc_point));
+            }
+
+            // Add the end point of the rounded corner
+            rounded_corner_ring.push(to_f32(end_point));
+        }
+        // Close the ring by repeating the first point at the end
+        if let Some(&first) = rounded_corner_ring.first() {
+            rounded_corner_ring.push(first);
+        }
+
+        // Add the ring to the rounded corner polygon
+        rounded_corner_polygon.push(rounded_corner_ring);
+    }
+    rounded_corner_polygon
+}
+
 #[cfg(test)]
 mod tests {
     // Ports test/tile/geometry_tile_data.test.cpp.
@@ -430,5 +531,120 @@ mod tests {
         // ensure we've kept the two largest interior rings
         assert_eq!(original[1], polygon[1]);
         assert_eq!(original[3], polygon[2]);
+    }
+    fn assert_ring_near(actual: &GeometryCoordinatesFloat, expected: &[(f32, f32)]) {
+        assert_eq!(actual.len(), expected.len(), "{actual:?}");
+        for (a, &(x, y)) in actual.iter().zip(expected) {
+            assert!((a.x - x).abs() < 1e-3 && (a.y - y).abs() < 1e-3, "{actual:?}");
+        }
+    }
+
+    // The arc of a right angle at `corner`, from `start` to `end`, around
+    // the center `center`.
+    fn right_angle_arc(start: (f32, f32), center: (f32, f32), end: (f32, f32)) -> Vec<(f32, f32)> {
+        let radius = ((start.0 - center.0).powi(2) + (start.1 - center.1).powi(2)).sqrt();
+        let start_angle = (start.1 - center.1).atan2(start.0 - center.0);
+        let end_angle = (end.1 - center.1).atan2(end.0 - center.0);
+        let mut arc_angle = end_angle - start_angle;
+        if arc_angle > std::f32::consts::PI {
+            arc_angle -= 2.0 * std::f32::consts::PI;
+        } else if arc_angle < -std::f32::consts::PI {
+            arc_angle += 2.0 * std::f32::consts::PI;
+        }
+        let mut points = vec![start];
+        for k in 1..=3 {
+            let angle = start_angle + arc_angle * k as f32 / 4.0;
+            points.push((center.0 + angle.cos() * radius, center.1 + angle.sin() * radius));
+        }
+        points.push(end);
+        points
+    }
+
+    #[test]
+    fn round_polygon_corners_square() {
+        let polygon = collection(&[&[(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)]]);
+        let rounded = round_polygon_corners(&polygon, 10.0);
+
+        assert_eq!(rounded.len(), 1);
+        let mut expected = Vec::new();
+        expected.extend(right_angle_arc((0.0, 10.0), (10.0, 10.0), (10.0, 0.0)));
+        expected.extend(right_angle_arc((90.0, 0.0), (90.0, 10.0), (100.0, 10.0)));
+        expected.extend(right_angle_arc((100.0, 90.0), (90.0, 90.0), (90.0, 100.0)));
+        expected.extend(right_angle_arc((10.0, 100.0), (10.0, 90.0), (0.0, 90.0)));
+        expected.push((0.0, 10.0));
+        assert_ring_near(&rounded[0], &expected);
+        // The middle of the first arc is 10 units from the corner's center.
+        let middle = rounded[0][2];
+        assert!((middle.x - (10.0 - 10.0 / 2f32.sqrt())).abs() < 1e-3);
+    }
+
+    #[test]
+    fn round_polygon_corners_clockwise_ring() {
+        let polygon = collection(&[&[(0, 0), (0, 100), (100, 100), (100, 0), (0, 0)]]);
+        let rounded = round_polygon_corners(&polygon, 10.0);
+
+        let mut expected = Vec::new();
+        expected.extend(right_angle_arc((10.0, 0.0), (10.0, 10.0), (0.0, 10.0)));
+        expected.extend(right_angle_arc((0.0, 90.0), (10.0, 90.0), (10.0, 100.0)));
+        expected.extend(right_angle_arc((90.0, 100.0), (90.0, 90.0), (100.0, 90.0)));
+        expected.extend(right_angle_arc((100.0, 10.0), (90.0, 10.0), (90.0, 0.0)));
+        expected.push((10.0, 0.0));
+        assert_ring_near(&rounded[0], &expected);
+    }
+
+    #[test]
+    fn round_polygon_corners_clamps_to_a_fifth_of_the_shorter_edge() {
+        let polygon = collection(&[&[(0, 0), (100, 0), (100, 50), (0, 50), (0, 0)]]);
+        let rounded = round_polygon_corners(&polygon, 1000.0);
+
+        // The shorter edges are 50 long: every arc starts and ends 10 away.
+        assert_eq!(rounded[0].len(), 21);
+        assert_ring_near(&rounded[0][..1].to_vec(), &[(0.0, 10.0)]);
+        assert_ring_near(&rounded[0][4..6].to_vec(), &[(10.0, 0.0), (90.0, 0.0)]);
+    }
+
+    #[test]
+    fn round_polygon_corners_rounds_every_ring() {
+        let polygon = collection(&[
+            &[(0, 0), (100, 0), (100, 100), (0, 100), (0, 0)],
+            &[(25, 25), (25, 75), (75, 75), (75, 25), (25, 25)],
+        ]);
+        let rounded = round_polygon_corners(&polygon, 5.0);
+
+        assert_eq!(rounded.len(), 2);
+        assert_eq!(rounded[0].len(), 21);
+        assert_eq!(rounded[1].len(), 21);
+        assert_eq!(rounded[1].first(), rounded[1].last());
+        assert_ring_near(&rounded[1][..1].to_vec(), &[(30.0, 25.0)]);
+    }
+
+    #[test]
+    fn round_polygon_corners_keeps_straight_and_duplicate_vertices() {
+        // (50, 0) lies on a straight edge, and (100, 100) is repeated.
+        let polygon = collection(&[&[(0, 0), (50, 0), (100, 0), (100, 100), (100, 100), (0, 100), (0, 0)]]);
+        let rounded = round_polygon_corners(&polygon, 10.0);
+
+        // 3 rounded corners, the straight vertex, and both copies of the
+        // repeated one, which sit next to a zero-length edge.
+        assert_eq!(rounded[0].len(), 3 * 5 + 1 + 2 + 1);
+        assert_ring_near(&rounded[0][5..6].to_vec(), &[(50.0, 0.0)]);
+        assert_ring_near(&rounded[0][11..13].to_vec(), &[(100.0, 100.0), (100.0, 100.0)]);
+    }
+
+    #[test]
+    fn round_polygon_corners_keeps_a_spike_sharp() {
+        // At (100, 1) the ring turns back by almost 180°.
+        let polygon = collection(&[&[(0, 0), (100, 1), (0, 2), (0, 0)]]);
+        let rounded = round_polygon_corners(&polygon, 10.0);
+
+        assert_ring_near(&rounded[0][5..6].to_vec(), &[(100.0, 1.0)]);
+    }
+
+    #[test]
+    fn round_polygon_corners_of_degenerate_rings() {
+        let polygon = collection(&[&[], &[(1, 1)], &[(1, 1), (1, 1)]]);
+        let rounded = round_polygon_corners(&polygon, 10.0);
+
+        assert_eq!(rounded, vec![vec![], vec![], vec![Point::new(1.0, 1.0), Point::new(1.0, 1.0)]]);
     }
 }

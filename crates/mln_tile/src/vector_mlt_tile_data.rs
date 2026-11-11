@@ -11,11 +11,12 @@
 // `GeometryTileFeature::error`, as VectorMVTTileFeature does.
 
 use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use feature::{Identifier, PropertyMap, Value};
 use mln_tile_id::{
-    EncodedTileData, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData,
+    EncodedTileData, FeatureGroups, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData,
     GeometryTileFeature, GeometryTileLayer,
 };
 use mln_util::constants::EXTENT;
@@ -119,14 +120,19 @@ impl<'l> VectorMLTTileFeature<'l> {
     }
 }
 
+/// `VectorMLTTileFeature::getType`.
+fn feature_type(feature: &mlt::Feature) -> FeatureType {
+    match feature.get_geometry().shape {
+        Shape::Point(_) => FeatureType::Point,
+        // C++ reports multi-points as LineString (the MVT path: Point).
+        Shape::MultiPoint(_) | Shape::MultiLineString(_) | Shape::LineString(_) => FeatureType::LineString,
+        Shape::Polygon(_) | Shape::MultiPolygon(_) => FeatureType::Polygon,
+    }
+}
+
 impl GeometryTileFeature for VectorMLTTileFeature<'_> {
     fn get_type(&self) -> FeatureType {
-        match self.feature.get_geometry().shape {
-            Shape::Point(_) => FeatureType::Point,
-            // C++ reports multi-points as LineString (the MVT path: Point).
-            Shape::MultiPoint(_) | Shape::MultiLineString(_) | Shape::LineString(_) => FeatureType::LineString,
-            Shape::Polygon(_) | Shape::MultiPolygon(_) => FeatureType::Polygon,
-        }
+        feature_type(self.feature)
     }
 
     fn get_value(&self, key: &str) -> Option<Value> {
@@ -221,6 +227,47 @@ impl GeometryTileLayer for VectorMLTTileLayer {
 
     fn get_name(&self) -> String {
         self.layer().get_name().to_string()
+    }
+
+    /// Groups by geometry type and by each key's value code
+    /// ([`mlt::PresentProperties::codes`]): equal codes are equal values,
+    /// and equal values with distinct codes only split a group. A key
+    /// without a column is absent from every feature. `None` for a value
+    /// that would throw, leaving its error to the accessors.
+    fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
+        let layer = self.layer();
+        let features = layer.get_features();
+        let count = features.len();
+        // Grouping costs about as much as evaluating each feature once.
+        let limit = count / 4 + 8;
+        let columns: Vec<mlt::ValueCodes<'_>> = keys
+            .iter()
+            .filter_map(|key| layer.get_property_column(key))
+            .map(|column| column.codes())
+            .collect::<Option<_>>()?;
+        let mut index: HashMap<Box<[Option<u64>]>, u32> = HashMap::new();
+        let mut codes = vec![None; columns.len() + 1];
+        let mut groups = FeatureGroups { of_feature: Vec::with_capacity(count), first: Vec::new() };
+        for (i, feature) in features.iter().enumerate() {
+            codes[columns.len()] = Some(feature_type(feature) as u64);
+            for (code, column) in codes.iter_mut().zip(&columns) {
+                *code = column.get(feature.get_index()).ok()?;
+            }
+            let group = match index.get(codes.as_slice()) {
+                Some(&group) => group,
+                None => {
+                    if groups.first.len() == limit {
+                        return None;
+                    }
+                    let group = groups.first.len() as u32;
+                    index.insert(codes.as_slice().into(), group);
+                    groups.first.push(i);
+                    group
+                }
+            };
+            groups.of_feature.push(group);
+        }
+        Some(groups)
     }
 }
 

@@ -79,7 +79,7 @@ fn transition_and_evaluate(
     now: TimePoint,
     transition: TransitionOptions,
 ) -> (BackgroundPaintProperties::Unevaluated, BackgroundPaintProperties::PossiblyEvaluated) {
-    let unevaluated = impl_.paint.transitioned(&TransitionParameters { now, transition }, unevaluated);
+    let unevaluated = impl_.paint.transitioned(&TransitionParameters::new(now, transition), unevaluated);
     zoom_history.update(zoom, &now);
     let parameters = PropertyEvaluationParameters::with_zoom_history(*zoom_history, now, Duration::zero());
     let evaluated = unevaluated.evaluate(&parameters);

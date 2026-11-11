@@ -440,7 +440,6 @@ fn read_geometry_data(name: &str) -> String {
 
 // gtest: PropertyExpression.DistanceExpression
 #[test]
-#[ignore = "TODO(port): the \"distance\" expression (src/mln/style/expression/distance.cpp) fails to parse"]
 fn distance_expression() {
     let invalid_result = f64::NAN;
     let canonical_tile_id = CanonicalTileID::new(15, 18653, 9484);

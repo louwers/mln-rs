@@ -12,8 +12,8 @@ version:
   `mln_util::`. They exist for mln-rs only.
 - The test tooling the differential tests
   ([mln-rs-difftests](https://github.com/louwers/mln-rs-difftests)) use:
-  `mln-rs-render-test`, `mln-rs-style-codegen`, `mln-rs-pixelmatch`,
-  `mln-rs-cheap-ruler` and `mln-rs-earcut-test-fixtures`. mln-rs does not
+  `mln-rs-render-test`, `mln-rs-style-codegen`, `mln-rs-pixelmatch` and
+  `mln-rs-earcut-test-fixtures`. mln-rs does not
   depend on them.
 
 The other `publish = false` packages (the desktop app, the browser build in

@@ -37,7 +37,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use mlt_core::wire::{Analyze as _, ColumnDecl, LogicalEncoding, PhysicalEncoding};
 use mlt_core::{GeometryType as WireGeometryType, GeometryValues, ParsedLayer01, ParsedProperty};
@@ -241,6 +241,81 @@ pub struct PresentProperties {
     /// The column has a present stream (C++ `physicalIndexes` is set).
     optional: bool,
     values: PropertyVec,
+    /// Port-only: the codes of a string column ([`PresentProperties::codes`]).
+    string_codes: StringCodes,
+}
+
+/// Each string's code, numbered by first use; [`StringCodes::ABSENT`] for an
+/// absent value. `None` if the strings are too varied to be worth coding.
+/// Made on first use; a cache, so it never makes two columns unequal.
+#[derive(Clone, Debug, Default)]
+struct StringCodes(OnceLock<Option<Box<[u32]>>>);
+
+impl StringCodes {
+    const ABSENT: u32 = u32::MAX;
+
+    fn get_or_init(&self, spans: &[Option<(u32, u32)>], data: &str) -> Option<&[u32]> {
+        let codes = self.0.get_or_init(|| {
+            // Past about a quarter as many strings as values, the codes would
+            // group little and cost about as much as reading every value.
+            let limit = spans.len() / 4 + 8;
+            let mut index: HashMap<&str, u32> = HashMap::new();
+            let mut codes = Vec::with_capacity(spans.len());
+            for span in spans {
+                codes.push(match *span {
+                    Some((start, end)) => {
+                        let next = index.len() as u32;
+                        let code = *index.entry(&data[start as usize..end as usize]).or_insert(next);
+                        if index.len() > limit {
+                            return None;
+                        }
+                        code
+                    }
+                    None => Self::ABSENT,
+                });
+            }
+            Some(codes.into_boxed_slice())
+        });
+        codes.as_deref()
+    }
+}
+
+impl PartialEq for StringCodes {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// Port-only: [`PresentProperties::codes`].
+#[derive(Clone, Copy)]
+pub struct ValueCodes<'a> {
+    column: &'a PresentProperties,
+    strings: &'a [u32],
+}
+
+impl ValueCodes<'_> {
+    /// The code of the value at `logical_index`, `None` for an absent value;
+    /// throws where [`PresentProperties::get_property`] does.
+    pub fn get(&self, logical_index: u32) -> Result<Option<u64>, Error> {
+        let i = logical_index as usize;
+        let column = self.column;
+        if i >= column.values.len() {
+            return if column.optional { Ok(None) } else { Err(Error::new("Missing property value")) };
+        }
+        Ok(match &column.values {
+            PropertyVec::Bool(v) => v[i].map(u64::from),
+            PropertyVec::I32(v) => v[i].map(|x| u64::from(x as u32)),
+            PropertyVec::U32(v) => v[i].map(u64::from),
+            PropertyVec::I64(v) => v[i].map(|x| x as u64),
+            PropertyVec::U64(v) => v[i],
+            PropertyVec::F32(v) => v[i].map(|x| u64::from(x.to_bits())),
+            PropertyVec::F64(v) => v[i].map(f64::to_bits),
+            PropertyVec::Str { .. } => match self.strings[i] {
+                StringCodes::ABSENT => None,
+                code => Some(u64::from(code)),
+            },
+        })
+    }
 }
 
 impl PresentProperties {
@@ -256,6 +331,18 @@ impl PresentProperties {
     /// of a column without a present stream the C++ throws
     /// `std::runtime_error("Missing property value")` (after a failing
     /// `assert` in debug builds).
+    /// Port-only: a code for each value, equal codes for equal values (equal
+    /// values may differ in code). Numbers and booleans are their bits;
+    /// strings are numbered, on the first call. `None` for a string column
+    /// with more distinct strings than about a quarter of its values.
+    pub fn codes(&self) -> Option<ValueCodes<'_>> {
+        let strings = match &self.values {
+            PropertyVec::Str { data, spans } => self.string_codes.get_or_init(spans, data)?,
+            _ => &[],
+        };
+        Some(ValueCodes { column: self, strings })
+    }
+
     pub fn get_property(&self, logical_index: u32) -> Result<Option<Property<'_>>, Error> {
         let i = logical_index as usize;
         if i < self.values.len() {
@@ -467,14 +554,25 @@ impl Layer {
                     for item in dict.items() {
                         let (name, optional) = next()?;
                         let values = PropertyVec::strings(item.feature_count(), |i| item.get(dict, i), false);
-                        layer.insert_column(name, PresentProperties { type_: ScalarType::String, optional, values });
+                        layer.insert_column(
+                            name,
+                            PresentProperties {
+                                type_: ScalarType::String,
+                                optional,
+                                values,
+                                string_codes: StringCodes::default(),
+                            },
+                        );
                     }
                     continue;
                 }
                 _ => return Err(Error::new("unsupported property column")),
             };
             let (name, optional) = next()?;
-            layer.insert_column(name, PresentProperties { type_, optional, values });
+            layer.insert_column(
+                name,
+                PresentProperties { type_, optional, values, string_codes: StringCodes::default() },
+            );
         }
         Ok(layer)
     }

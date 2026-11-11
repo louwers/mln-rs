@@ -86,6 +86,12 @@ impl Tile for VectorTile {
         }
     }
 
+    fn retry_failed_load(&self) {
+        if let Some(loader) = &self.loader {
+            loader.retry_failed_load();
+        }
+    }
+
     fn cancel(&self) {
         self.tile.cancel();
     }

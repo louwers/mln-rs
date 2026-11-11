@@ -3,7 +3,10 @@
 //!
 //! The ref is checked out in a worktree under `target/bench-compare`, which
 //! the next comparison reuses, with this checkout's `tools/bench` laid over
-//! it, so both sides run the same cases. Each round runs one `mln-bench run`
+//! it, so both sides run the same cases. When the harness doesn't build
+//! there, because a case uses API the ref lacks, the ref runs its own
+//! harness instead, and the cases only this checkout has are reported as
+//! such. Each round runs one `mln-bench run`
 //! process per side, in ABBA order so that drift hits both alike; a
 //! process's value of a metric is one sample, since iterations in one
 //! process share its caches and heap. A lead metric gets a verdict when a
@@ -44,7 +47,7 @@ pub fn compare(options: &Options) -> Result<String, String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().map_err(|e| e.to_string())?;
     let work = root.join("target/bench-compare");
     let commit = git(&root, &["rev-parse", "--verify", &format!("{}^{{commit}}", options.base)])?;
-    let base_bin = build_base(&root, &work, &commit)?;
+    let (base_bin, own_harness) = build_base(&root, &work, &commit)?;
     let candidate_bin = std::env::current_exe().map_err(|e| e.to_string())?;
 
     let frames = work.join("frames");
@@ -79,6 +82,12 @@ pub fn compare(options: &Options) -> Result<String, String> {
         "- {} processes per side, ABBA; a verdict needs Holm-adjusted Mann-Whitney p < {ALPHA} and a change of at least {}%",
         options.rounds, options.threshold
     );
+    if own_harness {
+        let _ = writeln!(
+            out,
+            "- the base doesn't build this checkout's harness, so it ran its own: a case that changed between the two harnesses compares different work"
+        );
+    }
     if let (Some(before), Some(after)) = (load_before, load_after) {
         let _ = writeln!(out, "- load average: {before} before, {after} after");
     }
@@ -123,8 +132,9 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 /// Checks `commit` out under `work`, lays this checkout's harness over it,
-/// and builds it there.
-fn build_base(root: &Path, work: &Path, commit: &str) -> Result<PathBuf, String> {
+/// and builds it there; when that fails, builds the commit's own harness.
+/// Returns the binary, and whether it is the commit's own harness.
+fn build_base(root: &Path, work: &Path, commit: &str) -> Result<(PathBuf, bool), String> {
     let tree = work.join("tree");
     if tree.join(".git").exists() {
         git(&tree, &["checkout", "-q", "--force", "--detach", commit])?;
@@ -148,6 +158,21 @@ fn build_base(root: &Path, work: &Path, commit: &str) -> Result<PathBuf, String>
         .map_err(|e| e.to_string())?;
 
     eprintln!("mln-bench: building the base ({commit})");
+    let bin = work.join("target/release/mln-bench");
+    if build(&tree, work)? {
+        return Ok((bin, false));
+    }
+    eprintln!("mln-bench: the base doesn't build this checkout's harness; building its own");
+    git(&tree, &["checkout", "-q", "--force", "HEAD", "--", "."])?;
+    git(&tree, &["clean", "-q", "-d", "--force", "--", "tools/bench"])?;
+    if !build(&tree, work)? {
+        return Err("building the base failed, with this checkout's harness and with its own".into());
+    }
+    Ok((bin, true))
+}
+
+/// Builds the harness of the workspace at `tree`; whether it built.
+fn build(tree: &Path, work: &Path) -> Result<bool, String> {
     let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
         .args(["build", "--release", "-p", "mln-rs-bench", "--bin", "mln-bench", "--manifest-path"])
         .arg(tree.join("Cargo.toml"))
@@ -155,10 +180,7 @@ fn build_base(root: &Path, work: &Path, commit: &str) -> Result<PathBuf, String>
         .arg(work.join("target"))
         .status()
         .map_err(|e| format!("cargo: {e}"))?;
-    if !status.success() {
-        return Err(format!("building the base failed ({status})"));
-    }
-    Ok(work.join("target/release/mln-bench"))
+    Ok(status.success())
 }
 
 /// The ref's root manifest, with this checkout's entry of each workspace

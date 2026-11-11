@@ -10,13 +10,19 @@ use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
-use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
+use mln_map::{
+    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapLoadError, MapObserver,
+    MapOptions,
+};
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::{ClientOptions, ResourceOptions};
 use mln_util::LatLng;
+use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
+use mln_util::host_bytes::HostBytes;
+use mln_util::serialization::payload::Payload;
 use mln_util::size::Size;
 use mln_webgpu::SurfaceBackend;
 use wasm_bindgen::prelude::*;
@@ -135,8 +141,17 @@ fn physical(size: Size, pixel_ratio: f64) -> Size {
     )
 }
 
+/// Hands this instance's fetches the responses its Web Worker fetched ahead
+/// (web/map-worker.ts): `take(url)` returns a promise of the response
+/// fetched for exactly `url`, once, or undefined (mln_storage's
+/// `set_fetch_preloads`).
+#[wasm_bindgen]
+pub fn set_preloads(take: js_sys::Function) {
+    mln_storage::set_fetch_preloads(Some(take));
+}
+
 /// A continuous map in an OffscreenCanvas, in the Web Worker that runs it
-/// (web/map-worker.js).
+/// (web/map-worker.ts).
 #[wasm_bindgen]
 pub struct WebMap {
     // Dropped first: the map resets the renderer through the frontend.
@@ -163,7 +178,10 @@ impl WebMap {
     /// reply arrived, a task was queued); the worker then calls `tick` soon.
     /// `load_shaper()` returns a promise of the shaper module
     /// (web/pkg/mln_web_shaper.js), initialized; the map calls it the first
-    /// time a style declares font faces.
+    /// time a style declares font faces. With
+    /// `local_ideograph_font_family` (a CSS font-family list), the map
+    /// draws CJK glyphs in it rather than downloading them, as GL JS's
+    /// `localIdeographFontFamily`.
     pub async fn create(
         canvas: web_sys::OffscreenCanvas,
         width: u32,
@@ -173,6 +191,7 @@ impl WebMap {
         post: js_sys::Function,
         wake: js_sys::Function,
         load_shaper: js_sys::Function,
+        local_ideograph_font_family: Option<String>,
     ) -> Result<WebMap, JsValue> {
         if workers == 0 {
             return Err(js_error("the map needs at least one tile worker"));
@@ -223,7 +242,7 @@ impl WebMap {
         run_loop.set_waker(Some(Arc::new(wake_host)));
         scheduler.set_waker(Some(Arc::new(wake_host)));
         let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
-        let mut renderer = Renderer::new(renderer_backend, pixel_ratio as f32);
+        let mut renderer = Renderer::new(renderer_backend, pixel_ratio as f32, local_ideograph_font_family);
         let count = workers as usize;
         let transport = SerializingTransport::new(|_| Box::new(WebWorkers { count, post }));
         renderer.set_tile_worker_transport(transport.clone());
@@ -255,6 +274,14 @@ impl WebMap {
         })
     }
 
+    /// Sets the font faces that every font stack of the styles loaded from
+    /// now on falls back to: `json` is an array of font files, each an
+    /// object with a `url` and an optional `unicode-range`, as in a font
+    /// face of a style's `font-faces`.
+    pub fn set_fallback_font_faces(&mut self, json: &str) -> Result<(), JsValue> {
+        self.map.get_style_mut().set_fallback_font_faces(json).map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
     /// Loads a style from a URL.
     pub fn set_style_url(&mut self, url: &str) {
         self.map.get_style_mut().load_url(url);
@@ -272,6 +299,62 @@ impl WebMap {
         );
     }
 
+    /// The camera as `[latitude, longitude, zoom, bearing, pitch]`, in
+    /// degrees but for the zoom.
+    pub fn camera(&self) -> Vec<f64> {
+        let camera = self.map.get_camera_options(None);
+        let center = camera.center.unwrap_or_default();
+        vec![
+            center.latitude(),
+            center.longitude(),
+            camera.zoom.unwrap_or_default(),
+            camera.bearing.unwrap_or_default(),
+            camera.pitch.unwrap_or_default(),
+        ]
+    }
+
+    /// Eases the bearing and pitch back to zero, as a step of the page's
+    /// input.
+    pub fn reset_north(&mut self) {
+        let update = CameraUpdate {
+            mode: CameraUpdateMode::Ease,
+            camera: CameraOptions::default().with_bearing(Some(0.0)).with_pitch(Some(0.0)),
+            animation: AnimationOptions::new(Duration::from_millis(500)),
+            phase: GesturePhase::None,
+        };
+        self.gestures.step_to(&mut self.map, update);
+    }
+
+    /// Jumps to another map's camera, for a comparison that this map
+    /// follows: its own motion stops (an ease, momentum, a wheel's eased
+    /// zoom).
+    pub fn follow(&mut self, latitude: f64, longitude: f64, zoom: f64, bearing: f64, pitch: f64) {
+        self.map.cancel_transitions();
+        let update = CameraUpdate {
+            mode: CameraUpdateMode::Jump,
+            camera: CameraOptions::default()
+                .with_center(LatLng::new(latitude, longitude).ok())
+                .with_zoom(Some(zoom))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch)),
+            animation: AnimationOptions::default(),
+            phase: GesturePhase::None,
+        };
+        self.gestures.step_to(&mut self.map, update);
+    }
+
+    /// The attributions of the style's sources that have one, as HTML. A
+    /// source that links a TileJSON has one once the TileJSON loads.
+    pub fn attributions(&self) -> Vec<String> {
+        let style = self.map.get_style();
+        style.get_sources().iter().filter_map(|source| source.get_attribution()).filter(|a| !a.is_empty()).collect()
+    }
+
+    /// The style's `name`, or an empty string.
+    pub fn style_name(&self) -> String {
+        self.map.get_style().get_name()
+    }
+
     /// Resizes the map and its surface to `width` x `height` CSS pixels.
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), JsValue> {
         let size = Size::new(width.max(1), height.max(1));
@@ -280,13 +363,16 @@ impl WebMap {
     }
 
     /// A reply from the tile worker in Web Worker `instance`, as
-    /// `TileWorker::run` returns it: its bytes, then its payloads. Each is
-    /// copied once, into the Vec its image or bucket array takes.
+    /// `TileWorker::run` returns it: its bytes, then its payloads. The bytes
+    /// are copied into wasm memory; the payloads stay JS arrays, which a
+    /// bucket's vertices and indices stay in until they're uploaded
+    /// (mln_util::host_bytes).
     pub fn receive(&self, instance: u32, reply: js_sys::Array) {
         self.received.set(self.received.get() + 1);
-        let mut parts = reply.iter().map(|part| js_sys::Uint8Array::new(&part).to_vec());
-        let bytes = parts.next().unwrap_or_default();
-        self.transport.receive(instance as usize, Encoded { bytes, payloads: parts.collect() });
+        let mut parts = reply.iter().map(js_sys::Uint8Array::from);
+        let bytes = parts.next().map(|bytes| bytes.to_vec()).unwrap_or_default();
+        let payloads = parts.map(|part| Payload::Host(HostBytes::new(part))).collect();
+        self.transport.receive(instance as usize, Encoded { bytes, payloads });
     }
 
     /// How many worker replies arrived so far.
@@ -369,7 +455,7 @@ impl WebMap {
         self.gestures.handle(&mut self.map, Input::PointerCancel { id }, time)
     }
 
-    /// A DOM `wheel` event, as the page classifies it (web/main.js): at
+    /// A DOM `wheel` event, as the page classifies it (web/main.ts): at
     /// (`x`, `y`), `amount` notches of a mouse wheel when `kind` is
     /// [`WHEEL_NOTCHES`], or `amount` pixels of continuous scrolling when it
     /// is [`WHEEL_PIXELS`]; positive scrolls down.
@@ -428,7 +514,7 @@ impl WebMap {
     }
 }
 
-/// `WebMap::wheel`'s `kind`, as web/main.js's `WHEEL_PIXELS` and
+/// `WebMap::wheel`'s `kind`, as web/protocol.ts's `WHEEL_PIXELS` and
 /// `WHEEL_NOTCHES` send it.
 const WHEEL_PIXELS: u32 = 0;
 const WHEEL_NOTCHES: u32 = 1;

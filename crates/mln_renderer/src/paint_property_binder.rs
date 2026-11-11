@@ -80,6 +80,13 @@ impl InterleavedVertexBuffer {
         data[start..start + value.len()].copy_from_slice(value);
     }
 
+    /// `get<T>(index, offset)`, `len` = `sizeof(T)`, or `None` when the
+    /// vertex is out of range.
+    pub fn try_get(&self, index: usize, offset: usize, len: usize) -> Option<Vec<u8>> {
+        let start = self.stride.checked_mul(index)?.checked_add(offset)?;
+        self.shared_vertex_vector.data().get(start..start.checked_add(len)?).map(<[u8]>::to_vec)
+    }
+
     /// `get<T>(index, offset)`, `len` = `sizeof(T)`.
     pub fn get(&self, index: usize, offset: usize, len: usize) -> Vec<u8> {
         let start = self.stride * index + offset;
@@ -178,6 +185,54 @@ pub enum PaintPropertyBinderKind<T> {
         zoom_range: Range<f32>,
         feature_map: FeatureVertexRangeMap,
     },
+}
+
+impl<T: BinderValue> PaintPropertyBinderKind<T> {
+    /// `updateVertexVector(start, end, feature, state)`.
+    fn update_vertex_vector(
+        &self,
+        statistics: &mut PaintPropertyStatistics<T>,
+        buffer: &mut InterleavedVertexBuffer,
+        vertex_offset: usize,
+        range: &FeatureVertexRange,
+        feature: &dyn GeometryTileFeature,
+        state: &mln_style::expression::expression::FeatureState,
+    ) {
+        match self {
+            Self::Constant { .. } => {}
+            Self::SourceFunction { expression, default_value, .. } => {
+                let evaluated = expression.evaluate(
+                    &EvaluationContext::from_feature(Some(feature)).with_feature_state(Some(state)),
+                    default_value.clone(),
+                );
+                statistics.add(&evaluated);
+                let value = evaluated.attribute_value();
+                let bytes = floats_to_bytes(&value[..T::DIMENSIONS]);
+                for i in range.start..range.end {
+                    buffer.set(i, vertex_offset, &bytes);
+                }
+            }
+            Self::CompositeFunction { expression, default_value, zoom_range, .. } => {
+                let min = expression.evaluate(
+                    &EvaluationContext::with_zoom_feature_state(zoom_range.min, Some(feature), Some(state)),
+                    default_value.clone(),
+                );
+                let max = expression.evaluate(
+                    &EvaluationContext::with_zoom_feature_state(zoom_range.max, Some(feature), Some(state)),
+                    default_value.clone(),
+                );
+                statistics.add(&min);
+                statistics.add(&max);
+                let mut value = Vec::with_capacity(2 * T::DIMENSIONS);
+                value.extend_from_slice(&min.attribute_value()[..T::DIMENSIONS]);
+                value.extend_from_slice(&max.attribute_value()[..T::DIMENSIONS]);
+                let bytes = floats_to_bytes(&value);
+                for i in range.start..range.end {
+                    buffer.set(i, vertex_offset, &bytes);
+                }
+            }
+        }
+    }
 }
 
 /// `PaintPropertyBinder<T, T, PossiblyEvaluatedPropertyValue<T>, A>`.
@@ -336,10 +391,11 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
         states: &crate::bucket::FeatureStates,
         layer: &dyn GeometryTileLayer,
     ) {
-        let feature_map = match &self.kind {
+        let Self { kind, statistics, vertex_offset, .. } = self;
+        let feature_map = match &*kind {
             PaintPropertyBinderKind::Constant { .. } => return,
             PaintPropertyBinderKind::SourceFunction { feature_map, .. }
-            | PaintPropertyBinderKind::CompositeFunction { feature_map, .. } => feature_map.clone(),
+            | PaintPropertyBinderKind::CompositeFunction { feature_map, .. } => feature_map,
         };
         for (id, state) in states {
             let Some(positions) = feature_map.get(id) else {
@@ -352,53 +408,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
                 let Ok(feature) = layer.get_feature(pos.feature_index) else {
                     continue;
                 };
-                self.update_vertex_vector(buffer, pos.start, pos.end, &*feature, state);
-            }
-        }
-    }
-
-    /// `updateVertexVector(start, end, feature, state)`.
-    pub fn update_vertex_vector(
-        &mut self,
-        buffer: &mut InterleavedVertexBuffer,
-        start: usize,
-        end: usize,
-        feature: &dyn GeometryTileFeature,
-        state: &mln_style::expression::expression::FeatureState,
-    ) {
-        let vertex_offset = self.vertex_offset;
-        match &self.kind {
-            PaintPropertyBinderKind::Constant { .. } => {}
-            PaintPropertyBinderKind::SourceFunction { expression, default_value, .. } => {
-                let evaluated = expression.evaluate(
-                    &EvaluationContext::from_feature(Some(feature)).with_feature_state(Some(state)),
-                    default_value.clone(),
-                );
-                self.statistics.add(&evaluated);
-                let value = evaluated.attribute_value();
-                let bytes = floats_to_bytes(&value[..T::DIMENSIONS]);
-                for i in start..end {
-                    buffer.set(i, vertex_offset, &bytes);
-                }
-            }
-            PaintPropertyBinderKind::CompositeFunction { expression, default_value, zoom_range, .. } => {
-                let min = expression.evaluate(
-                    &EvaluationContext::with_zoom_feature_state(zoom_range.min, Some(feature), Some(state)),
-                    default_value.clone(),
-                );
-                let max = expression.evaluate(
-                    &EvaluationContext::with_zoom_feature_state(zoom_range.max, Some(feature), Some(state)),
-                    default_value.clone(),
-                );
-                self.statistics.add(&min);
-                self.statistics.add(&max);
-                let mut value = Vec::with_capacity(2 * T::DIMENSIONS);
-                value.extend_from_slice(&min.attribute_value()[..T::DIMENSIONS]);
-                value.extend_from_slice(&max.attribute_value()[..T::DIMENSIONS]);
-                let bytes = floats_to_bytes(&value);
-                for i in start..end {
-                    buffer.set(i, vertex_offset, &bytes);
-                }
+                kind.update_vertex_vector(statistics, buffer, *vertex_offset, pos, &*feature, state);
             }
         }
     }
@@ -429,21 +439,22 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     }
 
     /// `getVertexValue(index)`: the zoom-interpolated vertex (`2 *
-    /// DIMENSIONS` floats).
-    pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Vec<f32> {
+    /// DIMENSIONS` floats), or `None` when `index` is out of range (C++
+    /// throws `std::out_of_range`).
+    pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> Option<Vec<f32>> {
         let n = T::DIMENSIONS;
-        match &self.kind {
+        Some(match &self.kind {
             PaintPropertyBinderKind::Constant { .. } => vec![0.0; 2 * n],
             PaintPropertyBinderKind::SourceFunction { .. } => {
-                let base: Vec<f32> = bytemuck::pod_collect_to_vec(&buffer.get(index, self.vertex_offset, n * 4));
+                let base: Vec<f32> = bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset, n * 4)?);
                 let mut value = base.clone();
                 value.extend_from_slice(&base);
                 value
             }
             PaintPropertyBinderKind::CompositeFunction { .. } => {
-                bytemuck::pod_collect_to_vec(&buffer.get(index, self.vertex_offset, 2 * n * 4))
+                bytemuck::pod_collect_to_vec(&buffer.try_get(index, self.vertex_offset, 2 * n * 4)?)
             }
-        }
+        })
     }
 
     /// `applyPaintProperty<TAttribute>(attrIndex, attrib)`.

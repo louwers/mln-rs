@@ -1,16 +1,25 @@
 // Ports test/style/properties.test.cpp.
 
-use mln_util::chrono::{Duration, TimePoint, milliseconds};
+use std::sync::Arc;
 
-use crate::expression::dsl;
+use feature::Value;
+use mln_conversion::{Convertible, Error};
+use mln_util::chrono::{Duration, TimePoint, milliseconds};
+use mln_vec_map::VecSet;
+
+use super::util::parse_json;
+use crate::conversion::convert_property_value;
+use crate::expression::{GlobalStateMap, Image, dsl};
+use crate::light::{LightColor, LightIntensity, LightProperties};
 use crate::map::zoom_history::ZoomHistory;
-use crate::properties::Transitioning;
+use crate::properties::{Transitionable, Transitioning};
 use crate::property_expression::PropertyExpression;
 use crate::property_value::PropertyValue;
 use crate::renderer::data_driven_property_evaluator::DataDrivenPropertyEvaluator;
 use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::PropertyEvaluator;
+use crate::renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 use crate::transition_options::TransitionOptions;
 
 fn evaluate(property: &Transitioning<PropertyValue<f32>>, delta: Duration) -> f32 {
@@ -187,4 +196,151 @@ fn possibly_evaluated_evaluate_per_feature() {
         LineJoinType::Miter,
         layout.evaluate_canonical::<LineJoin>(10.0, &feature, &CanonicalTileID::new(0, 0, 0))
     );
+}
+
+fn global_state_value(key: &str) -> PropertyValue<f32> {
+    let json = parse_json(&format!(r#"["global-state", "{key}"]"#));
+    let mut error = Error::default();
+    let value = convert_property_value::<f32>(&Convertible::from(&json), &mut error, false, false);
+    value.unwrap_or_else(|| panic!("{}", error.message))
+}
+
+fn width_state(width: f64) -> Arc<GlobalStateMap> {
+    Arc::new(GlobalStateMap::from_iter([("width".to_owned(), Value::Double(width))]))
+}
+
+fn evaluate_with_state(
+    property: &Transitioning<PropertyValue<f32>>,
+    global_state: Arc<GlobalStateMap>,
+    delta: Duration,
+) -> f32 {
+    let mut zoom_history = ZoomHistory::default();
+    zoom_history.update(0.0, &(TimePoint::min() + delta));
+
+    let mut parameters =
+        PropertyEvaluationParameters::with_zoom_history(zoom_history, TimePoint::min() + delta, Duration::zero());
+    parameters.global_state = Some(global_state);
+
+    let evaluator = PropertyEvaluator::new(&parameters, 0.0_f32);
+
+    property.evaluate(&evaluator, parameters.now)
+}
+
+fn global_state_change(
+    prior_state: Arc<GlobalStateMap>,
+    changed_key: &str,
+    delta: Duration,
+    state_only: bool,
+) -> TransitionParameters {
+    let mut transition = TransitionOptions::default();
+    transition.duration = Some(milliseconds(1000));
+    TransitionParameters {
+        now: TimePoint::min() + delta,
+        transition,
+        global_state_change: Some(GlobalStateChange {
+            prior_state,
+            changed_keys: Arc::new(VecSet::from_iter([changed_key.to_owned()])),
+            state_only,
+        }),
+    }
+}
+
+fn untransitioned() -> TransitionParameters {
+    TransitionParameters::new(TimePoint::min(), TransitionOptions::default())
+}
+
+fn width_transitionable() -> Transitionable<PropertyValue<f32>> {
+    Transitionable { value: global_state_value("width"), options: TransitionOptions::default() }
+}
+
+// gtest: TransitioningPropertyValue.GlobalStateChangeTransitionsFromPriorState
+#[test]
+fn global_state_change_transitions_from_prior_state() {
+    let width = width_transitionable();
+    let mut property = width.transition(&untransitioned(), Transitioning::default());
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(0)));
+
+    property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
+
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(1.0), milliseconds(0)));
+    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+    assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), milliseconds(1500)));
+}
+
+// gtest: TransitioningPropertyValue.GlobalStateChangeContinuesRunningTransition
+#[test]
+fn global_state_change_continues_running_transition() {
+    let width = width_transitionable();
+    let mut property = width.transition(&untransitioned(), Transitioning::default());
+    property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
+    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+
+    // Changing the state back halfway starts from the value shown, not from the state now read.
+    property = width.transition(&global_state_change(width_state(1.0), "width", milliseconds(500), true), property);
+
+    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(2500)));
+}
+
+// gtest: TransitioningPropertyValue.GlobalStateChangeWithLayerChangeTransitionsFromPriorState
+#[test]
+fn global_state_change_with_layer_change_transitions_from_prior_state() {
+    let width = width_transitionable();
+    let mut property = width.transition(&untransitioned(), Transitioning::default());
+    property = width.transition(&global_state_change(width_state(0.0), "width", milliseconds(0), true), property);
+    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(1.0), milliseconds(500)));
+
+    // A layer change in the same frame as the state change restarts the transition from the value shown.
+    property = width.transition(&global_state_change(width_state(1.0), "width", milliseconds(500), false), property);
+
+    assert_float_eq(0.823099, evaluate_with_state(&property, width_state(0.0), milliseconds(500)));
+    assert_float_eq(0.0, evaluate_with_state(&property, width_state(0.0), milliseconds(2500)));
+}
+
+// gtest: TransitioningPropertyValue.GlobalStateChangeSnapsPatternImage
+#[test]
+fn global_state_change_snaps_pattern_image() {
+    let json = parse_json(r#"["image", ["global-state", "pattern"]]"#);
+    let mut error = Error::default();
+    let pattern = convert_property_value::<Image>(&Convertible::from(&json), &mut error, true, false)
+        .unwrap_or_else(|| panic!("{}", error.message));
+    let value = Transitionable { value: pattern, options: TransitionOptions::default() };
+    let mut property = value.transition(&untransitioned(), Transitioning::default());
+
+    // Pattern images are laid out into tiles, not interpolated, so the state change applies at once.
+    let prior_state = Arc::new(GlobalStateMap::from_iter([("pattern".to_owned(), Value::String("a".to_owned()))]));
+    property = value.transition(&global_state_change(prior_state, "pattern", milliseconds(0), true), property);
+
+    assert!(!property.has_transition());
+}
+
+// gtest: TransitioningPropertyValue.GlobalStateChangeOfUnreadKeyKeepsValue
+#[test]
+fn global_state_change_of_unread_key_keeps_value() {
+    let width = width_transitionable();
+    let mut property = width.transition(&untransitioned(), Transitioning::default());
+
+    property = width.transition(&global_state_change(width_state(0.0), "color", milliseconds(0), true), property);
+
+    assert!(!property.has_transition());
+    assert_float_eq(1.0, evaluate_with_state(&property, width_state(1.0), milliseconds(0)));
+}
+
+// gtest: TransitioningPropertyValue.GlobalStateChangeTransitionsLightProperty
+#[test]
+fn global_state_change_transitions_light_property() {
+    let mut light = LightProperties::Transitionable::default();
+    light.get_mut::<LightIntensity>().value = global_state_value("width");
+    let mut transitioning = light.transitioned(&untransitioned(), light.untransitioned());
+
+    // A state-only change transitions the property that reads the key and leaves the others alone.
+    transitioning =
+        light.transitioned(&global_state_change(width_state(0.0), "width", milliseconds(0), true), transitioning);
+
+    assert!(transitioning.get::<LightIntensity>().has_transition());
+    assert!(!transitioning.get::<LightColor>().has_transition());
+    let intensity = transitioning.get::<LightIntensity>();
+    assert_float_eq(0.0, evaluate_with_state(intensity, width_state(1.0), milliseconds(0)));
+    assert_float_eq(0.823099, evaluate_with_state(intensity, width_state(1.0), milliseconds(500)));
+    assert_float_eq(1.0, evaluate_with_state(intensity, width_state(1.0), milliseconds(1500)));
 }

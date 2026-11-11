@@ -4,6 +4,9 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[cfg(target_family = "wasm")]
+use mln_util::host_bytes::HostBytes;
+
 use crate::draw_mode::DrawMode;
 
 /// `gfx::IndexBufferBase`: backend buffer attached to a shared index vector.
@@ -16,6 +19,10 @@ pub trait IndexBufferBase: Any {
 #[derive(Default)]
 pub struct IndexVectorBase {
     v: Vec<u16>,
+    /// Port-only: the indexes while they are in a JS array; `v` is empty
+    /// then.
+    #[cfg(target_family = "wasm")]
+    host: Option<HostBytes>,
     buffer: Option<Box<dyn IndexBufferBase>>,
     dirty: bool,
     released: bool,
@@ -29,12 +36,28 @@ pub type IndexVectorBasePtr = Rc<RefCell<IndexVectorBase>>;
 
 impl IndexVectorBase {
     pub fn new(indexes: Vec<u16>) -> Self {
-        IndexVectorBase { v: indexes, buffer: None, dirty: true, released: false, freed_count: 0 }
+        IndexVectorBase {
+            v: indexes,
+            #[cfg(target_family = "wasm")]
+            host: None,
+            buffer: None,
+            dirty: true,
+            released: false,
+            freed_count: 0,
+        }
     }
 
     /// The C++ copy constructor: the buffer is not copied.
     pub fn copy(&self) -> Self {
-        IndexVectorBase { v: self.v.clone(), buffer: None, dirty: true, released: false, freed_count: 0 }
+        IndexVectorBase {
+            v: self.v.clone(),
+            #[cfg(target_family = "wasm")]
+            host: self.host.clone(),
+            buffer: None,
+            dirty: true,
+            released: false,
+            freed_count: 0,
+        }
     }
 
     /// A vector holding `indexes` that will not be updated (`release()`d):
@@ -43,6 +66,34 @@ impl IndexVectorBase {
         let mut result = IndexVectorBase::new(indexes);
         result.release();
         result
+    }
+
+    /// Port-only: a released vector of the indexes in a JS array, which the
+    /// upload pass writes to the GPU from there. Released, it frees them once
+    /// it is uploaded, so no buffer is ever updated from them.
+    #[cfg(target_family = "wasm")]
+    pub fn from_host_released(indexes: HostBytes) -> Self {
+        debug_assert!(indexes.len().is_multiple_of(size_of::<u16>()));
+        let mut result = IndexVectorBase::new(Vec::new());
+        result.host = Some(indexes);
+        result.release();
+        result
+    }
+
+    /// Port-only: the indexes while they are in a JS array rather than in
+    /// wasm memory (`data` is empty then), until they are freed after upload.
+    #[cfg(target_family = "wasm")]
+    pub fn host_data(&self) -> Option<&HostBytes> {
+        self.host.as_ref()
+    }
+
+    /// The index count in a JS array.
+    fn host_count(&self) -> usize {
+        #[cfg(target_family = "wasm")]
+        if let Some(bytes) = &self.host {
+            return bytes.len() / size_of::<u16>();
+        }
+        0
     }
 
     pub fn get_buffer(&self) -> Option<&dyn IndexBufferBase> {
@@ -82,7 +133,7 @@ impl IndexVectorBase {
     }
     /// The element count, which stays when the CPU copy is freed.
     pub fn elements(&self) -> usize {
-        self.v.len() + self.freed_count
+        self.v.len() + self.host_count() + self.freed_count
     }
     pub fn bytes(&self) -> usize {
         self.elements() * std::mem::size_of::<u16>()
@@ -93,6 +144,10 @@ impl IndexVectorBase {
     pub fn clear(&mut self) {
         self.dirty = true;
         self.v.clear();
+        #[cfg(target_family = "wasm")]
+        {
+            self.host = None;
+        }
         self.freed_count = 0;
         self.buffer = None;
     }
@@ -105,10 +160,15 @@ impl IndexVectorBase {
         }
     }
     fn free_raw_data(&mut self) {
-        self.freed_count += self.v.len();
+        self.freed_count += self.v.len() + self.host_count();
         self.v = Vec::new();
+        #[cfg(target_family = "wasm")]
+        {
+            self.host = None;
+        }
     }
-    /// The CPU copy of the indexes, empty once it is freed after upload.
+    /// The CPU copy of the indexes, empty once it is freed after upload or
+    /// while the indexes are in a JS array.
     pub fn data(&self) -> &[u16] {
         &self.v
     }

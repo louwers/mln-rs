@@ -13,6 +13,7 @@ use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source;
 use mln_style_types::SourceType;
+use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::constants;
 use mln_util::geo::{LatLngBounds, WrapMode};
@@ -27,7 +28,6 @@ use crate::tile::tile_cache::TileCache;
 use crate::tile::tile_observer::{NullTileObserver, TileObserver};
 use crate::tile_parameters::TileParameters;
 use crate::util::tile_cover::{TileCoverParameters, covering_zoom_level, tile_cover};
-use crate::util::tile_range::TileRange;
 
 /// `util::clamp<double>(value, min, max)`.
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
@@ -208,9 +208,14 @@ impl TilePyramid {
                 if !relayout {
                     // These tiles are invisible, we set optional necessity
                     // for them and thus suppress network requests on tiles
-                    // expiration (see `OnlineFileRequest`).
+                    // expiration (see `OnlineFileRequest`). One that hasn't
+                    // loaded then stops loading, and is released, as in C++.
                     tile.set_necessity(TileNecessity::Optional);
-                    self.cache.add(id, tile);
+                    if tile.is_renderable() {
+                        self.cache.add(id, tile);
+                    } else {
+                        self.cache.deferred_release(tile);
+                    }
                 } else {
                     self.cache.deferred_release(tile);
                 }
@@ -406,7 +411,14 @@ impl TilePyramid {
                 if relayout {
                     self.cache.deferred_release(tile);
                 } else {
-                    tile.set_necessity(TileNecessity::Optional);
+                    // Port-only: a tile still loading keeps its necessity,
+                    // so that it goes on loading in the cache (C++ releases
+                    // it, and optional, it would stop loading). A view that
+                    // turns back and forth needs the tiles at its corners
+                    // for moments too short to load them each time.
+                    if tile.is_renderable() {
+                        tile.set_necessity(TileNecessity::Optional);
+                    }
                     self.cache.add(key, tile);
                 }
             }
@@ -817,6 +829,13 @@ impl TilePyramid {
 
     pub fn reduce_memory_use(&mut self) {
         self.cache.clear();
+    }
+
+    /// `retryFailedTiles()`.
+    pub fn retry_failed_tiles(&self) {
+        for tile in self.tiles.values() {
+            tile.retry_failed_load();
+        }
     }
 
     /// `setObserver(TileObserver*)`.

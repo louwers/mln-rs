@@ -190,11 +190,6 @@ impl RenderTile {
 
     pub fn upload(&self, upload_pass: &dyn UploadPass) {
         self.render_data().upload(upload_pass);
-
-        // layers: debug
-        if let Some(debug_bucket) = &self.debug_bucket {
-            debug_bucket.upload(upload_pass);
-        }
     }
 
     /// `prepare(const SourcePrepareParameters&)`; `tile` is the tile this

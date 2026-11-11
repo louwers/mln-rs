@@ -22,6 +22,7 @@ mln_map.workspace = true
 mln_renderer.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
+mln_text.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true
 
@@ -37,8 +38,7 @@ path = "tests/m1_background_render_test.rs"
 name = "local_glyph_rasterizer_test"
 path = "tests/local_glyph_rasterizer_test.rs"
 
-# gtests-core: test/renderer/feature_tracking.test.cpp (all ignored until
-# rendered-feature tracking is ported; see the file comment).
+# gtests-core: test/renderer/feature_tracking.test.cpp.
 [[test]]
 name = "gtest_feature_tracking"
 path = "tests/gtest_feature_tracking.rs"
@@ -57,11 +57,27 @@ path = "tests/gtest_map.rs"
 name = "gtest_api"
 path = "tests/gtest_api.rs"
 
+[[test]]
+name = "gtest_tile_lod"
+path = "tests/gtest_tile_lod.rs"
+
 # gtests-core: test/util/memory.test.cpp (Map over a StubFileSource with the
 # test/fixtures/resources styles). Shared fixture in tests/support/mod.rs.
 [[test]]
 name = "gtest_memory"
 path = "tests/gtest_memory.rs"
+
+# gtests-core: test/renderer/symbol_rendering.test.cpp (maplibre-native
+# #4628). Shared fixture in tests/support/mod.rs.
+[[test]]
+name = "gtest_symbol_rendering"
+path = "tests/gtest_symbol_rendering.rs"
+
+# Map::set_debug's tile overlays and the rendering stats view. Shared fixture
+# in tests/support/mod.rs.
+[[test]]
+name = "debug_options_test"
+path = "tests/debug_options_test.rs"
 
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
@@ -71,9 +87,10 @@ mln_image = { package = "mln-rs-image", path = "../mln_image" }
 mln_map_types = { package = "mln-rs-map-types", path = "../mln_map_types" }
 mln_math = { package = "mln-rs-math", path = "../mln_math" }
 mln_storage = { workspace = true, features = ["sqlite"] }
-mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
+mln_style_types.workspace = true
 mln_test_server = { package = "mln-rs-test-server", path = "../../tools/test-server" }
-mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
+mln_text = { package = "mln-rs-text", path = "../mln_text" }
+mln_tile_id.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
 

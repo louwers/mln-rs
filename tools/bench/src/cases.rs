@@ -2,18 +2,19 @@
 //! follow maplibre-native-ffi's of the same names, over the same data and
 //! cameras, so their numbers are comparable to the C++ core's.
 
-use std::sync::Barrier;
+use std::sync::{Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use mln_map::RenderMode;
+use mln_text::GlyphCache;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use crate::meter::{Meter, ms};
+use crate::meter::{Meter, live_heap_mib, ms};
 use crate::scene::{
-    BASEMAP_SIZE, BASEMAP_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene, basemap_center, basemap_north_west,
-    basemap_south_east, basemap_style, write_frame,
+    BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
+    basemap_center, basemap_north_west, basemap_point, basemap_south_east, basemap_style, cjk_center, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};
@@ -46,6 +47,7 @@ struct View {
 #[derive(Clone)]
 enum Style {
     Url(String),
+    Json(&'static str),
     Basemap,
 }
 
@@ -53,11 +55,17 @@ impl View {
     fn scene(&self, cx: &Context, mode: Mode) -> Scene {
         let mut scene = Scene::new(self.size, mode);
         scene.jump(self.center, self.zoom);
+        self.load(cx, &mut scene);
+        scene
+    }
+
+    /// Starts loading the style on `scene`.
+    fn load(&self, cx: &Context, scene: &mut Scene) {
         match &self.style {
             Style::Url(url) => scene.load_url(url),
+            Style::Json(json) => scene.load_json(json),
             Style::Basemap => scene.load_json(&basemap_style(&cx.fixtures)),
         }
-        scene
     }
 }
 
@@ -89,15 +97,25 @@ pub fn all() -> Vec<Case> {
         let name = format!("Still/{}", view.name);
         cases.push(Case::new(name, move |cx| still(cx, &view)));
     }
+    for (icons, overlap) in [(256, false), (1024, false), (1024, true)] {
+        let name = format!("Still/CollidingIcons/{icons}{}", if overlap { "-overlap" } else { "" });
+        cases.push(Case::new(name.clone(), move |cx| still_colliding_icons(cx, &name, icons, overlap)));
+    }
     cases.push(Case::new("Frame/Throughput", frame_throughput));
     cases.push(Case::new("Frame/Paced", frame_paced));
     cases.push(Case::new("Frame/Idle", frame_idle));
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
+    cases.push(Case::new("Frame/AddImages", frame_add_images));
+    cases.push(Case::new("Frame/FeatureState", frame_feature_state));
+    cases.push(Case::new("Frame/FeatureStateHover", frame_feature_state_hover));
+    cases.push(Case::new("Frame/HideLayers", frame_hide_layers));
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
     }
     cases.push(Case::new("Load/Concurrent", load_concurrent));
+    cases.push(Case::new("Load/GlyphCache/Private", |cx| load_glyph_cache(cx, false)));
+    cases.push(Case::new("Load/GlyphCache/Shared", |cx| load_glyph_cache(cx, true)));
     cases.push(Case::new("Load/JumpWarm", |cx| load_jump(cx, false)));
     cases.push(Case::new("Load/JumpCold", |cx| load_jump(cx, true)));
     cases
@@ -127,6 +145,48 @@ fn still(cx: &Context, view: &View) -> Metrics {
     meter.finish()
 }
 
+/// A still frame of `icons` icons at one point, each with its own sort key,
+/// so that each is a drawable of its own. Without `overlap`, placement
+/// hides all but one.
+fn still_colliding_icons(cx: &Context, name: &str, icons: usize, overlap: bool) -> Metrics {
+    let features: Vec<String> = (0..icons)
+        .map(|i| {
+            format!(
+                r#"{{"type":"Feature","properties":{{"rank":{i}}},"geometry":{{"type":"Point","coordinates":[5,5]}}}}"#
+            )
+        })
+        .collect();
+    let style = format!(
+        r#"{{"version":8,"sources":{{"points":{{"type":"geojson","maxzoom":0,
+            "data":{{"type":"FeatureCollection","features":[{}]}}}}}},
+            "layers":[{{"id":"symbols","type":"symbol","source":"points","layout":{{
+            "icon-image":"marker","symbol-sort-key":["get","rank"],"icon-allow-overlap":{overlap}}}}}]}}"#,
+        features.join(",")
+    );
+    let center = LatLng::new(5.0, 5.0).expect("a center");
+    let mut scene = Scene::new(Size::new(256, 256), Mode::Still);
+    scene.jump(center, 4.0);
+    scene.load_json(&style);
+    scene.add_image("marker", PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]));
+    let nudge = |scene: &mut Scene, i: usize| scene.jump(center, 4.0 + 0.001 * (i % 2) as f64);
+    for i in 0..10 {
+        nudge(&mut scene, i);
+        scene.render_still();
+    }
+    let mut meter = Meter::new();
+    for i in 0..cx.iterations(100) {
+        meter.time(|| {
+            nudge(&mut scene, i);
+            scene.render_still()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        nudge(&mut scene, 0);
+        write_frame(dir, name, &scene.render_still());
+    }
+    meter.finish()
+}
+
 /// From loading the style on a new map to its first complete still: the
 /// style, sprite and glyph requests, tile parsing and layout, pipeline
 /// creation and the frame. The GPU device is set up before.
@@ -137,10 +197,7 @@ fn load_style(cx: &Context, view: &View) -> Metrics {
         let mut scene = Scene::new(view.size, Mode::Still);
         scene.jump(view.center, view.zoom);
         meter.start();
-        match &view.style {
-            Style::Url(url) => scene.load_url(url),
-            Style::Basemap => scene.load_json(&basemap_style(&cx.fixtures)),
-        }
+        view.load(cx, &mut scene);
         last = Some(scene.render_still());
         meter.stop();
     }
@@ -153,26 +210,48 @@ fn load_style(cx: &Context, view: &View) -> Metrics {
 /// Renderers on threads of their own, as the render tests run many at
 /// once: each loads a real-world style on a new map and renders its first
 /// complete still through `HeadlessFrontend::render`, the threads taking
-/// the styles in turn. An iteration is every renderer's load
-/// and still; the GPU devices are set up before.
+/// the styles in turn.
 fn load_concurrent(cx: &Context) -> Metrics {
+    let views: Vec<View> = views().into_iter().filter(|view| matches!(view.style, Style::Url(_))).collect();
+    concurrent(cx, "Load/Concurrent", &views, false)
+}
+
+/// Load/Concurrent over the CJK view, every renderer with a glyph cache of
+/// its own or all sharing one: the glyphs that several maps in one process
+/// parse from the same glyph ranges.
+fn load_glyph_cache(cx: &Context, shared: bool) -> Metrics {
+    let view =
+        View { name: "cjk", size: CJK_SIZE, center: cjk_center(), zoom: CJK_ZOOM, style: Style::Json(CJK_STYLE) };
+    let name = if shared { "Load/GlyphCache/Shared" } else { "Load/GlyphCache/Private" };
+    concurrent(cx, name, &[view], shared)
+}
+
+/// 16 renderers on threads of their own, taking `views` in turn: each loads
+/// its view's style on a new map and renders its first complete still
+/// through `HeadlessFrontend::render`, as the render tests' workers draw.
+/// An iteration is every renderer's load and still; the GPU devices are set
+/// up before. With `shared`, the renderers share one glyph cache, new for
+/// each iteration.
+fn concurrent(cx: &Context, name: &str, views: &[View], shared: bool) -> Metrics {
     const RENDERERS: usize = 16;
     let mut meter = Meter::new();
     let mut last = None;
     for _ in 0..cx.iterations(5) {
+        let glyph_cache = shared.then(Arc::<GlyphCache>::default);
         let ready = Barrier::new(RENDERERS + 1);
         let images: Vec<PremultipliedImage> = std::thread::scope(|scope| {
-            let threads: Vec<_> = REAL_WORLD
+            let threads: Vec<_> = views
                 .iter()
                 .cycle()
                 .take(RENDERERS)
                 .map(|view| {
-                    let ready = &ready;
+                    let (ready, glyph_cache) = (&ready, glyph_cache.clone());
                     scope.spawn(move || {
-                        let mut scene = Scene::new(REAL_WORLD_SIZE, Mode::Still);
-                        scene.jump(view.center(), view.zoom);
+                        let mut scene =
+                            Scene::with_glyph_cache(view.size, Mode::Still, glyph_cache.unwrap_or_default());
+                        scene.jump(view.center, view.zoom);
                         ready.wait();
-                        scene.load_url(&view.style_url());
+                        view.load(cx, &mut scene);
                         scene.render()
                     })
                 })
@@ -186,7 +265,7 @@ fn load_concurrent(cx: &Context) -> Metrics {
         last = images.into_iter().next();
     }
     if let (Some(dir), Some(image)) = (&cx.frames, &last) {
-        write_frame(dir, "Load/Concurrent", image);
+        write_frame(dir, name, image);
     }
     meter.finish()
 }
@@ -238,6 +317,130 @@ fn frame_throughput(cx: &Context) -> Metrics {
     let mut metrics = meter.finish();
     metrics.lead("frame_p95_ms", p95);
     metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Frames of Frame/FeatureState's map, with one building's state changing
+/// in every frame, as hover highlighting does.
+fn frame_feature_state_hover(cx: &Context) -> Metrics {
+    const LAP: usize = 240;
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let layers = style["layers"].as_array_mut().expect("the style has layers");
+    let buildings = layers.iter_mut().find(|layer| layer["id"] == "buildings").expect("the buildings layer");
+    buildings["paint"]["fill-color"] =
+        serde_json::json!(["case", ["boolean", ["feature-state", "selected"], false], "#c9a28f", "#d9d0c9"]);
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    for index in 0..LAP {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        scene.pump();
+        scene.render_frame();
+    }
+    scene.settle();
+    let ids = scene.feature_ids("basemap", "buildings");
+    assert!(!ids.is_empty(), "buildings has no features with ids");
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(100) {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        scene.select_feature("basemap", "buildings", &ids[index * 7919 % ids.len()], index % 2 == 0);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/FeatureStateHover", &scene.read_frame());
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Frames of Frame/Throughput over the basemap with its buildings and a
+/// street overlay colored by feature state, after every building and street
+/// of the loaded tiles was given a state; no state changes while it pans.
+fn frame_feature_state(cx: &Context) -> Metrics {
+    const LAP: usize = 240;
+    const SOURCE_LAYERS: [&str; 2] = ["buildings", "streets"];
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let selected =
+        |on: &str, off: &str| serde_json::json!(["case", ["boolean", ["feature-state", "selected"], false], on, off]);
+    let layers = style["layers"].as_array_mut().expect("the style has layers");
+    let buildings = layers.iter_mut().find(|layer| layer["id"] == "buildings").expect("the buildings layer");
+    buildings["paint"]["fill-color"] = selected("#c9a28f", "#d9d0c9");
+    let streets = layers.iter().position(|layer| layer["source-layer"] == "streets").expect("a streets layer");
+    layers.insert(
+        streets,
+        serde_json::json!({
+            "id": "selected-streets",
+            "type": "line",
+            "source": "basemap",
+            "source-layer": "streets",
+            "paint": {"line-color": selected("#e55e5e", "rgba(0, 0, 0, 0)"), "line-width": 6},
+        }),
+    );
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    for index in 0..LAP {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        scene.pump();
+        scene.render_frame();
+    }
+    for source_layer in SOURCE_LAYERS {
+        scene.select_every_feature("basemap", source_layer);
+    }
+    scene.settle();
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(100) {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/FeatureState", &scene.read_frame());
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Every layer of the loaded basemap hidden until the map settles, then
+/// shown again until it settles complete. `hidden_heap_mib` and
+/// `hidden_gpu_mib` are the heap and the GPU buffers live while they're
+/// hidden.
+fn frame_hide_layers(cx: &Context) -> Metrics {
+    let mut scene = basemap(cx, Mode::OnDemand);
+    scene.settle();
+    let mut meter = Meter::new();
+    let (mut heap, mut gpu) = (Vec::new(), Vec::new());
+    for _ in 0..cx.iterations(10) {
+        meter.start();
+        scene.set_source_visible("basemap", false);
+        scene.settle();
+        heap.push(live_heap_mib());
+        gpu.push(scene.gpu_buffers_mib());
+        scene.set_source_visible("basemap", true);
+        scene.settle();
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/HideLayers", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("hidden_heap_mib", median(&heap));
+    metrics.lead("hidden_gpu_mib", median(&gpu));
     metrics
 }
 
@@ -376,6 +579,73 @@ fn frame_settle_without_symbols(cx: &Context) -> Metrics {
     }
     let mut metrics = meter.finish();
     metrics.lead("frames", median(&frames));
+    metrics
+}
+
+/// From adding the first of 50 icons to the basemap, five on each refresh
+/// over ten refreshes, as a host supplies marker icons when they load,
+/// until the map stops asking for frames. A symbol layer over 20 points
+/// draws five of the icons, which its tile asked for before they were
+/// added; nothing draws the other 45. Each iteration loads the style again
+/// first, untimed, without the icons.
+fn frame_add_images(cx: &Context) -> Metrics {
+    const ICONS: usize = 50;
+    const PER_REFRESH: usize = 5;
+    const DRAWN: usize = 5;
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let features: Vec<serde_json::Value> = (0..20)
+        .map(|n| {
+            let point = basemap_point(2619.5 + 0.1 * (n % 5) as f64, 6331.8 + 0.3 * (n / 5) as f64);
+            serde_json::json!({
+                "type": "Feature",
+                "properties": {"icon": format!("marker-{}", n % DRAWN)},
+                "geometry": {"type": "Point", "coordinates": [point.longitude(), point.latitude()]},
+            })
+        })
+        .collect();
+    style["sources"]["markers"] =
+        serde_json::json!({"type": "geojson", "data": {"type": "FeatureCollection", "features": features}});
+    style["layers"].as_array_mut().expect("the style has layers").push(serde_json::json!({
+        "id": "markers",
+        "type": "symbol",
+        "source": "markers",
+        "layout": {"icon-image": ["get", "icon"], "icon-allow-overlap": true},
+    }));
+    let style = style.to_string();
+    let icon = |n: usize| {
+        let pixel = [(n * 5) as u8, 0, 255 - (n * 5) as u8, 255];
+        PremultipliedImage::from_vec(Size::new(24, 24), pixel.repeat(24 * 24))
+    };
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    for _ in 0..cx.iterations(5) {
+        scene.load_json(&style);
+        scene.settle();
+        meter.start();
+        let start = Instant::now();
+        for tick in 0..ICONS / PER_REFRESH {
+            std::thread::sleep((start + REFRESH * tick as u32).saturating_duration_since(Instant::now()));
+            for n in tick * PER_REFRESH..(tick + 1) * PER_REFRESH {
+                scene.add_image(&format!("marker-{n}"), icon(n));
+            }
+            let demanded = Instant::now();
+            scene.pump();
+            scene.render_frame();
+            frames.push(ms(demanded.elapsed()));
+        }
+        scene.settle();
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/AddImages", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
+    metrics.lead("frame_p99_ms", percentile(&frames, 99.0));
+    metrics.other("frame_p50_ms", percentile(&frames, 50.0));
     metrics
 }
 

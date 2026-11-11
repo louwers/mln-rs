@@ -52,5 +52,8 @@ pub mod util;
 
 pub use renderer::Renderer;
 pub use renderer_frontend::RendererFrontend;
-pub use renderer_observer::{ExceptionPtr, RenderMode, RendererObserver};
+pub use renderer_observer::{
+    ExceptionPtr, FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound,
+    OverscaledTileID, RenderMode, RendererObserver, RenderingStats, SourceLayerID, TileOperation,
+};
 pub use update_parameters::UpdateParameters;

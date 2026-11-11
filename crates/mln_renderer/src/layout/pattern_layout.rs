@@ -36,6 +36,7 @@ use crate::bucket_parameters::BucketParameters;
 use crate::buckets::fill_bucket::FillBucket;
 use crate::buckets::line_bucket::LineBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
@@ -136,6 +137,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         source_layer: &dyn GeometryTileLayer,
         image_dependencies: &mut ImageDependencies,
         available_images: &VecSet<String>,
+        filter_groups: &mut FilterGroups,
         sorted: bool,
     ) -> Result<Self, ExceptionPtr> {
         debug_assert!(!group.is_empty());
@@ -170,16 +172,25 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let constant_sort_key = if sorted { S::constant_sort_key(&layout) } else { None };
         let mut features: Vec<PatternFeature> = Vec::new();
         let feature_count = source_layer.feature_count();
-        for i in 0..feature_count {
-            let feature = source_layer.get_feature(i)?;
-            let passes = leader_impl.filter.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(&*feature))
+        let passes = |feature: &dyn GeometryTileFeature| {
+            leader_impl.filter.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
                     .with_global_state(parameters.global_state.as_deref()),
-            );
-            feature.check()?;
-            if !passes {
+            )
+        };
+        let selected = filter_groups.select(&source_layer_id, source_layer, &leader_impl.filter, passes);
+        for i in 0..feature_count {
+            if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
+            }
+            let feature = source_layer.get_feature(i)?;
+            if selected.is_none() {
+                let passes = passes(&*feature);
+                feature.check()?;
+                if !passes {
+                    continue;
+                }
             }
 
             let mut pattern_dependency_map = PatternLayerMap::new();
@@ -280,6 +291,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             &*source_layer.layer()?,
             parameters.image_dependencies,
             parameters.available_images,
+            parameters.filter_groups,
             sorted,
         )?;
         layout.source_layer = Some(source_layer);

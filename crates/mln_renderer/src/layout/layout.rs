@@ -19,6 +19,7 @@ use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layout::filter_groups::FilterGroups;
 use crate::render_layer::LayerRenderData;
 use crate::text::glyph_manager::HBShapeResults;
 
@@ -93,4 +94,6 @@ pub struct LayoutParameters<'a> {
     pub glyph_dependencies: &'a mut GlyphDependencies,
     pub image_dependencies: &'a mut ImageDependencies,
     pub available_images: &'a VecSet<String>,
+    /// Port-only: the tile's feature groups, shared by the layouts' filters.
+    pub filter_groups: &'a mut FilterGroups,
 }

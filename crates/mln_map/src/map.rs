@@ -9,13 +9,14 @@ use mln_map_types::{
     ConstrainMode, MapDebugOptions, MapMode, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
     VerticalPerspectiveProjection, ViewportMode,
 };
-use mln_renderer::{ExceptionPtr, RendererFrontend};
+use mln_renderer::{ExceptionPtr, FeatureInfo, LayerFeaturesMap, RendererFrontend, RenderingStats, SourceLayerID};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::Style;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::chrono::TimePoint;
 use mln_util::exception::MisuseException;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::geometry::{Geometry, for_each_point};
 use mln_util::mat4::Mat4;
 use mln_util::size::Size;
 use mln_util::vectors::{Vec3, Vec4};
@@ -23,6 +24,7 @@ use mln_util::vectors::{Vec3, Vec4};
 use crate::map_impl::{MapImpl, StillImageCallback, StillImageRequest, StyleMut};
 use crate::map_observer::MapObserver;
 use crate::map_options::MapOptions;
+use crate::rendering_stats_view::{RenderingStatsView, RenderingStatsViewOptions};
 
 pub struct Map {
     impl_: Rc<MapImpl>,
@@ -114,6 +116,7 @@ impl Map {
         }
 
         *impl_.still_image_request.borrow_mut() = Some(StillImageRequest { callback });
+        impl_.still_image_request_id.set(impl_.still_image_request_id.get() + 1);
 
         impl_.on_update();
     }
@@ -390,7 +393,24 @@ impl Map {
             .with_pitch(Some(mln_math::rad2deg(transform.get_pitch()))))
     }
 
-    // TODO(port): cameraForGeometry.
+    /// `cameraForGeometry(geometry, padding, bearing, pitch)`: the camera
+    /// that fits every point of `geometry` (x longitude, y latitude), as
+    /// [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits them. `Err`:
+    /// as that, and the std::domain_error of the C++ LatLng constructor for
+    /// a point with no LatLng (an infinite or NaN coordinate, or a latitude
+    /// beyond ±90°).
+    pub fn camera_for_geometry(
+        &self,
+        geometry: &Geometry<f64>,
+        padding: &EdgeInsets,
+        bearing: Option<f64>,
+        pitch: Option<f64>,
+    ) -> Result<CameraOptions, String> {
+        let mut points = Vec::new();
+        for_each_point(geometry, &mut |point| points.push(*point));
+        let lat_lngs = points.iter().map(|point| LatLng::new(point.y, point.x)).collect::<Result<Vec<_>, _>>()?;
+        self.camera_for_lat_lngs(&lat_lngs, padding, bearing, pitch)
+    }
 
     /// `latLngBoundsForCameraUnwrapped(camera)`.
     /// `Err`: as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera).
@@ -618,6 +638,93 @@ impl Map {
         self.impl_.tile_lod_mode.get()
     }
 
+    // MARK: - Rendered features
+    //
+    // With `MapOptions::with_rendered_feature_info(true)`, these give the
+    // features rendered in the most recently completed frame.
+
+    /// The stats of the most recently completed frame, whose
+    /// `frame_rendered_features` holds every rendered feature by source and
+    /// layer. `None` before the first frame.
+    pub fn get_last_frame_stats(&self) -> Option<Arc<RenderingStats>> {
+        self.impl_.last_frame_stats.borrow().clone()
+    }
+
+    /// Calls `result` with the ID and info of each feature rendered in the
+    /// last frame that matches the given feature, layer and source IDs
+    /// (`None` matches any), until it returns `false`.
+    pub fn get_rendered_features(
+        &self,
+        feature_id: Option<&str>,
+        layer_id: Option<&str>,
+        source_id: Option<&str>,
+        mut result: impl FnMut(&str, &FeatureInfo) -> bool,
+    ) {
+        let Some(stats) = self.get_last_frame_stats() else {
+            return;
+        };
+        let features = &stats.frame_rendered_features;
+
+        let mut search_features = |layer_features: &LayerFeaturesMap| {
+            for (id, info) in layer_features {
+                if feature_id.is_none_or(|feature_id| id == feature_id) && !result(id, info) {
+                    return false;
+                }
+            }
+            true
+        };
+
+        if let (Some(source_id), Some(layer_id)) = (source_id, layer_id) {
+            // Both source and layer are specified, look for an exact match
+            let key = SourceLayerID { source_id: source_id.to_owned(), layer_id: layer_id.to_owned() };
+            if let Some(layer_features) = features.get(&key) {
+                search_features(layer_features);
+            }
+        } else {
+            // Linear search for matching items
+            for (id, layer_features) in features {
+                if source_id.is_none_or(|source_id| id.source_id == source_id)
+                    && layer_id.is_none_or(|layer_id| id.layer_id == layer_id)
+                    && !search_features(layer_features)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// The number of matching features rendered in the last frame (see
+    /// [`get_rendered_features`](Self::get_rendered_features)).
+    pub fn get_rendered_feature_count(
+        &self,
+        feature_id: Option<&str>,
+        layer_id: Option<&str>,
+        source_id: Option<&str>,
+    ) -> usize {
+        let mut count = 0;
+        self.get_rendered_features(feature_id, layer_id, source_id, |_, _| {
+            count += 1;
+            true
+        });
+        count
+    }
+
+    /// Whether any matching feature was rendered in the last frame (see
+    /// [`get_rendered_features`](Self::get_rendered_features)).
+    pub fn is_feature_rendered(
+        &self,
+        feature_id: Option<&str>,
+        layer_id: Option<&str>,
+        source_id: Option<&str>,
+    ) -> bool {
+        let mut found = false;
+        self.get_rendered_features(feature_id, layer_id, source_id, |_, _| {
+            found = true;
+            false
+        });
+        found
+    }
+
     // gtests-core: projection and prefetch zoom delta (test/map, test/api).
     // MARK: - Projection
 
@@ -677,8 +784,17 @@ impl Map {
         self.impl_.transform.borrow().get_free_camera_options()
     }
 
-    // TODO(port): annotations, rendering stats view, setFreeCameraOptions,
-    // rendered features.
+    /// `setFreeCameraOptions(camera)`: places the camera by its position
+    /// and orientation, and cancels the running camera commands. A NaN
+    /// position, or a NaN or zero-length orientation, is ignored; the
+    /// position's height is clamped to the zoom range.
+    pub fn set_free_camera_options(&mut self, camera: &mln_map_types::FreeCameraOptions) {
+        self.impl_.transform.borrow_mut().set_free_camera_options(camera);
+        self.impl_.camera_mutated.set(true);
+        self.impl_.on_update();
+    }
+
+    // TODO(port): annotations, rendered features.
 
     // MARK: - Debug
 
@@ -689,6 +805,32 @@ impl Map {
 
     pub fn get_debug(&self) -> MapDebugOptions {
         self.impl_.debug_options.get()
+    }
+
+    /// `isRenderingStatsViewEnabled()`.
+    pub fn is_rendering_stats_view_enabled(&self) -> bool {
+        self.impl_.rendering_stats_view.borrow().is_some()
+    }
+
+    /// `enableRenderingStatsView(value)`: shows the rendering stats of the
+    /// last frames in the top right corner, with a symbol layer (and its
+    /// source) that the view adds to the style and keeps there, even when
+    /// the style is replaced. The text needs the style's glyphs. Disabling
+    /// the view removes them.
+    pub fn enable_rendering_stats_view(&mut self, value: bool) {
+        if value {
+            if self.is_rendering_stats_view_enabled() {
+                return;
+            }
+            let view = RenderingStatsView::new(RenderingStatsViewOptions::default());
+            view.create(&mut self.get_style_mut());
+            *self.impl_.rendering_stats_view.borrow_mut() = Some(view);
+        } else {
+            let view = self.impl_.rendering_stats_view.borrow_mut().take();
+            if let Some(view) = view {
+                view.destroy(&mut self.get_style_mut());
+            }
+        }
     }
 
     pub fn is_fully_loaded(&self) -> bool {

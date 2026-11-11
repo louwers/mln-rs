@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_util::chrono::{Timestamp, now};
 use mln_util::constants::DEFAULT_MAX_CACHE_SIZE;
@@ -17,7 +18,8 @@ use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Scheme;
 
 use super::{
-    FixtureLog, Message, copy_file, cpp_path, delete_file, error, file_size, random_string, temp_path, warning,
+    FixtureLog, Message, TempPath, copy_file, cpp_path, delete_file, error, file_size, random_string, temp_path,
+    warning,
 };
 use crate::offline::{
     OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus,
@@ -33,12 +35,12 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 /// `filename` ("test/fixtures/offline_database/offline.db"): a fresh path.
-fn filename() -> String {
+fn filename() -> TempPath {
     temp_path("offline.db")
 }
 
 /// `filename_sideload` ("test/fixtures/offline_database/offline_sideload.db").
-fn filename_sideload() -> String {
+fn filename_sideload() -> TempPath {
     temp_path("offline_sideload.db")
 }
 
@@ -1335,6 +1337,37 @@ fn has_region_resource_tile() {
     check_log_empty(&log);
 }
 
+// Not a C++ test: ffi patch 0077 tests these through OfflineDownload.
+// checkRegionResource reports whether the stored copy is usable, and
+// putRegionResource reports the stored size for a 304.
+#[test]
+fn check_region_resource_and_not_modified_size() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let definition = tile_pyramid("", LatLngBounds::world(), 0.0, f64::INFINITY, 1.0, false);
+    let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).expect("region");
+
+    for resource in [style("http://example.com/style.json"), example_tile()] {
+        let mut response = Response::new();
+        response.data = data("first");
+        assert_eq!(None, db.check_region_resource(&resource));
+        assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &response));
+        assert_eq!(Some((5, true)), db.check_region_resource(&resource));
+
+        assert!(db.invalidate_region(region.get_id()).is_none());
+        assert_eq!(Some((5, false)), db.check_region_resource(&resource));
+        assert_eq!(Some(5), db.has_region_resource(&resource));
+
+        let mut not_modified = Response::new();
+        not_modified.not_modified = true;
+        not_modified.expires = Some(Timestamp::from_secs(now().secs_since_epoch() + 3600));
+        assert_eq!(Ok(5), db.put_region_resource(region.get_id(), &resource, &not_modified));
+        assert_eq!(Some((5, true)), db.check_region_resource(&resource));
+    }
+
+    check_log_empty(&log);
+}
+
 // gtest: OfflineDatabase.OfflineMapboxTileCount
 #[test]
 fn offline_mapbox_tile_count() {
@@ -2070,4 +2103,265 @@ fn geometry_region_round_trip() {
     assert_eq!(1, regions.len());
     assert_eq!(region.get_id(), regions[0].get_id());
     assert_eq!(&OfflineRegionDefinition::Geometry(definition), regions[0].get_definition());
+}
+
+fn cached_accessed(filename: &str, table: &str) -> i64 {
+    let db = Database::open(filename, OpenFlag::ReadOnly).unwrap();
+    let conn = db.conn();
+    let sql = format!("SELECT accessed FROM {table}");
+    let mut stmt = Statement::new(&conn, &sql).unwrap();
+    let mut query = Query::new(&mut stmt);
+    assert!(query.run().unwrap());
+    query.get_i64(0).unwrap()
+}
+
+fn cache_sql(filename: &str, sql: &str) {
+    Database::open(filename, OpenFlag::ReadWriteCreate).unwrap().exec(sql).unwrap();
+}
+
+fn constraint_warning(msg: &str) -> Message {
+    warning(i64::from(result_code::CONSTRAINT), msg)
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesDeduplicateAndSkipMisses
+#[test]
+fn batched_read_touches_deduplicate_and_skip_misses() {
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    db.put(&fixture::resource(), &fixture::response());
+    db.put(&fixture::tile(), &fixture::response());
+    cache_sql(&filename, "UPDATE resources SET accessed = 100; UPDATE tiles SET accessed = 100");
+    let callbacks = Arc::new(AtomicUsize::new(0));
+    let counter = callbacks.clone();
+    db.set_accessed_callback(Box::new(move || {
+        counter.fetch_add(1, Ordering::Relaxed);
+    }));
+    assert!(db.get(&fixture::resource()).is_some());
+    assert!(db.get(&fixture::resource()).is_some());
+    assert!(db.get(&fixture::tile()).is_some());
+    assert!(db.get(&fixture::tile()).is_some());
+    assert!(db.get_region_resource(&fixture::resource()).is_some());
+    assert!(db.get(&style("not-cached")).is_none());
+    assert_eq!(5, callbacks.load(Ordering::Relaxed));
+    assert_eq!(2, db.pending_accessed_count());
+    assert_eq!(100, cached_accessed(&filename, "resources"));
+    assert_eq!(100, cached_accessed(&filename, "tiles"));
+    assert!(db.flush_accessed());
+    assert_eq!(0, db.pending_accessed_count());
+    assert!(cached_accessed(&filename, "resources") > 100);
+    assert!(cached_accessed(&filename, "tiles") > 100);
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesRollbackAndRetry
+#[test]
+fn batched_read_touches_rollback_and_retry() {
+    let log = FixtureLog::new();
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    db.put(&fixture::resource(), &fixture::response());
+    db.put(&fixture::tile(), &fixture::response());
+    cache_sql(
+        &filename,
+        "UPDATE resources SET accessed = 100; UPDATE tiles SET accessed = 100; \
+         CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON tiles \
+         BEGIN SELECT RAISE(ABORT, 'injected flush failure'); END",
+    );
+    assert!(db.get(&fixture::resource()).is_some());
+    assert!(db.get(&fixture::tile()).is_some());
+    assert!(!db.flush_accessed());
+    assert_eq!(1, log.count(&constraint_warning("Can't flush accessed timestamps: injected flush failure"), false));
+    assert_eq!(2, db.pending_accessed_count());
+    // The resource update ran first, but the whole transaction rolled back.
+    assert_eq!(100, cached_accessed(&filename, "resources"));
+    assert_eq!(100, cached_accessed(&filename, "tiles"));
+    cache_sql(&filename, "DROP TRIGGER fail_touch");
+    assert!(db.flush_accessed());
+    assert_eq!(0, db.pending_accessed_count());
+    assert!(cached_accessed(&filename, "resources") > 100);
+    assert!(cached_accessed(&filename, "tiles") > 100);
+    check_log_empty(&log);
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesPreserveNewerTimestampAndFlushReadOnly
+#[test]
+fn batched_read_touches_preserve_newer_timestamp_and_flush_read_only() {
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    db.put(&fixture::resource(), &fixture::response());
+    assert!(db.get(&fixture::resource()).is_some());
+    cache_sql(&filename, "UPDATE resources SET accessed = 4102444800");
+    assert!(db.flush_accessed());
+    assert_eq!(4102444800, cached_accessed(&filename, "resources"));
+    cache_sql(&filename, "UPDATE resources SET accessed = 100");
+    assert!(db.get(&fixture::resource()).is_some());
+    db.reopen_database_read_only(true);
+    assert_eq!(0, db.pending_accessed_count());
+    assert!(cached_accessed(&filename, "resources") > 100);
+    assert!(db.get(&fixture::resource()).is_some());
+    assert_eq!(0, db.pending_accessed_count());
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesDiscardAfterClear
+#[test]
+fn batched_read_touches_discard_after_clear() {
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    db.put(&fixture::resource(), &fixture::response());
+    assert!(db.get(&fixture::resource()).is_some());
+    assert_eq!(1, db.pending_accessed_count());
+    assert!(db.clear_ambient_cache().is_none());
+    assert_eq!(0, db.pending_accessed_count());
+    assert!(db.get(&fixture::resource()).is_none());
+    assert!(db.flush_accessed());
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesFlushOnPathChangeAndClose
+#[test]
+fn batched_read_touches_flush_on_path_change_and_close() {
+    let filename = filename();
+    delete_database_files(&filename);
+    {
+        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        db.put(&fixture::resource(), &fixture::response());
+        cache_sql(&filename, "UPDATE resources SET accessed = 100");
+        assert!(db.get(&fixture::resource()).is_some());
+        db.change_path(":memory:");
+        assert_eq!(0, db.pending_accessed_count());
+        assert!(cached_accessed(&filename, "resources") > 100);
+        assert!(db.get(&fixture::resource()).is_none());
+    }
+    cache_sql(&filename, "UPDATE resources SET accessed = 100");
+    {
+        let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+        assert!(db.get(&fixture::resource()).is_some());
+    }
+    assert!(cached_accessed(&filename, "resources") > 100);
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesBoundPersistentFailures
+#[test]
+fn batched_read_touches_bound_persistent_failures() {
+    let log = FixtureLog::new();
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    cache_sql(
+        &filename,
+        "WITH RECURSIVE sequence(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<4100) \
+         INSERT INTO resources(url,kind,accessed) SELECT 'key-'||n,2,100 FROM sequence; \
+         CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON resources \
+         BEGIN SELECT RAISE(ABORT,'injected persistent failure'); END",
+    );
+    for i in 1..=4100 {
+        assert!(db.get(&Resource::new(Kind::Source, format!("key-{i}"))).is_some());
+    }
+    assert_eq!(4096, db.pending_accessed_count());
+    assert_eq!(
+        1,
+        log.count(&constraint_warning("Can't flush accessed timestamps: injected persistent failure"), false)
+    );
+    cache_sql(&filename, "DROP TRIGGER fail_touch");
+    assert!(db.flush_accessed());
+    assert_eq!(0, db.pending_accessed_count());
+    check_log_empty(&log);
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchesParticipateInEvictionTransaction
+#[test]
+fn batched_read_touches_participate_in_eviction_transaction() {
+    let log = FixtureLog::new();
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    cache_sql(
+        &filename,
+        "WITH RECURSIVE sequence(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM sequence WHERE n<60) \
+         INSERT INTO resources(url,kind,accessed,data) SELECT 'evict-'||n,2,n,randomblob(1024) FROM sequence",
+    );
+    assert!(db.set_maximum_ambient_cache_size(100000).is_none());
+    let recent = Resource::new(Kind::Source, "evict-1");
+    assert!(db.get(&recent).is_some());
+    assert_eq!(1, db.pending_accessed_count());
+    let mut response = Response::new();
+    response.data = Some(random_string(50000));
+    let incoming = Resource::new(Kind::Source, "evict-incoming");
+    cache_sql(
+        &filename,
+        "CREATE TRIGGER fail_insert BEFORE INSERT ON resources WHEN NEW.url='evict-incoming' \
+         BEGIN SELECT RAISE(ABORT,'injected insertion failure'); END",
+    );
+    assert!(!db.put(&incoming, &response).0);
+    assert_eq!(1, log.count(&constraint_warning("Can't write resource: injected insertion failure"), false));
+    assert_eq!(1, db.pending_accessed_count());
+    assert_eq!(1, cached_accessed(&filename, "resources"));
+    cache_sql(&filename, "DROP TRIGGER fail_insert");
+    assert!(db.put(&incoming, &response).0);
+    assert_eq!(0, db.pending_accessed_count());
+    assert!(db.get(&recent).is_some());
+    assert!(db.get(&Resource::new(Kind::Source, "evict-2")).is_none());
+    let cached = db.get(&incoming).expect("cached");
+    assert_eq!(response.data, cached.data);
+    check_log_empty(&log);
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchFailureDoesNotPreventCacheResize
+#[test]
+fn batched_read_touch_failure_does_not_prevent_cache_resize() {
+    let log = FixtureLog::new();
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    db.put(&fixture::resource(), &fixture::response());
+    assert!(db.get(&fixture::resource()).is_some());
+    cache_sql(
+        &filename,
+        "CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON resources \
+         BEGIN SELECT RAISE(ABORT,'injected resize touch failure'); END",
+    );
+    assert!(db.set_maximum_ambient_cache_size(0).is_none());
+    assert_eq!(
+        1,
+        log.count(&constraint_warning("Can't flush accessed timestamps: injected resize touch failure"), false)
+    );
+    assert!(db.get(&fixture::resource()).is_none());
+    assert_eq!(1, db.pending_accessed_count());
+    cache_sql(&filename, "DROP TRIGGER fail_touch");
+    assert!(db.flush_accessed());
+    assert_eq!(0, db.pending_accessed_count());
+    check_log_empty(&log);
+}
+
+// gtest: OfflineDatabase.BatchedReadTouchFailureDoesNotPreventRegionDeletion
+#[test]
+fn batched_read_touch_failure_does_not_prevent_region_deletion() {
+    let log = FixtureLog::new();
+    let filename = filename();
+    delete_database_files(&filename);
+    let mut db = OfflineDatabase::new(&filename, &fixture::tile_server_options());
+    assert!(db.set_maximum_ambient_cache_size(0).is_none());
+    let definition = tile_pyramid("maptiler://maps/style", hull((1.0, 2.0), (3.0, 4.0)), 5.0, 6.0, 2.0, true);
+    let region = db.create_region(&definition.into(), &OfflineRegionMetadata::new()).unwrap();
+    db.put_region_resource(region.get_id(), &fixture::tile(), &fixture::response()).unwrap();
+    assert!(db.get_region_resource(&fixture::tile()).is_some());
+    cache_sql(
+        &filename,
+        "CREATE TRIGGER fail_touch BEFORE UPDATE OF accessed ON tiles \
+         BEGIN SELECT RAISE(ABORT,'injected delete touch failure'); END",
+    );
+    assert!(db.delete_region(region).is_none());
+    assert_eq!(
+        1,
+        log.count(&constraint_warning("Can't flush accessed timestamps: injected delete touch failure"), false)
+    );
+    assert!(db.list_regions().unwrap().is_empty());
+    assert!(db.get(&fixture::tile()).is_none());
+    assert_eq!(1, db.pending_accessed_count());
+    cache_sql(&filename, "DROP TRIGGER fail_touch");
+    assert!(db.flush_accessed());
+    assert_eq!(0, db.pending_accessed_count());
+    check_log_empty(&log);
 }

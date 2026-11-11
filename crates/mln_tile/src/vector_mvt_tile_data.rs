@@ -10,10 +10,13 @@
 // channel).
 
 use std::cell::OnceCell;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
-use mln_tile_id::{EncodedTileData, GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer};
+use mln_tile_id::{
+    EncodedTileData, FeatureGroups, GeometryCollection, GeometryTileData, GeometryTileFeature, GeometryTileLayer,
+};
 use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
@@ -192,6 +195,57 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
 
     fn get_name(&self) -> String {
         self.layer.get_name()
+    }
+
+    /// Groups by geometry type and by the value-table index of each key's
+    /// first tag, as `getValue` reads it: equal indices are equal values.
+    /// Equal values at distinct indices only split a group. `None` for a
+    /// malformed feature, leaving its errors to the accessors.
+    fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
+        /// A key the feature has no tag for.
+        const ABSENT: u32 = u32::MAX;
+        let layer = &self.layer;
+        let count = layer.feature_count();
+        // Grouping costs about as much as evaluating each feature once.
+        let limit = count / 4 + 8;
+        let slots: Vec<Option<usize>> =
+            (layer.keys().iter()).map(|key| keys.iter().position(|k| k.as_bytes() == *key)).collect();
+        let mut index: HashMap<Box<[u32]>, u32> = HashMap::new();
+        let mut codes = vec![ABSENT; keys.len() + 1];
+        let mut groups = FeatureGroups { of_feature: Vec::with_capacity(count), first: Vec::new() };
+        for i in 0..count {
+            let feature = vector_tile::Feature::new(layer.get_feature(i).ok()?, layer).ok()?;
+            codes.fill(ABSENT);
+            codes[keys.len()] = u32::from(feature.get_type().0);
+            let mut valid = true;
+            feature
+                .for_each_tag(|key, value| {
+                    valid &= value != ABSENT;
+                    if let Some(slot) = slots[key as usize]
+                        && codes[slot] == ABSENT
+                    {
+                        codes[slot] = value;
+                    }
+                })
+                .ok()?;
+            if !valid {
+                return None;
+            }
+            let group = match index.get(codes.as_slice()) {
+                Some(&group) => group,
+                None => {
+                    if groups.first.len() == limit {
+                        return None;
+                    }
+                    let group = groups.first.len() as u32;
+                    index.insert(codes.as_slice().into(), group);
+                    groups.first.push(i);
+                    group
+                }
+            };
+            groups.of_feature.push(group);
+        }
+        Some(groups)
     }
 }
 

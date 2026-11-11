@@ -111,43 +111,76 @@ pub(crate) fn create_instance(backends: wgpu::Backends) -> wgpu::Instance {
 
 impl HeadlessBackend {
     /// `HeadlessBackend(size = {256, 256}, swapBehaviour = NoFlush,
-    /// contextMode = Unique)`
+    /// contextMode = Unique)`: on a device of its own, from
+    /// [`HeadlessBackend::request_device`] with no adapter named. Without
+    /// an adapter or device it logs why and has no device.
     pub fn new(size: Size, _swap_behaviour: SwapBehaviour, mode: ContextMode) -> Self {
-        let backend = HeadlessBackend {
+        match Self::request_device(None) {
+            Ok((device, queue)) => Self::with_device(device, queue, size, mode),
+            Err(e) => {
+                eprintln!("WebGPU HeadlessBackend: {e}");
+                Self::without_device(size, mode)
+            }
+        }
+    }
+
+    /// A backend on `device`, which other backends and the host may share.
+    /// It renders into textures of its own and submits to `queue`, so
+    /// backends on one device render independently. The host keeps the
+    /// device's uncaptured-error handler.
+    pub fn with_device(device: wgpu::Device, queue: wgpu::Queue, size: Size, mode: ContextMode) -> Self {
+        let backend = Self::without_device(size, mode);
+        let backend_impl = backend.renderer_backend.backend_impl();
+        backend_impl.set_device(Some(device));
+        backend_impl.set_queue(Some(queue));
+        backend.create_offscreen_textures();
+        backend
+    }
+
+    fn without_device(size: Size, mode: ContextMode) -> Self {
+        HeadlessBackend {
             renderer_backend: RendererBackend::new(mode),
             renderable: RenderableBase::new(size, None),
             impl_: RefCell::new(Impl::default()),
             active: Cell::new(false),
-        };
+        }
+    }
 
-        // wgpu-native backend initialization
-        let instance = create_instance(instance_backends());
-
-        // Request adapter (blocking)
-        let adapter = match pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            ..Default::default()
-        })) {
-            Ok(adapter) => adapter,
-            Err(e) => {
-                eprintln!("WebGPU HeadlessBackend: No adapter found: {e}");
-                return backend;
+    /// Requests a device for [`HeadlessBackend::with_device`] on the
+    /// adapter at `adapter_index` in [`wgpu::Instance::enumerate_adapters`]
+    /// order, or on the high-performance adapter when `None`. The instance
+    /// takes the backends `WGPU_BACKEND` names (Vulkan on Linux by
+    /// default), and the device logs its uncaptured errors.
+    ///
+    /// Errors when there is no such adapter, or the adapter can't create
+    /// the device.
+    pub fn request_device(adapter_index: Option<usize>) -> Result<(wgpu::Device, wgpu::Queue), String> {
+        let backends = instance_backends();
+        let instance = create_instance(backends);
+        let adapter = match adapter_index {
+            Some(index) => {
+                let mut adapters = pollster::block_on(instance.enumerate_adapters(backends));
+                let count = adapters.len();
+                if index >= count {
+                    return Err(format!("adapter_index {index} is past the {count} adapters"));
+                }
+                adapters.swap_remove(index)
             }
+            None => pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            }))
+            .map_err(|e| format!("No adapter found: {e}"))?,
         };
 
-        // Request device (blocking), with the WebGPU default limits lowered to
-        // what the adapter supports: the Metal of the iOS, tvOS and visionOS
-        // simulators allows fewer inter-stage shader variables than they ask.
+        // The WebGPU default limits lowered to what the adapter supports:
+        // the Metal of the iOS, tvOS and visionOS simulators allows fewer
+        // inter-stage shader variables than they ask.
         let required_limits = wgpu::Limits::default().or_worse_values_from(&adapter.limits());
-        let (device, queue) = match pollster::block_on(
+        let (device, queue) = pollster::block_on(
             adapter.request_device(&wgpu::DeviceDescriptor { required_limits, ..Default::default() }),
-        ) {
-            Ok(pair) => pair,
-            Err(e) => {
-                eprintln!("WebGPU HeadlessBackend: Failed to create device: {e}");
-                return backend;
-            }
-        };
+        )
+        .map_err(|e| format!("Failed to create device: {e}"))?;
 
         // C++ sets no uncaptured-error callback, and Dawn logs the error
         // and invalidates the object. wgpu's default handler panics; log as
@@ -155,17 +188,7 @@ impl HeadlessBackend {
         device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
             Log::error(Event::Render, format!("WebGPU validation error: {error}"));
         }));
-
-        // Store device, queue, and instance in base class
-        let backend_impl = backend.renderer_backend.backend_impl();
-        backend_impl.set_device(Some(device));
-        backend_impl.set_queue(Some(queue));
-        backend_impl.set_adapter(Some(adapter));
-        backend_impl.set_instance(Some(instance));
-
-        // Create offscreen render texture
-        backend.create_offscreen_textures();
-        backend
+        Ok((device, queue))
     }
 
     /// `HeadlessBackend::Create(size)` with the C++ defaults.
@@ -182,9 +205,9 @@ impl HeadlessBackend {
         self.renderer_backend.get_device()
     }
 
-    /// Info about the adapter in use (e.g. "llvmpipe" on lavapipe).
+    /// Info about the device's adapter (e.g. "llvmpipe" on lavapipe).
     pub fn get_adapter_info(&self) -> Option<wgpu::AdapterInfo> {
-        self.renderer_backend.backend_impl().get_adapter().map(|a| a.get_info())
+        self.get_device().map(|device| device.adapter_info())
     }
 
     /// `createOffscreenTextures()`. Quirk ported: these textures are not used

@@ -14,9 +14,11 @@ name = "mln_expression"
 doctest = false
 
 [dependencies]
+cheap_ruler.workspace = true
 feature.workspace = true
 geojson.workspace = true
 geometry.workspace = true
+libstdcxx.workspace = true
 mln_conversion.workspace = true
 mln_math.workspace = true
 mln_style_types.workspace = true

@@ -9,6 +9,7 @@ use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
 use mln_gfx::{RenderPassDescriptor, RendererBackend, ScissorRect, ShaderRegistry};
 use mln_map_types::MapDebugOptions;
+use mln_text::GlyphCache;
 use mln_util::Color;
 
 use crate::paint_parameters::PaintParameters;
@@ -40,11 +41,17 @@ pub struct RendererImpl {
 
 impl RendererImpl {
     /// `Renderer::Impl(gfx::RendererBackend&, float pixelRatio,
-    /// const std::optional<std::string>& localFontFamily)`.
-    pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32) -> Self {
+    /// const std::optional<std::string>& localFontFamily,
+    /// std::shared_ptr<GlyphCache>)`.
+    pub fn new(
+        backend: Rc<dyn RendererBackend>,
+        pixel_ratio: f32,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
         let background_layer_as_color = !backend.context_is_shared();
         RendererImpl {
-            orchestrator: RenderOrchestrator::new(background_layer_as_color),
+            orchestrator: RenderOrchestrator::new(background_layer_as_color, local_font_family, glyph_cache),
             backend,
             observer: None,
             pixel_ratio,
@@ -407,9 +414,9 @@ impl RendererImpl {
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
 
-        // TODO(port): auto stats = std::make_shared<gfx::RenderingStats>(
-        // context.threadSafeCopyRenderingStats()) with the frame's rendered
-        // features, passed to the observer.
+        let mut stats = context.thread_safe_copy_rendering_stats();
+        stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
+        let stats = Arc::new(stats);
         drop(parameters);
 
         if let Some(observer) = &observer {
@@ -417,6 +424,7 @@ impl RendererImpl {
                 if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
                 render_tree_parameters.needs_repaint,
                 render_tree_parameters.placement_changed,
+                stats,
             );
         }
 

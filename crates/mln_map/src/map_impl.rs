@@ -21,15 +21,16 @@ use std::sync::Arc;
 
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{CameraOptions, MapDebugOptions, MapMode, TileLodMode};
-use mln_renderer::tile::tile::TileOperation;
-use mln_renderer::{ExceptionPtr, RenderMode, RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{
+    ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererFrontend, RendererObserver,
+    RenderingStats, TileOperation, UpdateParameters,
+};
 use mln_storage::FileSource;
 use mln_style::Style;
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
-use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Clock, TimePoint};
 use mln_util::exception::{NotFoundException, StyleLoadException, StyleParseException};
 use mln_util::identity::SimpleIdentity;
@@ -37,6 +38,7 @@ use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
 use crate::map_observer::{CameraChange, MapLoadError, MapObserver, RenderFrameStatus};
 use crate::map_options::MapOptions;
+use crate::rendering_stats_view::RenderingStatsView;
 use crate::transform::{Transform, TransformObserver};
 
 /// `Map::StillImageCallback`: called with `None` on success, or the error.
@@ -66,15 +68,15 @@ impl TransformObserver for MapTransformObserver {
 
 /// A style::Observer call, queued while the style is borrowed mutably.
 enum StyleEvent {
-    SourceChanged,
+    SourceChanged(String),
     Update,
     StyleLoading,
     StyleLoaded,
     StyleError(ExceptionPtr),
     ResourceError(ExceptionPtr),
-    SpriteLoaded,
-    SpriteError,
-    SpriteRequested,
+    SpriteLoaded(Option<Sprite>),
+    SpriteError(Option<Sprite>, ExceptionPtr),
+    SpriteRequested(Option<Sprite>),
     /// Port-only: a `Style::loadURL` response is waiting (see
     /// `Observer::on_style_response`).
     StyleResponse,
@@ -94,8 +96,8 @@ impl MapStyleObserver {
 }
 
 impl SourceObserver for MapStyleObserver {
-    fn on_source_changed(&self, _source: &dyn Source) {
-        self.dispatch(StyleEvent::SourceChanged);
+    fn on_source_changed(&self, source: &dyn Source) {
+        self.dispatch(StyleEvent::SourceChanged(source.get_id()));
     }
 }
 
@@ -115,14 +117,14 @@ impl StyleObserver for MapStyleObserver {
     fn on_resource_error(&self, error: ExceptionPtr) {
         self.dispatch(StyleEvent::ResourceError(error));
     }
-    fn on_sprite_loaded(&self, _sprite: Option<&Sprite>) {
-        self.dispatch(StyleEvent::SpriteLoaded);
+    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
+        self.dispatch(StyleEvent::SpriteLoaded(sprite.cloned()));
     }
-    fn on_sprite_error(&self, _sprite: Option<&Sprite>, _error: ExceptionPtr) {
-        self.dispatch(StyleEvent::SpriteError);
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+        self.dispatch(StyleEvent::SpriteError(sprite.cloned(), error));
     }
-    fn on_sprite_requested(&self, _sprite: Option<&Sprite>) {
-        self.dispatch(StyleEvent::SpriteRequested);
+    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
+        self.dispatch(StyleEvent::SpriteRequested(sprite.cloned()));
     }
     fn on_style_response(&self) {
         self.dispatch(StyleEvent::StyleResponse);
@@ -142,7 +144,10 @@ pub struct MapImpl {
     pub(crate) capture_rendered_features: bool,
 
     pub(crate) debug_options: Cell<MapDebugOptions>,
-    // TODO(port): renderingStatsView, lastFrameStats, annotationManager.
+    pub(crate) rendering_stats_view: RefCell<Option<RenderingStatsView>>,
+    // TODO(port): annotationManager.
+    /// The stats of the last frame the renderer finished.
+    pub(crate) last_frame_stats: RefCell<Option<Arc<RenderingStats>>>,
     pub(crate) style: RefCell<Style>,
     pending_style_events: RefCell<Vec<StyleEvent>>,
 
@@ -153,6 +158,8 @@ pub struct MapImpl {
     pub(crate) loading: Cell<bool>,
     pub(crate) renderer_fully_loaded: Cell<bool>,
     pub(crate) still_image_request: RefCell<Option<StillImageRequest>>,
+    /// Counts the still image requests, so the renderer can tell a new one.
+    pub(crate) still_image_request_id: Cell<u64>,
 
     pub(crate) tile_lod_min_radius: Cell<f64>,
     pub(crate) tile_lod_scale: Cell<f64>,
@@ -194,6 +201,8 @@ impl MapImpl {
             fast_pfor_enabled: map_options.fast_pfor_enabled(),
             capture_rendered_features: map_options.rendered_feature_info(),
             debug_options: Cell::new(MapDebugOptions::NO_DEBUG),
+            rendering_stats_view: RefCell::new(None),
+            last_frame_stats: RefCell::new(None),
             style: RefCell::new(Style::with_file_source(file_source.clone(), pixel_ratio, thread_pool)),
             pending_style_events: RefCell::new(Vec::new()),
             camera_mutated: Cell::new(false),
@@ -204,6 +213,7 @@ impl MapImpl {
             // frame or style load.
             renderer_fully_loaded: Cell::new(false),
             still_image_request: RefCell::new(None),
+            still_image_request_id: Cell::new(0),
             tile_lod_min_radius: Cell::new(3.0),
             tile_lod_scale: Cell::new(1.0),
             tile_lod_pitch_threshold: Cell::new((60.0 / 180.0) * std::f64::consts::PI),
@@ -257,15 +267,15 @@ impl MapImpl {
 
     fn handle_style_event(&self, event: StyleEvent) {
         match event {
-            StyleEvent::SourceChanged => self.on_source_changed(),
+            StyleEvent::SourceChanged(source_id) => self.on_source_changed(&source_id),
             StyleEvent::Update => self.on_update(),
             StyleEvent::StyleLoading => self.on_style_loading(),
             StyleEvent::StyleLoaded => self.on_style_loaded(),
             StyleEvent::StyleError(error) => self.on_style_error(error),
             StyleEvent::ResourceError(error) => RendererObserver::on_resource_error(self, error),
-            // TODO(port): MapObserver::onSpriteLoaded / onSpriteError /
-            // onSpriteRequested (and the action journal).
-            StyleEvent::SpriteLoaded | StyleEvent::SpriteError | StyleEvent::SpriteRequested => {}
+            StyleEvent::SpriteLoaded(sprite) => self.on_sprite_loaded(sprite.as_ref()),
+            StyleEvent::SpriteError(sprite, error) => self.on_sprite_error(sprite.as_ref(), error),
+            StyleEvent::SpriteRequested(sprite) => self.on_sprite_requested(sprite.as_ref()),
             // C++ parses inside the file source callback (the lambda in
             // Style::Impl::loadURL); the observer calls the parse makes are
             // queued while the style is borrowed and replayed here.
@@ -278,8 +288,8 @@ impl MapImpl {
 
     // MARK: - Map::Impl StyleObserver
 
-    fn on_source_changed(&self) {
-        // TODO(port): observer.onSourceChanged(source).
+    fn on_source_changed(&self, source_id: &str) {
+        self.observer.on_source_changed(source_id);
     }
 
     pub fn on_update(&self) {
@@ -322,6 +332,7 @@ impl MapImpl {
                 file_source: self.file_source.clone(),
                 prefetch_zoom_delta: self.prefetch_zoom_delta.get(),
                 still_image_request: self.still_image_request.borrow().is_some(),
+                still_image_request_id: self.still_image_request_id.get(),
                 cross_source_collisions: self.cross_source_collisions,
                 fast_pfor_enabled: self.fast_pfor_enabled,
                 capture_rendered_features: self.capture_rendered_features,
@@ -377,6 +388,18 @@ impl MapImpl {
         self.observer.on_did_fail_loading_map(type_, &description);
     }
 
+    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
+        self.observer.on_sprite_loaded(sprite);
+    }
+
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+        self.observer.on_sprite_error(sprite, error);
+    }
+
+    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
+        self.observer.on_sprite_requested(sprite);
+    }
+
     // MARK: - Map
 
     pub fn jump_to(&self, camera: &CameraOptions) {
@@ -430,10 +453,25 @@ impl RendererObserver for MapImpl {
         }
     }
 
-    fn on_did_finish_rendering_frame(&self, render_mode: RenderMode, needs_repaint: bool, placement_changed: bool) {
+    fn on_did_finish_rendering_frame(
+        &self,
+        render_mode: RenderMode,
+        needs_repaint: bool,
+        placement_changed: bool,
+        stats: Arc<RenderingStats>,
+    ) {
         self.renderer_fully_loaded.set(render_mode == RenderMode::Full);
 
-        // TODO(port): renderingStatsView->update(*style, *stats).
+        let stats_view_updated = match (self.rendering_stats_view.borrow_mut().as_mut(), self.style.try_borrow_mut()) {
+            (Some(view), Ok(mut style)) => {
+                view.update(&mut style, &stats);
+                true
+            }
+            _ => false,
+        };
+        if stats_view_updated {
+            self.process_pending_style_events();
+        }
 
         if self.mode == MapMode::Continuous {
             let frame_status = RenderFrameStatus {
@@ -443,6 +481,7 @@ impl RendererObserver for MapImpl {
                 },
                 needs_repaint,
                 placement_changed,
+                rendering_stats: stats.clone(),
             };
             self.observer.on_did_finish_rendering_frame(&frame_status);
 
@@ -457,6 +496,8 @@ impl RendererObserver for MapImpl {
                 (request.callback)(None);
             }
         }
+
+        *self.last_frame_stats.borrow_mut() = Some(stats);
     }
 
     fn on_will_start_rendering_map(&self) {
@@ -493,14 +534,24 @@ impl RendererObserver for MapImpl {
         }
     }
 
-    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
-        self.observer.on_tile_action(op, id, source_id);
-
-        // TODO(port): actionJournal->impl->onTileAction(op, id, sourceID).
-    }
-
     fn on_render_error(&self, error: ExceptionPtr) {
         self.observer.on_render_error(error);
+    }
+
+    fn on_glyphs_loaded(&self, font_stack: &FontStack, range: &GlyphRange) {
+        self.observer.on_glyphs_loaded(font_stack, range);
+    }
+
+    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
+        self.observer.on_glyphs_error(font_stack, range, error);
+    }
+
+    fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
+        self.observer.on_glyphs_requested(font_stack, range);
+    }
+
+    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
+        self.observer.on_tile_action(op, id, source_id);
     }
 }
 

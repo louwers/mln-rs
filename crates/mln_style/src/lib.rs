@@ -26,6 +26,7 @@ pub mod collection;
 pub mod color_ramp_property_value;
 pub mod conversion;
 pub mod conversion_impl;
+pub mod custom_tile_loader;
 pub mod expression;
 pub mod filter;
 pub mod format_section_override;
@@ -68,7 +69,7 @@ pub use layer::{Layer, LayerTypeInfo};
 pub use layers::background_layer::BackgroundLayer;
 pub use property_value::PropertyValue;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
-pub use renderer::transition_parameters::TransitionParameters;
+pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 pub use style::Style;
 pub use transition_options::TransitionOptions;
 

@@ -26,6 +26,7 @@ use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;
 use crate::buckets::circle_bucket::CircleBucket;
 use crate::geometry::feature_index::FeatureIndex;
+use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, SourceLayer};
 use crate::render_layer::LayerRenderData;
 
@@ -62,6 +63,7 @@ impl CircleLayout {
         parameters: &BucketParameters,
         group: &[Immutable<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
+        filter_groups: &mut FilterGroups,
     ) -> Result<Self, ExceptionPtr> {
         debug_assert!(!group.is_empty());
         let zoom = parameters.tile_id.overscaled_z as f32;
@@ -88,16 +90,25 @@ impl CircleLayout {
 
         let mut features: Vec<CircleFeature> = Vec::new();
         let feature_count = source_layer.feature_count();
-        for i in 0..feature_count {
-            let feature = source_layer.get_feature(i)?;
-            let passes = leader_impl.filter.evaluate(
-                &EvaluationContext::with_zoom_feature(zoom, Some(&*feature))
+        let passes = |feature: &dyn GeometryTileFeature| {
+            leader_impl.filter.evaluate(
+                &EvaluationContext::with_zoom_feature(zoom, Some(feature))
                     .with_canonical_tile_id(Some(&parameters.tile_id.canonical))
                     .with_global_state(parameters.global_state.as_deref()),
-            );
-            feature.check()?;
-            if !passes {
+            )
+        };
+        let selected = filter_groups.select(&source_layer_id, source_layer, &leader_impl.filter, passes);
+        for i in 0..feature_count {
+            if selected.as_ref().is_some_and(|selected| !selected[i]) {
                 continue;
+            }
+            let feature = source_layer.get_feature(i)?;
+            if selected.is_none() {
+                let passes = passes(&*feature);
+                feature.check()?;
+                if !passes {
+                    continue;
+                }
             }
 
             if !sort_features_by_key {
@@ -141,8 +152,9 @@ impl CircleLayout {
         parameters: &BucketParameters,
         group: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
+        filter_groups: &mut FilterGroups,
     ) -> Result<Self, ExceptionPtr> {
-        let mut layout = CircleLayout::new(parameters, group, &*source_layer.layer()?)?;
+        let mut layout = CircleLayout::new(parameters, group, &*source_layer.layer()?, filter_groups)?;
         layout.source_layer = Some(source_layer);
         Ok(layout)
     }

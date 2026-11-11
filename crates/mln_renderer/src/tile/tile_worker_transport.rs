@@ -21,6 +21,7 @@
 // as bytes.
 
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Weak;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -30,7 +31,6 @@ use mln_actor::{ActorRef, LocalObject, TaggedScheduler};
 use mln_map_types::MapMode;
 use mln_text::glyph::FontFaces;
 use mln_tile_id::OverscaledTileID;
-use mln_util::logging::{Event, Log};
 use serde::{Deserialize, Serialize};
 
 use crate::gfx::dynamic_texture_atlas::DynamicTextureAtlasPtr;
@@ -175,7 +175,7 @@ impl TileWorkerTransport for InProcessTransport {
             )
         };
         if synchronous {
-            Box::new(SynchronousWorker(RefCell::new(make_worker(None))))
+            Box::new(SynchronousWorker::new(make_worker(None)))
         } else {
             Box::new(PoolWorker::new(Actor::new_tagged(&self.thread_pool, move |self_ref| make_worker(Some(self_ref)))))
         }
@@ -234,17 +234,36 @@ impl WorkerEndpoint<RasterDEMWorkerMessage> for PoolWorker<RasterDEMTileWorker> 
 
 /// `OptionalActor<GeometryTileWorker>` with an object: the worker on the
 /// render thread, for synchronous updates.
-struct SynchronousWorker(RefCell<GeometryTileWorker>);
+///
+/// C++ makes a nested call into the worker directly, e.g. the glyph and
+/// image managers answering inside `parse` from what they already hold.
+/// The worker can't be re-entered here, so a nested message waits in
+/// `nested` and is handled as soon as the message being handled returns,
+/// before `send` returns to its caller.
+struct SynchronousWorker {
+    worker: RefCell<GeometryTileWorker>,
+    nested: RefCell<VecDeque<WorkerMessage>>,
+}
+
+impl SynchronousWorker {
+    fn new(worker: GeometryTileWorker) -> Self {
+        SynchronousWorker { worker: RefCell::new(worker), nested: RefCell::new(VecDeque::new()) }
+    }
+}
 
 impl WorkerEndpoint for SynchronousWorker {
     /// `worker.self().invoke(fn, args...)`: a direct call.
     fn send(&self, message: WorkerMessage) {
-        match self.0.try_borrow_mut() {
-            Ok(mut worker) => worker.handle(message),
-            // C++ makes the nested call (e.g. onImagesAvailable from inside
-            // parse); the port cannot re-enter the worker.
-            // TODO(port): reentrant synchronous calls.
-            Err(_) => Log::error(Event::General, "TODO(port): reentrant call into a synchronous GeometryTileWorker"),
+        let Ok(mut worker) = self.worker.try_borrow_mut() else {
+            self.nested.borrow_mut().push_back(message);
+            return;
+        };
+        worker.handle(message);
+        loop {
+            let Some(message) = self.nested.borrow_mut().pop_front() else {
+                break;
+            };
+            worker.handle(message);
         }
     }
 }

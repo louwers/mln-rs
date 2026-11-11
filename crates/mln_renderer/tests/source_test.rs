@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
+use geojson::GeoJSON;
 use mln_actor::{RunLoop, TaggedScheduler, Timer, scheduler};
 use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map_types::{
@@ -15,7 +16,7 @@ use mln_renderer::sources::render_geojson_source::RenderGeoJSONSource;
 use mln_renderer::tile_parameters::TileParameters;
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
-use mln_storage::{FileSource, Kind, Response};
+use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::layer::{Layer, static_immutable_cast};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::layers::circle_layer::Impl as CircleLayerImpl;
@@ -28,13 +29,18 @@ use mln_style::layers::{
 };
 use mln_style::observer::SourceObserver;
 use mln_style::source::{self, Source};
+use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
+use mln_style::sources::custom_vector_source::{
+    CustomVectorSource, Options as CustomVectorSourceOptions, TileDataFormat,
+};
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
 use mln_style::sources::geojson_source_impl;
 use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 use mln_style_types::SourceType;
-use mln_tile_id::OverscaledTileID;
+use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::{Duration, milliseconds};
-use mln_util::exception::ExceptionPtr;
+use mln_util::client_options::ClientOptions;
+use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
@@ -353,6 +359,88 @@ fn tile_cancel(kind: Tiled) {
     assert!(*requested.borrow());
 }
 
+/// A file source whose tile requests never answer, as tiles in flight: it
+/// records each request's tile and each cancellation.
+#[derive(Default)]
+struct PendingTileSource {
+    requested: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+}
+
+struct PendingTileRequest {
+    tile: (i8, i32, i32),
+    cancelled: Arc<Mutex<Vec<(i8, i32, i32)>>>,
+}
+
+impl AsyncRequest for PendingTileRequest {}
+
+impl Drop for PendingTileRequest {
+    fn drop(&mut self) {
+        self.cancelled.lock().unwrap().push(self.tile);
+    }
+}
+
+impl FileSource for PendingTileSource {
+    fn request(&self, resource: &Resource, _callback: Callback) -> Box<dyn AsyncRequest> {
+        let data = resource.tile_data.as_ref().expect("only tiles are requested");
+        let tile = (data.z, data.x, data.y);
+        self.requested.lock().unwrap().push(tile);
+        Box::new(PendingTileRequest { tile, cancelled: self.cancelled.clone() })
+    }
+
+    fn can_request(&self, _resource: &Resource) -> bool {
+        true
+    }
+
+    fn set_resource_options(&self, _options: ResourceOptions) {}
+
+    fn get_resource_options(&self) -> ResourceOptions {
+        ResourceOptions::default()
+    }
+
+    fn set_client_options(&self, _options: ClientOptions) {}
+
+    fn get_client_options(&self) -> ClientOptions {
+        ClientOptions::default()
+    }
+}
+
+/// A tile that leaves the view while it loads goes on loading, and is the
+/// one the view gets back when it turns back, as a map rotated back and
+/// forth does at its corners: its request is neither cancelled nor made
+/// again.
+#[test]
+fn tile_out_of_view_keeps_loading() {
+    let mut test = SourceTest::new();
+    test.transform.resize(Size::new(1024, 128)).unwrap();
+    let file_source = Arc::new(PendingTileSource::default());
+    let (requested, cancelled) = (file_source.requested.clone(), file_source.cancelled.clone());
+    let layers = Tiled::Vector.layers();
+    let source = Tiled::Vector.source(tiles_tileset());
+    source.load_description(&*file_source);
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let fs: Arc<dyn FileSource> = file_source;
+    // Requests made so far, after an update with the camera at `bearing`.
+    let mut turn = |test: &mut SourceTest, bearing: f64, needs_relayout: bool| {
+        test.transform.jump_to(&CameraOptions {
+            center: Some(LatLng::new(20.0, 20.0).unwrap()),
+            zoom: Some(4.0),
+            bearing: Some(bearing),
+            ..Default::default()
+        });
+        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs.clone()));
+        render_source.update(source.base_impl(), &layers, true, needs_relayout, &parameters);
+        requested.lock().unwrap().clone()
+    };
+
+    let unturned = turn(&mut test, 0.0, true);
+    let turned = turn(&mut test, 90.0, false);
+    assert!(turned.len() > unturned.len(), "turning shows other tiles");
+    let back = turn(&mut test, 0.0, false);
+    assert_eq!(turned, back, "no tile is requested again");
+    assert!(cancelled.lock().unwrap().is_empty(), "no request is cancelled");
+}
+
 // gtest: Source.RasterTileEmpty
 #[test]
 fn raster_tile_empty() {
@@ -491,13 +579,116 @@ fn raster_dem_tile_attribution() {
     tile_attribution(Tiled::RasterDEM, mapbox);
 }
 
+/// A loaded custom geometry source "source", a line layer for it, and its
+/// render source after one update, observed by `observer`.
+fn custom_geometry_case(
+    test: &SourceTest,
+    observer: Rc<StubRenderSourceObserver>,
+) -> (CustomGeometrySource, Box<dyn RenderSource>) {
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let source = CustomGeometrySource::new("source", CustomGeometrySourceOptions::default()).unwrap();
+    source.load_description(&file_source);
+
+    let mut layer = LineLayer::new("id", "source");
+    layer.set_source_layer("water");
+    let layer_properties: Immutable<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+    let layers = vec![layer_properties];
+
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    render_source.set_observer(observer);
+    render_source.update(source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
+    (source, render_source)
+}
+
 // gtest: Source.CustomGeometrySourceSetTileData
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource (style/sources/custom_geometry_source*, RenderCustomGeometrySource)"]
 fn custom_geometry_source_set_tile_data() {
-    // TODO(port): body: a CustomGeometrySource with a LineLayer ("water");
-    // `setTileData(CanonicalTileID(0, 0, 0), GeoJSON{FeatureCollection{}})`
-    // from the loop must report tileChanged for "source" and no tileError.
+    let test = SourceTest::new();
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let end = test.end_handle();
+        *observer.tile_changed.borrow_mut() = Some(Box::new(move |source_id, _tile_id| {
+            assert_eq!("source", source_id);
+            end();
+        }));
+    }
+    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
+
+    let (source, _render_source) = custom_geometry_case(&test, observer);
+
+    let handle = source.handle();
+    test.run_loop.invoke(move || {
+        // Set Tile Data
+        handle.set_tile_data(CanonicalTileID::new(0, 0, 0), GeoJSON::FeatureCollection(Vec::new()));
+    });
+
+    test.run();
+}
+
+// gtest: Source.CustomGeometrySourceSetTileError
+#[test]
+fn custom_geometry_source_set_tile_error() {
+    let test = SourceTest::new();
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let end = test.end_handle();
+        *observer.tile_error.borrow_mut() = Some(Box::new(move |source_id, tile_id, error| {
+            assert_eq!("source", source_id);
+            assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), *tile_id);
+            assert_eq!("failed", error.to_string());
+            end();
+        }));
+    }
+
+    let (source, _render_source) = custom_geometry_case(&test, observer);
+
+    let handle = source.handle();
+    test.run_loop.invoke(move || {
+        handle.set_tile_error(CanonicalTileID::new(0, 0, 0), RuntimeError::ptr("failed"));
+    });
+
+    test.run();
+}
+
+// Port-only: Source.CustomGeometrySourceSetTileData for a custom vector
+// source.
+#[test]
+fn custom_vector_source_set_tile_data() {
+    let test = SourceTest::new();
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let end = test.end_handle();
+        *observer.tile_changed.borrow_mut() = Some(Box::new(move |source_id, _tile_id| {
+            assert_eq!("source", source_id);
+            end();
+        }));
+    }
+    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
+
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default());
+    source.load_description(&file_source);
+
+    let mut layer = LineLayer::new("id", "source");
+    layer.set_source_layer("water");
+    let layer_properties: Immutable<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    render_source.set_observer(observer);
+    render_source.update(
+        source.base_impl(),
+        &[layer_properties],
+        true,
+        true,
+        &test.tile_parameters(MapMode::Continuous),
+    );
+
+    let handle = source.handle();
+    test.run_loop.invoke(move || handle.set_tile_data(CanonicalTileID::new(0, 0, 0), None, TileDataFormat::Mvt));
+
+    test.run();
 }
 
 // gtest: Source.InvisibleSourcesTileNecessity
@@ -523,6 +714,71 @@ fn source_minimum_update_interval() {
 fn render_tile_set_source_update() {
     // TODO(port): body: updateInternal runs on both updates, also for a
     // source whose description has not loaded yet.
+}
+
+// gtest: Source.EmptyTileset
+#[test]
+fn empty_tileset() {
+    let test = SourceTest::new();
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let source =
+        VectorSource::new("source", UrlOrTileset::Tileset(Tileset::default()), None, None, VectorEncoding::Mapbox);
+    source.load_description(&*file_source);
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let errors = observe_tile_errors(&mut *render_source);
+
+    let layers = Tiled::Vector.layers();
+    let fs: Arc<dyn FileSource> = file_source;
+    let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
+
+    render_source.update(source.base_impl(), &layers, true, true, &parameters);
+    assert!(render_source.is_loaded());
+
+    source.set_tiles(&["tiles".to_owned()]);
+    render_source.update(source.base_impl(), &layers, true, false, &parameters);
+    assert!(!render_source.is_loaded());
+
+    source.set_tiles(&[]);
+    render_source.update(source.base_impl(), &layers, true, false, &parameters);
+    assert!(render_source.is_loaded());
+
+    source.set_tiles(&["tiles".to_owned()]);
+    render_source.update(source.base_impl(), &layers, true, false, &parameters);
+    assert!(!render_source.is_loaded());
+
+    assert_eq!(0, *errors.borrow());
+}
+
+// As Source.EmptyTileset, for the raster and raster-dem render sources.
+#[test]
+fn empty_raster_tilesets_make_no_tiles() {
+    for kind in [Tiled::Raster, Tiled::RasterDEM] {
+        let test = SourceTest::new();
+        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let source = kind.source(UrlOrTileset::Tileset(Tileset::default()));
+        source.load_description(&*file_source);
+        let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+        let errors = observe_tile_errors(&mut *render_source);
+
+        let fs: Arc<dyn FileSource> = file_source;
+        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
+        render_source.update(source.base_impl(), &kind.layers(), true, true, &parameters);
+
+        assert!(render_source.is_loaded());
+        assert_eq!(0, *errors.borrow());
+    }
+}
+
+/// Counts the tile errors `render_source` reports.
+fn observe_tile_errors(render_source: &mut dyn RenderSource) -> Rc<RefCell<usize>> {
+    let errors = Rc::new(RefCell::new(0));
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let errors = errors.clone();
+        *observer.tile_error.borrow_mut() = Some(Box::new(move |_, _, _| *errors.borrow_mut() += 1));
+    }
+    render_source.set_observer(observer);
+    errors
 }
 
 // gtest: Source.GeoJSONSourceTilesAfterDataReset
@@ -563,6 +819,143 @@ fn geojson_source_tiles_after_data_reset() {
     source.set_geojson_data(None);
     render_source.update(source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Static));
     assert!(render_source.is_loaded()); // Tiles are reset in static mode.
+}
+
+/// Runs `run_loop` until a task or async handle has run.
+fn run_until_work(run_loop: &RunLoop) {
+    while !run_loop.run_once() {
+        run_loop.wait_for_work();
+    }
+}
+
+/// A circle layer "id" on "source", as layer properties.
+fn circle_layers() -> Vec<Immutable<dyn LayerProperties>> {
+    let layer = CircleLayer::new("id", "source");
+    vec![Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())))]
+}
+
+/// A GeoJSON source rendered with a circle layer. Its data is clustered,
+/// which slices a tile within the call in either mode, so whether the tiles
+/// complete within an update shows only how they lay out.
+struct SynchronousUpdateSource {
+    options: Immutable<GeoJSONOptions>,
+    source: GeoJSONSource,
+    render_source: RenderGeoJSONSource,
+    layers: Vec<Immutable<dyn LayerProperties>>,
+}
+
+impl SynchronousUpdateSource {
+    fn new(test: &SourceTest, synchronous_update: bool) -> Self {
+        let options: Immutable<GeoJSONOptions> =
+            Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
+        let source = GeoJSONSource::new("source", options.clone());
+        let render_source = RenderGeoJSONSource::new(
+            source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
+            &test.thread_pool,
+        );
+        SynchronousUpdateSource { options, source, render_source, layers: circle_layers() }
+    }
+
+    /// Sets new data and updates the render source, as a frame would.
+    fn update(&mut self, test: &SourceTest) {
+        let geojson = geojson::parse(
+            r#"{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {},
+                "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}}]}"#,
+        )
+        .unwrap();
+        self.source
+            .set_geojson_data(Some(create_geojson_data(&geojson, scheduler::get_sequenced(), &self.options).unwrap()));
+        let mut parameters = test.tile_parameters(MapMode::Continuous);
+        parameters.is_update_synchronous = self.source.is_update_synchronous();
+        self.render_source.update(self.source.base_impl(), &self.layers, true, true, &parameters);
+    }
+}
+
+// gtest: Source.GeoJSONSourceSynchronousUpdateOverrideAppliesToExistingTiles
+#[test]
+fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
+    let test = SourceTest::new();
+
+    let mut synchronous = SynchronousUpdateSource::new(&test, true);
+    synchronous.update(&test);
+    assert!(synchronous.render_source.is_loaded()); // The tiles complete within the update.
+    synchronous.source.set_override_synchronous_update(false);
+    synchronous.update(&test);
+    assert!(!synchronous.render_source.is_loaded()); // The tiles now lay out in the background.
+
+    let mut asynchronous = SynchronousUpdateSource::new(&test, false);
+    asynchronous.update(&test);
+    assert!(!asynchronous.render_source.is_loaded());
+    while !asynchronous.render_source.is_loaded() {
+        run_until_work(&test.run_loop);
+    }
+    asynchronous.source.set_override_synchronous_update(true);
+    asynchronous.update(&test);
+    assert!(asynchronous.render_source.is_loaded()); // The tiles now complete within the update.
+}
+
+/// Holds the tasks it is given until the test runs them.
+#[derive(Default)]
+struct HeldScheduler {
+    tasks: Mutex<Vec<scheduler::Task>>,
+}
+
+impl scheduler::Scheduler for HeldScheduler {
+    fn schedule(&self, task: scheduler::Task) {
+        self.tasks.lock().unwrap().push(task);
+    }
+
+    fn wait_for_empty(&self) {}
+}
+
+// gtest: Source.GeoJSONSourceSlicesInlineWhileABackgroundSliceRuns
+#[test]
+fn geojson_source_slices_inline_while_a_background_slice_runs() {
+    let mut test = SourceTest::new();
+    // At zoom 3 the index slices its tiles on demand, which fills its tile cache.
+    test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(3.0), ..Default::default() });
+
+    // Unclustered data slices on this scheduler while the source is asynchronous.
+    let slicer = Arc::new(HeldScheduler::default());
+    let source = GeoJSONSource::with_default_options("source");
+    let geojson = geojson::parse(
+        r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#,
+    )
+    .unwrap();
+    source.set_geojson_data(Some(
+        create_geojson_data(&geojson, slicer.clone(), &GeoJSONOptions::default_options()).unwrap(),
+    ));
+    let mut render_source = RenderGeoJSONSource::new(
+        source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
+        &test.thread_pool,
+    );
+    let layers = circle_layers();
+    let update = |render_source: &mut RenderGeoJSONSource| {
+        let mut parameters = test.tile_parameters(MapMode::Continuous);
+        parameters.is_update_synchronous = source.is_update_synchronous();
+        render_source.update(source.base_impl(), &layers, true, true, &parameters);
+    };
+
+    update(&mut render_source);
+    assert!(!slicer.tasks.lock().unwrap().is_empty());
+    assert!(!render_source.is_loaded());
+
+    // The queued slices run in the background while the source turns
+    // synchronous and recreates its tiles, which slice the same index inline.
+    source.set_override_synchronous_update(true);
+    let tasks = std::mem::take(&mut *slicer.tasks.lock().unwrap());
+    let background = std::thread::spawn(move || {
+        for task in tasks {
+            task();
+        }
+    });
+    update(&mut render_source);
+    background.join().unwrap();
+    assert!(render_source.is_loaded()); // The new tiles complete within the update.
+
+    // The background slices reply to tiles that no longer exist.
+    run_until_work(&test.run_loop);
+    assert!(render_source.is_loaded());
 }
 
 type Records = Arc<Mutex<Vec<((EventSeverity, Event, String), bool)>>>;

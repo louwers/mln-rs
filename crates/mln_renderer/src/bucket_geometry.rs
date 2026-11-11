@@ -10,6 +10,11 @@
 // draws it, so the bucket and the drawables don't each keep a copy. The gfx
 // vector is released, so it frees the data once it is uploaded, and the
 // drawables a layer builds again for the same bucket reuse its buffer.
+//
+// In the browser, the arrays a bucket gets from a tile worker in another
+// wasm instance stay the JS arrays they arrived in (mln_util::host_bytes)
+// and move to the gfx vector as they are, which uploads them from there.
+// Anything that reads or changes them first copies them into wasm memory.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,8 +24,10 @@ use std::sync::{Mutex, MutexGuard};
 
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::vertex_vector::{VertexVector, VertexVectorBasePtr};
+#[cfg(target_family = "wasm")]
+use mln_util::host_bytes::HostBytes;
 use mln_util::identity::SimpleIdentity;
-use mln_util::serialization::payload::pod;
+use mln_util::serialization::payload::{Payload, pod};
 use mln_util::sync::MutexExt;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -31,6 +38,10 @@ use crate::bucket::Bucket;
 /// `len` still counts it.
 pub struct GeometryVec<T> {
     v: Mutex<Vec<T>>,
+    /// The data while it is still in the JS array it arrived in; `v` is
+    /// empty then.
+    #[cfg(target_family = "wasm")]
+    host: Mutex<Option<HostBytes>>,
     /// The element count of the data moved out.
     moved: AtomicUsize,
 }
@@ -43,18 +54,34 @@ impl<T> Default for GeometryVec<T> {
 
 impl<T> GeometryVec<T> {
     pub fn new(v: Vec<T>) -> Self {
-        GeometryVec { v: Mutex::new(v), moved: AtomicUsize::new(0) }
+        GeometryVec {
+            v: Mutex::new(v),
+            #[cfg(target_family = "wasm")]
+            host: Mutex::new(None),
+            moved: AtomicUsize::new(0),
+        }
     }
 
     /// The data, to fill. Not after it is moved out.
-    pub fn get_mut(&mut self) -> &mut Vec<T> {
+    pub fn get_mut(&mut self) -> &mut Vec<T>
+    where
+        T: bytemuck::Pod,
+    {
         debug_assert!(!self.is_moved(), "geometry modified after it moved to the render thread");
+        #[cfg(target_family = "wasm")]
+        if let Some(bytes) = self.host.get_mut().unwrap_or_else(|e| e.into_inner()).take() {
+            *self.v.get_mut().unwrap_or_else(|e| e.into_inner()) = bytes.to_pod_vec();
+        }
         self.v.get_mut().unwrap_or_else(|e| e.into_inner())
     }
 
     /// The element count, which stays when the data is moved out.
     pub fn len(&self) -> usize {
-        self.data().len() + self.moved.load(Ordering::Relaxed)
+        #[cfg(target_family = "wasm")]
+        if let Some(bytes) = &*self.host.lock_unpoisoned() {
+            return bytes.len() / size_of::<T>() + self.moved.load(Ordering::Relaxed);
+        }
+        self.v.lock_unpoisoned().len() + self.moved.load(Ordering::Relaxed)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -67,12 +94,19 @@ impl<T> GeometryVec<T> {
     }
 
     /// The data, empty once it is moved out.
-    pub fn data(&self) -> MutexGuard<'_, Vec<T>> {
+    pub fn data(&self) -> MutexGuard<'_, Vec<T>>
+    where
+        T: bytemuck::Pod,
+    {
+        #[cfg(target_family = "wasm")]
+        if let Some(bytes) = self.host.lock_unpoisoned().take() {
+            *self.v.lock_unpoisoned() = bytes.to_pod_vec();
+        }
         self.v.lock_unpoisoned()
     }
 }
 
-impl<T: Clone> GeometryVec<T> {
+impl<T: bytemuck::Pod> GeometryVec<T> {
     /// The data, moved out unless `keep` (which copies it).
     fn take(&self, keep: bool) -> Vec<T> {
         let mut v = self.data();
@@ -83,15 +117,48 @@ impl<T: Clone> GeometryVec<T> {
         self.moved.fetch_add(data.len(), Ordering::Relaxed);
         data
     }
+
+    /// The data, moved out if it is still in the JS array it arrived in.
+    #[cfg(target_family = "wasm")]
+    fn take_host(&self) -> Option<HostBytes> {
+        let bytes = self.host.lock_unpoisoned().take()?;
+        self.moved.fetch_add(bytes.len() / size_of::<T>(), Ordering::Relaxed);
+        Some(bytes)
+    }
+
+    /// A released gfx vector of the data, moved out unless `keep`.
+    fn vertex_vector(&self, keep: bool) -> VertexVector<T> {
+        #[cfg(target_family = "wasm")]
+        if !keep && let Some(bytes) = self.take_host() {
+            return VertexVector::from_host_released(bytes);
+        }
+        VertexVector::from_vec_released(self.take(keep))
+    }
+}
+
+impl GeometryVec<u16> {
+    /// A released gfx index vector of the data, moved out unless `keep`.
+    fn index_vector(&self, keep: bool) -> IndexVectorBase {
+        #[cfg(target_family = "wasm")]
+        if !keep && let Some(bytes) = self.take_host() {
+            return IndexVectorBase::from_host_released(bytes);
+        }
+        IndexVectorBase::new_released(self.take(keep))
+    }
 }
 
 impl<T: Clone> Clone for GeometryVec<T> {
     fn clone(&self) -> Self {
-        GeometryVec { v: Mutex::new(self.data().clone()), moved: AtomicUsize::new(self.moved.load(Ordering::Relaxed)) }
+        GeometryVec {
+            v: Mutex::new(self.v.lock_unpoisoned().clone()),
+            #[cfg(target_family = "wasm")]
+            host: Mutex::new(self.host.lock_unpoisoned().clone()),
+            moved: AtomicUsize::new(self.moved.load(Ordering::Relaxed)),
+        }
     }
 }
 
-impl<T: PartialEq> PartialEq for GeometryVec<T> {
+impl<T: bytemuck::Pod + PartialEq> PartialEq for GeometryVec<T> {
     fn eq(&self, other: &Self) -> bool {
         self.moved.load(Ordering::Relaxed) == other.moved.load(Ordering::Relaxed) && *self.data() == *other.data()
     }
@@ -99,10 +166,11 @@ impl<T: PartialEq> PartialEq for GeometryVec<T> {
 
 impl<T: std::fmt::Debug> std::fmt::Debug for GeometryVec<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GeometryVec")
-            .field("v", &*self.data())
-            .field("moved", &self.moved.load(Ordering::Relaxed))
-            .finish()
+        let mut f = f.debug_struct("GeometryVec");
+        f.field("v", &*self.v.lock_unpoisoned());
+        #[cfg(target_family = "wasm")]
+        f.field("host", &*self.host.lock_unpoisoned());
+        f.field("moved", &self.moved.load(Ordering::Relaxed)).finish()
     }
 }
 
@@ -121,9 +189,18 @@ impl<T: bytemuck::Pod> Serialize for GeometryVec<T> {
     }
 }
 
+/// A payload the host kept in JS stays there (mln_util::host_bytes).
 impl<'de, T: bytemuck::Pod> Deserialize<'de> for GeometryVec<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        pod::deserialize(deserializer).map(GeometryVec::new)
+        Ok(match pod::deserialize_payload::<T, D>(deserializer)? {
+            Payload::Bytes(bytes) => GeometryVec::new(bytemuck::pod_collect_to_vec(&bytes)),
+            #[cfg(target_family = "wasm")]
+            Payload::Host(bytes) => {
+                let vec = GeometryVec::default();
+                *vec.host.lock_unpoisoned() = Some(bytes);
+                vec
+            }
+        })
     }
 }
 
@@ -153,7 +230,7 @@ impl BucketGeometry {
         self.vertices
             .borrow_mut()
             .entry(key(bucket, vec))
-            .or_insert_with(|| Rc::new(VertexVector::from_vec_released(vec.take(keep(bucket)))))
+            .or_insert_with(|| Rc::new(vec.vertex_vector(keep(bucket))))
             .clone()
     }
 
@@ -162,7 +239,7 @@ impl BucketGeometry {
         self.indexes
             .borrow_mut()
             .entry(key(bucket, vec))
-            .or_insert_with(|| Rc::new(RefCell::new(IndexVectorBase::new_released(vec.take(keep(bucket))))))
+            .or_insert_with(|| Rc::new(RefCell::new(vec.index_vector(keep(bucket)))))
             .clone()
     }
 }

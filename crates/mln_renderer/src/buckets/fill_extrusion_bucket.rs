@@ -6,12 +6,8 @@
 // The vertex/index vectors are plain `Vec`s (the bucket is built on the
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
-//
-// TODO(port): `fill-extrusion-rounded-corner-distance` (roundPolygonCorners,
-// GeometryCollectionFloat): no render test sets it; the polygon is
-// extruded without rounding (logged once).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 
 use geometry::Point;
@@ -27,13 +23,12 @@ use mln_style::properties::Property;
 use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedFadedPropertyValue;
 use mln_style_types::LightAnchorType;
 use mln_style_types::image::ImagePositions;
-use mln_tile::geometry_tile_data::{classify_rings, limit_holes};
+use mln_tile::geometry_tile_data::{classify_rings, limit_holes, round_polygon_corners};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinates, GeometryTileFeature};
 use mln_util::Color;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
-use mln_util::logging::{Event, Log};
 use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::sync::RwLockExt;
@@ -102,7 +97,6 @@ pub struct FillExtrusionBucket {
 }
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
-static ROUNDED_CORNERS_LOGGED: AtomicBool = AtomicBool::new(false);
 
 // Each ring vertex can add a wall quad beside itself.
 fn wall_vertex_count(ring_vertices: usize) -> usize {
@@ -180,6 +174,141 @@ impl FillExtrusionBucket {
         }
     }
 
+    /// Adds the walls and the roof of one polygon (its outer ring, then its
+    /// holes), with integer or, after corner rounding, float coordinates.
+    /// With a subdivided `roof` (the globe's), the rings make only the walls
+    /// and the roof is that mesh.
+    fn add_polygon<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(
+        &mut self,
+        polygon: &[R],
+        roof: Option<&SubdivisionResult>,
+    ) -> Result<(), ExceptionPtr> {
+        let mut total_vertices: usize = 0;
+        for ring in polygon {
+            total_vertices += ring.as_ref().len();
+            if total_vertices > usize::from(u16::MAX) {
+                return Err(Arc::new(GeometryTooLongException));
+            }
+        }
+
+        if total_vertices == 0 {
+            return Ok(());
+        }
+
+        let mut flat_indices: Vec<u32> = Vec::with_capacity(total_vertices);
+
+        let wall_vertices = wall_vertex_count(total_vertices);
+
+        let start_vertices = self.vertices.len();
+
+        if self.triangle_segments.is_empty()
+            || self.triangle_segments.last().expect("segment").vertex_length + wall_vertices > usize::from(u16::MAX)
+        {
+            self.triangle_segments.push(SegmentBase::new(start_vertices, self.triangles.len()));
+        }
+
+        let segment_index = self.triangle_segments.len() - 1;
+        debug_assert!(self.triangle_segments[segment_index].vertex_length <= usize::from(u16::MAX));
+        let mut triangle_index = self.triangle_segments[segment_index].vertex_length as u16;
+
+        debug_assert!(usize::from(triangle_index) + wall_vertices <= usize::from(u16::MAX));
+
+        for ring in polygon {
+            let ring = ring.as_ref();
+            let n_vertices = ring.len();
+
+            if n_vertices == 0 {
+                continue;
+            }
+
+            let mut edge_distance: usize = 0;
+
+            for i in 0..n_vertices {
+                let p1 = Point::new(ring[i].x.into(), ring[i].y.into());
+                let p2 = if i < n_vertices - 1 {
+                    Some(Point::new(ring[i + 1].x.into(), ring[i + 1].y.into()))
+                } else {
+                    None
+                };
+
+                // processRingPoints(p1, p2, edgeDistance)
+                self.vertices.get_mut().push(Self::layout_vertex(p1, 0.0, 0.0, 1, edge_distance as u16));
+                flat_indices.push(u32::from(triangle_index));
+                triangle_index = triangle_index.wrapping_add(1);
+
+                if let Some(p2) = p2 {
+                    let perp = unit_perp(Point::new(p2.x - p1.x, p2.y - p1.y));
+
+                    let dist = usize::from(dist_u16(p1, p2));
+                    if edge_distance + dist > usize::from(u16::MAX) {
+                        edge_distance = 0;
+                    }
+
+                    self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 0, edge_distance as u16));
+                    self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 1, edge_distance as u16));
+
+                    edge_distance += dist;
+
+                    self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 0, edge_distance as u16));
+                    self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 1, edge_distance as u16));
+
+                    // ┌──────┐
+                    // │ 0  1 │ Counter-Clockwise winding order.
+                    // │      │ Triangle 1: 0 => 2 => 1
+                    // │ 2  3 │ Triangle 2: 1 => 2 => 3
+                    // └──────┘
+                    let t = triangle_index;
+                    self.triangles.get_mut().extend_from_slice(&[t, t.wrapping_add(2), t.wrapping_add(1)]);
+                    self.triangles.get_mut().extend_from_slice(&[
+                        t.wrapping_add(1),
+                        t.wrapping_add(2),
+                        t.wrapping_add(3),
+                    ]);
+                    triangle_index = triangle_index.wrapping_add(4);
+                    let segment = &mut self.triangle_segments[segment_index];
+                    segment.vertex_length += 4;
+                    segment.index_length += 6;
+                }
+            }
+        }
+
+        let indices: Vec<u32> = if roof.is_none() { earcut::earcut::<u32, _, _>(polygon) } else { Vec::new() };
+
+        let n_indices = indices.len();
+        debug_assert!(n_indices % 3 == 0);
+
+        for i in (0..n_indices).step_by(3) {
+            // Counter-Clockwise winding order.
+            self.triangles.get_mut().extend_from_slice(&[
+                flat_indices[indices[i] as usize] as u16,
+                flat_indices[indices[i + 2] as usize] as u16,
+                flat_indices[indices[i + 1] as usize] as u16,
+            ]);
+        }
+
+        let segment = &mut self.triangle_segments[segment_index];
+        segment.vertex_length += total_vertices;
+        segment.index_length += n_indices;
+
+        // The roof's triangles index only its own vertices, so it
+        // continues the walls' segment or starts its own.
+        if let Some(roof) = roof {
+            fill_large_mesh_arrays(
+                self.vertices.get_mut(),
+                |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0, 1, 0),
+                &mut self.triangle_segments,
+                self.triangles.get_mut(),
+                &roof.vertices,
+                &roof.triangle_indices,
+                None,
+                MAX_SEGMENT_VERTICES,
+            );
+        }
+        // (instanceSegments, and the roof's vertices counted into them:
+        // MLN_USE_FILL_EXTRUSION_INSTANCING only.)
+        Ok(())
+    }
+
     /// `lightColor(const EvaluatedLight&)`.
     pub fn light_color(light: &EvaluatedLight) -> [f32; 3] {
         let color = light.get::<LightColor>();
@@ -231,154 +360,28 @@ impl Bucket for FillExtrusionBucket {
             // tessellation.
             limit_holes(&mut polygon, 500);
 
-            let rounded_corner_distance = *self.layout.get::<FillExtrusionRoundedCornerDistance>();
-            if rounded_corner_distance > 0.0 && !ROUNDED_CORNERS_LOGGED.swap(true, Ordering::Relaxed) {
-                Log::warning(Event::Render, "TODO(port): fill-extrusion-rounded-corner-distance (roundPolygonCorners)");
+            let rounded_corner_distance = f64::from(*self.layout.get::<FillExtrusionRoundedCornerDistance>());
+            if rounded_corner_distance > 0.0 {
+                self.add_polygon(&round_polygon_corners(&polygon, rounded_corner_distance), None)?;
+                continue;
             }
 
             // On the globe the walls follow subdivided rings and the roof is a
             // subdivided mesh of its own, spread over as many segments as it
             // needs. Walls too long for a segment are drawn as on Mercator.
+            // Rounded corners are not subdivided.
             let granularity = self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z);
-            let mut subdivided: Option<Vec<GeometryCoordinates>> = None;
-            let mut roof: Option<SubdivisionResult> = None;
-            if granularity >= 2 && rounded_corner_distance <= 0.0 {
-                let mut subdivided_rings: Vec<GeometryCoordinates> = Vec::new();
-                let mut ring_vertices = 0;
-                for ring in polygon.iter() {
-                    subdivided_rings.push(subdivide_vertex_line(ring, granularity, true));
-                    ring_vertices += subdivided_rings.last().expect("ring").len();
-                }
+            if granularity >= 2 {
+                let subdivided_rings: Vec<GeometryCoordinates> =
+                    polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
+                let ring_vertices = subdivided_rings.iter().map(|ring| ring.len()).sum();
                 if wall_vertex_count(ring_vertices) <= MAX_SEGMENT_VERTICES {
-                    subdivided = Some(subdivided_rings);
-                    roof = Some(subdivide_polygon(&polygon, canonical, granularity, false));
-                }
-            }
-            // `polyVariant`
-            let poly: &[GeometryCoordinates] = subdivided.as_deref().unwrap_or(&polygon[..]);
-
-            let mut total_vertices: usize = 0;
-            for ring in poly.iter() {
-                total_vertices += ring.len();
-                if total_vertices > usize::from(u16::MAX) {
-                    return Err(Arc::new(GeometryTooLongException));
-                }
-            }
-
-            if total_vertices == 0 {
-                continue;
-            }
-
-            let mut flat_indices: Vec<u32> = Vec::with_capacity(total_vertices);
-
-            let wall_vertices = wall_vertex_count(total_vertices);
-
-            let start_vertices = self.vertices.len();
-
-            if self.triangle_segments.is_empty()
-                || self.triangle_segments.last().expect("segment").vertex_length + wall_vertices > usize::from(u16::MAX)
-            {
-                self.triangle_segments.push(SegmentBase::new(start_vertices, self.triangles.len()));
-            }
-
-            let segment_index = self.triangle_segments.len() - 1;
-            debug_assert!(self.triangle_segments[segment_index].vertex_length <= usize::from(u16::MAX));
-            let mut triangle_index = self.triangle_segments[segment_index].vertex_length as u16;
-
-            debug_assert!(usize::from(triangle_index) + wall_vertices <= usize::from(u16::MAX));
-
-            for ring in poly.iter() {
-                let n_vertices = ring.len();
-
-                if n_vertices == 0 {
+                    let roof = subdivide_polygon(&polygon, canonical, granularity, false);
+                    self.add_polygon(&subdivided_rings, Some(&roof))?;
                     continue;
                 }
-
-                let mut edge_distance: usize = 0;
-
-                for i in 0..n_vertices {
-                    let p1 = Point::new(f64::from(ring[i].x), f64::from(ring[i].y));
-                    let p2 = if i < n_vertices - 1 {
-                        Some(Point::new(f64::from(ring[i + 1].x), f64::from(ring[i + 1].y)))
-                    } else {
-                        None
-                    };
-
-                    // processRingPoints(p1, p2, edgeDistance)
-                    self.vertices.get_mut().push(Self::layout_vertex(p1, 0.0, 0.0, 1, edge_distance as u16));
-                    flat_indices.push(u32::from(triangle_index));
-                    triangle_index = triangle_index.wrapping_add(1);
-
-                    if let Some(p2) = p2 {
-                        let perp = unit_perp(Point::new(p2.x - p1.x, p2.y - p1.y));
-
-                        let dist = usize::from(dist_u16(p1, p2));
-                        if edge_distance + dist > usize::from(u16::MAX) {
-                            edge_distance = 0;
-                        }
-
-                        self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 0, edge_distance as u16));
-                        self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 1, edge_distance as u16));
-
-                        edge_distance += dist;
-
-                        self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 0, edge_distance as u16));
-                        self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 1, edge_distance as u16));
-
-                        // ┌──────┐
-                        // │ 0  1 │ Counter-Clockwise winding order.
-                        // │      │ Triangle 1: 0 => 2 => 1
-                        // │ 2  3 │ Triangle 2: 1 => 2 => 3
-                        // └──────┘
-                        let t = triangle_index;
-                        self.triangles.get_mut().extend_from_slice(&[t, t.wrapping_add(2), t.wrapping_add(1)]);
-                        self.triangles.get_mut().extend_from_slice(&[
-                            t.wrapping_add(1),
-                            t.wrapping_add(2),
-                            t.wrapping_add(3),
-                        ]);
-                        triangle_index = triangle_index.wrapping_add(4);
-                        let segment = &mut self.triangle_segments[segment_index];
-                        segment.vertex_length += 4;
-                        segment.index_length += 6;
-                    }
-                }
             }
-
-            let indices: Vec<u32> = if roof.is_none() { earcut::earcut::<u32, _, _>(poly) } else { Vec::new() };
-
-            let n_indices = indices.len();
-            debug_assert!(n_indices % 3 == 0);
-
-            for i in (0..n_indices).step_by(3) {
-                // Counter-Clockwise winding order.
-                self.triangles.get_mut().extend_from_slice(&[
-                    flat_indices[indices[i] as usize] as u16,
-                    flat_indices[indices[i + 2] as usize] as u16,
-                    flat_indices[indices[i + 1] as usize] as u16,
-                ]);
-            }
-
-            let segment = &mut self.triangle_segments[segment_index];
-            segment.vertex_length += total_vertices;
-            segment.index_length += n_indices;
-
-            // The roof's triangles index only its own vertices, so it
-            // continues the walls' segment or starts its own.
-            if let Some(roof) = &roof {
-                fill_large_mesh_arrays(
-                    self.vertices.get_mut(),
-                    |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0, 1, 0),
-                    &mut self.triangle_segments,
-                    self.triangles.get_mut(),
-                    &roof.vertices,
-                    &roof.triangle_indices,
-                    None,
-                    MAX_SEGMENT_VERTICES,
-                );
-            }
-            // (instanceSegments, and the roof's vertices counted into them:
-            // MLN_USE_FILL_EXTRUSION_INSTANCING only.)
+            self.add_polygon(&polygon[..], None)?;
         }
 
         let length = self.vertices.len();

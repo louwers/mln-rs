@@ -93,6 +93,10 @@ pub struct TileBase {
     pub pending: Cell<bool>,
     pub loaded: Cell<bool>,
 
+    /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
+    /// version this tile's buckets hold; 0 for buckets that have none.
+    pub feature_state_version: Cell<u64>,
+
     observer: RefCell<Rc<dyn TileObserver>>,
 }
 
@@ -110,6 +114,7 @@ impl TileBase {
             renderable: Cell::new(false),
             pending: Cell::new(false),
             loaded: Cell::new(false),
+            feature_state_version: Cell::new(0),
             observer: RefCell::new(observer.unwrap_or_else(|| Rc::new(NullTileObserver))),
         }
     }
@@ -206,6 +211,9 @@ pub trait Tile {
     fn set_necessity(&self, _necessity: TileNecessity) {}
 
     fn set_update_parameters(&self, _parameters: &TileUpdateParameters) {}
+
+    /// `retryFailedLoad()`: requests the tile again if its last load failed.
+    fn retry_failed_load(&self) {}
 
     /// Mark this tile as no longer needed and cancel any pending work.
     fn cancel(&self);

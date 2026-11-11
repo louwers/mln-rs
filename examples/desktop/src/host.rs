@@ -3,15 +3,24 @@
 //
 // The main thread only turns window events into `Message`s for the render
 // thread and carries out what the render thread asks of the window (a
-// surface, its title, its size). Frames wait for the display on the render
-// thread: on macOS, waiting in `-[CAMetalLayer nextDrawable]` on the main
-// thread holds up the window's input with it, and a trackpad's first moves
-// arrive ~100 ms late (rust-windowing/winit#1737).
+// surface, its title, its size, egui's cursor and links). Frames wait for
+// the display on the render thread: on macOS, waiting in
+// `-[CAMetalLayer nextDrawable]` on the main thread holds up the window's
+// input with it, and a trackpad's first moves arrive ~100 ms late
+// (rust-windowing/winit#1737).
+//
+// Every event goes to egui (egui-winit), whose input the render thread's
+// controls (ui.rs) take. The map gets the pointer's events where the
+// controls weren't, as of egui's last frame: a press over a control is the
+// control's, and a press on the map keeps the pointer the map's until it is
+// released, wherever it moves.
 //
 // Positions reach the map in its logical pixels: physical pixels divided by
 // the pixel ratio the map was created with. The map keeps that ratio when the
-// window moves to a display with another scale factor.
+// window moves to a display with another scale factor; egui follows the
+// window's.
 
+use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, mpsc};
 use std::time::{Duration, Instant};
 
@@ -39,14 +48,15 @@ pub(crate) enum Message {
         input: Input,
         at: Instant,
     },
-    /// A key went down (or repeats) or up, with the cursor where it was.
+    /// A key that the controls didn't take went down (or repeats) or up.
     Key {
         code: KeyCode,
         pressed: bool,
         modifiers: Modifiers,
-        cursor: ScreenCoordinate,
         at: Instant,
     },
+    /// The controls' input since the last.
+    Ui(egui::RawInput),
     /// The window's new size in physical pixels.
     Resized(PhysicalSize<u32>),
     Focused {
@@ -64,6 +74,8 @@ pub(crate) enum UserEvent {
     MakeSurface(wgpu::Instance, mpsc::Sender<Result<wgpu::Surface<'static>, String>>),
     SetTitle(String),
     RequestSize(LogicalSize<f64>),
+    /// What egui asks of the window after a frame: its cursor, a link to open.
+    Ui(Box<egui::PlatformOutput>),
     /// The render thread has dropped the map and ended.
     Ended,
 }
@@ -102,6 +114,15 @@ impl Inbox {
     }
 }
 
+/// A mouse button's key in `Open::buttons`.
+fn button_key(button: Button) -> u8 {
+    match button {
+        Button::Primary => 0,
+        Button::Secondary => 1,
+        Button::Middle => 2,
+    }
+}
+
 /// Opens the window and runs the app in it until it closes.
 pub(crate) fn run(args: Args, settings: Settings) -> Result<(), winit::error::EventLoopError> {
     let event_loop = EventLoop::<UserEvent>::with_user_event().build()?;
@@ -120,10 +141,15 @@ struct Host {
 struct Open {
     window: Arc<Window>,
     inbox: Arc<Inbox>,
+    egui: egui_winit::State,
     /// The map's pixel ratio: physical pixels per logical pixel.
     pixel_ratio: f64,
-    /// Where the mouse is, in logical pixels.
+    /// Where the mouse is, in the map's logical pixels and in egui's points.
     cursor: ScreenCoordinate,
+    cursor_points: egui::Pos2,
+    /// The mouse buttons and touches that went down on the map.
+    buttons: BTreeSet<u8>,
+    touches: BTreeSet<u32>,
     modifiers: Modifiers,
     /// Whether the trackpad's pinch and rotation streams are under way:
     /// macOS phases each apart, and the map gets one pinch of both.
@@ -136,6 +162,20 @@ impl Open {
         ScreenCoordinate::new(position.x / self.pixel_ratio, position.y / self.pixel_ratio)
     }
 
+    /// Whether `position` is over one of the controls.
+    fn over_controls(&self, position: PhysicalPosition<f64>) -> bool {
+        let scale = self.window.scale_factor();
+        crate::ui::over_controls(self.egui.egui_ctx(), (position.x / scale) as f32, (position.y / scale) as f32)
+    }
+
+    /// The controls' input so far, for the render thread.
+    fn send_ui_input(&mut self, init: bool) {
+        let mut input = self.egui.take_egui_input(&self.window);
+        let viewport = input.viewports.entry(egui::ViewportId::ROOT).or_default();
+        egui_winit::update_viewport_info(viewport, self.egui.egui_ctx(), &self.window, init);
+        self.inbox.send(Message::Ui(input));
+    }
+
     fn input(&self, input: Input) {
         self.inbox.send(Message::Input { input, at: Instant::now() });
     }
@@ -144,8 +184,11 @@ impl Open {
     /// first to begin begins the pinch, and the last to end ends it.
     fn trackpad(&mut self, rotating: bool, scale: f64, rotation: f64, phase: TouchPhase) {
         let active = self.pinching || self.rotating;
+        // A pinch that begins over the controls isn't the map's.
+        let over_controls = egui_over(self.egui.egui_ctx(), self.cursor_points);
         let stream = if rotating { &mut self.rotating } else { &mut self.pinching };
         let phase = match phase {
+            TouchPhase::Started if over_controls && !active => return,
             TouchPhase::Started => {
                 *stream = true;
                 if active {
@@ -167,6 +210,10 @@ impl Open {
     }
 }
 
+fn egui_over(ctx: &egui::Context, at: egui::Pos2) -> bool {
+    crate::ui::over_controls(ctx, at.x, at.y)
+}
+
 /// The recognizer's modifiers for winit's.
 fn modifiers(state: winit::keyboard::ModifiersState) -> Modifiers {
     Modifiers { shift: state.shift_key(), ctrl: state.control_key(), alt: state.alt_key(), meta: state.super_key() }
@@ -182,7 +229,7 @@ impl ApplicationHandler<UserEvent> for Host {
         let Some((args, settings)) = self.start.take() else {
             return;
         };
-        let mut attributes = Window::default_attributes().with_title("MapLibre Native").with_inner_size(WINDOW_SIZE);
+        let mut attributes = Window::default_attributes().with_title("mln-rs").with_inner_size(WINDOW_SIZE);
         if args.fullscreen {
             attributes = attributes.with_fullscreen(Some(Fullscreen::Borderless(None)));
         }
@@ -201,7 +248,17 @@ impl ApplicationHandler<UserEvent> for Host {
             .and_then(|monitor| monitor.refresh_rate_millihertz())
             .map_or(60.0, |mhz| f64::from(mhz) / 1000.0);
         let inbox = Arc::new(Inbox::default());
+        let ui = egui::Context::default();
+        let egui = egui_winit::State::new(
+            ui.clone(),
+            egui::ViewportId::ROOT,
+            &window,
+            Some(window.scale_factor() as f32),
+            window.theme(),
+            None,
+        );
         let launch = Launch {
+            ui,
             args,
             settings,
             pixel_ratio,
@@ -211,15 +268,21 @@ impl ApplicationHandler<UserEvent> for Host {
             inbox: inbox.clone(),
             proxy: self.proxy.clone(),
         };
-        self.open = Some(Open {
+        let mut open = Open {
             window,
             inbox,
+            egui,
             pixel_ratio,
             cursor: ScreenCoordinate::default(),
+            cursor_points: egui::Pos2::ZERO,
+            buttons: BTreeSet::new(),
+            touches: BTreeSet::new(),
             modifiers: Modifiers::default(),
             pinching: false,
             rotating: false,
-        });
+        };
+        open.send_ui_input(true);
+        self.open = Some(open);
 
         let proxy = self.proxy.clone();
         let spawned = std::thread::Builder::new().name("render".into()).spawn(move || {
@@ -243,26 +306,33 @@ impl ApplicationHandler<UserEvent> for Host {
         let Some(open) = self.open.as_mut() else {
             return;
         };
+        let response = open.egui.on_window_event(&open.window, &event);
+        if response.repaint {
+            open.send_ui_input(false);
+        }
         match event {
             // The render thread drops the map, then says it has ended.
             WindowEvent::CloseRequested => open.inbox.send(Message::Close),
             WindowEvent::Resized(size) => open.inbox.send(Message::Resized(size)),
             WindowEvent::Focused(focused) => open.inbox.send(Message::Focused { focused, at: Instant::now() }),
             WindowEvent::ModifiersChanged(state) => open.modifiers = modifiers(state.state()),
-            WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => {
+            WindowEvent::KeyboardInput { event, is_synthetic: false, .. } if !response.consumed => {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     open.inbox.send(Message::Key {
                         code,
                         pressed: event.state == ElementState::Pressed,
                         modifiers: open.modifiers,
-                        cursor: open.cursor,
                         at: Instant::now(),
                     });
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 open.cursor = open.logical(position);
-                open.input(Input::PointerMove { id: 0, position: open.cursor });
+                let scale = open.window.scale_factor();
+                open.cursor_points = egui::pos2((position.x / scale) as f32, (position.y / scale) as f32);
+                if !open.buttons.is_empty() || !open.over_controls(position) {
+                    open.input(Input::PointerMove { id: 0, position: open.cursor });
+                }
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 let button = match button {
@@ -272,16 +342,22 @@ impl ApplicationHandler<UserEvent> for Host {
                     _ => return,
                 };
                 let position = open.cursor;
-                open.input(match state {
-                    ElementState::Pressed => Input::PointerDown {
-                        id: 0,
-                        kind: PointerKind::Mouse,
-                        button,
-                        position,
-                        modifiers: open.modifiers,
-                    },
-                    ElementState::Released => Input::PointerUp { id: 0, position },
-                });
+                match state {
+                    ElementState::Pressed if !egui_over(open.egui.egui_ctx(), open.cursor_points) => {
+                        open.buttons.insert(button_key(button));
+                        open.input(Input::PointerDown {
+                            id: 0,
+                            kind: PointerKind::Mouse,
+                            button,
+                            position,
+                            modifiers: open.modifiers,
+                        });
+                    }
+                    ElementState::Released if open.buttons.remove(&button_key(button)) => {
+                        open.input(Input::PointerUp { id: 0, position });
+                    }
+                    _ => {}
+                }
             }
             // winit's positive y scrolls up, which zooms in; the recognizer's
             // scrolls down. Line deltas are a wheel's notches, pixel deltas a
@@ -291,25 +367,33 @@ impl ApplicationHandler<UserEvent> for Host {
                     MouseScrollDelta::LineDelta(_, y) => WheelDelta::Notches(-f64::from(y)),
                     MouseScrollDelta::PixelDelta(pixels) => WheelDelta::Pixels(-pixels.y / open.pixel_ratio),
                 };
-                if delta != WheelDelta::Notches(0.0) && delta != WheelDelta::Pixels(0.0) {
+                if delta != WheelDelta::Notches(0.0)
+                    && delta != WheelDelta::Pixels(0.0)
+                    && !egui_over(open.egui.egui_ctx(), open.cursor_points)
+                {
                     open.input(Input::Wheel { position: open.cursor, delta, modifiers: open.modifiers });
                 }
             }
             WindowEvent::Touch(touch) => {
                 let id = touch_id(touch.id);
                 let position = open.logical(touch.location);
-                open.input(match touch.phase {
-                    TouchPhase::Started => Input::PointerDown {
-                        id,
-                        kind: PointerKind::Touch,
-                        button: Button::Primary,
-                        position,
-                        modifiers: open.modifiers,
-                    },
-                    TouchPhase::Moved => Input::PointerMove { id, position },
-                    TouchPhase::Ended => Input::PointerUp { id, position },
-                    TouchPhase::Cancelled => Input::PointerCancel { id },
-                });
+                let input = match touch.phase {
+                    TouchPhase::Started if !open.over_controls(touch.location) => {
+                        open.touches.insert(id);
+                        Input::PointerDown {
+                            id,
+                            kind: PointerKind::Touch,
+                            button: Button::Primary,
+                            position,
+                            modifiers: open.modifiers,
+                        }
+                    }
+                    TouchPhase::Moved if open.touches.contains(&id) => Input::PointerMove { id, position },
+                    TouchPhase::Ended if open.touches.remove(&id) => Input::PointerUp { id, position },
+                    TouchPhase::Cancelled if open.touches.remove(&id) => Input::PointerCancel { id },
+                    _ => return,
+                };
+                open.input(input);
             }
             // macOS's trackpad magnify and rotate (winit has them nowhere
             // else). winit's rotation turns counterclockwise.
@@ -334,6 +418,7 @@ impl ApplicationHandler<UserEvent> for Host {
                 let _ = reply.send(surface);
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
+            UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),
             UserEvent::RequestSize(size) => {
                 let _ = open.window.request_inner_size(size);
             }

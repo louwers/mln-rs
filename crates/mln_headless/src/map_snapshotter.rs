@@ -21,7 +21,7 @@ use mln_actor::AsyncTask;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_map::transform::Transform;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, TransformState};
-use mln_renderer::{ExceptionPtr, RenderMode, RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{ExceptionPtr, RenderMode, RendererFrontend, RendererObserver, RenderingStats, UpdateParameters};
 use mln_storage::{ClientOptions, ResourceOptions};
 use mln_util::exception::MisuseException;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -133,12 +133,18 @@ impl RendererObserver for SnapshotterRenderer {
         }
     }
 
-    fn on_did_finish_rendering_frame(&self, mode: RenderMode, repaint: bool, placement_changed: bool) {
+    fn on_did_finish_rendering_frame(
+        &self,
+        mode: RenderMode,
+        repaint: bool,
+        placement_changed: bool,
+        stats: Arc<RenderingStats>,
+    ) {
         if mode == RenderMode::Full && self.has_pending_still_image_request.get() {
             *self.still_image.borrow_mut() = self.frontend.read_still_image();
         }
         if let Some(observer) = self.renderer_observer() {
-            observer.on_did_finish_rendering_frame(mode, repaint, placement_changed);
+            observer.on_did_finish_rendering_frame(mode, repaint, placement_changed, stats);
         }
     }
 

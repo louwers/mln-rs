@@ -171,3 +171,42 @@ fn font_stacks_share_the_allocation_of_the_same_glyph() {
     assert_eq!(glyph_atlas.texture_handles.len(), 2);
     assert_eq!(glyph_atlas.texture_handles[0].get_id(), glyph_atlas.texture_handles[1].get_id());
 }
+
+impl DynamicTextureAtlasTest {
+    /// Uploads `image` as an icon at `version`, keeping its atlas alive.
+    fn upload_icon(&mut self, image: &Immutable<ImageImpl>, version: u32) -> &ImageAtlas {
+        let version_map = ImageVersionMap::from([(image.id.clone(), version)]);
+        let image_atlas = self.atlas.upload_icons_and_patterns(&image_map(image), &ImageMap::new(), &version_map);
+        self.atlases.push(image_atlas);
+        self.atlases.last().unwrap()
+    }
+}
+
+// Port-only: the icon cases of maplibre/maplibre-native#4751's
+// DynamicTextureAtlas.UpdatedImageGetsSeparateRegion and
+// ManyLiveVersionsGetSeparateRegions. Allocations here are keyed by image
+// revision rather than by the version map, so a re-upload of the same
+// revision shares its bin and every live revision gets its own.
+#[test]
+fn updated_icon_gets_fresh_allocation() {
+    let mut test = DynamicTextureAtlasTest::new();
+    let original_image = make_image("marker", false);
+    let original = test.upload_icon(&original_image, 0).texture_handles[0];
+    let shared = test.upload_icon(&original_image, 0).texture_handles[0];
+    assert_eq!(original.get_id(), shared.get_id());
+
+    let updated_atlas = test.upload_icon(&make_image("marker", false), 1);
+    assert_eq!(updated_atlas.icon_positions["marker"].version, 1);
+    let updated = updated_atlas.texture_handles[0];
+    assert_ne!(original.get_rectangle(), updated.get_rectangle());
+}
+
+#[test]
+fn many_live_icon_revisions_get_their_own_allocations() {
+    let mut test = DynamicTextureAtlasTest::new();
+    const REVISIONS: u32 = 64;
+    let ids: std::collections::HashSet<i32> = (0..REVISIONS)
+        .map(|version| test.upload_icon(&make_image("marker", false), version).texture_handles[0].get_id())
+        .collect();
+    assert_eq!(ids.len(), REVISIONS as usize);
+}

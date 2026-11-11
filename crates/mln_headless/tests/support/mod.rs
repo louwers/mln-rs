@@ -20,15 +20,18 @@
 use std::cell::{Cell, RefCell, RefMut};
 use std::path::PathBuf;
 use std::rc::{Rc, Weak};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use mln_actor::{LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus};
-use mln_renderer::tile::tile::TileOperation;
+use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
-use mln_tile_id::OverscaledTileID;
+use mln_style::custom_tile_loader::TileFunction;
+use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
+use mln_style::sprite::Sprite;
+use mln_tile_id::CanonicalTileID;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
 
@@ -96,6 +99,17 @@ pub fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: 
     pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }
 
+/// `test::checkImages(possibleExpected, actual, imageThreshold,
+/// pixelThreshold)`: the image matches one of the bases.
+#[track_caller]
+pub fn check_images(bases: &[&str], actual: &PremultipliedImage, image_threshold: f64, pixel_threshold: f64) {
+    let diffs: Vec<f64> = bases.iter().map(|base| get_image_diff(base, actual, pixel_threshold)).collect();
+    assert!(
+        diffs.iter().any(|diff| *diff <= image_threshold),
+        "{bases:?}: image differences {diffs:?}, none <= {image_threshold} (pixel threshold {pixel_threshold})"
+    );
+}
+
 /// `test::checkImage(base, actual, imageThreshold, pixelThreshold)`: the
 /// C++ defaults are 0 and 0.
 #[track_caller]
@@ -112,6 +126,23 @@ pub fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64
 pub fn center_pixel(image: &PremultipliedImage) -> [u8; 4] {
     let offset = (image.size.height as usize / 2) * image.stride() + (image.size.width as usize / 2) * 4;
     [image.data[offset], image.data[offset + 1], image.data[offset + 2], image.data[offset + 3]]
+}
+
+// MARK: - Custom geometry sources
+
+/// A custom geometry source's fetch function that answers with `features`
+/// through the handle in `handle`, once it's set, as the C++ tests answer
+/// through `getSource("custom")`.
+pub fn answer_with(
+    handle: &Arc<OnceLock<CustomGeometrySourceHandle>>,
+    features: impl Fn(&CanonicalTileID) -> Vec<geojson::Feature> + Send + Sync + 'static,
+) -> TileFunction {
+    let handle = handle.clone();
+    Arc::new(move |tile_id: &CanonicalTileID| {
+        if let Some(handle) = handle.get() {
+            handle.set_tile_data(*tile_id, geojson::GeoJSON::FeatureCollection(features(tile_id)));
+        }
+    })
 }
 
 // MARK: - ASSERT_DOUBLE_EQ
@@ -181,10 +212,9 @@ impl<A> CallbackSlot<A> {
     }
 }
 
-/// `StubMapObserver`.
+/// `StubMapObserver`, with callbacks for the source and sprite events too.
 // TODO(port): onRegisterShaders, onPre/PostCompileShader,
-// onShaderCompileFailed, onGlyphs* callbacks (MapObserver has none of them
-// yet).
+// onShaderCompileFailed callbacks (MapObserver has none of them yet).
 #[derive(Default)]
 pub struct StubMapObserver {
     pub will_start_loading_map_callback: CallbackSlot<()>,
@@ -194,7 +224,14 @@ pub struct StubMapObserver {
     pub did_finish_rendering_frame_callback: CallbackSlot<RenderFrameStatus>,
     pub did_become_idle_callback: CallbackSlot<()>,
     pub on_style_image_missing_callback: CallbackSlot<String>,
+    pub on_glyphs_loaded_callback: CallbackSlot<(FontStack, GlyphRange)>,
+    pub on_glyphs_error_callback: CallbackSlot<(FontStack, GlyphRange, ExceptionPtr)>,
+    pub on_glyphs_requested_callback: CallbackSlot<(FontStack, GlyphRange)>,
     pub on_tile_action_callback: CallbackSlot<(TileOperation, OverscaledTileID, String)>,
+    pub on_source_changed_callback: CallbackSlot<String>,
+    pub on_sprite_loaded_callback: CallbackSlot<Option<Sprite>>,
+    pub on_sprite_error_callback: CallbackSlot<(Option<Sprite>, ExceptionPtr)>,
+    pub on_sprite_requested_callback: CallbackSlot<Option<Sprite>>,
 }
 
 impl MapObserver for StubMapObserver {
@@ -211,7 +248,7 @@ impl MapObserver for StubMapObserver {
         self.did_finish_loading_style_callback.call(());
     }
     fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
-        self.did_finish_rendering_frame_callback.call(*status);
+        self.did_finish_rendering_frame_callback.call(status.clone());
     }
     fn on_did_become_idle(&self) {
         self.did_become_idle_callback.call(());
@@ -219,8 +256,29 @@ impl MapObserver for StubMapObserver {
     fn on_style_image_missing(&self, id: &str) {
         self.on_style_image_missing_callback.call(id.to_owned());
     }
+    fn on_glyphs_loaded(&self, font_stack: &FontStack, range: &GlyphRange) {
+        self.on_glyphs_loaded_callback.call((font_stack.clone(), *range));
+    }
+    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
+        self.on_glyphs_error_callback.call((font_stack.clone(), *range, error));
+    }
+    fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
+        self.on_glyphs_requested_callback.call((font_stack.clone(), *range));
+    }
     fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
         self.on_tile_action_callback.call((op, *id, source_id.to_owned()));
+    }
+    fn on_source_changed(&self, source_id: &str) {
+        self.on_source_changed_callback.call(source_id.to_owned());
+    }
+    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
+        self.on_sprite_loaded_callback.call(sprite.cloned());
+    }
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+        self.on_sprite_error_callback.call((sprite.cloned(), error));
+    }
+    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
+        self.on_sprite_requested_callback.call(sprite.cloned());
     }
 }
 

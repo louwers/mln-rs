@@ -1,5 +1,6 @@
 // Ports include/mln/storage/online_file_source.hpp and
-// platform/default/src/mln/storage/online_file_source.cpp.
+// platform/default/src/mln/storage/online_file_source.cpp, with
+// maplibre-native-ffi's patch 0068 (a resource transform can fail a request).
 //
 // The requests run on the "OnlineFileSource" thread (`util::Thread`) as in
 // C++: an `OnlineFileRequest` per caller request, scheduled by a
@@ -40,11 +41,12 @@ use crate::async_request::AsyncRequest;
 use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::http_file_source::HTTPFileSource;
+use crate::http_header_transform::HttpHeaderTransform;
 use crate::http_timeout::{error_retry_timeout, expiration_timeout};
 use crate::network_status::{NetworkStatus, Status};
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::resource_transform::ResourceTransform;
+use crate::resource_transform::{ResourceTransform, TransformResult};
 use crate::response::{Error, Reason, Response};
 
 /// For testing only
@@ -71,6 +73,12 @@ struct OnlineFileRequest {
     failed_request_reason: Cell<Reason>,
     retry_after: Cell<Option<Timestamp>>,
 
+    /// Whether the resource transform is computing the URL to load.
+    transforming: Cell<bool>,
+    /// Whether the resource transform failed the request. A retry calls the
+    /// transform again instead of loading the original URL.
+    transform_failed: Cell<bool>,
+
     /// Lazily created for the ResourceTransform's reply (`actor()`).
     mailbox: RefCell<Option<Arc<Mailbox>>>,
 }
@@ -82,12 +90,12 @@ struct OnlineFileRequestRef {
 }
 
 impl OnlineFileRequestRef {
-    /// `OnlineFileRequest::setTransformedURL(const std::string&)`.
-    fn set_transformed_url(&self, url: String) {
+    /// `OnlineFileRequest::setTransformResult(ResourceTransform::Result)`.
+    fn set_transform_result(&self, result: TransformResult) {
         if let Some(impl_) = self.impl_.upgrade()
             && let Some(req) = impl_.get(self.id)
         {
-            req.set_transformed_url(url);
+            req.set_transform_result(result);
         }
     }
 }
@@ -213,11 +221,18 @@ impl ThreadState {
     /// `add(OnlineFileRequest*)`
     fn add(&self, req: &OnlineFileRequest) {
         self.all_requests.borrow_mut().insert(req.id);
+        self.transform(req);
+    }
+
+    /// `transform(OnlineFileRequest*)`
+    fn transform(&self, req: &OnlineFileRequest) {
+        req.transform_failed.set(false);
         let transform = self.resource_transform.borrow().clone();
         if transform.is_set() {
             // Request the ResourceTransform actor a new url and replace the
             // resource url with the transformed one before proceeding to
             // schedule the request.
+            req.transforming.set(true);
             let r = req.actor();
             let (kind, url) = {
                 let resource = req.resource.borrow();
@@ -226,8 +241,8 @@ impl ThreadState {
             transform.transform(
                 kind,
                 &url,
-                Box::new(move |url: String| {
-                    r.invoke(move |req: &OnlineFileRequestRef| req.set_transformed_url(url));
+                Box::new(move |result: TransformResult| {
+                    r.invoke(move |req: &OnlineFileRequestRef| req.set_transform_result(result));
                 }),
             );
         } else {
@@ -328,10 +343,21 @@ impl ThreadState {
 }
 
 impl OnlineFileRequest {
-    /// `setTransformedURL(const std::string&)`
-    fn set_transformed_url(&self, url: String) {
-        self.resource.borrow_mut().url = url;
-        self.activate();
+    /// `setTransformResult(ResourceTransform::Result)`
+    fn set_transform_result(&self, result: TransformResult) {
+        self.transforming.set(false);
+        match result {
+            Ok(url) => {
+                self.resource.borrow_mut().url = url;
+                self.activate();
+            }
+            Err(error) => {
+                self.transform_failed.set(true);
+                let mut response = Response::new();
+                response.error = Some(Box::new(error));
+                self.completed(response);
+            }
+        }
     }
 
     /// `actor()`
@@ -362,7 +388,7 @@ impl OnlineFileRequest {
         let Some(impl_) = self.impl_.upgrade() else {
             return;
         };
-        if impl_.is_pending(self.id) || impl_.is_active(self.id) {
+        if self.transforming.get() || impl_.is_pending(self.id) || impl_.is_active(self.id) {
             // There's already a request in progress; don't start another one.
             return;
         }
@@ -383,8 +409,12 @@ impl OnlineFileRequest {
         let weak = self.impl_.clone();
         let id = self.id;
         self.timer.start(timeout, Duration::zero(), move || {
-            if let Some(impl_) = weak.upgrade() {
-                impl_.activate_or_queue_request(id);
+            let Some(impl_) = weak.upgrade() else {
+                return;
+            };
+            match impl_.get(id) {
+                Some(req) if req.transform_failed.get() => impl_.transform(&req),
+                _ => impl_.activate_or_queue_request(id),
             }
         });
     }
@@ -521,6 +551,8 @@ impl OnlineFileSourceThread {
             failed_requests: Cell::new(0),
             failed_request_reason: Cell::new(Reason::Success),
             retry_after: Cell::new(None),
+            transforming: Cell::new(false),
+            transform_failed: Cell::new(false),
             mailbox: RefCell::new(None),
         });
         self.state.tasks.borrow_mut().insert(req, request.clone());
@@ -537,6 +569,10 @@ impl OnlineFileSourceThread {
     /// `setResourceTransform(ResourceTransform)`
     fn set_resource_transform(&self, transform: ResourceTransform) {
         *self.state.resource_transform.borrow_mut() = transform;
+    }
+
+    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        self.state.http_file_source.set_http_header_transform(transform);
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {
@@ -738,6 +774,10 @@ impl FileSource for OnlineFileSource {
 
     fn set_resource_transform(&self, transform: ResourceTransform) {
         self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
+    }
+
+    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {

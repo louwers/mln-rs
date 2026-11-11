@@ -7,13 +7,14 @@ use std::rc::Rc;
 use mln_actor::RunLoop;
 use mln_util::tileset::Scheme;
 
-use super::{cpp_path, req};
+use super::{cpp_path, req, temp_path};
 use crate::ClientOptions;
 use crate::file_source::FileSource;
 use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
+use crate::sqlite3::{Database, OpenFlag};
 
 fn to_absolute_url(file_name: &str) -> String {
     let path = cpp_path("test/fixtures/storage/mbtiles").join(file_name);
@@ -65,6 +66,17 @@ fn absolute_path() {
     assert!(res.data.is_none());
 }
 
+// An empty path is not absolute
+// gtest: MBTilesFileSource.EmptyPath
+#[test]
+fn empty_path() {
+    let mbtiles = mbtiles_file_source();
+    let res = request(&mbtiles, Resource::new(Kind::Unknown, "mbtiles://"));
+    let error = res.error.as_ref().expect("error");
+    assert_eq!(Reason::Other, error.reason);
+    assert!(error.message.contains("absolute"));
+}
+
 // Nonexistent mbtiles file raises error
 // gtest: MBTilesFileSource.NonExistentFile
 #[test]
@@ -74,6 +86,39 @@ fn non_existent_file() {
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(error.message.contains("path not found"));
+    assert!(res.data.is_none());
+}
+
+// A file that is not an mbtiles database raises error
+// gtest: MBTilesFileSource.NotADatabase
+#[test]
+fn not_a_database() {
+    let mbtiles = mbtiles_file_source();
+    let path = cpp_path("test/fixtures/storage/pmtiles/geography-class-png.pmtiles");
+    let res = request(&mbtiles, Resource::new(Kind::Unknown, format!("mbtiles://{}", path.display())));
+    let error = res.error.as_ref().expect("error");
+    assert_eq!(Reason::Other, error.reason);
+    assert!(res.data.is_none());
+}
+
+// Metadata that does not parse raises error
+// gtest: MBTilesFileSource.BadMetadata
+#[test]
+fn bad_metadata() {
+    let path = temp_path("mbtiles_bad_metadata.mbtiles");
+    Database::open(&path, OpenFlag::ReadWriteCreate)
+        .and_then(|db| {
+            db.exec(
+                "CREATE TABLE metadata (name TEXT, value TEXT); INSERT INTO metadata VALUES ('minzoom', 'zero'), \
+                 ('maxzoom', '1');",
+            )
+        })
+        .expect("create the database");
+
+    let mbtiles = mbtiles_file_source();
+    let res = request(&mbtiles, Resource::new(Kind::Unknown, format!("mbtiles://{path}")));
+    let error = res.error.as_ref().expect("error");
+    assert_eq!(Reason::Other, error.reason);
     assert!(res.data.is_none());
 }
 
@@ -131,4 +176,26 @@ fn non_existent_tile() {
     assert_eq!(None, res.error);
     assert!(res.data.is_none());
     assert!(res.no_content);
+}
+
+// Tiles from a nonexistent mbtiles file raise errors
+// gtest: MBTilesFileSource.NonExistentFileTile
+#[test]
+fn non_existent_file_tile() {
+    let mbtiles = mbtiles_file_source();
+    let res = request(
+        &mbtiles,
+        Resource::tile(
+            &to_absolute_url("does_not_exist?file={z}/{x}/{y}.png"),
+            1.0,
+            0,
+            0,
+            0,
+            Scheme::XYZ,
+            LoadingMethod::All,
+        ),
+    );
+    let error = res.error.as_ref().expect("error");
+    assert_eq!(Reason::Other, error.reason);
+    assert!(res.data.is_none());
 }

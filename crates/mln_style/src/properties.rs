@@ -16,6 +16,7 @@
 // Interpolation with a float `t` is `mln_util::interpolate::Interpolate::interpolate_f32`
 // (C++ `util::interpolate(a, b, float t)`).
 
+use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Debug;
 
@@ -28,12 +29,12 @@ use mln_util::interpolate::Interpolate;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
-use crate::expression::{Dependency, ValueConverter};
+use crate::expression::{Dependency, Image, ValueConverter, global_state_refs_intersect};
 use crate::property_value::PropertyValue;
 use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 use crate::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use crate::renderer::property_evaluator::Evaluator;
-use crate::renderer::transition_parameters::TransitionParameters;
+use crate::renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
 use crate::transition_options::TransitionOptions;
 
 /// What `Transitioning<Value>` / `Transitionable<Value>` need from `Value`
@@ -46,9 +47,26 @@ pub trait PropertyValueLike: Clone + Default + Debug {
     fn get_dependencies(&self) -> Dependency;
     fn get_global_state_refs(&self) -> Option<&VecSet<String>>;
     fn has_data_driven_property_difference(&self, other: &Self) -> bool;
+
+    /// Whether a change of the keys in `changed_keys` transitions the value
+    /// rather than snapping it. Color ramps never do: their layers rebuild them.
+    fn transitions_on_global_state_change(&self, _changed_keys: Option<&VecSet<String>>) -> bool {
+        false
+    }
+
+    /// Keeps the value reading the global state from before `change`, if it
+    /// transitions on it.
+    fn retain_prior_global_state(&mut self, _change: &GlobalStateChange) {}
 }
 
-impl<T: Clone + Debug + PartialEq> PropertyValueLike for PropertyValue<T> {
+/// Whether the value reads one of the global-state keys in `changed_keys`;
+/// `None` means the keys are unknown, and every reference counts as changed.
+pub fn reads_global_state<V: PropertyValueLike>(value: &V, changed_keys: Option<&VecSet<String>>) -> bool {
+    value.get_dependencies().intersects(Dependency::GLOBAL_STATE)
+        && global_state_refs_intersect(value.get_global_state_refs(), changed_keys)
+}
+
+impl<T: Clone + Debug + PartialEq + 'static> PropertyValueLike for PropertyValue<T> {
     type Type = T;
 
     fn evaluate<E: Evaluator<T>>(&self, evaluator: &E) -> E::ResultType {
@@ -73,6 +91,18 @@ impl<T: Clone + Debug + PartialEq> PropertyValueLike for PropertyValue<T> {
 
     fn has_data_driven_property_difference(&self, other: &Self) -> bool {
         PropertyValue::has_data_driven_property_difference(self, other)
+    }
+
+    /// Pattern images are never interpolated, so a transition would only
+    /// delay the image the tiles are laid out with.
+    fn transitions_on_global_state_change(&self, changed_keys: Option<&VecSet<String>>) -> bool {
+        TypeId::of::<T>() != TypeId::of::<Image>() && !self.is_data_driven() && reads_global_state(self, changed_keys)
+    }
+
+    fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
+        if self.is_expression() && self.transitions_on_global_state_change(Some(&change.changed_keys)) {
+            self.as_expression_mut().pin_global_state(change.prior_state.clone());
+        }
     }
 }
 
@@ -155,6 +185,15 @@ impl<V: PropertyValueLike> Transitioning<V> {
         self.value.is_undefined()
     }
 
+    /// Keeps every step that reads a key changed by `change` on the state from
+    /// before it, so that a new transition starts from what this one shows.
+    pub fn retain_prior_global_state(&mut self, change: &GlobalStateChange) {
+        self.value.retain_prior_global_state(change);
+        if let Some(prior) = self.prior.get_mut() {
+            prior.retain_prior_global_state(change);
+        }
+    }
+
     pub fn get_value(&self) -> &V {
         &self.value
     }
@@ -172,7 +211,13 @@ pub struct Transitionable<V> {
 }
 
 impl<V: PropertyValueLike> Transitionable<V> {
-    pub fn transition(&self, params: &TransitionParameters, prior: Transitioning<V>) -> Transitioning<V> {
+    pub fn transition(&self, params: &TransitionParameters, mut prior: Transitioning<V>) -> Transitioning<V> {
+        if let Some(change) = &params.global_state_change {
+            prior.retain_prior_global_state(change);
+            if change.state_only && !self.value.transitions_on_global_state_change(Some(&change.changed_keys)) {
+                return prior;
+            }
+        }
         Transitioning::with_prior(
             self.value.clone(),
             prior,

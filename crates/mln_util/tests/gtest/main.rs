@@ -5,7 +5,6 @@
 mod color;
 mod geo;
 mod lru_cache;
-mod mapbox;
 mod number_conversions;
 mod position;
 mod rotation;

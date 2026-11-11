@@ -51,13 +51,56 @@ pub fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
 }
 
-/// A fresh path in the test's temporary directory (C++ tests write next to
-/// the fixtures in the source tree; the port never writes there).
-pub fn temp_path(name: &str) -> String {
-    let dir = std::env::temp_dir().to_string_lossy().into_owned();
+/// A fresh path in a temporary directory of its own (C++ tests write next to
+/// the fixtures in the source tree; the port never writes there). The
+/// directory is unique to this process, so concurrent test runs never share
+/// a file, and dropping the guard removes it with everything SQLite wrote
+/// beside the path.
+pub fn temp_path(name: &str) -> TempPath {
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-    format!("{dir}/{n}-{name}")
+    let dir = std::env::temp_dir().join(format!("mln-storage-test-{}-{n}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap_or_else(|e| panic!("Cannot create {}: {e}", dir.display()));
+    let path = dir.join(name).to_string_lossy().into_owned();
+    TempPath { dir, path }
+}
+
+/// A path from [`temp_path`], usable as a `&str`.
+pub struct TempPath {
+    dir: PathBuf,
+    path: String,
+}
+
+impl std::ops::Deref for TempPath {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.path
+    }
+}
+
+impl std::fmt::Display for TempPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.path)
+    }
+}
+
+impl From<&TempPath> for String {
+    fn from(path: &TempPath) -> Self {
+        path.path.clone()
+    }
+}
+
+impl AsRef<std::path::Path> for TempPath {
+    fn as_ref(&self) -> &std::path::Path {
+        self.path.as_ref()
+    }
+}
+
+impl Drop for TempPath {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

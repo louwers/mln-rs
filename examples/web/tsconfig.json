@@ -1,0 +1,19 @@
+{
+  // The page's scripts. The Web Workers' have tsconfig.worker.json, for the
+  // globals a worker has instead of a window's.
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": ["vite/client"],
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "skipLibCheck": true
+  },
+  "include": ["web/main.ts", "web/compare.ts", "web/styles.ts", "web/protocol.ts", "vite.config.ts"]
+}

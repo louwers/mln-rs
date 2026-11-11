@@ -322,6 +322,7 @@ impl GeometryTileInner {
 
         *self.layout_result.borrow_mut() = Some(Rc::new(result));
         *self.bucket_geometry.borrow_mut() = Rc::default();
+        self.base.feature_state_version.set(0);
         if self.atlas_textures.borrow().is_none() {
             *self.atlas_textures.borrow_mut() = Some(Rc::new(TileAtlasTextures::default()));
         }
@@ -421,11 +422,44 @@ impl GlyphRequestor for GeometryTileInner {
         }
         self.worker.send(WorkerMessage::GlyphsAvailable { glyph_map, results });
     }
+
+    /// Lays the tile out again with the glyphs it got as missing requested
+    /// again; the tile is pending until then.
+    fn retry_missing_glyphs(&self) {
+        if self.is_obsolete() {
+            return;
+        }
+        if !self.base.pending.get() {
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+        self.base.pending.set(true);
+
+        self.correlation_id.set(self.correlation_id.get() + 1);
+        let correlation_id = self.correlation_id.get();
+        self.worker.send(WorkerMessage::RetryMissingGlyphs { correlation_id });
+    }
 }
 
 impl ImageRequestor for GeometryTileInner {
     fn requestor_base(&self) -> &ImageRequestorBase {
         &self.image_requestor_base
+    }
+
+    /// `onRequestedImageAdded()`: parses again with the added image.
+    fn on_requested_image_added(&self) {
+        if self.is_obsolete() {
+            return;
+        }
+
+        if !self.base.pending.get() {
+            self.base.pending.set(true);
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+
+        self.correlation_id.set(self.correlation_id.get() + 1);
+        let correlation_id = self.correlation_id.get();
+        let available_images = self.available_images();
+        self.worker.send(WorkerMessage::SetAvailableImages { available_images, correlation_id });
     }
 
     /// `onImagesAvailable(images, patterns, versionMap, imageCorrelationID)`.
@@ -814,7 +848,11 @@ impl Tile for GeometryTile {
             // Go through all sourceLayers, if any
             // to gather all the features
             if let Some(layer) = data.get_layer(source_layer)? {
+                let start = result.len();
                 query_layer_source_features(&*layer, result, options, global_state, &id)?;
+                for feature in &mut result[start..] {
+                    feature.source_layer.clone_from(source_layer);
+                }
             }
         }
         Ok(())

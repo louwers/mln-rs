@@ -7,9 +7,12 @@
 //! fonts bit-identically to HarfBuzz; harfbuzz_impl.rs says where it differs.
 
 pub mod bidi;
+#[cfg(target_family = "wasm")]
+mod browser_glyph_rasterizer;
 pub mod freetype;
 pub mod ft;
 pub mod glyph;
+pub mod glyph_cache;
 pub mod glyph_pbf;
 pub mod harfbuzz;
 pub mod harfbuzz_impl;
@@ -20,6 +23,7 @@ pub mod language_tag;
 pub mod local_glyph_rasterizer;
 pub mod shaping;
 pub mod tagged_string;
+pub mod woff;
 #[rustfmt::skip]
 mod hb_ucd_table;
 mod rasterize;
@@ -32,6 +36,7 @@ pub use glyph::{
     Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, GlyphRange, PositionedGlyph,
     PositionedLine, Shaping, WritingModeType,
 };
+pub use glyph_cache::GlyphCache;
 pub use harfbuzz::{HBShapeAdjust, HBShaper};
 pub use shaping::{AnchorAlignment, PositionedIcon, get_anchor_justification, get_shaping};
 pub use tagged_string::{SectionOptions, TaggedString};

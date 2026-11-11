@@ -4,17 +4,23 @@
 //! `fixtures.py` prepared. Nothing uses the network.
 
 use std::cell::{Cell, RefCell};
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use feature::{Value, ValueObject};
 use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
+use mln_renderer::query::SourceQueryOptions;
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_style_types::VisibilityType;
+use mln_text::GlyphCache;
+use mln_util::feature::feature_id_to_string;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -53,6 +59,31 @@ impl RealWorld {
         LatLng::new(self.latitude, self.longitude).expect("a scene's center")
     }
 }
+
+/// The render suite's `text-font/chinese` style, without its unused
+/// sprite: `data/chinese.geojson`'s 500 labels in Noto Sans CJK, about 2,500
+/// characters over 80 glyph ranges, all in the cache database.
+pub const CJK_STYLE: &str = r#"{
+  "version": 8,
+  "sources": { "geojson": { "type": "geojson", "data": "local://data/chinese.geojson" } },
+  "glyphs": "local://glyphs/{fontstack}/{range}.pbf",
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "white" } },
+    {
+      "id": "labels",
+      "type": "symbol",
+      "source": "geojson",
+      "layout": { "text-field": "{name}", "text-font": ["NotoCJK"], "symbol-placement": "point" }
+    }
+  ]
+}"#;
+
+/// The `text-font/chinese` test's camera, at its size.
+pub fn cjk_center() -> LatLng {
+    LatLng::new(43.3900489867738, -70.752954126).expect("the CJK view's center")
+}
+pub const CJK_ZOOM: f64 = 11.0;
+pub const CJK_SIZE: Size = Size { width: 512, height: 512 };
 
 /// maplibre-native-ffi's view of the basemap.
 pub const BASEMAP_SIZE: Size = Size { width: 1024, height: 768 };
@@ -102,14 +133,14 @@ pub enum Mode {
 #[derive(Default)]
 struct Observer {
     frames: Cell<u64>,
-    last_frame: Cell<Option<RenderFrameStatus>>,
+    last_frame: RefCell<Option<RenderFrameStatus>>,
     failure: RefCell<Option<String>>,
 }
 
 impl MapObserver for Observer {
     fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
         self.frames.set(self.frames.get() + 1);
-        self.last_frame.set(Some(*status));
+        *self.last_frame.borrow_mut() = Some(status.clone());
     }
 
     fn on_did_fail_loading_map(&self, _error: MapLoadError, what: &str) {
@@ -125,18 +156,25 @@ pub struct Scene {
 }
 
 impl Scene {
-    /// A map without a style; its GPU device is ready.
+    /// A map without a style; its GPU device is ready. Its renderer has a
+    /// glyph cache of its own.
     pub fn new(size: Size, mode: Mode) -> Scene {
+        Scene::with_glyph_cache(size, mode, Arc::default())
+    }
+
+    /// A map whose renderer shares `glyph_cache`.
+    pub fn with_glyph_cache(size: Size, mode: Mode, glyph_cache: Arc<GlyphCache>) -> Scene {
         render_test::file_source::register_proxy_file_source();
         let cache = Path::new(env!("CARGO_MANIFEST_DIR")).join("../render-test/testdata/metrics/cache-style.db");
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
         let client_options = ClientOptions::default();
-        let frontend = HeadlessFrontend::with_options(
+        let frontend = HeadlessFrontend::with_glyph_cache(
             size,
             1.0,
             SwapBehaviour::NoFlush,
             ContextMode::Unique,
             mode != Mode::OnDemand,
+            glyph_cache,
         );
         let file_source = FileSourceManager::get().get_file_source(
             FileSourceType::ResourceLoader,
@@ -163,6 +201,14 @@ impl Scene {
 
     pub fn load_json(&mut self, json: &str) {
         self.map.get_style_mut().load_json(json);
+    }
+
+    /// Adds an image to the style, as a sprite's would be.
+    pub fn add_image(&mut self, id: &str, image: PremultipliedImage) {
+        let image =
+            mln_style::image::Impl::new(id.to_owned(), image, 1.0, false, Vec::new(), Vec::new(), None, None, None)
+                .expect("a style image");
+        self.map.get_style_mut().add_image(Arc::new(image));
     }
 
     pub fn jump(&mut self, center: LatLng, zoom: f64) {
@@ -209,7 +255,7 @@ impl Scene {
     pub fn render_frame(&mut self) -> RenderFrameStatus {
         self.frontend.render_frame();
         self.wait_for_gpu();
-        self.observer.last_frame.get().expect("the renderer reports each frame")
+        self.observer.last_frame.borrow().clone().expect("the renderer reports each frame")
     }
 
     fn wait_for_gpu(&self) {
@@ -275,13 +321,79 @@ impl Scene {
     /// Whether the last frame showed the view complete with nothing left to
     /// animate.
     pub fn is_settled(&self) -> bool {
-        self.observer.last_frame.get().is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
+        self.observer
+            .last_frame
+            .borrow()
+            .as_ref()
+            .is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
+    }
+
+    /// Shows or hides every layer that draws `source`.
+    pub fn set_source_visible(&mut self, source: &str, visible: bool) {
+        let ids: Vec<String> = self
+            .map
+            .get_style()
+            .get_layers()
+            .iter()
+            .filter(|layer| layer.get_source_id() == source)
+            .map(|layer| layer.get_id())
+            .collect();
+        assert!(!ids.is_empty(), "no layer draws {source}");
+        let visibility = if visible { VisibilityType::Visible } else { VisibilityType::None };
+        for id in ids {
+            self.map.get_style_mut().get_layer_mut(&id).expect("the layer").set_visibility(visibility);
+        }
+    }
+
+    /// The vertex and index buffers the GPU held after the last frame, in
+    /// MiB.
+    pub fn gpu_buffers_mib(&self) -> f64 {
+        let last_frame = self.observer.last_frame.borrow();
+        let stats = &last_frame.as_ref().expect("a frame").rendering_stats;
+        f64::from(stats.mem_vertex_buffers + stats.mem_index_buffers) / (1024.0 * 1024.0)
     }
 
     /// Drops every loaded tile and the renderer's other data, as after a
     /// memory warning: the next frames load and lay out again.
     pub fn clear_data(&self) {
         self.frontend.with_renderer(|renderer| renderer.clear_data());
+    }
+
+    /// Sets `selected` on every other feature of `source_layer` in the
+    /// loaded tiles, and `false` on the rest.
+    pub fn select_every_feature(&self, source: &str, source_layer: &str) {
+        self.frontend.with_renderer(|renderer| {
+            let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
+            let features = renderer.query_source_features(source, &options).expect("the source's features");
+            let ids: BTreeSet<String> =
+                features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
+            assert!(!ids.is_empty(), "{source_layer} has no features with ids");
+            for (index, id) in ids.iter().enumerate() {
+                let mut state = ValueObject::new();
+                state.insert("selected".to_string(), Value::Bool(index % 2 == 0));
+                renderer.set_feature_state(source, Some(source_layer), id, &state);
+            }
+        });
+    }
+
+    /// Sets the `selected` state of one feature.
+    pub fn select_feature(&self, source: &str, source_layer: &str, id: &str, selected: bool) {
+        self.frontend.with_renderer(|renderer| {
+            let mut state = ValueObject::new();
+            state.insert("selected".to_string(), Value::Bool(selected));
+            renderer.set_feature_state(source, Some(source_layer), id, &state);
+        });
+    }
+
+    /// The ids of the loaded features of a source layer.
+    pub fn feature_ids(&self, source: &str, source_layer: &str) -> Vec<String> {
+        self.frontend.with_renderer(|renderer| {
+            let options = SourceQueryOptions::new(Some(vec![source_layer.to_string()]), None);
+            let features = renderer.query_source_features(source, &options).expect("the source's features");
+            let ids: BTreeSet<String> =
+                features.iter().filter_map(|feature| feature_id_to_string(&feature.id)).collect();
+            ids.into_iter().collect()
+        })
     }
 
     fn webgpu(&self) -> &mln_webgpu::HeadlessBackend {

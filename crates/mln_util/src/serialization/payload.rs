@@ -9,25 +9,71 @@
 //! indices). Outside a session the arrays are written in the message, as
 //! serde bytes, which postcard writes in one piece (serde writes a `Vec<u8>`
 //! byte by byte).
+//!
+//! On wasm a host can hand `decode` its payloads as the JS arrays they
+//! arrived in (`Payload::Host`). Each field copies its array into wasm
+//! memory, but for `pod::deserialize_payload`, whose caller can keep it in
+//! JS.
 
 use std::cell::RefCell;
 
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+#[cfg(target_family = "wasm")]
+use crate::host_bytes::HostBytes;
+
+/// A payload as `decode` takes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Payload {
+    Bytes(Vec<u8>),
+    /// A JS array, outside wasm memory.
+    #[cfg(target_family = "wasm")]
+    Host(HostBytes),
+}
+
+impl Payload {
+    pub fn len(&self) -> usize {
+        match self {
+            Payload::Bytes(bytes) => bytes.len(),
+            #[cfg(target_family = "wasm")]
+            Payload::Host(bytes) => bytes.len(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The bytes in wasm memory: a JS array's, copied.
+    pub fn into_vec(self) -> Vec<u8> {
+        match self {
+            Payload::Bytes(bytes) => bytes,
+            #[cfg(target_family = "wasm")]
+            Payload::Host(bytes) => bytes.to_vec(),
+        }
+    }
+}
+
+impl From<Vec<u8>> for Payload {
+    fn from(bytes: Vec<u8>) -> Self {
+        Payload::Bytes(bytes)
+    }
+}
+
 /// The smallest array that travels as a payload.
 pub const PAYLOAD_MIN: usize = 4096;
 
 thread_local! {
     /// While `encode` runs: the payloads so far.
-    static ENCODING: RefCell<Option<Vec<Vec<u8>>>> = const { RefCell::new(None) };
+    static ENCODING: RefCell<Option<Vec<Payload>>> = const { RefCell::new(None) };
     /// While `decode` runs: the payloads not taken yet.
-    static DECODING: RefCell<Option<Vec<Option<Vec<u8>>>>> = const { RefCell::new(None) };
+    static DECODING: RefCell<Option<Vec<Option<Payload>>>> = const { RefCell::new(None) };
 }
 
 /// Runs `encode`, which serializes a message, with a session open: returns
 /// its result and the payloads the message refers to.
-pub fn encode<R>(encode: impl FnOnce() -> R) -> (R, Vec<Vec<u8>>) {
+pub fn encode<R>(encode: impl FnOnce() -> R) -> (R, Vec<Payload>) {
     let outer = ENCODING.with(|session| session.borrow_mut().replace(Vec::new()));
     let result = encode();
     let payloads = ENCODING.with(|session| std::mem::replace(&mut *session.borrow_mut(), outer));
@@ -36,7 +82,7 @@ pub fn encode<R>(encode: impl FnOnce() -> R) -> (R, Vec<Vec<u8>>) {
 
 /// Runs `decode`, which deserializes a message that `encode` made, with its
 /// payloads.
-pub fn decode<R>(payloads: Vec<Vec<u8>>, decode: impl FnOnce() -> R) -> R {
+pub fn decode<R>(payloads: Vec<Payload>, decode: impl FnOnce() -> R) -> R {
     let payloads = payloads.into_iter().map(Some).collect();
     let outer = DECODING.with(|session| session.borrow_mut().replace(payloads));
     let result = decode();
@@ -87,7 +133,7 @@ fn write<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> 
     let index = if bytes.len() >= PAYLOAD_MIN {
         ENCODING.with(|session| {
             session.borrow_mut().as_mut().map(|payloads| {
-                payloads.push(bytes.to_vec());
+                payloads.push(Payload::Bytes(bytes.to_vec()));
                 payloads.len() - 1
             })
         })
@@ -103,13 +149,17 @@ fn write<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> 
     }
 }
 
-fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+fn read_payload<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Payload, D::Error> {
     match Read::deserialize(deserializer)? {
-        Read::Inline(bytes) => Ok(bytes),
+        Read::Inline(bytes) => Ok(Payload::Bytes(bytes)),
         Read::Payload(index) => DECODING
             .with(|session| session.borrow_mut().as_mut().and_then(|payloads| payloads.get_mut(index as usize)?.take()))
             .ok_or_else(|| D::Error::custom(format!("no payload {index}"))),
     }
+}
+
+fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
+    read_payload(deserializer).map(Payload::into_vec)
 }
 
 /// A `Vec<u8>`.
@@ -163,12 +213,25 @@ pub mod pod {
     use serde::de::Error as _;
     use serde::{Deserializer, Serializer};
 
+    use super::Payload;
+
     pub fn serialize<T: bytemuck::Pod, S: Serializer>(values: &[T], serializer: S) -> Result<S::Ok, S::Error> {
         super::write(bytemuck::cast_slice(values), serializer)
     }
 
     pub fn deserialize<'de, T: bytemuck::Pod, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<T>, D::Error> {
-        let bytes = super::read(deserializer)?;
+        Ok(match deserialize_payload::<T, D>(deserializer)? {
+            Payload::Bytes(bytes) => bytemuck::pod_collect_to_vec(&bytes),
+            #[cfg(target_family = "wasm")]
+            Payload::Host(bytes) => bytes.to_pod_vec(),
+        })
+    }
+
+    /// The values' bytes as they arrived, a whole number of `T`s.
+    pub fn deserialize_payload<'de, T: bytemuck::Pod, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Payload, D::Error> {
+        let bytes = super::read_payload(deserializer)?;
         if !bytes.len().is_multiple_of(size_of::<T>()) {
             let size = size_of::<T>();
             return Err(D::Error::custom(format!(
@@ -176,7 +239,7 @@ pub mod pod {
                 bytes.len()
             )));
         }
-        Ok(bytemuck::pod_collect_to_vec(&bytes))
+        Ok(bytes)
     }
 }
 

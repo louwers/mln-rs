@@ -13,7 +13,8 @@ mod support;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeSet, HashSet};
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use feature::Value;
 use geojson::{Feature, GeoJSON, Geometry, Point};
@@ -23,10 +24,9 @@ use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
-    NorthOrientation, ProjectionMode, RenderMode, TileLodMode, ViewportMode,
+    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_renderer::tile::tile::TileOperation;
-use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{OverscaledTileID, RendererFrontend, RendererObserver, TileOperation, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -36,21 +36,29 @@ use mln_storage::{
 };
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
+use mln_style::custom_tile_loader::TileFunction;
+use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
+use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
 use mln_style::layers::raster_layer::RasterLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
-use mln_style::sources::geojson_source::GeoJSONSource;
+use mln_style::sources::custom_geometry_source::{
+    CustomGeometrySource, CustomGeometrySourceHandle, Options as CustomGeometrySourceOptions,
+};
+use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
+use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
-use mln_style::{PropertyValue, TransitionOptions};
-use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_style::{PropertyValue, TransitionOptions, source};
+use mln_style_types::{ProjectionDefinition, ProjectionType, VisibilityType};
 use mln_test_server::HttpServer;
-use mln_tile_id::{CanonicalTileID, OverscaledTileID};
+use mln_text::glyph::{GlyphIDType, GlyphRange};
+use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::chrono::{Duration, Timestamp};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -328,6 +336,145 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
     assert_double_eq(virtual_camera.pitch.unwrap(), 20.0);
     assert_double_eq(test.map().get_bounds().min_pitch.unwrap(), 20.0);
     assert_double_eq(test.map().get_bounds().max_pitch.unwrap(), 60.0);
+}
+
+/// A geometry fits as its points do, wherever they sit in it.
+#[test]
+fn geometry_to_camera() {
+    use mln_util::geometry::{Geometry as G, Point as P};
+    let test = MapTest::new();
+    let points: Vec<P<f64>> = lat_lngs().iter().map(|ll| P::new(ll.longitude(), ll.latitude())).collect();
+    let geometry = G::GeometryCollection(vec![
+        G::Point(points[0]),
+        G::Polygon(vec![vec![points[1], points[2], points[1]]]),
+        G::Empty,
+    ]);
+
+    let expected = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
+    let fitted = test.map().camera_for_geometry(&geometry, &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
+    assert_double_eq(fitted.zoom.unwrap(), expected.zoom.unwrap());
+    assert_double_eq(fitted.center.unwrap().latitude(), expected.center.unwrap().latitude());
+    assert_double_eq(fitted.center.unwrap().longitude(), expected.center.unwrap().longitude());
+    assert_double_eq(fitted.bearing.unwrap(), 23.0);
+    assert_double_eq(fitted.pitch.unwrap(), 20.0);
+
+    let fitted = test.map().camera_for_geometry(&G::LineString(points), &EdgeInsets::default(), None, None).unwrap();
+    let expected = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), None, None).unwrap();
+    assert_double_eq(fitted.zoom.unwrap(), expected.zoom.unwrap());
+
+    // No points: the camera as cameraForLatLngs leaves it, unset.
+    assert!(test.map().camera_for_geometry(&G::Empty, &EdgeInsets::default(), None, None).unwrap().zoom.is_none());
+    // A point with no LatLng.
+    let bad = G::MultiPoint(vec![P::new(0.0, 0.0), P::new(0.0, 91.0)]);
+    assert!(test.map().camera_for_geometry(&bad, &EdgeInsets::default(), None, None).is_err());
+}
+
+/// A style with no sources publishes an update once it loads: a continuous
+/// map whose camera was set first (so the style's default camera doesn't
+/// jump it) still renders the style and finishes loading
+/// (maplibre/maplibre-native#4674).
+#[test]
+fn a_sourceless_style_loaded_after_the_camera_renders() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.map().jump_to(&cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(3.0)));
+    test.load_json(
+        r##"{"version": 8, "sources": {}, "layers": [
+            {"id": "bg", "type": "background", "paint": {"background-color": "#00ff00"}}
+        ]}"##,
+    );
+
+    let loaded = Rc::new(Cell::new(false));
+    let timeout = Timer::new();
+    {
+        let run_loop = test.run_loop.clone();
+        timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+    }
+    {
+        let loaded = loaded.clone();
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| {
+            loaded.set(true);
+            run_loop.stop();
+        });
+    }
+    test.run_loop.run();
+    test.observer.did_finish_loading_map_callback.clear();
+    assert!(loaded.get(), "the map never finished loading");
+
+    let image = {
+        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+        test.frontend.read_still_image()
+    };
+    assert_eq!(center_pixel(&image), [0, 255, 0, 255]);
+}
+
+/// A flight too slow for its duration to be held jumps, so the map goes idle
+/// rather than animating for centuries.
+#[test]
+fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(r##"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background"}]}"##);
+    let run_until_idle = || {
+        let idle = Rc::new(Cell::new(false));
+        let timeout = Timer::new();
+        {
+            let run_loop = test.run_loop.clone();
+            timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
+        }
+        {
+            let idle = idle.clone();
+            let run_loop = test.run_loop.clone();
+            test.observer.did_become_idle_callback.set(move |_| {
+                idle.set(true);
+                run_loop.stop();
+            });
+        }
+        test.run_loop.run();
+        test.observer.did_become_idle_callback.clear();
+        idle.get()
+    };
+    assert!(run_until_idle());
+
+    let target = cam().with_center(Some(ll(40.0, -74.0))).with_zoom(Some(10.0));
+    test.map().fly_to(&target, &AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() });
+    assert!(!test.map().in_transition());
+    assert_near(test.map().get_camera_options(None).zoom.unwrap(), 10.0, 1e-9);
+    assert!(run_until_idle());
+}
+
+/// Free camera options place the camera, and cancel the running commands.
+#[test]
+fn free_camera_options_place_the_camera_and_cancel_commands() {
+    let test = MapTest::new();
+    let ended = Rc::new(Cell::new(None));
+    let record = ended.clone();
+    let animation = AnimationOptions {
+        transition_end_fn: Some(Rc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
+        ..AnimationOptions::new(Duration::from_secs(10))
+    };
+    test.map().ease_to(&cam().with_zoom(Some(10.0)), &animation);
+    assert!(test.map().in_transition());
+
+    let position = [0.25, 0.25, 0.01];
+    test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
+    assert_eq!(ended.get(), Some(mln_map::TransitionOutcome::Cancelled));
+    assert!(!test.map().in_transition());
+    let placed = test.map().get_free_camera_options().position.unwrap();
+    for (placed, wanted) in placed.iter().zip(position) {
+        assert_near(*placed, wanted, 1e-9);
+    }
+    // Looking straight down from a quarter of the world's width and height:
+    // the center is 90° W, north of the equator.
+    let center = test.map().get_camera_options(None).center.unwrap();
+    assert_near(center.longitude(), -90.0, 1e-6);
+    assert!(center.latitude() > 0.0);
+
+    // A NaN position is ignored.
+    test.map().set_free_camera_options(&mln_map::FreeCameraOptions {
+        position: Some([f64::NAN, 0.0, 0.0]),
+        orientation: None,
+    });
+    assert_near(test.map().get_camera_options(None).center.unwrap().longitude(), -90.0, 1e-6);
 }
 
 // gtest: Map.CameraToLatLngBounds
@@ -1181,12 +1328,55 @@ fn dont_load_unneeded_tiles() {
 
 // gtest: Map.ContinuousRendering
 #[test]
-#[ignore = "TODO(port): AssetFileSource (the style's asset:// URLs under ResourceOptions::withAssetPath); also TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
+#[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:994"]
 fn continuous_rendering() {
-    // test/map/map.test.cpp:994: a Continuous map over
-    // ResourceOptions().withCachePath(":memory:").withAssetPath(
-    // "test/fixtures/api/assets") loads test/fixtures/api/water.json and must
-    // stop rendering (no frame for 1 s) within 10 s.
+    let run_loop = RunLoop::new();
+
+    let did_not_stop = Rc::new(Cell::new(false));
+    let emergency_shutoff = Timer::new();
+    {
+        let run_loop = run_loop.clone();
+        let did_not_stop = did_not_stop.clone();
+        emergency_shutoff.start(Duration::from_secs(10), Duration::zero(), move || {
+            run_loop.stop();
+            did_not_stop.set(true);
+        });
+    }
+
+    let timer = Rc::new(Timer::new());
+
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let timer = Rc::downgrade(&timer);
+        let run_loop = run_loop.clone();
+        observer.did_finish_rendering_frame_callback.set(move |_| {
+            // Start a timer that ends the test one second from now. If we are
+            // continuing to render indefinitely, the timer will be constantly
+            // restarted and never trigger. Instead, the emergency shutoff above
+            // will trigger, failing the test.
+            if let Some(timer) = timer.upgrade() {
+                let run_loop = run_loop.clone();
+                timer.start(Duration::from_secs(1), Duration::zero(), move || run_loop.stop());
+            }
+        });
+    }
+
+    let mut map = Map::with_resource_options(
+        &frontend,
+        observer.clone(),
+        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+        &ResourceOptions::default()
+            .with_cache_path(":memory:")
+            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        &ClientOptions::default(),
+    )
+    .unwrap();
+    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+
+    run_loop.run();
+    assert!(!did_not_stop.get(), "Did not stop rendering");
 }
 
 // gtest: Map.NoContentTiles
@@ -1233,6 +1423,214 @@ fn no_content_tiles() {
                         }"#,
     );
     check_image("test/fixtures/map/nocontent", &test.render().image, 0.0015, 0.1);
+}
+
+// A glyph range that fails to load or doesn't parse reaches the map observer
+// with its font stack and range, beside the ranges that are requested and
+// load.
+#[test]
+fn glyph_range_errors_reach_the_observer() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    test.file_source.set_response(Kind::Glyphs, |resource| {
+        let mut response = Response::new();
+        if resource.url.contains("/Missing/") {
+            response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+        } else if resource.url.contains("/Corrupt/") {
+            response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
+        } else {
+            response = file_response("test/fixtures/resources/glyphs.pbf");
+        }
+        Some(response)
+    });
+
+    let symbol_layer = |font: &str| {
+        format!(
+            r#"{{"id": "{font}", "type": "symbol", "source": "point",
+                "layout": {{"text-field": "a", "text-font": ["{font}"]}}}}"#
+        )
+    };
+    test.load_json(&format!(
+        r#"{{
+            "version": 8,
+            "glyphs": "test://glyphs/{{fontstack}}/{{range}}.pbf",
+            "sources": {{
+                "point": {{"type": "geojson", "data": {{"type": "Point", "coordinates": [0, 0]}}}}
+            }},
+            "layers": [{}, {}, {}]
+        }}"#,
+        symbol_layer("Missing"),
+        symbol_layer("Corrupt"),
+        symbol_layer("Good"),
+    ));
+
+    type Reported = Rc<RefCell<Vec<(Vec<String>, GlyphRange)>>>;
+    let requested: Reported = Rc::default();
+    let loaded: Reported = Rc::default();
+    let errors: Rc<RefCell<Vec<(Vec<String>, GlyphRange, String)>>> = Rc::default();
+
+    let r = requested.clone();
+    test.observer.on_glyphs_requested_callback.set(move |(font_stack, range)| r.borrow_mut().push((font_stack, range)));
+    let (l, e, run_loop) = (loaded.clone(), errors.clone(), test.run_loop.clone());
+    let stop_when_settled = move || {
+        if l.borrow().len() == 1 && e.borrow().len() == 2 {
+            run_loop.stop();
+        }
+    };
+    let (l, stop) = (loaded.clone(), stop_when_settled.clone());
+    test.observer.on_glyphs_loaded_callback.set(move |(font_stack, range)| {
+        l.borrow_mut().push((font_stack, range));
+        stop();
+    });
+    // The file source retries a failed request, so a failure can repeat.
+    let (e, stop) = (errors.clone(), stop_when_settled);
+    test.observer.on_glyphs_error_callback.set(move |(font_stack, range, error)| {
+        let error = (font_stack, range, error.to_string());
+        if !e.borrow().contains(&error) {
+            e.borrow_mut().push(error);
+        }
+        stop();
+    });
+
+    run_with_timeout(&test.run_loop, 10);
+
+    let first_range = GlyphRange::new(0, 255, GlyphIDType::FontPBF);
+    let stack = |font: &str| vec![font.to_owned()];
+    let mut requested = requested.take();
+    requested.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        requested,
+        [(stack("Corrupt"), first_range), (stack("Good"), first_range), (stack("Missing"), first_range)]
+    );
+    assert_eq!(loaded.take(), [(stack("Good"), first_range)]);
+    let mut errors = errors.take();
+    errors.sort_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(
+        errors,
+        [
+            (stack("Corrupt"), first_range, "unknown pbf field type exception".to_owned()),
+            (stack("Missing"), first_range, "Not found by the test".to_owned()),
+        ]
+    );
+}
+
+// The map observer hears each sprite the style requests, and whether it
+// loaded or failed.
+#[test]
+fn sprite_events_reach_the_observer() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    let serve = |kind: Kind, file: &'static str| {
+        test.file_source.set_response(kind, move |resource| {
+            if resource.url.starts_with("test://sprites/good") {
+                Some(file_response(file))
+            } else {
+                let mut response = Response::new();
+                response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+                Some(response)
+            }
+        });
+    };
+    serve(Kind::SpriteJSON, "test/fixtures/resources/sprite.json");
+    serve(Kind::SpriteImage, "test/fixtures/resources/sprite.png");
+
+    let requested: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
+    let loaded: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
+    let errors: Rc<RefCell<Vec<(Option<Sprite>, String)>>> = Rc::default();
+    let r = requested.clone();
+    test.observer.on_sprite_requested_callback.set(move |sprite| r.borrow_mut().push(sprite));
+    let (l, e, run_loop) = (loaded.clone(), errors.clone(), test.run_loop.clone());
+    let stop_when_settled = move || {
+        if l.borrow().len() == 1 && !e.borrow().is_empty() {
+            run_loop.stop();
+        }
+    };
+    let (l, stop) = (loaded.clone(), stop_when_settled.clone());
+    test.observer.on_sprite_loaded_callback.set(move |sprite| {
+        l.borrow_mut().push(sprite);
+        stop();
+    });
+    // The file source retries a failed request, so a failure can repeat.
+    let (e, stop) = (errors.clone(), stop_when_settled);
+    test.observer.on_sprite_error_callback.set(move |(sprite, error)| {
+        let error = (sprite, error.to_string());
+        if !e.borrow().contains(&error) {
+            e.borrow_mut().push(error);
+        }
+        stop();
+    });
+
+    test.load_json(
+        r#"{
+            "version": 8,
+            "sprite": [{"id": "good", "url": "test://sprites/good"}, {"id": "bad", "url": "test://sprites/bad"}],
+            "sources": {},
+            "layers": [{"id": "background", "type": "background"}]
+        }"#,
+    );
+    run_with_timeout(&test.run_loop, 10);
+
+    let good = Some(Sprite::new("good", "test://sprites/good"));
+    let bad = Some(Sprite::new("bad", "test://sprites/bad"));
+    assert_eq!(requested.take(), [good.clone(), bad.clone()]);
+    assert_eq!(loaded.take(), [good]);
+    assert_eq!(errors.take(), [(bad, "Not found by the test".to_owned())]);
+}
+
+// A style without a sprite loads an empty one, which the observer hears as
+// `None`, with no request before it.
+#[test]
+fn a_style_without_a_sprite_reports_it_loaded() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let requested = Rc::new(Cell::new(0));
+    let loaded: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
+    let r = requested.clone();
+    test.observer.on_sprite_requested_callback.set(move |_| r.set(r.get() + 1));
+    let l = loaded.clone();
+    test.observer.on_sprite_loaded_callback.set(move |sprite| l.borrow_mut().push(sprite));
+
+    test.load_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
+
+    assert_eq!(requested.get(), 0);
+    assert_eq!(loaded.take(), [None]);
+}
+
+// The observer hears a source change both when it comes from a file source
+// response, as a TileJSON, and when it's made through the map's style, as
+// new GeoJSON data, which it hears once the style is no longer borrowed.
+#[test]
+fn source_changes_reach_the_observer() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.file_source.set_response(Kind::Source, |_| Some(file_response("test/fixtures/resources/source_vector.json")));
+
+    let changed: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (c, run_loop) = (changed.clone(), test.run_loop.clone());
+    test.observer.on_source_changed_callback.set(move |source_id| {
+        c.borrow_mut().push(source_id);
+        run_loop.stop();
+    });
+
+    test.load_json(
+        r#"{
+            "version": 8,
+            "sources": {
+                "described": {"type": "vector", "url": "test://tiles.json"},
+                "points": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}
+            },
+            "layers": []
+        }"#,
+    );
+    run_with_timeout(&test.run_loop, 10);
+    assert_eq!(changed.take(), ["described"]);
+
+    {
+        let mut map = test.map();
+        let style = map.get_style_mut();
+        let source = style.get_source("points").unwrap().as_any().downcast_ref::<GeoJSONSource>().unwrap();
+        source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.0, 1.0)))).unwrap();
+        assert!(changed.borrow().is_empty());
+    }
+    assert_eq!(changed.take(), ["points"]);
 }
 
 const ISSUE12432_STYLE: &str = r#"{
@@ -1548,12 +1946,106 @@ fn empty_image_name_is_no_image() {
     assert!(missing.borrow().is_empty(), "{:?}", missing.borrow());
 }
 
+// gtest: Map.PrefetchDeltaOverride
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource (the test counts tiles of a vector and a custom source); see map.test.cpp:1350"]
 fn prefetch_delta_override() {
-    // test/map/map.test.cpp:1350: with setPrefetchZoomDelta(0) on a vector and
-    // a CustomGeometrySource, z16 requests 2 x 4 tiles; resetting the delta
-    // to the default requests 4 parent tiles per source.
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    test.load_json(
+        r#"{
+                "layers": [{
+                    "id": "vector",
+                    "type": "fill",
+                    "source": "vector",
+                    "minzoom": 0,
+                    "maxzoom": 24
+                },
+                {
+                    "id": "custom",
+                    "type": "fill",
+                    "source": "custom",
+                    "minzoom": 0,
+                    "maxzoom": 24
+                }]
+                }"#,
+    );
+
+    // Vector source
+    let vector = vector_source("vector", "a/{z}/{x}/{y}");
+    source::set_prefetch_zoom_delta(&vector, Some(0));
+    test.map().get_style_mut().add_source(Box::new(vector)).unwrap();
+
+    let requested_tiles = Arc::new(AtomicI32::new(0));
+    {
+        let requested_tiles = requested_tiles.clone();
+        test.file_source.set_response(Kind::Tile, move |_| {
+            requested_tiles.fetch_add(1, Ordering::SeqCst);
+            no_content()
+        });
+    }
+
+    // Custom source
+    test.map().get_style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+
+    test.map().jump_to(&cam().with_zoom(Some(16.0)));
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    }
+    test.run_loop.run();
+    // 2 sources x 4 tiles
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
+
+    requested_tiles.store(0, Ordering::SeqCst);
+
+    // Should request z12 tiles when delta is set back to default, that is 4.
+    stop_on_full_frame(&test);
+
+    for id in ["vector", "custom"] {
+        let map = test.map();
+        source::set_prefetch_zoom_delta(map.get_style().get_source(id).unwrap(), None);
+    }
+    test.run_loop.run();
+
+    // Each source requests 4 additional parent tiles.
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
+}
+
+/// A custom geometry source "custom" that counts its fetches in
+/// `requested_tiles` and answers each with empty data.
+fn counted_custom_source(requested_tiles: &Arc<AtomicI32>, prefetch_zoom_delta: Option<u8>) -> CustomGeometrySource {
+    let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
+    let fetch: TileFunction = {
+        let handle = handle.clone();
+        let requested_tiles = requested_tiles.clone();
+        Arc::new(move |tile_id: &CanonicalTileID| {
+            requested_tiles.fetch_add(1, Ordering::SeqCst);
+            if let Some(handle) = handle.get() {
+                handle.set_tile_data(*tile_id, GeoJSON::default());
+            }
+        })
+    };
+    let options = CustomGeometrySourceOptions {
+        fetch_tile_function: Some(fetch),
+        cancel_tile_function: Some(Arc::new(|_: &CanonicalTileID| {})),
+        ..Default::default()
+    };
+    let custom = CustomGeometrySource::new("custom", options).unwrap();
+    handle.set(custom.handle()).unwrap();
+    if prefetch_zoom_delta.is_some() {
+        source::set_prefetch_zoom_delta(&custom, prefetch_zoom_delta);
+    }
+    custom
+}
+
+/// Stops the run loop at the next full frame.
+fn stop_on_full_frame<FS: mln_storage::FileSource + 'static>(test: &MapTest<FS>) {
+    let run_loop = test.run_loop.clone();
+    test.observer.did_finish_rendering_frame_callback.set(move |status: RenderFrameStatus| {
+        if status.mode == RenderMode::Full {
+            run_loop.stop();
+        }
+    });
 }
 
 // gtest: Map.GlobePrefetchRequestsCoarserTiles
@@ -1670,10 +2162,50 @@ fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
 // if there is a significant change.
 // gtest: Map.PrefetchDeltaOverrideCustomSource
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource; see map.test.cpp:1528"]
 fn prefetch_delta_override_custom_source() {
-    // test/map/map.test.cpp:1528: removing and re-adding the custom source
-    // re-requests the z16 tiles and their parents (8 requests).
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    test.load_json(
+        r#"{
+                "layers": [{
+                    "id": "custom",
+                    "type": "fill",
+                    "source": "custom",
+                    "source-layer": "a",
+                    "minzoom": 0,
+                    "maxzoom": 24
+                }]
+                }"#,
+    );
+
+    let requested_tiles = Arc::new(AtomicI32::new(0));
+
+    test.map().get_style_mut().add_source(Box::new(counted_custom_source(&requested_tiles, Some(0)))).unwrap();
+
+    test.map().jump_to(&cam().with_zoom(Some(16.0)));
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    }
+    test.run_loop.run();
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 4);
+    requested_tiles.store(0, Ordering::SeqCst);
+
+    stop_on_full_frame(&test);
+
+    {
+        let mut map = test.map();
+        let mut style = map.get_style_mut();
+        let layer = style.remove_layer("custom").unwrap();
+        style.remove_source("custom");
+        style.add_layer(layer, None).unwrap();
+        style.add_source(Box::new(counted_custom_source(&requested_tiles, None))).unwrap();
+    }
+    test.run_loop.run();
+
+    // Source was significantly mutated, therefore, tile pyramid would be
+    // cleared and current zoom level + parent tiles would be re-requested.
+    assert_eq!(requested_tiles.load(Ordering::SeqCst), 8);
 }
 
 /// The `ForwardingHeadlessFrontend` of Map.ExpiredSpriteSheet: a
@@ -2111,12 +2643,132 @@ fn resource_error() {
     }
 }
 
+/// Answers each request of `kind` once, as a file source that doesn't retry
+/// does: with an error while the returned flag is set, then with `response`.
+/// Also returns the request count.
+fn fail_requests(test: &MapTest, kind: Kind, response: Response) -> (Rc<Cell<bool>>, Rc<Cell<usize>>) {
+    let failing = Rc::new(Cell::new(true));
+    let count = Rc::new(Cell::new(0));
+    let (f, c) = (failing.clone(), count.clone());
+    test.file_source.set_response(kind, move |_| {
+        c.set(c.get() + 1);
+        if f.get() {
+            let mut failed = Response::new();
+            failed.error = Some(Box::new(ResponseError::new(Reason::Server, "failed")));
+            Some(failed)
+        } else {
+            Some(response.clone())
+        }
+    });
+    (failing, count)
+}
+
+fn assert_still_image_retries_failed_tile(source: &str, layer: &str) {
+    let test = MapTest::new();
+    let mut empty = Response::new();
+    empty.no_content = true;
+    let (failing, requests) = fail_requests(&test, Kind::Tile, empty);
+    test.load_json(&format!(r#"{{"version": 8, "sources": {{"tiles": {source}}}, "layers": [{layer}]}}"#));
+
+    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(requests.get(), 1);
+
+    failing.set(false);
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+
+    // Nothing failed, so nothing is requested again.
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+}
+
+// gtest: Map.StillImageRetriesFailedTile
+#[test]
+fn still_image_retries_failed_tile() {
+    assert_still_image_retries_failed_tile(
+        r#"{"type": "vector", "tiles": ["http://example.com/{z}/{x}/{y}.pbf"], "maxzoom": 0}"#,
+        r#"{"id": "fill", "type": "fill", "source": "tiles", "source-layer": "any"}"#,
+    );
+}
+
+#[test]
+fn still_image_retries_failed_raster_tile() {
+    assert_still_image_retries_failed_tile(
+        r#"{"type": "raster", "tiles": ["http://example.com/{z}/{x}/{y}.png"], "maxzoom": 0}"#,
+        r#"{"id": "raster", "type": "raster", "source": "tiles"}"#,
+    );
+}
+
+// gtest: Map.StillImageRetriesFailedGlyphRange
+#[test]
+fn still_image_retries_failed_glyph_range() {
+    let test = MapTest::new();
+    let (failing, requests) = fail_requests(&test, Kind::Glyphs, file_response("test/fixtures/resources/glyphs.pbf"));
+    test.load_json(
+        r#"{
+        "version": 8,
+        "glyphs": "http://example.com/{fontstack}/{range}.pbf",
+        "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}},
+        "layers": [{"id": "label", "type": "symbol", "source": "point", "layout": {"text-field": "A"}}]
+    }"#,
+    );
+    let labels = |test: &MapTest| {
+        let size = test.frontend.get_size();
+        let center = ScreenCoordinate::new(f64::from(size.width) / 2.0, f64::from(size.height) / 2.0);
+        let options = mln_renderer::query::RenderedQueryOptions::default();
+        test.frontend
+            .with_renderer(|renderer| renderer.query_rendered_features_at_point(&center, &options))
+            .unwrap()
+            .len()
+    };
+
+    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(requests.get(), 1);
+    assert_eq!(labels(&test), 0);
+
+    // The tile laid out without the range lays out again with it.
+    failing.set(false);
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+    assert_eq!(labels(&test), 1);
+
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+}
+
 // gtest: Map.StencilOverflow
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource and RenderResult::stats (gfx::RenderingStats::stencilUpdates); see map.test.cpp:1964"]
 fn stencil_overflow() {
-    // test/map/map.test.cpp:1964: a CustomGeometrySource with 16 px tiles at
-    // z5 renders without crashing; ASSERT_LE(0, result.stats.stencilUpdates).
+    let test = MapTest::new();
+
+    test.load_json("{}");
+
+    // Create a tile source with small tiles that produces enough tiles to
+    // exceed the stencil ID limit and causes a clearing of the stencil buffer.
+    let handle = Arc::new(OnceLock::<CustomGeometrySourceHandle>::new());
+    let fetch: TileFunction = {
+        let handle = handle.clone();
+        Arc::new(move |tile_id: &CanonicalTileID| {
+            if let Some(handle) = handle.get() {
+                handle.set_tile_data(*tile_id, GeoJSON::default());
+            }
+        })
+    };
+    let mut options = CustomGeometrySourceOptions { fetch_tile_function: Some(fetch), ..Default::default() };
+    options.tile_options.tile_size = mln_util::constants::TILE_SIZE_I / 32;
+    let custom = CustomGeometrySource::new("custom", options).unwrap();
+    handle.set(custom.handle()).unwrap();
+
+    test.map().get_style_mut().add_source(Box::new(custom)).unwrap();
+    test.map().get_style_mut().add_layer(Box::new(FillLayer::new("fill", "custom")), None).unwrap();
+
+    test.map().jump_to(&cam().with_zoom(Some(5.0)));
+    let result = test.render();
+
+    // No drawables are built because no bucket/tiledata is available.
+    assert!(0 <= result.stats.stencil_updates);
+
+    // TODO: confirm that the stencil masking actually worked
 }
 
 // gtest: Map.InvalidUTF8InTile
@@ -2186,13 +2838,117 @@ fn invalid_utf8_in_tile() {
 }
 
 // gtest: Map.ObserveTileLifecycle
+// TODO(port): the half of the gtest that checks the pre/post compile events
+// of the fill and fill-outline shaders (MapObserver has no shader callbacks).
 #[test]
-#[ignore = "TODO(port): MapObserver::onPre/PostCompileShader, and AssetFileSource for the asset:// style; see map.test.cpp:2040"]
 fn observe_tile_lifecycle() {
-    // test/map/map.test.cpp:2040: checks the order of the tile operations
-    // (RequestedFromCache/Network, LoadFromCache/Network, StartParse,
-    // EndParse, Cancelled) for the four z10 tiles around San Francisco and
-    // the pre/post compile events of the fill and fill-outline shaders.
+    let _run_loop = RunLoop::new();
+
+    let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
+    // We expect to see a valid lifecycle for every tile in this list.
+    let expected_tiles = [
+        OverscaledTileID::with_zxy(10, 0, 10, 163, 395),
+        OverscaledTileID::with_zxy(10, 0, 10, 163, 396),
+        OverscaledTileID::with_zxy(10, 0, 10, 164, 395),
+        OverscaledTileID::with_zxy(10, 0, 10, 164, 396),
+        // Lower zooms can also be seen, but not always, so we ignore them.
+    ];
+
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let tile_ops = tile_ops.clone();
+        observer.on_tile_action_callback.set(move |(op, id, source_id)| {
+            if source_id == "mapbox" {
+                tile_ops.borrow_mut().push((id, op));
+            }
+        });
+    }
+
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let mut map = Map::with_resource_options(
+        &frontend,
+        observer.clone(),
+        MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+        &ResourceOptions::default()
+            .with_cache_path(":memory:")
+            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        &ClientOptions::default(),
+    )
+    .unwrap();
+    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    let mut layer = FillLayer::new("landcover", "mapbox");
+    layer.set_source_layer("landcover");
+    layer.set_fill_color(&PropertyValue::Constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+    map.jump_to(&cam().with_center(Some(ll(37.8, -122.5))).with_zoom(Some(10.0)));
+    frontend.render(&mut map).unwrap();
+
+    use TileOperation::*;
+    let tile_ops = tile_ops.borrow();
+    for tile in expected_tiles {
+        let mut stage = NullOp;
+        let mut parsing = false;
+
+        for (index, (id, op)) in tile_ops.iter().enumerate() {
+            if *id != tile {
+                continue;
+            }
+            let context = format!("{tile} op {index}: {op:?} after {stage:?}");
+            match op {
+                RequestedFromCache => {
+                    assert_eq!(stage, NullOp, "{context}");
+                }
+                RequestedFromNetwork => {
+                    // Parsing happens concurrently with the file source
+                    // request and can start and stop between requests
+                    assert!(matches!(stage, StartParse | EndParse | LoadFromCache), "{context}");
+                }
+                LoadFromNetwork => {
+                    // Parsing happens concurrently with the file source
+                    // request and can start and stop between requests
+                    assert!(matches!(stage, StartParse | EndParse | RequestedFromNetwork), "{context}");
+                }
+                LoadFromCache => {
+                    assert!(matches!(stage, RequestedFromCache | StartParse), "{context}");
+                }
+                StartParse => {
+                    // Parsing is expected to be started early during the
+                    // request process by a call to `setLayers`
+                    assert!(
+                        matches!(stage, RequestedFromCache | RequestedFromNetwork | LoadFromCache | LoadFromNetwork),
+                        "{context}"
+                    );
+                    // We must not already be parsing when seeing this marker.
+                    assert!(!parsing, "{context}");
+                    parsing = true;
+                }
+                Cancelled => {
+                    assert!(
+                        matches!(
+                            stage,
+                            RequestedFromCache | RequestedFromNetwork | LoadFromNetwork | LoadFromCache | StartParse
+                        ),
+                        "{context}"
+                    );
+                    parsing = false;
+                }
+                EndParse => {
+                    // A parse that a newer response interrupts isn't
+                    // cancelled, so EndParse can follow the network request
+                    // or response as well as StartParse.
+                    assert!(matches!(stage, StartParse | LoadFromNetwork | RequestedFromNetwork), "{context}");
+                    // We must have been parsing to see the EndParse marker.
+                    assert!(parsing, "{context}");
+                    parsing = false;
+                }
+                NullOp | Error => panic!("{context}"),
+            }
+            stage = *op;
+        }
+
+        assert!(matches!(stage, EndParse | Cancelled), "{tile} ends at {stage:?}");
+        assert!(!parsing, "{tile} is still parsing");
+    }
 }
 
 // gtest: Map.EmptyPlacementDoesNotRequestRepaint
@@ -2216,7 +2972,7 @@ fn empty_placement_does_not_request_repaint() {
     for frame in 0..2 {
         status.set(None);
         test.frontend.render_frame();
-        let value = status.get().expect("rendered a frame");
+        let value = status.take().expect("rendered a frame");
         assert!(!value.needs_repaint, "frame {frame}");
     }
 
@@ -2236,7 +2992,7 @@ fn empty_placement_does_not_request_repaint() {
     test.run_loop.run_once();
     status.set(None);
     test.frontend.render_frame();
-    let value = status.get().expect("rendered a frame");
+    let value = status.take().expect("rendered a frame");
     assert!(value.needs_repaint);
 }
 
@@ -2677,6 +3433,207 @@ fn set_frustum_offset() {
     check_image("test/fixtures/map/setFrustumOffset/after", &test.render().image, 0.0006, 0.1);
 }
 
+/// A `width` x `height` opaque red image.
+fn red_image(width: u32, height: u32) -> PremultipliedImage {
+    let pixels = [255, 0, 0, 255].repeat((width * height) as usize);
+    PremultipliedImage::from_vec(Size::new(width, height), pixels)
+}
+
+/// The shared setup of the GeoJSON symbol tests: a 512x512 map with a white
+/// background, glyphs from test/fixtures/resources/glyphs.pbf, counting the
+/// glyph requests.
+fn geojson_symbol_map() -> (MapTest, Rc<Cell<u32>>) {
+    let test = MapTest::new();
+    test.frontend.clone().set_size(Size::new(512, 512));
+    test.map().set_size(Size::new(512, 512)).unwrap();
+
+    let glyph_requests = Rc::new(Cell::new(0));
+    let counter = glyph_requests.clone();
+    test.file_source.set_response(Kind::Glyphs, move |_| {
+        counter.set(counter.get() + 1);
+        Some(file_response("test/fixtures/resources/glyphs.pbf"))
+    });
+    test.load_json(
+        r#"{
+        "version": 8,
+        "glyphs": "https://example.com/{fontstack}/{range}.pbf",
+        "sources": {},
+        "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}}]
+    }"#,
+    );
+    (test, glyph_requests)
+}
+
+/// Adds a GeoJSON source with a point at `longitude` and a symbol layer
+/// drawing the "marker" icon above it and, `with_text`, a label below it.
+fn add_geojson_symbol(test: &MapTest, index: usize, longitude: f64, synchronous: bool, with_text: bool) {
+    let source_id = format!("point-{index}");
+    let options = GeoJSONOptions { synchronous_update: synchronous, ..GeoJSONOptions::default() };
+    let source = GeoJSONSource::new(source_id.clone(), Arc::new(options));
+    source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(longitude, 0.0)))).unwrap();
+    test.map().get_style_mut().add_source(Box::new(source)).unwrap();
+
+    let text = if with_text { "New place" } else { "" };
+    let layer_json = format!(
+        r#"{{
+            "id": "symbol-{index}", "type": "symbol", "source": "{source_id}",
+            "layout": {{
+                "icon-image": "marker", "icon-anchor": "bottom",
+                "icon-allow-overlap": true, "icon-ignore-placement": true,
+                "text-field": "{text}", "text-font": ["Open Sans Regular"], "text-anchor": "top",
+                "text-allow-overlap": true, "text-ignore-placement": true
+            }}
+        }}"#
+    );
+    let layer_value: serde_json::Value = serde_json::from_str(&layer_json).unwrap();
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
+    test.map().get_style_mut().add_layer(layer, None).unwrap();
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom
+fn retains_icons_and_text_across_zoom(synchronous: bool, with_text: bool) {
+    let (test, glyph_requests) = geojson_symbol_map();
+    test.map().get_style_mut().add_image(style_image("marker", red_image(40, 48), 1.0));
+    for i in 0..3 {
+        add_geojson_symbol(&test, i, (i as f64 - 1.0) * 0.01, synchronous, with_text);
+    }
+
+    for zoom in [14.0, 13.5, 13.0, 12.5, 14.0] {
+        test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(zoom)));
+        let image = test.render().image;
+        let mut red_pixels = 0;
+        let mut black_pixels = 0;
+        for pixel in image.data.chunks_exact(4) {
+            red_pixels += usize::from(pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50);
+            black_pixels += usize::from(pixel[0] < 100 && pixel[1] < 100 && pixel[2] < 100);
+        }
+        assert!(red_pixels >= 5000, "zoom {zoom}: {red_pixels} red pixels");
+        if with_text {
+            assert!(black_pixels > 100, "zoom {zoom}: {black_pixels} black pixels");
+            assert_eq!(glyph_requests.get(), 1, "zoom {zoom}");
+        }
+    }
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/AsynchronousIconOnly
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_asynchronous_icon_only() {
+    retains_icons_and_text_across_zoom(false, false);
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/AsynchronousWithText
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_asynchronous_with_text() {
+    retains_icons_and_text_across_zoom(false, true);
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/SynchronousIconOnly
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_synchronous_icon_only() {
+    retains_icons_and_text_across_zoom(true, false);
+}
+
+// gtest: GeoJSON/GeoJSONSymbolTest.RetainsIconsAndTextAcrossZoom/SynchronousWithText
+#[test]
+fn geojson_symbol_retains_icons_and_text_across_zoom_synchronous_with_text() {
+    retains_icons_and_text_across_zoom(true, true);
+}
+
+/// The RGBA pixel at `x`, `y`.
+fn pixel_at(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
+    let offset = ((y * image.size.width + x) * 4) as usize;
+    image.data[offset..offset + 4].try_into().unwrap()
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout
+fn renders_image_added_after_layout(synchronous: bool, with_text: bool) {
+    let (test, _) = geojson_symbol_map();
+    add_geojson_symbol(&test, 0, 0.0, synchronous, with_text);
+
+    // Complete tile layout with the image missing, then add it without
+    // changing the camera or layers.
+    let icon_size = Size::new(32, 32);
+    let before = test.render().image;
+    let x = before.size.width / 2;
+    let y = before.size.height / 2 - icon_size.height / 2;
+    assert_eq!(pixel_at(&before, x, y)[..3], [255, 255, 255]);
+
+    test.map().get_style_mut().add_image(style_image("marker", red_image(icon_size.width, icon_size.height), 1.0));
+    let after = test.render().image;
+    assert_eq!(pixel_at(&after, x, y), [255, 0, 0, 255]);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/AsynchronousIconOnly
+#[test]
+fn late_style_image_renders_image_added_after_layout_asynchronous_icon_only() {
+    renders_image_added_after_layout(false, false);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/AsynchronousWithText
+#[test]
+fn late_style_image_renders_image_added_after_layout_asynchronous_with_text() {
+    renders_image_added_after_layout(false, true);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/SynchronousIconOnly
+#[test]
+fn late_style_image_renders_image_added_after_layout_synchronous_icon_only() {
+    renders_image_added_after_layout(true, false);
+}
+
+// gtest: GeoJSON/LateStyleImageTest.RendersImageAddedAfterLayout/SynchronousWithText
+#[test]
+fn late_style_image_renders_image_added_after_layout_synchronous_with_text() {
+    renders_image_added_after_layout(true, true);
+}
+
+// gtest: Map.UnrelatedImagePreservesTileLayoutAndCache
+//
+// The C++ test counts StartParse tile actions; MapObserver has no
+// onTileAction here, so this counts the requests for the missing "marker"
+// image, which every layout of the point's tile makes.
+#[test]
+fn unrelated_image_preserves_tile_layout_and_cache() {
+    let test = MapTest::new();
+    test.frontend.clone().set_size(Size::new(128, 128));
+    test.map().set_size(Size::new(128, 128)).unwrap();
+    test.map().set_prefetch_zoom_delta(0);
+    test.load_json(
+        r#"{
+        "version": 8,
+        "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [-90, 40]}}},
+        "layers": [{"id": "symbol", "type": "symbol", "source": "point", "layout": {"icon-image": "marker"}}]
+    }"#,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, -90.0))).with_zoom(Some(3.0)));
+    let parses = Rc::new(Cell::new(0));
+    {
+        let parses = parses.clone();
+        test.observer.on_style_image_missing_callback.set(move |id| {
+            if id == "marker" {
+                parses.set(parses.get() + 1);
+            }
+        });
+    }
+    test.render();
+    assert!(parses.get() > 0);
+
+    // Move the original tiles into the cache and finish layout in another
+    // region.
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, 0.0))).with_zoom(Some(3.0)));
+    test.render();
+    parses.set(0);
+    test.map().get_style_mut().add_image(style_image("unrelated", red_image(16, 16), 1.0));
+    test.render();
+    assert_eq!(parses.get(), 0);
+
+    test.map().jump_to(&cam().with_center(Some(ll(40.0, -90.0))).with_zoom(Some(3.0)));
+    test.render();
+    assert_eq!(parses.get(), 0);
+}
+
 // End-to-end: a feature-state change must alter the *rendered* output, not just
 // the value read back through the API. A fill covering the viewport is colored
 // by a data-driven expression on feature-state "active" (blue by default, red
@@ -2747,6 +3704,173 @@ fn feature_state_changes_rendered_style() {
         assert!(center_channel(&result.image, 0) < 40, "red channel (removed)");
         assert!(center_channel(&result.image, 2) > 200, "blue channel (removed)");
     }
+}
+
+fn load_selectable_halves_style(test: &MapTest) {
+    test.load_json(
+        r##"{
+      "version": 8,
+      "sources": {
+        "fs": {
+          "type": "geojson",
+          "data": {
+            "type": "FeatureCollection",
+            "features": [{
+              "type": "Feature",
+              "id": 1,
+              "properties": {},
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[-180, -85], [0, -85], [0, 85], [-180, 85], [-180, -85]]]
+              }
+            }, {
+              "type": "Feature",
+              "id": 2,
+              "properties": {},
+              "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[0, -85], [180, -85], [180, 85], [0, 85], [0, -85]]]
+              }
+            }]
+          }
+        }
+      },
+      "layers": [{
+        "id": "fill",
+        "type": "fill",
+        "source": "fs",
+        "paint": {
+          "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#ff0000", "#0000ff"]
+        }
+      }]
+    }"##,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
+}
+
+/// Whether feature 1 (the left half) and feature 2 (the right half) render as
+/// selected.
+fn render_selected_halves(test: &MapTest) -> (bool, bool) {
+    let image = test.render().image;
+    let is_selected = |x: usize| {
+        let offset = (image.size.height as usize / 2) * image.stride() + x * 4;
+        image.data[offset] > 200 && image.data[offset + 2] < 40
+    };
+    let width = image.size.width as usize;
+    (is_selected(width / 4), is_selected(width * 3 / 4))
+}
+
+fn feature_state(key: &str) -> mln_style::expression::expression::FeatureState {
+    let mut state = mln_style::expression::expression::FeatureState::new();
+    state.insert(key.into(), Value::Bool(true));
+    state
+}
+
+fn set_state(test: &MapTest, feature_id: &str, state: &mln_style::expression::expression::FeatureState) {
+    test.frontend.with_renderer(|renderer| renderer.set_feature_state("fs", None, feature_id, state));
+}
+
+fn remove_state(test: &MapTest, feature_id: Option<&str>, state_key: Option<&str>) {
+    test.frontend.with_renderer(|renderer| renderer.remove_feature_state("fs", None, feature_id, state_key));
+}
+
+// gtest: Map.FeatureStateRemovalAndChangeOfAnotherFeatureBeforeOneRender
+#[test]
+fn feature_state_removal_and_change_of_another_feature_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    remove_state(&test, Some("1"), None);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (false, true));
+}
+
+// gtest: Map.FeatureStateKeyRemovalAndChangeOfSameKeyBeforeOneRender
+#[test]
+fn feature_state_key_removal_and_change_of_same_key_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    remove_state(&test, Some("1"), Some("selected"));
+    set_state(&test, "1", &selected);
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    set_state(&test, "1", &selected);
+    remove_state(&test, Some("1"), Some("selected"));
+    assert_eq!(render_selected_halves(&test), (false, false));
+}
+
+// gtest: Map.FeatureStateChangeAndRemovalOfSameFeatureBeforeOneRender
+#[test]
+fn feature_state_change_and_removal_of_same_feature_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+
+    set_state(&test, "1", &feature_state("selected"));
+    assert_eq!(render_selected_halves(&test), (true, false));
+
+    set_state(&test, "1", &feature_state("hovered"));
+    remove_state(&test, Some("1"), None);
+    assert_eq!(render_selected_halves(&test), (false, false));
+}
+
+// gtest: Map.FeatureStateKeyRemovalsOfTwoFeaturesBeforeOneRender
+#[test]
+fn feature_state_key_removals_of_two_features_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (true, true));
+
+    remove_state(&test, Some("1"), Some("selected"));
+    remove_state(&test, Some("2"), Some("selected"));
+    assert_eq!(render_selected_halves(&test), (false, false));
+}
+
+// gtest: Map.FeatureStateChangeSourceRemovalAndChangeBeforeOneRender
+#[test]
+fn feature_state_change_source_removal_and_change_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    remove_state(&test, None, None);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (false, true));
+}
+
+// gtest: Map.FeatureStateSourceRemovalAndChangeBeforeOneRender
+#[test]
+fn feature_state_source_removal_and_change_before_one_render() {
+    let test = MapTest::new();
+    load_selectable_halves_style(&test);
+    assert_eq!(render_selected_halves(&test), (false, false));
+    let selected = feature_state("selected");
+
+    set_state(&test, "1", &selected);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (true, true));
+
+    remove_state(&test, None, None);
+    set_state(&test, "2", &selected);
+    assert_eq!(render_selected_halves(&test), (false, true));
 }
 
 fn count_green_pixels(image: &PremultipliedImage) -> usize {
@@ -2835,21 +3959,80 @@ fn location_indicator_accuracy_colors_transition() {
     assert!(count_green_pixels(&result) > 0, "The accuracy border should finish transitioning to green");
 }
 
+const CIRCLE_STYLE: &str = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{
+    "type":"Point","coordinates":[0,0]}}},"layers":[{"id":"circle","type":"circle","source":"points"}]}"#;
+
 // gtest: Map.RenderingStatisticsTrackDrawsAcrossFrames
 #[test]
-#[ignore = "TODO(port): HeadlessFrontend::RenderResult::stats (gfx::RenderingStats numFrames/numDrawCalls/totalDrawCalls); see map.test.cpp:2725"]
 fn rendering_statistics_track_draws_across_frames() {
-    // test/map/map.test.cpp:2725: numFrames counts up per render, numDrawCalls
-    // is the frame's and totalDrawCalls the running sum; a hidden circle layer
-    // draws nothing.
+    let test = MapTest::new();
+    test.load_json(CIRCLE_STYLE);
+    let first = test.render().stats;
+    assert!(first.num_frames > 0);
+    assert!(first.num_draw_calls > 0);
+    assert!(first.total_draw_calls >= first.num_draw_calls);
+
+    let second = test.render().stats;
+    assert_eq!(first.num_frames + 1, second.num_frames);
+    assert!(second.num_draw_calls > 0);
+    assert_eq!(first.total_draw_calls + second.num_draw_calls, second.total_draw_calls);
+
+    test.map().get_style_mut().get_layer_mut("circle").expect("circle layer").set_visibility(VisibilityType::None);
+    let empty = test.render().stats;
+    assert_eq!(second.num_frames + 1, empty.num_frames);
+    assert_eq!(0, empty.num_draw_calls);
+    assert_eq!(second.total_draw_calls, empty.total_draw_calls);
+}
+
+// The map observer gets each frame's rendering stats with its status.
+#[test]
+fn frame_status_carries_rendering_stats() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let last = Rc::new(RefCell::new(None::<RenderFrameStatus>));
+    {
+        let last = last.clone();
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |status| {
+            let done = status.mode == RenderMode::Full && !status.needs_repaint;
+            *last.borrow_mut() = Some(status);
+            if done {
+                run_loop.stop();
+            }
+        });
+    }
+    test.load_json(CIRCLE_STYLE);
+    run_with_timeout(&test.run_loop, 10);
+    test.observer.did_finish_rendering_frame_callback.clear();
+
+    let status = last.borrow_mut().take().expect("rendered a frame");
+    let stats = &status.rendering_stats;
+    assert!(stats.num_frames > 0);
+    assert!(stats.num_draw_calls > 0);
+    assert!(stats.total_draw_calls >= stats.num_draw_calls);
+    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+    assert_eq!(**stats, *test.frontend.get_backend().get_context().rendering_stats());
 }
 
 // gtest: Map.LocationIndicatorWithoutImages
 #[test]
-#[ignore = "TODO(port): RenderResult::stats (numDrawCalls) and RenderLocationIndicatorLayer; see map.test.cpp:2746"]
+#[ignore = "TODO(port): RenderLocationIndicatorLayer; until it draws, this passes without checking anything"]
 fn location_indicator_without_images() {
-    // test/map/map.test.cpp:2746: a location-indicator with accuracy-radius 0
-    // and no images produces no draw call.
+    let test = MapTest::new();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {},
+      "layers": [{
+        "id": "location",
+        "type": "location-indicator",
+        "paint": {"location": [0, 0, 0], "accuracy-radius": 0}
+      }]
+    }"#,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(16.0)));
+
+    // Neither the accuracy circle nor any image should produce a draw call.
+    assert_eq!(test.render().stats.num_draw_calls, 0);
 }
 
 /// The capturing `RendererFrontend` of TileSelectionOptionsPublishUpdates.
@@ -2871,6 +4054,92 @@ impl RendererFrontend for CapturingFrontend {
         *self.parameters.borrow_mut() = Some(value);
     }
     // TODO(port): getThreadPool() (not in the Rust RendererFrontend yet).
+}
+
+/// Renders a frame and returns the RGB of the pixel at the centre of the map.
+fn render_center_pixel(test: &MapTest) -> [u8; 3] {
+    test.map().trigger_repaint();
+    test.frontend.render_frame();
+    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+    let [r, g, b, _] = center_pixel(&test.frontend.read_still_image());
+    [r, g, b]
+}
+
+// gtest: Map.GlobalStateChangeTransitionsPaintProperty
+#[test]
+fn global_state_change_transitions_paint_property() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(
+        r##"{
+      "version": 8,
+      "transition": { "duration": 100, "delay": 0 },
+      "state": { "color": { "default": "#ff0000" } },
+      "sources": {},
+      "layers": [{
+        "id": "background",
+        "type": "background",
+        "paint": { "background-color": ["global-state", "color"] }
+      }]
+    }"##,
+    );
+
+    let initial = render_center_pixel(&test);
+    assert!(initial[0] > 240, "{initial:?}");
+    assert!(initial[2] < 10, "{initial:?}");
+
+    test.map().get_style_mut().set_global_state_property("color", &Value::String("#0000ff".to_owned())).unwrap();
+
+    // The frame that picks up the change starts the transition at its own time point, so it still shows red.
+    let changed = render_center_pixel(&test);
+    assert!(changed[0] > 200, "{changed:?}");
+    assert!(changed[2] < 55, "{changed:?}");
+
+    // Once the transition has run its course, the new state shows.
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    let finished = render_center_pixel(&test);
+    assert!(finished[0] < 10, "{finished:?}");
+    assert!(finished[2] > 240, "{finished:?}");
+}
+
+// gtest: Map.LayerAddedWithGlobalStateChangeShowsNewState
+#[test]
+fn layer_added_with_global_state_change_shows_new_state() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.load_json(
+        r##"{
+      "version": 8,
+      "transition": { "duration": 100, "delay": 0 },
+      "state": { "color": { "default": "#0000ff" } },
+      "sources": {},
+      "layers": [{
+        "id": "base",
+        "type": "background",
+        "paint": { "background-color": "#ff0000" }
+      }]
+    }"##,
+    );
+
+    let initial = render_center_pixel(&test);
+    assert!(initial[0] > 240, "{initial:?}");
+    assert!(initial[1] < 10, "{initial:?}");
+
+    // The state changes and a layer reading it is added before the next frame.
+    test.map().get_style_mut().set_global_state_property("color", &Value::String("#00ff00".to_owned())).unwrap();
+
+    let layer_value: serde_json::Value = serde_json::from_str(
+        r#"{"id": "added", "type": "background", "paint": {"background-color": ["global-state", "color"]}}"#,
+    )
+    .unwrap();
+    let mut error = ConversionError::default();
+    let layer = convert_layer(&Convertible::from(&layer_value), &mut error);
+    let layer = layer.unwrap_or_else(|| panic!("{}", error.message));
+    test.map().get_style_mut().add_layer(layer, None).unwrap();
+
+    // The new layer never showed the prior state, so it must show the current one at once.
+    let added = render_center_pixel(&test);
+    assert!(added[0] < 10, "{added:?}");
+    assert!(added[1] > 240, "{added:?}");
+    assert!(added[2] < 10, "{added:?}");
 }
 
 // gtest: Map.TileSelectionOptionsPublishUpdates
@@ -2910,6 +4179,38 @@ fn tile_selection_options_publish_updates() {
     check(&mut map, &frontend, Map::set_tile_lod_pitch_threshold, |p| p.tile_lod_pitch_threshold, 0.5);
     check(&mut map, &frontend, Map::set_tile_lod_zoom_shift, |p| p.tile_lod_zoom_shift, 1.0);
     check(&mut map, &frontend, Map::set_tile_lod_mode, |p| p.tile_lod_mode, TileLodMode::Distance);
+}
+
+// gtest: Map.FallbackFontFacesCoverEveryFontStack
+#[test]
+fn fallback_font_faces_cover_every_font_stack() {
+    let test = MapTest::new();
+    let requested = Rc::new(RefCell::new(Vec::<String>::new()));
+    let r = requested.clone();
+    test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
+        r.borrow_mut().push(resource.url.clone());
+        let mut response = Response::new();
+        response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "not found")));
+        Some(response)
+    });
+
+    test.map()
+        .get_style_mut()
+        .set_fallback_font_faces(r#"[{"url": "fallback.ttf", "unicode-range": ["U+1000-109F"]}]"#)
+        .unwrap();
+    test.load_json(
+        r#"{
+        "version": 8,
+        "sources": {"point": {"type": "geojson", "data": {
+            "type": "Feature", "properties": {"name": "မြန်မာ"}, "geometry": {"type": "Point", "coordinates": [0, 0]}}}},
+        "glyphs": "{fontstack}/{range}.pbf",
+        "layers": [{"id": "symbol", "type": "symbol", "source": "point",
+                    "layout": {"text-field": ["get", "name"], "text-font": ["Any Font"]}}]
+    }"#,
+    );
+    let _ = test.try_render();
+
+    assert!(requested.borrow().iter().any(|url| url == "fallback.ttf"));
 }
 
 /// `ColorRampGlobalStateTest.RendersCurrentStateAfterUnrelatedStateChange`
@@ -3039,4 +4340,293 @@ fn empty_size_is_an_error() {
         );
         assert_eq!(result.err().as_deref(), Some("failed to resize: size is empty"));
     }
+}
+
+// gtest: Map.SourcelessLayersRenderAfterLeavingZoomRange
+// Layers without a source rebuild what they draw when they return to their
+// zoom range. The C++ test draws a location-indicator layer, which mln-rs
+// core doesn't render; a second background layer, which isn't drawn as the
+// clear color, stands in for it.
+#[test]
+fn sourceless_layers_render_after_leaving_zoom_range() {
+    let test = MapTest::new();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {},
+      "layers": [{
+        "id": "background",
+        "type": "background",
+        "minzoom": 10,
+        "paint": {"background-color": "red"}
+      }, {
+        "id": "tint",
+        "type": "background",
+        "minzoom": 10,
+        "paint": {"background-color": "blue", "background-opacity": 0.5}
+      }]
+    }"#,
+    );
+    let render = |zoom: f64| {
+        test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(zoom)));
+        test.render().image
+    };
+    let is_blank = |image: &PremultipliedImage| image.data.iter().all(|&v| v == 0);
+
+    let image = render(16.0);
+    let center = center_pixel(&image);
+    assert!(center[0] > 0 && center[2] > 0 && center[3] == 255, "{center:?}");
+    assert!(is_blank(&render(5.0)));
+
+    let again = render(16.0);
+    assert_eq!(image.bytes(), again.bytes());
+    assert!(image.data == again.data);
+}
+
+/// `InactiveLayerCase`: a source, a layer object without "id", "source",
+/// "minzoom" or "maxzoom", and a layer of the same source that renders
+/// nothing.
+struct InactiveLayerCase {
+    source: &'static str,
+    layer: &'static str,
+    keeper: &'static str,
+}
+
+/// At zoom 16.1 to 16.45, a 256 pixel viewport shows one raster tile at the
+/// small center, and four at the large one.
+const INACTIVE_SMALL_TILE: CanonicalTileID = CanonicalTileID { z: 15, x: 16484, y: 16283 };
+
+fn inactive_small_center() -> LatLng {
+    let id = INACTIVE_SMALL_TILE;
+    LatLngBounds::from_canonical_tile(id.z, id.x, id.y).center()
+}
+
+fn inactive_large_center() -> LatLng {
+    ll(0.0, 0.0)
+}
+
+fn inactive_layer_features() -> String {
+    let mut features: Vec<String> = Vec::new();
+    let mut feature = |geometry: String| {
+        features.push(format!(r#"{{"type":"Feature","properties":{{}},"geometry":{geometry}}}"#));
+    };
+    let point = |center: &LatLng, dx: f64, dy: f64| format!("[{},{}]", center.longitude() + dx, center.latitude() + dy);
+
+    let small = inactive_small_center();
+    feature(format!(
+        r#"{{"type":"Polygon","coordinates":[[{},{},{},{}]]}}"#,
+        point(&small, 0.0, 0.0),
+        point(&small, 0.001, 0.0),
+        point(&small, 0.0, 0.001),
+        point(&small, 0.0, 0.0)
+    ));
+    feature(format!(
+        r#"{{"type":"LineString","coordinates":[{},{}]}}"#,
+        point(&small, 0.0, 0.0),
+        point(&small, 0.001, 0.001)
+    ));
+    feature(format!(r#"{{"type":"Point","coordinates":{}}}"#, point(&small, 0.0, 0.0)));
+
+    let large = inactive_large_center();
+    let ring: Vec<String> = (0..=256)
+        .map(|i| {
+            let angle = std::f64::consts::TAU * f64::from(i % 256) / 256.0;
+            point(&large, 0.002 * angle.cos(), 0.002 * angle.sin())
+        })
+        .collect();
+    feature(format!(r#"{{"type":"Polygon","coordinates":[[{}]]}}"#, ring.join(",")));
+    for row in 0..32 {
+        let mut line = Vec::new();
+        for column in 0..32 {
+            let coordinates = point(&large, -0.002 + f64::from(column) * 0.000125, -0.002 + f64::from(row) * 0.000125);
+            feature(format!(r#"{{"type":"Point","coordinates":{coordinates}}}"#));
+            line.push(coordinates);
+        }
+        feature(format!(r#"{{"type":"LineString","coordinates":[{}]}}"#, line.join(",")));
+    }
+    format!(r#"{{"type":"FeatureCollection","features":[{}]}}"#, features.join(","))
+}
+
+/// The GPU resources of `RenderingStats` the test compares.
+fn inactive_layer_resources(stats: &mln_gfx::rendering_stats::RenderingStats) -> [i32; 5] {
+    [
+        stats.num_vertex_buffers,
+        stats.mem_vertex_buffers,
+        stats.num_index_buffers,
+        stats.mem_index_buffers,
+        stats.num_active_textures,
+    ]
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+// A layer outside its zoom range, and a source whose layers all are, release
+// the tiles they last rendered.
+fn releases_tiles_outside_zoom_range(param: InactiveLayerCase) {
+    let test = MapTest::new();
+    test.map().set_prefetch_zoom_delta(0);
+    test.frontend.with_renderer(|renderer| renderer.set_tile_cache_enabled(false));
+    test.file_source.set_response(Kind::Glyphs, |_| Some(file_response("test/fixtures/resources/glyphs.pbf")));
+    let small_tile = Arc::new(mln_image::encode_png(&PremultipliedImage::new(Size::new(4, 4))));
+    let large_tile = Arc::new(read_bytes("test/fixtures/resources/raster.tile"));
+    test.file_source.set_response(Kind::Tile, move |resource: &Resource| {
+        let tile = resource.tile_data.as_ref().expect("a tile resource");
+        let (z, x, y) = (tile.z, tile.x, tile.y);
+        let mut response = Response::new();
+        if z == 15 && x == INACTIVE_SMALL_TILE.x as i32 && y == INACTIVE_SMALL_TILE.y as i32 {
+            response.data = Some(small_tile.clone());
+        } else if z == 15 && (x == 16383 || x == 16384) && (y == 16383 || y == 16384) {
+            response.data = Some(large_tile.clone());
+        } else {
+            response.no_content = true;
+        }
+        Some(response)
+    });
+
+    let source = if param.source == "geojson" {
+        format!(r#"{{"type":"geojson","data":{}}}"#, inactive_layer_features())
+    } else {
+        format!(r#"{{"type":"{}","tiles":["https://example.com/{{z}}/{{x}}/{{y}}.png"]}}"#, param.source)
+    };
+    let layer = |id: &str, zoom: &str, json: &str| format!(r#"{{"id":"{id}","source":"data",{zoom},{}"#, &json[1..]);
+    test.load_json(&format!(
+        r#"{{"version":8,"glyphs":"https://example.com/{{fontstack}}/{{range}}.pbf","sources":{{"data":{source}}},"layers":[{},{}]}}"#,
+        layer("layer", r#""minzoom":16.4"#, param.layer),
+        layer("keeper", r#""minzoom":16.2,"maxzoom":16.35"#, param.keeper),
+    ));
+
+    // Tiles a source drops are released on the render thread during the
+    // frame, so the frame's stats already count them out.
+    let render = |center: LatLng, zoom: f64| {
+        test.map().jump_to(&cam().with_center(Some(center)).with_zoom(Some(zoom)));
+        test.render()
+    };
+    let leave_zoom_range = |center: LatLng| {
+        // The layer leaves its zoom range while the keeper still renders the
+        // source.
+        render(center, 16.3);
+        // The keeper leaves its zoom range too, so the source stops
+        // rendering.
+        render(center, 16.1).stats
+    };
+
+    // Render the layer with the large data first: the context's buffers of
+    // default attribute values grow to the largest drawable they serve, and
+    // stay.
+    render(inactive_large_center(), 16.45);
+    leave_zoom_range(inactive_large_center());
+    // Render the layer once with little data, so it creates whatever it
+    // keeps between frames.
+    assert!(render(inactive_small_center(), 16.45).stats.num_draw_calls > 0);
+    let released = leave_zoom_range(inactive_small_center());
+
+    let rendered = render(inactive_large_center(), 16.45);
+    let image = &rendered.image;
+    assert!(image.data.iter().any(|&v| v != 0));
+    assert_eq!(
+        inactive_layer_resources(&released),
+        inactive_layer_resources(&leave_zoom_range(inactive_large_center())),
+        "released"
+    );
+
+    let rendered_again = render(inactive_large_center(), 16.45);
+    assert_eq!(
+        inactive_layer_resources(&rendered.stats),
+        inactive_layer_resources(&rendered_again.stats),
+        "rendered again"
+    );
+    assert_eq!(image.bytes(), rendered_again.image.bytes());
+    assert!(image.data == rendered_again.image.data, "rendered again");
+}
+
+const INACTIVE_NO_FEATURES: &str = r#"{"type":"circle","filter":["==",["get","missing"],1]}"#;
+const INACTIVE_DEM_KEEPER: &str = r#"{"type":"color-relief","paint":{"color-relief-opacity":0}}"#;
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_fill() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"fill","paint":{"fill-color":"red"}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_line() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"line","paint":{"line-width":4}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_circle() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"circle"}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_fill_extrusion() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"fill-extrusion","paint":{"fill-extrusion-height":100}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_symbol() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"symbol","layout":{"text-field":"x","text-font":["Open Sans Regular"],"text-allow-overlap":true}}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_heatmap() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "geojson",
+        layer: r#"{"type":"heatmap"}"#,
+        keeper: INACTIVE_NO_FEATURES,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_raster() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "raster",
+        layer: r#"{"type":"raster"}"#,
+        keeper: r#"{"type":"raster","paint":{"raster-opacity":0}}"#,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_hillshade() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "raster-dem",
+        layer: r#"{"type":"hillshade"}"#,
+        keeper: INACTIVE_DEM_KEEPER,
+    });
+}
+
+// gtest: InactiveLayerTest.ReleasesTilesOutsideZoomRange
+#[test]
+fn releases_tiles_outside_zoom_range_color_relief() {
+    releases_tiles_outside_zoom_range(InactiveLayerCase {
+        source: "raster-dem",
+        layer: r#"{"type":"color-relief","paint":{"color-relief-color":["interpolate",["linear"],["elevation"],-10000,"black",10000,"white"]}}"#,
+        keeper: INACTIVE_DEM_KEEPER,
+    });
 }

@@ -13,7 +13,9 @@
 //
 // Request headers as in C++: `Range` for data ranges, `If-None-Match` from
 // the prior etag, else `If-Modified-Since` from the prior modification date,
-// user agent "MapLibreNative/1.0", redirects followed. Response headers are
+// user agent "MapLibreNative/1.0", redirects followed. Then the host's
+// headers from the `HttpHeaderTransform`, which a redirect to another origin
+// drops, as maplibre-native-ffi's HTTP file sources do. Response headers are
 // read in order with curl's header callback rules (case-insensitive names;
 // `Last-Modified`/`Expires` through vendor parsedate, `Cache-Control`,
 // `ETag`, `Retry-After`, `X-Rate-Limit-Reset`). Status codes map to the same
@@ -44,6 +46,7 @@ use mln_util::sync::MutexExt;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
+use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Error, Reason, Response};
@@ -116,6 +119,7 @@ impl Cancellation {
 /// `HTTPFileSource::Impl`
 struct Impl {
     transport: Arc<dyn HttpTransport>,
+    header_transform: Mutex<HttpHeaderTransform>,
     resource_options: Mutex<ResourceOptions>,
     client_options: Mutex<ClientOptions>,
 }
@@ -139,9 +143,10 @@ pub struct Transfer {
 }
 
 /// A request an `HTTPFileSource` hands to its transport: the resource to
-/// fetch, and where its response goes.
+/// fetch, the host's headers, and where its response goes.
 pub struct TransferRequest {
     resource: Resource,
+    headers: HttpHeaders,
     reply: ActorRef<HTTPRequestState>,
     cancellation: Arc<Cancellation>,
 }
@@ -149,6 +154,14 @@ pub struct TransferRequest {
 impl TransferRequest {
     pub fn resource(&self) -> &Resource {
         &self.resource
+    }
+
+    /// The host's headers (`HttpHeaderTransform`), which the transport sends
+    /// besides its own, and drops when a redirect leaves the origin of the
+    /// URL that sent them. A transport that can't drop them fails a
+    /// redirect instead of following it.
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
     }
 
     /// Whether the request was dropped, so that nobody waits for the
@@ -292,6 +305,44 @@ pub fn range_header(resource: &Resource) -> Option<String> {
     resource.data_range.map(|(first, second)| format!("bytes={first}-{second}"))
 }
 
+/// Whether two absolute `http` or `https` URLs have the same origin: scheme,
+/// host and port, the scheme's default port when there's none, ignoring
+/// letter case. False when either isn't such a URL.
+#[cfg(not(target_family = "wasm"))]
+pub(crate) fn same_origin(left: &str, right: &str) -> bool {
+    matches!((origin(left), origin(right)), (Some(left), Some(right)) if left == right)
+}
+
+/// The lowercased scheme and host, and the port, of an `http` or `https` URL.
+#[cfg(not(target_family = "wasm"))]
+fn origin(url: &str) -> Option<(String, String, u16)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    let default_port = match scheme.as_str() {
+        "http" => 80,
+        "https" => 443,
+        _ => return None,
+    };
+    let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    let host_and_port = authority.rsplit_once('@').map_or(authority, |(_, host_and_port)| host_and_port);
+    let (host, port) = match host_and_port.strip_prefix('[') {
+        // An IPv6 address.
+        Some(bracketed) => {
+            let (host, after) = bracketed.split_once(']')?;
+            (host, after.strip_prefix(':'))
+        }
+        None => match host_and_port.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (host_and_port, None),
+        },
+    };
+    let port = match port {
+        None | Some("") => default_port,
+        Some(port) => port.parse().ok()?,
+    };
+    (!host.is_empty()).then(|| (scheme, host.to_ascii_lowercase(), port))
+}
+
 /// `HTTPFileSource`: plain HTTP(S) requests, used by the OnlineFileSource.
 pub struct HTTPFileSource {
     impl_: Impl,
@@ -304,6 +355,7 @@ impl HTTPFileSource {
         HTTPFileSource {
             impl_: Impl {
                 transport: current_transport(),
+                header_transform: Mutex::new(HttpHeaderTransform::default()),
                 resource_options: Mutex::new(resource_options.clone()),
                 client_options: Mutex::new(client_options.clone()),
             },
@@ -316,8 +368,11 @@ impl HTTPFileSource {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
         let cancellation = Arc::new(Cancellation::default());
+        let header_transform = self.impl_.header_transform.lock_unpoisoned().clone();
+        let headers = header_transform.headers(resource.kind, &resource.url);
         self.impl_.transport.start(TransferRequest {
             resource: resource.clone(),
+            headers,
             reply: ActorRef::new(&mailbox),
             cancellation: cancellation.clone(),
         });
@@ -332,6 +387,10 @@ impl FileSource for HTTPFileSource {
 
     fn can_request(&self, _resource: &Resource) -> bool {
         true
+    }
+
+    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        *self.impl_.header_transform.lock_unpoisoned() = transform;
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {

@@ -58,9 +58,9 @@ impl layer::Impl for Impl {
         let impl_ = other
             .downcast_ref::<Impl>()
             .expect("FillExtrusionLayer::Impl::hasLayoutDifference: not a fill-extrusion layer");
-        // Quirk kept: C++ does not compare the layout properties here.
         self.filter != impl_.filter
             || self.visibility != impl_.visibility
+            || self.layout != impl_.layout
             || self.paint.has_data_driven_property_difference(&impl_.paint)
     }
 

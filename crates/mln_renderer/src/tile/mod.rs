@@ -1,11 +1,10 @@
 //! Ports the high files of `src/mln/tile` (they include the renderer, so
 //! they live here; `mln_tile` holds the tile data decoding).
-//!
-//! TODO(port): raster-dem tiles, custom geometry tiles.
 
 #[allow(clippy::module_inception)]
 pub mod tile;
 
+pub mod custom_tile;
 pub mod geojson_tile;
 pub mod geojson_tile_data;
 pub mod geometry_tile;

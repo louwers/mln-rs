@@ -12,7 +12,8 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 ## Data
 
 - The shared render suite's real-world styles (Chicago, San Francisco,
-  Norway) at their tests' cameras, 512 x 512, read from its cache database.
+  Norway) at their tests' cameras, 512 x 512, and its CJK labels
+  (`text-font/chinese`), read from its cache database.
 - maplibre-native-ffi's basemap: VersaTiles' Shortbread tiles over central
   San Francisco (a 5 x 5 block at zoom 14) with Noto Sans glyphs and a
   generated sprite, 1024 x 768. `fixtures.json` and `style.json` are
@@ -26,12 +27,18 @@ just bench-compare main         # this checkout, uncommitted changes included, a
 | case | what one iteration is |
 |---|---|
 | `Still/<scene>` | a still frame of a loaded map, read back; the zoom alternates by 0.001, so each is a new frame over the same tiles |
+| `Still/CollidingIcons/<n>` | as `Still`, of n icons at one point, each with its own sort key; placement hides all but one, or none in the `-overlap` case |
 | `Load/Style/<scene>` | from loading the style on a new map to its first complete still; the GPU device is set up before |
 | `Frame/Throughput` | a camera jump around a 200-pixel circle until the GPU has finished the frame that shows it, over tiles an untimed lap loaded |
 | `Frame/Paced` | a two-second flight from the block's north-west corner at zoom 14 to its south-east corner at zoom 15.5, past the tiles' zoom, on a 60 Hz display's clock, with only the first view loaded |
 | `Frame/Idle` | 100 ms of a settled map whose run loop draws whenever the map asks |
+| `Frame/FeatureState` | a frame of `Frame/Throughput` over the basemap with its buildings and a street overlay colored by feature state, every building and street of the loaded tiles given a state |
+| `Frame/FeatureStateHover` | a frame of `Frame/Throughput` over the basemap with its buildings colored by feature state, one building's state changing in every frame as hover highlighting does |
+| `Frame/HideLayers` | every layer of the loaded basemap hidden until the map settles, then shown again until it settles complete |
 | `Frame/SettleWithoutSymbols` | from a camera nudge on the basemap with its symbol layers left out, which has nothing to place, until the map stops asking for frames |
+| `Frame/AddImages` | from adding 50 icons to a settled basemap, five on each refresh, until it stops asking for frames; a symbol layer over 20 points draws five of them, which its tile asked for before they were added, and nothing draws the rest |
 | `Load/Concurrent` | 16 renderers on threads of their own, each from loading a real-world style on a new map to its first complete still through `HeadlessFrontend::render`, as the render tests' workers draw; the GPU devices are set up before |
+| `Load/GlyphCache/Private`, `Load/GlyphCache/Shared` | `Load/Concurrent` over the render suite's `text-font/chinese` style (500 labels, about 2,500 CJK characters over 80 glyph ranges), each renderer with a glyph cache of its own, or all sharing one `GlyphCache` |
 | `Load/JumpWarm`, `Load/JumpCold` | a jump between two views that share no tile until a frame shows the new view complete, on the display's clock; cold drops the loaded tiles first |
 
 In `Frame/Paced`, refreshes are absolute deadlines, and at each refresh
@@ -61,6 +68,7 @@ metrics only; `--verbose` also shows the others.
   view shows complete.
 - In `Frame/Idle`: **`frames_per_s`**, frames drawn while nothing changes.
 - In `Frame/SettleWithoutSymbols`: **`frames`**, frames drawn until the map stops asking for them.
+- In `Frame/HideLayers`: **`hidden_heap_mib`** and **`hidden_gpu_mib`**, the heap and the GPU's vertex and index buffers live while the layers are hidden.
 
 ## Comparing
 
@@ -71,6 +79,12 @@ builds it there. Then it runs one `mln-bench run` process per side per
 round, in ABBA order so that drift hits both sides alike: `--rounds` (6)
 processes per side. A process's value of a metric is one sample, since
 iterations in one process share its caches and heap.
+
+A case may use API that older commits lack. When this checkout's harness
+doesn't build over the ref, the ref runs its own harness instead, the
+report says so, and the cases only this checkout has show as "only in the
+candidate". A case that changed between the two harnesses then compares
+different work.
 
 A lead metric gets a verdict when a two-sided Mann-Whitney U test,
 Holm-corrected over the case's lead metrics, gives p < 0.05 and the medians

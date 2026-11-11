@@ -87,6 +87,34 @@ impl BackendImpl {
         }
     }
 
+    /// Port-only: writes the bytes of `data` at `offset` in `buffer`
+    /// straight from the JS array they're in (`Writes::write_from_host`).
+    /// `offset` is a multiple of 4; a length that isn't is padded with
+    /// zeros.
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn write_buffer_from_host(
+        &self,
+        buffer: &wgpu::Buffer,
+        offset: u64,
+        data: &mln_util::host_bytes::HostBytes,
+    ) {
+        let (Some(device), Some(queue)) = (self.device.borrow().clone(), self.queue.borrow().clone()) else {
+            return;
+        };
+        let len = data.len() as u64;
+        let aligned = len & !(wgpu::COPY_BUFFER_ALIGNMENT - 1);
+        let mut writes = self.writes.borrow_mut();
+        writes.write_from_host(&device, &queue, buffer, offset, data, 0, aligned);
+        if aligned < len
+            && let Some(array) = data.array()
+        {
+            // writeBuffer takes whole 4-byte words.
+            let mut tail = [0u8; wgpu::COPY_BUFFER_ALIGNMENT as usize];
+            array.subarray(aligned as u32, len as u32).copy_to(&mut tail[..(len - aligned) as usize]);
+            writes.write(&device, &queue, buffer, offset + aligned, &tail);
+        }
+    }
+
     /// Port-only: submits `command_buffer` after the copies of the writes
     /// gathered by [`write_buffer`](Self::write_buffer).
     pub(crate) fn submit(&self, command_buffer: wgpu::CommandBuffer) {

@@ -14,8 +14,9 @@
 // tile sends others. Here the worker never got them, so the host resets it
 // (which drops both the data and the layers) and gives it back the other of
 // the two, as its tile last sent it. Until the tile sends what failed again,
-// each `setData` or `setLayers` gets that error, as each parse would throw in
-// C++, rather than no answer, which would leave the tile pending.
+// each `setData`, `setLayers` or `setAvailableImages` gets that error, as each
+// parse would throw in C++, rather than no answer, which would leave the tile
+// pending.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -129,6 +130,15 @@ impl Sent {
                     *subdivision_granularity,
                 ));
                 self.data.error().map(|error| (error, *correlation_id))
+            }
+            WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
+                if let Kept::Sent((_, images)) = &mut self.data {
+                    *images = available_images.clone();
+                }
+                if let Kept::Sent((_, _, images, _)) = &mut self.layers {
+                    *images = available_images.clone();
+                }
+                self.data.error().or_else(|| self.layers.error()).map(|error| (error, *correlation_id))
             }
             WorkerMessage::Reset { .. } => {
                 *self = Sent::default();

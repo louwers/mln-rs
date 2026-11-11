@@ -565,9 +565,9 @@ impl TransformActor {
     /// server's /test.
     fn call(&self, url: &str, cb: FinishedCallback) {
         if url == "localhost://test" {
-            cb(self.test_url.clone());
+            cb(Ok(self.test_url.clone()));
         } else {
-            cb(url.to_owned());
+            cb(Ok(url.to_owned()));
         }
     }
 }
@@ -645,7 +645,8 @@ fn set_resource_cache_path() {
     let dbfs = fs.as_any().and_then(|fs| fs.downcast_ref::<DatabaseFileSource>()).expect("DatabaseFileSource");
     let stop = run_loop.handle();
     // C++: "./new_offline.db".
-    dbfs.set_database_path(&temp_path("new_offline.db"), Some(Box::new(move || stop.stop())));
+    let path = temp_path("new_offline.db");
+    dbfs.set_database_path(&path, Some(Box::new(move || stop.stop())));
     run_loop.run();
 }
 

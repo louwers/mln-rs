@@ -2,7 +2,7 @@
 // src/mln/style/sources/geojson_source_impl.cpp (GeoJSONSource::Impl,
 // GeoJSONVTData, SuperclusterData and GeoJSONData::create).
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 
 use feature::{Feature, PropertyMap, Value};
@@ -13,6 +13,7 @@ use mln_expression::expression::evaluate_accumulated;
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
+use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -66,16 +67,16 @@ impl GeoJSONData for GeoJSONVTData {
         }
     }
 
-    fn get_children(&self, _cluster_id: u32) -> Features {
-        Features::new()
+    fn get_children(&self, _cluster_id: u32) -> Result<Features, RuntimeError> {
+        Ok(Features::new())
     }
 
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Features {
-        Features::new()
+    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, RuntimeError> {
+        Ok(Features::new())
     }
 
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> u8 {
-        0
+    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, RuntimeError> {
+        Ok(0)
     }
 }
 
@@ -95,19 +96,16 @@ impl GeoJSONData for SuperclusterData {
         callback(self.impl_.get_tile(id.z, id.x, id.y));
     }
 
-    // C++ lets the "No cluster with the specified id." exception escape;
-    // TODO(port): queryFeatureExtensions reports it; here it is an empty
-    // result.
-    fn get_children(&self, cluster_id: u32) -> Features {
-        self.impl_.get_children(cluster_id).unwrap_or_default()
+    fn get_children(&self, cluster_id: u32) -> Result<Features, RuntimeError> {
+        self.impl_.get_children(cluster_id).map_err(RuntimeError)
     }
 
-    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Features {
-        self.impl_.get_leaves(cluster_id, limit, offset).unwrap_or_default()
+    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, RuntimeError> {
+        self.impl_.get_leaves(cluster_id, limit, offset).map_err(RuntimeError)
     }
 
-    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> u8 {
-        self.impl_.get_cluster_expansion_zoom(cluster_id).unwrap_or(0)
+    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, RuntimeError> {
+        self.impl_.get_cluster_expansion_zoom(cluster_id).map_err(RuntimeError)
     }
 }
 
@@ -197,9 +195,14 @@ pub struct Impl {
     base: ImplBase,
     options: Immutable<GeoJSONOptions>,
     data: Option<Arc<dyn GeoJSONData>>,
-    /// `mutable bool overrideSynchronousUpdate`.
-    override_synchronous_update: AtomicBool,
+    /// Replaces `options.synchronous_update` once set: `OVERRIDE_UNSET`,
+    /// `OVERRIDE_OFF` or `OVERRIDE_ON`.
+    override_synchronous_update: AtomicU8,
 }
+
+const OVERRIDE_UNSET: u8 = 0;
+const OVERRIDE_OFF: u8 = 1;
+const OVERRIDE_ON: u8 = 2;
 
 impl Clone for Impl {
     /// The C++ copy constructor (`Impl(const Impl&) = default` via
@@ -209,7 +212,7 @@ impl Clone for Impl {
             base: self.base.clone(),
             options: self.options.clone(),
             data: self.data.clone(),
-            override_synchronous_update: AtomicBool::new(self.override_synchronous_update.load(Ordering::Relaxed)),
+            override_synchronous_update: AtomicU8::new(self.override_synchronous_update.load(Ordering::Relaxed)),
         }
     }
 }
@@ -221,7 +224,7 @@ impl Impl {
             base: ImplBase::new(SourceType::GeoJSON, id),
             options,
             data: None,
-            override_synchronous_update: AtomicBool::new(false),
+            override_synchronous_update: AtomicU8::new(OVERRIDE_UNSET),
         }
     }
 
@@ -231,7 +234,7 @@ impl Impl {
             base: other.base.clone(),
             options: other.options.clone(),
             data,
-            override_synchronous_update: AtomicBool::new(other.override_synchronous_update.load(Ordering::Relaxed)),
+            override_synchronous_update: AtomicU8::new(other.override_synchronous_update.load(Ordering::Relaxed)),
         }
     }
 
@@ -248,8 +251,10 @@ impl Impl {
         &self.options
     }
 
+    /// Replaces `options.synchronous_update`, on or off.
     pub fn set_override_synchronous_update(&self, new_override: bool) {
-        self.override_synchronous_update.store(new_override, Ordering::Relaxed);
+        let value = if new_override { OVERRIDE_ON } else { OVERRIDE_OFF };
+        self.override_synchronous_update.store(value, Ordering::Relaxed);
     }
 }
 
@@ -263,10 +268,14 @@ impl source_impl::Impl for Impl {
     }
 
     fn get_attribution(&self) -> Option<String> {
-        None
+        self.options.attribution.clone()
     }
 
     fn is_update_synchronous(&self) -> bool {
-        self.options.synchronous_update || self.override_synchronous_update.load(Ordering::Relaxed)
+        match self.override_synchronous_update.load(Ordering::Relaxed) {
+            OVERRIDE_OFF => false,
+            OVERRIDE_ON => true,
+            _ => self.options.synchronous_update,
+        }
     }
 }

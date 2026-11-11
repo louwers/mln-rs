@@ -1,7 +1,7 @@
 // Ports include/mln/webgpu/texture2d.hpp and src/mln/webgpu/texture2d.cpp
 //
-// TODO(port): the stats bookkeeping of texture creation is not in the C++
-// WebGPU backend either.
+// Port-only: the rendering stats count the textures and their memory, as the
+// OpenGL backend's do; the C++ WebGPU backend doesn't.
 
 use std::any::Any;
 use std::rc::Rc;
@@ -53,6 +53,8 @@ pub struct Texture2D {
     image: Option<Rc<PremultipliedImage>>,
     dirty: bool,
     size_changed_callback: Option<Box<dyn Fn(Size)>>,
+    /// The bytes of `texture` in the rendering stats' `mem_textures`.
+    counted_bytes: usize,
 }
 
 impl Texture2D {
@@ -73,6 +75,17 @@ impl Texture2D {
             image: None,
             dirty: false,
             size_changed_callback: None,
+            counted_bytes: 0,
+        }
+    }
+
+    /// Drops the texture and takes it out of the rendering stats.
+    fn release_texture(&mut self) {
+        if self.texture.take().is_some() {
+            let mut stats = self.context.rendering_stats_mut();
+            stats.num_active_textures -= 1;
+            stats.mem_textures -= self.counted_bytes as i32;
+            self.counted_bytes = 0;
         }
     }
 
@@ -114,6 +127,12 @@ impl Texture2D {
             },
             wgpu::Extent3d { width: region.width, height: region.height, depth_or_array_layers: 1 },
         );
+    }
+}
+
+impl Drop for Texture2D {
+    fn drop(&mut self) {
+        self.release_texture();
     }
 }
 
@@ -226,7 +245,7 @@ impl texture2d::Texture2D for Texture2D {
             return;
         }
         self.texture_view = None;
-        self.texture = None;
+        self.release_texture();
 
         let Some(device) = self.context.get_backend().get_device() else {
             return;
@@ -300,6 +319,13 @@ impl texture2d::Texture2D for Texture2D {
             array_layer_count: Some(1),
         }));
         self.texture = Some(texture);
+        self.counted_bytes = self.get_data_size();
+        {
+            let mut stats = self.context.rendering_stats_mut();
+            stats.num_created_textures += 1;
+            stats.num_active_textures += 1;
+            stats.mem_textures += self.counted_bytes as i32;
+        }
 
         // Create default sampler if not already created
         if self.sampler.is_none() {

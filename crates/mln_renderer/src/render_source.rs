@@ -174,6 +174,10 @@ pub trait RenderSource {
     /// Creates the render data to be passed to the render item.
     fn prepare(&mut self, parameters: &SourcePrepareParameters<'_>);
 
+    /// Releases the render data from the last `prepare` while the source is
+    /// disabled.
+    fn release_render_data(&mut self) {}
+
     fn update_fading_tiles(&mut self);
     fn has_fading_tiles(&self) -> bool;
 
@@ -254,11 +258,26 @@ pub trait RenderSource {
         Ok(Vec::new())
     }
 
+    /// `queryFeatureExtensions(feature, extension, extensionField, args)`:
+    /// sources without extensions return a null value.
+    fn query_feature_extensions(
+        &self,
+        _feature: &mln_util::feature::Feature,
+        _extension: &str,
+        _extension_field: &str,
+        _args: Option<&feature::PropertyMap>,
+    ) -> Result<crate::query::FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+        Ok(Default::default())
+    }
+
     fn set_cache_enabled(&mut self, _enable: bool) {}
 
     fn set_fast_pfor_enabled(&mut self, _enable: bool) {}
 
     fn reduce_memory_use(&mut self);
+
+    /// `retryFailedTiles()`: requests the tiles whose load failed again.
+    fn retry_failed_tiles(&mut self) {}
 
     fn dump_debug_logs(&self);
 
@@ -313,10 +332,20 @@ pub fn create(impl_: &Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler
             debug_assert!(false);
             None
         }
-        // TODO(port): RenderRasterDEMSource,
-        // RenderAnnotationSource, RenderImageSource,
-        // RenderCustomGeometrySource, RenderCustomVectorSource. The
-        // orchestrator skips the layers of a source without a render source.
+        SourceType::CustomVector => {
+            Some(Box::new(crate::sources::render_custom_geometry_source::RenderCustomGeometrySource::new(
+                source::static_immutable_cast::<mln_style::sources::custom_geometry_source::Impl>(impl_),
+                thread_pool,
+            )))
+        }
+        SourceType::CustomMVTVector => {
+            Some(Box::new(crate::sources::render_custom_vector_source::RenderCustomVectorSource::new(
+                source::static_immutable_cast::<mln_style::sources::custom_vector_source::Impl>(impl_),
+                thread_pool,
+            )))
+        }
+        // TODO(port): RenderAnnotationSource. The orchestrator skips the
+        // layers of a source without a render source.
         _ => None,
     }
 }

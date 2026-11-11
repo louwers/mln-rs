@@ -9,7 +9,9 @@
 //! the writes are gathered, merged where they touch or overlap in one buffer
 //! (the later write's bytes winning), and uploaded with one
 //! `Queue::write_buffer` into a staging buffer that is kept while it's big
-//! enough.
+//! enough. Bytes that are still in a JS array (mln_util::host_bytes) go to
+//! `GPUQueue.writeBuffer` from there instead, without a copy in wasm
+//! memory.
 
 #[cfg(any(target_arch = "wasm32", test))]
 use std::ops::Range;
@@ -191,6 +193,50 @@ impl Writes {
             return;
         }
         queue.write_buffer(buffer, offset, data);
+    }
+
+    /// Writes `len` bytes of `data` from `at` (both multiples of 4) at
+    /// `offset` in `buffer` with `GPUQueue.writeBuffer`, straight from the JS
+    /// array, ahead of the commands submitted after the next
+    /// [`encode`](Self::encode)'s. That's also ahead of the writes gathered
+    /// so far: those it overlaps are submitted first.
+    #[cfg(target_family = "wasm")]
+    pub(crate) fn write_from_host(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        buffer: &wgpu::Buffer,
+        offset: u64,
+        data: &mln_util::host_bytes::HostBytes,
+        at: u64,
+        len: u64,
+    ) {
+        if len == 0 {
+            return;
+        }
+        debug_assert!(
+            at.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) && len.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT)
+        );
+        if self.overlaps(buffer, offset, len)
+            && let Some(writes) = self.encode(device, queue)
+        {
+            queue.submit([writes]);
+        }
+        let (Some(queue), Some(buffer), Some(array)) = (queue.as_webgpu(), buffer.as_webgpu(), data.array()) else {
+            return;
+        };
+        if let Err(error) = queue.write_buffer_with_f64_and_u8_array_and_u32_and_u32(
+            buffer,
+            offset as f64,
+            &array,
+            at as u32,
+            len as u32,
+        ) {
+            mln_util::logging::Log::error(
+                mln_util::logging::Event::Render,
+                format!("writing a buffer from a JS array: {error:?}"),
+            );
+        }
     }
 
     /// Copies `data` into the belt, to land at `offset` in `buffer`; false if

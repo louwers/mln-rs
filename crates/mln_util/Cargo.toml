@@ -26,6 +26,10 @@ rapidjson.workspace = true
 serde.workspace = true
 web-time.workspace = true
 
+[target.'cfg(target_family = "wasm")'.dependencies]
+# host_bytes: tile workers' vertex and index arrays, kept in JS until upload.
+js-sys.workspace = true
+
 # Ported C++ gtests of test/util (markers `// gtest: Group.Name`), for
 # mln_util and the low crates next to it.
 [[test]]

@@ -4,7 +4,11 @@
 // render of the same view (pixelmatch, as the render tests compare). It
 // fails when a frame differs by more than its threshold, when the page, one of
 // its Web Workers (the map's or a tile worker's) or the native runner reports
-// an error, or when a view's tiles got no worker replies. CI runs it (the
+// an error, or when a view's tiles got no worker replies. It also makes the
+// map's wasm instance and a tile worker's panic (the page's `panic`), and
+// fails unless the page stops and shows the panic, and opens a comparison
+// with GL JS (the page's `compare`), and fails unless GL JS's map covers
+// the page's and takes the input right of the divider. CI runs it (the
 // `web` job); see ../README.md.
 //
 //   node examples/web/check/check.mjs [options]
@@ -185,9 +189,17 @@ if (views.length === 0) throw new Error(`no view matches ${options.filter}`);
 
 // MARK: - The page, served from web/, and the fixtures
 
-const root = path.join(here, '../web');
-if (!existsSync(path.join(root, 'pkg/mln_web_bg.wasm'))) throw new Error('no web/pkg: run `just web` first');
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.json': 'application/json' };
+// The page as Vite builds it, as it deploys.
+const root = path.join(here, '../dist');
+if (!existsSync(path.join(root, 'index.html'))) throw new Error('no dist: run `just web` first');
+const types = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.wasm': 'application/wasm',
+  '.json': 'application/json',
+};
 
 // Every URL the page loads is on this server: `/fixtures/<scheme>/<rest>`
 // serves the cache's `<scheme>://<rest>`.
@@ -274,6 +286,8 @@ const pageUrl = (view, count) => {
     height: view.height,
     ratio: view.ratio,
     workers: String(count),
+    // The native runner downloads every glyph, as GL JS's render tests do.
+    localIdeographFontFamily: 'false',
   });
   return `${origin}/index.html?${params}`;
 };
@@ -463,7 +477,10 @@ async function load(browser, view, count) {
           await new Promise((resolve) => setTimeout(resolve, 50));
         }
         return await Promise.race([
-          window.mln.loaded,
+          // A panic's message, on one line.
+          window.mln.loaded.catch((error) => {
+            throw new Error(error.message.replaceAll('\\n', ' '));
+          }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('not loaded after 60 s')), 60000)),
         ]);
       })()`,
@@ -541,14 +558,109 @@ try {
   if (!/swiftshader/.test(gpu ?? '')) throw new Error(`the page's WebGPU adapter is ${gpu}, not SwiftShader`);
 
   failures = await compare();
+  for (const [where, instance] of [['map', "the map's instance"], ['tile', "a tile worker's instance"]]) {
+    const failure = await checkPanic(browser, views[0], where);
+    console.log(`a panic in ${instance}: ${failure ?? 'the page stopped and showed it'}`);
+    if (failure) failures.push(`a panic in ${instance}: ${failure}`);
+  }
+  const comparing = await checkCompare(browser, views[0]);
+  console.log(`a comparison with GL JS: ${comparing ?? "GL JS's map covers the page's, right of the divider"}`);
+  if (comparing) failures.push(`a comparison with GL JS: ${comparing}`);
 } finally {
   await browser.close();
   server.close();
   database.close();
 }
 if (failures.length > 0) {
-  console.log(`\n${failures.length} of ${views.length} views failed:\n  ${failures.join('\n  ')}`);
+  console.log(`\nfailed:\n  ${failures.join('\n  ')}`);
   process.exitCode = 1;
+}
+
+/**
+ * Loads `view` in the whole window with a comparison with GL JS (the page's
+ * `compare`); returns how GL JS's map failed to cover the page's map, or to
+ * take the input right of the divider, if it did.
+ */
+async function checkCompare(browser, view) {
+  const url = new URL(pageUrl(view, workers));
+  for (const name of ['width', 'height', 'ratio']) url.searchParams.delete(name);
+  url.searchParams.set('compare', '');
+  const session = await open(browser, url.href);
+  try {
+    return await evaluate(
+      browser,
+      session,
+      `(async () => {
+        const deadline = performance.now() + 60000;
+        let gl;
+        while (!(gl = document.querySelector('.gl-map canvas'))) {
+          if (performance.now() > deadline) return "GL JS's map did not open";
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const map = document.getElementById('map');
+        const box = (element) => {
+          const { left, top, width, height } = element.getBoundingClientRect();
+          return [left, top, width, height].map(Math.round).join(',');
+        };
+        if (box(gl) !== box(map)) return \`GL JS's map is at \${box(gl)}, the page's at \${box(map)}\`;
+        const { top, height, left, width } = map.getBoundingClientRect();
+        const at = (x) => document.elementFromPoint(left + width * x, top + height / 2);
+        if (!gl.parentElement.closest('.gl-layer')?.contains(at(0.75))) return "GL JS's map takes no input right of the divider";
+        if (at(0.25) !== map) return "the page's map takes no input left of the divider";
+        return null;
+      })()`,
+    );
+  } catch (error) {
+    return firstLines(error.message);
+  } finally {
+    await session.close();
+  }
+}
+
+/**
+ * Loads `view` with the map's instance or the first tile worker's panicking
+ * at its start (the page's `panic`); returns how the page failed to stop
+ * and show the panic, if it did.
+ */
+async function checkPanic(browser, view, where) {
+  const session = await open(browser, `${pageUrl(view, workers)}&panic=${where}`);
+  try {
+    const page = await evaluate(
+      browser,
+      session,
+      `(async () => {
+        const deadline = performance.now() + 60000;
+        while (!window.mln) {
+          if (performance.now() > deadline) throw new Error('the page did not start');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const fatal = await Promise.race([
+          window.mln.fatal,
+          new Promise((_, reject) => setTimeout(() => reject(new Error('no fatal error after 60 s')), 60000)),
+        ]);
+        const message = (promise) => promise.then(() => 'resolved', (error) => error.message);
+        const banner = document.getElementById('error');
+        return {
+          fatal: fatal.message,
+          loaded: await message(window.mln.loaded),
+          readPixels: await message(window.mln.readPixels()),
+          banner: banner.hidden ? 'hidden' : banner.textContent,
+        };
+      })()`,
+    );
+    const expected = `${where === 'map' ? 'map' : 'tile worker 0'}: panicked at `;
+    if (!page.fatal.startsWith(expected) || !page.fatal.includes('panic=<map|tile> asked for this panic')) {
+      return `the page's fatal error is ${JSON.stringify(page.fatal)}`;
+    }
+    if (page.loaded !== page.fatal) return `\`loaded\` is ${page.loaded}`;
+    if (page.readPixels !== page.fatal) return `\`readPixels()\` is ${page.readPixels}`;
+    if (!page.banner.includes(page.fatal)) return `the page shows ${JSON.stringify(page.banner)}`;
+    return null;
+  } catch (error) {
+    return firstLines(error.message);
+  } finally {
+    await session.close();
+  }
 }
 
 /** Loads and compares every view; returns what failed. */

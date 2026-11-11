@@ -18,6 +18,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::{TaggedScheduler, scheduler};
+use mln_gfx::rendering_stats::{FrameRenderedFeaturesMap, SourceLayerID, merge_layer_features};
 use mln_gfx::{Context, LayerGroupBase, LayerGroupBasePtr, ShaderRegistry};
 use mln_map_types::{MapMode, TransformState};
 use mln_style::collection::ImmutableVector;
@@ -25,7 +26,11 @@ use mln_style::expression::{Dependency, GlobalStateMap};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::map::zoom_history::ZoomHistory;
-use mln_style::{PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source};
+use mln_style::{
+    GlobalStateChange, PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source,
+};
+use mln_text::GlyphCache;
+use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
@@ -45,8 +50,9 @@ use crate::paint_parameters::PaintParameters;
 use crate::pattern_atlas::PatternAtlas;
 use crate::render_layer::{LayerPrepareParameters, RenderLayerPtr};
 use crate::render_source::{self, RenderSource, RenderSourceObserver, SourcePrepareParameters};
-use crate::render_tree::{LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
+use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, RenderTreeParameters};
 use crate::renderer_observer::RendererObserver;
+use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
 use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
 use crate::text::glyph_manager::GlyphManager;
 use crate::tile::tile::TileOperation;
@@ -137,7 +143,22 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
             ),
         );
         if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_glyphs_error(font_stack, glyph_range, error.clone());
             observer.on_resource_error(error);
+        }
+    }
+
+    /// `onGlyphsLoaded(fontStack, range)`.
+    fn on_glyphs_loaded(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
+        if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_glyphs_loaded(font_stack, range);
+        }
+    }
+
+    /// `onGlyphsRequested(fontStack, range)`.
+    fn on_glyphs_requested(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
+        if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_glyphs_requested(font_stack, range);
         }
     }
 }
@@ -185,6 +206,8 @@ pub struct RenderOrchestrator {
     source_observer: Rc<OrchestratorSourceObserver>,
 
     zoom_history: ZoomHistory,
+    /// The still image request the last update was for.
+    still_image_request_id: u64,
     transform_state: TransformState,
 
     // symbols: the glyph and image managers (shared with the tiles), and the
@@ -236,6 +259,10 @@ pub struct RenderOrchestrator {
 
     /// `RenderItem::DebugLayerGroupMap debugLayerGroups` (layers: debug).
     debug_layer_groups: crate::render_tree::DebugLayerGroupMap,
+    /// The tweaker of each debug layer group, with the group it was made
+    /// for. The render items that fill the groups last one frame, so the
+    /// orchestrator owns the tweakers (layers: debug).
+    debug_layer_tweakers: VecMap<DebugType, (LayerGroupBasePtr, Rc<RefCell<PolylineLayerTweaker>>)>,
 
     // dem-heatmap: `std::vector<RenderTargetPtr> renderTargets`.
     render_targets: Vec<crate::render_target::RenderTargetPtr>,
@@ -244,26 +271,38 @@ pub struct RenderOrchestrator {
 
     globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass,
     sky_pass: crate::sky_pass::SkyPass,
+
+    /// The features the layers rendered in the last `update_layers`.
+    frame_rendered_features: FrameRenderedFeaturesMap,
 }
 
 impl RenderOrchestrator {
     /// `RenderOrchestrator(bool backgroundLayerAsColor, TaggedScheduler&,
-    /// const std::optional<std::string>& localFontFamily)`.
-    // TODO(port): local font family (glyph manager). C++ gets the map's
-    // thread pool; the port uses the background pool with its own tag.
-    pub fn new(background_layer_as_color: bool) -> Self {
+    /// const std::optional<std::string>& localFontFamily,
+    /// std::shared_ptr<GlyphCache>)`.
+    // C++ gets the map's thread pool; the port uses the background pool
+    // with its own tag.
+    pub fn new(
+        background_layer_as_color: bool,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
         let observer: SharedObserver = Rc::new(RefCell::new(None));
         // `imageManager->setObserver(this)`.
         let image_manager = ImageManager::create();
         image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { observer: observer.clone() })));
         // symbols: `glyphManager->setObserver(this)`.
-        let glyph_manager = GlyphManager::new(None);
+        let glyph_manager = GlyphManager::with_glyph_cache(
+            Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
+            glyph_cache,
+        );
         glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { observer: observer.clone() })));
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         RenderOrchestrator {
             observer: observer.clone(),
             source_observer: Rc::new(OrchestratorSourceObserver { observer }),
             zoom_history: ZoomHistory::default(),
+            still_image_request_id: 0,
             transform_state: TransformState::default(),
             glyph_manager,
             image_manager,
@@ -293,9 +332,11 @@ impl RenderOrchestrator {
             layer_group_tweakers: HashMap::new(),
             globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
-            debug_layer_groups: VecMap::new(), // layers: debug
-            render_targets: Vec::new(),        // dem-heatmap
+            debug_layer_groups: VecMap::new(),   // layers: debug
+            debug_layer_tweakers: VecMap::new(), // layers: debug
+            render_targets: Vec::new(),          // dem-heatmap
             pending_changes: Vec::new(),
+            frame_rendered_features: FrameRenderedFeaturesMap::new(),
         }
     }
 
@@ -354,8 +395,6 @@ impl RenderOrchestrator {
         let transition_options =
             if is_map_mode_continuous { update_parameters.transition_options } else { TransitionOptions::default() };
 
-        let transition_parameters =
-            TransitionParameters { now: update_parameters.time_point, transition: transition_options };
         let transition_duration = transition_options.duration.unwrap_or(if is_map_mode_continuous {
             DEFAULT_TRANSITION_DURATION
         } else {
@@ -364,12 +403,31 @@ impl RenderOrchestrator {
 
         let global_state_changed = !ptr_eq_option(&self.global_state, &update_parameters.global_state);
         let mut changed_global_state_keys: Option<Arc<VecSet<String>>> = None;
+        let mut global_state_change = None;
         if global_state_changed {
             if let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state) {
-                changed_global_state_keys = Some(Arc::new(diff_global_state_keys(previous, current)));
+                let changed_keys = Arc::new(diff_global_state_keys(previous, current));
+                changed_global_state_keys = Some(changed_keys.clone());
+                global_state_change =
+                    Some(GlobalStateChange { prior_state: previous.clone(), changed_keys, state_only: false });
             }
         }
         self.global_state = update_parameters.global_state.clone();
+
+        // A layer added this frame has shown nothing yet, so a global-state
+        // change leaves it nothing to transition from.
+        let added_layer_transition_parameters =
+            TransitionParameters::new(update_parameters.time_point, transition_options);
+        let transition_parameters =
+            TransitionParameters { global_state_change, ..added_layer_transition_parameters.clone() };
+
+        // Transitions the values that read a changed global-state key, where
+        // nothing else changed.
+        let global_state_transition_parameters =
+            transition_parameters.global_state_change.as_ref().map(|change| TransitionParameters {
+                global_state_change: Some(GlobalStateChange { state_only: true, ..change.clone() }),
+                ..transition_parameters.clone()
+            });
 
         let mut evaluation_parameters = PropertyEvaluationParameters::with_zoom_history(
             self.zoom_history,
@@ -414,6 +472,8 @@ impl RenderOrchestrator {
         if light_changed {
             self.render_light.impl_ = update_parameters.light.clone();
             self.render_light.transition(&transition_parameters);
+        } else if let Some(parameters) = &global_state_transition_parameters {
+            self.render_light.transition(parameters);
         }
 
         if light_changed || zoom_changed || global_state_changed || self.render_light.has_transition() {
@@ -433,7 +493,11 @@ impl RenderOrchestrator {
                     render_sky.transition(&transition_parameters);
                     sky_changed = true;
                 }
-                Some(_) => {}
+                Some(render_sky) => {
+                    if let Some(parameters) = &global_state_transition_parameters {
+                        render_sky.transition(parameters);
+                    }
+                }
             }
         } else if self.render_sky.is_some() {
             self.render_sky = None;
@@ -441,7 +505,7 @@ impl RenderOrchestrator {
         }
 
         if let Some(render_sky) = &mut self.render_sky
-            && (sky_changed || zoom_changed || render_sky.has_transition())
+            && (sky_changed || zoom_changed || global_state_changed || render_sky.has_transition())
         {
             render_sky.evaluate(&evaluation_parameters);
         }
@@ -449,9 +513,10 @@ impl RenderOrchestrator {
         let image_diff = diff_images(&self.image_impls, &update_parameters.images);
         self.image_impls = update_parameters.images.clone();
 
-        // Only trigger tile reparse for changed images. Changed images only
-        // need a relayout when they have a different size.
-        let mut _has_image_diff = !image_diff.removed.is_empty();
+        // Removing an image changes layout for tiles that use it, and
+        // updating one does when its size changes. The image manager
+        // relayouts the tiles that asked for an added image itself.
+        let mut has_image_diff = !image_diff.removed.is_empty();
 
         // Remove removed images from sprite atlas.
         for id in image_diff.removed.keys() {
@@ -468,7 +533,7 @@ impl RenderOrchestrator {
         for change in image_diff.changed.values() {
             if self.image_manager.update_image(change.after.clone()) {
                 // TODO(port): patternAtlas->removePattern(id) (background-pattern).
-                _has_image_diff = true;
+                has_image_diff = true;
             }
         }
 
@@ -491,7 +556,7 @@ impl RenderOrchestrator {
         // Create render layers for newly added layers.
         for (id, impl_) in &layer_diff.added {
             if let Some(render_layer) = layermanager::create_render_layer(impl_) {
-                render_layer.borrow_mut().transition(&transition_parameters);
+                render_layer.borrow_mut().transition(&added_layer_transition_parameters);
                 // `emplace` keeps an existing entry.
                 self.render_layers.entry(id.clone()).or_insert(render_layer);
             }
@@ -550,6 +615,14 @@ impl RenderOrchestrator {
                 && !layer_added_or_changed
                 && layer.get_style_dependencies().intersects(Dependency::GLOBAL_STATE);
 
+            // A running transition may read the changed state too, from a
+            // value the layer no longer has.
+            if let Some(parameters) = &global_state_transition_parameters {
+                if !layer_added_or_changed && (global_state_changed_and_matters || layer.has_transition()) {
+                    layer.transition(parameters);
+                }
+            }
+
             if layer_added_or_changed
                 || zoom_changed_and_matters
                 || global_state_changed_and_matters
@@ -580,6 +653,20 @@ impl RenderOrchestrator {
                 render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
                 // `emplace` keeps an existing entry.
                 self.render_sources.entry(id.clone()).or_insert(render_source);
+            }
+        }
+
+        // A still image fails at the first resource error, and nothing
+        // requests a failed resource again on its own: each new still image
+        // retries them instead of waiting on them or rendering without them.
+        if !is_map_mode_continuous
+            && update_parameters.still_image_request
+            && update_parameters.still_image_request_id != self.still_image_request_id
+        {
+            self.still_image_request_id = update_parameters.still_image_request_id;
+            self.glyph_manager.retry_failed_requests();
+            for render_source in self.render_sources.values_mut() {
+                render_source.retry_failed_tiles();
             }
         }
         self.transform_state = update_parameters.transform_state.clone();
@@ -660,7 +747,7 @@ impl RenderOrchestrator {
                                 }
                             };
                             source_needs_relayout = source_needs_relayout
-                                || _has_image_diff
+                                || has_image_diff
                                 || constants_mask_changed.contains(&layer_id)
                                 || has_layout_difference(&layer_diff, &layer_id)
                                 || global_state_requires_relayout;
@@ -720,17 +807,17 @@ impl RenderOrchestrator {
                 self.filtered_layers_for_source = filtered_layers;
                 self.filtered_layers_for_source.clear();
             }
-
-            // Update all layers with their new renderability status, if it
-            // changed.
-            for (i, will_render) in update_list.iter().enumerate() {
-                let mut layer = self.ordered_layers[i].borrow_mut();
-                if layer.is_layer_renderable() != *will_render {
-                    layer.mark_layer_renderable(*will_render, &mut changes);
-                }
-            }
-            self.add_changes(&mut changes);
         }
+
+        // Update all layers with their new renderability status, if it
+        // changed.
+        for (i, will_render) in update_list.iter().enumerate() {
+            let mut layer = self.ordered_layers[i].borrow_mut();
+            if layer.is_layer_renderable() != *will_render {
+                layer.mark_layer_renderable(*will_render, &mut changes);
+            }
+        }
+        self.add_changes(&mut changes);
 
         render_tree_parameters.loaded = update_parameters.style_loaded && self.is_loaded();
         if !is_map_mode_continuous && !render_tree_parameters.loaded {
@@ -747,6 +834,8 @@ impl RenderOrchestrator {
                     image_manager: &self.image_manager,
                     source_name: name.clone(),
                 });
+            } else {
+                render_source.release_render_data();
             }
         }
 
@@ -949,6 +1038,7 @@ impl RenderOrchestrator {
         self.add_changes(&mut changes);
 
         self.debug_layer_groups.clear(); // layers: debug
+        self.debug_layer_tweakers.clear(); // layers: debug
         self.render_sources.clear();
         self.render_layers.clear();
         // C++ keeps orderedLayers here and rebuilds it on the next
@@ -1058,14 +1148,28 @@ impl RenderOrchestrator {
 
     /// `updateDebugLayerGroups(renderTree, parameters)` (layers: debug).
     pub fn update_debug_layer_groups(&mut self, render_tree: &RenderTree, parameters: &PaintParameters<'_>) {
-        let mut tweakers: crate::render_tree::DebugLayerTweakers = Vec::new();
         for item in render_tree.get_source_render_items() {
-            item.update_debug_drawables(&mut self.debug_layer_groups, parameters, &mut tweakers);
+            item.update_debug_drawables(&mut self.debug_layer_groups, parameters);
         }
-        // `layerGroup->addLayerTweaker(tweaker)`
-        for (layer_group, tweaker) in tweakers {
-            let id = layer_group.borrow().get_id();
-            self.layer_group_tweakers.entry(id).or_default().push(tweaker);
+
+        // `layerGroup->addLayerTweaker(tweaker)`, once per group.
+        let groups = &self.debug_layer_groups;
+        let group_tweakers = &mut self.layer_group_tweakers;
+        self.debug_layer_tweakers.retain(|type_, (group, _)| {
+            let live = groups.get(type_).is_some_and(|g| Rc::ptr_eq(g, group));
+            if !live {
+                group_tweakers.remove(&group.borrow().get_id());
+            }
+            live
+        });
+        for (type_, group) in self.debug_layer_groups.iter() {
+            if self.debug_layer_tweakers.contains_key(type_) {
+                continue;
+            }
+            let tweaker = Rc::new(RefCell::new(PolylineLayerTweaker::new(debug_line_properties(*type_))));
+            let weak: Weak<RefCell<dyn LayerTweaker>> = Rc::downgrade(&tweaker) as _;
+            self.layer_group_tweakers.entry(group.borrow().get_id()).or_default().push(weak);
+            self.debug_layer_tweakers.insert(*type_, (group.clone(), tweaker));
         }
     }
 
@@ -1108,6 +1212,7 @@ impl RenderOrchestrator {
         let items = render_tree.get_layer_render_item_map();
 
         let mut changes: UniqueChangeRequestVec = Vec::with_capacity(items.len() * 3);
+        let mut all_features = FrameRenderedFeaturesMap::new();
 
         let mut has_3d = false;
         for item in items.values() {
@@ -1125,10 +1230,19 @@ impl RenderOrchestrator {
             );
             has_3d = has_3d || render_layer.needs_globe_depth();
 
-            // TODO(port): accumulate renderLayer.stats.renderedFeatures
-            // (rendered-feature capture).
+            // Accumulate rendered features from each render layer, leaving each one empty.
+            let rendered_features = std::mem::take(&mut render_layer.base_mut().stats.rendered_features);
+            if !rendered_features.is_empty() {
+                let id = SourceLayerID {
+                    source_id: item.source.clone().unwrap_or_default(),
+                    layer_id: render_layer.get_id().to_owned(),
+                };
+                merge_layer_features(all_features.entry(id).or_default(), rendered_features);
+            }
         }
         self.add_changes(&mut changes);
+
+        self.frame_rendered_features = all_features;
 
         let tree_parameters = render_tree.get_parameters();
         self.sky_pass.update(
@@ -1147,6 +1261,12 @@ impl RenderOrchestrator {
             update_parameters,
             has_3d || self.sky_pass.has_atmosphere(),
         );
+    }
+
+    /// `moveFrameRenderedFeatures()`: the features the layers rendered in
+    /// the last `update_layers`, leaving none.
+    pub fn move_frame_rendered_features(&mut self) -> FrameRenderedFeaturesMap {
+        std::mem::take(&mut self.frame_rendered_features)
     }
 
     /// `getSkyLayerGroup()`.
@@ -1357,7 +1477,10 @@ impl RenderOrchestrator {
             if !filtered_layers.contains_key(&layer_impl.id) {
                 continue;
             }
-            if let Some(features) = results_by_layer.remove(&layer_impl.id) {
+            if let Some(mut features) = results_by_layer.remove(&layer_impl.id) {
+                for feature in &mut features {
+                    feature.layer.clone_from(&layer_impl.id);
+                }
                 result.extend(features);
             }
         }
@@ -1382,6 +1505,22 @@ impl RenderOrchestrator {
         };
 
         source.query_source_features(options, self.global_state.as_deref())
+    }
+
+    /// `queryFeatureExtensions(sourceID, feature, extension, extensionField,
+    /// args)`: a null value for a source the style doesn't have.
+    pub fn query_feature_extensions(
+        &self,
+        source_id: &str,
+        feature: &mln_util::feature::Feature,
+        extension: &str,
+        extension_field: &str,
+        args: Option<&feature::PropertyMap>,
+    ) -> Result<crate::query::FeatureExtensionValue, ExceptionPtr> {
+        match self.get_render_source(source_id) {
+            Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
+            None => Ok(Default::default()),
+        }
     }
 
     /// `dumpDebugLogs()`.

@@ -1,9 +1,16 @@
 // Ports include/mln/renderer/renderer_observer.hpp
 
-use mln_tile_id::OverscaledTileID;
-pub use mln_util::exception::ExceptionPtr;
+use std::sync::Arc;
 
-use crate::tile::tile::TileOperation;
+pub use mln_gfx::rendering_stats::{
+    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, RenderingStats, SourceLayerID,
+};
+pub use mln_text::glyph::GlyphRange;
+pub use mln_tile_id::OverscaledTileID;
+pub use mln_util::exception::ExceptionPtr;
+pub use mln_util::font_stack::FontStack;
+
+pub use crate::tile::TileOperation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -16,8 +23,7 @@ pub enum RenderMode {
 ///
 /// C++ has four `onDidFinishRenderingFrame` overloads that forward to each
 /// other; the port keeps the one the renderer calls (with the stats).
-// TODO(port): `gfx::RenderingStats` in on_did_finish_rendering_frame,
-// `onRegisterShaders`, shader compile callbacks, glyph callbacks,
+// TODO(port): `onRegisterShaders`, shader compile callbacks,
 // `SymbolErrorObserver::onSymbolError`.
 pub trait RendererObserver {
     /// Signals that a repaint is required.
@@ -33,8 +39,15 @@ pub trait RendererObserver {
     fn on_will_start_rendering_frame(&self) {}
 
     /// End of frame, booleans flags that a repaint is required and that
-    /// placement changed.
-    fn on_did_finish_rendering_frame(&self, _mode: RenderMode, _repaint: bool, _placement_changed: bool) {}
+    /// placement changed. `stats` are the context's counters after the frame.
+    fn on_did_finish_rendering_frame(
+        &self,
+        _mode: RenderMode,
+        _repaint: bool,
+        _placement_changed: bool,
+        _stats: Arc<RenderingStats>,
+    ) {
+    }
 
     /// Final frame.
     fn on_did_finish_rendering_map(&self) {}
@@ -46,7 +59,17 @@ pub trait RendererObserver {
 
     fn on_remove_unused_style_images(&self, _ids: &[String]) {}
 
-    /// Tile loading.
+    /// A glyph range of a font stack loaded.
+    fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
+
+    /// A glyph range of a font stack failed to load or parse.
+    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: ExceptionPtr) {}
+
+    /// A glyph range of a font stack was requested.
+    fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
+
+    /// A tile of the source `source_id` went through `op`: a request, a
+    /// response, the start or end of its parse, an error or a cancel.
     fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
 
     /// Render layer or drawable failed.

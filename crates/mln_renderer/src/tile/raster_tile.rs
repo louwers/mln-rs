@@ -171,6 +171,10 @@ impl LoaderTile for RasterTileInner {
         self.base.observer().on_tile_error(&self.base, err);
     }
 
+    fn set_loading(&self) {
+        self.base.loaded.set(false);
+    }
+
     fn set_tried_cache(&self) {
         self.base.set_tried_cache();
     }
@@ -271,6 +275,12 @@ impl Tile for RasterTile {
     fn set_update_parameters(&self, parameters: &TileUpdateParameters) {
         if let Some(loader) = &self.loader {
             loader.set_update_parameters(parameters);
+        }
+    }
+
+    fn retry_failed_load(&self) {
+        if let Some(loader) = &self.loader {
+            loader.retry_failed_load();
         }
     }
 

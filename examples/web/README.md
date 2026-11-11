@@ -8,7 +8,7 @@ Worker loads a second, the font-face shaper, only for styles with font
 faces. The page's thread runs no wasm: it hands its canvas to the map's Web
 Worker and only forwards to it.
 
-- in the map's Web Worker (web/map-worker.js), `WebMap` (src/map.rs): the
+- in the map's Web Worker (web/map-worker.ts), `WebMap` (src/map.rs): the
   map, its renderer (wgpu's WebGPU backend, into the page's canvas as an
   OffscreenCanvas) and its file sources. The
   instance has no threads, so it installs a `CooperativeScheduler`. Each
@@ -18,7 +18,7 @@ Worker and only forwards to it.
   task of its own (`WebMap::tick`): a finished fetch or a worker's reply
   is handled at once, rather than at the next frame, so that a load's
   steps don't each wait for a frame.
-- in each tile worker's Web Worker (web/worker.js), `TileWorker`
+- in each tile worker's Web Worker (web/worker.ts), `TileWorker`
   (src/worker.rs): a `TileWorkerHost` on the instance's own
   `CooperativeScheduler`. The map's `SerializingTransport` gives each
   tile's worker to one of the Web Workers and sends every message between
@@ -29,8 +29,11 @@ Worker and only forwards to it.
   there (the map gets back the pixels, and a DEM with the border it
   backfills from the neighbouring tiles). A reply's large arrays (pixels,
   vertices, indices) travel beside its bytes as their own buffers, which
-  the Web Worker transfers, and which the map copies once, into the
-  arrays its buckets keep.
+  the Web Worker transfers. The map copies pixels into wasm memory, but a
+  bucket's vertices and indices stay in their JS arrays until
+  `GPUQueue.writeBuffer` uploads them from there (mln_util's
+  `host_bytes`); what reads or changes them first, such as feature state,
+  copies them in.
 - in the map's Web Worker again, the first time a style declares font
   faces (`"font-faces"`): the shaper module
   ([crates/mln_web_shaper](../../crates/mln_web_shaper)), mln_text's
@@ -70,12 +73,12 @@ worker turns it into its own `performance.now()`, the clock it gives
 `WebMap::frame`, which also puts the map's animations on the frame clock.
 The page tells a mouse wheel's notches, which the recognizer eases, from a
 trackpad's continuous pixels, which it applies at once, by how browsers
-report each (`wheelDelta` in web/main.js: Firefox's lines, Safari's
+report each (`wheelDelta` in web/main.ts: Firefox's lines, Safari's
 4.000244 px steps, Chromium's legacy `wheelDeltaY`); those rules aren't
 checked on real hardware yet. A ResizeObserver resizes the map with the
 canvas; the map keeps the pixel ratio it started with.
 
-Controls: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
+Gestures: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
 to zoom to a box (Escape cancels it); the wheel (a third of a level a
 notch, eased) or a trackpad to zoom, Ctrl or a trackpad pinch faster;
 double-click or double-tap to zoom in, Shift-double-click or a two-finger
@@ -83,12 +86,47 @@ tap to zoom out, double-tap-and-drag to zoom; two fingers to pinch, twist
 and tilt; the arrow keys to pan (Shift: rotate and tilt) and `+`/`=` and
 `-` to zoom, once the map has focus.
 
+Over the map, the page draws its own controls (web/index.html, page.css):
+a style picker, zoom buttons, a compass that eases the bearing and pitch
+back to zero, the sources' attributions, and a panel that lists the
+gestures. The map's Web Worker reports the camera, the style's name and
+the sources' attributions back to the page as they change.
+
+`?compare`, or the switch in the panel, puts MapLibre GL JS's map of the
+same style over the canvas, clipped to the right of a divider you can drag
+(web/compare.ts); the page loads GL JS, a chunk of its own, when the
+comparison first opens. Each side takes its own input: the map that last took input leads,
+and the other jumps to its camera.
+
 ## Images decode in the browser
 
 Every instance decodes images with the browser's decoders (mln_image's
-default on wasm), so the module carries no PNG or WebP decoder. The decoder
-answers later, from the event loop, so a tile worker's reply can come
-outside `TileWorker::run`; it then wakes web/worker.js for a run.
+default on wasm), so the module carries no PNG, WebP or JPEG decoder. The
+decoder answers later, from the event loop, so a tile worker's reply can come
+outside `TileWorker::run`; it then wakes web/worker.ts for a run.
+
+## CJK glyphs are drawn locally
+
+As MapLibre GL JS does with its `localIdeographFontFamily`, the map draws
+CJK ideographs, kana, hangul and the related blocks (mln_util's
+`allows_fixed_width_glyph_generation`) in a local font, rather than
+downloading the style's glyph ranges for them, which are most of a CJK
+label's glyphs. mln_text's `DefaultLocalGlyphRasterizer` draws each in the
+map's Web Worker with an `OffscreenCanvas`, and the `GlyphManager` turns it
+into an SDF. The check turns it off, as GL JS's render tests do, so that
+its frames match the native renders.
+
+## Startup
+
+The page creates the Web Workers as soon as it starts the module's
+download and compile, so that their scripts load meanwhile, and posts
+them the module once it has compiled. Meanwhile the map's Web Worker
+fetches what the map asks for first: the style, then its sources'
+TileJSON, its sprite and the first glyph range of each constant
+`text-font` of the labels shown at the camera's zoom. The map's fetch
+transport takes each of those responses (mln_storage's
+`set_fetch_preloads`) when the map fetches the same URL, and fetches as
+before for any other.
 
 ## Caching
 
@@ -105,39 +143,49 @@ in a storage worker loaded only when a page asks for them.
 
 ## Build and run
 
-`wasm-bindgen-cli` must be the version in Cargo.lock, and a release build
-also runs binaryen's `wasm-opt` (its latest release), which shrinks the code with
-`-Oz` and strips the names and the other custom sections:
+mise.toml pins the tools: wasm-bindgen-cli at the version in Cargo.lock,
+binaryen's `wasm-opt`, which shrinks a release build's code with `-Oz` and
+strips the names and the other custom sections, and Node and pnpm for the
+page. `just web` builds the modules into web/pkg, then Vite builds the page
+(web/, TypeScript) around them into dist/, every asset's name hashed by its
+content so that a browser never mixes two builds' files:
 
 ```sh
-cargo install wasm-bindgen-cli --version 0.2.130
-mise use -g aqua:WebAssembly/binaryen@latest  # or binaryen's release, on the PATH
-just profile=release web
-python3 -m http.server -d examples/web/web
+mise install
+just profile=release web  # into examples/web/dist, as Pages deploys it
+just web-dev              # or Vite's dev server, from the sources
 ```
 
 `just web` (the dev profile) skips wasm-opt and keeps the names, for
-debugging and profiling.
+debugging and profiling. `pnpm -C examples/web typecheck` checks the page's
+TypeScript, as CI does.
 
-Then open <http://localhost:8000/> in a browser with WebGPU. URL parameters
-(web/main.js):
+Serve dist/ over HTTP, or run `just web-dev`, and open the page in a
+browser with WebGPU. URL parameters (web/main.ts):
 
-- `style=<url>` (default: OpenFreeMap Liberty), `lat`, `lon`, `zoom`,
-  `bearing`, `pitch`;
+- `style=<key|url>`: a style of web/styles.ts by its key, or any style's
+  URL (default: OpenFreeMap Liberty);
+- `lat`, `lon`, `zoom`, `bearing`, `pitch`: the camera, unless the hash
+  has one (`#zoom/lat/lon[/bearing/pitch]`, as GL JS writes it, which the
+  page keeps up to date);
+- `fallbackFontFaces=<json>`: font files that every font stack falls back
+  to, in the format of a style's `font-faces` entry without a font name
+  (`[{"url": "...", "unicode-range": ["U+1000-109F"]}]`);
+- `compare`: MapLibre GL JS's map beside this one (see above);
 - `workers=<n>`: Web Workers for the tiles (default: up to 4);
 - `width`, `height`, `ratio`: a fixed canvas size in CSS pixels and pixel
-  ratio.
+  ratio;
+- `localIdeographFontFamily=<CSS font-family list>` (default: `sans-serif`):
+  see above; empty or `false` turns it off;
+- `panic=map` or `panic=tile`: the map's instance or the first tile
+  worker's panics once it starts, for the check.
 
-## A panic stops a Web Worker
+## A panic stops the map
 
-wasm32-unknown-unknown aborts on a panic, so the tile workers'
-`catch_unwind`, which natively turns a panic while parsing (a malformed
-vector tile, MVT or MLT) into an error for its tile, as C++ `catch (...)`
-does, doesn't run in the browser. The panic aborts the Web Worker's wasm
-instance instead: web/worker.js logs the instance as dead and drops its
-requests, and every tile whose worker it hosts stays pending. TODO(port):
-build with `panic=unwind` and wasm exception handling, or respawn the
-instance and create its tiles' workers again.
+A panic is a bug. wasm32-unknown-unknown aborts on one, which traps the
+wasm instance it happens in, so nothing calls into that instance again.
+When the map's instance or a tile worker's traps, the map stops and the
+page shows the panic's message (`window.mln.fatal` in web/main.ts).
 
 ## Check
 
@@ -176,7 +224,9 @@ It fails when more than 0.1% of a view's pixels differ (the combination
 of raster-dem and vector at z1: 1%, where SwiftShader and lavapipe
 antialias coastlines differently), when the page or a Web Worker logs an
 error or throws (a worker that panics, a tile that fails to load), or
-when a view gets no worker replies. The page renders on SwiftShader, which
+when a view gets no worker replies. It also loads the first view with
+`panic=map` and with `panic=tile`, and fails unless the page stops and
+shows the panic. The page renders on SwiftShader, which
 Chromium bundles, and most views come out identical to lavapipe's;
 leaving out one layer of labels changes 0.1% to 2% of the pixels.
 

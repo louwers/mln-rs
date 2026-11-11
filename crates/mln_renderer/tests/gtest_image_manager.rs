@@ -13,6 +13,7 @@ use mln_actor::RunLoop;
 use mln_renderer::gfx::dynamic_texture_atlas::ImageVersionMap;
 use mln_renderer::image_manager::{ImageManager, ImageManagerObserver, ImageRequestor, ImageRequestorBase};
 use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as ImageImpl};
+use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
@@ -88,7 +89,9 @@ struct StubImageRequestor {
     base: ImageRequestorBase,
     image_manager: Rc<ImageManager>,
     images_available: RefCell<Option<ImagesAvailable>>,
-    image_correlation_id: u64,
+    image_correlation_id: Cell<u64>,
+    /// The `on_requested_image_added` calls.
+    relayouts: Cell<u32>,
 }
 
 impl StubImageRequestor {
@@ -97,7 +100,8 @@ impl StubImageRequestor {
             base: ImageRequestorBase::default(),
             image_manager: image_manager.clone(),
             images_available: RefCell::new(None),
-            image_correlation_id: 0,
+            image_correlation_id: Cell::new(0),
+            relayouts: Cell::new(0),
         })
     }
 }
@@ -105,6 +109,10 @@ impl StubImageRequestor {
 impl ImageRequestor for StubImageRequestor {
     fn requestor_base(&self) -> &ImageRequestorBase {
         &self.base
+    }
+
+    fn on_requested_image_added(&self) {
+        self.relayouts.set(self.relayouts.get() + 1);
     }
 
     fn on_images_available(
@@ -115,7 +123,7 @@ impl ImageRequestor for StubImageRequestor {
         image_correlation_id: u64,
     ) {
         if let Some(images_available) = &*self.images_available.borrow() {
-            if self.image_correlation_id == image_correlation_id {
+            if self.image_correlation_id.get() == image_correlation_id {
                 images_available(icons, patterns, version_map);
             }
         }
@@ -518,4 +526,178 @@ fn remove_unused_style_images() {
     assert!(image_manager.get_image("missing").is_none());
     assert!(image_manager.get_image("1024px").is_none());
     assert!(image_manager.get_image("sprite").is_some());
+}
+
+// gtest: ImageManager.MixedDependenciesRetainProvidedImages
+#[test]
+fn mixed_dependencies_retain_provided_images() {
+    const ON_DEMAND_IMAGE_COUNT: usize = 6;
+    const ON_DEMAND_IMAGE_SIDE: u32 = 256;
+    const _: () = assert!(
+        ON_DEMAND_IMAGE_COUNT * (ON_DEMAND_IMAGE_SIDE * ON_DEMAND_IMAGE_SIDE * 4) as usize
+            > DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE
+    );
+
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    let observer = StubImageManagerObserver::new();
+    image_manager.set_observer(Some(observer.clone()));
+    image_manager.set_loaded(true);
+
+    let weak_manager: Weak<ImageManager> = Rc::downgrade(&image_manager);
+    *observer.image_missing.borrow_mut() = Box::new(move |id: &str| {
+        let image_manager = weak_manager.upgrade().expect("imageManager");
+        image_manager.add_image(make_image(id, Size::new(ON_DEMAND_IMAGE_SIDE, ON_DEMAND_IMAGE_SIDE), 3.0, false));
+    });
+    let evicted: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    let weak_manager: Weak<ImageManager> = Rc::downgrade(&image_manager);
+    let evicted_by_observer = evicted.clone();
+    *observer.remove_unused_style_images.borrow_mut() = Box::new(move |ids: &[String]| {
+        let image_manager = weak_manager.upgrade().expect("imageManager");
+        evicted_by_observer.borrow_mut().extend(ids.iter().cloned());
+        for id in ids {
+            image_manager.remove_image(id);
+        }
+    });
+
+    let mut requestor = Some(StubImageRequestor::new(&image_manager));
+    image_manager.add_image(make_image("sprite", Size::new(16, 16), 1.0, false));
+    let dependencies: Rc<RefCell<ImageDependencies>> = Rc::new(RefCell::new(dependencies(&["sprite"])));
+    for i in 0..ON_DEMAND_IMAGE_COUNT {
+        dependencies.borrow_mut().insert(format!("a{i}"), ImageType::Icon);
+    }
+    let notified = Rc::new(Cell::new(false));
+    {
+        let notified = notified.clone();
+        let dependencies = dependencies.clone();
+        *requestor.as_ref().unwrap().images_available.borrow_mut() =
+            Some(Box::new(move |icons: ImageMap, _: ImageMap, _: ImageVersionMap| {
+                notified.set(true);
+                let dependencies = dependencies.borrow();
+                assert_eq!(icons.len(), dependencies.len());
+                for id in dependencies.keys() {
+                    assert!(icons.contains_key(id), "{id}");
+                }
+            }));
+    }
+    let request = |requestor: &Rc<StubImageRequestor>| {
+        notified.set(false);
+        let correlation_id = requestor.image_correlation_id.get() + 1;
+        requestor.image_correlation_id.set(correlation_id);
+        get_images(&image_manager, requestor, dependencies.borrow().clone(), correlation_id);
+        image_manager.reduce_memory_use_if_cache_size_exceeds_limit();
+        assert!(evicted.borrow().is_empty());
+        run_loop.run_once();
+        image_manager.notify_if_missing_image_added();
+        assert!(notified.get());
+    };
+
+    request(requestor.as_ref().unwrap());
+    assert_eq!(observer.count.get(), 6);
+    image_manager.reduce_memory_use_if_cache_size_exceeds_limit();
+    assert!(evicted.borrow().is_empty());
+
+    request(requestor.as_ref().unwrap());
+    assert_eq!(observer.count.get(), 6);
+
+    for i in 0..ON_DEMAND_IMAGE_COUNT {
+        dependencies.borrow_mut().insert(format!("b{i}"), ImageType::Icon);
+    }
+    for _round in 0..2 {
+        request(requestor.as_ref().unwrap());
+        image_manager.reduce_memory_use_if_cache_size_exceeds_limit();
+        assert!(evicted.borrow().is_empty());
+        assert_eq!(observer.count.get(), 12);
+        for id in dependencies.borrow().keys() {
+            assert!(image_manager.get_image(id).is_some(), "{id}");
+        }
+    }
+
+    requestor.take();
+    image_manager.reduce_memory_use_if_cache_size_exceeds_limit();
+    assert_eq!(evicted.borrow().len(), 12);
+    dependencies.borrow_mut().remove("sprite");
+    for id in dependencies.borrow().keys() {
+        assert!(image_manager.get_image(id).is_none(), "{id}");
+    }
+    assert!(image_manager.get_image("sprite").is_some());
+}
+
+// Port-only: maplibre-native-ffi's late style image layout (its patch 0030).
+// A requestor answered without an image it asked for relayouts once the
+// image is added, after all of the update's images are; one that didn't ask
+// for it doesn't.
+#[test]
+fn requestor_relayouts_when_requested_image_is_added() {
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
+    image_manager.set_loaded(true);
+    let requestor = StubImageRequestor::new(&image_manager);
+    let unrelated = StubImageRequestor::new(&image_manager);
+    let answered = Rc::new(Cell::new(0));
+    for stub in [&requestor, &unrelated] {
+        let answered = answered.clone();
+        *stub.images_available.borrow_mut() = Some(Box::new(move |_, _, _| answered.set(answered.get() + 1)));
+    }
+
+    get_images(&image_manager, &requestor, dependencies(&["marker"]), 0);
+    get_images(&image_manager, &unrelated, dependencies(&["other"]), 0);
+    run_loop.run_once();
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(answered.get(), 2);
+
+    image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
+    image_manager.add_image(make_image("unrequested", Size::new(16, 16), 1.0, false));
+    assert_eq!(requestor.relayouts.get(), 0);
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(requestor.relayouts.get(), 1);
+    assert_eq!(unrelated.relayouts.get(), 0);
+
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(requestor.relayouts.get(), 1);
+}
+
+// Port-only: as above. A requestor still waiting for its answer gets an
+// image added in the meantime with the answer, without a relayout.
+#[test]
+fn pending_requestor_gets_added_image_without_relayout() {
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
+    image_manager.set_loaded(true);
+    let requestor = StubImageRequestor::new(&image_manager);
+    let icons = Rc::new(RefCell::new(Vec::new()));
+    {
+        let icons = icons.clone();
+        *requestor.images_available.borrow_mut() =
+            Some(Box::new(move |received: ImageMap, _, _| icons.borrow_mut().extend(received.keys().cloned())));
+    }
+
+    get_images(&image_manager, &requestor, dependencies(&["marker"]), 0);
+    image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
+    run_loop.run_once();
+    image_manager.notify_if_missing_image_added();
+
+    assert_eq!(*icons.borrow(), ["marker"]);
+    assert_eq!(requestor.relayouts.get(), 0);
+}
+
+// Port-only: as above. A requestor that goes away before the update's
+// images are all added isn't told.
+#[test]
+fn removed_requestor_does_not_relayout() {
+    let run_loop = RunLoop::new();
+    let image_manager = ImageManager::create();
+    image_manager.set_observer(Some(Rc::new(DefaultImageManagerObserver)));
+    image_manager.set_loaded(true);
+    let requestor = StubImageRequestor::new(&image_manager);
+    get_images(&image_manager, &requestor, dependencies(&["marker"]), 0);
+    run_loop.run_once();
+    image_manager.notify_if_missing_image_added();
+
+    image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
+    image_manager.remove_requestor_key(Rc::as_ptr(&requestor) as *const () as usize);
+    image_manager.notify_if_missing_image_added();
+    assert_eq!(requestor.relayouts.get(), 0);
 }

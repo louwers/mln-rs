@@ -19,6 +19,9 @@ image-webp.workspace = true
 mln_util.workspace = true
 png.workspace = true
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+zune-jpeg.workspace = true
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true

@@ -9,7 +9,8 @@
 // otherwise stay reserved in the instance's atlas.
 
 use mln_style_types::image::RectU16;
-use mln_util::serialization::{payload, shared};
+use mln_util::serialization::payload::{self, Payload};
+use mln_util::serialization::shared;
 use serde::{Deserialize, Serialize};
 
 use crate::gfx::dynamic_texture::{DynamicTexturePtr, TextureHandle};
@@ -22,7 +23,7 @@ use crate::tile::worker_codec::fields;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Encoded {
     pub bytes: Vec<u8>,
-    pub payloads: Vec<Vec<u8>>,
+    pub payloads: Vec<Payload>,
 }
 
 impl From<Vec<u8>> for Encoded {

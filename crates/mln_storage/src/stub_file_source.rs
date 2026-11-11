@@ -8,8 +8,8 @@
 // stub lives on the thread that created it; requests must come from that
 // thread.
 //
-// TODO(port): ResponseType::Manual (`respondToAll`), the style/source/tile/
-// glyphs/image responders beyond the generic `set_response`.
+// TODO(port): the style/source/tile/glyphs/image responders beyond the
+// generic `set_response`.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -33,6 +33,8 @@ use crate::response::Response;
 pub enum ResponseType {
     Asynchronous,
     Synchronous,
+    /// Requests wait for `respond_to_all`.
+    Manual,
 }
 
 /// A responder: `std::function<std::optional<Response>(const Resource&)>`.
@@ -135,6 +137,24 @@ impl StubFileSource {
         })
     }
 
+    /// `respondToAll()`: answers the requests pending now. Only for
+    /// `ResponseType::Manual`.
+    pub fn respond_to_all(&self) {
+        assert_eq!(self.type_, ResponseType::Manual, "this method can only be called with ResponseType::Manual");
+        let state = self.state();
+        let ids: Vec<u64> = state.borrow().pending.keys().copied().collect();
+        for id in ids {
+            // A callback can cancel or start requests, so take each one out
+            // of `pending` before calling it.
+            let Some((resource, responder, callback)) = state.borrow_mut().pending.remove(&id) else {
+                continue;
+            };
+            if let Some(res) = responder(&resource) {
+                (callback.borrow_mut())(res);
+            }
+        }
+    }
+
     fn schedule_poll(state: &Rc<RefCell<State>>) {
         if let Some(timer) = &state.borrow().timer {
             timer.send();
@@ -184,13 +204,16 @@ impl FileSource for StubFileSource {
         };
         let req = StubFileRequest { id, state: Rc::downgrade(&state) };
         let responder = self.response();
-        if self.type_ == ResponseType::Synchronous {
-            if let Some(res) = responder(resource) {
-                callback(res);
+        match self.type_ {
+            ResponseType::Synchronous => {
+                if let Some(res) = responder(resource) {
+                    callback(res);
+                }
             }
-        } else {
-            state.borrow_mut().pending.insert(id, (resource.clone(), responder, Rc::new(RefCell::new(callback))));
-            Self::schedule_poll(&state);
+            ResponseType::Asynchronous | ResponseType::Manual => {
+                state.borrow_mut().pending.insert(id, (resource.clone(), responder, Rc::new(RefCell::new(callback))));
+                Self::schedule_poll(&state);
+            }
         }
         Box::new(req)
     }

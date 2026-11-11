@@ -113,10 +113,10 @@ fn sky_constants_and_transitions() {
     changed.properties.get_mut::<SkyAtmosphereBlend>().value = PropertyValue::Constant(0.9);
     transitioning.impl_ = Arc::new(changed);
     let start = TimePoint::new(Duration::zero());
-    transitioning.transition(&TransitionParameters {
-        now: start,
-        transition: TransitionOptions { duration: Some(milliseconds(100)), ..TransitionOptions::default() },
-    });
+    transitioning.transition(&TransitionParameters::new(
+        start,
+        TransitionOptions { duration: Some(milliseconds(100)), ..TransitionOptions::default() },
+    ));
     assert!(transitioning.has_transition());
 
     let mut evaluation = PropertyEvaluationParameters::new(0.0);

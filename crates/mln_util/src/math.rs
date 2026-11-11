@@ -1,6 +1,5 @@
-// Ports src/mln/util/math.hpp: the vector helpers the query path uses
-// (`perp`, `dist`, `distSqr`, `length`, `mag`, `unit`, `rotate`). Other
-// files keep private copies of some of these; they can switch over.
+// Ports vector helpers of src/mln/util/math.hpp. Other files keep private
+// copies of some of these; they can switch over.
 
 use geometry::Point;
 
@@ -29,6 +28,25 @@ pub fn dist_f64(a: Point<f64>, b: Point<f64>) -> f64 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
     (dx * dx + dy * dy).sqrt()
+}
+
+/// `normal<double>(a, b)`: the unit vector from `a` to `b` (NaN when they
+/// are equal).
+pub fn normal(a: Point<f64>, b: Point<f64>) -> Point<f64> {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    let c = (dx * dx + dy * dy).sqrt();
+    Point::new(dx / c, dy / c)
+}
+
+/// `crossProduct<double>(a, b)`.
+pub fn cross_product(a: Point<f64>, b: Point<f64>) -> f64 {
+    a.x * b.y - a.y * b.x
+}
+
+/// `angle_between<double>(a, b)`: the signed angle from `a` to `b`.
+pub fn angle_between(a: Point<f64>, b: Point<f64>) -> f64 {
+    (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y)
 }
 
 /// `length(a, b)`.

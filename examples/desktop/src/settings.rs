@@ -1,12 +1,10 @@
-// The fields and defaults of platform/glfw/settings_json.hpp.
-//
-// TODO(port): `load()`/`save()` of /tmp/mbgl-native.cfg (C++ restores the
-// last camera at startup and saves it at exit); the port always starts from
-// the defaults and the command line.
+// The camera and options the app starts with, which the command line
+// overrides.
 
 use mln_util::constants::{DEFAULT_FOV, DEFAULT_PITCH_MAX};
 
-/// The camera and options the app starts with (`Settings_JSON`).
+/// The camera and options the app starts with: central Amsterdam, as the
+/// web demo opens.
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub longitude: f64,
@@ -25,10 +23,10 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            longitude: 0.0,
-            latitude: 0.0,
+            longitude: 4.89,
+            latitude: 52.37,
             altitude: 0.0,
-            zoom: 0.0,
+            zoom: 13.0,
             bearing: 0.0,
             pitch: 0.0,
             roll: 0.0,

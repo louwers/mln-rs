@@ -85,9 +85,9 @@ impl Face {
             sfnt_offset = b.u32(12) as usize;
             format_tag = b.u32(sfnt_offset);
         } else if format_tag == tag(b"wOFF") || format_tag == tag(b"wOF2") {
-            // TODO(port): WOFF (FreeType decompresses it with zlib) and WOFF2
-            // (no Brotli in the C++ build: fails there too).
-            return Err(OpenError("Unknown_File_Format (WOFF not ported)"));
+            // FreeType decodes these here (woff_open_font, woff2_open_font);
+            // the port's callers decode them first, with crate::woff.
+            return Err(OpenError("Unknown_File_Format (WOFF: decode it with crate::woff first)"));
         }
         // sfnt_open_font accepts these tags (plus Mac resource forks).
         let known = [tag(b"\0\x01\0\0"), tag(b"OTTO"), tag(b"true"), tag(b"\0\x02\0\0"), tag(b"typ1")];

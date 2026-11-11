@@ -26,7 +26,7 @@
 //! before anything else runs, and the instance's tasks run when its Web
 //! Worker runs them.
 //!
-//! web/main.js, web/map-worker.js and web/worker.js are the JavaScript side.
+//! web/main.ts, web/map-worker.ts and web/worker.ts are the TypeScript side.
 
 #![cfg(target_arch = "wasm32")]
 
@@ -37,7 +37,7 @@ mod worker;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use map::WebMap;
+pub use map::{WebMap, set_preloads};
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_actor::scheduler;
 use mln_util::enum_::Enum;
@@ -50,9 +50,23 @@ pub use worker::TileWorker;
 /// map or file source exists (they would start threads otherwise).
 #[wasm_bindgen(start)]
 fn start() {
-    std::panic::set_hook(Box::new(|info| web_sys::console::error_1(&JsValue::from_str(&info.to_string()))));
+    std::panic::set_hook(Box::new(|info| {
+        let message = JsValue::from_str(&info.to_string());
+        web_sys::console::error_1(&message);
+        // The instance aborts after the hook: the Web Worker's script reads
+        // the message from here, since it can't call into the instance any
+        // more.
+        let _ = js_sys::Reflect::set(&js_sys::global(), &JsValue::from_str("mlnPanic"), &message);
+    }));
     Log::set_observer(Box::new(ConsoleLog));
     scheduler::install_cooperative(Arc::new(CooperativeScheduler::new()));
+}
+
+/// Panics with `message`. Only check/check.mjs calls it (the page's `panic`
+/// parameter), to test that a panic stops the page.
+#[wasm_bindgen]
+pub fn panic_for_check(message: &str) {
+    panic!("{message}");
 }
 
 /// The scheduler `start` installed.

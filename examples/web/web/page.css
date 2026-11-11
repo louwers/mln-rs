@@ -1,0 +1,477 @@
+/* The page's controls float over a full-window map. Their colors follow the
+   style's: `data-theme="dark"` on the root for a dark style. */
+
+:root {
+  --surface: #ffffff;
+  --ink: #1d2733;
+  --muted: #5d6874;
+  --line: rgb(29 39 51 / 0.14);
+  --hover: rgb(29 39 51 / 0.07);
+  --north: #d2392b;
+  --focus: #2f6fd6;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.16), 0 0 0 1px var(--line);
+  --gap: 10px;
+  --radius: 6px;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --surface: #222a33;
+  --ink: #e6eaee;
+  --muted: #9ba6b1;
+  --line: rgb(255 255 255 / 0.14);
+  --hover: rgb(255 255 255 / 0.08);
+  --north: #ff6a5a;
+  --focus: #7eaaf2;
+  --shadow: 0 1px 3px rgb(0 0 0 / 0.5), 0 0 0 1px var(--line);
+  color-scheme: dark;
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #e8e4dc;
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--ink);
+}
+
+canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.corner {
+  position: fixed;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  pointer-events: none;
+}
+
+.corner > * {
+  pointer-events: auto;
+}
+
+.top-left {
+  top: max(var(--gap), env(safe-area-inset-top));
+  left: max(var(--gap), env(safe-area-inset-left));
+}
+
+.top-right {
+  top: max(var(--gap), env(safe-area-inset-top));
+  right: max(var(--gap), env(safe-area-inset-right));
+}
+
+.bottom-right {
+  bottom: max(var(--gap), env(safe-area-inset-bottom));
+  right: max(var(--gap), env(safe-area-inset-right));
+  align-items: flex-end;
+}
+
+/* Controls */
+
+.control {
+  background: var(--surface);
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.icon-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: var(--surface);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.icon-button:hover {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+.icon-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.group .icon-button {
+  border-radius: 0;
+}
+
+.group .icon-button:first-child {
+  border-radius: var(--radius) var(--radius) 0 0;
+}
+
+.group .icon-button:last-child {
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+
+.group .icon-button + .icon-button {
+  border-top: 1px solid var(--line);
+}
+
+.compass svg {
+  transition: transform 80ms linear;
+}
+
+.compass .north {
+  fill: var(--north);
+  stroke: none;
+}
+
+.compass .south {
+  fill: var(--muted);
+  stroke: none;
+}
+
+/* The style button: the style's name and who makes it. */
+
+.style-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 152px;
+  padding: 6px 10px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.style-button:hover {
+  background-image: linear-gradient(var(--hover), var(--hover));
+}
+
+.style-text {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+
+.style-name {
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.style-detail {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chevron {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Panels: the style list and the about panel, as popovers by the button
+   that opens them. */
+
+.panel {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 6px 24px rgb(0 0 0 / 0.22), 0 0 0 1px var(--line);
+  max-height: calc(100vh - 80px);
+  overflow: auto;
+}
+
+.styles {
+  position: fixed;
+  inset: auto;
+  top: calc(max(var(--gap), env(safe-area-inset-top)) + 52px);
+  left: max(var(--gap), env(safe-area-inset-left));
+  width: min(280px, calc(100vw - 2 * var(--gap)));
+}
+
+.about {
+  position: fixed;
+  inset: auto;
+  top: calc(max(var(--gap), env(safe-area-inset-top)) + 40px);
+  right: max(var(--gap), env(safe-area-inset-right));
+  width: min(320px, calc(100vw - 2 * var(--gap)));
+  padding: 4px 16px;
+}
+
+.style-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+}
+
+.style-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.style-option:hover {
+  background: var(--hover);
+}
+
+.style-option[aria-current="true"] {
+  background: var(--hover);
+  box-shadow: inset 3px 0 0 var(--focus);
+}
+
+.note {
+  margin: 0;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+code, kbd {
+  font: 12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+kbd {
+  padding: 0 4px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+
+.about h2 {
+  margin: 12px 0 4px;
+  font-size: 16px;
+}
+
+.about p {
+  margin: 8px 0;
+}
+
+.gestures {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 12px;
+  margin: 12px 0;
+}
+
+.gestures dt {
+  font-weight: 600;
+}
+
+.gestures dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.status {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+a {
+  color: var(--focus);
+}
+
+/* Attribution: the sources' credits on one line, wrapped when long. On a
+   narrow window it folds into its button. */
+
+.attribution {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(560px, calc(100vw - 2 * var(--gap)));
+  padding: 2px 4px 2px 8px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 85%, transparent);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.attribution[hidden] {
+  display: none;
+}
+
+.attribution-text a {
+  color: inherit;
+}
+
+.attribution-toggle {
+  display: none;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ink);
+  color: var(--surface);
+  font: italic 600 12px/18px Georgia, serif;
+  cursor: pointer;
+}
+
+@media (max-width: 640px) {
+  .attribution:not(.open) {
+    padding: 2px;
+  }
+
+  .attribution:not(.open) .attribution-text {
+    display: none;
+  }
+
+  .attribution-toggle {
+    display: block;
+  }
+}
+
+/* The comparison (compare.js): GL JS's map over the canvas, right of the
+   divider at --split. */
+
+.gl-layer {
+  position: fixed;
+  inset: 0;
+  clip-path: inset(0 0 0 var(--split, 50%));
+}
+
+.gl-map {
+  width: 100%;
+  height: 100%;
+}
+
+.divider {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--split, 50%);
+  width: 24px;
+  margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 12px;
+  height: 40px;
+  margin-top: -20px;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.compare-label {
+  position: fixed;
+  top: calc(max(var(--gap), env(safe-area-inset-top)) + 56px);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.compare-label.mln {
+  right: calc(100% - var(--split, 50%) + 16px);
+}
+
+.compare-label.gl {
+  left: calc(var(--split, 50%) + 16px);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  cursor: pointer;
+}
+
+.toggle input {
+  margin: 0;
+  accent-color: var(--focus);
+}
+
+/* Why the map can't start, or why it stopped. */
+
+.notice {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  max-width: min(360px, calc(100vw - 4 * var(--gap)));
+  margin: 0;
+  padding: 12px 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  border-left: 4px solid var(--north);
+  white-space: pre-wrap;
+}
+
+.notice[hidden] {
+  display: none;
+}
+
+/* A Shift-drag's box. */
+
+#box {
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 2px dotted #202020;
+  background: #ffffff80;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .compass svg {
+    transition: none;
+  }
+}

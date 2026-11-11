@@ -1,0 +1,21 @@
+{
+  "name": "mln-rs-web",
+  "private": true,
+  "license": "BSD-2-Clause",
+  "description": "The browser build's page: mln-rs in Web Workers, with its controls and a comparison with MapLibre GL JS",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.worker.json"
+  },
+  "dependencies": {
+    "maplibre-gl": "^6.17.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2",
+    "vite": "^8.3.7"
+  },
+  "packageManager": "pnpm@12.18.0"
+}

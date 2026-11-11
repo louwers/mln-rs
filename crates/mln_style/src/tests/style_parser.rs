@@ -284,3 +284,77 @@ fn font_face_unicode_range_with_multibyte_character() {
     assert_eq!(faces.len(), 1);
     assert_eq!(faces[0].ranges, vec![(0, 0xFF)]);
 }
+
+// gtest: StyleParser.FallbackFontFaces
+#[test]
+fn fallback_font_faces() {
+    use mln_text::glyph::GlyphIDType;
+
+    use crate::parser::parse_fallback_font_faces;
+
+    let faces = parse_fallback_font_faces(
+        r#"[{"url": "a.ttf", "unicode-range": ["U+1000-109F", "U+A9E0-A9FF"]}, {"url": "b.ttf"}]"#,
+    )
+    .unwrap();
+    assert_eq!(faces.len(), 2);
+    assert_eq!(faces[0].name, "");
+    assert_eq!(faces[0].url, "a.ttf");
+    assert_eq!(faces[0].ranges, vec![(0x1000, 0x109F), (0xA9E0, 0xA9FF)]);
+    assert_eq!(faces[1].ranges, vec![(0, 0x10FFFF)]);
+    assert_ne!(faces[0].type_, GlyphIDType::FontPBF);
+
+    assert!(parse_fallback_font_faces("{}").is_err());
+    assert!(parse_fallback_font_faces("[1]").is_err());
+    assert!(parse_fallback_font_faces(r#"[{"unicode-range": ["U+0-FF"]}]"#).is_err());
+    assert!(parse_fallback_font_faces(r#"[{"url": "a.ttf", "unicode-range": ["U+XYZ-FF"]}]"#).is_err());
+}
+
+// gtest: StyleParser.NestingDepthLimit
+// Port-only: serde_json admits 127 levels of nesting rather than 256, and
+// words its error differently.
+#[test]
+fn nesting_depth_limit() {
+    let parse = |depth: usize| {
+        let json = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        Parser::default().parse(&json).unwrap_err().to_string()
+    };
+
+    assert_eq!(parse(127), "style must be an object");
+    assert_eq!(parse(128), "recursion limit exceeded at line 1 column 128");
+    // Deep enough to overflow the stack if the parser recursed through it all.
+    assert!(parse(1_000_000).starts_with("recursion limit exceeded"));
+}
+
+// Port-only: the JSON depth limit is what bounds how deeply expressions and
+// filters nest, so the deepest style it admits must parse on a 1 MiB stack,
+// the browser build's default. "interpolate" uses the most stack per level.
+#[test]
+fn deepest_admitted_style_parses_on_a_1_mib_stack() {
+    let nest =
+        |wrap: &str, base: &str, depth: usize| (0..depth).fold(base.to_owned(), |inner, _| wrap.replace('X', &inner));
+    let style = |depth: usize| {
+        let filter = nest(r#"["all", X, ["==", ["get", "a"], 1]]"#, r#"["==", ["get", "a"], 1]"#, depth);
+        let radius =
+            nest(r#"["interpolate", ["linear"], ["get", "a"], 0, X, 1, 0]"#, r#"["number", ["get", "a"]]"#, depth);
+        format!(
+            r#"{{"version": 8, "sources": {{"s": {{"type": "vector", "tiles": ["http://example.com/{{z}}/{{x}}/{{y}}"]}}}},
+                "layers": [{{"id": "c", "type": "circle", "source": "s", "source-layer": "l",
+                             "filter": {filter}, "paint": {{"circle-radius": {radius}}}}}]}}"#
+        )
+    };
+    let fits = |depth: usize| serde_json::from_str::<serde_json::Value>(&style(depth)).is_ok();
+    let depth = (0..200).take_while(|&depth| fits(depth)).last().unwrap();
+    assert!(depth >= 120, "{depth}");
+
+    let json = style(depth);
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(move || {
+            let mut parser = Parser::default();
+            parser.parse(&json).unwrap();
+            assert_eq!(parser.layers.len(), 1);
+        })
+        .unwrap()
+        .join()
+        .unwrap();
+}

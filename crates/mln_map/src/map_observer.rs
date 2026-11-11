@@ -3,9 +3,10 @@
 // Methods take `&self` (the observer is shared with the map as
 // `Rc<dyn MapObserver>`); implementations use `Cell`/`RefCell` for state.
 
-use mln_renderer::ExceptionPtr;
-use mln_renderer::tile::tile::TileOperation;
-use mln_tile_id::OverscaledTileID;
+use std::sync::Arc;
+
+use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, RenderingStats, TileOperation};
+use mln_style::sprite::Sprite;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapLoadError {
@@ -58,22 +59,28 @@ pub enum RenderMode {
     Full,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RenderFrameStatus {
     pub mode: RenderMode,
     /// In continuous mode, shows that there are ongoing transitions.
     pub needs_repaint: bool,
     pub placement_changed: bool,
-    // TODO(port): rendering_stats: Arc<gfx::RenderingStats>.
+    /// The render context's counters after this frame: per-frame ones such
+    /// as `num_draw_calls` count this frame, running ones such as
+    /// `total_draw_calls` and `num_frames` count every frame so far.
+    pub rendering_stats: Arc<RenderingStats>,
 }
 
-// TODO(port): onSourceChanged(style::Source&), onRegisterShaders, shader
-// compile callbacks, glyph/sprite request callbacks.
+// TODO(port): onRegisterShaders, shader compile callbacks.
 /// `MapObserver`. All methods have the C++ default (empty) bodies.
 ///
 /// The camera callbacks take a [`CameraChange`], where C++ passes only its
 /// mode, so that observers can tell a gesture and its momentum from a
 /// command, as maplibre-native-ffi's camera events can.
+///
+/// [`on_source_changed`](Self::on_source_changed) takes the source's ID,
+/// where C++ passes the `style::Source&`: the source lives in the style,
+/// which the map may still be mutating when it reports the change.
 pub trait MapObserver {
     fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}
@@ -86,6 +93,10 @@ pub trait MapObserver {
     fn on_will_start_rendering_map(&self) {}
     fn on_did_finish_rendering_map(&self, _mode: RenderMode) {}
     fn on_did_finish_loading_style(&self) {}
+    /// A style source changed its description, as when its TileJSON
+    /// arrives or its GeoJSON data is replaced. The map's style already
+    /// holds the change.
+    fn on_source_changed(&self, _source_id: &str) {}
     fn on_did_become_idle(&self) {}
     fn on_style_image_missing(&self, _id: &str) {}
     /// This method should return true if unused image can be removed, false
@@ -93,8 +104,21 @@ pub trait MapObserver {
     fn on_can_remove_unused_style_image(&self, _id: &str) -> bool {
         true
     }
-    fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
     fn on_render_error(&self, _error: ExceptionPtr) {}
+    fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
+    /// A glyph range of a font stack failed to load or parse.
+    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: ExceptionPtr) {}
+    fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
+    /// A tile of the source `source_id` went through `op`.
+    fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
+    /// A sprite's image and JSON loaded and parsed. `None` stands for a
+    /// style without a sprite.
+    fn on_sprite_loaded(&self, _sprite: Option<&Sprite>) {}
+    /// A sprite's image or JSON failed to load, or the sprite failed to
+    /// parse. `None` stands for a sprite URL that no file source serves.
+    fn on_sprite_error(&self, _sprite: Option<&Sprite>, _error: ExceptionPtr) {}
+    /// The style requested a sprite.
+    fn on_sprite_requested(&self, _sprite: Option<&Sprite>) {}
     /// Called with a description of a corrupted symbol detected by the
     /// symbol guard checks.
     fn on_symbol_error(&self, _message: &str) {}

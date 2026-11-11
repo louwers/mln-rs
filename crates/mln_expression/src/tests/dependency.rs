@@ -84,7 +84,6 @@ fn image_() {
 
 // gtest: ExpressionDependencies.Distance
 #[test]
-#[ignore = "TODO(port): the \"distance\" expression (src/mln/style/expression/distance.cpp) fails to parse"]
 fn distance() {
     let point_geo_source = r#"{
          "type": "Point",
