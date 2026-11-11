@@ -494,6 +494,7 @@ impl Map {
             .with_constrain_mode(state.get_constrain_mode())
             .with_viewport_mode(state.get_viewport_mode())
             .with_cross_source_collisions(self.impl_.cross_source_collisions)
+            .with_keep_upright_margin(self.impl_.keep_upright_margin)
             .with_size(state.get_size())
             .with_pixel_ratio(self.impl_.pixel_ratio)
     }

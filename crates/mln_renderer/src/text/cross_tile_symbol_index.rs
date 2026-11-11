@@ -208,6 +208,7 @@ impl CrossTileSymbolLayerIndex {
             .or_default()
             .get(tile_id)
             .map(|index| (index.bucket_instance_id, index.clone()));
+        let new_to_the_index = previous.as_ref().is_none_or(|(id, _)| *id != bucket.bucket_instance_id);
         if let Some((previous_bucket_instance_id, previous_index)) = previous {
             if previous_bucket_instance_id == bucket.bucket_instance_id && !state.has_uninitialized_symbols {
                 return false;
@@ -221,6 +222,11 @@ impl CrossTileSymbolLayerIndex {
             }
         }
 
+        if new_to_the_index {
+            // A new bucket, or its tile back from the cache.
+            state.line_label_directions_stale = true;
+        }
+
         state.has_uninitialized_symbols = false;
 
         if tile_id.overscale_factor() > 1 {
@@ -228,6 +234,10 @@ impl CrossTileSymbolLayerIndex {
             // so we filter out the off-screen symbols to improve the performance.
             for symbol_instance in state.symbol_instances.iter_mut() {
                 if is_in_viewport(tile_matrix, symbol_instance.get_anchor().point) {
+                    if symbol_instance.get_cross_tile_id() == SymbolInstance::INVALID_CROSS_TILE_ID {
+                        // Back in view: it gets an id again, maybe the one of a copy in another tile.
+                        state.cross_tile_ids_reassigned = true;
+                    }
                     symbol_instance.set_cross_tile_id(0);
                 } else {
                     symbol_instance.set_cross_tile_id(SymbolInstance::INVALID_CROSS_TILE_ID);
@@ -728,5 +738,71 @@ mod tests {
 
         assert_eq!(cross_tile_id(&symbol_bucket, 0), 1);
         assert_eq!(cross_tile_id(&symbol_bucket, 1), 2);
+    }
+
+    // gtest: CrossTileSymbolLayerIndex.lineLabelDirectionsStale
+    #[test]
+    fn line_label_directions_stale() {
+        // A bucket new to the index (a new one, or its tile back from the cache) may hold out of date
+        // reading directions of its line labels; one that stays in the index, even updated, does not.
+        let mut index = CrossTileSymbolLayerIndex::new(Rc::new(Cell::new(0)));
+
+        let tile_id = OverscaledTileID::with_zxy(7, 0, 6, 18, 24);
+        let bucket = make_bucket(vec![make_symbol_instance(1000.0, 1000.0, "Washington")], 1);
+        let stale = |bucket: &SymbolBucket| bucket.state().line_label_directions_stale;
+        assert!(!stale(&bucket));
+
+        // New, with its symbol out of view.
+        let pos_matrix = populate_pos_matrix(&tile_id, 60.0, 25.0, 7.0);
+        assert!(index.add_bucket(&tile_id, &pos_matrix, &bucket));
+        assert!(stale(&bucket));
+        bucket.state().line_label_directions_stale = false; // as Placement does once it has synced them
+
+        // Updated in place as its symbol comes into view, then unchanged.
+        let pos_matrix = populate_pos_matrix(&tile_id, 39.0, -76.0, 7.0);
+        assert!(index.add_bucket(&tile_id, &pos_matrix, &bucket));
+        assert!(!stale(&bucket));
+        assert!(!index.add_bucket(&tile_id, &pos_matrix, &bucket));
+        assert!(!stale(&bucket));
+
+        // Out of view, then back from the cache.
+        index.remove_stale_buckets(&HashSet::new());
+        assert!(index.add_bucket(&tile_id, &pos_matrix, &bucket));
+        assert!(stale(&bucket));
+    }
+
+    // gtest: CrossTileSymbolLayerIndex.crossTileIDsReassigned
+    #[test]
+    fn cross_tile_ids_reassigned() {
+        // An overscaled tile's symbols out of view have no id; one that comes back into view gets an id
+        // again, maybe the id of a copy in another tile.
+        let mut index = CrossTileSymbolLayerIndex::new(Rc::new(Cell::new(0)));
+
+        let tile_id = OverscaledTileID::with_zxy(7, 0, 6, 18, 24);
+        let bucket = make_bucket(
+            vec![make_symbol_instance(100.0, 4096.0, "West"), make_symbol_instance(8100.0, 4096.0, "East")],
+            1,
+        );
+        let reassigned = |bucket: &SymbolBucket| bucket.state().cross_tile_ids_reassigned;
+
+        // New, with the view left of the tile: West in view, East out of it. A new bucket is marked as
+        // such, not as reassigned.
+        let pos_matrix = populate_pos_matrix(&tile_id, 38.82, -80.12, 7.0);
+        index.add_bucket(&tile_id, &pos_matrix, &bucket);
+        assert_ne!(cross_tile_id(&bucket, 0), SymbolInstance::INVALID_CROSS_TILE_ID);
+        assert_eq!(cross_tile_id(&bucket, 1), SymbolInstance::INVALID_CROSS_TILE_ID);
+        assert!(!reassigned(&bucket));
+        bucket.state().line_label_directions_stale = false;
+
+        // Updated (East still out of view): West keeping its id is no reason to sync.
+        index.add_bucket(&tile_id, &pos_matrix, &bucket);
+        assert!(!reassigned(&bucket));
+
+        // East back in view.
+        let pos_matrix = populate_pos_matrix(&tile_id, 39.0, -76.0, 7.0);
+        index.add_bucket(&tile_id, &pos_matrix, &bucket);
+        assert_ne!(cross_tile_id(&bucket, 1), SymbolInstance::INVALID_CROSS_TILE_ID);
+        assert!(reassigned(&bucket));
+        assert!(!bucket.state().line_label_directions_stale);
     }
 }

@@ -366,6 +366,11 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         }
     }
 
+    // A continuous-mode test outputs no image unless it asks for one: the frame of the settled map.
+    if has("outputsImage") {
+        metadata.outputs_image = get_bool(member(test_value, "outputsImage"));
+    }
+
     if has("width") {
         if metadata.map_mode == MapMode::Tile {
             log::warning(Event::ParseStyle, "The 'width' metadata field is ignored in tile map mode");
@@ -415,6 +420,10 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
 
     if has("crossSourceCollisions") {
         metadata.cross_source_collisions = get_bool(member(test_value, "crossSourceCollisions"));
+    }
+
+    if has("keepUprightMargin") {
+        metadata.keep_upright_margin = get_f32(member(test_value, "keepUprightMargin"));
     }
 
     if has("axonometric") {
@@ -631,6 +640,19 @@ fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     }
 }
 
+/// `renderUntilIdle(ctx)`: continuous mode, renders frames until the map is
+/// idle (no still image can be requested in that mode); false when the map
+/// failed to load.
+pub fn render_until_idle(ctx: &mut TestContext<'_>) -> bool {
+    match ctx.get_map().render_until_idle() {
+        Ok(loaded) => loaded,
+        Err(error) => {
+            infallible(ctx, Err(error));
+            false
+        }
+    }
+}
+
 /// `parseTestOperations(metadata)`.
 pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
     let mut result: TestOperations = Vec::new();
@@ -642,12 +664,17 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
     if operations_array.is_empty() {
         return result;
     }
+    let continuous = metadata.map_mode == MapMode::Continuous;
     for operation_array in &operations_array {
         let arg = |i: usize| index(operation_array, i);
         let size = array_size(operation_array);
         let name = get_str(arg(0));
 
-        if name == WAIT_OP {
+        if name == WAIT_OP && continuous {
+            // wait, in continuous mode: render frames until the map is idle, so the next operation
+            // starts from a settled frame (a still image cannot be requested in this mode)
+            result.push(Box::new(|ctx: &mut TestContext<'_>| render_until_idle(ctx)));
+        } else if name == WAIT_OP {
             // wait
             result.push(Box::new(|ctx: &mut TestContext<'_>| ctx.get_map().render().is_ok()));
         } else if name == SLEEP_OP {

@@ -441,12 +441,42 @@ pub fn place_first_and_last_glyph(
     Some((first_placed_glyph, last_placed_glyph))
 }
 
-/// `requiresOrientationChange(writingModes, firstPoint, lastPoint, aspectRatio)`.
+/// Whether a horizontal line label kept upright has to be drawn flipped, given
+/// where its first and last glyph project (gl coordinates) when it is drawn
+/// unflipped. Without a keep-upright margin (`keep_upright_margin` 0, the
+/// default), or when it is drawn for the first time (`was_flipped` unset), it
+/// is flipped when it runs right to left. With a margin, in degrees (see
+/// `MapOptions::with_keep_upright_margin`), it keeps the direction it was
+/// drawn with until that direction is more than the margin past the vertical:
+/// without it a label on a line close to the vertical of a rotating map turns
+/// over and back at every small rotation.
+pub fn line_label_needs_flip(
+    first_point: Point<f32>,
+    last_point: Point<f32>,
+    aspect_ratio: f32,
+    was_flipped: Option<bool>,
+    keep_upright_margin: f32,
+) -> bool {
+    let Some(was_flipped) = was_flipped.filter(|_| keep_upright_margin > 0.0) else {
+        // No margin, or drawn for the first time: flipped when it runs right to left.
+        return first_point.x > last_point.x;
+    };
+    // Gl coordinates: y points up; x scaled by the aspect ratio so that angles are the screen's.
+    let dx = (last_point.x - first_point.x) * aspect_ratio;
+    let dy = last_point.y - first_point.y;
+    let margin = (dx * dx + dy * dy).sqrt() * mln_math::deg2radf(keep_upright_margin).sin();
+    if was_flipped { dx <= margin } else { dx < -margin }
+}
+
+/// `requiresOrientationChange(writingModes, firstPoint, lastPoint, aspectRatio,
+/// wasFlipped, keepUprightMargin)`.
 fn requires_orientation_change(
     writing_modes: WritingModeType,
     first_point: Point<f32>,
     last_point: Point<f32>,
     aspect_ratio: f32,
+    was_flipped: Option<bool>,
+    keep_upright_margin: f32,
 ) -> Option<PlacementResult> {
     if writing_modes == (WritingModeType::Horizontal | WritingModeType::Vertical) {
         // On top of choosing whether to flip, choose whether to render this
@@ -464,7 +494,7 @@ fn requires_orientation_change(
     if if writing_modes == WritingModeType::Vertical {
         first_point.y < last_point.y
     } else {
-        first_point.x > last_point.x
+        line_label_needs_flip(first_point, last_point, aspect_ratio, was_flipped, keep_upright_margin)
     } {
         // Includes "horizontalOnly" case for labels without vertical glyphs
         return Some(PlacementResult::NeedsFlipping);
@@ -479,6 +509,7 @@ fn place_glyphs_along_line(
     font_size: f32,
     flip: bool,
     keep_upright: bool,
+    keep_upright_margin: f32,
     pos_matrix: &Mat4,
     label_plane_matrix: &Mat4,
     gl_coord_matrix: &Mat4,
@@ -510,9 +541,14 @@ fn place_glyphs_along_line(
         let last_point = project(first_and_last_glyph.1.point, gl_coord_matrix).0;
 
         if keep_upright && !flip {
-            if let Some(orientation_change) =
-                requires_orientation_change(symbol.writing_modes, first_point, last_point, aspect_ratio)
-            {
+            if let Some(orientation_change) = requires_orientation_change(
+                symbol.writing_modes,
+                first_point,
+                last_point,
+                aspect_ratio,
+                symbol.keep_upright_flipped,
+                keep_upright_margin,
+            ) {
                 return orientation_change;
             }
         }
@@ -561,7 +597,14 @@ fn place_glyphs_along_line(
                 project_truncated_line_segment(symbol.anchor_point, tile_segment_end, a, 1.0, pos_matrix)
             };
 
-            if let Some(orientation_change) = requires_orientation_change(symbol.writing_modes, a, b, aspect_ratio) {
+            if let Some(orientation_change) = requires_orientation_change(
+                symbol.writing_modes,
+                a,
+                b,
+                aspect_ratio,
+                symbol.keep_upright_flipped,
+                keep_upright_margin,
+            ) {
                 return orientation_change;
             }
         }
@@ -599,15 +642,22 @@ fn place_glyphs_along_line(
 }
 
 /// `reprojectLineLabels(dynamicVertexArray, placedSymbols, posMatrix,
-/// pitchWithMap, rotateWithMap, keepUpright, tile, sizeBinder, state)`.
+/// pitchWithMap, rotateWithMap, keepUpright, keepUprightMargin, tile,
+/// sizeBinder, state)`.
+///
+/// With a `keep_upright_margin` above 0 (degrees, text only), each drawn
+/// symbol remembers the direction it was drawn with in
+/// `PlacedSymbol::keep_upright_flipped` and keeps it, see
+/// [`line_label_needs_flip`]. With 0, nothing is remembered or read.
 #[allow(clippy::too_many_arguments)]
 pub fn reproject_line_labels(
     dynamic_vertex_array: &mut Vec<SymbolDynamicLayoutVertex>,
-    placed_symbols: &[PlacedSymbol],
+    placed_symbols: &mut [PlacedSymbol],
     pos_matrix: &Mat4,
     pitch_with_map: bool,
     rotate_with_map: bool,
     keep_upright: bool,
+    keep_upright_margin: f32,
     tile: &RenderTile,
     size_binder: &SymbolSizeBinder,
     state: &TransformState,
@@ -628,7 +678,7 @@ pub fn reproject_line_labels(
 
     let mut use_vertical = false;
 
-    for placed_symbol in placed_symbols {
+    for placed_symbol in placed_symbols.iter_mut() {
         // Don't do calculations for vertical glyphs unless the previous symbol
         // was horizontal and we determined that vertical glyphs were necessary.
         // Also don't do calculations for symbols that are collided and fully
@@ -665,6 +715,7 @@ pub fn reproject_line_labels(
             pitch_scaled_font_size,
             false, /*unflipped*/
             keep_upright,
+            keep_upright_margin,
             pos_matrix,
             &label_plane_matrix,
             &gl_coord_matrix,
@@ -683,6 +734,7 @@ pub fn reproject_line_labels(
                     pitch_scaled_font_size,
                     true, /*flipped*/
                     keep_upright,
+                    keep_upright_margin,
                     pos_matrix,
                     &label_plane_matrix,
                     &gl_coord_matrix,
@@ -692,6 +744,9 @@ pub fn reproject_line_labels(
                 ) == PlacementResult::NotEnoughRoom)
         {
             hide_glyphs(placed_symbol.glyph_offsets.len(), dynamic_vertex_array);
+        } else if keep_upright && keep_upright_margin > 0.0 {
+            // Remember the direction it was drawn with (see line_label_needs_flip).
+            placed_symbol.keep_upright_flipped = Some(place_unflipped == PlacementResult::NeedsFlipping);
         }
     }
 }

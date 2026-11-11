@@ -56,7 +56,7 @@ use crate::layout::symbol_projection::{
     add_dynamic_attributes, evaluate_size_for_feature, get_label_plane_matrix, hide_glyphs, project,
     reproject_line_labels,
 };
-use crate::render_layer::{BucketPlacementData, RenderLayer, RenderLayerPtr};
+use crate::render_layer::{BucketPlacementData, LayerPlacementData, RenderLayer, RenderLayerPtr};
 use crate::render_tile::RenderTile;
 use crate::text::collision_feature::{CollisionBox, CollisionFeature, ProjectedCollisionBox};
 use crate::text::collision_index::{CollisionBoundaries, CollisionIndex, IntersectStatus};
@@ -501,6 +501,132 @@ enum PlacementKind {
 /// Key of `collisionCircles` (C++: the `CollisionFeature*`).
 type CollisionFeatureKey = (u32, usize, bool);
 
+/// The reading direction of line labels kept upright, by cross tile id, used
+/// with a keep-upright margin (`MapOptions::with_keep_upright_margin`) so that
+/// every copy of a label (tiles of two zoom levels, a tile back from the
+/// cache) reads the way the label was last drawn.
+///
+/// Between two syncs, each copy keeps its own direction from frame to frame
+/// (`PlacedSymbol::keep_upright_flipped`). Placement syncs a layer when a new
+/// placement draws it for the first time, when one of its buckets has just
+/// entered the cross tile index or has given a symbol back in view an id
+/// again, or when its set of buckets changes (see
+/// `Placement::sync_line_label_directions`), not on every frame: first
+/// [`remember`](Self::remember) for every bucket of the layer, then
+/// [`restore`](Self::restore) for every bucket of it. Only text is synced,
+/// icons are never read nor written.
+///
+/// What is shared is the reading direction on the map, not the flag: the
+/// copies of a label are matched by text and position only, and the line of
+/// one copy may run the other way than the line of another (tiles merge or
+/// cut lines differently), so the same reading direction can be drawn flipped
+/// in one copy and unflipped in the other.
+#[derive(Debug, Default)]
+pub struct LineLabelDirections {
+    directions: HashMap<u32, Point<f32>>,
+}
+
+impl LineLabelDirections {
+    /// Records the reading direction of each label of the bucket that has
+    /// been drawn since the last sync: not hidden, in a bucket that is not new
+    /// to the cross tile index (`SymbolBucketState::line_label_directions_stale`).
+    pub fn remember(&mut self, bucket: &SymbolBucketState) {
+        if bucket.line_label_directions_stale {
+            return;
+        }
+        for symbol in &bucket.symbol_instances {
+            let cross_tile_id = symbol.get_cross_tile_id();
+            if cross_tile_id == SymbolInstance::INVALID_CROSS_TILE_ID {
+                continue;
+            }
+            for index in placed_line_texts(symbol, bucket.text.placed_symbols.len()) {
+                let placed = &bucket.text.placed_symbols[index];
+                // A hidden copy is not drawn, so its direction may be out of
+                // date (one copy at most is not hidden: the others are
+                // duplicates, see `Placement::update_bucket_opacities`).
+                let Some(flipped) = placed.keep_upright_flipped.filter(|_| !placed.hidden) else {
+                    continue;
+                };
+                let line = line_direction_at_anchor(placed);
+                if line.x == 0.0 && line.y == 0.0 {
+                    continue;
+                }
+                self.directions.insert(cross_tile_id, if flipped { Point::new(-line.x, -line.y) } else { line });
+            }
+        }
+    }
+
+    /// Sets the direction of each label of the bucket, drawn or not, to the
+    /// recorded one, or else to the one recorded in `older` (the previous
+    /// placement's), or unsets it: such a label is decided as if it were drawn
+    /// for the first time. Clears `line_label_directions_stale` and
+    /// `cross_tile_ids_reassigned`.
+    pub fn restore(&self, bucket: &mut SymbolBucketState, older: Option<&LineLabelDirections>) {
+        let SymbolBucketState { symbol_instances, text, .. } = bucket;
+        for symbol in symbol_instances.iter() {
+            let cross_tile_id = symbol.get_cross_tile_id();
+            if cross_tile_id == SymbolInstance::INVALID_CROSS_TILE_ID {
+                continue;
+            }
+            let reading = self
+                .reading_direction(cross_tile_id)
+                .or_else(|| older.and_then(|older| older.reading_direction(cross_tile_id)));
+            // Overwritten even when the placed symbol has a direction of its
+            // own: a copy that was not drawn (hidden, or its tile back from the
+            // cache) would bring back an old one.
+            for index in placed_line_texts(symbol, text.placed_symbols.len()) {
+                let placed = &mut text.placed_symbols[index];
+                placed.keep_upright_flipped = reading.and_then(|reading| {
+                    // Flipped where this copy's line runs against the reading direction.
+                    let line = line_direction_at_anchor(placed);
+                    let along_line = line.x * reading.x + line.y * reading.y;
+                    (along_line != 0.0).then_some(along_line < 0.0)
+                });
+            }
+        }
+        bucket.line_label_directions_stale = false;
+        bucket.cross_tile_ids_reassigned = false;
+    }
+
+    /// The direction in which the label reads, in tile coordinates (the axes
+    /// are the same in the tiles of every zoom level); its length has no
+    /// meaning.
+    pub fn reading_direction(&self, cross_tile_id: u32) -> Option<Point<f32>> {
+        self.directions.get(&cross_tile_id).copied()
+    }
+}
+
+/// The placed horizontal texts of a symbol (its vertical text is placed by its
+/// own rule).
+fn placed_line_texts(symbol: &SymbolInstance, placed_symbol_count: usize) -> impl Iterator<Item = usize> {
+    [symbol.placed_right_text_index, symbol.placed_center_text_index, symbol.placed_left_text_index]
+        .into_iter()
+        .flatten()
+        .filter(move |index| *index < placed_symbol_count)
+}
+
+/// Whether the bucket's text is placed along lines, rotated with the map and
+/// kept upright: the labels that `reproject_line_labels` turns over.
+fn has_line_labels_kept_upright(bucket: &SymbolBucket) -> bool {
+    let layout = &*bucket.layout;
+    bucket.has_text_data()
+        && *layout.get::<SymbolPlacement>() != SymbolPlacementType::Point
+        && *layout.get::<TextRotationAlignment>() == AlignmentType::Map
+        && *layout.get::<TextKeepUpright>()
+}
+
+/// The direction of the line of a placed label at its anchor, in tile
+/// coordinates: the label reads this way when it is drawn unflipped. (0, 0)
+/// when unknown.
+fn line_direction_at_anchor(placed: &PlacedSymbol) -> Point<f32> {
+    if placed.segment + 1 >= placed.line.len() {
+        return Point::new(0.0, 0.0);
+    }
+    let from = placed.line[placed.segment];
+    let to = placed.line[placed.segment + 1];
+    Point::new(f32::from(to.x) - f32::from(from.x), f32::from(to.y) - f32::from(from.y))
+}
+
 /// `Placement`.
 pub struct Placement {
     kind: PlacementKind,
@@ -525,6 +651,15 @@ pub struct Placement {
     /// `mutable std::optional<Immutable<Placement>> prevPlacement`.
     prev_placement: RefCell<Option<Rc<Placement>>>,
     show_collision_boxes: bool,
+    /// `MapOptions::with_keep_upright_margin`, in degrees; 0 (the default)
+    /// outside `MapMode::Continuous`.
+    keep_upright_margin: f32,
+    /// Synced in `update_layer_buckets`, next to the opacities it depends on;
+    /// unused without a margin.
+    line_label_directions: RefCell<LineLabelDirections>,
+    /// The buckets of each layer (bucket instance ids, sorted) when this
+    /// placement last synced it.
+    line_label_synced_buckets: RefCell<HashMap<String, Vec<u32>>>,
 
     // Cache being used by placeSymbol()
     text_boxes: Vec<ProjectedCollisionBox>,
@@ -814,6 +949,9 @@ impl Placement {
             collision_groups: CollisionGroups::new(true),
             prev_placement: RefCell::new(None),
             show_collision_boxes: false,
+            keep_upright_margin: 0.0,
+            line_label_directions: RefCell::default(),
+            line_label_synced_buckets: RefCell::default(),
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
             collision_circles: HashMap::new(),
@@ -846,6 +984,16 @@ impl Placement {
             collision_groups: CollisionGroups::new(update_parameters.cross_source_collisions),
             prev_placement: RefCell::new(prev_placement),
             show_collision_boxes: update_parameters.debug_options.contains(MapDebugOptions::COLLISION),
+            // Continuous mode only. A second guard: in static and tile mode the
+            // cross tile index is reset for every image, so every bucket enters
+            // it anew and the directions it holds are not used anyway.
+            keep_upright_margin: if update_parameters.mode == MapMode::Continuous {
+                update_parameters.keep_upright_margin
+            } else {
+                0.0
+            },
+            line_label_directions: RefCell::default(),
+            line_label_synced_buckets: RefCell::default(),
             text_boxes: Vec::new(),
             icon_boxes: Vec::new(),
             collision_circles: HashMap::new(),
@@ -1539,12 +1687,66 @@ impl Placement {
 
     /// `updateLayerBuckets(layer, state, updateOpacities)`.
     pub fn update_layer_buckets(&self, layer: &dyn RenderLayer, state: &TransformState, update_opacities: bool) {
+        if update_opacities {
+            // Before the opacities change which copy is drawn.
+            self.sync_line_label_directions(layer.get_id(), layer.get_placement_data());
+        }
         let mut seen_cross_tile_ids: BTreeSet<u32> = BTreeSet::new();
         for item in layer.get_placement_data() {
             // `sortKeyRange->isFirstRange()`: `start == 0u`.
             if item.sort_key_range.is_none_or(|range| range.start == 0) {
                 update_vertices(&*item.bucket, self, update_opacities, state, item.tile(), &mut seen_cross_tile_ids);
             }
+        }
+    }
+
+    /// With a keep-upright margin, syncs the reading directions of the line
+    /// labels of one layer (see [`LineLabelDirections`]) if this placement has
+    /// not synced it yet, if one of its buckets has just entered the cross
+    /// tile index or has given a symbol back in view an id again, or if its
+    /// set of buckets has changed since; otherwise, and without a margin, does
+    /// nothing. Called whenever the opacities are updated, which can be on
+    /// every frame: a bucket of an overscaled tile with symbols out of view is
+    /// registered again on every frame.
+    pub(crate) fn sync_line_label_directions(&self, layer_id: &str, placement_data: &LayerPlacementData) {
+        if self.keep_upright_margin <= 0.0 {
+            return;
+        }
+        let buckets: Vec<&SymbolBucket> = placement_data
+            .iter()
+            // A bucket is listed once per sort key range.
+            .filter(|item| item.sort_key_range.is_none_or(|range| range.start == 0))
+            .filter_map(|item| item.bucket.downcast_ref::<SymbolBucket>())
+            .filter(|bucket| has_line_labels_kept_upright(bucket))
+            .collect();
+        // Which copy of a label is drawn only changes with the placement or
+        // the buckets: skip the layer when neither has changed since its last
+        // sync.
+        let ids_changed = buckets.iter().any(|bucket| {
+            let state = bucket.state();
+            state.line_label_directions_stale || state.cross_tile_ids_reassigned
+        });
+        let mut ids: Vec<u32> = buckets.iter().map(|bucket| bucket.bucket_instance_id).collect();
+        ids.sort_unstable();
+        {
+            let mut synced = self.line_label_synced_buckets.borrow_mut();
+            if !ids_changed && synced.get(layer_id) == Some(&ids) {
+                return;
+            }
+            synced.insert(layer_id.to_owned(), ids);
+        }
+
+        // All copies of a label are in the same layer, but in any order: first
+        // remember the directions of the copies that were drawn, then hand them
+        // to all copies.
+        let mut directions = self.line_label_directions.borrow_mut();
+        for bucket in &buckets {
+            directions.remember(&bucket.state());
+        }
+        let prev = self.get_prev_placement();
+        let older = prev.as_ref().map(|prev| prev.line_label_directions.borrow());
+        for bucket in &buckets {
+            directions.restore(&mut bucket.state(), older.as_deref());
         }
     }
 
@@ -1577,11 +1779,12 @@ impl Placement {
                 if has_sdf_icon {
                     reproject_line_labels(
                         &mut bs.sdf_icon.dynamic_attribute_data,
-                        &bs.sdf_icon.placed_symbols,
+                        &mut bs.sdf_icon.placed_symbols,
                         &tile.matrix,
                         pitch_with_map,
                         true, /*rotateWithMap*/
                         keep_upright,
+                        0.0, /*keepUprightMargin: text only*/
                         tile,
                         &bucket.icon_size_binder,
                         state,
@@ -1591,11 +1794,12 @@ impl Placement {
                 if has_icon {
                     reproject_line_labels(
                         &mut bs.icon.dynamic_attribute_data,
-                        &bs.icon.placed_symbols,
+                        &mut bs.icon.placed_symbols,
                         &tile.matrix,
                         pitch_with_map,
                         true, /*rotateWithMap*/
                         keep_upright,
+                        0.0, /*keepUprightMargin: text only*/
                         tile,
                         &bucket.icon_size_binder,
                         state,
@@ -1609,11 +1813,12 @@ impl Placement {
                 let keep_upright = *layout.get::<TextKeepUpright>();
                 reproject_line_labels(
                     &mut bs.text.dynamic_attribute_data,
-                    &bs.text.placed_symbols,
+                    &mut bs.text.placed_symbols,
                     &tile.matrix,
                     pitch_with_map,
                     true, /*rotateWithMap*/
                     keep_upright,
+                    self.keep_upright_margin,
                     tile,
                     &bucket.text_size_binder,
                     state,
@@ -2635,3 +2840,7 @@ mod tests {
         assert_eq!(fading_in.opacity, 0.25);
     }
 }
+
+#[cfg(test)]
+#[path = "line_label_flip_test.rs"]
+mod line_label_flip_test;

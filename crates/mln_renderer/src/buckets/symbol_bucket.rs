@@ -281,6 +281,14 @@ pub struct PlacedSymbol {
     /// set to support placement for orientation variants.
     pub placed_orientation: Option<TextWritingModeType>,
     pub angle: f32,
+    /// For a line label kept upright, with a keep-upright margin
+    /// (`MapOptions::with_keep_upright_margin`): whether it was last drawn
+    /// flipped (from its last glyph to its first); unset until it is drawn,
+    /// and always without a margin. It lets the label keep its reading
+    /// direction while the map rotates close to the vertical of its line, see
+    /// `line_label_needs_flip`. Placement syncs it between the copies of a
+    /// label (`LineLabelDirections`).
+    pub keep_upright_flipped: Option<bool>,
     /// Reference to placed icon, only applicable for text symbols.
     pub placed_icon_index: Option<usize>,
     pub feature_id: Option<String>,
@@ -315,6 +323,7 @@ impl PlacedSymbol {
             cross_tile_id: 0,
             placed_orientation: None,
             angle: 0.0,
+            keep_upright_flipped: None,
             placed_icon_index,
             feature_id,
         }
@@ -403,6 +412,17 @@ pub struct SymbolBucketState {
     pub just_reloaded: bool,
     pub has_variable_placement: bool,
     pub has_uninitialized_symbols: bool,
+    /// Set when the bucket enters the cross tile index (a new bucket, or its
+    /// tile back from the cache) and cleared once Placement has synced the
+    /// reading directions of its line labels: until then the directions they
+    /// were last drawn with may be out of date, so they are not passed on to
+    /// other copies of the labels (see `LineLabelDirections`).
+    pub line_label_directions_stale: bool,
+    /// Set when a symbol of this bucket that was out of view (overscaled
+    /// tile) gets a cross tile id again, and cleared once Placement has synced
+    /// the reading directions of its line labels: the symbol may now be a copy
+    /// of a label drawn elsewhere in the meantime (see `LineLabelDirections`).
+    pub cross_tile_ids_reassigned: bool,
 
     pub symbol_instances: Vec<SymbolInstance>,
 

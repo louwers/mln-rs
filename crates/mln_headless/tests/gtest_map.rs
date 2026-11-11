@@ -716,9 +716,34 @@ fn default_map_options() {
     assert_eq!(options.constrain_mode(), ConstrainMode::HeightOnly);
     assert_eq!(options.north_orientation(), NorthOrientation::Upwards);
     assert!(options.cross_source_collisions());
+    assert_eq!(options.keep_upright_margin(), 0.0);
     assert_eq!(options.size().width, 256);
     assert_eq!(options.size().height, 256);
     assert_eq!(options.pixel_ratio(), 1.0);
+}
+
+// gtest: Map.KeepUprightMargin
+#[test]
+fn keep_upright_margin() {
+    assert_eq!(MapOptions::new().with_keep_upright_margin(20.0).keep_upright_margin(), 20.0);
+    // Clamped to 0 to 45 degrees; NaN leaves it as it was.
+    assert_eq!(MapOptions::new().with_keep_upright_margin(-5.0).keep_upright_margin(), 0.0);
+    assert_eq!(MapOptions::new().with_keep_upright_margin(45.0).keep_upright_margin(), 45.0);
+    assert_eq!(MapOptions::new().with_keep_upright_margin(60.0).keep_upright_margin(), 45.0);
+    assert_eq!(
+        MapOptions::new().with_keep_upright_margin(20.0).with_keep_upright_margin(f32::NAN).keep_upright_margin(),
+        20.0
+    );
+
+    let _run_loop = RunLoop::new();
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let options = MapOptions::new()
+        .with_map_mode(MapMode::Continuous)
+        .with_size(frontend.get_size())
+        .with_keep_upright_margin(20.0);
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let map = Map::with_file_source(&frontend, Rc::new(StubMapObserver::default()), file_source, options).unwrap();
+    assert_eq!(map.get_map_options().keep_upright_margin(), 20.0);
 }
 
 // gtest: Map.SetStyleInvalidJSON

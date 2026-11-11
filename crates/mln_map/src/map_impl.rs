@@ -137,6 +137,7 @@ pub struct MapImpl {
     pub(crate) mode: MapMode,
     pub(crate) pixel_ratio: f32,
     pub(crate) cross_source_collisions: bool,
+    pub(crate) keep_upright_margin: f32,
     pub(crate) fast_pfor_enabled: bool,
     pub(crate) capture_rendered_features: bool,
 
@@ -190,6 +191,7 @@ impl MapImpl {
             mode: map_options.map_mode(),
             pixel_ratio,
             cross_source_collisions: map_options.cross_source_collisions(),
+            keep_upright_margin: map_options.keep_upright_margin(),
             fast_pfor_enabled: map_options.fast_pfor_enabled(),
             capture_rendered_features: map_options.rendered_feature_info(),
             debug_options: Cell::new(MapDebugOptions::NO_DEBUG),
@@ -311,6 +313,7 @@ impl MapImpl {
                 prefetch_zoom_delta: self.prefetch_zoom_delta.get(),
                 still_image_request: self.still_image_request.borrow().is_some(),
                 cross_source_collisions: self.cross_source_collisions,
+                keep_upright_margin: self.keep_upright_margin,
                 fast_pfor_enabled: self.fast_pfor_enabled,
                 capture_rendered_features: self.capture_rendered_features,
                 tile_lod_min_radius: self.tile_lod_min_radius.get(),

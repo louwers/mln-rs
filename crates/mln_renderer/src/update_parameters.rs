@@ -40,6 +40,8 @@ pub struct UpdateParameters {
     /// For still image requests, render requested.
     pub still_image_request: bool,
     pub cross_source_collisions: bool,
+    /// `MapOptions::with_keep_upright_margin`, in degrees.
+    pub keep_upright_margin: f32,
     pub fast_pfor_enabled: bool,
     pub capture_rendered_features: bool,
 

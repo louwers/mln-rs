@@ -94,6 +94,20 @@ pub trait TestRunnerImpl {
     /// `frontend.render(map).image`; `Err` carries the exception message.
     fn render(&mut self) -> Result<PremultipliedImage, String>;
 
+    /// `renderUntilIdle(ctx)`, continuous mode: `map.triggerRepaint()` (a
+    /// settled map renders no frame on its own, and idle is reported after a
+    /// frame), then `frontend.renderOnce(map)` until the map is idle or has
+    /// failed to load. `Ok(false)` when it failed to load.
+    fn render_until_idle(&mut self) -> Result<bool, MapError> {
+        not_ported("renderUntilIdle")
+    }
+
+    /// `frontend.readStillImage()`, under a `gfx::BackendScope`: the last
+    /// frame rendered.
+    fn read_still_image(&mut self) -> Result<PremultipliedImage, MapError> {
+        not_ported("HeadlessFrontend::readStillImage")
+    }
+
     /// Port-only: `map.dumpDebugLogs()` and the renderer's, for a test that
     /// timed out (watchdog.rs): which tiles never loaded or completed.
     fn dump_debug_logs(&self) {}
@@ -936,10 +950,11 @@ impl TestRunner {
         }
 
         let key = format!(
-            "{}/{}/{}",
+            "{}/{}/{}/{}",
             ctx.metadata.map_mode as u32,
             ctx.metadata.pixel_ratio,
-            u32::from(ctx.metadata.cross_source_collisions)
+            u32::from(ctx.metadata.cross_source_collisions),
+            ctx.metadata.keep_upright_margin
         );
 
         let mut cut_off_labels_report = String::new();
@@ -1291,7 +1306,18 @@ fn run_test(ctx: &mut TestContext<'_>) -> PremultipliedImage {
         }
     }
 
-    if ctx.metadata.outputs_image {
+    if ctx.metadata.outputs_image && ctx.metadata.map_mode == MapMode::Continuous {
+        // A still image cannot be requested in continuous mode: the last frame of the settled map.
+        if crate::parser::render_until_idle(ctx) {
+            match ctx.get_map().read_still_image() {
+                Ok(image) => result = image,
+                Err(MapError::NotPorted(what)) => {
+                    ctx.fail_not_ported(&what);
+                }
+                Err(e) => ctx.get_metadata().error_message = format!("Renering raised an exception: {e:?}"),
+            }
+        }
+    } else if ctx.metadata.outputs_image {
         match ctx.get_map().render() {
             Ok(image) => result = image,
             Err(e) => {

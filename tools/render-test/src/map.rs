@@ -113,7 +113,8 @@ impl Impl {
                 .with_map_mode(map_mode(metadata.map_mode))
                 .with_size(metadata.size)
                 .with_pixel_ratio(metadata.pixel_ratio)
-                .with_cross_source_collisions(metadata.cross_source_collisions),
+                .with_cross_source_collisions(metadata.cross_source_collisions)
+                .with_keep_upright_margin(metadata.keep_upright_margin),
             &resource_options,
             &client_options,
         )?;
@@ -148,6 +149,20 @@ impl TestRunnerImpl for Impl {
 
     fn render(&mut self) -> Result<PremultipliedImage, String> {
         self.frontend.render(&mut self.map).map(|result| result.image)
+    }
+
+    fn render_until_idle(&mut self) -> Result<bool, MapError> {
+        self.observer.reset();
+        self.map.trigger_repaint();
+        while !self.observer.idle.get() && !self.observer.map_load_failure.get() {
+            self.frontend.render_once(&mut self.map);
+        }
+        Ok(!self.observer.map_load_failure.get())
+    }
+
+    fn read_still_image(&mut self) -> Result<PremultipliedImage, MapError> {
+        let _scope = mln_gfx::BackendScope::new(self.frontend.get_backend(), mln_gfx::ScopeType::Explicit);
+        Ok(self.frontend.read_still_image())
     }
 
     fn dump_debug_logs(&self) {

@@ -14,6 +14,7 @@ pub struct MapOptions {
     viewport_mode: ViewportMode,
     orientation: NorthOrientation,
     cross_source_collisions: bool,
+    keep_upright_margin: f32,
     capture_rendered_features: bool,
     size: Size,
     pixel_ratio: f32,
@@ -28,6 +29,7 @@ impl Default for MapOptions {
             viewport_mode: ViewportMode::Default,
             orientation: NorthOrientation::Upwards,
             cross_source_collisions: true,
+            keep_upright_margin: 0.0,
             capture_rendered_features: false,
             size: Size::new(64, 64),
             pixel_ratio: 1.0,
@@ -86,6 +88,41 @@ impl MapOptions {
 
     pub fn cross_source_collisions(&self) -> bool {
         self.cross_source_collisions
+    }
+
+    /// Sets how far past the vertical a line label kept upright may read
+    /// before it is turned over, in degrees. By default, it is 0: a label is
+    /// turned over as soon as it would read from right to left, decided anew
+    /// on every frame, as in MapLibre GL JS.
+    ///
+    /// With a margin, a label keeps the reading direction it was last drawn
+    /// with until that direction is more than the margin past the vertical of
+    /// the screen, and all copies of a label (tiles of two zoom levels, a tile
+    /// back from the cache) share it. This keeps labels on lines close to the
+    /// vertical, such as the road ahead in a map rotated with the direction of
+    /// travel, from turning over and back as the map rotates. A label drawn for
+    /// the first time is decided as without the margin, so a still map looks
+    /// the same.
+    ///
+    /// It applies to text placed along lines (`symbol-placement` `line` or
+    /// `line-center`) with `text-keep-upright` and `text-rotation-alignment`
+    /// `map`, in `MapMode::Continuous` only. Icons, `icon-keep-upright`
+    /// included, still turn over as before, and so does the background of an
+    /// `icon-text-fit` icon: while a line is within the margin of the vertical,
+    /// a label and its icon can face opposite ways.
+    ///
+    /// `degrees` is clamped to 0 to 45; NaN is ignored. Past 45, labels could
+    /// stay drawn more upside down than upright.
+    pub fn with_keep_upright_margin(mut self, degrees: f32) -> Self {
+        if !degrees.is_nan() {
+            self.keep_upright_margin = degrees.clamp(0.0, 45.0);
+        }
+        self
+    }
+
+    /// The keep-upright margin in degrees, 0 by default.
+    pub fn keep_upright_margin(&self) -> f32 {
+        self.keep_upright_margin
     }
 
     /// Sets the orientation of the Map. By default, it is set to Upwards.
