@@ -8,10 +8,11 @@
 // starts, then {module, canvas, ports, width, height, ratio, style,
 // fallbackFontFaces, camera, localIdeographFontFamily, panic}, then
 // {readPixels}, {resize: [width, height]} in CSS pixels, {style: url},
-// {jumpTo: camera}, {resetNorth}, and {input, args}: a call of WebMap's
-// input methods (pointer_down, pointer_move, pointer_up, pointer_cancel,
-// wheel, key, blur) whose last argument is the event's time as
-// performance.timeOrigin + timeStamp. A camera is [lat, lon, zoom, bearing,
+// {jumpTo: camera}, {resetNorth}, {follow: camera} (another map's, which
+// this one follows), and {input, args}: a call of WebMap's input methods
+// (pointer_down, pointer_move, pointer_up, pointer_cancel, wheel, key, blur)
+// whose last argument is the event's time as performance.timeOrigin +
+// timeStamp. A camera is [lat, lon, zoom, bearing,
 // pitch]. To the page: {status}, {loaded: {loadedMs, replies}} once the map
 // is fully loaded, {pixels: {width, height, pixels}} for each readPixels,
 // {box} when a Shift-drag's box changes ([x0, y0, x1, y1], or null),
@@ -275,6 +276,7 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
     }
     if (data.jumpTo) map.jump_to(...data.jumpTo);
     if (data.resetNorth) map.reset_north();
+    if (data.follow) map.follow(...data.follow);
     if (INPUTS.has(data.input)) {
       const args = data.args.slice();
       args[args.length - 1] -= performance.timeOrigin;

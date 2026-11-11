@@ -325,6 +325,24 @@ impl WebMap {
         self.gestures.step_to(&mut self.map, update);
     }
 
+    /// Jumps to another map's camera, for a comparison that this map
+    /// follows: its own motion stops (an ease, momentum, a wheel's eased
+    /// zoom).
+    pub fn follow(&mut self, latitude: f64, longitude: f64, zoom: f64, bearing: f64, pitch: f64) {
+        self.map.cancel_transitions();
+        let update = CameraUpdate {
+            mode: CameraUpdateMode::Jump,
+            camera: CameraOptions::default()
+                .with_center(LatLng::new(latitude, longitude).ok())
+                .with_zoom(Some(zoom))
+                .with_bearing(Some(bearing))
+                .with_pitch(Some(pitch)),
+            animation: AnimationOptions::default(),
+            phase: GesturePhase::None,
+        };
+        self.gestures.step_to(&mut self.map, update);
+    }
+
     /// The attributions of the style's sources that have one, as HTML. A
     /// source that links a TileJSON has one once the TileJSON loads.
     pub fn attributions(&self) -> Vec<String> {

@@ -356,6 +356,84 @@ a {
   }
 }
 
+/* The comparison (compare.js): GL JS's map over the canvas, right of the
+   divider at --split. */
+
+.gl-map {
+  position: fixed;
+  inset: 0;
+  clip-path: inset(0 0 0 var(--split, 50%));
+}
+
+.divider {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: var(--split, 50%);
+  width: 24px;
+  margin-left: -12px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+
+.divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 11px;
+  width: 2px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+.divider::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  width: 12px;
+  height: 40px;
+  margin-top: -20px;
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.compare-label {
+  position: fixed;
+  top: calc(max(var(--gap), env(safe-area-inset-top)) + 56px);
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.compare-label.mln {
+  right: calc(100% - var(--split, 50%) + 16px);
+}
+
+.compare-label.gl {
+  left: calc(var(--split, 50%) + 16px);
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 8px;
+  cursor: pointer;
+}
+
+.toggle input {
+  margin: 0;
+  accent-color: var(--focus);
+}
+
 /* Why the map can't start, or why it stopped. */
 
 .notice {

@@ -92,6 +92,12 @@ back to zero, the sources' attributions, and a panel that lists the
 gestures. The map's Web Worker reports the camera, the style's name and
 the sources' attributions back to the page as they change.
 
+`?compare`, or the switch in the panel, puts MapLibre GL JS's map of the
+same style over the canvas, clipped to the right of a divider you can drag
+(web/compare.js); GL JS loads from jsDelivr when the comparison first
+opens. Each side takes its own input: the map that last took input leads,
+and the other jumps to its camera.
+
 ## Images decode in the browser
 
 Every instance decodes images with the browser's decoders (mln_image's
@@ -162,6 +168,7 @@ Then open <http://localhost:8000/> in a browser with WebGPU. URL parameters
 - `fallbackFontFaces=<json>`: font files that every font stack falls back
   to, in the format of a style's `font-faces` entry without a font name
   (`[{"url": "...", "unicode-range": ["U+1000-109F"]}]`);
+- `compare`: MapLibre GL JS's map beside this one (see above);
 - `workers=<n>`: Web Workers for the tiles (default: up to 4);
 - `width`, `height`, `ratio`: a fixed canvas size in CSS pixels and pixel
   ratio;

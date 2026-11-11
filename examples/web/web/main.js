@@ -21,6 +21,8 @@
 //                          the font CJK glyphs are drawn in rather than
 //                          downloaded, as GL JS's option (default:
 //                          sans-serif); empty or `false` downloads them
+//   compare                MapLibre GL JS's map of the style beside this one
+//                          (compare.js)
 //   panic=<map|tile>       the map's instance or the first tile worker's
 //                          panics once it starts, for check/check.mjs
 //
@@ -289,6 +291,7 @@ function showCamera(next) {
   latestCamera = next;
   const [, , , bearing, pitch] = next;
   needle.style.transform = `rotateX(${pitch}deg) rotateZ(${-bearing}deg)`;
+  comparison?.cameraChanged(next);
   hashTimer ??= setTimeout(() => {
     hashTimer = null;
     writtenHash = hashFromCamera(latestCamera);
@@ -302,9 +305,18 @@ window.addEventListener('hashchange', () => {
 });
 
 // Zoom and the compass.
-$('zoom-in').addEventListener('click', (e) => send('key', '+', 0, time(e)));
-$('zoom-out').addEventListener('click', (e) => send('key', '-', 0, time(e)));
-$('compass').addEventListener('click', () => map.postMessage({ resetNorth: true }));
+$('zoom-in').addEventListener('click', (e) => {
+  comparison?.lead();
+  send('key', '+', 0, time(e));
+});
+$('zoom-out').addEventListener('click', (e) => {
+  comparison?.lead();
+  send('key', '-', 0, time(e));
+});
+$('compass').addEventListener('click', () => {
+  comparison?.lead();
+  map.postMessage({ resetNorth: true });
+});
 
 // The style button and its list.
 let loading = true;
@@ -326,8 +338,14 @@ function pickStyle(next) {
   showStyle();
   showAttribution([]);
   map.postMessage({ style: next.url });
+  comparison?.setStyle(next.url);
+  setParam('style', next.key);
+}
+// Sets (or, for null, removes) a URL parameter, keeping the camera's hash.
+function setParam(name, value) {
   const url = new URL(location.href);
-  url.searchParams.set('style', next.key);
+  if (value === null) url.searchParams.delete(name);
+  else url.searchParams.set(name, value);
   url.hash = writtenHash;
   history.replaceState(history.state, '', url);
 }
@@ -386,3 +404,40 @@ function showAttribution(entries) {
   text.replaceChildren(...parts.flatMap((part, i) => (i ? [' ', part] : [part])));
   attribution.hidden = parts.length === 0;
 }
+
+// The comparison with GL JS (compare.js), which loads when it first opens.
+let comparison = null;
+let comparing = false;
+const compareToggle = $('compare-toggle');
+async function setComparing(on) {
+  if (on === comparing) return;
+  comparing = on;
+  compareToggle.checked = on;
+  setParam('compare', on ? '' : null);
+  if (!on) {
+    comparison?.remove();
+    comparison = null;
+    return;
+  }
+  try {
+    const { compare } = await import('./compare.js');
+    const style = current.url;
+    const opened = await compare(canvas, {
+      style,
+      camera: latestCamera,
+      follow: (next) => map.postMessage({ follow: next }),
+    });
+    // Closed, or the style changed, while GL JS loaded.
+    if (!comparing) {
+      opened.remove();
+      return;
+    }
+    comparison = opened;
+    if (current.url !== style) comparison.setStyle(current.url);
+  } catch (error) {
+    console.error('the comparison failed to open:', error);
+    if (comparing) setComparing(false);
+  }
+}
+compareToggle.addEventListener('change', () => setComparing(compareToggle.checked));
+if (params.has('compare')) setComparing(true);
