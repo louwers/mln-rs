@@ -39,6 +39,6 @@ pub use render::{
     OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot,
     RenderSessionState, RenderTarget, RenderedQueryGeometry, STILL_IMAGE_TOKEN, Surface, Wake,
 };
-pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest};
+pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};
 pub use style::{CustomSourceCallbacks, GeoJsonSourceInfo, LayerInfo, SourceInfo, SourceKind, SourceTiles};
