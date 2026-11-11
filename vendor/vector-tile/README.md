@@ -7,6 +7,8 @@
 
 Ports vector-tile 1.0.5 (`mapbox::vector_tile`), the Mapbox Vector Tile reader.
 
+Licensed under the ISC License, as vector-tile is ([LICENSE](LICENSE)).
+
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)
 map rendering core. All its crates are released together, at the same version.

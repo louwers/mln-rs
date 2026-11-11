@@ -102,7 +102,8 @@ jobs:
   # tools/ratchet), clippy with the workspace's lints (Cargo.toml), the API
   # docs as docs.rs builds them, and clippy on the libraries and examples/web
   # for wasm32-unknown-unknown (`just check-wasm`, the browser build), all
-  # with warnings as errors (the justfile denies them in CI).
+  # with warnings as errors (the justfile denies them in CI), and the
+  # packages' licenses against deny.toml (`just licenses`).
   lint:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -110,7 +111,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - uses: taiki-e/install-action@v2
-        with: { tool: just }
+        with: { tool: 'just,cargo-deny' }
 
       - name: Install Rust
         run: |

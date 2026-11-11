@@ -4,7 +4,8 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
-license.workspace = true
+license = "MIT AND Unicode-3.0 AND BSD-2-Clause"
+license-file.workspace = true
 repository.workspace = true
 include.workspace = true
 

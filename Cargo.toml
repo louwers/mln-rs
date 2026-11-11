@@ -28,8 +28,12 @@ edition = "2024"
 rust-version = "1.98"
 description = "Part of mln-rs, a Rust port of the MapLibre Native map rendering core. Depend on mln-rs instead."
 license = "BSD-2-Clause"
+# Cargo copies it into the packages that inherit it: those whose code is, all
+# or in part, under this license. The ports of other projects ship their own
+# license files instead (`include`).
+license-file = "LICENSE.md"
 repository = "https://github.com/louwers/mln-rs"
-include = ["/src", "/tests"]
+include = ["/src", "/tests", "/LICENSE*"]
 
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.

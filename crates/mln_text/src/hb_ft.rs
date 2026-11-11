@@ -2,7 +2,8 @@
 // (HarfBuzz 8.2.0) that HarfBuzz calls while shaping horizontal text, as
 // HarfRust `FontFuncs` over the ported FreeType face:
 // `hb_ft_get_nominal_glyph(s)`, `hb_ft_get_variation_glyph`,
-// `hb_ft_get_glyph_h_advances`, plus `hb_ft_font_changed`'s scale.
+// `hb_ft_get_glyph_h_advances`, plus `hb_ft_font_changed`'s scale. Under
+// HarfBuzz's "Old MIT" license (LICENSE-HarfBuzz).
 //
 // hb-ft also registers extents, contour-point, kerning and vertical
 // callbacks; the C++ core's HarfBuzz is built with HB_TINY, whose shaping

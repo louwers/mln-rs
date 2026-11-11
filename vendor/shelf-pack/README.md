@@ -7,6 +7,8 @@
 
 Ports shelf-pack-cpp (`mapbox/shelf-pack.hpp`), the bin packer for glyph and icon atlases.
 
+Licensed under the ISC License, as shelf-pack-cpp is ([LICENSE.md](LICENSE.md)).
+
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)
 map rendering core. All its crates are released together, at the same version.

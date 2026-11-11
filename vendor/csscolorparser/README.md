@@ -7,6 +7,8 @@
 
 Ports csscolorparser (the C++ core's `vendor/csscolorparser`), the CSS color parser, with the glibc `strtof`/`strtod`/`strtoll` behaviour it relies on. It is not the crates.io `csscolorparser` crate, which accepts different input.
 
+Licensed under the MIT License, as csscolorparser is ([LICENSE](LICENSE)).
+
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)
 map rendering core. All its crates are released together, at the same version.
