@@ -81,7 +81,22 @@ impl HeadlessFrontend {
         invalidate_on_update: bool,
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
-        let backend = Rc::new(HeadlessBackend::new(physical_size(size, pixel_ratio), swap_behavior, context_mode));
+        let backend = HeadlessBackend::new(physical_size(size, pixel_ratio), swap_behavior, context_mode);
+        Self::with_backend(backend, size, pixel_ratio, invalidate_on_update, glyph_cache)
+    }
+
+    /// Port-only: a frontend that renders through `backend`, such as one
+    /// on a device other backends share (`HeadlessBackend::with_device`),
+    /// which it sizes for `size` at `pixel_ratio`.
+    pub fn with_backend(
+        backend: HeadlessBackend,
+        size: Size,
+        pixel_ratio: f32,
+        invalidate_on_update: bool,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
+        backend.set_size(physical_size(size, pixel_ratio));
+        let backend = Rc::new(backend);
         let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
         let shared = Rc::new(Shared {
             size: Cell::new(size),

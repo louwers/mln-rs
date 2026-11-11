@@ -68,6 +68,19 @@ fn instance_backends() -> wgpu::Backends {
     if cfg!(target_os = "linux") { wgpu::Backends::VULKAN } else { wgpu::Backends::all() }
 }
 
+/// The usages and vsync'ed present mode to configure a surface with: COPY_SRC
+/// for readback where the surface has it, and MAILBOX where it has it (see
+/// `SurfaceState::vsync_present_mode`).
+fn surface_options(capabilities: &wgpu::SurfaceCapabilities) -> (wgpu::TextureUsages, wgpu::PresentMode) {
+    let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | (capabilities.usages & wgpu::TextureUsages::COPY_SRC);
+    let present_mode = if capabilities.present_modes.contains(&wgpu::PresentMode::Mailbox) {
+        wgpu::PresentMode::Mailbox
+    } else {
+        wgpu::PresentMode::Fifo
+    };
+    (usage, present_mode)
+}
+
 /// The current swapchain texture and its view (`currentTexture`,
 /// `currentTextureView`).
 struct CurrentTexture {
@@ -78,11 +91,12 @@ struct CurrentTexture {
 /// The members of `GLFWWebGPUBackend` that the renderable resource reaches
 /// through its `backend` reference in C++.
 pub struct SurfaceState {
-    surface: wgpu::Surface<'static>,
+    /// `None` from `SurfaceBackend::release_surface` until `set_surface`.
+    surface: RefCell<Option<wgpu::Surface<'static>>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     swap_chain_format: wgpu::TextureFormat,
-    surface_usage: wgpu::TextureUsages,
+    surface_usage: Cell<wgpu::TextureUsages>,
     depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
 
     current: RefCell<Option<CurrentTexture>>,
@@ -99,7 +113,7 @@ pub struct SurfaceState {
     /// window is not visible (no frame callbacks), which stalls the whole
     /// event loop; MAILBOX is vsync'ed without blocking, so it is used when
     /// the surface supports it.
-    vsync_present_mode: wgpu::PresentMode,
+    vsync_present_mode: Cell<wgpu::PresentMode>,
     /// What `glfwGetFramebufferSize` returns in C++.
     framebuffer_size: Cell<Size>,
     /// `static auto lastSwapTime` in `swap()`.
@@ -122,12 +136,12 @@ struct PendingReadback {
 impl SurfaceState {
     fn configuration(&self, size: Size) -> wgpu::SurfaceConfiguration {
         wgpu::SurfaceConfiguration {
-            usage: self.surface_usage,
+            usage: self.surface_usage.get(),
             format: self.swap_chain_format,
             width: size.width,
             height: size.height,
             // Use Immediate mode (no vsync) in benchmark mode, Fifo (vsync) otherwise
-            present_mode: if self.enable_vsync { self.vsync_present_mode } else { wgpu::PresentMode::Immediate },
+            present_mode: if self.enable_vsync { self.vsync_present_mode.get() } else { wgpu::PresentMode::Immediate },
             desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
             view_formats: vec![self.swap_chain_format],
@@ -193,6 +207,11 @@ impl SurfaceState {
 
     /// `getCurrentTextureView()`
     fn get_current_texture_view(&self) -> Option<wgpu::TextureView> {
+        // Port: a surface that had no size to configure with yet (or was
+        // just set) is configured once it has one.
+        if !self.surface_configured.get() && self.surface_needs_reconfigure.get() {
+            self.reconfigure_surface();
+        }
         if !self.surface_configured.get() {
             return None;
         }
@@ -220,7 +239,8 @@ impl SurfaceState {
             self.reconfigure_surface();
         }
 
-        let surface_texture = match self.surface.get_current_texture() {
+        let acquired = self.surface.borrow().as_ref()?.get_current_texture();
+        let surface_texture = match acquired {
             wgpu::CurrentSurfaceTexture::Success(texture) | wgpu::CurrentSurfaceTexture::Suboptimal(texture) => texture,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface_needs_reconfigure.set(true);
@@ -272,6 +292,11 @@ impl SurfaceState {
         // Clear all texture state
         self.current.borrow_mut().take();
 
+        let surface = self.surface.borrow();
+        let Some(surface) = surface.as_ref() else {
+            return;
+        };
+
         // Get current size
         let size = self.framebuffer_size.get();
 
@@ -287,7 +312,7 @@ impl SurfaceState {
             return;
         }
 
-        self.surface.configure(&self.device, &self.configuration(size));
+        surface.configure(&self.device, &self.configuration(size));
 
         self.create_depth_stencil_texture(size.width, size.height);
 
@@ -336,7 +361,7 @@ impl SurfaceState {
     /// Port-only: copies the swapchain texture into a buffer and starts
     /// mapping it (`finish_readback` makes the image).
     fn copy_texture(&self, texture: &wgpu::Texture) -> Option<PendingReadback> {
-        if !self.surface_usage.contains(wgpu::TextureUsages::COPY_SRC) {
+        if !self.surface_usage.get().contains(wgpu::TextureUsages::COPY_SRC) {
             Log::warning(Event::Render, "WebGPU: the surface does not support readback (no COPY_SRC)");
             return None;
         }
@@ -447,7 +472,7 @@ struct Parts {
     adapter: Option<wgpu::Adapter>,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    surface: wgpu::Surface<'static>,
+    surface: Option<wgpu::Surface<'static>>,
 }
 
 /// The surface configuration `SurfaceBackend::finish` uses.
@@ -530,6 +555,7 @@ impl SurfaceBackend {
         let surface = create_surface(&instance)?;
 
         let capabilities = surface.get_capabilities(&adapter);
+        let (surface_usage, present_mode) = surface_options(&capabilities);
         let preferred_formats = [
             wgpu::TextureFormat::Bgra8Unorm,
             wgpu::TextureFormat::Bgra8UnormSrgb,
@@ -541,19 +567,9 @@ impl SurfaceBackend {
             .find(|f| capabilities.formats.contains(f))
             .or_else(|| capabilities.formats.first().copied())
             .unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
-        let mut surface_usage = wgpu::TextureUsages::RENDER_ATTACHMENT;
-        if capabilities.usages.contains(wgpu::TextureUsages::COPY_SRC) {
-            surface_usage |= wgpu::TextureUsages::COPY_SRC;
-        }
-
-        let present_mode = if capabilities.present_modes.contains(&wgpu::PresentMode::Mailbox) {
-            wgpu::PresentMode::Mailbox
-        } else {
-            wgpu::PresentMode::Fifo
-        };
         Ok(Self::finish(
             renderer_backend,
-            Parts { instance, adapter: Some(adapter), device, queue, surface },
+            Parts { instance, adapter: Some(adapter), device, queue, surface: Some(surface) },
             SurfaceChoice { swap_chain_format, surface_usage, present_mode, depth_stencil_format },
             framebuffer_size,
             cap_frame_rate,
@@ -590,7 +606,7 @@ impl SurfaceBackend {
         renderer_backend.set_depth_stencil_format(Some(depth_stencil_format));
         Self::finish(
             renderer_backend,
-            Parts { instance, adapter: None, device, queue, surface },
+            Parts { instance, adapter: None, device, queue, surface: Some(surface) },
             SurfaceChoice {
                 swap_chain_format: format,
                 surface_usage: wgpu::TextureUsages::RENDER_ATTACHMENT | (usages & wgpu::TextureUsages::COPY_SRC),
@@ -619,11 +635,11 @@ impl SurfaceBackend {
 
         let backend_impl = renderer_backend.backend_impl().clone();
         let state = Rc::new(SurfaceState {
-            surface,
+            surface: RefCell::new(surface),
             device: device.clone(),
             queue: queue.clone(),
             swap_chain_format,
-            surface_usage,
+            surface_usage: Cell::new(surface_usage),
             depth_stencil_format: Cell::new(Some(depth_stencil_format)),
             current: RefCell::new(None),
             depth_stencil: RefCell::new(None),
@@ -633,7 +649,7 @@ impl SurfaceBackend {
             last_configured_size: Cell::new(Size::default()),
             consecutive_errors: Cell::new(0),
             enable_vsync: cap_frame_rate,
-            vsync_present_mode: present_mode,
+            vsync_present_mode: Cell::new(present_mode),
             framebuffer_size: Cell::new(framebuffer_size),
             last_swap_time: Cell::new(Instant::now()),
             readback_requested: Cell::new(false),
@@ -642,13 +658,8 @@ impl SurfaceBackend {
         });
 
         // Configure surface
-        if framebuffer_size.width > 0 && framebuffer_size.height > 0 {
-            state.surface.configure(&device, &state.configuration(framebuffer_size));
-            state.surface_configured.set(true);
-            state.last_configured_size.set(framebuffer_size);
-        } else {
-            state.surface_needs_reconfigure.set(true);
-        }
+        state.surface_needs_reconfigure.set(true);
+        state.reconfigure_surface();
 
         // Store WebGPU instance, device and queue in the base class
         backend_impl.set_instance(Some(instance));
@@ -729,6 +740,60 @@ impl SurfaceBackend {
     pub fn get_device(&self) -> wgpu::Device {
         self.state.device.clone()
     }
+
+    /// Port-only: whether the backend has a surface to present to.
+    pub fn has_surface(&self) -> bool {
+        self.state.surface.borrow().is_some()
+    }
+
+    /// Port-only: drops the surface, so the host can destroy what it was
+    /// made from, and keeps the device and everything built on it. Until
+    /// `set_surface`, `acquire_next_texture` returns false and `swap`
+    /// presents nothing.
+    pub fn release_surface(&self) {
+        let state = &self.state;
+        // The swapchain texture goes before the surface it came from.
+        state.current.borrow_mut().take();
+        state.depth_stencil.borrow_mut().take();
+        state.frame_presented.set(true);
+        state.surface_configured.set(false);
+        state.surface_needs_reconfigure.set(false);
+        state.consecutive_errors.set(0);
+        state.surface.borrow_mut().take();
+    }
+
+    /// Port-only: presents to `surface` from now on, at `framebuffer_size`,
+    /// in place of the surface the backend has, if any, which it drops.
+    /// The surface is configured with the backend's swapchain format.
+    ///
+    /// Errors, keeping the current surface, when the backend's adapter
+    /// can't present to `surface` in that format: pipelines are built for
+    /// it, so a new format needs a new backend. A backend `from_host` has
+    /// no adapter to check with, and uses the usages it was made with.
+    pub fn set_surface(&self, surface: wgpu::Surface<'static>, framebuffer_size: Size) -> Result<(), String> {
+        let state = &self.state;
+        if let Some(adapter) = self.renderer_backend.backend_impl().get_adapter() {
+            let capabilities = surface.get_capabilities(&adapter);
+            if !capabilities.formats.contains(&state.swap_chain_format) {
+                return Err(format!(
+                    "The surface does not take the {:?} format the backend renders in",
+                    state.swap_chain_format
+                ));
+            }
+            let (usage, present_mode) = surface_options(&capabilities);
+            state.surface_usage.set(usage);
+            state.vsync_present_mode.set(present_mode);
+        }
+        self.release_surface();
+        *state.surface.borrow_mut() = Some(surface);
+        state.framebuffer_size.set(framebuffer_size);
+        if self.get_size() != framebuffer_size {
+            self.set_renderable_size(framebuffer_size);
+        }
+        state.surface_needs_reconfigure.set(true);
+        state.reconfigure_surface();
+        Ok(())
+    }
 }
 
 impl Drop for SurfaceBackend {
@@ -777,5 +842,70 @@ impl renderer_backend::RendererBackend for SurfaceBackend {
 
     fn deactivate(&self) {
         // WebGPU doesn't need explicit context deactivation like OpenGL
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mln_gfx::backend_scope::{BackendScope, ScopeType};
+    use mln_gfx::renderer_backend::RendererBackend as _;
+
+    use super::*;
+
+    /// A backend whose surface is released, on a headless device: the
+    /// tests have no window to make a surface from.
+    fn released_backend(framebuffer_size: Size) -> SurfaceBackend {
+        let (device, queue) = crate::HeadlessBackend::request_device(None).expect("device");
+        let adapter_info = device.adapter_info();
+        let format = wgpu::TextureFormat::Bgra8Unorm;
+        SurfaceBackend::finish(
+            RendererBackend::new(ContextMode::Unique),
+            Parts {
+                instance: crate::headless_backend::create_instance(instance_backends()),
+                adapter: None,
+                device,
+                queue,
+                surface: None,
+            },
+            SurfaceChoice {
+                swap_chain_format: format,
+                surface_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                present_mode: wgpu::PresentMode::Fifo,
+                depth_stencil_format: wgpu::TextureFormat::Depth24PlusStencil8,
+            },
+            framebuffer_size,
+            true,
+            adapter_info,
+        )
+    }
+
+    #[test]
+    fn a_backend_without_a_surface_has_no_frame_to_render() {
+        let backend = released_backend(Size::new(32, 16));
+        assert!(!backend.has_surface());
+        assert!(!backend.acquire_next_texture());
+        backend.swap();
+        assert!(!backend.acquire_next_texture());
+        assert!(!backend.state.surface_configured.get());
+    }
+
+    #[test]
+    fn a_released_backend_takes_resizes_for_its_next_surface() {
+        let backend = released_backend(Size::new(32, 16));
+        backend.release_surface();
+        backend.set_framebuffer_size(Size::new(64, 48));
+        assert_eq!(backend.get_framebuffer_size(), Size::new(64, 48));
+        assert!(!backend.acquire_next_texture());
+        assert!(!backend.has_surface());
+    }
+
+    #[test]
+    fn a_released_backend_keeps_its_context() {
+        let backend = released_backend(Size::new(32, 16));
+        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+        let context = backend.get_context_ptr().clone();
+        backend.release_surface();
+        assert!(Rc::ptr_eq(&context, backend.get_context_ptr()));
+        assert!(backend.state.depth_stencil.borrow().is_none());
     }
 }
