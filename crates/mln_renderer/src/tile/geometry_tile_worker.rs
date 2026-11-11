@@ -518,8 +518,12 @@ impl GeometryTileWorker {
         self.symbol_dependencies_changed();
     }
 
-    /// `requestNewGlyphs(glyphDependencies)`.
-    fn request_new_glyphs(&mut self, glyph_dependencies: &GlyphDependencies) {
+    /// `requestNewDependencies(glyphDependencies, imageDependencies)`.
+    fn request_new_dependencies(
+        &mut self,
+        glyph_dependencies: &GlyphDependencies,
+        image_dependencies: ImageDependencies,
+    ) {
         for (font_stack, glyph_ids) in &glyph_dependencies.glyphs {
             let font_glyphs = self.glyph_map.get(&font_stack_hash(font_stack));
             for glyph_id in glyph_ids {
@@ -541,8 +545,21 @@ impl GeometryTileWorker {
                 }
             }
         }
+        // Record both before requesting either, so that a glyph answer
+        // handled before the image request goes out can't finalize the layout
+        // with an empty icon map.
+        self.pending_image_dependencies = image_dependencies;
+        // An empty image name means no image, as in the style spec, so don't
+        // request it.
+        self.pending_image_dependencies.remove("");
+
         if !self.pending_glyph_dependencies.glyphs.is_empty() {
             self.parent.send(TileMessage::GetGlyphs(self.pending_glyph_dependencies.clone()));
+        }
+        if !self.pending_image_dependencies.is_empty() {
+            self.image_correlation_id += 1;
+            let pair = (self.pending_image_dependencies.clone(), self.image_correlation_id);
+            self.parent.send(TileMessage::GetImages(pair));
         }
     }
 
@@ -562,20 +579,6 @@ impl GeometryTileWorker {
         self.version_map = new_version_map;
         self.pending_image_dependencies.clear();
         self.symbol_dependencies_changed();
-    }
-
-    /// `requestNewImages(imageDependencies)`.
-    fn request_new_images(&mut self, image_dependencies: ImageDependencies) {
-        self.pending_image_dependencies = image_dependencies;
-        // An empty image name means no image, as in the style spec, so don't
-        // request it.
-        self.pending_image_dependencies.remove("");
-
-        if !self.pending_image_dependencies.is_empty() {
-            self.image_correlation_id += 1;
-            let pair = (self.pending_image_dependencies.clone(), self.image_correlation_id);
-            self.parent.send(TileMessage::GetImages(pair));
-        }
     }
 
     /// `parse()`.
@@ -736,8 +739,7 @@ impl GeometryTileWorker {
             }
         }
 
-        self.request_new_glyphs(&glyph_dependencies);
-        self.request_new_images(image_dependencies);
+        self.request_new_dependencies(&glyph_dependencies, image_dependencies);
 
         self.finalize_layout()
     }
