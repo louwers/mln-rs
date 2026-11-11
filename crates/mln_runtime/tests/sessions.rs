@@ -514,6 +514,46 @@ fn abandon_ends_pending_work_and_frees_the_map_at_once() {
 }
 
 #[test]
+fn an_abandon_that_keeps_graphics_counts_the_renderer_and_its_backend() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    demand(&session, DemandMode::Force, 1);
+    take_one(&session);
+    demand(&session, DemandMode::WaitForUpdate, 2);
+
+    assert_eq!(2, session.abandon_keeping_graphics().unwrap());
+    assert_eq!(RenderSessionState::Abandoned, session.snapshot().unwrap().state);
+    let result = take_one(&session);
+    assert_eq!((2, FrameDisposition::TargetNotReady), (result.token, result.disposition));
+    assert_eq!(ErrorKind::InvalidState, session.abandon_keeping_graphics().unwrap_err().kind);
+    wait(session.release());
+
+    let other = attach(&map);
+    render_until_idle(&map, &other);
+}
+
+#[test]
+fn a_dispose_that_keeps_graphics_frees_the_map_at_once() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    demand(&session, DemandMode::Force, 1);
+    take_one(&session);
+
+    session.dispose_keeping_graphics().unwrap();
+    assert_eq!(ErrorKind::InvalidState, session.snapshot().unwrap_err().kind);
+    assert_eq!(ErrorKind::InvalidState, session.dispose_keeping_graphics().unwrap_err().kind);
+    let other = attach(&map);
+    render_until_idle(&map, &other);
+
+    // A session that ended already is only released.
+    wait(other.detach());
+    other.dispose_keeping_graphics().unwrap();
+    attach(&map);
+}
+
+#[test]
 fn work_queued_before_an_abandon_completes_as_target_lost() {
     let runtime = runtime();
     let map = red_map(&runtime);

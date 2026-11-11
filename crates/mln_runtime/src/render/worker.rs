@@ -146,6 +146,9 @@ struct Gfx {
 }
 
 impl Gfx {
+    /// How many graphics objects a `Gfx` holds: the renderer and its backend.
+    const OBJECTS: u32 = 2;
+
     fn new(target: TargetInit, size: Size, pixel_ratio: f32, glyph_cache: Arc<GlyphCache>) -> Result<Gfx, Error> {
         let size = physical_size(size, pixel_ratio);
         let (backend, renderer_backend): (Backend, Rc<dyn RendererBackend>) = match target {
@@ -322,6 +325,12 @@ pub(crate) struct Worker {
     behind_resizes: VecDeque<(u64, Task)>,
 }
 
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.drop_gfx();
+    }
+}
+
 fn target_lost() -> Error {
     Error::target_lost("the render session lost its renderer")
 }
@@ -341,6 +350,7 @@ impl Worker {
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
+                shared.state.lock_unpoisoned().graphics_objects = Gfx::OBJECTS;
                 Some(gfx)
             }
             Some(Err(error)) => {
@@ -428,7 +438,7 @@ impl Worker {
             }
             state.attach.take()
         };
-        self.gfx = None;
+        self.drop_gfx();
         if let Some(attach) = attach {
             outbox.resolve(attach, Err(error));
         }
@@ -815,13 +825,28 @@ impl Worker {
         }
         self.renderer_events.set_waker(None);
         self.forward_events();
-        self.gfx = None;
+        self.drop_gfx();
         self.map_events = None;
         self.sources = None;
         self.has_frame = false;
         let attach = self.shared.state.lock_unpoisoned().attach.take();
         if let Some(attach) = attach {
             outbox.resolve(attach, Err(Error::target_lost("the render session ended before it attached")));
+        }
+    }
+
+    /// Lets go of the renderer and its backend: frees them, unless the
+    /// session keeps them until the process exits.
+    fn drop_gfx(&mut self) {
+        let Some(gfx) = self.gfx.take() else { return };
+        let keep = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.graphics_objects = 0;
+            state.keep_graphics
+        };
+        if keep {
+            // The host's graphics objects behind them may be gone already.
+            std::mem::forget(gfx);
         }
     }
 

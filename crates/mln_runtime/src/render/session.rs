@@ -134,6 +134,11 @@ pub(crate) struct SessionState {
     /// Counts the resizes sent, which run on the map's thread before they
     /// reach the session's.
     pub(crate) resizes_sent: u64,
+    /// How many graphics objects the session's thread holds.
+    pub(crate) graphics_objects: u32,
+    /// Whether the session's thread keeps its graphics objects until the
+    /// process exits, instead of freeing them, when the session ends.
+    pub(crate) keep_graphics: bool,
 }
 
 impl SessionState {
@@ -247,6 +252,37 @@ impl SessionShared {
         with_unlocked_wakes(|| self.dispose_locked(done))
     }
 
+    /// Releases the session without waiting and without graphics calls past
+    /// the one in progress: a session that hasn't ended is abandoned, and
+    /// keeps its graphics objects until the process exits.
+    fn dispose_keeping_graphics(&self) -> Result<(), Error> {
+        with_unlocked_wakes(|| {
+            {
+                let mut state = self.state.lock_unpoisoned();
+                if state.released {
+                    return Err(released());
+                }
+                state.released = true;
+                state.keep_graphics = true;
+                if matches!(state.lifecycle, RenderSessionState::Detached | RenderSessionState::Abandoned) {
+                    return Ok(());
+                }
+            }
+            if self.abandon_locked(Abandoner::Library, true).is_err() {
+                // Only the session's own work could hold the gate here: the
+                // session detaches after it, keeping its graphics objects.
+                let mut state = self.state.lock_unpoisoned();
+                if !matches!(
+                    state.lifecycle,
+                    RenderSessionState::Detaching | RenderSessionState::Detached | RenderSessionState::Abandoned
+                ) {
+                    self.start_detach(&mut state);
+                }
+            }
+            Ok(())
+        })
+    }
+
     fn dispose_locked(&self, done: Option<Resolver<()>>) -> Result<(), Error> {
         let mut state = self.state.lock_unpoisoned();
         if state.released {
@@ -285,17 +321,19 @@ impl SessionShared {
     /// Stops the session at once, as [`RenderSession::abandon`] documents.
     /// The library may abandon a released session too.
     pub(crate) fn abandon(&self, by: Abandoner) -> Result<(), Error> {
-        with_unlocked_wakes(|| self.abandon_locked(by))
+        with_unlocked_wakes(|| self.abandon_locked(by, false)).map(drop)
     }
 
-    fn abandon_locked(&self, by: Abandoner) -> Result<(), Error> {
+    /// Abandons the session, which keeps its graphics objects until the
+    /// process exits if `keep_graphics`, and returns how many it keeps.
+    fn abandon_locked(&self, by: Abandoner, keep_graphics: bool) -> Result<u32, Error> {
         let on_driver = self.thread.get() == Some(&std::thread::current().id());
         let gate = if on_driver {
             self.gate.try_lock().map_err(|_| Error::busy("the render session is rendering on this thread"))?
         } else {
             self.gate.lock_unpoisoned()
         };
-        let (waiters, map) = {
+        let (waiters, map, kept) = {
             let mut state = self.state.lock_unpoisoned();
             if by == Abandoner::Host && state.released {
                 return Err(released());
@@ -310,7 +348,9 @@ impl SessionShared {
                 }
             }
             state.lifecycle = RenderSessionState::Abandoned;
-            (state.take_waiters(), state.map.take())
+            state.keep_graphics |= keep_graphics;
+            let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
+            (state.take_waiters(), state.map.take(), kept)
         };
         match &map {
             // The map unbinds the session before another can attach.
@@ -324,7 +364,7 @@ impl SessionShared {
         let lost = || Error::target_lost("the render session was abandoned");
         waiters.settle(Err(lost()), lost);
         drop(map);
-        Ok(())
+        Ok(kept)
     }
 }
 
@@ -506,6 +546,8 @@ pub(crate) fn attach(
             map: Some(map.clone()),
             init: Some(Box::new(Init { target, size, pixel_ratio, glyph_cache: map.glyph_cache() })),
             resizes_sent: 0,
+            graphics_objects: 0,
+            keep_graphics: false,
         }),
         gate: Mutex::new(()),
         frame_wake: options.frame_wake,
@@ -948,6 +990,17 @@ impl RenderSession {
         self.shared().abandon(Abandoner::Host)
     }
 
+    /// Abandons the session as [`abandon`](Self::abandon) does, but makes no
+    /// graphics call: the session keeps its graphics objects until the
+    /// process exits. Returns how many it keeps, such as its renderer and
+    /// the backend it draws with.
+    ///
+    /// This is for a host whose shutdown may already have destroyed the
+    /// graphics objects behind the session.
+    pub fn abandon_keeping_graphics(&self) -> Result<u32, Error> {
+        with_unlocked_wakes(|| self.shared().abandon_locked(Abandoner::Host, true))
+    }
+
     /// Releases the session, detaching it first when it is attached. The
     /// completion reports when the session has let go of its map and its
     /// graphics objects. Every call on the session fails with
@@ -967,6 +1020,14 @@ impl RenderSession {
     /// handle does the same.
     pub fn dispose(&self) -> Result<(), Error> {
         self.shared().dispose(None)
+    }
+
+    /// Releases the session in any state, without waiting and without a
+    /// graphics call past the one in progress. A session that hasn't ended
+    /// is abandoned, keeping its graphics objects until the process exits,
+    /// as [`abandon_keeping_graphics`](Self::abandon_keeping_graphics) does.
+    pub fn dispose_keeping_graphics(&self) -> Result<(), Error> {
+        self.shared().dispose_keeping_graphics()
     }
 }
 
