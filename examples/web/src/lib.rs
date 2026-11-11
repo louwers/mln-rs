@@ -3,12 +3,12 @@
 //! wasm-bindgen. The page loads one wasm module, and Web Workers instantiate
 //! it, each instance with its own memory:
 //!
-//! - In the map's Web Worker, `WebMap` (map.rs): the map, its renderer
-//!   (wgpu's WebGPU backend, into the page's canvas as an OffscreenCanvas)
-//!   and its file sources. Each animation frame runs the
-//!   RunLoop, draws, and runs the cooperative scheduler's tasks until the
-//!   frame's budget is spent; between frames, the RunLoop and the scheduler
-//!   wake the worker to run what arrives (`WebMap::tick`).
+//! - In the map's Web Worker, `WebMap` (map.rs): the map, its renderer (the
+//!   browser's WebGPU through wgpu, or its WebGL2 through mln_gl in the
+//!   `webgl` build, into the page's canvas as an OffscreenCanvas) and its
+//!   file sources. Each animation frame runs the RunLoop, draws, and runs the
+//!   cooperative scheduler's tasks until the frame's budget is spent; between
+//!   frames, they wake the worker to run what arrives (`WebMap::tick`).
 //! - In each tile worker's Web Worker, `TileWorker` (worker.rs): a
 //!   `TileWorkerHost` on the instance's cooperative scheduler. The map's
 //!   `SerializingTransport` puts each tile's worker (geometry, raster or
@@ -26,7 +26,7 @@
 //! before anything else runs, and the instance's tasks run when its Web
 //! Worker runs them.
 //!
-//! web/main.ts, web/map-worker.ts and web/worker.ts are the TypeScript side.
+//! web/main.ts, web/map-worker.ts and web/tile-worker.ts are the page's side.
 
 #![cfg(target_arch = "wasm32")]
 

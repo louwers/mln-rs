@@ -2773,6 +2773,7 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-map",
  "mln-rs-renderer",
  "mln-rs-storage",

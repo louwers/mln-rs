@@ -23,9 +23,9 @@ use mln_util::geo::ScreenCoordinate;
 use mln_util::host_bytes::HostBytes;
 use mln_util::serialization::payload::Payload;
 use mln_util::size::Size;
-use mln_webgpu::SurfaceBackend;
 use wasm_bindgen::prelude::*;
 
+use self::backend::*;
 use crate::shaper::{self, ShaperModuleEngine};
 use crate::{cooperative_scheduler, deadline, js_error};
 
@@ -134,18 +134,18 @@ pub struct WebMap {
 #[wasm_bindgen]
 impl WebMap {
     /// Creates the WebGPU device, a surface on `canvas` (the page's canvas,
-    /// transferred to this worker) and the map, at
-    /// `width` x `height` CSS pixels. The tiles' workers run in
-    /// `workers` Web Workers (at least one), reached through
-    /// `post(instance, bytes)`, whose replies go to `receive`. `wake()` is
-    /// called whenever the map gets work between frames (a fetch finished, a
-    /// reply arrived, a task was queued); the worker then calls `tick` soon.
-    /// `load_shaper()` returns a promise of the shaper module
-    /// (web/pkg/mln_web_shaper.js), initialized; the map calls it the first
-    /// time a style declares font faces. With
-    /// `local_ideograph_font_family` (a CSS font-family list), the map
-    /// draws CJK glyphs in it rather than downloading them, as GL JS's
-    /// `localIdeographFontFamily`.
+    /// transferred to this worker) and the map, at `width` x `height` CSS
+    /// pixels. The tiles' workers run in `workers` Web Workers (at least
+    /// one), reached through `post(instance, bytes)`, whose replies go to
+    /// `receive`. `wake()` is called whenever the map gets work between
+    /// frames (a fetch finished, a reply arrived, a task was queued); the
+    /// worker then calls `tick` soon. `load_shaper()` returns a promise of
+    /// the shaper module (web/pkg/mln_web_shaper.js), initialized; the map
+    /// calls it the first time a style declares font faces. With
+    /// `local_ideograph_font_family` (a CSS font-family list), the map draws
+    /// CJK glyphs in it rather than downloading them, as GL JS's
+    /// `localIdeographFontFamily`. (map_webgl.rs has the `webgl` build's.)
+    #[cfg(not(feature = "webgl"))]
     pub async fn create(
         canvas: web_sys::OffscreenCanvas,
         width: u32,
@@ -510,3 +510,13 @@ impl WebMap {
         more
     }
 }
+
+/// What draws the map: the browser's WebGPU through wgpu, or, in the `webgl`
+/// build of the module, its WebGL2 through mln_gl (map_webgl.rs).
+#[cfg(not(feature = "webgl"))]
+mod backend {
+    pub use mln_webgpu::SurfaceBackend;
+}
+#[cfg(feature = "webgl")]
+#[path = "map_webgl.rs"]
+mod backend;

@@ -8,9 +8,17 @@ Worker loads a second, the font-face shaper, only for styles with font
 faces. The page's thread runs no wasm: it hands its canvas to the map's Web
 Worker and only forwards to it.
 
+The module has two builds, and a browser downloads one. The first draws
+with the browser's WebGPU, through mln_webgpu and its WGSL. The second (the
+`webgl` feature, in web/pkg/webgl) draws with WebGL2, for a browser that has
+no WebGPU or whose WebGPU can't start the map: through mln_gl, the port of
+the C++ OpenGL backend, and its GLSL (src/map_webgl.rs). Neither build has
+the other's backend or shaders.
+
 - in the map's Web Worker (web/map-worker.ts), `WebMap` (src/map.rs): the
-  map, its renderer (wgpu's WebGPU backend, into the page's canvas as an
-  OffscreenCanvas) and its file sources. The
+  map, its renderer (the browser's WebGPU through wgpu, or its WebGL2
+  through mln_gl, into the page's canvas as an OffscreenCanvas) and its
+  file sources. The
   instance has no threads, so it installs a `CooperativeScheduler`. Each
   animation frame runs the RunLoop, draws, and runs the scheduler's tasks
   until the frame's budget is spent. Between frames the RunLoop and the
@@ -18,7 +26,7 @@ Worker and only forwards to it.
   task of its own (`WebMap::tick`): a finished fetch or a worker's reply
   is handled at once, rather than at the next frame, so that a load's
   steps don't each wait for a frame.
-- in each tile worker's Web Worker (web/worker.ts), `TileWorker`
+- in each tile worker's Web Worker (web/tile-worker.ts), `TileWorker`
   (src/worker.rs): a `TileWorkerHost` on the instance's own
   `CooperativeScheduler`. The map's `SerializingTransport` gives each
   tile's worker to one of the Web Workers and sends every message between
@@ -103,7 +111,7 @@ and the other jumps to its camera.
 Every instance decodes images with the browser's decoders (mln_image's
 default on wasm), so the module carries no PNG, WebP or JPEG decoder. The
 decoder answers later, from the event loop, so a tile worker's reply can come
-outside `TileWorker::run`; it then wakes web/worker.ts for a run.
+outside `TileWorker::run`; it then wakes web/tile-worker.ts for a run.
 
 ## CJK glyphs are drawn locally
 
@@ -160,8 +168,8 @@ just web-dev              # or Vite's dev server, from the sources
 debugging and profiling. `pnpm -C examples/web typecheck` checks the page's
 TypeScript, as CI does.
 
-Serve dist/ over HTTP, or run `just web-dev`, and open the page in a
-browser with WebGPU. URL parameters (web/main.ts):
+Serve dist/ over HTTP, or run `just web-dev`, and open the page. URL
+parameters (web/main.ts):
 
 - `style=<key|url>`: a style of web/styles.ts by its key, or any style's
   URL (default: OpenFreeMap Liberty);
@@ -178,7 +186,9 @@ browser with WebGPU. URL parameters (web/main.ts):
 - `localIdeographFontFamily=<CSS font-family list>` (default: `sans-serif`):
   see above; empty or `false` turns it off;
 - `panic=map` or `panic=tile`: the map's instance or the first tile
-  worker's panics once it starts, for the check.
+  worker's panics once it starts, for the check;
+- `backend=webgpu` or `backend=webgl2`: what the map draws with (default:
+  WebGPU where the browser has it).
 
 ## A panic stops the map
 
@@ -223,7 +233,9 @@ keep lavapipe for the native runner (`VK_DRIVER_FILES`).
   canvases as white, so a screenshot shows nothing.
   `WebMap::request_pixels` draws the frame again and copies the canvas
   texture into a buffer, which the event loop maps
-  (`SurfaceBackend::take_readback`).
+  (`SurfaceBackend::take_readback`). A WebGL2 canvas can't be copied from
+  on the GPU, so there the map's Web Worker reads the canvas after the
+  frame.
 - The frames become the `expected.png` of render tests of the same views,
   which the native runner renders from the same cache database and
   compares with pixelmatch, as the render tests do.
@@ -243,5 +255,6 @@ Options: `--filter <regex>` picks views, `--workers <n>` sets the page's
 Web Workers (default 2), `--codec <n>` renders natively through n codec
 instances (`--tileWorkerCodec`), `--out <dir>` keeps the frames, the
 native renders and their diffs, `--chromium <path>` uses another
-Chromium. `MLN_WEB_CHECK_LOG=1` prints the consoles of the page and its
+Chromium, `--backend webgl2` checks the module that draws with WebGL2
+(CI runs the check once for each). `MLN_WEB_CHECK_LOG=1` prints the consoles of the page and its
 workers, and the fixtures the cache lacks.

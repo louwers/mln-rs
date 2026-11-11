@@ -196,8 +196,9 @@ jobs:
   # examples/web/README.md): views of the render suite, served offline from
   # its cache database to the page with its tile workers in Web Workers, each
   # frame compared with the native runner's render of the same view
-  # (lavapipe). The Chromium is Playwright's build, pinned, and runs WebGPU on
-  # the SwiftShader it bundles.
+  # (lavapipe). Twice: the module that draws with WebGPU, and the one that
+  # draws with WebGL2 for browsers without it. The Chromium is Playwright's
+  # build, pinned, and runs both on the SwiftShader it bundles.
   web:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -249,6 +250,10 @@ jobs:
 
       - name: Check
         run: just profile=release web-check --out "$RUNNER_TEMP/web-check"
+
+      # The build and the native runner are the ones the step above made.
+      - name: Check the WebGL2 module
+        run: node examples/web/check/check.mjs --backend webgl2 --out "$RUNNER_TEMP/web-check-webgl2"
 
       # The page's TypeScript, against the modules' wasm-bindgen typings that
       # the check's build wrote.
