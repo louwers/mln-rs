@@ -18,7 +18,6 @@ use mln_util::Color;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
-use mln_util::serialization::payload::pod;
 use mln_util::serialization::sorted;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::sync::RwLockExt;
@@ -26,6 +25,7 @@ use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
+use crate::bucket_geometry::GeometryVec;
 use crate::buckets::line_bucket::LineLayoutVertex;
 use crate::gfx::fill_generator::generate_fill_and_outline_buffers;
 use crate::layout::pattern_layout::PatternLayerMap;
@@ -54,23 +54,18 @@ pub struct FillBucket {
     pub base: BucketBase,
 
     // MLN_TRIANGULATE_FILL_OUTLINES
-    #[serde(with = "pod")]
-    pub line_vertices: Vec<LineLayoutVertex>,
+    pub line_vertices: GeometryVec<LineLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
-    #[serde(with = "pod")]
-    pub line_indexes: Vec<u16>,
+    pub line_indexes: GeometryVec<u16>,
     pub line_segments: Vec<SegmentBase>,
 
     /// `gfx::IndexVector<gfx::Lines>`.
-    #[serde(with = "pod")]
-    pub basic_lines: Vec<u16>,
+    pub basic_lines: GeometryVec<u16>,
     pub basic_line_segments: Vec<SegmentBase>,
 
-    #[serde(with = "pod")]
-    pub vertices: Vec<FillLayoutVertex>,
+    pub vertices: GeometryVec<FillLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
-    #[serde(with = "pod")]
-    pub triangles: Vec<u16>,
+    pub triangles: GeometryVec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
     pub subdivision_granularity: SubdivisionGranularitySetting,
 
@@ -102,13 +97,13 @@ impl FillBucket {
         }
         FillBucket {
             base: BucketBase::default(),
-            line_vertices: Vec::new(),
-            line_indexes: Vec::new(),
+            line_vertices: GeometryVec::default(),
+            line_indexes: GeometryVec::default(),
             line_segments: Vec::new(),
-            basic_lines: Vec::new(),
+            basic_lines: GeometryVec::default(),
             basic_line_segments: Vec::new(),
-            vertices: Vec::new(),
-            triangles: Vec::new(),
+            vertices: GeometryVec::default(),
+            triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
@@ -133,13 +128,13 @@ impl FillBucket {
     ) -> Result<(), ExceptionPtr> {
         generate_fill_and_outline_buffers(
             geometry,
-            &mut self.vertices,
-            &mut self.triangles,
+            self.vertices.get_mut(),
+            self.triangles.get_mut(),
             &mut self.triangle_segments,
-            &mut self.line_vertices,
-            &mut self.line_indexes,
+            self.line_vertices.get_mut(),
+            self.line_indexes.get_mut(),
             &mut self.line_segments,
-            &mut self.basic_lines,
+            self.basic_lines.get_mut(),
             &mut self.basic_line_segments,
             canonical,
             self.subdivision_granularity.fill.get_granularity_for_zoom_level(canonical.z),

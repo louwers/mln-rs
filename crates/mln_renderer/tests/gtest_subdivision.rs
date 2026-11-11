@@ -247,15 +247,17 @@ fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) ->
         .expect("addFeature");
     let mut segments_end = 0;
     let mut indices_outside_their_segment = 0;
+    let triangles = bucket.triangles.data();
     for segment in &bucket.triangle_segments {
         assert!(segment.vertex_length <= MAX_SEGMENT_VERTICES);
         assert!(segment.index_length > 0);
         assert!(segment.vertex_offset >= segments_end);
         for i in segment.index_offset..segment.index_offset + segment.index_length {
-            indices_outside_their_segment += usize::from(usize::from(bucket.triangles[i]) >= segment.vertex_length);
+            indices_outside_their_segment += usize::from(usize::from(triangles[i]) >= segment.vertex_length);
         }
         segments_end = segment.vertex_offset + segment.vertex_length;
     }
+    drop(triangles);
     assert_eq!(0, indices_outside_their_segment);
     assert!(segments_end <= bucket.vertices.len());
     bucket
@@ -281,12 +283,13 @@ fn fine_zigzag() -> GeometryCollection {
 // last; 0 when there is none.
 fn roof_granularity(bucket: &FillExtrusionBucket, polygon: &GeometryCollection, tile: &CanonicalTileID) -> u32 {
     let mut drawn: Vec<[i16; 6]> = Vec::new();
+    let (vertices, triangles) = (bucket.vertices.data(), bucket.triangles.data());
     for segment in &bucket.triangle_segments {
         let mut i = segment.index_offset;
         while i + 3 <= segment.index_offset + segment.index_length {
             let mut triangle = [0i16; 6];
             for k in 0..3 {
-                let position = bucket.vertices[segment.vertex_offset + usize::from(bucket.triangles[i + k])].a1;
+                let position = vertices[segment.vertex_offset + usize::from(triangles[i + k])].a1;
                 triangle[k * 2] = position[0];
                 triangle[k * 2 + 1] = position[1];
             }
@@ -592,13 +595,13 @@ fn globe_mask_keeps_the_uncovered_parts() {
     }
 
     let mut masked_edge = BTreeSet::new();
-    for vertex in vertices {
+    for vertex in vertices.iter() {
         if vertex.position[0] == EXTENT_I16 / 2 && vertex.position[1] >= 0 && vertex.position[1] <= EXTENT_I16 / 2 {
             masked_edge.insert(vertex.position[1]);
         }
     }
     let mut child_edge = BTreeSet::new();
-    for vertex in child.vertices.vector() {
+    for vertex in child.vertices.vector().iter() {
         if vertex.position[0] == EXTENT_I16 && vertex.position[1] >= 0 {
             child_edge.insert(vertex.position[1] / 2);
         }
@@ -607,7 +610,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
     assert_eq!(33, masked_edge.len());
 
     let mut north_pole = 0;
-    for vertex in vertices {
+    for vertex in vertices.iter() {
         if vertex.position[1] == NORTH_POLE_Y {
             assert!(vertex.position[0] >= EXTENT_I16 / 2);
             north_pole += 1;

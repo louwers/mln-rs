@@ -343,6 +343,7 @@ const SYMBOL_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(6, AttributeDataType::Float3, ID_SYMBOL_PROJECTED_POS_ATTRIBUTE),
     attr(7, AttributeDataType::Float, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE),
     attr(8, AttributeDataType::Float, ID_SYMBOL_OPACITY_ATTRIBUTE),
+    attr(9, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
 ];
 const SYMBOL_ICON_TEXTURES: &[TextureInfo] = &[tex(0, ID_SYMBOL_IMAGE_TEXTURE)];
 const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
@@ -356,6 +357,7 @@ const SYMBOL_SDF_ATTRIBUTES: &[AttributeInfo] = &[
     attr(10, AttributeDataType::Float, ID_SYMBOL_OPACITY_ATTRIBUTE),
     attr(11, AttributeDataType::Float, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
     attr(12, AttributeDataType::Float, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
+    attr(13, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
 ];
 const SYMBOL_SDF_TEXTURES: &[TextureInfo] = &[tex(0, ID_SYMBOL_IMAGE_TEXTURE)];
 const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
@@ -368,6 +370,7 @@ const SYMBOL_TEXT_AND_ICON_ATTRIBUTES: &[AttributeInfo] = &[
     attr(9, AttributeDataType::Float, ID_SYMBOL_OPACITY_ATTRIBUTE),
     attr(10, AttributeDataType::Float, ID_SYMBOL_HALO_WIDTH_ATTRIBUTE),
     attr(11, AttributeDataType::Float, ID_SYMBOL_HALO_BLUR_ATTRIBUTE),
+    attr(12, UShort2, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE),
 ];
 const SYMBOL_TEXT_AND_ICON_TEXTURES: &[TextureInfo] =
     &[tex(0, ID_SYMBOL_IMAGE_TEXTURE), tex(2, ID_SYMBOL_IMAGE_ICON_TEXTURE)];

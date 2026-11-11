@@ -35,7 +35,6 @@ use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::mat3::{Mat3, matrix as mat3};
-use mln_util::serialization::payload::pod;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::sync::RwLockExt;
 use mln_util::vectors::Vec3f;
@@ -43,6 +42,7 @@ use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
+use crate::bucket_geometry::GeometryVec;
 use crate::gfx::fill_large_mesh_arrays::fill_large_mesh_arrays;
 use crate::layout::pattern_layout::{PatternLayerMap, PatternLayoutSpec};
 use crate::paint_property_binder::{CrossFadedPaintPropertyBinder, PaintPropertyBinder};
@@ -90,11 +90,9 @@ pub struct FillExtrusionBucket {
     pub base: BucketBase,
     pub layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
 
-    #[serde(with = "pod")]
-    pub vertices: Vec<FillExtrusionLayoutVertex>,
+    pub vertices: GeometryVec<FillExtrusionLayoutVertex>,
     /// `gfx::IndexVector<gfx::Triangles>`.
-    #[serde(with = "pod")]
-    pub triangles: Vec<u16>,
+    pub triangles: GeometryVec<u16>,
     pub triangle_segments: Vec<SegmentBase>,
     pub subdivision_granularity: SubdivisionGranularitySetting,
 
@@ -146,8 +144,8 @@ impl FillExtrusionBucket {
         FillExtrusionBucket {
             base: BucketBase::default(),
             layout,
-            vertices: Vec::new(),
-            triangles: Vec::new(),
+            vertices: GeometryVec::default(),
+            triangles: GeometryVec::default(),
             triangle_segments: Vec::new(),
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             paint_property_binders,
@@ -307,7 +305,7 @@ impl Bucket for FillExtrusionBucket {
                     };
 
                     // processRingPoints(p1, p2, edgeDistance)
-                    self.vertices.push(Self::layout_vertex(p1, 0.0, 0.0, 1, edge_distance as u16));
+                    self.vertices.get_mut().push(Self::layout_vertex(p1, 0.0, 0.0, 1, edge_distance as u16));
                     flat_indices.push(u32::from(triangle_index));
                     triangle_index = triangle_index.wrapping_add(1);
 
@@ -319,13 +317,13 @@ impl Bucket for FillExtrusionBucket {
                             edge_distance = 0;
                         }
 
-                        self.vertices.push(Self::layout_vertex(p2, perp.x, perp.y, 0, edge_distance as u16));
-                        self.vertices.push(Self::layout_vertex(p2, perp.x, perp.y, 1, edge_distance as u16));
+                        self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 0, edge_distance as u16));
+                        self.vertices.get_mut().push(Self::layout_vertex(p2, perp.x, perp.y, 1, edge_distance as u16));
 
                         edge_distance += dist;
 
-                        self.vertices.push(Self::layout_vertex(p1, perp.x, perp.y, 0, edge_distance as u16));
-                        self.vertices.push(Self::layout_vertex(p1, perp.x, perp.y, 1, edge_distance as u16));
+                        self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 0, edge_distance as u16));
+                        self.vertices.get_mut().push(Self::layout_vertex(p1, perp.x, perp.y, 1, edge_distance as u16));
 
                         // ┌──────┐
                         // │ 0  1 │ Counter-Clockwise winding order.
@@ -333,8 +331,12 @@ impl Bucket for FillExtrusionBucket {
                         // │ 2  3 │ Triangle 2: 1 => 2 => 3
                         // └──────┘
                         let t = triangle_index;
-                        self.triangles.extend_from_slice(&[t, t.wrapping_add(2), t.wrapping_add(1)]);
-                        self.triangles.extend_from_slice(&[t.wrapping_add(1), t.wrapping_add(2), t.wrapping_add(3)]);
+                        self.triangles.get_mut().extend_from_slice(&[t, t.wrapping_add(2), t.wrapping_add(1)]);
+                        self.triangles.get_mut().extend_from_slice(&[
+                            t.wrapping_add(1),
+                            t.wrapping_add(2),
+                            t.wrapping_add(3),
+                        ]);
                         triangle_index = triangle_index.wrapping_add(4);
                         let segment = &mut self.triangle_segments[segment_index];
                         segment.vertex_length += 4;
@@ -350,7 +352,7 @@ impl Bucket for FillExtrusionBucket {
 
             for i in (0..n_indices).step_by(3) {
                 // Counter-Clockwise winding order.
-                self.triangles.extend_from_slice(&[
+                self.triangles.get_mut().extend_from_slice(&[
                     flat_indices[indices[i] as usize] as u16,
                     flat_indices[indices[i + 2] as usize] as u16,
                     flat_indices[indices[i + 1] as usize] as u16,
@@ -365,10 +367,10 @@ impl Bucket for FillExtrusionBucket {
             // continues the walls' segment or starts its own.
             if let Some(roof) = &roof {
                 fill_large_mesh_arrays(
-                    &mut self.vertices,
+                    self.vertices.get_mut(),
                     |x, y| Self::layout_vertex(Point::new(f64::from(x), f64::from(y)), 0.0, 0.0, 1, 0),
                     &mut self.triangle_segments,
-                    &mut self.triangles,
+                    self.triangles.get_mut(),
                     &roof.vertices,
                     &roof.triangle_indices,
                     None,
