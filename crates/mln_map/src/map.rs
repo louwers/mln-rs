@@ -730,8 +730,17 @@ impl Map {
         self.impl_.transform.borrow().get_free_camera_options()
     }
 
-    // TODO(port): annotations, rendering stats view, setFreeCameraOptions,
-    // rendered features.
+    /// `setFreeCameraOptions(camera)`: places the camera by its position
+    /// and orientation, and cancels the running camera commands. A NaN
+    /// position, or a NaN or zero-length orientation, is ignored; the
+    /// position's height is clamped to the zoom range.
+    pub fn set_free_camera_options(&mut self, camera: &mln_map_types::FreeCameraOptions) {
+        self.impl_.transform.borrow_mut().set_free_camera_options(camera);
+        self.impl_.camera_mutated.set(true);
+        self.impl_.on_update();
+    }
+
+    // TODO(port): annotations, rendering stats view, rendered features.
 
     // MARK: - Debug
 

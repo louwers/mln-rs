@@ -367,6 +367,41 @@ fn geometry_to_camera() {
     assert!(test.map().camera_for_geometry(&bad, &EdgeInsets::default(), None, None).is_err());
 }
 
+/// Free camera options place the camera, and cancel the running commands.
+#[test]
+fn free_camera_options_place_the_camera_and_cancel_commands() {
+    let test = MapTest::new();
+    let ended = Rc::new(Cell::new(None));
+    let record = ended.clone();
+    let animation = AnimationOptions {
+        transition_end_fn: Some(Rc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
+        ..AnimationOptions::new(Duration::from_secs(10))
+    };
+    test.map().ease_to(&cam().with_zoom(Some(10.0)), &animation);
+    assert!(test.map().in_transition());
+
+    let position = [0.25, 0.25, 0.01];
+    test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
+    assert_eq!(ended.get(), Some(mln_map::TransitionOutcome::Cancelled));
+    assert!(!test.map().in_transition());
+    let placed = test.map().get_free_camera_options().position.unwrap();
+    for (placed, wanted) in placed.iter().zip(position) {
+        assert_near(*placed, wanted, 1e-9);
+    }
+    // Looking straight down from a quarter of the world's width and height:
+    // the center is 90° W, north of the equator.
+    let center = test.map().get_camera_options(None).center.unwrap();
+    assert_near(center.longitude(), -90.0, 1e-6);
+    assert!(center.latitude() > 0.0);
+
+    // A NaN position is ignored.
+    test.map().set_free_camera_options(&mln_map::FreeCameraOptions {
+        position: Some([f64::NAN, 0.0, 0.0]),
+        orientation: None,
+    });
+    assert_near(test.map().get_camera_options(None).center.unwrap().longitude(), -90.0, 1e-6);
+}
+
 // gtest: Map.CameraToLatLngBounds
 #[test]
 fn camera_to_lat_lng_bounds() {
