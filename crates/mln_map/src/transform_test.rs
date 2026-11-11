@@ -4203,6 +4203,27 @@ fn momentum_pans_its_distance_on_screen() {
     assert!(!transform.in_transition());
 }
 
+// Port-only: momentum pans the globe as a drag around the view center does,
+// and its zoom keeps the planet's size as the latitude changes.
+#[test]
+fn momentum_pans_the_globe_as_a_drag_does() {
+    let mut transform = new_transform();
+    set_up_globe_camera(&mut transform, &ll(10.0, 20.0), 3.0);
+    let start = transform.get_lat_lng(WrapMode::Wrapped);
+    let momentum = CameraMomentum { pan_velocity: Some(sc(0.0, 800.0)), ..header_momentum() };
+    transform.start_momentum(&momentum, &AnimationOptions::default());
+    let begin = transform.get_latest_transition_start();
+    transform.update_transitions(begin + seconds(3));
+    assert!(!transform.in_transition());
+    let end = transform.get_lat_lng(WrapMode::Wrapped);
+    assert!(end.latitude() > start.latitude() + 1.0, "{}", end.latitude());
+    assert_near(
+        3.0 + VerticalPerspectiveProjection::zoom_adjustment(start.latitude(), end.latitude()),
+        transform.get_zoom(),
+        1e-9,
+    );
+}
+
 // gtest: Transform.MomentumFollowsAnEasedGlide. An eased glide follows its
 // curve, and its speed is the curve's slope. A straight curve moves at an
 // even speed.
@@ -4789,6 +4810,46 @@ fn a_turn_around_an_anchor_keeps_the_ground_under_it() {
     assert_near(under.y, anchor.y, 1e-6);
 }
 
+// Port-only: a drag through apply_camera_delta holds the point its anchor
+// names, as move_by_with_anchor does. On the globe the planet turns to keep
+// the grabbed location under the cursor, which a drag around the view center
+// doesn't; on a flat map the anchor changes nothing.
+#[test]
+fn a_drag_delta_holds_its_anchor() {
+    let offset = sc(30.0, 12.0);
+    let cursor = sc(330.0, 200.0);
+    let drag = |transform: &mut Transform, anchor: Option<ScreenCoordinate>| {
+        transform.apply_camera_delta(&CameraDelta { offset: Some(offset), anchor, ..CameraDelta::default() }).unwrap();
+        transform.get_lat_lng(WrapMode::Unwrapped)
+    };
+    let globe = || {
+        let mut transform = new_transform();
+        set_up_globe_camera(&mut transform, &ll(30.0, 20.0), 1.0);
+        transform
+    };
+
+    let mut held = globe();
+    let through_the_delta = drag(&mut held, Some(cursor));
+    let mut direct = globe();
+    direct.move_by_with_anchor(&offset, Some(cursor), &AnimationOptions::default()).unwrap();
+    assert_eq!(through_the_delta, direct.get_lat_lng(WrapMode::Unwrapped));
+    assert_eq!(held.get_zoom(), direct.get_zoom());
+    let around_the_center = drag(&mut globe(), None);
+    assert!(
+        (through_the_delta.latitude() - around_the_center.latitude()).abs() > 0.1
+            || (through_the_delta.longitude() - around_the_center.longitude()).abs() > 0.1,
+        "{through_the_delta:?} {around_the_center:?}"
+    );
+
+    let flat = || {
+        let mut transform = new_transform();
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.jump_to(&cam().with_center(Some(ll(30.0, 20.0))).with_zoom(Some(3.0)));
+        transform
+    };
+    assert_eq!(drag(&mut flat(), Some(cursor)), drag(&mut flat(), None));
+}
+
 #[test]
 fn camera_deltas_are_validated_as_maplibre_native_ffi_validates_them() {
     let mut transform = outcome_transform();
@@ -4802,8 +4863,10 @@ fn camera_deltas_are_validated_as_maplibre_native_ffi_validates_them() {
         check(CameraDelta { bearing: Some(f64::INFINITY), ..CameraDelta::default() }),
         Err(CameraError::NotFinite)
     );
+    // An anchor with only an offset is the point a drag holds (the globe's
+    // `moveBy(offset, anchor)`); one with nothing to hold is rejected.
     assert_eq!(
-        check(CameraDelta { anchor: Some(sc(1.0, 1.0)), offset: Some(sc(1.0, 0.0)), ..CameraDelta::default() }),
+        check(CameraDelta { anchor: Some(sc(1.0, 1.0)), ..CameraDelta::default() }),
         Err(CameraError::AnchorWithoutChange)
     );
     assert_eq!(

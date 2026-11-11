@@ -17,5 +17,9 @@ doctest = false
 mln_map.workspace = true
 mln_util.workspace = true
 
+[dev-dependencies]
+# The globe drag test's projection.
+mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
+
 [lints]
 workspace = true

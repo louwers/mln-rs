@@ -1415,6 +1415,7 @@ name = "mln-rs-gestures"
 version = "0.0.11"
 dependencies = [
  "mln-rs-map",
+ "mln-rs-style-types",
  "mln-rs-util",
 ]
 

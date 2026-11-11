@@ -2069,6 +2069,10 @@ impl Transform {
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.get_lat_lng_bounds() != LatLngBounds::default();
         for _ in 0..steps as u32 {
+            if self.state.is_globe_rendering() {
+                self.step_globe_pan(&step);
+                continue;
+            }
             let size = self.state.get_size();
             let center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
             let point = ScreenCoordinate::new(center.x - step.x, center.y - step.y);
@@ -2091,6 +2095,33 @@ impl Transform {
         self.get_lat_lng(WrapMode::Unwrapped) != before
     }
 
+    /// One pan step on the globe, as a drag around the view center
+    /// ([`Self::move_by_with_anchor`] without an anchor) makes it: the
+    /// planet turns, the bearing too when it is free, and the zoom keeps the
+    /// planet's size as the latitude changes.
+    fn step_globe_pan(&mut self, step: &ScreenCoordinate) {
+        let size = self.state.get_size();
+        let view_center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
+        let grab = ScreenCoordinate::new(view_center.x, f64::from(size.height) - view_center.y);
+        let pan_delta = ScreenCoordinate::new(step.x, -step.y);
+        let (center, bearing) = if self.globe_free_bearing {
+            let drag = VerticalPerspectiveProjection::drag_camera(&self.state, &grab, &pan_delta);
+            (drag.center, Some(drag.bearing))
+        } else {
+            (VerticalPerspectiveProjection::drag_center(&self.state, &grab, &pan_delta), None)
+        };
+        let center = self.state.constrained_center(&center, self.get_zoom());
+        let zoom = self.get_zoom()
+            + VerticalPerspectiveProjection::zoom_adjustment(
+                self.get_lat_lng(WrapMode::Wrapped).latitude(),
+                center.latitude(),
+            );
+        if let Some(bearing) = bearing {
+            self.state.set_bearing(mln_math::deg2rad(-bearing));
+        }
+        self.state.set_lat_lng_zoom(&center, zoom);
+    }
+
     fn step_zoom(&mut self, zoom: f64, anchor: Option<ScreenCoordinate>) -> bool {
         let before = self.state.get_zoom();
         let altitude = self.state.get_center_altitude();
@@ -2104,7 +2135,21 @@ impl Transform {
         // reads the projection, and through the correction's change of
         // center.
         self.state.set_center_altitude(altitude);
-        self.hold_momentum_anchor(anchor);
+        match anchor {
+            // On the globe the zoom around the anchor is the globe's, as in
+            // apply_transitions.
+            Some((point, lat_lng)) if self.state.is_globe_rendering() && self.state.get_zoom() != before => {
+                let zoom_delta = self.state.get_zoom() - before;
+                VerticalPerspectiveProjection::zoom_around_point(
+                    &mut self.state,
+                    &point,
+                    &lat_lng,
+                    zoom_delta,
+                    self.globe_free_bearing,
+                );
+            }
+            _ => self.hold_momentum_anchor(anchor),
+        }
         self.state.get_zoom() != before
     }
 
@@ -2230,8 +2275,10 @@ impl Transform {
         }
         self.with_source(source, |transform| {
             if let Some(offset) = delta.offset {
-                // Validation keeps the offset finite, so it has a LatLng.
-                let _ = transform.move_by(&offset, &parts);
+                // Validation keeps the offset finite, so it has a LatLng. The
+                // anchor is the point the drag holds, which the globe keeps
+                // under it.
+                let _ = transform.move_by_with_anchor(&offset, delta.anchor, &parts);
             }
             if eases {
                 let current = transform.get_camera_options(None);
