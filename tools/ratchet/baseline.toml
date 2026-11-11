@@ -206,7 +206,7 @@
 "crates/mln_headless/tests/gtest_query.rs" = 1
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
-"crates/mln_map/src/map.rs" = 6
+"crates/mln_map/src/map.rs" = 4
 "crates/mln_map/tests/gtest_action_journal.rs" = 7
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
 "crates/mln_renderer/src/bucket.rs" = 1
