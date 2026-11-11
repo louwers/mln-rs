@@ -17,8 +17,6 @@
 // glyph slot, which the C++ then renders; here a glyph that cannot be loaded
 // is empty.
 
-use std::sync::Arc;
-
 use mln_util::image::AlphaImage;
 use mln_util::size::Size;
 use skrifa::raw::model::glyph::outline::{DrawMemory, PathSink};
@@ -85,9 +83,8 @@ impl PathSink for Collector {
 
 /// The hinting scaler of a face at `SDF_FONT_SIZE` (FT_LOAD_DEFAULT), on
 /// the face's own font data.
-pub(crate) fn new_scaler(data: &Arc<Vec<u8>>) -> Option<ScalerFont> {
-    let data: Arc<dyn AsRef<[u8]> + Send + Sync> = data.clone();
-    let font = skrifa::Font::new(data, 0)?;
+pub(crate) fn new_scaler(data: &crate::glyph::FontData) -> Option<ScalerFont> {
+    let font = skrifa::Font::new(data.shared(), 0)?;
     Some(ScalerFont::hinted(font, SDF_FONT_SIZE as f32, HintOptions::auto_fallback()))
 }
 
