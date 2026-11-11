@@ -255,6 +255,25 @@ fn a_waiting_demand_renders_the_next_map_update() {
 }
 
 #[test]
+fn a_burst_of_queued_commands_renders_in_one_frame() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+    demand(&session, DemandMode::WaitForUpdate, 621);
+
+    // The commands wait behind the held thread, and then run as one burst.
+    let open = hold_runtime(&map);
+    let zooms: Vec<_> = (1..=8).map(|step| zoom(&map, f64::from(step))).collect();
+    drop(open);
+    let last = zooms.into_iter().map(|zoom| zoom.wait().unwrap()).last().unwrap();
+    let result = take_one(&session);
+    assert_eq!((621, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
+    assert_eq!(last.render_update_generation, result.map_update_generation);
+    assert_eq!(map.snapshot().unwrap().update_generation, result.map_update_generation);
+}
+
+#[test]
 fn a_waiting_demand_ends_by_supersession_barrier_or_detach() {
     let runtime = runtime();
     let map = red_map(&runtime);

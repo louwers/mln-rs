@@ -45,7 +45,6 @@ abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default
 abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them
 abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api
 abi/render/demands.c:a_barrier_ends_a_demand_while_the_ring_stays_acquired
-abi/render/demands.c:a_burst_of_held_commands_renders_in_one_frame
 abi/render/demands.c:a_demand_behind_a_command_without_an_update_finishes
 abi/render/demands.c:a_demand_shows_the_commands_sent_before_it
 abi/render/demands.c:a_detach_ends_a_demand_waiting_for_commands

@@ -285,6 +285,21 @@ impl Map {
         self.updates.group_depth()
     }
 
+    /// Holds the map's updates back from its renderer, as a command group
+    /// does, until [`release_updates`](Self::release_updates). The hold is
+    /// apart from the groups: it doesn't nest, and
+    /// [`command_group_depth`](Self::command_group_depth) doesn't count it.
+    pub fn hold_updates(&mut self) {
+        self.updates.hold();
+    }
+
+    /// Ends the hold that [`hold_updates`](Self::hold_updates) began. The
+    /// changes show unless a command group still holds them.
+    pub fn release_updates(&mut self) {
+        self.process_events();
+        self.updates.release();
+    }
+
     // MARK: - Events
 
     /// Sets the waker that runs, on any thread, when the map has events to

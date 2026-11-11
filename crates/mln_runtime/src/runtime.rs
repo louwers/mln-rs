@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::ThreadId;
 
@@ -67,6 +67,8 @@ struct Lifecycle {
 
 pub(crate) struct RuntimeShared {
     run_loop: RunLoopHandle,
+    /// The tasks that [`post`](Self::post) sent and the thread hasn't run.
+    queued: Arc<AtomicUsize>,
     thread: ThreadId,
     lifecycle: Mutex<Lifecycle>,
     next_map_id: AtomicU64,
@@ -76,9 +78,11 @@ pub(crate) struct RuntimeShared {
 }
 
 impl RuntimeShared {
-    /// Runs `task` on the runtime's thread, after everything sent before it.
+    /// Runs `task` on the runtime's thread, after everything sent before it,
+    /// in the burst of the tasks queued with it.
     pub(crate) fn post(&self, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
-        post(&self.run_loop, task);
+        self.queued.fetch_add(1, Ordering::SeqCst);
+        self.run_loop.invoke(move || run(task, true));
     }
 
     /// Runs `task` with `value` on the runtime's thread, after everything
@@ -97,7 +101,7 @@ impl RuntimeShared {
             drop(lifecycle);
             instead(value);
         } else {
-            post(&self.run_loop, move |core, outbox| task(core, outbox, value));
+            self.post(move |core, outbox| task(core, outbox, value));
         }
     }
 
@@ -162,17 +166,24 @@ thread_local! {
 
 /// Posts `task` to the runtime thread whose loop is `run_loop`.
 pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut RuntimeCore, &mut Outbox) + Send + 'static) {
-    run_loop.invoke(move || run(task));
+    run_loop.invoke(move || run(task, false));
 }
 
 /// Runs `task` on the runtime's state, then delivers what it sends to the
 /// host, with the state unborrowed. A task that comes after the runtime shut
-/// down drops, which cancels its completions.
-fn run(task: impl FnOnce(&mut RuntimeCore, &mut Outbox)) {
+/// down drops, which cancels its completions. A task that
+/// [`RuntimeShared::post`] sent runs in its burst.
+fn run(task: impl FnOnce(&mut RuntimeCore, &mut Outbox), in_burst: bool) {
     let mut outbox = Outbox::default();
     let unrun = CORE.with(|core| match core.borrow_mut().as_mut() {
         Some(core) => {
+            if in_burst {
+                core.begin_burst_task();
+            }
             task(core, &mut outbox);
+            if in_burst {
+                core.end_burst_task(&mut outbox);
+            }
             None
         }
         None => Some(task),
@@ -219,10 +230,16 @@ pub(crate) struct RuntimeCore {
     database: Option<Arc<dyn FileSource>>,
     network: Option<Arc<dyn FileSource>>,
     pub(crate) run_loop: RunLoopHandle,
+    /// [`RuntimeShared::queued`].
+    queued: Arc<AtomicUsize>,
+    /// The tasks of the burst in progress that haven't finished.
+    burst_left: usize,
+    /// Whether the maps hold their updates back for the burst.
+    holding: bool,
 }
 
 impl RuntimeCore {
-    fn new(resource_options: ResourceOptions, run_loop: RunLoopHandle) -> Self {
+    fn new(resource_options: ResourceOptions, run_loop: RunLoopHandle, queued: Arc<AtomicUsize>) -> Self {
         let hooks = Arc::new(ResourceHooks::default());
         let file_sources = FileSourceManager::new();
         let network_hooks = hooks.clone();
@@ -245,6 +262,42 @@ impl RuntimeCore {
             database,
             network,
             run_loop,
+            queued,
+            burst_left: 0,
+            holding: false,
+        }
+    }
+
+    /// Starts a task that [`RuntimeShared::post`] sent. The tasks that were
+    /// queued when a burst's first one starts make up the burst, and while a
+    /// burst of more than one runs, the maps hold their updates back, so that
+    /// a render session draws what the whole burst changed in one frame. A
+    /// task sent during a burst is in the next one, so a host that keeps
+    /// sending holds no update back for longer than a burst.
+    fn begin_burst_task(&mut self) {
+        let queued = self.queued.fetch_sub(1, Ordering::SeqCst);
+        if self.burst_left == 0 {
+            self.burst_left = queued;
+            self.holding = queued > 1;
+            if self.holding {
+                self.maps.values_mut().for_each(|entry| entry.core.hold_updates());
+            }
+        }
+    }
+
+    /// Ends a task of the burst, and after its last, shows what the maps
+    /// held back.
+    fn end_burst_task(&mut self, outbox: &mut Outbox) {
+        self.burst_left = self.burst_left.saturating_sub(1);
+        if self.burst_left > 0 || !std::mem::take(&mut self.holding) {
+            return;
+        }
+        let ids: Vec<MapId> = self.maps.keys().copied().collect();
+        for id in ids {
+            if let Some(entry) = self.maps.get_mut(&id) {
+                entry.core.release_updates();
+            }
+            crate::map::flush(self, id, outbox);
         }
     }
 
@@ -323,10 +376,12 @@ impl Runtime {
     pub fn new(options: RuntimeOptions) -> Result<Runtime, Error> {
         let resource_options = resource_options(&options)?;
         let (started, start) = mpsc::channel();
+        let queued = Arc::new(AtomicUsize::new(0));
+        let core_queued = Arc::clone(&queued);
         let thread = mln_util::thread::builder("Runtime")
             .spawn(move || {
                 let run_loop = RunLoop::new();
-                let core = RuntimeCore::new(resource_options, run_loop.handle());
+                let core = RuntimeCore::new(resource_options, run_loop.handle(), core_queued);
                 CORE.with(|cell| *cell.borrow_mut() = Some(core));
                 let _ = started.send(run_loop.handle());
                 run_loop.run();
@@ -342,6 +397,7 @@ impl Runtime {
         Ok(Runtime {
             shared: Arc::new(RuntimeShared {
                 run_loop,
+                queued,
                 thread: thread_id,
                 lifecycle: Mutex::new(Lifecycle { released: false, live_maps: 0, shut_down: false }),
                 next_map_id: AtomicU64::new(1),

@@ -8,6 +8,7 @@
 //!
 //! A command group holds the updates back: while one is open, what the map
 //! publishes waits, and the latest of it shows when the outermost group ends.
+//! A hold, which the map's owner sets apart from the groups, does the same.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -30,9 +31,10 @@ pub struct Update {
 struct State {
     generation: u64,
     latest: Option<Arc<UpdateParameters>>,
-    /// The latest update published while a group was open.
+    /// The latest update published while a group or the hold was open.
     held: Option<Arc<UpdateParameters>>,
     group_depth: u32,
+    hold: bool,
     closed: bool,
 }
 
@@ -82,12 +84,12 @@ impl UpdateSlot {
         self.shared.reader()
     }
 
-    /// Makes `parameters` the latest update, or, while a group is open, the
-    /// update that shows when the outermost group ends.
+    /// Makes `parameters` the latest update, or, while a group or the hold
+    /// is open, the update that shows when the last of them ends.
     pub fn publish(&self, parameters: Arc<UpdateParameters>) {
         {
             let mut state = self.shared.state.lock_unpoisoned();
-            if state.group_depth > 0 {
+            if state.group_depth > 0 || state.hold {
                 state.held = Some(parameters);
                 return;
             }
@@ -130,21 +132,42 @@ impl UpdateSlot {
                 return Err(Error::invalid_state("the map has no open command group"));
             }
             state.group_depth -= 1;
-            match state.held.take() {
-                Some(parameters) if state.group_depth == 0 => {
-                    Self::show(&mut state, parameters);
-                    true
-                }
-                held => {
-                    state.held = held;
-                    false
-                }
-            }
+            Self::show_held(&mut state)
         };
         if shown {
             self.shared.wake();
         }
         Ok(())
+    }
+
+    /// Shows the held update once neither a group nor the hold keeps it.
+    fn show_held(state: &mut State) -> bool {
+        if state.group_depth > 0 || state.hold {
+            return false;
+        }
+        let Some(parameters) = state.held.take() else { return false };
+        Self::show(state, parameters);
+        true
+    }
+
+    /// Holds the updates back, as a group does, until
+    /// [`release`](Self::release). It doesn't nest, and it doesn't count
+    /// as a group.
+    pub fn hold(&self) {
+        self.shared.state.lock_unpoisoned().hold = true;
+    }
+
+    /// Ends the hold: the latest update published during it shows, unless
+    /// a group still holds it.
+    pub fn release(&self) {
+        let shown = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.hold = false;
+            Self::show_held(&mut state)
+        };
+        if shown {
+            self.shared.wake();
+        }
     }
 
     /// How many command groups are open.

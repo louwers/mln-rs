@@ -63,6 +63,37 @@ fn a_command_group_holds_its_updates_until_the_outermost_group_ends() {
 }
 
 #[test]
+fn a_hold_keeps_updates_back_apart_from_the_groups() {
+    let _loop = RunLoop::new();
+    let mut map = map();
+    map.drain_events();
+    let before = map.update_generation();
+    let (_reader, wakes) = count_wakes(&map);
+
+    map.hold_updates();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
+    assert_eq!(map.command_group_depth(), 0);
+    assert_eq!(map.end_command_group().expect_err("the hold is no group").kind, ErrorKind::InvalidState);
+    map.begin_command_group();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    map.end_command_group().expect("the group ends");
+    assert_eq!((map.update_generation(), map.pending_update_generation()), (before, before + 1));
+
+    // A group open at the release keeps the update until it ends.
+    map.begin_command_group();
+    map.release_updates();
+    assert_eq!(map.update_generation(), before);
+    map.end_command_group().expect("the group ends");
+    assert_eq!(map.update_generation(), before + 1);
+    assert_eq!(wakes.load(Ordering::SeqCst), 1);
+
+    map.hold_updates();
+    map.jump_to(&CameraOptions::default().with_zoom(Some(4.0)));
+    map.release_updates();
+    assert_eq!(map.update_generation(), before + 2);
+}
+
+#[test]
 fn a_group_without_changes_publishes_nothing() {
     let _loop = RunLoop::new();
     let mut map = map();
