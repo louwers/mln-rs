@@ -110,7 +110,7 @@ fn a_demand_made_while_attaching_fails_when_the_map_cant_bind_the_session() {
     session.demand_frame(FrameDemand::new(DemandMode::Force, 3)).unwrap();
     assert!(serviced(&driver, attached).is_err());
     let result = take_one(&driver, &session);
-    assert_eq!((3, FrameDisposition::Failed), (result.token, result.disposition));
+    assert_eq!((3, FrameDisposition::Failed), (result.token.unwrap(), result.disposition));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn a_caller_driven_session_works_only_when_serviced() {
 
     session.demand_frame(FrameDemand::new(DemandMode::Force, 3)).unwrap();
     let result = take_one(&driver, &session);
-    assert_eq!((3, FrameDisposition::Rendered), (result.token, result.disposition));
+    assert_eq!((3, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
     assert_eq!([255, 0, 0, 255], center_pixel(&driver, &session));
 
     wait_release(&driver, &session);
@@ -204,7 +204,7 @@ fn the_driver_wake_runs_once_until_a_service() {
     settle(&driver, &wakes);
     session.demand_frame(FrameDemand::new(DemandMode::Force, 4)).unwrap();
     assert_eq!(1, wakes.load(Ordering::SeqCst));
-    assert_eq!(4, take_one(&driver, &session).token);
+    assert_eq!(4, take_one(&driver, &session).token.unwrap());
     wait_release(&driver, &session);
 }
 
@@ -302,7 +302,7 @@ fn an_abandon_completes_pending_work_at_once() {
     assert!(driver.is_finished());
     let results = session.drain_frame_results().unwrap();
     assert_eq!(1, results.len(), "{results:?}");
-    assert_eq!((6, FrameDisposition::TargetNotReady), (results[0].token, results[0].disposition));
+    assert_eq!((6, FrameDisposition::TargetNotReady), (results[0].token.unwrap(), results[0].disposition));
     wait(session.release());
     wait(other.release());
 }

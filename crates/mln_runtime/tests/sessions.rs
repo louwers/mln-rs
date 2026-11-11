@@ -14,7 +14,7 @@ use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
     AttachOptions, DemandMode, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult, Map, MapOptions,
     OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
-    RenderedQueryOptions, Runtime, STILL_IMAGE_TOKEN, SourceQueryOptions,
+    RenderedQueryOptions, Runtime, SourceQueryOptions,
 };
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
@@ -145,7 +145,7 @@ fn a_forced_demand_renders_the_map() {
 
     demand(&session, DemandMode::Force, 7);
     let result = take_one(&session);
-    assert_eq!(7, result.token);
+    assert_eq!(7, result.token.unwrap());
     assert_eq!(FrameDisposition::Rendered, result.disposition);
     assert_eq!(1, result.frame_generation);
     assert_eq!(SIZE, result.view.unwrap().extent.size);
@@ -171,21 +171,12 @@ fn frame_results_wake_the_host_once_until_it_drains() {
     demand(&session, DemandMode::Force, 2);
     assert!(eventually(|| session.snapshot().unwrap().frame_generation == 2));
     assert_eq!(1, wakes.load(Ordering::SeqCst));
-    let tokens: Vec<u64> = session.drain_frame_results().unwrap().iter().map(|result| result.token).collect();
+    let tokens: Vec<u64> = session.drain_frame_results().unwrap().iter().map(|result| result.token.unwrap()).collect();
     assert_eq!([1, 2], tokens.as_slice());
     assert!(session.drain_frame_results().unwrap().is_empty());
     demand(&session, DemandMode::Force, 3);
-    assert_eq!(3, take_one(&session).token);
+    assert_eq!(3, take_one(&session).token.unwrap());
     assert!(eventually(|| wakes.load(Ordering::SeqCst) == 2));
-}
-
-#[test]
-fn a_demand_rejects_the_still_image_token() {
-    let runtime = runtime();
-    let map = red_map(&runtime);
-    let session = attach(&map);
-    let error = session.demand_frame(FrameDemand::new(DemandMode::IfChanged, STILL_IMAGE_TOKEN)).unwrap_err();
-    assert_eq!(ErrorKind::InvalidArgument, error.kind);
 }
 
 #[test]
@@ -220,7 +211,7 @@ fn a_demand_shows_the_commands_sent_before_it() {
 
     let applied = moved.wait().unwrap();
     let result = take_one(&session);
-    assert_eq!(631, result.token);
+    assert_eq!(631, result.token.unwrap());
     assert_eq!(FrameDisposition::Rendered, result.disposition);
     assert!(result.map_update_generation >= applied.render_update_generation);
     assert_eq!(3.0, result.view.unwrap().camera.zoom);
@@ -239,7 +230,7 @@ fn a_demand_behind_a_command_without_an_update_finishes() {
     drop(open);
     logged.wait().unwrap();
     let result = take_one(&session);
-    assert_eq!(641, result.token);
+    assert_eq!(641, result.token.unwrap());
     assert_eq!(FrameDisposition::NoUpdate, result.disposition);
 }
 
@@ -258,7 +249,7 @@ fn a_waiting_demand_renders_the_next_map_update() {
     assert!(session.drain_frame_results().unwrap().is_empty());
     zoom(&map, 2.0).wait().unwrap();
     let result = take_one(&session);
-    assert_eq!(601, result.token);
+    assert_eq!(601, result.token.unwrap());
     assert_eq!(FrameDisposition::Rendered, result.disposition);
     assert!(result.map_update_generation > idle);
 }
@@ -274,13 +265,13 @@ fn a_waiting_demand_ends_by_supersession_barrier_or_detach() {
     demand(&session, DemandMode::WaitForUpdate, 612);
     wait(session.barrier());
     let results = take_results(&session, 2);
-    assert_eq!((611, FrameDisposition::Superseded), (results[0].token, results[0].disposition));
-    assert_eq!((612, FrameDisposition::NoUpdate), (results[1].token, results[1].disposition));
+    assert_eq!((611, FrameDisposition::Superseded), (results[0].token.unwrap(), results[0].disposition));
+    assert_eq!((612, FrameDisposition::NoUpdate), (results[1].token.unwrap(), results[1].disposition));
 
     demand(&session, DemandMode::WaitForUpdate, 613);
     wait(session.detach());
     let result = take_one(&session);
-    assert_eq!((613, FrameDisposition::TargetNotReady), (result.token, result.disposition));
+    assert_eq!((613, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
 }
 
 #[test]
@@ -297,7 +288,7 @@ fn a_detach_ends_a_demand_waiting_for_commands() {
     drop(open);
     detached.wait().unwrap();
     let result = take_one(&session);
-    assert_eq!((661, FrameDisposition::TargetNotReady), (result.token, result.disposition));
+    assert_eq!((661, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
     moved.wait().unwrap();
 }
 
@@ -493,7 +484,7 @@ fn a_demand_made_while_attaching_renders_after_the_attach() {
     demand(&session, DemandMode::Force, 5);
     attached.wait().unwrap();
     let result = take_one(&session);
-    assert_eq!((5, FrameDisposition::Rendered), (result.token, result.disposition));
+    assert_eq!((5, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
 }
 
 #[test]
@@ -536,7 +527,7 @@ fn abandon_ends_pending_work_and_frees_the_map_at_once() {
     assert_eq!(RenderSessionState::Abandoned, session.snapshot().unwrap().state);
     let other = attach(&map);
     let result = take_one(&session);
-    assert_eq!((9, FrameDisposition::TargetNotReady), (result.token, result.disposition));
+    assert_eq!((9, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
     assert_eq!(ErrorKind::InvalidState, session.demand_frame(FrameDemand::default()).unwrap_err().kind);
     assert_eq!(ErrorKind::InvalidState, session.abandon().unwrap_err().kind);
     wait(session.release());
@@ -556,7 +547,7 @@ fn an_abandon_that_keeps_graphics_counts_the_renderer_and_its_backend() {
     assert_eq!(2, session.abandon_keeping_graphics().unwrap());
     assert_eq!(RenderSessionState::Abandoned, session.snapshot().unwrap().state);
     let result = take_one(&session);
-    assert_eq!((2, FrameDisposition::TargetNotReady), (result.token, result.disposition));
+    assert_eq!((2, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
     assert_eq!(ErrorKind::InvalidState, session.abandon_keeping_graphics().unwrap_err().kind);
     wait(session.release());
 
@@ -619,7 +610,7 @@ fn maintenance_work_runs_in_order_with_frames() {
     wait(session.dump_debug_logs());
     let result = session.drain_frame_results().unwrap();
     assert_eq!(1, result.len());
-    assert_eq!((2, FrameDisposition::Rendered), (result[0].token, result[0].disposition));
+    assert_eq!((2, FrameDisposition::Rendered), (result[0].token.unwrap(), result[0].disposition));
     assert_eq!(ErrorKind::Unsupported, session.release_target().unwrap_err().kind);
 }
 
@@ -665,7 +656,7 @@ fn a_static_map_renders_still_images() {
     wait(map.request_still_image());
     let results = session.drain_frame_results().unwrap();
     let last = results.last().unwrap();
-    assert_eq!((STILL_IMAGE_TOKEN, FrameDisposition::Rendered), (last.token, last.disposition));
+    assert_eq!((None, FrameDisposition::Rendered), (last.token, last.disposition));
     assert_eq!([255, 0, 0, 255], center_pixel(&session, SIZE));
 
     wait(map.set_style_json(style("#00ff00")));

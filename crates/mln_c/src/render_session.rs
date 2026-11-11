@@ -74,6 +74,10 @@ pub(crate) fn resolve(session: mln_render_session) -> Result<Arc<SessionObject>,
     SESSIONS.get(session)
 }
 
+/// `MLN_FRAME_DEMAND_TOKEN_STILL_IMAGE`: the token of a still image's frame
+/// results, which a host's demand can't use.
+const STILL_IMAGE_TOKEN: u64 = u64::MAX;
+
 // MARK: - Attach
 
 const KNOWN_SYNC_KINDS: u32 = MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE
@@ -324,6 +328,9 @@ pub unsafe extern "C" fn mln_render_session_demand_frame(
                 return Err(Error::invalid_argument("a frame demand that waits for a map update cannot force"));
             }
         };
+        if demand.token == STILL_IMAGE_TOKEN {
+            return Err(Error::invalid_argument("the token is reserved for still images"));
+        }
         let object = resolve(session)?;
         object.session.demand_frame(FrameDemand::new(mode, demand.token))?;
         Ok(())
@@ -389,7 +396,7 @@ fn frame_result(result: &FrameResult, scale_factor: f64) -> mln_render_frame_res
     mln_render_frame_result {
         size: size_of::<mln_render_frame_result>() as u32,
         disposition: disposition(result.disposition),
-        token: result.token,
+        token: result.token.unwrap_or(STILL_IMAGE_TOKEN),
         map_update_generation: result.map_update_generation,
         generation: result.generation,
         frame_generation: result.frame_generation,
@@ -988,7 +995,7 @@ pub(crate) mod tests {
     fn a_result_that_rendered_nothing_has_no_view() {
         let result = FrameResult {
             disposition: FrameDisposition::Superseded,
-            token: 3,
+            token: Some(3),
             map_update_generation: 4,
             generation: 0,
             frame_generation: 0,

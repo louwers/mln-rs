@@ -22,7 +22,7 @@ use mln_util::size::Size;
 use mln_util::sync::MutexExt;
 use mln_webgpu::{HeadlessBackend, SurfaceBackend};
 
-use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult, STILL_IMAGE_TOKEN};
+use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::session::{RenderSessionState, SessionShared, WorkId, physical_size};
 use super::target::{Driver, HostDevice, OffscreenDevice, Surface};
 use crate::completion::Resolver;
@@ -512,7 +512,7 @@ impl Worker {
     /// their way unless it forces a frame.
     pub(crate) fn demand(&mut self, demand: FrameDemand, sequence: u64, outbox: &mut Outbox) {
         if self.torn_down {
-            let result = FrameResult::unrendered(demand.token, FrameDisposition::TargetNotReady, 0);
+            let result = FrameResult::unrendered(Some(demand.token), FrameDisposition::TargetNotReady, 0);
             return self.publish(result, outbox);
         }
         if demand.mode != DemandMode::Force {
@@ -525,7 +525,7 @@ impl Worker {
             self.waiting = waiting;
             let superseded = superseded.into_iter().chain(waiting_superseded.into_iter().map(|(pending, _)| pending));
             for pending in superseded {
-                let result = FrameResult::unrendered(pending.demand.token, FrameDisposition::Superseded, latest);
+                let result = FrameResult::unrendered(Some(pending.demand.token), FrameDisposition::Superseded, latest);
                 self.publish(result, outbox);
             }
         }
@@ -561,7 +561,7 @@ impl Worker {
     }
 
     fn evaluate(&mut self, pending: PendingDemand, outbox: &mut Outbox) {
-        let token = pending.demand.token;
+        let token = Some(pending.demand.token);
         let latest = self.latest();
         let latest_generation = latest.as_ref().map_or(0, |update| update.generation);
         if self.gfx.is_none() {
@@ -590,7 +590,7 @@ impl Worker {
             return;
         }
         self.still_attempted = update.generation;
-        self.render(STILL_IMAGE_TOKEN, update, outbox);
+        self.render(None, update, outbox);
     }
 
     fn generation(&self) -> u64 {
@@ -600,7 +600,7 @@ impl Worker {
     /// Renders `update` for the demand `token`, and publishes its result. A
     /// still map draws no frame until everything that it shows has loaded,
     /// and a surface without a texture to render into takes no frame.
-    fn render(&mut self, token: u64, update: Update, outbox: &mut Outbox) {
+    fn render(&mut self, token: Option<u64>, update: Update, outbox: &mut Outbox) {
         let Some(gfx) = self.gfx.as_mut() else { return };
         if !gfx.ready_for_frame() {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
@@ -677,7 +677,7 @@ impl Worker {
         let latest = self.latest_generation();
         let pending: Vec<_> = self.queue.drain(..).chain(self.waiting.drain(..).map(|(pending, _)| pending)).collect();
         for pending in pending {
-            self.publish(FrameResult::unrendered(pending.demand.token, disposition, latest), outbox);
+            self.publish(FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
         }
     }
 

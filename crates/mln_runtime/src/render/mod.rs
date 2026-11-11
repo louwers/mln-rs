@@ -8,7 +8,7 @@ mod target;
 mod worker;
 
 pub use driver::DriverWork;
-pub use frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult, STILL_IMAGE_TOKEN};
+pub use frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 pub use query::RenderedQueryGeometry;
 pub(crate) use session::{Abandoner, SessionId, SessionShared, attach};
 pub use session::{RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState};

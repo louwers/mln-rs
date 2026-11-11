@@ -35,7 +35,7 @@ pub use mln_runtime::{
     FrameResult, HostDevice, Map, MapId, MapOptions, MapSnapshot, Offline, OffscreenDevice, OffscreenDeviceOptions,
     RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
     RenderedQueryGeometry, RenderedQueryOptions, ResourceProvider, ResourceRequest, Runtime, RuntimeEvent,
-    RuntimeEventKind, RuntimeOptions, STILL_IMAGE_TOKEN, SourceQueryOptions, Surface, Wake,
+    RuntimeEventKind, RuntimeOptions, SourceQueryOptions, Surface, Wake,
 };
 pub use mln_sprite;
 pub use mln_storage;

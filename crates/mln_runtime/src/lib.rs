@@ -37,7 +37,7 @@ pub use offline::Offline;
 pub use render::{
     AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, HostDevice,
     OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot,
-    RenderSessionState, RenderTarget, RenderedQueryGeometry, STILL_IMAGE_TOKEN, Surface, Wake,
+    RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

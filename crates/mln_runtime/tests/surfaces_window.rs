@@ -51,7 +51,7 @@ fn frame(session: &RenderSession, driver: Option<&DriverWork>, token: u64) -> Fr
         std::thread::sleep(std::time::Duration::from_millis(1));
     }
     assert_eq!(1, results.len(), "{results:?}");
-    assert_eq!(token, results[0].token);
+    assert_eq!(Some(token), results[0].token);
     results[0]
 }
 

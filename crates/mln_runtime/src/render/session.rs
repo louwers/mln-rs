@@ -18,7 +18,7 @@ use mln_util::size::Size;
 use mln_util::sync::MutexExt;
 
 use super::driver::DriverWork;
-use super::frame::{FrameDemand, FrameResult, STILL_IMAGE_TOKEN};
+use super::frame::{FrameDemand, FrameResult};
 use super::query::RenderedQueryGeometry;
 use super::target::{AttachOptions, Driver, RenderTarget, Surface, Wake};
 use super::worker::{self, Init, TargetInit, Worker};
@@ -716,13 +716,7 @@ impl RenderSession {
     /// While the session has no target, or a surface has no texture to
     /// render into, a demand finishes as
     /// [`FrameDisposition::TargetNotReady`](super::FrameDisposition).
-    ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for the
-    /// token [`STILL_IMAGE_TOKEN`].
     pub fn demand_frame(&self, demand: FrameDemand) -> Result<(), Error> {
-        if demand.token == STILL_IMAGE_TOKEN {
-            return Err(Error::invalid_argument("the token is reserved for still images"));
-        }
         let shared = self.shared();
         with_unlocked_wakes(|| {
             let mut state = shared.state.lock_unpoisoned();

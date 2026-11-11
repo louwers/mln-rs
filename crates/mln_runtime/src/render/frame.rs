@@ -2,11 +2,6 @@
 
 use mln_map::{MapView, RenderMode};
 
-/// The token of the frame results that a session adds when it renders an
-/// image for [`Map::request_still_image`](crate::Map::request_still_image).
-/// A host's demands can't use it.
-pub const STILL_IMAGE_TOKEN: u64 = u64::MAX;
-
 /// When a demand draws a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum DemandMode {
@@ -25,8 +20,7 @@ pub enum DemandMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct FrameDemand {
     pub mode: DemandMode,
-    /// A value of the host's choice that the demand's result carries. It
-    /// can't be [`STILL_IMAGE_TOKEN`].
+    /// A value of the host's choice that the demand's result carries.
     pub token: u64,
 }
 
@@ -54,7 +48,10 @@ pub enum FrameDisposition {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameResult {
     pub disposition: FrameDisposition,
-    pub token: u64,
+    /// The token of the demand that the result finishes, or `None` for a
+    /// frame that the session rendered for
+    /// [`Map::request_still_image`](crate::Map::request_still_image).
+    pub token: Option<u64>,
     /// The map update that a rendered frame shows, or the latest one for a
     /// demand that rendered nothing. The frame includes a command's change
     /// when this is at least the command's
@@ -76,7 +73,7 @@ pub struct FrameResult {
 
 impl FrameResult {
     /// The result of a demand that rendered nothing.
-    pub(crate) fn unrendered(token: u64, disposition: FrameDisposition, map_update_generation: u64) -> Self {
+    pub(crate) fn unrendered(token: Option<u64>, disposition: FrameDisposition, map_update_generation: u64) -> Self {
         FrameResult {
             disposition,
             token,
