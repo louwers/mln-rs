@@ -1,6 +1,6 @@
 // Loads OpenFreeMap Liberty (main.cpp's default style) over HTTPS through
 // the path mln-glfw uses: Map -> FileSourceManager's ResourceLoader ->
-// OnlineFileSource -> HTTPFileSource (ureq), `Style::loadURL`, the Map's
+// OnlineFileSource -> HTTPFileSource (the platform transport), `Style::loadURL`, the Map's
 // style-response event and the parser. Needs network access.
 
 use std::cell::{Cell, RefCell};
