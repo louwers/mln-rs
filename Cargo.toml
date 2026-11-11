@@ -300,3 +300,9 @@ workspace = true
 [profile.release]
 lto = "fat"
 codegen-units = 1
+
+# Debug builds, the tests' among them, compress and decompress tiles, the
+# offline database and PNGs through zlib-rs, which is many times slower
+# unoptimized.
+[profile.dev.package.zlib-rs]
+opt-level = 3
