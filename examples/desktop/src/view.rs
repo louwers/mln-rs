@@ -183,17 +183,16 @@ pub(crate) fn run(launch: Launch) {
     let framebuffer_size = Size::new(size.width, size.height);
     let surface_proxy = proxy.clone();
     let make_surface = move |instance: &wgpu::Instance| {
+        let closed = || mln_util::Error::cancelled("The window closed before it had a surface");
         let (reply, surface) = mpsc::channel();
-        surface_proxy
-            .send_event(UserEvent::MakeSurface(instance.clone(), reply))
-            .map_err(|_| "The window closed before it had a surface".to_owned())?;
-        surface.recv().map_err(|_| "The window closed before it had a surface".to_owned())?
+        surface_proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| closed())?;
+        surface.recv().map_err(|_| closed())?.map_err(mln_util::Error::native)
     };
     // Vsync unless benchmarking.
     let backend = match SurfaceBackend::new(make_surface, framebuffer_size, !args.benchmark) {
         Ok(backend) => Rc::new(backend),
         Err(e) => {
-            Log::error(Event::GraphicsBackend, &e);
+            Log::error(Event::GraphicsBackend, e.message);
             return;
         }
     };
@@ -257,13 +256,13 @@ pub(crate) fn run(launch: Launch) {
     ) {
         Ok(map) => map,
         Err(e) => {
-            Log::error(Event::Setup, e);
+            Log::error(Event::Setup, e.message);
             return;
         }
     };
 
     if let Err(e) = map.set_bounds(&BoundOptions::default().with_max_pitch(settings.max_pitch)) {
-        Log::warning(Event::Setup, e);
+        Log::warning(Event::Setup, e.message);
     }
     map.jump_to(
         &CameraOptions::default()
@@ -366,9 +365,9 @@ fn logical_size(size: PhysicalSize<u32>, pixel_ratio: f64) -> Size {
 }
 
 /// Logs a camera change's error (a NaN pan from the input).
-fn log_error(result: Result<(), String>) {
+fn log_error(result: Result<(), mln_util::Error>) {
     if let Err(e) = result {
-        Log::error(Event::General, &e);
+        Log::error(Event::General, e.message);
     }
 }
 
@@ -576,9 +575,9 @@ impl View {
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
         self.backend.set_framebuffer_size(Size::new(size.width, size.height));
         self.size = logical_size(size, self.pixel_ratio);
-        // C++ throws for an empty size (a minimized window).
+        // An empty size (a minimized window) fails.
         if let Err(e) = self.map.set_size(self.size) {
-            Log::warning(Event::General, e);
+            Log::warning(Event::General, e.message);
         }
         self.shared.invalidate();
     }

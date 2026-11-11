@@ -17,6 +17,7 @@ use geometry::Point;
 use mln_tile_id::UnwrappedTileID;
 use mln_util::constants;
 use mln_util::constants::{DEFAULT_FOV, DEFAULT_MAX_ZOOM, DEFAULT_PITCH_MAX, M2PI, PITCH_MAX, TILE_SIZE_D};
+use mln_util::error::Error;
 pub use mln_util::geo::NorthOrientation;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
@@ -1173,13 +1174,9 @@ impl TransformState {
     }
 
     /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Unwrapped)`.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
-    /// infinite point).
-    pub fn screen_coordinate_to_lat_lng(
-        &self,
-        point: &ScreenCoordinate,
-        wrap_mode: WrapMode,
-    ) -> Result<LatLng, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// NaN or infinite point.
+    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         let coord = self.screen_coordinate_to_tile_coordinate(point, 0);
         Projection::unproject(&coord.p, 1.0 / TILE_SIZE_D, wrap_mode)
     }
@@ -1401,9 +1398,9 @@ impl TransformState {
 
     /// Recenter the map so that the given coordinate is located at the given
     /// point on screen.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
-    /// infinite anchor).
-    pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// NaN or infinite anchor.
+    pub fn move_lat_lng(&mut self, lat_lng: &LatLng, anchor: &ScreenCoordinate) -> Result<(), Error> {
         let center_coord = Projection::project(&self.get_lat_lng(WrapMode::Unwrapped), self.scale);
         let lat_lng_coord = Projection::project(lat_lng, self.scale);
         let anchor_coord =

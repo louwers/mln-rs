@@ -26,6 +26,7 @@ use mln_map_types::{
 use mln_util::UnitBezier;
 use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
+use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::interpolate::interpolate;
 use mln_util::logging::{Event, Log};
@@ -87,14 +88,14 @@ fn lat_lng(lat: f64, lon: f64) -> LatLng {
 /// the frame, and nothing catches it; the port logs it, and the frame keeps
 /// the insets.
 fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<EdgeInsets> {
-    EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e)).ok()
+    EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e.message)).ok()
 }
 
 /// An animation frame's `Projection::unproject`, which constructs a LatLng
 /// and so can throw std::domain_error (NaN); handled as
 /// [`frame_edge_insets`]: the frame keeps the center and zoom.
 fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
-    Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e)).ok()
+    Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e.message)).ok()
 }
 
 /// `std::to_string(double)`: `%f`.
@@ -553,9 +554,9 @@ impl Transform {
 
     // MARK: - Map View
 
-    pub fn resize(&mut self, size: Size) -> Result<(), String> {
+    pub fn resize(&mut self, size: Size) -> Result<(), Error> {
         if size.is_empty() {
-            return Err("failed to resize: size is empty".to_owned());
+            return Err(Error::invalid_argument("failed to resize: size is empty"));
         }
 
         if self.state.get_size() == size {
@@ -936,9 +937,9 @@ impl Transform {
     // MARK: - Position
 
     /// Pans the map by the given amount.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
-    /// infinite offset).
-    pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
+    /// or infinite offset.
+    pub fn move_by(&mut self, offset: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
         let mut center_offset = *offset;
 
         // Reduce the offset so that it never goes past the horizon. If it
@@ -980,9 +981,9 @@ impl Transform {
 
     // MARK: - Bounds
 
-    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) -> Result<(), String> {
+    pub fn set_lat_lng_bounds(&mut self, bounds: LatLngBounds) -> Result<(), Error> {
         if !bounds.valid() {
-            return Err("failed to set bounds: bounds are invalid".to_owned());
+            return Err(Error::invalid_argument("failed to set bounds: bounds are invalid"));
         }
         self.state.set_lat_lng_bounds(bounds);
         Ok(())
@@ -1189,7 +1190,7 @@ impl Transform {
                     coupled_fields = fields;
                 }
                 Err(e) => {
-                    Log::error(Event::General, &e);
+                    Log::error(Event::General, &e.message);
                     anchor = None;
                 }
             }
@@ -1314,7 +1315,7 @@ impl Transform {
             && let Some(anchor) = anchored.anchor
             && let Err(e) = self.state.move_lat_lng(&anchored.anchor_lat_lng, &anchor)
         {
-            Log::error(Event::General, &e);
+            Log::error(Event::General, &e.message);
         }
         self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
     }
@@ -1628,7 +1629,7 @@ impl Transform {
         match self.state.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
             Ok(lat_lng) => Some((point, lat_lng)),
             Err(e) => {
-                Log::error(Event::General, &e);
+                Log::error(Event::General, &e.message);
                 None
             }
         }
@@ -1640,7 +1641,7 @@ impl Transform {
         let Some((point, lat_lng)) = anchor else { return };
         let altitude = self.state.get_center_altitude();
         if let Err(e) = self.state.move_lat_lng(&lat_lng, &point) {
-            Log::error(Event::General, &e);
+            Log::error(Event::General, &e.message);
         }
         self.state.set_center_altitude(altitude);
     }
@@ -1673,7 +1674,7 @@ impl Transform {
             let unwrapped = match self.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
                 Ok(lat_lng) => lat_lng,
                 Err(e) => {
-                    Log::error(Event::General, &e);
+                    Log::error(Event::General, &e.message);
                     break;
                 }
             };
@@ -1960,12 +1961,9 @@ impl Transform {
     }
 
     /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Wrapped)`.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor.
-    pub fn screen_coordinate_to_lat_lng(
-        &self,
-        point: &ScreenCoordinate,
-        wrap_mode: WrapMode,
-    ) -> Result<LatLng, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN
+    /// or infinite point.
+    pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         let mut flipped_point = *point;
         flipped_point.y = self.state.get_size().height as f64 - flipped_point.y;
         self.state.screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)

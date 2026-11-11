@@ -321,7 +321,7 @@ fn write_frames(out: &mut String, frames: &Path) {
     for name in names {
         let read = |dir: &Path| {
             let bytes = std::fs::read(dir.join(&name)).map_err(|e| e.to_string())?;
-            mln_image::decode_png(&bytes)
+            mln_image::decode_png(&bytes).map_err(|e| e.message)
         };
         let line = match (read(&base), read(&candidate)) {
             (Ok(a), Ok(b)) if a.size == b.size => {

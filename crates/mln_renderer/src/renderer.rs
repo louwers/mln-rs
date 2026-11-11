@@ -88,7 +88,7 @@ impl Renderer {
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_rendered_features(geometry, options)
     }
 
@@ -97,7 +97,7 @@ impl Renderer {
         &self,
         point: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_rendered_features(&[*point], options)
     }
 
@@ -107,7 +107,7 @@ impl Renderer {
         min: &mln_util::geo::ScreenCoordinate,
         max: &mln_util::geo::ScreenCoordinate,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         use mln_util::geo::ScreenCoordinate;
         self.impl_ref().orchestrator.query_rendered_features(
             &[*min, ScreenCoordinate::new(max.x, min.y), *max, ScreenCoordinate::new(min.x, max.y), *min],
@@ -120,7 +120,7 @@ impl Renderer {
         &self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_source_features(source_id, options)
     }
 
@@ -137,7 +137,7 @@ impl Renderer {
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+    ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
         self.impl_ref().orchestrator.query_feature_extensions(source_id, feature, extension, extension_field, args)
     }
 

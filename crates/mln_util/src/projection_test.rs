@@ -160,8 +160,8 @@ fn projected_meters() {
 #[test]
 fn invalid_projected_meters() {
     // C++ `ProjectedMeters{NAN}`: the easting defaults to 0.
-    assert_eq!(ProjectedMeters::new(f64::NAN, 0.0).unwrap_err(), "northing must not be NaN");
-    assert_eq!(ProjectedMeters::new(0.0, f64::NAN).unwrap_err(), "easting must not be NaN");
+    assert_eq!(ProjectedMeters::new(f64::NAN, 0.0).unwrap_err(), Error::invalid_argument("northing must not be NaN"));
+    assert_eq!(ProjectedMeters::new(0.0, f64::NAN).unwrap_err(), Error::invalid_argument("easting must not be NaN"));
 }
 
 // Not in the C++ suite: the int-zoom `project` overload and the throwing
@@ -175,7 +175,7 @@ fn project_zoom_and_unproject_errors() {
 
     assert_eq!(
         Projection::unproject(&Point::new(f64::NAN, 0.0), 1.0, WrapMode::Unwrapped).unwrap_err(),
-        "longitude must not be NaN"
+        Error::invalid_argument("longitude must not be NaN")
     );
     let wrapped = Projection::unproject(&Point::new(TILE_SIZE_D * 1.5, 256.0), 1.0, WrapMode::Wrapped).unwrap();
     // Unwrapped longitude 360 wraps to 0.

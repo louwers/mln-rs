@@ -13,6 +13,7 @@
 // decoder runs in strict mode, which fails where libjpeg warns (truncated
 // data, stray bytes or markers).
 
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use zune_jpeg::JpegDecoder;
@@ -22,8 +23,8 @@ use zune_jpeg::zune_core::colorspace::ColorSpace;
 use zune_jpeg::zune_core::options::DecoderOptions;
 
 /// `mln::decodeJPEG(const uint8_t*, size_t)`.
-pub fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, String> {
-    let invalid = |e: DecodeErrors| format!("JPEG Reader: libjpeg could not read image: {e}");
+pub fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, Error> {
+    let invalid = |e: DecodeErrors| Error::invalid_argument(format!("JPEG Reader: libjpeg could not read image: {e}"));
     let options = DecoderOptions::default().set_strict_mode(true);
 
     // The output color space must be set before the headers are read, and
@@ -35,14 +36,14 @@ pub fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, String> {
         Some(ColorSpace::YCbCr | ColorSpace::RGB) => ColorSpace::RGB,
         Some(ColorSpace::CMYK) => ColorSpace::CMYK,
         Some(ColorSpace::YCCK) => ColorSpace::YCCK,
-        _ => return Err("JPEG Reader: failed to read unknown color space".to_string()),
+        _ => return Err(Error::invalid_argument("JPEG Reader: failed to read unknown color space")),
     };
 
     let mut decoder = JpegDecoder::new_with_options(ZCursor::new(data), options.jpeg_set_out_colorspace(output));
     let pixels = decoder.decode().map_err(invalid)?;
     let (width, height) = decoder.dimensions().unwrap_or_default();
     if width == 0 || height == 0 {
-        return Err("JPEG Reader: failed to read image size".to_string());
+        return Err(Error::invalid_argument("JPEG Reader: failed to read image size"));
     }
 
     // zune-jpeg caps both dimensions far below u32::MAX.
@@ -134,7 +135,7 @@ mod tests {
         let data = tile();
         for bytes in [&data[..2], &data[..data.len() / 2], b"\xff\xd8\xff\xc0\x00\x02"] {
             let error = decode_jpeg(bytes).unwrap_err();
-            assert!(error.starts_with("JPEG Reader: libjpeg could not read image: "), "{error}");
+            assert!(error.message.starts_with("JPEG Reader: libjpeg could not read image: "), "{error}");
         }
     }
 

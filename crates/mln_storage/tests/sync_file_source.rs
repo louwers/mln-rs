@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use mln_actor::RunLoop;
 use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapOptions, NullMapObserver};
-use mln_storage::response::{Error, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Resource, ResourceOptions, Response};
 use mln_util::size::Size;
 
@@ -43,7 +43,8 @@ impl FileSource for SyncFileSource {
         let data = self.assets.lock().unwrap().get(&resource.url).cloned();
         match data {
             None => {
-                response.error = Some(Box::new(Error::new(Reason::NotFound, format!("Not Found: {}", resource.url))));
+                response.error =
+                    Some(Box::new(ResourceError::new(Reason::NotFound, format!("Not Found: {}", resource.url))));
             }
             Some(data) => response.data = Some(data),
         }

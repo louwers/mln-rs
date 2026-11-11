@@ -1572,7 +1572,8 @@ fn nan_screen_coordinates_are_errors() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     let nan = sc(f64::NAN, 500.0);
     let error = transform.screen_coordinate_to_lat_lng(&nan, WrapMode::Wrapped).unwrap_err();
-    assert!(error.ends_with("must not be NaN"), "{error}");
+    assert_eq!(error.kind, mln_util::ErrorKind::InvalidArgument);
+    assert!(error.message.ends_with("must not be NaN"), "{error}");
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     assert!(transform.move_by(&nan, &AnimationOptions::default()).is_err());
     assert_eq!(transform.get_lat_lng(WrapMode::Wrapped), center);

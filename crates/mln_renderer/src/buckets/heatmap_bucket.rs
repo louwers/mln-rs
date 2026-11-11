@@ -17,7 +17,7 @@ use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::constants::EXTENT;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
@@ -120,7 +120,7 @@ impl Bucket for HeatmapBucket {
         _patterns: &PatternLayerMap,
         feature_index: usize,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         const VERTEX_LENGTH: usize = 4;
 
         for points in geometry.iter() {

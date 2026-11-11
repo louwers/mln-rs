@@ -7,8 +7,8 @@
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
 
+use std::sync::RwLock;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
 
 use geometry::Point;
 use mln_gfx::UploadPass;
@@ -27,7 +27,7 @@ use mln_tile::geometry_tile_data::{classify_rings, limit_holes, round_polygon_co
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::Color;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::mat3::{Mat3, matrix as mat3};
 use mln_util::sync::RwLockExt;
@@ -63,19 +63,6 @@ pub struct FillExtrusionLayoutVertex {
 
 /// `EvaluatedLight = style::LightProperties::PossiblyEvaluated`.
 pub use crate::render_light::EvaluatedLight;
-
-/// The `GeometryTooLongException` of fill_extrusion_bucket.cpp (its own
-/// struct there, also without `what()`).
-#[derive(Debug)]
-struct GeometryTooLongException;
-
-impl std::fmt::Display for GeometryTooLongException {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("std::exception")
-    }
-}
-
-impl std::error::Error for GeometryTooLongException {}
 
 #[derive(Serialize, Deserialize)]
 pub struct FillExtrusionBucket {
@@ -162,12 +149,12 @@ impl FillExtrusionBucket {
 
     /// Adds the walls and the roof of one polygon (its outer ring, then its
     /// holes), with integer or, after corner rounding, float coordinates.
-    fn add_polygon<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> Result<(), ExceptionPtr> {
+    fn add_polygon<T: Copy + Into<f64>, R: AsRef<[Point<T>]>>(&mut self, polygon: &[R]) -> Result<(), Error> {
         let mut total_vertices: usize = 0;
         for ring in polygon {
             total_vertices += ring.as_ref().len();
             if total_vertices > usize::from(u16::MAX) {
-                return Err(Arc::new(GeometryTooLongException));
+                return Err(crate::bucket::geometry_too_long());
             }
         }
 
@@ -315,7 +302,7 @@ impl Bucket for FillExtrusionBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let vertex_offset = self.vertices.len();
 
         for mut polygon in classify_rings(geometry) {

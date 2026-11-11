@@ -49,7 +49,7 @@ use crate::file_source::{Callback, FileSource};
 use crate::http_header_transform::{HttpHeaderTransform, HttpHeaders};
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// The part of `HTTPRequest` that lives on the requesting thread.
 pub struct HTTPRequestState {
@@ -139,7 +139,7 @@ fn getdate(value: &str) -> Timestamp {
 pub struct Transfer {
     pub status: i64,
     pub headers: Vec<(String, String)>,
-    pub body: Result<Vec<u8>, Box<Error>>,
+    pub body: Result<Vec<u8>, Box<ResourceError>>,
 }
 
 /// A request an `HTTPFileSource` hands to its transport: the resource to
@@ -183,7 +183,7 @@ impl TransferRequest {
     /// builds the response, as the header callback and
     /// `handleResult(CURLcode)` do, and hands it to the requesting thread,
     /// unless the request was dropped. Any thread may call it.
-    pub fn finish(self, transfer: Result<Transfer, Box<Error>>) {
+    pub fn finish(self, transfer: Result<Transfer, Box<ResourceError>>) {
         self.cancellation.clear_handler();
         let response = build_response(&self.resource, transfer);
         if !self.is_cancelled() {
@@ -236,7 +236,7 @@ fn default_transport() -> Arc<dyn HttpTransport> {
 
 /// The response half of `HTTPRequest`, from a finished transfer: the header
 /// callback and `handleResult(CURLcode)`.
-fn build_response(resource: &Resource, transfer: Result<Transfer, Box<Error>>) -> Response {
+fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceError>>) -> Response {
     // Make sure a response object exists in case we haven't got any headers or content.
     let mut response = Response::new();
     let transfer = match transfer {
@@ -282,19 +282,23 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<Error>>) -
     } else if response_code == 304 {
         response.not_modified = true;
     } else if response_code == 404 {
-        response.error = Some(Box::new(Error::new(Reason::NotFound, "HTTP status code 404")));
+        response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "HTTP status code 404")));
     } else if response_code == 429 {
-        response.error = Some(Box::new(Error::with_retry_after(
+        response.error = Some(Box::new(ResourceError::with_retry_after(
             Reason::RateLimit,
             "HTTP status code 429",
             parse_retry_headers(&retry_after, &x_rate_limit_reset),
         )));
     } else if (500..600).contains(&response_code) {
-        response.error =
-            Some(Box::new(Error::new(Reason::Server, format!("HTTP status code {}", to_string_i64(response_code)))));
+        response.error = Some(Box::new(ResourceError::new(
+            Reason::Server,
+            format!("HTTP status code {}", to_string_i64(response_code)),
+        )));
     } else {
-        response.error =
-            Some(Box::new(Error::new(Reason::Other, format!("HTTP status code {}", to_string_i64(response_code)))));
+        response.error = Some(Box::new(ResourceError::new(
+            Reason::Other,
+            format!("HTTP status code {}", to_string_i64(response_code)),
+        )));
     }
     response
 }

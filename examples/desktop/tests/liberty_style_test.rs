@@ -44,8 +44,8 @@ impl MapObserver for Observer {
             run_loop.stop();
         }
     }
-    fn on_did_fail_loading_map(&self, _error: mln_map::MapLoadError, what: &str) {
-        *self.failed.borrow_mut() = Some(what.to_owned());
+    fn on_did_fail_loading_map(&self, error: &mln_map::StyleLoadError) {
+        *self.failed.borrow_mut() = Some(error.to_string());
         if let Some(run_loop) = self.run_loop.borrow().as_ref() {
             run_loop.stop();
         }

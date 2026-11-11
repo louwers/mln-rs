@@ -8,13 +8,14 @@
 
 use std::sync::{Arc, Mutex};
 
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::sync::MutexExt;
 
 use crate::image::{ImageType, UNSUPPORTED, image_type};
 
 /// What `decode_image` returns.
-pub type DecodeResult = Result<PremultipliedImage, String>;
+pub type DecodeResult = Result<PremultipliedImage, Error>;
 
 /// Where a decoder's result goes.
 pub type DecodeDone = Box<dyn FnOnce(DecodeResult)>;
@@ -42,7 +43,7 @@ pub fn set_decoder(decoder: Arc<dyn ImageDecoder>) {
 /// recognizes fails before returning, with its error.
 pub fn decode(data: &[u8], done: impl FnOnce(DecodeResult) + 'static) {
     let Some(kind) = image_type(data) else {
-        done(Err(UNSUPPORTED.to_string()));
+        done(Err(Error::unsupported(UNSUPPORTED)));
         return;
     };
     let decoder = DECODER.lock_unpoisoned().clone();
@@ -78,7 +79,7 @@ mod tests {
 
     #[test]
     fn default_decoder_answers_at_once() {
-        assert_eq!(decode_now(b"GIF89a").unwrap_err(), UNSUPPORTED);
+        assert_eq!(decode_now(b"GIF89a").unwrap_err().message, UNSUPPORTED);
         let png =
             crate::encode_png(&PremultipliedImage::from_vec(mln_util::size::Size::new(1, 1), vec![64, 0, 0, 128]));
         let image = decode_now(&png).unwrap();

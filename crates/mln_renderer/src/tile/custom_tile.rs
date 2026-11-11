@@ -23,7 +23,7 @@ use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
 use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use mln_style::sources::geojson_source::TileFeatures;
 use mln_tile_id::OverscaledTileID;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 
 use crate::tile::geojson_tile_data::GeoJSONTileData;
@@ -62,7 +62,7 @@ impl<D: Clone + Send + 'static> Link<D> {
     }
 
     /// `setTileError(error)`.
-    fn set_tile_error(&self, error: ExceptionPtr) {
+    fn set_tile_error(&self, error: Error) {
         if let Some(tile) = self.tile.upgrade() {
             if !tile.is_obsolete() {
                 tile.set_error(error);
@@ -87,7 +87,7 @@ impl<D: Clone + Send + 'static> CustomTileSubscriber<D> for Subscriber<D> {
         self.0.invoke(move |link| link.set_tile_data(data));
     }
 
-    fn set_tile_error(&self, error: ExceptionPtr) {
+    fn set_tile_error(&self, error: Error) {
         self.0.invoke(move |link| link.set_tile_error(error));
     }
 
@@ -142,7 +142,7 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
     }
 
     /// `setTileError(error)`, as the loader's message does.
-    pub fn set_tile_error(&self, error: ExceptionPtr) {
+    pub fn set_tile_error(&self, error: Error) {
         self.link.set_tile_error(error);
     }
 
@@ -311,7 +311,7 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         global_state: Option<&GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
         feature_state: &crate::source_state::SourceFeatureState,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         self.tile.query_rendered_features(
             result,
             query_geometry,
@@ -334,7 +334,7 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         result: &mut Vec<mln_util::feature::Feature>,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&GlobalStateMap>,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         if !self.single_layer {
             return self.tile.query_source_features(result, options, global_state);
         }

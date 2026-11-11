@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
 use mln_style_types::image::SharedImage;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::{payload, shared};
@@ -251,10 +251,10 @@ impl MapCodec {
                     Err(message) => error(message, correlation_id),
                 }),
                 WorkerType::Raster => Reply::Raster(self.decode_message(message).unwrap_or_else(|message| {
-                    RasterTileMessage::Error { error: RuntimeError::ptr(message), correlation_id }
+                    RasterTileMessage::Error { error: Error::native(message), correlation_id }
                 })),
                 WorkerType::RasterDEM => Reply::RasterDEM(self.decode_message(message).unwrap_or_else(|message| {
-                    RasterDEMTileMessage::Error { error: RuntimeError::ptr(message), correlation_id }
+                    RasterDEMTileMessage::Error { error: Error::native(message), correlation_id }
                 })),
             };
             Ok(Some((head.tile, reply)))
@@ -267,7 +267,7 @@ impl MapCodec {
 }
 
 fn error(message: impl Into<String>, correlation_id: u64) -> TileMessage {
-    TileMessage::Error { error: RuntimeError::ptr(message.into()), correlation_id }
+    TileMessage::Error { error: Error::native(message.into()), correlation_id }
 }
 
 /// What the layouts of one worker instance release their atlases' bins to:

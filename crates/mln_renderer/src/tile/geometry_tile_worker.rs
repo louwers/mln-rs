@@ -39,7 +39,7 @@ use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
@@ -143,11 +143,7 @@ pub enum TileMessage {
     /// `onLayout(result, correlationID)`.
     Layout { result: LayoutResult, correlation_id: u64 },
     /// `onError(error, correlationID)`.
-    Error {
-        #[serde(with = "fields::exception")]
-        error: ExceptionPtr,
-        correlation_id: u64,
-    },
+    Error { error: Error, correlation_id: u64 },
     /// `getGlyphs(glyphDependencies)`.
     GetGlyphs(GlyphDependencies),
     /// `getImages(pair)`.
@@ -283,7 +279,7 @@ impl GeometryTileWorker {
 
     /// Runs `f` as the C++ `try { f } catch (...) { parent.invoke(
     /// &GeometryTile::onError, std::current_exception(), correlationID); }`.
-    fn guarded(&mut self, f: impl FnOnce(&mut Self) -> Result<(), ExceptionPtr>) {
+    fn guarded(&mut self, f: impl FnOnce(&mut Self) -> Result<(), Error>) {
         let Err(error) = f(self) else {
             return;
         };
@@ -512,7 +508,7 @@ impl GeometryTileWorker {
     /// `coalesce()`. The synchronous worker's self-sent `coalesced` is a
     /// direct call (an exception from it propagates to the caller's
     /// handler, as in C++).
-    fn coalesce(&mut self) -> Result<(), ExceptionPtr> {
+    fn coalesce(&mut self) -> Result<(), Error> {
         self.state = State::Coalescing;
         match &self.self_ref {
             Some(self_ref) => self_ref.invoke(|worker: &mut GeometryTileWorker| worker.coalesced()),
@@ -638,7 +634,7 @@ impl GeometryTileWorker {
     }
 
     /// `parse()`.
-    fn parse(&mut self) -> Result<(), ExceptionPtr> {
+    fn parse(&mut self) -> Result<(), Error> {
         let (Some(data), Some(layers)) = (&self.data, &self.layers) else {
             return Ok(());
         };
@@ -820,7 +816,7 @@ impl GeometryTileWorker {
     }
 
     /// `finalizeLayout()`.
-    fn finalize_layout(&mut self) -> Result<(), ExceptionPtr> {
+    fn finalize_layout(&mut self) -> Result<(), Error> {
         if self.data.is_none()
             || self.layers.is_none()
             || !self.has_pending_parse_result()

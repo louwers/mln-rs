@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use mln_tile_id::tile_range::TileRange;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::geo::LatLngBounds;
 
 /// `style::TileFunction`: called with the canonical ID of a tile that the
@@ -28,7 +28,7 @@ pub type TileFunction = Arc<dyn Fn(&CanonicalTileID) + Send + Sync>;
 /// tile's own thread.
 pub trait CustomTileSubscriber<D>: Send {
     fn set_tile_data(&self, data: D);
-    fn set_tile_error(&self, error: ExceptionPtr);
+    fn set_tile_error(&self, error: Error);
     /// Marks the tile's data stale, so that it fetches again when it is next
     /// needed.
     fn invalidate_tile_data(&self);
@@ -184,7 +184,7 @@ impl<D: Clone> CustomTileLoader<D> {
     /// `setTileError(tileID, error)`: the host failed to load a tile. The
     /// tiles stay subscribed, so invalidating the failed tile or needing it
     /// again fetches it again.
-    pub fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: ExceptionPtr) {
+    pub fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: Error) {
         let Some(state) = self.tile_states.get_mut(tile_id) else {
             return;
         };

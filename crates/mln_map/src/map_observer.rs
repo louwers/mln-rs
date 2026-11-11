@@ -5,16 +5,10 @@
 
 use std::sync::Arc;
 
-use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, RenderingStats, TileOperation};
+use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, RenderingStats, TileOperation};
+use mln_style::StyleLoadError;
 use mln_style::sprite::Sprite;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MapLoadError {
-    StyleParseError,
-    StyleLoadError,
-    NotFoundError,
-    UnknownError,
-}
+use mln_util::error::Error;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u32)]
@@ -87,7 +81,7 @@ pub trait MapObserver {
     fn on_camera_did_change(&self, _change: CameraChange) {}
     fn on_will_start_loading_map(&self) {}
     fn on_did_finish_loading_map(&self) {}
-    fn on_did_fail_loading_map(&self, _error: MapLoadError, _what: &str) {}
+    fn on_did_fail_loading_map(&self, _error: &StyleLoadError) {}
     fn on_will_start_rendering_frame(&self) {}
     fn on_did_finish_rendering_frame(&self, _status: &RenderFrameStatus) {}
     fn on_will_start_rendering_map(&self) {}
@@ -104,10 +98,10 @@ pub trait MapObserver {
     fn on_can_remove_unused_style_image(&self, _id: &str) -> bool {
         true
     }
-    fn on_render_error(&self, _error: ExceptionPtr) {}
+    fn on_render_error(&self, _error: Error) {}
     fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
     /// A glyph range of a font stack failed to load or parse.
-    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: ExceptionPtr) {}
+    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: Error) {}
     fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
     /// A tile of the source `source_id` went through `op`.
     fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
@@ -116,7 +110,7 @@ pub trait MapObserver {
     fn on_sprite_loaded(&self, _sprite: Option<&Sprite>) {}
     /// A sprite's image or JSON failed to load, or the sprite failed to
     /// parse. `None` stands for a sprite URL that no file source serves.
-    fn on_sprite_error(&self, _sprite: Option<&Sprite>, _error: ExceptionPtr) {}
+    fn on_sprite_error(&self, _sprite: Option<&Sprite>, _error: Error) {}
     /// The style requested a sprite.
     fn on_sprite_requested(&self, _sprite: Option<&Sprite>) {}
     /// Called with a description of a corrupted symbol detected by the

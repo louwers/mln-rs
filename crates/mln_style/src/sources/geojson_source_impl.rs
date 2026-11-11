@@ -13,7 +13,7 @@ use mln_expression::expression::evaluate_accumulated;
 use mln_style_types::SourceType;
 use mln_tile_id::CanonicalTileID;
 use mln_util::constants;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -67,15 +67,15 @@ impl GeoJSONData for GeoJSONVTData {
         }
     }
 
-    fn get_children(&self, _cluster_id: u32) -> Result<Features, RuntimeError> {
+    fn get_children(&self, _cluster_id: u32) -> Result<Features, Error> {
         Ok(Features::new())
     }
 
-    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, RuntimeError> {
+    fn get_leaves(&self, _cluster_id: u32, _limit: u32, _offset: u32) -> Result<Features, Error> {
         Ok(Features::new())
     }
 
-    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, RuntimeError> {
+    fn get_cluster_expansion_zoom(&self, _cluster_id: u32) -> Result<u8, Error> {
         Ok(0)
     }
 }
@@ -96,16 +96,16 @@ impl GeoJSONData for SuperclusterData {
         callback(self.impl_.get_tile(id.z, id.x, id.y));
     }
 
-    fn get_children(&self, cluster_id: u32) -> Result<Features, RuntimeError> {
-        self.impl_.get_children(cluster_id).map_err(RuntimeError)
+    fn get_children(&self, cluster_id: u32) -> Result<Features, Error> {
+        self.impl_.get_children(cluster_id).map_err(Error::not_found)
     }
 
-    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, RuntimeError> {
-        self.impl_.get_leaves(cluster_id, limit, offset).map_err(RuntimeError)
+    fn get_leaves(&self, cluster_id: u32, limit: u32, offset: u32) -> Result<Features, Error> {
+        self.impl_.get_leaves(cluster_id, limit, offset).map_err(Error::not_found)
     }
 
-    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, RuntimeError> {
-        self.impl_.get_cluster_expansion_zoom(cluster_id).map_err(RuntimeError)
+    fn get_cluster_expansion_zoom(&self, cluster_id: u32) -> Result<u8, Error> {
+        self.impl_.get_cluster_expansion_zoom(cluster_id).map_err(Error::not_found)
     }
 }
 
@@ -124,7 +124,7 @@ pub(super) fn create(
     geojson: &GeoJSON,
     sequenced_scheduler: SchedulerPtr,
     options: &Immutable<GeoJSONOptions>,
-) -> Result<Arc<dyn GeoJSONData>, String> {
+) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
     if options.cluster {
         if let GeoJSON::FeatureCollection(features) = geojson {
@@ -167,7 +167,8 @@ pub(super) fn create(
                         to_return.insert(key.clone(), value);
                     }
                 }));
-                let impl_ = supercluster::Supercluster::new(features, cluster_options)?;
+                let impl_ =
+                    supercluster::Supercluster::new(features, cluster_options).map_err(Error::invalid_argument)?;
                 return Ok(Arc::new(SuperclusterData { impl_ }));
             }
         }

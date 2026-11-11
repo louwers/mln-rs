@@ -7,7 +7,7 @@ pub use mln_gfx::rendering_stats::{
 };
 pub use mln_text::glyph::GlyphRange;
 pub use mln_tile_id::OverscaledTileID;
-pub use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 pub use mln_util::font_stack::FontStack;
 
 pub use crate::tile::TileOperation;
@@ -30,7 +30,7 @@ pub trait RendererObserver {
     fn on_invalidate(&self) {}
 
     /// Resource failed to download / parse.
-    fn on_resource_error(&self, _error: ExceptionPtr) {}
+    fn on_resource_error(&self, _error: Error) {}
 
     /// First frame.
     fn on_will_start_rendering_map(&self) {}
@@ -63,7 +63,7 @@ pub trait RendererObserver {
     fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
 
     /// A glyph range of a font stack failed to load or parse.
-    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: ExceptionPtr) {}
+    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: Error) {}
 
     /// A glyph range of a font stack was requested.
     fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
@@ -73,5 +73,5 @@ pub trait RendererObserver {
     fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
 
     /// Render layer or drawable failed.
-    fn on_render_error(&self, _error: ExceptionPtr) {}
+    fn on_render_error(&self, _error: Error) {}
 }

@@ -11,8 +11,8 @@ use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
-    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapLoadError, MapObserver,
-    MapOptions,
+    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapObserver, MapOptions,
+    StyleLoadError,
 };
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
@@ -72,8 +72,8 @@ struct ConsoleMapObserver {
 }
 
 impl MapObserver for ConsoleMapObserver {
-    fn on_did_fail_loading_map(&self, error: MapLoadError, what: &str) {
-        web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load ({error:?}): {what}")));
+    fn on_did_fail_loading_map(&self, error: &StyleLoadError) {
+        web_sys::console::error_1(&JsValue::from_str(&format!("map failed to load: {error:?}")));
     }
 
     fn on_did_finish_loading_map(&self) {

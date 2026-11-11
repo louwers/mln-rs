@@ -25,9 +25,9 @@ use crate::offline::{
     OfflineGeometryRegionDefinition, OfflineRegionDefinition, OfflineRegionMetadata, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
 };
-use crate::offline_database::{DatabaseError, MapboxTileLimitExceededException, OfflineDatabase};
+use crate::offline_database::{DatabaseError, OfflineDatabase, TileCountLimitExceeded};
 use crate::resource::{Kind, LoadingMethod, Resource, TileData};
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 use crate::sqlite3::{Database, OpenFlag, Query, Statement, result_code};
 
 fn fixture(name: &str) -> PathBuf {
@@ -262,7 +262,7 @@ fn put_does_not_store_connection_errors() {
 
     let resource = Resource::new(Kind::Unknown, "http://example.com/");
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(Reason::Connection, "")));
+    response.error = Some(Box::new(ResourceError::new(Reason::Connection, "")));
 
     db.put(&resource, &response);
     assert!(db.get(&resource).is_none());
@@ -278,7 +278,7 @@ fn put_does_not_store_server_errors() {
 
     let resource = Resource::new(Kind::Unknown, "http://example.com/");
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(Reason::Server, "")));
+    response.error = Some(Box::new(ResourceError::new(Reason::Server, "")));
 
     db.put(&resource, &response);
     assert!(db.get(&resource).is_none());
@@ -862,8 +862,8 @@ fn mapbox_tile_limit_exceeded() {
     assert_eq!(db.get_offline_mapbox_tile_count(), limit);
 
     // Full.
-    assert_eq!(Err(MapboxTileLimitExceededException), insert_region_tile(&mut db, region1.get_id(), 200));
-    assert_eq!(Err(MapboxTileLimitExceededException), insert_region_tile(&mut db, region2.get_id(), 201));
+    assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region1.get_id(), 200));
+    assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region2.get_id(), 201));
 
     // These tiles are already on respective regions.
     insert_region_tile(&mut db, region1.get_id(), 0).unwrap();
@@ -896,7 +896,7 @@ fn mapbox_tile_limit_exceeded() {
     }
 
     // Full again.
-    assert_eq!(Err(MapboxTileLimitExceededException), insert_region_tile(&mut db, region1.get_id(), 202));
+    assert_eq!(Err(TileCountLimitExceeded), insert_region_tile(&mut db, region1.get_id(), 202));
 
     db.delete_region(region1);
 
@@ -1482,8 +1482,8 @@ fn batch_insertion_mapbox_tile_count_exceeded() {
 
     let mut status = OfflineRegionStatus::default();
     match db.put_region_resources(region.get_id(), &resources, &mut status) {
-        Ok(()) => panic!("expected MapboxTileLimitExceededException"),
-        Err(MapboxTileLimitExceededException) => {
+        Ok(()) => panic!("expected TileCountLimitExceeded"),
+        Err(TileCountLimitExceeded) => {
             // Expected
         }
     }
@@ -1930,7 +1930,7 @@ fn merge_database_with_single_region_too_many_existing_tiles() {
 
     let result = db.merge_database(&filename_sideload);
     // EXPECT_THROW(std::rethrow_exception(result.error()), MapboxTileLimitExceededException)
-    assert!(matches!(result, Err(DatabaseError::MapboxTileLimitExceeded)));
+    assert!(matches!(result, Err(DatabaseError::TileCountLimitExceeded)));
 
     assert_eq!(1, log.count(&message(EventSeverity::Error, -1, "Mapbox tile limit exceeded"), false));
     check_log_empty(&log);

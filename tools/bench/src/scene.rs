@@ -15,7 +15,7 @@ use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
-use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
+use mln_map::{CameraOptions, Map, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode, StyleLoadError};
 use mln_renderer::query::SourceQueryOptions;
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style_types::VisibilityType;
@@ -143,8 +143,8 @@ impl MapObserver for Observer {
         *self.last_frame.borrow_mut() = Some(status.clone());
     }
 
-    fn on_did_fail_loading_map(&self, _error: MapLoadError, what: &str) {
-        *self.failure.borrow_mut() = Some(what.to_string());
+    fn on_did_fail_loading_map(&self, error: &StyleLoadError) {
+        *self.failure.borrow_mut() = Some(error.to_string());
     }
 }
 

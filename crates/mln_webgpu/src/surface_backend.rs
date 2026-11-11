@@ -38,6 +38,7 @@ use mln_gfx::renderable::{Renderable, RenderableBase};
 use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -522,11 +523,15 @@ impl SurfaceBackend {
     /// The constructor of `GLFWWebGPUBackend(window, capFrameRate)` from the
     /// instance on: adapter, device, surface (made by `create_surface` from
     /// the window's handles), format selection and configuration.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
+    /// WebGPU adapter, with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// the adapter can't create a device, and with `create_surface`'s error.
     pub fn new(
-        create_surface: impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'static>, String>,
+        create_surface: impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'static>, Error>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<SurfaceBackend, String> {
+    ) -> Result<SurfaceBackend, Error> {
         let renderer_backend = RendererBackend::new(ContextMode::Unique);
 
         // Create the instance
@@ -537,7 +542,7 @@ impl SurfaceBackend {
             power_preference: wgpu::PowerPreference::HighPerformance,
             ..Default::default()
         }))
-        .map_err(|e| format!("No WebGPU adapter found: {e}"))?;
+        .map_err(|e| Error::unsupported(format!("No WebGPU adapter found: {e}")))?;
 
         // Log adapter info
         let adapter_info = adapter.get_info();
@@ -565,7 +570,7 @@ impl SurfaceBackend {
             required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
             ..Default::default()
         }))
-        .map_err(|e| format!("Failed to create WebGPU device: {e}"))?;
+        .map_err(|e| Error::native(format!("Failed to create WebGPU device: {e}")))?;
 
         // Dawn's logUncapturedError instead of wgpu's panicking default.
         device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
@@ -793,19 +798,20 @@ impl SurfaceBackend {
     /// in place of the surface the backend has, if any, which it drops.
     /// The surface is configured with the backend's swapchain format.
     ///
-    /// Errors, keeping the current surface, when the backend's adapter
-    /// can't present to `surface` in that format: pipelines are built for
-    /// it, so a new format needs a new backend. A backend `from_host` has
-    /// no adapter to check with, and uses the usages it was made with.
-    pub fn set_surface(&self, surface: wgpu::Surface<'static>, framebuffer_size: Size) -> Result<(), String> {
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind), keeping
+    /// the current surface, when the backend's adapter can't present to
+    /// `surface` in that format: pipelines are built for it, so a new format
+    /// needs a new backend. A backend `from_host` has no adapter to check
+    /// with, and uses the usages it was made with.
+    pub fn set_surface(&self, surface: wgpu::Surface<'static>, framebuffer_size: Size) -> Result<(), Error> {
         let state = &self.state;
         if let Some(adapter) = self.renderer_backend.backend_impl().get_adapter() {
             let capabilities = surface.get_capabilities(&adapter);
             if !capabilities.formats.contains(&state.swap_chain_format) {
-                return Err(format!(
+                return Err(Error::unsupported(format!(
                     "The surface does not take the {:?} format the backend renders in",
                     state.swap_chain_format
-                ));
+                )));
             }
             let (usage, present_mode) = surface_options(&capabilities);
             state.surface_usage.set(usage);

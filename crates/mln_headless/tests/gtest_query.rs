@@ -19,7 +19,7 @@ use mln_style::layers::circle_layer::CircleLayer;
 use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::source::Source;
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
-use mln_util::exception::RuntimeError;
+use mln_util::ErrorKind;
 use mln_util::feature::Feature;
 use mln_util::geo::{LatLng, ScreenCoordinate};
 
@@ -701,7 +701,7 @@ fn query_feature_extensions_supercluster_leaves() {
 
 #[test]
 fn query_feature_extensions_unknown_cluster() {
-    // A cluster ID the source doesn't have is the error C++ throws.
+    // A cluster ID the source doesn't have isn't found.
     let test = QueryTest::new();
     let mut top_cluster_feature = get_top_cluster_feature(&test);
     assert_eq!(top_cluster_feature.len(), 1);
@@ -711,5 +711,5 @@ fn query_feature_extensions_unknown_cluster() {
         renderer.query_feature_extensions("cluster_source", &top_cluster_feature[0], "supercluster", "children", None)
     });
     let error = result.expect_err("unknown cluster");
-    assert!(error.downcast_ref::<RuntimeError>().is_some(), "{error}");
+    assert_eq!(error.kind, ErrorKind::NotFound, "{error}");
 }

@@ -37,7 +37,7 @@ use objc2_foundation::{
 };
 
 use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
-use crate::response::{Error, Reason};
+use crate::response::{Reason, ResourceError};
 
 /// How long a transfer may go without receiving data before it fails with
 /// a timeout: bounds a stalled connection or handshake without capping a
@@ -155,7 +155,7 @@ impl HttpTransport for NSURLSessionTransport {
         }
         autoreleasepool(|_| {
             let Some(url_request) = url_request(&request) else {
-                request.finish(Err(Box::new(Error::new(Reason::Other, "Invalid URL"))));
+                request.finish(Err(Box::new(ResourceError::new(Reason::Other, "Invalid URL"))));
                 return;
             };
 
@@ -244,12 +244,12 @@ fn transfer(
     data: Option<&NSData>,
     response: Option<&NSURLResponse>,
     error: Option<&NSError>,
-) -> Result<Transfer, Box<Error>> {
+) -> Result<Transfer, Box<ResourceError>> {
     if let Some(error) = error {
-        return Err(Box::new(Error::new(reason(error.code()), error.localizedDescription().to_string())));
+        return Err(Box::new(ResourceError::new(reason(error.code()), error.localizedDescription().to_string())));
     }
     let Some(response) = response.and_then(|response| response.downcast_ref::<NSHTTPURLResponse>()) else {
-        return Err(Box::new(Error::new(Reason::Other, "Response class is not NSHTTPURLResponse")));
+        return Err(Box::new(ResourceError::new(Reason::Other, "Response class is not NSHTTPURLResponse")));
     };
     let headers = RESPONSE_HEADERS
         .iter()

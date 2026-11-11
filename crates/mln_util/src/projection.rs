@@ -6,6 +6,7 @@ use geometry::Point;
 use mln_math::{clamp_f64, deg2rad, rad2deg};
 
 use crate::constants::{DEGREES_MAX, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, MIN_ZOOM};
+use crate::error::Error;
 use crate::geo::{LatLng, WrapMode};
 
 // TODO(port): use mln_util::constants::TILE_SIZE_D once it exists (constants.rs
@@ -29,15 +30,14 @@ pub struct ProjectedMeters {
 // `a._northing == b._northing && a._easting == b._easting`.
 
 impl ProjectedMeters {
-    /// C++ throws std::domain_error from the constructor; the port returns
-    /// the same message as an error. (C++ defaults both arguments to 0; that
-    /// is `ProjectedMeters::default()`.)
-    pub fn new(n: f64, e: f64) -> Result<Self, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](crate::ErrorKind) for a NaN
+    /// northing or easting.
+    pub fn new(n: f64, e: f64) -> Result<Self, Error> {
         if n.is_nan() {
-            return Err("northing must not be NaN".to_owned());
+            return Err(Error::invalid_argument("northing must not be NaN"));
         }
         if e.is_nan() {
-            return Err("easting must not be NaN".to_owned());
+            return Err(Error::invalid_argument("easting must not be NaN"));
         }
         Ok(ProjectedMeters { northing: n, easting: e })
     }
@@ -104,9 +104,8 @@ impl Projection {
         Self::project_(lat_lng, (1i32 << zoom) as f64)
     }
 
-    /// C++ `unproject(p, scale, wrapMode = LatLng::Unwrapped)`; throws (here:
-    /// returns the LatLng constructor's error) for NaN or infinite results.
-    pub fn unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, String> {
+    /// Fails with the [`LatLng::new`] error for a NaN or infinite result.
+    pub fn unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         // `p * util::DEGREES_MAX / worldSize(scale)` (mapbox point operators)
         let world_size = Self::world_size(scale);
         let p2 = Point::new(p.x * DEGREES_MAX / world_size, p.y * DEGREES_MAX / world_size);

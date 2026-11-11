@@ -34,7 +34,7 @@ use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
@@ -128,7 +128,7 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
         &self,
         font_stack: &mln_util::font_stack::FontStack,
         glyph_range: &mln_text::glyph::GlyphRange,
-        error: mln_util::exception::ExceptionPtr,
+        error: mln_util::error::Error,
     ) {
         let range = if glyph_range.type_ == mln_text::glyph::GlyphIDType::FontPBF {
             format!("{}-{}", glyph_range.first, glyph_range.second)
@@ -177,7 +177,7 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
     }
 
     /// `onTileError(RenderSource&, const OverscaledTileID&, std::exception_ptr)`.
-    fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: ExceptionPtr) {
+    fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         Log::error(Event::Style, format!("Failed to load tile {tile_id} for source {source_id}: {error}"));
         if let Some(observer) = shared_observer(&self.observer) {
             observer.on_resource_error(error);
@@ -1257,7 +1257,7 @@ impl RenderOrchestrator {
         &self,
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let render_layers: Vec<&crate::render_layer::RenderLayerPtr> = match &options.layer_ids {
             Some(layer_ids) => layer_ids.iter().filter_map(|id| self.render_layers.get(id)).collect(),
             None => self.render_layers.values().collect(),
@@ -1279,7 +1279,7 @@ impl RenderOrchestrator {
         geometry: &[mln_util::geo::ScreenCoordinate],
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
         options: &crate::query::RenderedQueryOptions,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let cross_tile_symbol_index_layers: crate::geometry::feature_index::QueryLayers<'_> = layers
             .iter()
             .filter(|(_, layer)| {
@@ -1296,7 +1296,7 @@ impl RenderOrchestrator {
         let mut bucket_query_data = Vec::with_capacity(rendered_symbols.len());
         for bucket_instance_id in rendered_symbols.keys() {
             // C++ `getQueryData` throws for an unknown bucket.
-            bucket_query_data.push(placement.get_query_data(*bucket_instance_id).map_err(RuntimeError::ptr)?);
+            bucket_query_data.push(placement.get_query_data(*bucket_instance_id).map_err(Error::native)?);
         }
         // Although symbol query is global, symbol results are only sortable within
         // a bucket For a predictable global sort renderItems, we sort the buckets
@@ -1337,7 +1337,7 @@ impl RenderOrchestrator {
         geometry: &[mln_util::geo::ScreenCoordinate],
         options: &crate::query::RenderedQueryOptions,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
-    ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let mut source_ids: VecSet<String> = VecSet::new();
         let mut filtered_layers = crate::geometry::feature_index::QueryLayers::new();
         for (id, layer) in layers {
@@ -1409,7 +1409,7 @@ impl RenderOrchestrator {
         &self,
         source_id: &str,
         options: &crate::query::SourceQueryOptions,
-    ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, Error> {
         let Some(source) = self.get_render_source(source_id) else {
             return Ok(Vec::new());
         };
@@ -1426,7 +1426,7 @@ impl RenderOrchestrator {
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
-    ) -> Result<crate::query::FeatureExtensionValue, ExceptionPtr> {
+    ) -> Result<crate::query::FeatureExtensionValue, Error> {
         match self.get_render_source(source_id) {
             Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
             None => Ok(Default::default()),

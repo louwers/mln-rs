@@ -15,8 +15,7 @@ pub mod transform;
 pub use map::Map;
 pub use map_impl::{StillImageCallback, StyleMut};
 pub use map_observer::{
-    CameraChange, CameraChangeMode, CameraChangeSource, MapLoadError, MapObserver, NullMapObserver, RenderFrameStatus,
-    RenderMode,
+    CameraChange, CameraChangeMode, CameraChangeSource, MapObserver, NullMapObserver, RenderFrameStatus, RenderMode,
 };
 pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
@@ -30,3 +29,5 @@ pub use mln_renderer::{
     FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, OverscaledTileID, RenderingStats, SourceLayerID,
     TileOperation,
 };
+pub use mln_style::StyleLoadError;
+pub use mln_util::{Error, ErrorKind};

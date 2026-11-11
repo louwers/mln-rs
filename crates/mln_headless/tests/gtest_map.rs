@@ -27,7 +27,7 @@ use mln_map::{
 };
 use mln_renderer::{OverscaledTileID, RendererFrontend, RendererObserver, TileOperation, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
-use mln_storage::response::{Error as ResponseError, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{
     ClientOptions, FileSource, FileSourceManager, FileSourceType, Kind, LoadingMethod, MainResourceLoader,
@@ -904,7 +904,7 @@ fn set_style_invalid_url() {
 
     test.file_source.set_response(Kind::Style, |_| {
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::Other, "Failed by the test case")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
 
@@ -1400,7 +1400,7 @@ fn glyph_range_errors_reach_the_observer() {
     test.file_source.set_response(Kind::Glyphs, |resource| {
         let mut response = Response::new();
         if resource.url.contains("/Missing/") {
-            response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found by the test")));
         } else if resource.url.contains("/Corrupt/") {
             response.data = Some(Arc::new(b"CORRUPTED".to_vec()));
         } else {
@@ -1491,7 +1491,7 @@ fn sprite_events_reach_the_observer() {
                 Some(file_response(file))
             } else {
                 let mut response = Response::new();
-                response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+                response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found by the test")));
                 Some(response)
             }
         });
@@ -2399,7 +2399,7 @@ fn resource_error() {
     let test = MapTest::new();
     test.file_source.set_response(Kind::Glyphs, |_| {
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::Server, "Font file Server failed")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Server, "Font file Server failed")));
         Some(response)
     });
 
@@ -2466,7 +2466,7 @@ fn resource_error() {
     );
     // C++: try { render } catch (...) { EXPECT_EQ(toString(error), "Font file Server failed"); }
     if let Err(error) = test.try_render() {
-        assert_eq!(error, "Font file Server failed");
+        assert_eq!(error.message, "Font file Server failed");
     }
 }
 
@@ -2481,7 +2481,7 @@ fn fail_requests(test: &MapTest, kind: Kind, response: Response) -> (Rc<Cell<boo
         c.set(c.get() + 1);
         if f.get() {
             let mut failed = Response::new();
-            failed.error = Some(Box::new(ResponseError::new(Reason::Server, "failed")));
+            failed.error = Some(Box::new(ResourceError::new(Reason::Server, "failed")));
             Some(failed)
         } else {
             Some(response.clone())
@@ -2497,7 +2497,7 @@ fn assert_still_image_retries_failed_tile(source: &str, layer: &str) {
     let (failing, requests) = fail_requests(&test, Kind::Tile, empty);
     test.load_json(&format!(r#"{{"version": 8, "sources": {{"tiles": {source}}}, "layers": [{layer}]}}"#));
 
-    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
     assert_eq!(requests.get(), 1);
 
     failing.set(false);
@@ -2549,7 +2549,7 @@ fn still_image_retries_failed_glyph_range() {
             .len()
     };
 
-    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(test.try_render().err().map(|e| e.message).as_deref(), Some("failed"));
     assert_eq!(requests.get(), 1);
     assert_eq!(labels(&test), 0);
 
@@ -3780,7 +3780,7 @@ fn fallback_font_faces_cover_every_font_stack() {
     test.file_source.set_response(Kind::Glyphs, move |resource: &Resource| {
         r.borrow_mut().push(resource.url.clone());
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "not found")));
+        response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "not found")));
         Some(response)
     });
 
@@ -3928,7 +3928,10 @@ fn empty_size_is_an_error() {
             Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
             MapOptions::new().with_size(size),
         );
-        assert_eq!(result.err().as_deref(), Some("failed to resize: size is empty"));
+        assert_eq!(
+            result.err().map(|e| (e.kind, e.message)),
+            Some((mln_util::ErrorKind::InvalidArgument, "failed to resize: size is empty".to_owned()))
+        );
     }
 }
 

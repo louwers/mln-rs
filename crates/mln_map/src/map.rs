@@ -9,11 +9,11 @@ use mln_map_types::{
     ConstrainMode, MapDebugOptions, MapMode, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
     ViewportMode,
 };
-use mln_renderer::{ExceptionPtr, FeatureInfo, LayerFeaturesMap, RendererFrontend, RenderingStats, SourceLayerID};
+use mln_renderer::{FeatureInfo, LayerFeaturesMap, RendererFrontend, RenderingStats, SourceLayerID};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::Style;
 use mln_util::chrono::TimePoint;
-use mln_util::exception::MisuseException;
+use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::geometry::{Geometry, for_each_point};
 use mln_util::size::Size;
@@ -34,9 +34,8 @@ impl Map {
     /// C++ keeps a reference to the frontend; frontends are handles here
     /// (`Clone` shares the same renderer), so the map keeps a clone.
     ///
-    /// `Err` where C++ throws: "failed to resize: size is empty" for an
-    /// empty `map_options.size()`.
-    pub fn new<F>(frontend: &F, observer: Rc<dyn MapObserver>, map_options: MapOptions) -> Result<Map, String>
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty `map_options.size()`.
+    pub fn new<F>(frontend: &F, observer: Rc<dyn MapObserver>, map_options: MapOptions) -> Result<Map, Error>
     where
         F: RendererFrontend + Clone + 'static,
     {
@@ -59,7 +58,7 @@ impl Map {
         map_options: MapOptions,
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
-    ) -> Result<Map, String>
+    ) -> Result<Map, Error>
     where
         F: RendererFrontend + Clone + 'static,
     {
@@ -77,7 +76,7 @@ impl Map {
         observer: Rc<dyn MapObserver>,
         file_source: Arc<dyn FileSource>,
         map_options: MapOptions,
-    ) -> Result<Map, String>
+    ) -> Result<Map, Error>
     where
         F: RendererFrontend + Clone + 'static,
     {
@@ -97,12 +96,12 @@ impl Map {
     pub fn render_still(&mut self, callback: StillImageCallback) {
         let impl_ = &self.impl_;
         if impl_.mode != MapMode::Static && impl_.mode != MapMode::Tile {
-            callback(Some(misuse("Map is not in static or tile image render modes")));
+            callback(Some(Error::invalid_state("Map is not in static or tile image render modes")));
             return;
         }
 
         if impl_.still_image_request.borrow().is_some() {
-            callback(Some(misuse("Map is currently rendering an image")));
+            callback(Some(Error::invalid_state("Map is currently rendering an image")));
             return;
         }
 
@@ -263,9 +262,9 @@ impl Map {
 
     // query: the render-test runner's tile mode uses it.
     /// `latLngBoundsForCamera(camera)`.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor, for a
-    /// camera whose corners have no LatLng.
-    pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<mln_util::geo::LatLngBounds, String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
+    /// corners have no LatLng.
+    pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<mln_util::geo::LatLngBounds, Error> {
         let mut shallow = crate::transform::Transform::from_state(self.impl_.transform.borrow().get_state().clone());
         let size = shallow.get_state().get_size();
 
@@ -291,9 +290,9 @@ impl Map {
         self.impl_.on_update();
     }
 
-    /// `Err`: the std::domain_error of the C++ LatLng constructor (a NaN or
-    /// infinite point).
-    pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite
+    /// point.
+    pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
         self.impl_.camera_mutated.set(true);
         self.impl_.transform.borrow_mut().move_by(point, animation)?;
         self.impl_.on_update();
@@ -321,16 +320,16 @@ impl Map {
 
     // gtests-core: cameraForLatLngBounds, cameraForLatLngs,
     // latLngBoundsForCameraUnwrapped (test/map/map.test.cpp).
-    /// `cameraForLatLngBounds(bounds, padding, bearing, pitch)`. `Err`: the
-    /// std::domain_error of the C++ LatLng constructor, for a center that
-    /// has none (padding that pushes it to infinity).
+    /// `cameraForLatLngBounds(bounds, padding, bearing, pitch)`. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a center that has no
+    /// LatLng (padding that pushes it to infinity).
     pub fn camera_for_lat_lng_bounds(
         &self,
         bounds: &LatLngBounds,
         padding: &EdgeInsets,
         bearing: Option<f64>,
         pitch: Option<f64>,
-    ) -> Result<CameraOptions, String> {
+    ) -> Result<CameraOptions, Error> {
         self.camera_for_lat_lngs(
             &[bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()],
             padding,
@@ -339,15 +338,15 @@ impl Map {
         )
     }
 
-    /// `cameraForLatLngs(latLngs, padding, bearing, pitch)`. `Err`: as
-    /// [`camera_for_lat_lng_bounds`](Self::camera_for_lat_lng_bounds).
+    /// `cameraForLatLngs(latLngs, padding, bearing, pitch)`. Fails as
+    /// [`camera_for_lat_lng_bounds`](Self::camera_for_lat_lng_bounds) does.
     pub fn camera_for_lat_lngs(
         &self,
         lat_lngs: &[LatLng],
         padding: &EdgeInsets,
         bearing: Option<f64>,
         pitch: Option<f64>,
-    ) -> Result<CameraOptions, String> {
+    ) -> Result<CameraOptions, Error> {
         if bearing.is_none() && pitch.is_none() {
             return camera_for_lat_lngs(lat_lngs, &self.impl_.transform.borrow(), padding);
         }
@@ -363,9 +362,9 @@ impl Map {
 
     /// `cameraForGeometry(geometry, padding, bearing, pitch)`: the camera
     /// that fits every point of `geometry` (x longitude, y latitude), as
-    /// [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits them. `Err`:
-    /// as that, and the std::domain_error of the C++ LatLng constructor for
-    /// a point with no LatLng (an infinite or NaN coordinate, or a latitude
+    /// [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits them. Fails as
+    /// that does, and with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// point with no LatLng (an infinite or NaN coordinate, or a latitude
     /// beyond ±90°).
     pub fn camera_for_geometry(
         &self,
@@ -373,7 +372,7 @@ impl Map {
         padding: &EdgeInsets,
         bearing: Option<f64>,
         pitch: Option<f64>,
-    ) -> Result<CameraOptions, String> {
+    ) -> Result<CameraOptions, Error> {
         let mut points = Vec::new();
         for_each_point(geometry, &mut |point| points.push(*point));
         let lat_lngs = points.iter().map(|point| LatLng::new(point.y, point.x)).collect::<Result<Vec<_>, _>>()?;
@@ -381,8 +380,8 @@ impl Map {
     }
 
     /// `latLngBoundsForCameraUnwrapped(camera)`.
-    /// `Err`: as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera).
-    pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, String> {
+    /// Fails as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera) does.
+    pub fn lat_lng_bounds_for_camera_unwrapped(&self, camera: &CameraOptions) -> Result<LatLngBounds, Error> {
         let mut shallow = crate::transform::Transform::from_state(self.impl_.transform.borrow().get_state().clone());
         let size = shallow.get_state().get_size();
 
@@ -408,7 +407,7 @@ impl Map {
 
     // MARK: - Bounds
 
-    pub fn set_bounds(&mut self, options: &BoundOptions) -> Result<(), String> {
+    pub fn set_bounds(&mut self, options: &BoundOptions) -> Result<(), Error> {
         let mut change_camera = false;
         let mut camera_options = CameraOptions::default();
 
@@ -489,8 +488,8 @@ impl Map {
         self.impl_.on_update();
     }
 
-    /// C++ throws "failed to resize: size is empty"; the port returns it.
-    pub fn set_size(&mut self, size: Size) -> Result<(), String> {
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size.
+    pub fn set_size(&mut self, size: Size) -> Result<(), Error> {
         self.impl_.transform.borrow_mut().resize(size)?;
         self.impl_.on_update();
         Ok(())
@@ -693,9 +692,9 @@ impl Map {
         transform.lat_lng_to_screen_coordinate(&transform.get_state().lat_lng_near_center(lat_lng))
     }
 
-    /// `latLngForPixel(pixel, wrapMode)`. `Err`: the std::domain_error of
-    /// the C++ LatLng constructor (a NaN or infinite pixel).
-    pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, String> {
+    /// `latLngForPixel(pixel, wrapMode)`. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite pixel.
+    pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         self.impl_.transform.borrow().screen_coordinate_to_lat_lng(pixel, wrap_mode)
     }
 
@@ -709,7 +708,7 @@ impl Map {
         &self,
         screen_coords: &[ScreenCoordinate],
         wrap_mode: WrapMode,
-    ) -> Result<Vec<LatLng>, String> {
+    ) -> Result<Vec<LatLng>, Error> {
         screen_coords.iter().map(|point| self.lat_lng_for_pixel(point, wrap_mode)).collect()
     }
 
@@ -795,17 +794,13 @@ impl Map {
     }
 }
 
-fn misuse(message: &str) -> ExceptionPtr {
-    MisuseException::ptr(message)
-}
-
 // gtests-core: the free function `cameraForLatLngs(latLngs, transform,
 // padding)` of map.cpp (Map::cameraForLatLngs and MapProjection use it).
 pub(crate) fn camera_for_lat_lngs(
     lat_lngs: &[LatLng],
     transform: &crate::transform::Transform,
     padding: &EdgeInsets,
-) -> Result<CameraOptions, String> {
+) -> Result<CameraOptions, Error> {
     if lat_lngs.is_empty() {
         return Ok(CameraOptions::default());
     }

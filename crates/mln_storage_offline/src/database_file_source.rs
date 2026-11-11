@@ -100,7 +100,7 @@ pub trait DatabaseFileSourceExt {
     /// of another database, and the resources and tiles they use, into this
     /// one. Identical regions become one. The side database is upgraded to
     /// the current schema in place, so it must be writable. Fails with
-    /// `DatabaseError::MapboxTileLimitExceeded` if the merge would exceed
+    /// `DatabaseError::TileCountLimitExceeded` if the merge would exceed
     /// the offline Mapbox tile limit.
     fn merge_offline_regions(
         &self,

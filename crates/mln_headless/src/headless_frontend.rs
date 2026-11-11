@@ -16,6 +16,7 @@ use mln_gfx::{BackendScope, ContextMode, RendererBackend, ScopeType, SwapBehavio
 use mln_map::{CameraOptions, Map, TransformState};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_text::GlyphCache;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_webgpu::HeadlessBackend;
@@ -202,9 +203,10 @@ impl HeadlessFrontend {
         }
     }
 
-    /// `latLngForPixel(point)`.
-    /// `Err`: the std::domain_error of the C++ LatLng constructor.
-    pub fn lat_lng_for_pixel(&self, point: &mln_util::geo::ScreenCoordinate) -> Result<mln_util::geo::LatLng, String> {
+    /// `latLngForPixel(point)`. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
+    /// infinite point.
+    pub fn lat_lng_for_pixel(&self, point: &mln_util::geo::ScreenCoordinate) -> Result<mln_util::geo::LatLng, Error> {
         match self.shared.update_parameters.borrow().as_ref() {
             Some(parameters) => {
                 let state = &parameters.transform_state;
@@ -220,19 +222,16 @@ impl HeadlessFrontend {
         self.shared.backend.read_still_image()
     }
 
-    /// `render(Map&)`. C++ rethrows the still image error; the port returns
-    /// it (its `what()` message).
-    pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, String> {
+    /// `render(Map&)`: renders a still image, or fails with the map's still
+    /// image error.
+    pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
         let backend = self.shared.backend.clone();
         let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
 
-        let outcome: Rc<RefCell<Option<Result<(), String>>>> = Rc::new(RefCell::new(None));
+        let outcome: Rc<RefCell<Option<Result<(), Error>>>> = Rc::new(RefCell::new(None));
         let o = outcome.clone();
         map.render_still(Box::new(move |error| {
-            *o.borrow_mut() = Some(match error {
-                None => Ok(()),
-                Some(e) => Err(e.to_string()),
-            });
+            *o.borrow_mut() = Some(error.map_or(Ok(()), Err));
         }));
 
         // C++ spins on runOnce, which costs a core per renderer while the

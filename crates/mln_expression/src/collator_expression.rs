@@ -83,7 +83,7 @@ impl Expression for CollatorExpression {
             evaluated_locale = Some(locale_result.as_str().expect("string locale").to_owned());
         }
 
-        // TODO(port): util::LocaleException from the platform collator.
+        // TODO(port): an error from the platform collator for a locale it lacks.
         Ok(Value::Collator(Collator::new(
             case_sensitive_result.as_bool().expect("boolean option"),
             diacritic_sensitive_result.as_bool().expect("boolean option"),

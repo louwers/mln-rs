@@ -13,7 +13,7 @@ use mln_style::source_impl::Impl as _;
 use mln_style::sources::geojson_source::GeoJSONData;
 use mln_style::sources::geojson_source_impl;
 use mln_util::constants;
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 
 use crate::query::FeatureExtensionValue;
@@ -50,7 +50,7 @@ fn supercluster_extension(
     extension_field: &str,
     cluster_id: u32,
     args: Option<&feature::PropertyMap>,
-) -> Option<Result<FeatureExtensionValue, RuntimeError>> {
+) -> Option<Result<FeatureExtensionValue, Error>> {
     Some(match extension_field {
         "children" => cluster_data.get_children(cluster_id).map(FeatureExtensionValue::FeatureCollection),
         "leaves" => {
@@ -218,7 +218,7 @@ impl RenderSource for RenderGeoJSONSource {
         options: &crate::query::RenderedQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
         proj_matrix: &mln_util::mat4::Mat4,
-    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::exception::ExceptionPtr> {
+    ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
         self.tile_source.query_rendered_features(geometry, transform_state, layers, options, global_state, proj_matrix)
     }
 
@@ -226,7 +226,7 @@ impl RenderSource for RenderGeoJSONSource {
         &self,
         options: &crate::query::SourceQueryOptions,
         global_state: Option<&mln_style::expression::GlobalStateMap>,
-    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::exception::ExceptionPtr> {
+    ) -> Result<Vec<mln_util::feature::Feature>, mln_util::error::Error> {
         self.tile_source.query_source_features(options, global_state)
     }
 
@@ -239,7 +239,7 @@ impl RenderSource for RenderGeoJSONSource {
         extension: &str,
         extension_field: &str,
         args: Option<&feature::PropertyMap>,
-    ) -> Result<FeatureExtensionValue, mln_util::exception::ExceptionPtr> {
+    ) -> Result<FeatureExtensionValue, Error> {
         if extension != "supercluster" {
             return Ok(Default::default());
         }
@@ -249,10 +249,8 @@ impl RenderSource for RenderGeoJSONSource {
         let Some(json_data) = self.data.as_ref().and_then(Weak::upgrade) else {
             return Ok(Default::default());
         };
-        match supercluster_extension(&*json_data, extension_field, cluster_id as u32, args) {
-            Some(result) => result.map_err(|e| Arc::new(e) as mln_util::exception::ExceptionPtr),
-            None => Ok(Default::default()),
-        }
+        supercluster_extension(&*json_data, extension_field, cluster_id as u32, args)
+            .unwrap_or_else(|| Ok(Default::default()))
     }
 
     // layers: feature state

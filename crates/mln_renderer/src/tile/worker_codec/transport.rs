@@ -25,7 +25,7 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::{LocalObject, SchedulerPtr, TaggedScheduler, Thread, scheduler};
-use mln_util::exception::RuntimeError;
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
 
@@ -168,8 +168,9 @@ impl SerializingTransport {
         match request {
             Ok(request) => self.instances.post(instance, request),
             // As a worker reports what it can't parse.
-            Err(error) => self
-                .deliver(tile, Reply::Geometry(TileMessage::Error { error: RuntimeError::ptr(error), correlation_id })),
+            Err(error) => {
+                self.deliver(tile, Reply::Geometry(TileMessage::Error { error: Error::native(error), correlation_id }))
+            }
         }
     }
 

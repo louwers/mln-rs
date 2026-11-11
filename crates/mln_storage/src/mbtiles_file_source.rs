@@ -35,7 +35,7 @@ use crate::json_document::Document;
 use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 use crate::sqlite3::{Database, OpenFlag, Query, Statement};
 
 fn accepts_url(url: &str) -> bool {
@@ -119,7 +119,7 @@ fn db_path(path: &[u8]) -> &[u8] {
 
 fn error_response(reason: Reason, message: impl Into<String>) -> Response {
     let mut response = Response::new();
-    response.error = Some(Box::new(Error::new(reason, message)));
+    response.error = Some(Box::new(ResourceError::new(reason, message)));
     response
 }
 
@@ -223,7 +223,7 @@ impl MBTilesFileSourceThread {
             } else if name == "bounds" {
                 let bounds_values = split(value, ',');
                 if bounds_values.len() != 4 {
-                    response.error = Some(Box::new(Error::new(Reason::Other, "")));
+                    response.error = Some(Box::new(ResourceError::new(Reason::Other, "")));
                     return Ok(response);
                 }
                 let c_lon = (bounds_values[0] + bounds_values[2]) / 2.0;
@@ -342,7 +342,7 @@ impl FileSource for MBTilesFileSource {
             let mut response = Response::new();
             response.no_content = true;
             response.error =
-                Some(Box::new(Error::new(Reason::Other, "MBTilesFileSource only supports absolute path urls")));
+                Some(Box::new(ResourceError::new(Reason::Other, "MBTilesFileSource only supports absolute path urls")));
             req_ref.invoke(move |request: &FileSourceRequestState| request.set_response(response));
             return Box::new(req);
         }
@@ -356,7 +356,7 @@ impl FileSource for MBTilesFileSource {
         if not_found {
             let mut response = Response::new();
             response.no_content = true;
-            response.error = Some(Box::new(Error::new(
+            response.error = Some(Box::new(ResourceError::new(
                 Reason::NotFound,
                 format!("path not found: {}", String::from_utf8_lossy(&path)),
             )));

@@ -36,7 +36,7 @@ use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::json_document::{Document, strtol};
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 // https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md#3-header
 const PMTILES_HEADER_OFFSET: u64 = 0;
@@ -57,14 +57,14 @@ fn extract_url(url: &str) -> String {
     url[PMTILES_PROTOCOL.len().min(url.len())..].to_owned()
 }
 
-type ErrorPtr = Option<Box<Error>>;
+type ErrorPtr = Option<Box<ResourceError>>;
 /// `AsyncCallback` (`std::function<void(std::unique_ptr<Response::Error>)>`).
 type AsyncCallback = Rc<dyn Fn(ErrorPtr)>;
 /// `AsyncTileCallback`.
 type AsyncTileCallback = Rc<dyn Fn((u64, u32), ErrorPtr)>;
 
 fn error(reason: Reason, message: impl Into<String>) -> ErrorPtr {
-    Some(Box::new(Error::new(reason, message)))
+    Some(Box::new(ResourceError::new(reason, message)))
 }
 
 fn json_double(d: f64) -> Json {
@@ -531,7 +531,7 @@ impl PMTilesFileSourceThread {
         // C++ dereferences `resource.tileData` unchecked.
         let Some(tile_data) = resource.tile_data.clone() else {
             let mut response = Response::new();
-            response.error = Some(Box::new(Error::new(Reason::Other, "tile resource without tile data")));
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, "tile resource without tile data")));
             send(r, response);
             return;
         };

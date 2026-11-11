@@ -24,14 +24,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use mln_actor::{LocalObject, RunLoop, Timer};
 use mln_headless::{HeadlessFrontend, RenderResult};
-use mln_map::{Map, MapLoadError, MapMode, MapObserver, MapOptions, RenderFrameStatus};
-use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, TileOperation};
+use mln_map::{Map, MapMode, MapObserver, MapOptions, RenderFrameStatus, StyleLoadError};
+use mln_renderer::{FontStack, GlyphRange, OverscaledTileID, TileOperation};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::custom_tile_loader::TileFunction;
 use mln_style::sources::custom_geometry_source::CustomGeometrySourceHandle;
 use mln_style::sprite::Sprite;
 use mln_tile_id::CanonicalTileID;
+use mln_util::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log};
 
@@ -225,12 +226,12 @@ pub struct StubMapObserver {
     pub did_become_idle_callback: CallbackSlot<()>,
     pub on_style_image_missing_callback: CallbackSlot<String>,
     pub on_glyphs_loaded_callback: CallbackSlot<(FontStack, GlyphRange)>,
-    pub on_glyphs_error_callback: CallbackSlot<(FontStack, GlyphRange, ExceptionPtr)>,
+    pub on_glyphs_error_callback: CallbackSlot<(FontStack, GlyphRange, Error)>,
     pub on_glyphs_requested_callback: CallbackSlot<(FontStack, GlyphRange)>,
     pub on_tile_action_callback: CallbackSlot<(TileOperation, OverscaledTileID, String)>,
     pub on_source_changed_callback: CallbackSlot<String>,
     pub on_sprite_loaded_callback: CallbackSlot<Option<Sprite>>,
-    pub on_sprite_error_callback: CallbackSlot<(Option<Sprite>, ExceptionPtr)>,
+    pub on_sprite_error_callback: CallbackSlot<(Option<Sprite>, Error)>,
     pub on_sprite_requested_callback: CallbackSlot<Option<Sprite>>,
 }
 
@@ -241,7 +242,7 @@ impl MapObserver for StubMapObserver {
     fn on_did_finish_loading_map(&self) {
         self.did_finish_loading_map_callback.call(());
     }
-    fn on_did_fail_loading_map(&self, _error: MapLoadError, _what: &str) {
+    fn on_did_fail_loading_map(&self, _error: &StyleLoadError) {
         self.did_fail_loading_map_callback.call(());
     }
     fn on_did_finish_loading_style(&self) {
@@ -259,7 +260,7 @@ impl MapObserver for StubMapObserver {
     fn on_glyphs_loaded(&self, font_stack: &FontStack, range: &GlyphRange) {
         self.on_glyphs_loaded_callback.call((font_stack.clone(), *range));
     }
-    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
+    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: Error) {
         self.on_glyphs_error_callback.call((font_stack.clone(), *range, error));
     }
     fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
@@ -274,7 +275,7 @@ impl MapObserver for StubMapObserver {
     fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
         self.on_sprite_loaded_callback.call(sprite.cloned());
     }
-    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: Error) {
         self.on_sprite_error_callback.call((sprite.cloned(), error));
     }
     fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
@@ -542,7 +543,7 @@ impl<FS: FileSource + 'static> MapTest<FS> {
         self.try_render().unwrap_or_else(|e| panic!("render: {e}"))
     }
 
-    pub fn try_render(&self) -> Result<RenderResult, String> {
+    pub fn try_render(&self) -> Result<RenderResult, Error> {
         let mut frontend = self.frontend.clone();
         let mut map = self.map.borrow_mut();
         frontend.render(&mut map)

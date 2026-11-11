@@ -26,7 +26,7 @@ use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedFad
 use mln_style_types::image::{ImageDependencies, ImagePositions, ImageType};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_vec_map::{VecMap, VecSet};
 
@@ -134,7 +134,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         available_images: &VecSet<String>,
         filter_groups: &mut FilterGroups,
         sorted: bool,
-    ) -> Result<Self, ExceptionPtr> {
+    ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
         let zoom = parameters.tile_id.overscaled_z as f32;
         let overscaling = parameters.tile_id.overscale_factor();
@@ -278,7 +278,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         group: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
         sorted: bool,
-    ) -> Result<Self, ExceptionPtr> {
+    ) -> Result<Self, Error> {
         let mut layout = PatternLayout::new(
             parameters.bucket_parameters,
             group,
@@ -307,7 +307,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         insert_feature: &mut dyn FnMut(&GeometryCollection, usize, &str, &str),
         render_data: &mut HashMap<String, LayerRenderData>,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let mut bucket = S::create_bucket(&self.layout, &self.layer_properties_map, self.zoom, self.overscaling);
         bucket.set_retain_features_by_id(self.retain_features_by_id);
         bucket.reserve_features(self.features.len());
@@ -467,7 +467,7 @@ impl<S: PatternLayoutSpec> Layout for PatternLayout<S> {
         _first_load: bool,
         _show_collision_boxes: bool,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let source_layer = self.source_layer.clone().expect("PatternLayout: source layer");
         let layer = source_layer.layer()?;
         self.create_bucket_with(

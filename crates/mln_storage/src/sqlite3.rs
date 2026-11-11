@@ -69,35 +69,35 @@ pub enum OpenFlag {
     ReadWriteCreate = 0x0000_0006,
 }
 
-/// `mapbox::sqlite::Exception`. `code` is `static_cast<ResultCode>(err)`, the
+/// `mapbox::sqlite::SqliteError`. `code` is `static_cast<ResultCode>(err)`, the
 /// low byte of the (extended) result code (`ResultCode` is a `uint8_t`
 /// enum); `extended_code` is `err >> 8`.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Exception {
+pub struct SqliteError {
     pub code: i32,
     pub extended_code: i32,
     pub message: String,
 }
 
-impl Exception {
+impl SqliteError {
     pub fn new(err: i32, message: impl Into<String>) -> Self {
-        Exception { code: err & 0xff, extended_code: (err >> 8) & 0xff, message: message.into() }
+        SqliteError { code: err & 0xff, extended_code: (err >> 8) & 0xff, message: message.into() }
     }
 }
 
-impl std::fmt::Display for Exception {
+impl std::fmt::Display for SqliteError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
     }
 }
 
-impl From<rusqlite::Error> for Exception {
+impl From<rusqlite::Error> for SqliteError {
     fn from(e: rusqlite::Error) -> Self {
         match &e {
             rusqlite::Error::SqliteFailure(error, message) => {
-                Exception::new(error.extended_code, message.clone().unwrap_or_else(|| error.to_string()))
+                SqliteError::new(error.extended_code, message.clone().unwrap_or_else(|| error.to_string()))
             }
-            _ => Exception::new(result_code::ERROR, e.to_string()),
+            _ => SqliteError::new(result_code::ERROR, e.to_string()),
         }
     }
 }
@@ -110,15 +110,15 @@ pub struct Database {
 impl Database {
     /// `Database::tryOpen(filename, flags)` (`sqlite3_open_v2(filename, flags
     /// | SQLITE_OPEN_URI)`, extended result codes on). C++ returns a
-    /// `std::variant<Database, Exception>`.
-    pub fn try_open(filename: &str, flags: OpenFlag) -> Result<Database, Exception> {
+    /// `std::variant<Database, SqliteError>`.
+    pub fn try_open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
         let flags = OpenFlags::from_bits_retain(flags as i32) | OpenFlags::SQLITE_OPEN_URI;
         let conn = Connection::open_with_flags(filename, flags)?;
         Ok(Database { impl_: Arc::new(Mutex::new(conn)) })
     }
 
     /// `Database::open(filename, flags)` (throws the `tryOpen` exception).
-    pub fn open(filename: &str, flags: OpenFlag) -> Result<Database, Exception> {
+    pub fn open(filename: &str, flags: OpenFlag) -> Result<Database, SqliteError> {
         Self::try_open(filename, flags)
     }
 
@@ -128,14 +128,14 @@ impl Database {
     }
 
     /// `setBusyTimeout(std::chrono::milliseconds)` (clamped to `int`).
-    pub fn set_busy_timeout(&self, timeout_ms: i64) -> Result<(), Exception> {
+    pub fn set_busy_timeout(&self, timeout_ms: i64) -> Result<(), SqliteError> {
         let ms = timeout_ms.clamp(0, i32::MAX as i64) as u64;
         self.conn().busy_timeout(std::time::Duration::from_millis(ms))?;
         Ok(())
     }
 
     /// `exec(sql)`.
-    pub fn exec(&self, sql: &str) -> Result<(), Exception> {
+    pub fn exec(&self, sql: &str) -> Result<(), SqliteError> {
         exec(&self.conn(), sql)
     }
 
@@ -148,7 +148,7 @@ impl Database {
 /// `DatabaseImpl::exec` (`sqlite3_exec`): runs every statement to
 /// completion. rusqlite's `execute_batch` steps each statement only once,
 /// which leaves e.g. `PRAGMA incremental_vacuum` after freeing one page.
-fn exec(conn: &Connection, sql: &str) -> Result<(), Exception> {
+fn exec(conn: &Connection, sql: &str) -> Result<(), SqliteError> {
     let mut batch = rusqlite::Batch::new(conn, sql);
     while let Some(mut stmt) = batch.next()? {
         let mut rows = stmt.raw_query();
@@ -174,7 +174,7 @@ pub struct Transaction {
 
 impl Transaction {
     /// `Transaction(Database&, Mode = Deferred)`.
-    pub fn new(db: &Database, mode: TransactionMode) -> Result<Transaction, Exception> {
+    pub fn new(db: &Database, mode: TransactionMode) -> Result<Transaction, SqliteError> {
         let sql = match mode {
             TransactionMode::Deferred => "BEGIN DEFERRED TRANSACTION",
             TransactionMode::Immediate => "BEGIN IMMEDIATE TRANSACTION",
@@ -185,18 +185,18 @@ impl Transaction {
         Ok(Transaction { db_impl: db.impl_.clone(), need_rollback: true })
     }
 
-    fn exec(&self, sql: &str) -> Result<(), Exception> {
+    fn exec(&self, sql: &str) -> Result<(), SqliteError> {
         exec(&self.db_impl.lock_unpoisoned(), sql)
     }
 
     /// `commit()`.
-    pub fn commit(&mut self) -> Result<(), Exception> {
+    pub fn commit(&mut self) -> Result<(), SqliteError> {
         self.need_rollback = false;
         self.exec("COMMIT TRANSACTION")
     }
 
     /// `rollback()`.
-    pub fn rollback(&mut self) -> Result<(), Exception> {
+    pub fn rollback(&mut self) -> Result<(), SqliteError> {
         self.need_rollback = false;
         self.exec("ROLLBACK TRANSACTION")
     }
@@ -223,7 +223,7 @@ pub struct Statement<'conn> {
 
 impl<'conn> Statement<'conn> {
     /// `Statement(Database&, const char* sql)` (`sqlite3_prepare_v2`).
-    pub fn new(conn: &'conn Connection, sql: &str) -> Result<Statement<'conn>, Exception> {
+    pub fn new(conn: &'conn Connection, sql: &str) -> Result<Statement<'conn>, SqliteError> {
         Ok(Statement { stmt: conn.prepare(sql)?, conn, last_insert_row_id: 0, changes: 0 })
     }
 }
@@ -245,14 +245,14 @@ impl<'s, 'conn> Query<'s, 'conn> {
     }
 
     /// `bind(offset, value)` (before the first `run()`).
-    pub fn bind<T: ToSql>(&mut self, offset: usize, value: T) -> Result<(), Exception> {
+    pub fn bind<T: ToSql>(&mut self, offset: usize, value: T) -> Result<(), SqliteError> {
         let stmt = self.stmt.as_mut().expect("TODO(port): Query::bind after run()");
         stmt.raw_bind_parameter(offset, value)?;
         Ok(())
     }
 
     /// `run()`: steps once; true when a row is available.
-    pub fn run(&mut self) -> Result<bool, Exception> {
+    pub fn run(&mut self) -> Result<bool, SqliteError> {
         if self.rows.is_none() {
             let stmt = self.stmt.take().expect("statement");
             self.rows = Some(stmt.raw_query());
@@ -268,27 +268,27 @@ impl<'s, 'conn> Query<'s, 'conn> {
     }
 
     /// `get<int64_t>(offset)`.
-    pub fn get_i64(&self, offset: usize) -> Result<i64, Exception> {
+    pub fn get_i64(&self, offset: usize) -> Result<i64, SqliteError> {
         get_i64(self.row(), offset)
     }
 
     /// `get<int>(offset)`.
-    pub fn get_i32(&self, offset: usize) -> Result<i32, Exception> {
+    pub fn get_i32(&self, offset: usize) -> Result<i32, SqliteError> {
         get_i32(self.row(), offset)
     }
 
     /// `get<std::string>(offset)`, as bytes.
-    pub fn get_bytes(&self, offset: usize) -> Result<Vec<u8>, Exception> {
+    pub fn get_bytes(&self, offset: usize) -> Result<Vec<u8>, SqliteError> {
         get_bytes(self.row(), offset)
     }
 
     /// `get<std::optional<std::string>>(offset)`, as bytes.
-    pub fn get_optional_bytes(&self, offset: usize) -> Result<Option<Vec<u8>>, Exception> {
+    pub fn get_optional_bytes(&self, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
         get_optional_bytes(self.row(), offset)
     }
 
     /// `get<std::string>(offset)` for text columns.
-    pub fn get_string(&self, offset: usize) -> Result<String, Exception> {
+    pub fn get_string(&self, offset: usize) -> Result<String, SqliteError> {
         Ok(String::from_utf8_lossy(&get_bytes(self.row(), offset)?).into_owned())
     }
 
@@ -304,7 +304,7 @@ impl<'s, 'conn> Query<'s, 'conn> {
 }
 
 /// `sqlite3_column_int64`.
-pub fn get_i64(row: &Row<'_>, offset: usize) -> Result<i64, Exception> {
+pub fn get_i64(row: &Row<'_>, offset: usize) -> Result<i64, SqliteError> {
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => 0,
         ValueRef::Integer(i) => i,
@@ -314,18 +314,18 @@ pub fn get_i64(row: &Row<'_>, offset: usize) -> Result<i64, Exception> {
 }
 
 /// `sqlite3_column_int` (the low 32 bits of the 64-bit value).
-pub fn get_i32(row: &Row<'_>, offset: usize) -> Result<i32, Exception> {
+pub fn get_i32(row: &Row<'_>, offset: usize) -> Result<i32, SqliteError> {
     Ok(get_i64(row, offset)? as i32)
 }
 
 /// `Query::get<bool>` (`sqlite3_column_int(...) != 0`... C++ converts the
 /// `int` to `bool`).
-pub fn get_bool(row: &Row<'_>, offset: usize) -> Result<bool, Exception> {
+pub fn get_bool(row: &Row<'_>, offset: usize) -> Result<bool, SqliteError> {
     Ok(get_i32(row, offset)? != 0)
 }
 
 /// `Query::get<std::optional<int64_t>>`.
-pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, Exception> {
+pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, SqliteError> {
     if matches!(row.get_ref(offset)?, ValueRef::Null) {
         return Ok(None);
     }
@@ -334,7 +334,7 @@ pub fn get_optional_i64(row: &Row<'_>, offset: usize) -> Result<Option<i64>, Exc
 
 /// `Query::get<std::string>` (`sqlite3_column_blob`): the bytes of a text or
 /// blob value, a number's text form.
-pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, Exception> {
+pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, SqliteError> {
     Ok(match row.get_ref(offset)? {
         ValueRef::Null => Vec::new(),
         ValueRef::Integer(i) => i.to_string().into_bytes(),
@@ -345,7 +345,7 @@ pub fn get_bytes(row: &Row<'_>, offset: usize) -> Result<Vec<u8>, Exception> {
 }
 
 /// `Query::get<std::optional<std::string>>`, as bytes.
-pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>>, Exception> {
+pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>>, SqliteError> {
     if matches!(row.get_ref(offset)?, ValueRef::Null) {
         return Ok(None);
     }
@@ -354,7 +354,7 @@ pub fn get_optional_bytes(row: &Row<'_>, offset: usize) -> Result<Option<Vec<u8>
 
 /// `Query::get<std::optional<std::string>>` for text columns (lossy for
 /// invalid UTF-8, which C++ would keep).
-pub fn get_optional_string(row: &Row<'_>, offset: usize) -> Result<Option<String>, Exception> {
+pub fn get_optional_string(row: &Row<'_>, offset: usize) -> Result<Option<String>, SqliteError> {
     Ok(get_optional_bytes(row, offset)?.map(|bytes| match String::from_utf8(bytes) {
         Ok(s) => s,
         Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),

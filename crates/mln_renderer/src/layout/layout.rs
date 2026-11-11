@@ -14,7 +14,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
 use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
@@ -37,19 +37,19 @@ impl SourceLayer {
 
     /// The layer (`data->getLayer(name)`). The worker only creates layouts
     /// for layers the data has, so neither error is expected.
-    pub fn layer(&self) -> Result<Box<dyn GeometryTileLayer + '_>, ExceptionPtr> {
+    pub fn layer(&self) -> Result<Box<dyn GeometryTileLayer + '_>, Error> {
         self.data
             .get_layer(&self.name)?
-            .ok_or_else(|| RuntimeError::ptr(format!("SourceLayer: the tile data has no layer {:?}", self.name)))
+            .ok_or_else(|| Error::native(format!("SourceLayer: the tile data has no layer {:?}", self.name)))
     }
 }
 
 /// `Layout`.
 pub trait Layout: Send {
     /// `createBucket(patternPositions, featureIndex, renderData, firstLoad,
-    /// showCollisionBoxes, canonical)`. `Err` is an exception C++ lets
-    /// propagate (e.g. `GeometryTooLongException` from `addFeature`); the
-    /// worker reports it as the tile's error.
+    /// showCollisionBoxes, canonical)`. A feature that fails to lay out,
+    /// such as one that [`geometry_too_long`](crate::bucket::geometry_too_long)
+    /// reports, fails the bucket; the worker reports it as the tile's error.
     fn create_bucket(
         &mut self,
         pattern_positions: &ImagePositions,
@@ -58,7 +58,7 @@ pub trait Layout: Send {
         first_load: bool,
         show_collision_boxes: bool,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr>;
+    ) -> Result<(), Error>;
 
     fn has_symbol_instances(&self) -> bool {
         true

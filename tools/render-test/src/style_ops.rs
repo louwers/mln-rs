@@ -82,7 +82,7 @@ pub fn set_layer_filter(style: &mut Style, layer_name: &str, filter: &serde_json
 }
 
 /// `setGlobalStateProperty`: `style.setGlobalStateProperty(name, value)`;
-/// its MisuseException (style not loaded) is not caught by the runner.
+/// its error (style not loaded) is not caught by the runner.
 pub fn set_global_state_property(style: &mut Style, name: &str, value: &feature::Value) -> Result<(), MapError> {
     style.set_global_state_property(name, value).map_err(|e| MapError::Exception(e.to_string()))
 }

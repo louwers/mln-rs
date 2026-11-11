@@ -11,7 +11,7 @@
 
 use std::sync::Arc;
 
-use mln_util::exception::StyleImageException;
+use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::immutable::Immutable;
 use mln_util::serialization::shared;
@@ -109,7 +109,10 @@ fn validate_content(content: &ImageContent, size: &Size) -> bool {
 
 impl Impl {
     /// `Image::Impl(id, image, pixelRatio, sdf, stretchX, stretchY, content,
-    /// textFitWidth, textFitHeight)`; C++ throws `util::StyleImageException`.
+    /// textFitWidth, textFitHeight)`. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty image,
+    /// a pixel ratio that isn't positive, or stretches or a content area
+    /// outside the image.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: String,
@@ -121,17 +124,17 @@ impl Impl {
         content: Option<ImageContent>,
         text_fit_width: Option<TextFit>,
         text_fit_height: Option<TextFit>,
-    ) -> Result<Self, StyleImageException> {
+    ) -> Result<Self, Error> {
         if !image.valid() {
-            return Err(StyleImageException::new("dimensions may not be zero"));
+            return Err(Error::invalid_argument("dimensions may not be zero"));
         } else if pixel_ratio <= 0.0 {
-            return Err(StyleImageException::new("pixelRatio may not be <= 0"));
+            return Err(Error::invalid_argument("pixelRatio may not be <= 0"));
         } else if !validate_stretch(&stretch_x, image.size.width as f32) {
-            return Err(StyleImageException::new("stretchX is out of bounds or overlapping"));
+            return Err(Error::invalid_argument("stretchX is out of bounds or overlapping"));
         } else if !validate_stretch(&stretch_y, image.size.height as f32) {
-            return Err(StyleImageException::new("stretchY is out of bounds or overlapping"));
+            return Err(Error::invalid_argument("stretchY is out of bounds or overlapping"));
         } else if content.as_ref().is_some_and(|content| !validate_content(content, &image.size)) {
-            return Err(StyleImageException::new("content area is invalid"));
+            return Err(Error::invalid_argument("content area is invalid"));
         }
         Ok(Impl { id, image, pixel_ratio, sdf, stretch_x, stretch_y, content, text_fit_width, text_fit_height })
     }
@@ -157,7 +160,7 @@ impl Image {
         content: Option<ImageContent>,
         text_fit_width: Option<TextFit>,
         text_fit_height: Option<TextFit>,
-    ) -> Result<Self, StyleImageException> {
+    ) -> Result<Self, Error> {
         Ok(Image {
             base_impl: Arc::new(Impl::new(
                 id,

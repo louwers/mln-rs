@@ -10,7 +10,7 @@ use std::sync::Arc;
 use mln_actor::RunLoop;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
-use mln_map::{BoundOptions, Map, MapLoadError, MapObserver, MapOptions, ProjectionMode, RenderMode};
+use mln_map::{BoundOptions, Map, MapObserver, MapOptions, ProjectionMode, RenderMode, StyleLoadError};
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType};
 use mln_util::image::PremultipliedImage;
@@ -38,7 +38,7 @@ impl TestRunnerMapObserver {
 }
 
 impl MapObserver for TestRunnerMapObserver {
-    fn on_did_fail_loading_map(&self, _error: MapLoadError, _what: &str) {
+    fn on_did_fail_loading_map(&self, _error: &StyleLoadError) {
         self.map_load_failure.set(true);
     }
 
@@ -116,9 +116,10 @@ impl Impl {
                 .with_cross_source_collisions(metadata.cross_source_collisions),
             &resource_options,
             &client_options,
-        )?;
+        )
+        .map_err(|e| e.to_string())?;
         if let Some(max_pitch) = metadata.max_pitch {
-            map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch)))?;
+            map.set_bounds(&BoundOptions::default().with_max_pitch(f64::from(max_pitch))).map_err(|e| e.to_string())?;
         }
         Ok(Impl { observer, frontend, file_source, map })
     }
@@ -128,7 +129,7 @@ impl TestRunnerImpl for Impl {
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError> {
         self.frontend.with_renderer(|renderer| renderer.clear_data());
         self.frontend.set_size(metadata.size);
-        self.map.set_size(metadata.size).map_err(MapError::Exception)?;
+        self.map.set_size(metadata.size).map_err(|e| MapError::Exception(e.to_string()))?;
         self.map.set_projection_mode(
             &ProjectionMode::default()
                 .with_axonometric(metadata.axonometric)
@@ -147,7 +148,7 @@ impl TestRunnerImpl for Impl {
     }
 
     fn render(&mut self) -> Result<PremultipliedImage, String> {
-        self.frontend.render(&mut self.map).map(|result| result.image)
+        self.frontend.render(&mut self.map).map(|result| result.image).map_err(|e| e.to_string())
     }
 
     fn dump_debug_logs(&self) {
@@ -180,7 +181,7 @@ impl TestRunnerImpl for Impl {
             .with_bearing(camera.bearing)
             .with_pitch(camera.pitch)
             .with_roll(camera.roll);
-        let bounds = self.map.lat_lng_bounds_for_camera(&camera).map_err(MapError::Exception)?;
+        let bounds = self.map.lat_lng_bounds_for_camera(&camera).map_err(|e| MapError::Exception(e.to_string()))?;
         Ok(mln_renderer::util::tile_cover::tile_cover_bounds(&bounds, zoom)
             .into_iter()
             .map(|id| crate::runner::TileId { z: id.canonical.z, x: id.canonical.x, y: id.canonical.y, wrap: id.wrap })
@@ -407,7 +408,7 @@ impl TestRunnerImpl for Impl {
 
         // C++ `decodeImage` and the `style::Image` constructor throw (not
         // caught by the runner).
-        let image = mln_image::decode_image(&bytes).map_err(MapError::Exception)?;
+        let image = mln_image::decode_image(&bytes).map_err(|e| MapError::Exception(e.to_string()))?;
         let image = mln_style::image::Impl::new(
             name.to_string(),
             image,

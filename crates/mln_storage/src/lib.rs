@@ -66,12 +66,12 @@ pub use main_resource_loader::MainResourceLoader;
 pub use mbtiles_file_source::MBTilesFileSource;
 pub use mln_util::client_options::ClientOptions;
 #[cfg(feature = "sqlite")]
-pub use offline_database::{MapboxTileLimitExceededException, OfflineDatabase};
+pub use offline_database::{OfflineDatabase, TileCountLimitExceeded};
 pub use online_file_source::OnlineFileSource;
 pub use pmtiles_file_source::PMTilesFileSource;
 pub use resource::{Kind, LoadingMethod, Resource, StoragePolicy, TileData};
 pub use resource_options::ResourceOptions;
-pub use response::{Data, Response};
+pub use response::{Data, ResourceError, Response};
 
 #[cfg(test)]
 mod tests;

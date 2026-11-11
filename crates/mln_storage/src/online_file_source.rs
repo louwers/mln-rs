@@ -47,7 +47,7 @@ use crate::network_status::{NetworkStatus, Status};
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{ResourceTransform, TransformResult};
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// For testing only
 pub const ONLINE_STATUS_KEY: &str = "online-status";
@@ -304,7 +304,7 @@ impl ThreadState {
             *req.request.borrow_mut() = Some(request);
         } else {
             let mut response = Response::new();
-            response.error = Some(Box::new(Error::new(Reason::Connection, "Online connectivity is disabled.")));
+            response.error = Some(Box::new(ResourceError::new(Reason::Connection, "Online connectivity is disabled.")));
             callback(response);
         }
     }
@@ -683,7 +683,7 @@ impl FileSource for OnlineFileSource {
                 // C++ throws out of `request`; the port answers with the error.
                 Err(message) => {
                     let mut response = Response::new();
-                    response.error = Some(Box::new(Error::new(Reason::Other, message)));
+                    response.error = Some(Box::new(ResourceError::new(Reason::Other, message)));
                     let req = FileSourceRequest::new(callback);
                     let r = req.actor();
                     r.invoke(move |request: &FileSourceRequestState| request.set_response(response));

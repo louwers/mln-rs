@@ -24,7 +24,7 @@ use crate::file_source_manager::FileSourceManager;
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::resource::{LoadingMethod, Priority, Resource};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 type FileSourcePtr = Option<Arc<dyn FileSource>>;
 
@@ -188,7 +188,7 @@ impl MainResourceLoaderThread {
                 // cannot be processed.
                 let mut response = Response::new();
                 response.no_content = true;
-                response.error = Some(Box::new(Error::new(Reason::Other, "Unsupported resource request.")));
+                response.error = Some(Box::new(ResourceError::new(Reason::Other, "Unsupported resource request.")));
                 callback(response);
             }
         }

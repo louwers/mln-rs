@@ -36,7 +36,7 @@ use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::offline_database::{DatabaseError, OfflineDatabase};
 use crate::resource::{LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// How long cache hits' `accessed` timestamps wait, so that the reads of a
 /// map load share one write.
@@ -104,12 +104,13 @@ impl DatabaseFileSourceThread {
             None => {
                 let mut response = Response::new();
                 response.no_content = true;
-                response.error = Some(Box::new(Error::new(Reason::NotFound, "Not found in offline database")));
+                response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Not found in offline database")));
                 offline_response = Some(response);
             }
             Some(response) => {
                 if !response.is_usable() {
-                    response.error = Some(Box::new(Error::new(Reason::NotFound, "Cached resource is unusable")));
+                    response.error =
+                        Some(Box::new(ResourceError::new(Reason::NotFound, "Cached resource is unusable")));
                 }
             }
         }

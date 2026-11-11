@@ -17,7 +17,7 @@ use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, GeometryTileLayer};
 use mln_util::constants::EXTENT;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
 use mln_vec_map::VecMap;
@@ -64,7 +64,7 @@ impl CircleLayout {
         group: &[Immutable<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
         filter_groups: &mut FilterGroups,
-    ) -> Result<Self, ExceptionPtr> {
+    ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
         let zoom = parameters.tile_id.overscaled_z as f32;
         let leader_layer_properties = (*group[0])
@@ -153,7 +153,7 @@ impl CircleLayout {
         group: &[Immutable<dyn LayerProperties>],
         source_layer: SourceLayer,
         filter_groups: &mut FilterGroups,
-    ) -> Result<Self, ExceptionPtr> {
+    ) -> Result<Self, Error> {
         let mut layout = CircleLayout::new(parameters, group, &*source_layer.layer()?, filter_groups)?;
         layout.source_layer = Some(source_layer);
         Ok(layout)
@@ -173,7 +173,7 @@ impl CircleLayout {
         insert_feature: &mut dyn FnMut(&GeometryCollection, usize, &str, &str),
         render_data: &mut HashMap<String, LayerRenderData>,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let mut bucket = CircleBucket::new(&self.layer_properties_map, self.mode, self.zoom);
         bucket.set_retain_features_by_id(self.retain_features_by_id);
         bucket.reserve_features(self.features.len());
@@ -313,7 +313,7 @@ impl Layout for CircleLayout {
         _first_load: bool,
         _show_collision_boxes: bool,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let source_layer = self.source_layer.clone().expect("CircleLayout: source layer");
         let layer = source_layer.layer()?;
         self.create_bucket_with(

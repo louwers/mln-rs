@@ -3,8 +3,8 @@
 // outlines are generated both as triangulated lines and as line primitives).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::RwLock;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
 
 use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
@@ -15,7 +15,7 @@ use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
 use mln_util::Color;
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::serialization::sorted;
@@ -114,7 +114,7 @@ impl FillBucket {
         FillLayoutVertex { a1: [p.x, p.y] }
     }
 
-    fn generate_buffers(&mut self, geometry: &GeometryCollection) -> Result<(), ExceptionPtr> {
+    fn generate_buffers(&mut self, geometry: &GeometryCollection) -> Result<(), Error> {
         generate_fill_and_outline_buffers(
             geometry,
             self.vertices.get_mut(),
@@ -126,7 +126,6 @@ impl FillBucket {
             self.basic_lines.get_mut(),
             &mut self.basic_line_segments,
         )
-        .map_err(|e| Arc::new(e) as ExceptionPtr)
     }
 
     fn populate_binders(
@@ -168,7 +167,7 @@ impl Bucket for FillBucket {
         pattern_dependencies: &PatternLayerMap,
         index: usize,
         canonical: &CanonicalTileID,
-    ) -> Result<(), ExceptionPtr> {
+    ) -> Result<(), Error> {
         let vertex_offset = self.vertices.len();
 
         self.generate_buffers(geometry)?;

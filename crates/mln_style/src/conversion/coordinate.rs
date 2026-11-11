@@ -28,7 +28,7 @@ impl Converter for LatLng {
         match LatLng::new(latitude, longitude) {
             Ok(lat_lng) => Some(lat_lng),
             Err(message) => {
-                error.message = message;
+                error.message = message.message;
                 None
             }
         }

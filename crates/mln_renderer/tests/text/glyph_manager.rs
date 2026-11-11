@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use mln_actor::{RunLoop, Timer};
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use mln_renderer::text::glyph_manager::{GlyphManager, GlyphManagerObserver, GlyphRequestor, glyph_requestor_key};
-use mln_storage::response::{Error, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
 use mln_text::HBShapeAdjust;
@@ -21,7 +21,7 @@ use mln_text::glyph_cache::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
 use mln_text::tagged_string::font_stack_hash;
 use mln_util::chrono::{Duration, milliseconds};
-use mln_util::exception::ExceptionPtr;
+use mln_util::error::Error;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
 use mln_util::image::AlphaImage;
@@ -79,7 +79,7 @@ impl LocalGlyphRasterizer for LatinALocalGlyphRasterizer {
 }
 
 type LoadedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
-type ErrorFn = Box<dyn FnMut(&FontStack, &GlyphRange, ExceptionPtr)>;
+type ErrorFn = Box<dyn FnMut(&FontStack, &GlyphRange, Error)>;
 type RequestedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
 
 /// `StubGlyphManagerObserver`.
@@ -97,7 +97,7 @@ impl GlyphManagerObserver for StubGlyphManagerObserver {
         }
     }
 
-    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
+    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: Error) {
         if let Some(f) = self.glyphs_error.borrow_mut().as_mut() {
             f(font_stack, range, error);
         }
@@ -295,7 +295,7 @@ fn loading_fail() {
 
     test.file_source.set_response(Kind::Glyphs, |_: &Resource| {
         let mut response = Response::new();
-        response.error = Some(Box::new(Error::new(Reason::Other, "Failed by the test case")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
 
@@ -311,7 +311,7 @@ fn fails_first_then_glyphs(requests: Rc<Cell<u32>>) -> impl Fn(&Resource) -> Opt
     move |_: &Resource| {
         let mut response = Response::new();
         if requests.get() == 1 {
-            response.error = Some(Box::new(Error::new(Reason::NotFound, "Failed by the test case")));
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Failed by the test case")));
         } else {
             response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
         }
@@ -402,7 +402,7 @@ fn retry_failed_requests_skips_removed_requestors() {
     let mut test = GlyphManagerTest::new();
     test.file_source.set_response(Kind::Glyphs, |_: &Resource| {
         let mut response = Response::new();
-        response.error = Some(Box::new(Error::new(Reason::Other, "Failed by the test case")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
     let run_loop = test.run_loop.clone();
@@ -424,7 +424,7 @@ fn loading_fail_still_answers_with_the_other_ranges() {
         if resource.url == "test/fixtures/resources/glyphs-0-255.pbf" {
             response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
         } else {
-            response.error = Some(Box::new(Error::new(Reason::NotFound, "Failed by the test case")));
+            response.error = Some(Box::new(ResourceError::new(Reason::NotFound, "Failed by the test case")));
         }
         Some(response)
     });

@@ -65,7 +65,7 @@ pub use layers::background_layer::BackgroundLayer;
 pub use property_value::PropertyValue;
 pub use renderer::property_evaluation_parameters::{CrossfadeParameters, PropertyEvaluationParameters};
 pub use renderer::transition_parameters::{GlobalStateChange, TransitionParameters};
-pub use style::Style;
+pub use style::{Style, StyleLoadError};
 pub use transition_options::TransitionOptions;
 
 #[cfg(test)]

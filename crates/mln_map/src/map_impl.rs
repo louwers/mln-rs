@@ -22,25 +22,25 @@ use std::sync::Arc;
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{CameraOptions, MapDebugOptions, MapMode, TileLodMode};
 use mln_renderer::{
-    ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererFrontend, RendererObserver,
-    RenderingStats, TileOperation, UpdateParameters,
+    FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererFrontend, RendererObserver, RenderingStats,
+    TileOperation, UpdateParameters,
 };
 use mln_storage::FileSource;
-use mln_style::Style;
 use mln_style::observer::{Observer as StyleObserver, SourceObserver};
 use mln_style::source::Source;
 use mln_style::sprite::Sprite;
+use mln_style::{Style, StyleLoadError};
 use mln_util::chrono::{Clock, TimePoint};
-use mln_util::exception::{NotFoundException, StyleLoadException, StyleParseException};
+use mln_util::error::Error;
 use mln_util::identity::SimpleIdentity;
 
-use crate::map_observer::{CameraChange, MapLoadError, MapObserver, RenderFrameStatus};
+use crate::map_observer::{CameraChange, MapObserver, RenderFrameStatus};
 use crate::map_options::MapOptions;
 use crate::rendering_stats_view::RenderingStatsView;
 use crate::transform::{Transform, TransformObserver};
 
 /// `Map::StillImageCallback`: called with `None` on success, or the error.
-pub type StillImageCallback = Box<dyn FnOnce(Option<ExceptionPtr>)>;
+pub type StillImageCallback = Box<dyn FnOnce(Option<Error>)>;
 
 /// `StillImageRequest`.
 pub struct StillImageRequest {
@@ -70,10 +70,10 @@ enum StyleEvent {
     Update,
     StyleLoading,
     StyleLoaded,
-    StyleError(ExceptionPtr),
-    ResourceError(ExceptionPtr),
+    StyleError(StyleLoadError),
+    ResourceError(Error),
     SpriteLoaded(Option<Sprite>),
-    SpriteError(Option<Sprite>, ExceptionPtr),
+    SpriteError(Option<Sprite>, Error),
     SpriteRequested(Option<Sprite>),
     /// Port-only: a `Style::loadURL` response is waiting (see
     /// `Observer::on_style_response`).
@@ -109,16 +109,16 @@ impl StyleObserver for MapStyleObserver {
     fn on_update(&self) {
         self.dispatch(StyleEvent::Update);
     }
-    fn on_style_error(&self, error: ExceptionPtr) {
+    fn on_style_error(&self, error: StyleLoadError) {
         self.dispatch(StyleEvent::StyleError(error));
     }
-    fn on_resource_error(&self, error: ExceptionPtr) {
+    fn on_resource_error(&self, error: Error) {
         self.dispatch(StyleEvent::ResourceError(error));
     }
     fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
         self.dispatch(StyleEvent::SpriteLoaded(sprite.cloned()));
     }
-    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: Error) {
         self.dispatch(StyleEvent::SpriteError(sprite.cloned(), error));
     }
     fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
@@ -178,7 +178,7 @@ impl MapImpl {
         observer: Rc<dyn MapObserver>,
         file_source: Option<Arc<dyn FileSource>>,
         map_options: &MapOptions,
-    ) -> Result<Rc<MapImpl>, String> {
+    ) -> Result<Rc<MapImpl>, Error> {
         let transform_observer: Rc<dyn TransformObserver> =
             Rc::new(MapTransformObserver { observer: observer.clone() });
         let pixel_ratio = map_options.pixel_ratio();
@@ -355,26 +355,15 @@ impl MapImpl {
         // TODO(port): logStyleDependencies (debug builds only).
     }
 
-    pub fn on_style_error(&self, error: ExceptionPtr) {
-        let type_ = if error.downcast_ref::<StyleParseException>().is_some() {
-            MapLoadError::StyleParseError
-        } else if error.downcast_ref::<StyleLoadException>().is_some() {
-            MapLoadError::StyleLoadError
-        } else if error.downcast_ref::<NotFoundException>().is_some() {
-            MapLoadError::NotFoundError
-        } else {
-            MapLoadError::UnknownError
-        };
-        let description = error.to_string();
-
-        self.observer.on_did_fail_loading_map(type_, &description);
+    pub fn on_style_error(&self, error: StyleLoadError) {
+        self.observer.on_did_fail_loading_map(&error);
     }
 
     fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
         self.observer.on_sprite_loaded(sprite);
     }
 
-    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: Error) {
         self.observer.on_sprite_error(sprite, error);
     }
 
@@ -406,7 +395,7 @@ impl RendererObserver for MapImpl {
         self.on_update();
     }
 
-    fn on_resource_error(&self, error: ExceptionPtr) {
+    fn on_resource_error(&self, error: Error) {
         if self.mode != MapMode::Continuous {
             let request = self.still_image_request.borrow_mut().take();
             if let Some(request) = request {
@@ -502,7 +491,7 @@ impl RendererObserver for MapImpl {
         }
     }
 
-    fn on_render_error(&self, error: ExceptionPtr) {
+    fn on_render_error(&self, error: Error) {
         self.observer.on_render_error(error);
     }
 
@@ -510,7 +499,7 @@ impl RendererObserver for MapImpl {
         self.observer.on_glyphs_loaded(font_stack, range);
     }
 
-    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
+    fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: Error) {
         self.observer.on_glyphs_error(font_stack, range, error);
     }
 

@@ -20,10 +20,10 @@ use std::sync::Arc;
 use mln_actor::AsyncTask;
 use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_map::transform::Transform;
-use mln_map::{CameraOptions, Map, MapLoadError, MapMode, MapObserver, MapOptions, TransformState};
-use mln_renderer::{ExceptionPtr, RenderMode, RendererFrontend, RendererObserver, RenderingStats, UpdateParameters};
+use mln_map::{CameraOptions, Map, MapMode, MapObserver, MapOptions, TransformState};
+use mln_renderer::{RenderMode, RendererFrontend, RendererObserver, RenderingStats, UpdateParameters};
 use mln_storage::{ClientOptions, ResourceOptions};
-use mln_util::exception::MisuseException;
+use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -46,12 +46,12 @@ impl MapSnapshotterObserver for NullMapSnapshotterObserver {}
 pub type PointForFn = Box<dyn Fn(&LatLng) -> ScreenCoordinate>;
 /// `MapSnapshotter::LatLngForFn`.
 /// `Err`: the std::domain_error of the C++ LatLng constructor.
-pub type LatLngForFn = Box<dyn Fn(&ScreenCoordinate) -> Result<LatLng, String>>;
+pub type LatLngForFn = Box<dyn Fn(&ScreenCoordinate) -> Result<LatLng, Error>>;
 /// `MapSnapshotter::Attributions`.
 pub type Attributions = Vec<String>;
 /// `MapSnapshotter::Callback` (a `std::function`: `snapshot` may call it
 /// twice, see there).
-pub type Callback = Box<dyn FnMut(Option<ExceptionPtr>, PremultipliedImage, Attributions, PointForFn, LatLngForFn)>;
+pub type Callback = Box<dyn FnMut(Option<Error>, PremultipliedImage, Attributions, PointForFn, LatLngForFn)>;
 
 /// `SnapshotterRenderer`: a HeadlessFrontend that reads the still image at
 /// the end of the frame that answers a still image request.
@@ -114,7 +114,7 @@ impl RendererObserver for SnapshotterRenderer {
         }
     }
 
-    fn on_resource_error(&self, error: ExceptionPtr) {
+    fn on_resource_error(&self, error: Error) {
         self.has_pending_still_image_request.set(false);
         if let Some(observer) = self.renderer_observer() {
             observer.on_resource_error(error);
@@ -167,7 +167,7 @@ impl RendererObserver for SnapshotterRenderer {
         }
     }
 
-    fn on_render_error(&self, error: ExceptionPtr) {
+    fn on_render_error(&self, error: Error) {
         if let Some(observer) = self.renderer_observer() {
             observer.on_render_error(error);
         }
@@ -224,8 +224,8 @@ struct SnapshotterMapObserver {
 }
 
 impl MapObserver for SnapshotterMapObserver {
-    fn on_did_fail_loading_map(&self, _error: MapLoadError, what: &str) {
-        self.observer.on_did_fail_loading_style(what);
+    fn on_did_fail_loading_map(&self, error: &mln_map::StyleLoadError) {
+        self.observer.on_did_fail_loading_style(error.message());
     }
 
     fn on_did_finish_loading_style(&self) {
@@ -242,7 +242,7 @@ pub struct MapSnapshotter {
     /// `renderStillCallback`: the callback of the snapshot being rendered.
     render_still_callback: Rc<RefCell<Option<Callback>>>,
     /// The outcome of the still image the delivery task hands over.
-    still_image_result: Rc<RefCell<Option<Option<ExceptionPtr>>>>,
+    still_image_result: Rc<RefCell<Option<Option<Error>>>>,
     deliver: AsyncTask,
     frontend: SnapshotterRendererFrontend,
     map: Rc<RefCell<Map>>,
@@ -258,7 +258,7 @@ impl MapSnapshotter {
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
         observer: Rc<dyn MapSnapshotterObserver>,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, Error> {
         let frontend = SnapshotterRendererFrontend::new(size, pixel_ratio);
         let map = Rc::new(RefCell::new(Map::with_resource_options(
             &frontend,
@@ -269,7 +269,7 @@ impl MapSnapshotter {
         )?));
 
         let render_still_callback: Rc<RefCell<Option<Callback>>> = Rc::new(RefCell::new(None));
-        let still_image_result: Rc<RefCell<Option<Option<ExceptionPtr>>>> = Rc::new(RefCell::new(None));
+        let still_image_result: Rc<RefCell<Option<Option<Error>>>> = Rc::new(RefCell::new(None));
         let deliver = {
             let render_still_callback = render_still_callback.clone();
             let still_image_result = still_image_result.clone();
@@ -340,7 +340,7 @@ impl MapSnapshotter {
         pixel_ratio: f32,
         resource_options: &ResourceOptions,
         client_options: &ClientOptions,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, Error> {
         Self::with_observer(size, pixel_ratio, resource_options, client_options, Rc::new(NullMapSnapshotterObserver))
     }
 
@@ -390,20 +390,20 @@ impl MapSnapshotter {
         self.map.borrow().get_camera_options(None)
     }
 
-    /// `Err`: as `Map::camera_for_lat_lngs`.
-    pub fn set_region(&mut self, region: &LatLngBounds) -> Result<(), String> {
+    /// Fails as [`Map::camera_for_lat_lngs`] does.
+    pub fn set_region(&mut self, region: &LatLngBounds) -> Result<(), Error> {
         self.region = *region;
         self.jump_to_region()
     }
 
-    /// `Err`: as `Map::lat_lng_bounds_for_camera`.
-    pub fn get_region(&self) -> Result<LatLngBounds, String> {
+    /// Fails as [`Map::lat_lng_bounds_for_camera`] does.
+    pub fn get_region(&self) -> Result<LatLngBounds, Error> {
         let map = self.map.borrow();
         map.lat_lng_bounds_for_camera(&map.get_camera_options(Some(self.get_padding())))
     }
 
-    /// `Err`: as `Map::camera_for_lat_lngs`.
-    pub fn set_padding(&mut self, insets: &EdgeInsets) -> Result<(), String> {
+    /// Fails as [`Map::camera_for_lat_lngs`] does.
+    pub fn set_padding(&mut self, insets: &EdgeInsets) -> Result<(), Error> {
         self.region_insets = *insets;
         if !self.region.is_empty() {
             self.jump_to_region()?;
@@ -415,7 +415,7 @@ impl MapSnapshotter {
         self.region_insets
     }
 
-    fn jump_to_region(&self) -> Result<(), String> {
+    fn jump_to_region(&self) -> Result<(), Error> {
         let lat_lngs = [self.region.southwest(), self.region.northeast()];
         let camera = self.map.borrow().camera_for_lat_lngs(&lat_lngs, &self.region_insets, None, None)?;
         self.map().jump_to(&camera);
@@ -427,7 +427,7 @@ impl MapSnapshotter {
     pub fn snapshot(&self, mut callback: Callback) {
         if self.render_still_callback.borrow().is_some() {
             callback(
-                Some(MisuseException::ptr("MapSnapshotter is currently rendering an image")),
+                Some(Error::invalid_state("MapSnapshotter is currently rendering an image")),
                 PremultipliedImage::new(Size::default()),
                 Vec::new(),
                 Box::new(|_| ScreenCoordinate::default()),

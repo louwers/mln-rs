@@ -22,7 +22,7 @@ use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::local_file_request::request_local_file;
 use crate::resource::Resource;
 use crate::resource_options::ResourceOptions;
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 fn accepts_url(url: &str) -> bool {
     url.starts_with(FILE_PROTOCOL)
@@ -50,7 +50,7 @@ impl LocalFileSourceThread {
     pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         if !accepts_url(&resource.url) {
             let mut response = Response::new();
-            response.error = Some(Box::new(Error::new(Reason::Other, "Invalid file URL")));
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, "Invalid file URL")));
             req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
             return;
         }

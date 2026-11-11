@@ -14,7 +14,7 @@ use mln_map_types::{
 use mln_renderer::render_source::{self as render_source, RenderSource, RenderSourceObserver};
 use mln_renderer::sources::render_geojson_source::RenderGeoJSONSource;
 use mln_renderer::tile_parameters::TileParameters;
-use mln_storage::response::{Error as ResponseError, Reason};
+use mln_storage::response::{Reason, ResourceError};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{AsyncRequest, Callback, FileSource, Kind, Resource, ResourceOptions, Response};
 use mln_style::layer::{Layer, static_immutable_cast};
@@ -40,7 +40,7 @@ use mln_style_types::SourceType;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::chrono::{Duration, milliseconds};
 use mln_util::client_options::ClientOptions;
-use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_util::error::Error;
 use mln_util::geo::LatLng;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
@@ -131,7 +131,7 @@ impl Drop for SourceTest {
 #[derive(Default)]
 struct StubRenderSourceObserver {
     tile_changed: RefCell<Option<Box<dyn Fn(&str, &OverscaledTileID)>>>,
-    tile_error: RefCell<Option<Box<dyn Fn(&str, &OverscaledTileID, ExceptionPtr)>>>,
+    tile_error: RefCell<Option<Box<dyn Fn(&str, &OverscaledTileID, Error)>>>,
 }
 
 impl RenderSourceObserver for StubRenderSourceObserver {
@@ -141,7 +141,7 @@ impl RenderSourceObserver for StubRenderSourceObserver {
         }
     }
 
-    fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: ExceptionPtr) {
+    fn on_tile_error(&self, source_id: &str, tile_id: &OverscaledTileID, error: Error) {
         if let Some(f) = &*self.tile_error.borrow() {
             f(source_id, tile_id, error);
         }
@@ -277,7 +277,7 @@ fn tile_fail(kind: Tiled) {
     let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
     file_source.set_response(Kind::Tile, |_resource| {
         let mut response = Response::new();
-        response.error = Some(Box::new(ResponseError::new(Reason::Other, "Failed by the test case")));
+        response.error = Some(Box::new(ResourceError::new(Reason::Other, "Failed by the test case")));
         Some(response)
     });
 
@@ -643,7 +643,7 @@ fn custom_geometry_source_set_tile_error() {
 
     let handle = source.handle();
     test.run_loop.invoke(move || {
-        handle.set_tile_error(CanonicalTileID::new(0, 0, 0), RuntimeError::ptr("failed"));
+        handle.set_tile_error(CanonicalTileID::new(0, 0, 0), Error::native("failed"));
     });
 
     test.run();

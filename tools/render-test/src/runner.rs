@@ -1312,7 +1312,7 @@ fn self_check_image(metadata: &TestMetadata) -> PremultipliedImage {
         if filesystem::exists(dir) {
             let entries = read_expected_image_entries(dir);
             if let Some(first) = entries.first() {
-                if let Ok(image) = std::fs::read(first).map_err(|e| e.to_string()).and_then(|b| decode_image(&b)) {
+                if let Some(image) = std::fs::read(first).ok().and_then(|b| decode_image(&b).ok()) {
                     return image;
                 }
                 break;

@@ -24,7 +24,7 @@ use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{FinishedCallback, ResourceTransform};
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
 const CONNECTION_TIMEOUT: f64 = 0.0;
@@ -818,7 +818,7 @@ fn failed_resource_transform() {
     let fs = online_file_source();
     fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
         |_kind: Kind, _url: &str, finished: FinishedCallback| {
-            finished(Err(Error::new(Reason::Other, "No credential")));
+            finished(Err(ResourceError::new(Reason::Other, "No credential")));
         },
     ))));
 
@@ -854,7 +854,7 @@ fn retry_failed_resource_transform() {
         move |_kind: Kind, url: &str, finished: FinishedCallback| {
             assert_eq!(delayed, url);
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
-                finished(Err(Error::new(Reason::Connection, "Offline")));
+                finished(Err(ResourceError::new(Reason::Connection, "Offline")));
             } else {
                 finished(Ok(test.clone()));
             }
