@@ -15,6 +15,7 @@ doctest = false
 
 [dependencies]
 geometry.workspace = true
+mln_vec_map.workspace = true
 serde.workspace = true
 
 [lints]

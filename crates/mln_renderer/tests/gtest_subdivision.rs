@@ -26,6 +26,7 @@ use mln_tile_id::geometry_tile_data::{
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::subdivision_granularity::{SubdivisionGranularityExpression, SubdivisionGranularitySetting};
+use mln_vec_map::VecMap;
 
 /// `EXTENT` as a tile coordinate.
 const EXTENT_I16: i16 = EXTENT as i16;
@@ -234,7 +235,7 @@ impl GeometryTileFeature for StubGeometryTileFeature {
 // vertices.
 fn extrude_on_the_globe(polygon: &GeometryCollection, tile: &CanonicalTileID) -> FillExtrusionBucket {
     let mut bucket =
-        FillExtrusionBucket::new(FillExtrusionLayoutProperties::PossiblyEvaluated::default(), &BTreeMap::new(), 0.0, 1);
+        FillExtrusionBucket::new(FillExtrusionLayoutProperties::PossiblyEvaluated::default(), &VecMap::new(), 0.0, 1);
     bucket.set_subdivision_granularity(&SubdivisionGranularitySetting::globe());
     let feature = StubGeometryTileFeature {
         properties: PropertyMap::new(),

@@ -214,7 +214,7 @@ macro_rules! __data_driven_possibly_evaluated_hooks {
 
         fn possibly_evaluated_global_state_refs(
             value: &Self::PossiblyEvaluatedType,
-        ) -> Option<&std::collections::BTreeSet<String>> {
+        ) -> Option<&mln_vec_map::VecSet<String>> {
             value.get_global_state_refs()
         }
     };

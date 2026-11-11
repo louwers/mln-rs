@@ -3,8 +3,8 @@
 //
 // The database work runs on the "MBTilesFileSource" thread (`util::Thread`)
 // as in C++. The TileJSON is built as a rapidjson document would be (members
-// in insertion order, duplicates kept) and written with //vendor/rapidjson's
-// `Writer`.
+// in insertion order, duplicates kept; json_document.rs) and written with
+// //vendor/rapidjson's `Writer`. Needs the `sqlite` feature.
 //
 // Deviations: C++ lets the exceptions of `Database::open`, a query,
 // `std::stoi`/`std::stod` and `util::decompress` escape the file source
@@ -17,22 +17,22 @@
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
-use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::chrono::Timestamp;
 use mln_util::client_options::ClientOptions;
+use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
 use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
-use rapidjson::Writer;
+use mln_vec_map::VecMap;
 use serde_json::Value as Json;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
+use crate::json_document::{Document, strtol};
 use crate::local_file_request::path_from_utf8;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
@@ -45,88 +45,6 @@ fn accepts_url(url: &str) -> bool {
 
 fn url_to_path(url: &str) -> Vec<u8> {
     percent_decode(&url[MBTILES_PROTOCOL.len().min(url.len())..])
-}
-
-/// A rapidjson `Document` object: members in insertion order, duplicate
-/// names allowed (`AddMember` appends, `operator[]` finds the first).
-#[derive(Default)]
-pub(crate) struct Document {
-    pub members: Vec<(String, Json)>,
-}
-
-impl Document {
-    /// `doc.Parse(json)` followed by `if (!doc.IsObject()) doc.SetObject()`.
-    pub fn parse_object(json: &[u8]) -> Self {
-        // `Parse(const char*)` stops at the first NUL.
-        let end = json.iter().position(|&b| b == 0).unwrap_or(json.len());
-        match serde_json::from_slice::<Json>(&json[..end]) {
-            Ok(Json::Object(object)) => Document { members: object.into_iter().collect() },
-            _ => Document::default(),
-        }
-    }
-
-    pub fn has_member(&self, name: &str) -> bool {
-        self.members.iter().any(|(n, _)| n == name)
-    }
-
-    pub fn add_member(&mut self, name: impl Into<String>, value: Json) {
-        self.members.push((name.into(), value));
-    }
-
-    /// `doc[name]` (the member must exist).
-    pub fn get_mut(&mut self, name: &str) -> &mut Json {
-        &mut self.members.iter_mut().find(|(n, _)| n == name).expect("member").1
-    }
-
-    /// `serialize(doc)`: `doc.Accept(Writer<StringBuffer>)`.
-    pub fn serialize(&self) -> String {
-        let mut w = Writer::new();
-        w.start_object();
-        for (name, value) in &self.members {
-            w.key(name);
-            write_json(&mut w, value);
-        }
-        w.end_object();
-        w.into_string()
-    }
-}
-
-fn write_json(w: &mut Writer, value: &Json) {
-    match value {
-        Json::Null => {
-            w.null();
-        }
-        Json::Bool(b) => {
-            w.bool_(*b);
-        }
-        Json::Number(n) => {
-            if let Some(u) = n.as_u64() {
-                w.uint64(u);
-            } else if let Some(i) = n.as_i64() {
-                w.int64(i);
-            } else {
-                w.double(n.as_f64().unwrap_or_default());
-            }
-        }
-        Json::String(s) => {
-            w.string(s);
-        }
-        Json::Array(values) => {
-            w.start_array();
-            for v in values {
-                write_json(w, v);
-            }
-            w.end_array();
-        }
-        Json::Object(map) => {
-            w.start_object();
-            for (k, v) in map {
-                w.key(k);
-                write_json(w, v);
-            }
-            w.end_object();
-        }
-    }
 }
 
 fn json_double(d: f64) -> Json {
@@ -144,21 +62,6 @@ pub(crate) fn strtod(s: &str) -> f64 {
         }
     }
     best
-}
-
-/// `std::stoi(s)` / `std::strtol(s, nullptr, 10)`: the leading integer;
-/// 0 when there is none (C++ `stoi` throws then).
-pub(crate) fn strtol(s: &str) -> i64 {
-    let s = s.trim_start();
-    let bytes = s.as_bytes();
-    let mut end = 0;
-    if end < bytes.len() && (bytes[end] == b'-' || bytes[end] == b'+') {
-        end += 1;
-    }
-    while end < bytes.len() && bytes[end].is_ascii_digit() {
-        end += 1;
-    }
-    s[..end].parse::<i64>().unwrap_or(0)
 }
 
 /// `split(s, delim)`: each `std::getline` piece through `std::strtod`.
@@ -189,7 +92,7 @@ fn error_response(reason: Reason, message: impl Into<String>) -> Response {
 pub struct MBTilesFileSourceThread {
     // Multiple databases open simultaneously, to effectively support
     // multiple .mbtiles maps
-    db_cache: RefCell<BTreeMap<Vec<u8>, Database>>,
+    db_cache: RefCell<VecMap<Vec<u8>, Database>>,
 }
 
 impl MBTilesFileSourceThread {
@@ -210,7 +113,7 @@ impl MBTilesFileSourceThread {
 
         let mut doc = Document::default();
 
-        let mut values: BTreeMap<String, String> = BTreeMap::new();
+        let mut values: VecMap<String, String> = VecMap::new();
         let db =
             Database::open(path.to_str().ok_or("Invalid UTF-8 in path")?, OpenFlag::ReadOnly).map_err(|e| e.message)?;
         let conn = db.conn();
@@ -378,7 +281,7 @@ impl MBTilesFileSource {
     pub fn new(resource_options: &ResourceOptions, client_options: &ClientOptions) -> Self {
         MBTilesFileSource {
             thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
-                db_cache: RefCell::new(BTreeMap::new()),
+                db_cache: RefCell::new(VecMap::new()),
             }),
             resource_options: Mutex::new(resource_options.clone()),
             client_options: Mutex::new(client_options.clone()),

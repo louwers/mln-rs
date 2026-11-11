@@ -12,7 +12,7 @@
 // glyphs/image responders beyond the generic `set_response`.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Mutex;
 
@@ -20,6 +20,7 @@ use feature::Value;
 use mln_actor::{AsyncTask, LocalObject};
 use mln_util::client_options::ClientOptions;
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource};
@@ -39,7 +40,7 @@ pub type Responder = Rc<dyn Fn(&Resource) -> Option<Response>>;
 
 #[derive(Default)]
 struct State {
-    pending: BTreeMap<u64, (Resource, Responder, Rc<RefCell<Callback>>)>,
+    pending: VecMap<u64, (Resource, Responder, Rc<RefCell<Callback>>)>,
     next_id: u64,
     timer: Option<AsyncTask>,
     responders: HashMap<Kind, Responder>,

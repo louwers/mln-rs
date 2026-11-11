@@ -1,0 +1,41 @@
+[package]
+name = "mln-rs-web"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+# The browser build: the map and its tile workers in Web Workers, each a
+# wasm instance of the same module with its own memory
+# (wasm32-unknown-unknown, no atomics). `just web` builds it into web/pkg,
+# with the font-face shaper the map loads for styles with font faces
+# (crates/mln_web_shaper; mln_renderer's in-process shaper stays off here); never
+# released.
+publish = false
+autotests = false
+
+[lib]
+name = "mln_web"
+crate-type = ["cdylib", "rlib"]
+
+# Only the browser target has anything to build.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+mln_actor.workspace = true
+mln_gestures.workspace = true
+mln_gfx.workspace = true
+mln_map.workspace = true
+mln_renderer.workspace = true
+mln_storage.workspace = true
+mln_text.workspace = true
+mln_util.workspace = true
+mln_webgpu.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true

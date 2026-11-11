@@ -24,7 +24,7 @@
 // TODO(port): the ErrorScope for symbol errors, `setObserver`, font faces
 // (HarfBuzz shaping results for complex scripts).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -41,6 +41,7 @@ use mln_tile_id::geometry_tile_data::GeometryTileData;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
@@ -83,7 +84,7 @@ pub enum WorkerMessage {
     SetData {
         #[serde(with = "fields::tile_data")]
         data: Option<SharedTileData>,
-        available_images: Immutable<BTreeSet<String>>,
+        available_images: Immutable<VecSet<String>>,
         correlation_id: u64,
     },
     /// `setLayers(layers, globalState, availableImages,
@@ -92,7 +93,7 @@ pub enum WorkerMessage {
         #[serde(with = "fields::layers")]
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
-        available_images: Immutable<BTreeSet<String>>,
+        available_images: Immutable<VecSet<String>>,
         subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     },
@@ -189,7 +190,7 @@ pub struct GeometryTileWorker {
     icon_map: ImageMap,
     pattern_map: ImageMap,
     version_map: ImageVersionMap,
-    available_images: Immutable<BTreeSet<String>>,
+    available_images: Immutable<VecSet<String>>,
 
     show_collision_boxes: bool,
     subdivision_granularity: SubdivisionGranularitySetting,
@@ -240,7 +241,7 @@ impl GeometryTileWorker {
             icon_map: ImageMap::new(),
             pattern_map: ImageMap::new(),
             version_map: ImageVersionMap::new(),
-            available_images: Arc::new(BTreeSet::new()),
+            available_images: Arc::new(VecSet::new()),
             show_collision_boxes,
             subdivision_granularity: SubdivisionGranularitySetting::none(),
             first_load: true,
@@ -318,7 +319,7 @@ impl GeometryTileWorker {
     pub fn set_data(
         &mut self,
         data: Option<SharedTileData>,
-        available_images: Immutable<BTreeSet<String>>,
+        available_images: Immutable<VecSet<String>>,
         correlation_id: u64,
     ) {
         self.guarded(|this| {
@@ -345,7 +346,7 @@ impl GeometryTileWorker {
         &mut self,
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
-        available_images: Immutable<BTreeSet<String>>,
+        available_images: Immutable<VecSet<String>>,
         subdivision_granularity: SubdivisionGranularitySetting,
         correlation_id: u64,
     ) {

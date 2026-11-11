@@ -2,8 +2,6 @@
 // src/mln/style/expression/value.cpp, plus the parts of
 // src/mln/style/conversion/stringify.hpp that `stringify` uses.
 
-use std::collections::BTreeMap;
-
 use feature::{Value as MbglValue, ValueObject};
 use mln_style_types::{
     AlignmentType, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType, IconTextFitType,
@@ -22,8 +20,8 @@ use crate::type_::{self, Type};
 
 /// The object alternative of `expression::Value`.
 // C++ uses std::unordered_map, whose iteration order is libstdc++-hash
-// dependent; a BTreeMap iterates in key order.
-pub type ObjectType = BTreeMap<String, Value>;
+// dependent; a VecMap iterates in key order.
+pub type ObjectType = mln_vec_map::VecMap<String, Value>;
 
 /// `expression::Value`, same variant order as the C++ variant.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -342,6 +340,17 @@ pub fn from_mbgl_value(value: &MbglValue) -> Value {
         MbglValue::Double(v) => Value::Number(*v),
         MbglValue::Uint(v) => Value::Number(*v as f64),
         MbglValue::Int(v) => Value::Number(*v as f64),
+    }
+}
+
+/// [`from_mbgl_value`] for an owned value, moving its strings, arrays and
+/// objects instead of cloning them.
+pub fn from_mbgl_value_owned(value: MbglValue) -> Value {
+    match value {
+        MbglValue::Array(v) => Value::Array(v.into_iter().map(from_mbgl_value_owned).collect()),
+        MbglValue::Object(v) => Value::Object(v.into_iter().map(|(k, v)| (k, from_mbgl_value_owned(v))).collect()),
+        MbglValue::String(s) => Value::String(s),
+        other => from_mbgl_value(&other),
     }
 }
 

@@ -12,7 +12,7 @@ use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 use mln_style_types::{LineCapType, LineJoinType, TranslateAnchorType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use std::collections::BTreeSet;
+use mln_vec_map::VecSet;
 
 crate::layout_property!(
     /// `struct LineCap : LayoutProperty<LineCapType>`:
@@ -212,7 +212,7 @@ impl LayerProperties for LineLayerProperties {
         self.evaluated.get_dependencies()
     }
 
-    fn collect_evaluated_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.evaluated.collect_global_state_refs(refs);
     }
 }

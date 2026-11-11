@@ -88,6 +88,8 @@ pub struct Context {
     // UploadPass::build_attribute_bindings, one per attribute type, with the
     // vertex count each covers.
     dummy_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>>,
+    /// Command buffers the command encoders have submitted.
+    submissions: Cell<u64>,
 }
 
 /// `clipMaskStencilMode`
@@ -125,7 +127,18 @@ impl Context {
             globe_clip_mask_shader: RefCell::new(None),
             globe_clip_mask_pipeline_hash: Cell::new(None),
             globe_clip_meshes: RefCell::new(BTreeMap::new()),
+            submissions: Cell::new(0),
         })
+    }
+
+    /// How many command buffers the command encoders have submitted,
+    /// counting one as it is being submitted.
+    pub(crate) fn submissions(&self) -> u64 {
+        self.submissions.get()
+    }
+
+    pub(crate) fn count_submission(&self) {
+        self.submissions.set(self.submissions.get() + 1);
     }
 
     /// The owning `Rc` (resources keep the context alive, as the C++
@@ -176,7 +189,6 @@ impl Context {
     /// makes one (usage | CopyDst, initial queue write).
     fn create_raw_buffer(&self, data: &[u8], usage: wgpu::BufferUsages) -> Option<(wgpu::Buffer, u64)> {
         let device = self.backend.get_device()?;
-        let queue = self.backend.get_queue()?;
         let padded_size = (data.len() + 3) & !3usize;
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Buffer Resource"),
@@ -186,7 +198,7 @@ impl Context {
         });
         let mut padded = data.to_vec();
         padded.resize(padded_size, 0);
-        queue.write_buffer(&buffer, 0, &padded);
+        self.backend.write_buffer(&buffer, 0, &padded);
         Some((buffer, data.len() as u64))
     }
 

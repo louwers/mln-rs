@@ -9,6 +9,7 @@ use mln_util::font_stack::{FontStack, font_stack_to_string};
 use mln_util::image::AlphaImage;
 use mln_util::immutable::Immutable;
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::tagged_string::FontStackHash;
@@ -147,7 +148,7 @@ impl Glyph {
 /// `Glyphs = std::map<GlyphID, std::optional<Immutable<Glyph>>>`.
 pub type Glyphs = BTreeMap<GlyphID, Option<Immutable<Glyph>>>;
 /// `GlyphMap = std::map<FontStackHash, Glyphs>`.
-pub type GlyphMap = BTreeMap<FontStackHash, Glyphs>;
+pub type GlyphMap = VecMap<FontStackHash, Glyphs>;
 
 /// `PositionedGlyph`.
 #[derive(Clone, Debug, PartialEq)]
@@ -293,17 +294,17 @@ pub struct HBShapeRequest {
 
 /// `HBShapeRequests = std::map<FontStack, std::map<GlyphIDType,
 /// std::set<std::u16string>>>`.
-pub type HBShapeRequests = BTreeMap<FontStack, BTreeMap<GlyphIDType, BTreeSet<Vec<u16>>>>;
+pub type HBShapeRequests = VecMap<FontStack, VecMap<GlyphIDType, BTreeSet<Vec<u16>>>>;
 
 /// `GlyphDependencies`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct GlyphDependencies {
-    pub glyphs: BTreeMap<FontStack, GlyphIDs>,
+    pub glyphs: VecMap<FontStack, GlyphIDs>,
     pub shapes: HBShapeRequests,
 }
 
 /// `GlyphRangeDependencies = std::map<FontStack, std::unordered_set<GlyphRange>>`.
-pub type GlyphRangeDependencies = BTreeMap<FontStack, HashSet<GlyphRange>>;
+pub type GlyphRangeDependencies = VecMap<FontStack, HashSet<GlyphRange>>;
 
 /// `GlyphPosition`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -315,7 +316,7 @@ pub struct GlyphPosition {
 /// `GlyphPositionMap = std::map<GlyphID, GlyphPosition>`.
 pub type GlyphPositionMap = BTreeMap<GlyphID, GlyphPosition>;
 /// `GlyphPositions = std::map<FontStackHash, GlyphPositionMap>`.
-pub type GlyphPositions = BTreeMap<FontStackHash, GlyphPositionMap>;
+pub type GlyphPositions = VecMap<FontStackHash, GlyphPositionMap>;
 
 /// `genNewGlyphIDType()`: a process-wide counter (a function-local static
 /// in C++) that skips `FontPBF` when it wraps.
@@ -329,11 +330,11 @@ fn gen_new_glyph_id_type_counter(counter: &mut i16) -> GlyphIDType {
 
 struct GlyphTypes {
     counter: i16,
-    types: BTreeMap<String, BTreeMap<String, BTreeMap<usize, GlyphIDType>>>,
+    types: VecMap<String, VecMap<String, VecMap<usize, GlyphIDType>>>,
 }
 
 static GLYPH_TYPES: Mutex<GlyphTypes> =
-    Mutex::new(GlyphTypes { counter: GlyphIDType::FontPBF.0 as i16, types: BTreeMap::new() });
+    Mutex::new(GlyphTypes { counter: GlyphIDType::FontPBF.0 as i16, types: VecMap::new() });
 
 /// `util::hash_combine` with libstdc++'s identity `std::hash<uint32_t>`.
 fn hash_combine(seed: &mut usize, v: u32) {

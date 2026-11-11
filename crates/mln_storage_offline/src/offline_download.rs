@@ -14,7 +14,7 @@
 // iterator). `RunLoop::invokeCancellable` is `invoke_cancellable` below.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -44,6 +44,7 @@ use mln_util::constants::{DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, TILE_SIZE_I};
 use mln_util::i18n::glyph_range_is_entirely_locally_generated;
 use mln_util::range::Range;
 use mln_util::tileset::Tileset;
+use mln_vec_map::VecMap;
 
 use crate::mapbox::{canonicalize_glyph_url, canonicalize_source_url, canonicalize_sprite_url, canonicalize_tileset};
 
@@ -160,7 +161,7 @@ struct Inner {
     status: RefCell<OfflineRegionStatus>,
     observer: RefCell<Rc<dyn OfflineRegionObserver>>,
 
-    requests: RefCell<BTreeMap<u64, Option<Box<dyn AsyncRequest>>>>,
+    requests: RefCell<VecMap<u64, Option<Box<dyn AsyncRequest>>>>,
     next_request_id: Cell<u64>,
     required_source_urls: RefCell<HashSet<String>>,
     resources_remaining: RefCell<VecDeque<Resource>>,
@@ -210,7 +211,7 @@ impl OfflineDownload {
             online_file_source,
             status: RefCell::new(OfflineRegionStatus::default()),
             observer: RefCell::new(Rc::new(NullObserver)),
-            requests: RefCell::new(BTreeMap::new()),
+            requests: RefCell::new(VecMap::new()),
             next_request_id: Cell::new(0),
             required_source_urls: RefCell::new(HashSet::new()),
             resources_remaining: RefCell::new(VecDeque::new()),

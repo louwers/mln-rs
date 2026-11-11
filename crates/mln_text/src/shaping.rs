@@ -6,12 +6,11 @@
 // the C++ BiDi throws (it cannot for the line breaks determineLineBreaks
 // produces).
 
-use std::collections::BTreeSet;
-
 use mln_style_types::image::{ImagePosition, ImagePositions, RectU16, TextFit};
 use mln_style_types::types::{IconTextFitType, SymbolAnchorType, TextJustifyType};
 use mln_util::constants::ONE_EM;
 use mln_util::{Padding, i18n};
+use mln_vec_map::VecSet;
 
 use crate::bidi::{BiDi, StyledText};
 use crate::glyph::{
@@ -407,8 +406,8 @@ fn evaluate_break(
 }
 
 /// `leastBadBreaks`.
-fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[PotentialBreak]) -> BTreeSet<usize> {
-    let mut least_bad_breaks = BTreeSet::from([last_line_break.index]);
+fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[PotentialBreak]) -> VecSet<usize> {
+    let mut least_bad_breaks = VecSet::from([last_line_break.index]);
     let mut prior_break = last_line_break.prior_break;
     while let Some(k) = prior_break {
         least_bad_breaks.insert(potential_breaks[k].index);
@@ -427,13 +426,13 @@ pub fn determine_line_breaks(
     glyph_map: &GlyphMap,
     image_positions: &ImagePositions,
     layout_text_size: f32,
-) -> BTreeSet<usize> {
+) -> VecSet<usize> {
     if max_width == 0.0 {
-        return BTreeSet::new();
+        return VecSet::new();
     }
 
     if logical_input.empty() {
-        return BTreeSet::new();
+        return VecSet::new();
     }
 
     let target_width =
@@ -833,7 +832,7 @@ fn reorder_shaped_lines(
     }
     let block_styles: Vec<bool> = sections.iter().map(|section| section.type_ != GlyphIDType::FontPBF).collect();
 
-    let mut line_breaks = BTreeSet::new();
+    let mut line_breaks = VecSet::new();
     let mut line_end = 0;
     for line in lines.iter() {
         line_end += line.length();

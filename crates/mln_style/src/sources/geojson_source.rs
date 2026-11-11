@@ -5,7 +5,6 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::{Arc, OnceLock};
 
@@ -19,6 +18,7 @@ use mln_util::exception::RuntimeError;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_vec_map::VecMap;
 
 use super::geojson_source_impl::{self, Impl};
 use crate::conversion::Error;
@@ -32,7 +32,7 @@ use crate::source_impl;
 /// `GeoJSONOptions::ClusterExpression`.
 pub type ClusterExpression = (Arc<dyn Expression>, Arc<dyn Expression>);
 /// `GeoJSONOptions::ClusterProperties` (`std::map`).
-pub type ClusterProperties = BTreeMap<String, ClusterExpression>;
+pub type ClusterProperties = VecMap<String, ClusterExpression>;
 
 /// `style::GeoJSONOptions`.
 #[derive(Clone)]
@@ -108,7 +108,7 @@ pub type TileFeatures = Vec<Feature<i16>>;
 pub type Features = Vec<Feature<f64>>;
 
 /// `style::GeoJSONData`.
-pub trait GeoJSONData: Send + Sync + std::fmt::Debug {
+pub trait GeoJSONData: Send + Sync {
     /// `getTile(id, fn, runSynchronously)`: `callback` runs on the calling
     /// thread, either right away or later from its RunLoop.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
@@ -321,5 +321,13 @@ impl Source for GeoJSONSource {
 
     fn create_mutable(&self) -> Box<dyn source_impl::Impl> {
         Box::new((*self.impl_()).clone())
+    }
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn GeoJSONData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeoJSONData").finish_non_exhaustive()
     }
 }

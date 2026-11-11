@@ -2,10 +2,9 @@
 // PropertyExpression, PropertyValue, Filter, ColorRampPropertyValue and
 // FormatSectionOverride, which are mln_style / renderer types; see below).
 
-use std::collections::BTreeSet;
-
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
+use mln_vec_map::VecSet;
 
 use crate::expression::{
     Dependency, EvaluationContext, Expression, GlobalStateMap, Kind, collect_global_state_refs,
@@ -137,9 +136,9 @@ fn collect_global_state_refs_() {
     )
     .unwrap();
 
-    let mut refs = BTreeSet::new();
+    let mut refs = VecSet::new();
     collect_global_state_refs(&*expr, &mut refs);
-    assert_eq!(BTreeSet::from(["a".to_owned(), "b".to_owned()]), refs);
+    assert_eq!(VecSet::from(["a".to_owned(), "b".to_owned()]), refs);
 
     // Expressions without global-state references collect nothing.
     let plain = parse_expression(r#"["to-number", ["get", "width"]]"#, Some(Type::Number)).unwrap();
@@ -151,9 +150,9 @@ fn collect_global_state_refs_() {
 // gtest: GlobalStateExpression.GlobalStateRefsIntersect
 #[test]
 fn global_state_refs_intersect_() {
-    let refs = BTreeSet::from(["a".to_owned(), "b".to_owned()]);
-    let changed_hit = BTreeSet::from(["b".to_owned(), "c".to_owned()]);
-    let changed_miss = BTreeSet::from(["c".to_owned(), "d".to_owned()]);
+    let refs = VecSet::from(["a".to_owned(), "b".to_owned()]);
+    let changed_hit = VecSet::from(["b".to_owned(), "c".to_owned()]);
+    let changed_miss = VecSet::from(["c".to_owned(), "d".to_owned()]);
 
     assert!(global_state_refs_intersect(Some(&refs), Some(&changed_hit)));
     assert!(!global_state_refs_intersect(Some(&refs), Some(&changed_miss)));

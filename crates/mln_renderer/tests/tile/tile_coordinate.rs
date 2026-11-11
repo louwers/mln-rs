@@ -4,8 +4,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use geometry::Point;
-use mln_map::CameraChangeMode;
 use mln_map::transform::{Transform, TransformObserver};
+use mln_map::{CameraChange, CameraChangeMode};
 use mln_map_types::tile_coordinate::TileCoordinate;
 use mln_map_types::{ConstrainMode, ViewportMode};
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
@@ -31,15 +31,15 @@ struct Observer {
 }
 
 impl TransformObserver for Observer {
-    fn on_camera_will_change(&self, mode: CameraChangeMode) {
-        if mode == CameraChangeMode::Immediate {
+    fn on_camera_will_change(&self, change: CameraChange) {
+        if change.mode == CameraChangeMode::Immediate {
             assert_eq!(self.change_count.get(), 0);
             self.change_count.set(self.change_count.get() + 1);
         }
     }
 
-    fn on_camera_did_change(&self, mode: CameraChangeMode) {
-        if mode == CameraChangeMode::Immediate {
+    fn on_camera_did_change(&self, change: CameraChange) {
+        if change.mode == CameraChangeMode::Immediate {
             assert_eq!(self.change_count.get(), 1);
         }
     }

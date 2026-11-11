@@ -8,8 +8,7 @@ resolver = "3"
 # The packages with `publish = false` are test helpers or unused by mln-rs.
 members = [
     "crates/*",
-    "platform/glfw",
-    "platform/web",
+    "examples/*",
     "tools/bench",
     "tools/expression-test",
     "tools/render-test",
@@ -47,15 +46,20 @@ libstdcxx = { package = "mln-rs-libstdcxx", path = "vendor/libstdcxx", version =
 mln_actor = { package = "mln-rs-actor", path = "crates/mln_actor", version = "=0.0.11" }
 mln_conversion = { package = "mln-rs-conversion", path = "crates/mln_conversion", version = "=0.0.11" }
 mln_expression = { package = "mln-rs-expression", path = "crates/mln_expression", version = "=0.0.11" }
+mln_gestures = { package = "mln-rs-gestures", path = "crates/mln_gestures", version = "=0.0.11" }
 mln_gfx = { package = "mln-rs-gfx", path = "crates/mln_gfx", version = "=0.0.11" }
+mln_headless = { package = "mln-rs-headless", path = "crates/mln_headless", version = "=0.0.11" }
+mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0.0.11" }
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.11" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.11" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.11" }
-mln_platform_default = { package = "mln-rs-platform-default", path = "crates/mln_platform_default", version = "=0.0.11" }
-mln_platform_default_image = { package = "mln-rs-platform-default-image", path = "crates/mln_platform_default_image", version = "=0.0.11" }
-mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.11" }
+# Without its default feature, the in-process font-face shaper: the packages
+# that render turn it on (crates/mln_renderer/Cargo.toml).
+mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.11", default-features = false }
 mln_sprite = { package = "mln-rs-sprite", path = "crates/mln_sprite", version = "=0.0.11" }
-mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.11" }
+# Without SQLite (its `sqlite` feature) unless a package asks for it, so
+# that examples/web leaves it out.
+mln_storage = { package = "mln-rs-storage", path = "crates/mln_storage", version = "=0.0.11", default-features = false }
 mln_storage_offline = { package = "mln-rs-storage-offline", path = "crates/mln_storage_offline", version = "=0.0.11" }
 mln_style = { package = "mln-rs-style", path = "crates/mln_style", version = "=0.0.11" }
 mln_style_types = { package = "mln-rs-style-types", path = "crates/mln_style_types", version = "=0.0.11" }
@@ -63,6 +67,7 @@ mln_text = { package = "mln-rs-text", path = "crates/mln_text", version = "=0.0.
 mln_tile = { package = "mln-rs-tile", path = "crates/mln_tile", version = "=0.0.11" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "crates/mln_tile_id", version = "=0.0.11" }
 mln_util = { package = "mln-rs-util", path = "crates/mln_util", version = "=0.0.11" }
+mln_vec_map = { package = "mln-rs-vec-map", path = "crates/mln_vec_map", version = "=0.0.11" }
 mln_webgpu = { package = "mln-rs-webgpu", path = "crates/mln_webgpu", version = "=0.0.11" }
 nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=0.0.11" }
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
@@ -91,7 +96,7 @@ earcut_crate = { package = "earcut", version = "0.4.5" }
 # be byte-identical to the zlib the C++ links (offline database stored sizes
 # and ambient-cache accounting; OfflineDatabase.PutReturnsSize).
 flate2 = { version = "1.1.11", default-features = false, features = ["zlib"] }
-# platform/glfw: links the system GLFW (dynamic-link) instead of downloading
+# examples/glfw: links the system GLFW (dynamic-link) instead of downloading
 # prebuilt libraries in a build script; raw window handles give wgpu its
 # surface.
 glfw = { version = "0.63.0", default-features = false, features = ["dynamic-link", "raw-window-handle-v0-6", "wayland", "x11"] }
@@ -121,9 +126,6 @@ regex = { version = "1.13.1" }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 # The same engine as the C++ core's vendored SQLite, built from source like it.
 rusqlite = { version = "0.41.1", features = ["bundled"] }
-# rusqlite's SQLite on wasm32-unknown-unknown; platform/web turns on its host
-# functions (clock, randomness) through wasm-bindgen.
-sqlite-wasm-rs = { version = "0.6.2", features = ["wasm-bindgen"] }
 # preserve_order: rapidjson iterates object members in document order, and
 # the C++ relies on that (style parser, expression error order).
 # float_roundtrip: correctly rounded float parsing, like rapidjson's full
@@ -135,20 +137,24 @@ skrifa = { version = "0.49.0" }
 unicode-bidi = { version = "0.3.18" }
 # HTTP for the online file source (the C++ default platform uses curl).
 ureq = { version = "3.5.1" }
-# platform/web: the browser's API through wasm-bindgen (whose CLI must be
+# examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
 js-sys = { version = "0.3.107" }
 wasm-bindgen = { version = "=0.2.130" }
 wasm-bindgen-futures = { version = "0.4.80" }
-web-sys = { version = "0.3.107", features = ["Headers", "OffscreenCanvas", "Request", "RequestInit", "Response", "console"] }
+web-sys = { version = "0.3.107", features = [
+    "Blob", "Headers", "ImageBitmap", "ImageData", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "Request",
+    "RequestInit", "Response", "console",
+] }
 # std::time's clocks, which panic on wasm32-unknown-unknown (mln_util::time):
 # performance.now() and Date.now() there, std::time everywhere else.
 web-time = { version = "1.1.0" }
 # Ports the C++ WebGPU backend (src/mln/webgpu, which runs on Dawn or
-# wgpu-native) onto the Rust implementation of the same API. Its default
-# features hold the native backends, and on wasm32-unknown-unknown the
-# browser's WebGPU (platform/web).
-wgpu = { version = "30.0.1" }
+# wgpu-native) onto the Rust implementation of the same API: Vulkan, Metal
+# and DX12 natively (wgpu builds each only where it runs), and on
+# wasm32-unknown-unknown the browser's WebGPU (examples/web). Not its
+# default GLES backend, which nothing selects.
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
 # with warnings denied in CI (the `lint` job), except the lints whose fix
@@ -218,15 +224,17 @@ libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_conversion.workspace = true
 mln_expression.workspace = true
+mln_gestures.workspace = true
 mln_gfx.workspace = true
+mln_headless.workspace = true
+mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_platform_default.workspace = true
-mln_platform_default_image.workspace = true
-mln_renderer.workspace = true
+mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_sprite.workspace = true
-mln_storage.workspace = true
+# The ambient cache, offline regions and mbtiles:// sources, as in C++.
+mln_storage = { workspace = true, features = ["sqlite"] }
 mln_storage_offline.workspace = true
 mln_style.workspace = true
 mln_style_types.workspace = true
@@ -234,6 +242,7 @@ mln_text.workspace = true
 mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+mln_vec_map.workspace = true
 mln_webgpu.workspace = true
 nunicode.workspace = true
 pmtiles.workspace = true
@@ -247,3 +256,9 @@ wagyu.workspace = true
 
 [lints]
 workspace = true
+
+# Fat LTO with one codegen unit: smaller release binaries, for a longer
+# build. The browser build adds opt-level "s" (`just web`).
+[profile.release]
+lto = "fat"
+codegen-units = 1

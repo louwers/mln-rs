@@ -16,9 +16,9 @@
 // Where the C++ throws std::runtime_error, these return Err with the same
 // message (`what()`).
 
-use std::collections::BTreeSet;
 use std::ops::Range;
 
+use mln_vec_map::VecSet;
 use unicode_bidi::ParagraphInfo;
 use unicode_bidi::utf16::BidiInfo;
 
@@ -143,7 +143,7 @@ impl BiDi {
     }
 
     /// `mergeParagraphLineBreaks`.
-    fn merge_paragraph_line_breaks(info: &BidiInfo<'_>, line_break_points: &mut BTreeSet<usize>) {
+    fn merge_paragraph_line_breaks(info: &BidiInfo<'_>, line_break_points: &mut VecSet<usize>) {
         for paragraph in &info.paragraphs {
             line_break_points.insert(paragraph.range.end);
         }
@@ -155,7 +155,7 @@ impl BiDi {
     pub fn process_text(
         &mut self,
         input: &[u16],
-        mut line_break_points: BTreeSet<usize>,
+        mut line_break_points: VecSet<usize>,
     ) -> Result<Vec<Vec<u16>>, String> {
         let info = BidiInfo::new(input, None);
 
@@ -183,7 +183,7 @@ impl BiDi {
     pub fn process_styled_text(
         &mut self,
         input: &StyledText,
-        line_break_points: BTreeSet<usize>,
+        line_break_points: VecSet<usize>,
     ) -> Result<Vec<StyledText>, String> {
         self.process_styled_text_with_blocks(input, line_break_points, &input.0, &[])
     }
@@ -194,7 +194,7 @@ impl BiDi {
     pub fn split_styled_text(
         &mut self,
         input: &StyledText,
-        mut line_break_points: BTreeSet<usize>,
+        mut line_break_points: VecSet<usize>,
     ) -> Result<Vec<StyledText>, String> {
         let info = BidiInfo::new(&input.0, None);
         Self::merge_paragraph_line_breaks(&info, &mut line_break_points);
@@ -220,7 +220,7 @@ impl BiDi {
     pub fn process_styled_text_with_blocks(
         &mut self,
         input: &StyledText,
-        mut line_break_points: BTreeSet<usize>,
+        mut line_break_points: VecSet<usize>,
         bidi_text: &[u16],
         block_styles: &[bool],
     ) -> Result<Vec<StyledText>, String> {
@@ -361,7 +361,7 @@ mod bidi_test {
         s.encode_utf16().collect()
     }
 
-    fn set(v: &[usize]) -> BTreeSet<usize> {
+    fn set(v: &[usize]) -> VecSet<usize> {
         v.iter().copied().collect()
     }
 

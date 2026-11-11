@@ -9,4 +9,4 @@ A Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native
 map rendering core.
 
 **[Open the demo](https://louwers.github.io/mln-rs/)** (in a browser with
-WebGPU), the browser build in [platform/web](platform/web/README.md).
+WebGPU), the browser build in [examples/web](examples/web/README.md).

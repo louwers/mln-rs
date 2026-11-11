@@ -224,11 +224,11 @@ pub enum ImageType {
 
 /// `ImageMap = mln::unordered_map<std::string, Immutable<style::Image::Impl>>`.
 ///
-/// A `BTreeMap`: `DynamicTextureAtlas::upload_icons_and_patterns` reserves
+/// A `VecMap`: `DynamicTextureAtlas::upload_icons_and_patterns` reserves
 /// atlas space in iteration order, and a `HashMap`'s order changes from
 /// process to process, which moved icons in the atlas and changed rendered
 /// pixels between runs (sargunv/mln-rs#2).
-pub type ImageMap = std::collections::BTreeMap<String, Immutable<Impl>>;
+pub type ImageMap = mln_vec_map::VecMap<String, Immutable<Impl>>;
 /// `ImageDependencies = mln::unordered_map<std::string, ImageType>`.
 pub type ImageDependencies = std::collections::HashMap<String, ImageType>;
 

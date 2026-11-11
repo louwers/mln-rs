@@ -11,7 +11,7 @@ use crate::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType};
 use mln_util::Color;
 use mln_util::immutable::Immutable;
-use std::collections::BTreeSet;
+use mln_vec_map::VecSet;
 
 crate::paint_property!(
     /// `struct HillshadeAccentColor : PaintProperty<Color>`:
@@ -133,7 +133,7 @@ impl LayerProperties for HillshadeLayerProperties {
         self.evaluated.get_dependencies()
     }
 
-    fn collect_evaluated_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.evaluated.collect_global_state_refs(refs);
     }
 }

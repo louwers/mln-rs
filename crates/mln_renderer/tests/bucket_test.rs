@@ -1,7 +1,6 @@
 // Ports test/gl/bucket.test.cpp (the Buckets.* tests; the OpenGL headless
 // backend is the WebGPU one here) and test/renderer/fill_bucket.test.cpp.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use feature::{Identifier, PropertyMap, Value};
@@ -27,6 +26,7 @@ use mln_util::geometry::FeatureType;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
+use mln_vec_map::VecMap;
 use mln_webgpu::headless_backend::HeadlessBackend;
 
 /// `StubGeometryTileFeature(id, type, geometry, properties)`.
@@ -76,7 +76,7 @@ fn with_upload_pass(f: impl FnOnce(&dyn mln_gfx::UploadPass)) {
 // gtest: Buckets.CircleBucket
 #[test]
 fn circle_bucket() {
-    let mut bucket = CircleBucket::new(&BTreeMap::new(), MapMode::Static, 1.0);
+    let mut bucket = CircleBucket::new(&VecMap::new(), MapMode::Static, 1.0);
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 
@@ -108,7 +108,7 @@ fn circle_bucket() {
 #[test]
 fn fill_bucket() {
     let layout = FillLayoutProperties::PossiblyEvaluated::default();
-    let mut bucket = FillBucket::new(&layout, &BTreeMap::new(), 5.0, 1);
+    let mut bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 
@@ -134,7 +134,7 @@ fn fill_bucket() {
 #[test]
 fn line_bucket() {
     let layout = LineLayoutProperties::PossiblyEvaluated::default();
-    let mut bucket = LineBucket::new(layout, &BTreeMap::new(), 10.0, 1);
+    let mut bucket = LineBucket::new(layout, &VecMap::new(), 10.0, 1);
     assert!(!bucket.has_data());
     assert!(!bucket.needs_upload());
 
@@ -182,7 +182,7 @@ fn symbol_bucket() {
 
     let mut bucket = SymbolBucket::new(
         layout,
-        &BTreeMap::new(),
+        &VecMap::new(),
         &PropertyValue::Constant(16.0),
         &PropertyValue::Constant(1.0),
         0.0,
@@ -429,7 +429,7 @@ impl Drop for FixtureLog {
 fn tracks_sdf_patterns_per_layer() {
     let log = FixtureLog::new();
     let layout = FillLayoutProperties::PossiblyEvaluated::default();
-    let mut bucket = FillBucket::new(&layout, &BTreeMap::new(), 5.0, 1);
+    let mut bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
 
     bucket.record_sdf_pattern("sdf-layer", true);
     bucket.record_sdf_pattern("rgba-layer", false);
@@ -446,8 +446,8 @@ fn tracks_sdf_patterns_per_layer() {
 fn warns_once_for_mixed_pattern_types_per_bucket() {
     let log = FixtureLog::new();
     let layout = FillLayoutProperties::PossiblyEvaluated::default();
-    let mut first_bucket = FillBucket::new(&layout, &BTreeMap::new(), 5.0, 1);
-    let mut second_bucket = FillBucket::new(&layout, &BTreeMap::new(), 5.0, 1);
+    let mut first_bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
+    let mut second_bucket = FillBucket::new(&layout, &VecMap::new(), 5.0, 1);
 
     first_bucket.record_sdf_pattern("mixed-layer", true);
     first_bucket.record_sdf_pattern("mixed-layer", false);

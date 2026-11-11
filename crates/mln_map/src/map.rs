@@ -5,13 +5,15 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, MapDebugOptions, MapMode, NorthOrientation,
-    ProjectionMode, TileLodMode, TransformState, VerticalPerspectiveProjection, ViewportMode,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
+    ConstrainMode, MapDebugOptions, MapMode, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
+    VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_renderer::{ExceptionPtr, RendererFrontend};
 use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style::Style;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
+use mln_util::chrono::TimePoint;
 use mln_util::exception::MisuseException;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::mat4::Mat4;
@@ -156,6 +158,55 @@ impl Map {
         self.impl_.on_update();
     }
 
+    /// `cancelTransitions(uint64_t transitionId)`: cancels the commands whose
+    /// [`AnimationOptions::transition_id`] equals `transition_id`, and leaves
+    /// the others running. Requests an update only when a command ended.
+    pub fn cancel_transitions_with_id(&mut self, transition_id: u64) {
+        let ended = self.impl_.transform.borrow_mut().cancel_transitions_with_id(transition_id);
+        if ended {
+            self.impl_.on_update();
+        }
+    }
+
+    /// Moves the camera relative to where it is, as a gesture does
+    /// (maplibre-native-ffi's `mln_map_apply_camera_delta`): a pan, a zoom,
+    /// turn and tilt around an anchor, a gesture phase, and the momentum a
+    /// gesture's end continues with. See [`CameraDelta`].
+    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<(), CameraError> {
+        self.impl_.transform.borrow_mut().apply_camera_delta(delta)?;
+        self.impl_.camera_mutated.set(true);
+        self.impl_.on_update();
+        Ok(())
+    }
+
+    /// Moves the camera to absolute values, by a jump, an ease or a flight,
+    /// as a command or as part of a gesture (maplibre-native-ffi's
+    /// `mln_map_update_camera`). See [`CameraUpdate`].
+    pub fn update_camera(&mut self, update: &CameraUpdate) {
+        self.impl_.camera_mutated.set(true);
+        self.impl_.transform.borrow_mut().update_camera(update);
+        self.impl_.on_update();
+    }
+
+    /// Continues a gesture with momentum, which moves the camera on each
+    /// frame until its parts end. See [`CameraMomentum`].
+    ///
+    /// A low-level call, kept for parity with the C++ core's: it doesn't end
+    /// a gesture or report the change as momentum. Gestures end with an
+    /// `End` delta that carries their momentum
+    /// ([`apply_camera_delta`](Self::apply_camera_delta)).
+    pub fn start_momentum(&mut self, momentum: &CameraMomentum, animation: &AnimationOptions) {
+        self.impl_.camera_mutated.set(true);
+        self.impl_.transform.borrow_mut().start_momentum(momentum, animation);
+        self.impl_.on_update();
+    }
+
+    /// `setGestureInProgress`. A low-level call, kept for parity with the
+    /// C++ core's: the gesture phases of
+    /// [`apply_camera_delta`](Self::apply_camera_delta) and
+    /// [`update_camera`](Self::update_camera) set it for a gesture and its
+    /// momentum, and setting it directly while one runs gets out of step with
+    /// them.
     pub fn set_gesture_in_progress(&mut self, in_progress: bool) {
         self.impl_.transform.borrow_mut().set_gesture_in_progress(in_progress);
         self.impl_.on_update();
@@ -186,6 +237,29 @@ impl Map {
 
     pub fn is_globe_free_bearing(&self) -> bool {
         self.impl_.transform.borrow().is_globe_free_bearing()
+    }
+
+    /// Samples the camera's animations at the host's frame time, from now on,
+    /// and starts new ones from it: call it at the start of each frame with
+    /// `Clock::now()`, before rendering. One older than
+    /// [`STALE_FRAME_TIME`](crate::transform::STALE_FRAME_TIME) counts as
+    /// unset, so commands made while the host isn't drawing start now. If an
+    /// animation runs, the map updates for this frame at once. `None` goes
+    /// back to sampling at `Clock::now()` whenever the map updates. Still
+    /// images ignore it. See
+    /// [`Transform::set_frame_time`](crate::transform::Transform::set_frame_time).
+    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+        self.impl_.transform.borrow_mut().set_frame_time(time);
+        if self.impl_.transform.borrow().in_transition() {
+            self.impl_.on_update();
+        }
+    }
+
+    /// Whether any camera command is still animating. A command's
+    /// `MapObserver::on_camera_did_change` ends that command only, so this
+    /// tells whether the camera stopped once the last one ended.
+    pub fn in_transition(&self) -> bool {
+        self.impl_.transform.borrow().in_transition()
     }
 
     // MARK: - Camera

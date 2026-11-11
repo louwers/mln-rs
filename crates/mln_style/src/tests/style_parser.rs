@@ -1,10 +1,10 @@
 // Ports test/style/style_parser.test.cpp.
 
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use mln_util::enum_::Enum;
 use mln_util::logging::{Event, EventSeverity, Log};
+use mln_vec_map::VecSet;
 
 use super::util::FixtureLog;
 use crate::layer::FontStack;
@@ -163,7 +163,7 @@ fn sprite_as_array_multiple() {
 fn font_stacks() {
     let mut parser = Parser::default();
     let _ = parser.parse(&std::fs::read_to_string(fixtures_dir().join("font_stacks.json")).unwrap());
-    let expected: BTreeSet<FontStack> = [vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
+    let expected: VecSet<FontStack> = [vec!["a"], vec!["a", "b"], vec!["a", "b", "c"]]
         .into_iter()
         .map(|v| v.into_iter().map(str::to_owned).collect())
         .collect();
@@ -171,7 +171,7 @@ fn font_stacks() {
     assert_eq!(expected, result);
 }
 
-fn symbol_font_stacks(layout: &str) -> BTreeSet<FontStack> {
+fn symbol_font_stacks(layout: &str) -> VecSet<FontStack> {
     let mut parser = Parser::default();
     let _ = parser.parse(&format!(
         r#"{{
@@ -187,7 +187,7 @@ fn symbol_font_stacks(layout: &str) -> BTreeSet<FontStack> {
     parser.font_stacks()
 }
 
-fn arial_helvetica() -> BTreeSet<FontStack> {
+fn arial_helvetica() -> VecSet<FontStack> {
     [vec!["Arial".to_owned()], vec!["Helvetica".to_owned()]].into_iter().collect()
 }
 

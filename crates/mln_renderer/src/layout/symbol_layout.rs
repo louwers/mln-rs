@@ -7,7 +7,7 @@
 // images across worker messages.
 //
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use geometry::{LinearRing, Point, Polygon};
@@ -40,6 +40,7 @@ use mln_util::i18n;
 use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::sync::RwLockExt;
+use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr, get_retain_feature_id};
 use crate::bucket_parameters::BucketParameters;
@@ -216,12 +217,12 @@ fn evaluate_radial_offset(anchor: SymbolAnchorType, radial_offset: f32) -> [f32;
 
 /// `SymbolLayout`.
 pub struct SymbolLayout {
-    pub layer_paint_properties: BTreeMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_paint_properties: VecMap<String, Immutable<dyn LayerProperties>>,
     pub bucket_leader_id: String,
     pub symbol_instances: Vec<SymbolInstance>,
     pub sort_key_ranges: Vec<SortKeyRange>,
 
-    compare_text: BTreeMap<Vec<u16>, Vec<Anchor>>,
+    compare_text: VecMap<Vec<u16>, Vec<Anchor>>,
 
     // Stores the layer so that we can hold on to GeometryTileFeature
     // instances in SymbolFeature, which may reference data from this object.
@@ -281,11 +282,11 @@ impl SymbolLayout {
         let layout = Arc::new(create_layout(&leader.layout, zoom, parameters.global_state.clone()));
 
         let mut this = SymbolLayout {
-            layer_paint_properties: BTreeMap::new(),
+            layer_paint_properties: VecMap::new(),
             bucket_leader_id: layers[0].base_impl.id.clone(),
             symbol_instances: Vec::new(),
             sort_key_ranges: Vec::new(),
-            compare_text: BTreeMap::new(),
+            compare_text: VecMap::new(),
             source_layer,
             overscaling,
             zoom,
@@ -342,6 +343,7 @@ impl SymbolLayout {
                 || *layout.get::<IconAllowOverlap>()
                 || *layout.get::<TextIgnorePlacement>()
                 || *layout.get::<IconIgnorePlacement>());
+        let sort_features = this.sort_features_by_key && !layout.get::<SymbolSortKey>().is_constant();
         if *layout.get::<SymbolPlacement>() == SymbolPlacementType::Point {
             let modes = layout.get::<TextWritingMode>().clone();
             // Remove duplicates and preserve order.
@@ -404,7 +406,7 @@ impl SymbolLayout {
                 let base_font_stack: Vec<String> = layout.evaluate_canonical::<TextFont>(zoom, &ft, &canonical_id);
 
                 let mut formatted_text = TaggedString::default();
-                let mut section_table: BTreeMap<usize, usize> = BTreeMap::new();
+                let mut section_table: VecMap<usize, usize> = VecMap::new();
 
                 for (section_index, section) in formatted.sections.iter().enumerate() {
                     if let Some(image) = &section.image {
@@ -533,6 +535,8 @@ impl SymbolLayout {
             if ft.formatted_text.is_some() || ft.icon.is_some() {
                 if this.sort_features_by_key {
                     ft.sort_key = layout.evaluate_canonical::<SymbolSortKey>(zoom, &ft, &canonical_id);
+                }
+                if sort_features {
                     let lower_bound = this.features.partition_point(|f| f.sort_key < ft.sort_key);
                     this.features.insert(lower_bound, ft);
                 } else {
@@ -541,6 +545,12 @@ impl SymbolLayout {
             }
         }
         drop(geometry_layer);
+
+        if this.sort_features_by_key && !sort_features {
+            // Inserting at the lower bound puts each feature before the
+            // earlier ones with an equal key: keep that order without a sort.
+            this.features.reverse();
+        }
 
         if *layout.get::<SymbolPlacement>() == SymbolPlacementType::Line {
             merge_lines(&mut this.features);

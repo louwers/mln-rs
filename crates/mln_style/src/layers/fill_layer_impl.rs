@@ -3,8 +3,7 @@
 // `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
 // fill_layer.rs.
 
-use std::collections::BTreeSet;
-
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
@@ -78,7 +77,7 @@ impl layer::Impl for Impl {
         self.layout.get_dependencies() | self.base.get_filter_dependencies()
     }
 
-    fn collect_layout_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.layout.collect_global_state_refs(refs);
         self.base.collect_filter_global_state_refs(refs);
     }

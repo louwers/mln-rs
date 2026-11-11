@@ -7,7 +7,7 @@
 // tile data and the layer name, from which they re-borrow the layer (and
 // re-get features by index) when they need it. Same results.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions};
@@ -15,6 +15,7 @@ use mln_text::glyph::{GlyphDependencies, GlyphMap, GlyphPositions};
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileLayer};
 use mln_util::exception::{ExceptionPtr, RuntimeError};
+use mln_vec_map::VecSet;
 
 use crate::bucket_parameters::BucketParameters;
 use crate::geometry::feature_index::FeatureIndex;
@@ -91,5 +92,5 @@ pub struct LayoutParameters<'a> {
     pub font_faces: Option<Arc<mln_text::glyph::FontFaces>>,
     pub glyph_dependencies: &'a mut GlyphDependencies,
     pub image_dependencies: &'a mut ImageDependencies,
-    pub available_images: &'a BTreeSet<String>,
+    pub available_images: &'a VecSet<String>,
 }

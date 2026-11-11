@@ -9,7 +9,7 @@ use crate::expression::Dependency;
 use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase};
 use crate::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
 use mln_util::immutable::Immutable;
-use std::collections::BTreeSet;
+use mln_vec_map::VecSet;
 
 crate::color_ramp_property!(
     /// `struct HeatmapColor : ColorRampProperty {};`
@@ -109,7 +109,7 @@ impl LayerProperties for HeatmapLayerProperties {
         self.evaluated.get_dependencies()
     }
 
-    fn collect_evaluated_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.evaluated.collect_global_state_refs(refs);
     }
 }

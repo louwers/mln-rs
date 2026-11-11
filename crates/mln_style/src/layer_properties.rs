@@ -4,9 +4,8 @@
 // `Layer::Impl`, the data is `LayerPropertiesBase` and the virtual interface
 // is the `LayerProperties` trait. `dyn LayerProperties` derefs to its base.
 
-use std::collections::BTreeSet;
-
 use mln_util::immutable::Immutable;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::Dependency;
@@ -29,7 +28,7 @@ impl LayerPropertiesBase {
 }
 
 /// An interface, wrapping evaluated layer properties.
-pub trait LayerProperties: AsAny + std::fmt::Debug {
+pub trait LayerProperties: AsAny {
     fn base(&self) -> &LayerPropertiesBase;
     fn base_mut(&mut self) -> &mut LayerPropertiesBase;
 
@@ -49,7 +48,7 @@ pub trait LayerProperties: AsAny + std::fmt::Debug {
 
     /// Collect the global-state properties referenced by the expressions
     /// retained in the evaluated properties.
-    fn collect_evaluated_global_state_refs(&self, _refs: &mut BTreeSet<String>) {}
+    fn collect_evaluated_global_state_refs(&self, _refs: &mut VecSet<String>) {}
 }
 
 impl std::ops::Deref for dyn LayerProperties {
@@ -94,4 +93,16 @@ pub trait HasEvaluated: LayerProperties {
 /// properties hold one (background, fill, line, fill-extrusion).
 pub trait HasCrossfade: LayerProperties {
     fn crossfade(&self) -> &crate::renderer::property_evaluation_parameters::CrossfadeParameters;
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn LayerProperties {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let base_impl = &self.base().base_impl;
+        f.debug_struct("LayerProperties")
+            .field("id", &base_impl.base().id)
+            .field("type", &base_impl.get_type_info().type_)
+            .finish_non_exhaustive()
+    }
 }

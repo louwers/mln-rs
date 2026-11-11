@@ -4,7 +4,6 @@
 // bucket is built on the worker thread and shared with `Arc`); the render
 // layer copies them into the shared gfx vectors its drawables reference.
 
-use std::collections::BTreeMap;
 use std::sync::RwLock;
 use std::sync::atomic::Ordering;
 
@@ -22,6 +21,7 @@ use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::serialization::payload::pod;
 use mln_util::sync::RwLockExt;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -59,7 +59,7 @@ pub struct HeatmapBucket {
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s like the other buckets' binders (the bucket is
     /// shared; C++ heatmap buckets have no feature-state update).
-    pub paint_property_binders: BTreeMap<String, RwLock<HeatmapBinders>>,
+    pub paint_property_binders: VecMap<String, RwLock<HeatmapBinders>>,
     pub mode: MapMode,
 }
 
@@ -68,7 +68,7 @@ static EMPTY_FORMATTED_SECTION: Value = Value::Null;
 impl HeatmapBucket {
     /// `HeatmapBucket(const BucketParameters&, const std::vector<Immutable<style::LayerProperties>>&)`.
     pub fn new(parameters: &BucketParameters, layers: &[Immutable<dyn LayerProperties>]) -> Self {
-        let mut paint_property_binders = BTreeMap::new();
+        let mut paint_property_binders = VecMap::new();
         for layer in layers {
             // `emplace` keeps the first entry for an id.
             paint_property_binders.entry(layer.base_impl.id.clone()).or_insert_with(|| {

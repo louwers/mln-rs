@@ -17,6 +17,7 @@ use geometry::Point;
 use mln_map_types::{TileProjector, TransformState};
 use mln_tile_id::OverscaledTileID;
 use mln_util::constants::EXTENT;
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::Bucket;
 use crate::buckets::symbol_bucket::SymbolBucket;
@@ -151,8 +152,8 @@ fn is_in_viewport(projector: &TileProjector<'_>, point: Point<f32>) -> bool {
 /// `CrossTileSymbolLayerIndex`.
 #[derive(Debug)]
 pub struct CrossTileSymbolLayerIndex {
-    indexes: BTreeMap<u8, BTreeMap<OverscaledTileID, TileLayerIndex>>,
-    used_cross_tile_ids: BTreeMap<u8, BTreeSet<u32>>,
+    indexes: VecMap<u8, VecMap<OverscaledTileID, TileLayerIndex>>,
+    used_cross_tile_ids: VecMap<u8, BTreeSet<u32>>,
     lng: f32,
     max_cross_tile_id: Rc<Cell<u32>>,
 }
@@ -161,8 +162,8 @@ impl CrossTileSymbolLayerIndex {
     /// `CrossTileSymbolLayerIndex(uint32_t& maxCrossTileID)`.
     pub fn new(max_cross_tile_id: Rc<Cell<u32>>) -> Self {
         CrossTileSymbolLayerIndex {
-            indexes: BTreeMap::new(),
-            used_cross_tile_ids: BTreeMap::new(),
+            indexes: VecMap::new(),
+            used_cross_tile_ids: VecMap::new(),
             lng: 0.0,
             max_cross_tile_id,
         }
@@ -175,9 +176,9 @@ impl CrossTileSymbolLayerIndex {
     pub fn handle_wrap_jump(&mut self, new_lng: f32) {
         let wrap_delta = ((new_lng - self.lng) / 360.0).round() as i32;
         if wrap_delta != 0 {
-            let mut new_indexes: BTreeMap<u8, BTreeMap<OverscaledTileID, TileLayerIndex>> = BTreeMap::new();
+            let mut new_indexes: VecMap<u8, VecMap<OverscaledTileID, TileLayerIndex>> = VecMap::new();
             for (zoom, zoom_index) in std::mem::take(&mut self.indexes) {
-                let mut new_zoom_index: BTreeMap<OverscaledTileID, TileLayerIndex> = BTreeMap::new();
+                let mut new_zoom_index: VecMap<OverscaledTileID, TileLayerIndex> = VecMap::new();
                 for (_, mut index) in zoom_index {
                     // change the tileID's wrap and move its index
                     index.coord = index.coord.unwrap_to((index.coord.wrap as i32 + wrap_delta) as i16);
@@ -359,7 +360,7 @@ impl std::ops::BitOrAssign for AddLayerResult {
 /// `CrossTileSymbolIndex`.
 #[derive(Debug, Default)]
 pub struct CrossTileSymbolIndex {
-    layer_indexes: BTreeMap<String, CrossTileSymbolLayerIndex>,
+    layer_indexes: VecMap<String, CrossTileSymbolLayerIndex>,
     max_cross_tile_id: Rc<Cell<u32>>,
 }
 
@@ -399,7 +400,7 @@ impl CrossTileSymbolIndex {
     }
 
     /// `pruneUnusedLayers(usedLayers)`.
-    pub fn prune_unused_layers(&mut self, used_layers: &BTreeSet<String>) {
+    pub fn prune_unused_layers(&mut self, used_layers: &VecSet<String>) {
         self.layer_indexes.retain(|id, _| used_layers.contains(id));
     }
 
@@ -528,7 +529,7 @@ mod tests {
         let ranges: Vec<SortKeyRange> = Vec::new();
         let mut bucket = SymbolBucket::new(
             layout,
-            &BTreeMap::new(),
+            &VecMap::new(),
             &PropertyValue::Constant(16.0f32),
             &PropertyValue::Constant(1.0f32),
             0.0,

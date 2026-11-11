@@ -1,0 +1,29 @@
+[package]
+name = "mln-rs-image"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_image"
+# The doc comments have no examples to run.
+doctest = false
+
+[dependencies]
+flate2.workspace = true
+image-webp.workspace = true
+mln_util.workspace = true
+png.workspace = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+js-sys.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys.workspace = true
+
+[lints]
+workspace = true

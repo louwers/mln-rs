@@ -2,7 +2,6 @@
 // (non-OpenGL backend branches; the port's backend is WebGPU).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use mln_gfx::color_mode::{BlendFunction, LinearBlend, Mask};
@@ -24,6 +23,7 @@ use mln_util::mat4::Mat4;
 use mln_util::range::Range;
 use mln_util::size::Size;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecMap;
 
 use crate::globe_tile_mesh::raw_globe_tile_mesh;
 use crate::layer_tweaker::to_projection_ubo;
@@ -97,7 +97,7 @@ pub struct PaintParameters<'a> {
 
     pub shaders: &'a ShaderRegistry,
 
-    tile_clipping_mask_ids: BTreeMap<UnwrappedTileID, i32>,
+    tile_clipping_mask_ids: VecMap<UnwrappedTileID, i32>,
     next_stencil_id: i32,
 
     pub current_layer: u32,
@@ -174,7 +174,7 @@ impl<'a> PaintParameters<'a> {
             renderable_size,
             pixels_to_gl_units,
             shaders: &static_data.shaders,
-            tile_clipping_mask_ids: BTreeMap::new(),
+            tile_clipping_mask_ids: VecMap::new(),
             next_stencil_id: 1,
             // C++ leaves these uninitialized; the renderer sets them before
             // use.

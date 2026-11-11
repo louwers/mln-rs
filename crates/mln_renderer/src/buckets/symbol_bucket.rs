@@ -31,6 +31,7 @@ use mln_util::immutable::Immutable;
 use mln_util::range::Range;
 use mln_util::serialization::payload::pod;
 use mln_util::sync::{MutexExt, RwLockExt};
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase, FeatureStates};
@@ -446,7 +447,7 @@ pub struct SymbolBucket {
 
     pub sort_key_ranges: Vec<SortKeyRange>,
 
-    pub paint_properties: BTreeMap<String, RwLock<PaintProperties>>,
+    pub paint_properties: VecMap<String, RwLock<PaintProperties>>,
 
     pub text_size_binder: SymbolSizeBinder,
     pub icon_size_binder: SymbolSizeBinder,
@@ -491,7 +492,7 @@ impl SymbolBucket {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         layout: Immutable<SymbolLayoutProperties::PossiblyEvaluated>,
-        paint_properties: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
         text_size: &PropertyValue<f32>,
         icon_size: &PropertyValue<f32>,
         zoom: f32,
@@ -507,7 +508,7 @@ impl SymbolBucket {
     ) -> Self {
         let icon_size_data_driven_or_zoom = icon_size.is_expression()
             && (!icon_size.as_expression().is_feature_constant() || !icon_size.as_expression().is_zoom_constant());
-        let mut binders = BTreeMap::new();
+        let mut binders = VecMap::new();
         for (id, properties) in paint_properties {
             let evaluated = get_evaluated::<SymbolLayerProperties>(properties);
             binders.entry(id.clone()).or_insert_with(|| {

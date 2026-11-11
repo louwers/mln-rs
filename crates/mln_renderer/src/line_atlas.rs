@@ -5,14 +5,13 @@
 // the port keys by the values themselves (the float bits), which is the same
 // map without the collisions. The hash is only a cache key.
 
-use std::collections::BTreeMap;
-
 use mln_gfx::UploadPass;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_util::image::AlphaImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
+use mln_vec_map::VecMap;
 
 /// `LinePatternPos`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -298,7 +297,7 @@ fn dash_key(from: &[f32], to: &[f32], cap: LinePatternCap) -> DashKey {
 /// `LineAtlas`.
 #[derive(Default)]
 pub struct LineAtlas {
-    textures: BTreeMap<DashKey, DashPatternTexture>,
+    textures: VecMap<DashKey, DashPatternTexture>,
     /// Stores a list of the texture objects that need uploading.
     needs_upload: Vec<DashKey>,
 }

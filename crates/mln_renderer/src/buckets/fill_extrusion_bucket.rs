@@ -11,7 +11,6 @@
 // GeometryCollectionFloat): no render test sets it; the polygon is
 // extruded without rounding (logged once).
 
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
@@ -40,6 +39,7 @@ use mln_util::serialization::payload::pod;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 use mln_util::sync::RwLockExt;
 use mln_util::vectors::Vec3f;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -100,7 +100,7 @@ pub struct FillExtrusionBucket {
 
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: BTreeMap<String, RwLock<FillExtrusionBinders>>,
+    pub paint_property_binders: VecMap<String, RwLock<FillExtrusionBinders>>,
 }
 
 static EMPTY_FORMATTED_SECTION: Value = Value::Null;
@@ -133,11 +133,11 @@ impl FillExtrusionBucket {
     /// `FillExtrusionBucket(layout, layerPaintProperties, zoom, overscaling)`.
     pub fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
-        layer_paint_properties: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         _overscaling: u32,
     ) -> Self {
-        let mut paint_property_binders = BTreeMap::new();
+        let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
                 RwLock::new(FillExtrusionBinders::new(get_evaluated::<FillExtrusionLayerProperties>(properties), zoom))
@@ -469,9 +469,13 @@ impl PatternLayoutSpec for FillExtrusionLayoutSpec {
         0.0
     }
 
+    fn constant_sort_key(_layout: &Self::Layout) -> Option<f32> {
+        None
+    }
+
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillExtrusionBucket {

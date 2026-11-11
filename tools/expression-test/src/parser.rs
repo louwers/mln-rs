@@ -4,7 +4,6 @@
 // The C++ runner reads the fixtures with rapidjson's full-precision parser
 // (correctly rounded, like serde_json).
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use feature::{Feature, Identifier, Value, ValueObject};
@@ -13,12 +12,13 @@ use mln_conversion::Convertible;
 use mln_expression::type_::{self, Type};
 use mln_expression::{Expression, ParsingContext, is_feature_constant, is_zoom_constant};
 use mln_tile_id::CanonicalTileID;
+use mln_vec_map::VecSet;
 
 pub struct Input {
     pub zoom: Option<f32>,
     pub heatmap_density: Option<f64>,
     pub canonical: Option<CanonicalTileID>,
-    pub available_images: BTreeSet<String>,
+    pub available_images: VecSet<String>,
     pub feature: Feature<f64>,
 }
 
@@ -285,7 +285,7 @@ fn parse_inputs(inputs_value: &serde_json::Value, data: &mut TestData) -> Result
         });
 
         // Parse availableImages
-        let mut available_images = BTreeSet::new();
+        let mut available_images = VecSet::new();
         if let Some(images) = evaluation_context.get("availableImages") {
             for image in images.as_array().expect("array") {
                 available_images.insert(as_str(image));

@@ -10,7 +10,7 @@ use crate::layer_properties::{HasEvaluated, LayerProperties, LayerPropertiesBase
 use crate::layers::raster_layer_impl::Impl as RasterLayerImpl;
 use mln_style_types::RasterResamplingType;
 use mln_util::immutable::Immutable;
-use std::collections::BTreeSet;
+use mln_vec_map::VecSet;
 
 crate::paint_property!(
     /// `struct RasterBrightnessMax : PaintProperty<float>`:
@@ -132,7 +132,7 @@ impl LayerProperties for RasterLayerProperties {
         self.evaluated.get_dependencies()
     }
 
-    fn collect_evaluated_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.evaluated.collect_global_state_refs(refs);
     }
 }

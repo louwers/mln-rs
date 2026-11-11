@@ -21,7 +21,6 @@
 // writes (cross-faded binders) is behind a `Mutex`.
 //
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use mln_expression::range::Range;
@@ -43,6 +42,7 @@ use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
 use mln_util::serialization::payload;
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::layout::pattern_layout::PatternDependency;
@@ -57,7 +57,7 @@ pub struct FeatureVertexRange {
 }
 
 /// `std::map<std::string, std::vector<FeatureVertexRange>>`.
-pub type FeatureVertexRangeMap = BTreeMap<String, Vec<FeatureVertexRange>>;
+pub type FeatureVertexRangeMap = VecMap<String, Vec<FeatureVertexRange>>;
 
 /// `InterleavedVertexBuffer`: the data-driven attribute values of all the
 /// binders of one `PaintPropertyBinders`, one interleaved vertex per layout

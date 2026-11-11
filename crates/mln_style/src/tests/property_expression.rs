@@ -1,13 +1,12 @@
 // Ports test/style/property_expression.test.cpp.
 
-use std::collections::BTreeSet;
-
 use feature::Value as MbglValue;
 use geometry::{Geometry, Point};
 use mln_expression::dsl::create_expression_from_str;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryCollection;
 use mln_util::geometry::FeatureType;
+use mln_vec_map::VecSet;
 
 use super::util::{StubGeometryTileFeature, property_map};
 use crate::expression::dsl::{get, get_str, image, interpolate, linear, literal, literal_str, number, step, zoom};
@@ -182,8 +181,8 @@ fn issue8460() {
 // gtest: PropertyExpression.ImageExpression
 #[test]
 fn image_expression() {
-    let empty_set = BTreeSet::new();
-    let available_images: BTreeSet<String> =
+    let empty_set = VecSet::new();
+    let available_images: VecSet<String> =
         ["maki-11", "airport-11", "bicycle-15"].iter().map(|s| s.to_string()).collect();
 
     // evaluation test without available images

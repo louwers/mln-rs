@@ -3,13 +3,11 @@
 // serde_json::Value, distinguishes uint64/int64/double — the expression and
 // conversion subsystems depend on that distinction.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
-// C++ uses std::unordered_map; BTreeMap gives us deterministic iteration
-// (useful for serialization comparisons) at no behavioral cost.
-pub type ValueObject = BTreeMap<String, Value>;
+// C++ uses std::unordered_map; a VecMap gives us deterministic iteration in
+// key order (useful for serialization comparisons) at no behavioral cost.
+pub type ValueObject = mln_vec_map::VecMap<String, Value>;
 
 /// `mapbox::base::Value`:
 /// `variant<null, bool, uint64_t, int64_t, double, string, vector, map>`.

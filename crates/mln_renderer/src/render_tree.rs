@@ -4,16 +4,16 @@
 // C++ `RenderTree` is an abstract class with one implementation
 // (`RenderTreeImpl` in render_orchestrator.cpp); the port has one struct.
 // `std::set<LayerRenderItem>` (ordered and deduplicated by `index`) is a
-// `BTreeMap<u32, LayerRenderItem>`.
+// `VecMap<u32, LayerRenderItem>`.
 
 use std::cell::RefCell; // layers: debug
-use std::collections::BTreeMap;
 use std::rc::Weak;
 
 use mln_gfx::{LayerGroupBasePtr, UploadPass}; // layers: debug
 use mln_map_types::{MapDebugOptions, MapMode, TransformState};
 use mln_util::Color;
 use mln_util::chrono::TimePoint;
+use mln_vec_map::VecMap;
 
 use crate::layer_tweaker::LayerTweaker; // layers: debug
 use crate::paint_parameters::{PaintParameters, TransformParameters};
@@ -29,7 +29,7 @@ pub enum DebugType {
 }
 
 /// `RenderItem::DebugLayerGroupMap` (layers: debug).
-pub type DebugLayerGroupMap = BTreeMap<DebugType, LayerGroupBasePtr>;
+pub type DebugLayerGroupMap = VecMap<DebugType, LayerGroupBasePtr>;
 
 /// The `layerGroup->addLayerTweaker(tweaker)` calls of
 /// `updateDebugDrawables`: Rust layer groups keep no tweaker list (see
@@ -126,7 +126,7 @@ impl RenderTreeParameters {
 /// `RenderTree` / `RenderTreeImpl`.
 pub struct RenderTree {
     parameters: Box<RenderTreeParameters>,
-    pub(crate) layer_render_items: BTreeMap<u32, LayerRenderItem>,
+    pub(crate) layer_render_items: VecMap<u32, LayerRenderItem>,
     source_render_items: Vec<Box<dyn RenderItem>>,
     // symbols:
     layers_need_placement: Vec<crate::render_layer::RenderLayerPtr>,
@@ -139,7 +139,7 @@ pub struct RenderTree {
 impl RenderTree {
     pub(crate) fn new(
         parameters: Box<RenderTreeParameters>,
-        layer_render_items: BTreeMap<u32, LayerRenderItem>,
+        layer_render_items: VecMap<u32, LayerRenderItem>,
         source_render_items: Vec<Box<dyn RenderItem>>,
         start_time: mln_util::time::Instant,
     ) -> Self {
@@ -188,7 +188,7 @@ impl RenderTree {
         }
     }
 
-    pub fn get_layer_render_item_map(&self) -> &BTreeMap<u32, LayerRenderItem> {
+    pub fn get_layer_render_item_map(&self) -> &VecMap<u32, LayerRenderItem> {
         &self.layer_render_items
     }
 

@@ -1,15 +1,24 @@
 // Ported gtests (test/storage/*.test.cpp) and test helpers.
 
+// Most helpers serve the SQLite tests.
+#![cfg_attr(not(feature = "sqlite"), allow(dead_code))]
+
 mod asset_file_source;
+#[cfg(feature = "sqlite")]
 mod database_file_source;
 mod http_file_source;
 mod local_file_source;
+// The C++ MainResourceLoader tests assume its Database file source.
+#[cfg(feature = "sqlite")]
 mod main_resource_loader;
+#[cfg(feature = "sqlite")]
 mod mbtiles_file_source;
 mod offline;
+#[cfg(feature = "sqlite")]
 mod offline_database;
 mod online_file_source;
 mod pmtiles_file_source;
+#[cfg(feature = "sqlite")]
 mod sqlite;
 
 use std::cell::RefCell;

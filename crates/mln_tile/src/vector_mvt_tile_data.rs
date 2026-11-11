@@ -10,7 +10,6 @@
 // channel).
 
 use std::cell::OnceCell;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use feature::{Identifier, PropertyMap, Value};
@@ -19,6 +18,7 @@ use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geometry::FeatureType;
 use mln_util::logging::{Event, Log};
+use mln_vec_map::VecMap;
 use vector_tile::{Error, GeomType};
 
 use crate::geometry_tile_data::fixup_polygons;
@@ -204,7 +204,7 @@ pub struct VectorMVTTileData {
     /// protozero::data_view> layers`; views as (offset, length) into `data`.
     // OnceLock (not OnceCell): the tile data is shared with the tile
     // worker thread (mln_renderer, `Arc<dyn GeometryTileData + Send + Sync>`).
-    layers: std::sync::OnceLock<BTreeMap<Vec<u8>, (usize, usize)>>,
+    layers: std::sync::OnceLock<VecMap<Vec<u8>, (usize, usize)>>,
 }
 
 impl VectorMVTTileData {

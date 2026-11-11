@@ -6,7 +6,7 @@
 // Nothing in the C++ core calls it except `Properties<...>::stringify`
 // (`stringifyLayout`), whose only callers are tests.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use feature::{Identifier, Value};
 use mln_style_types::{
@@ -17,6 +17,7 @@ use mln_style_types::{
 use mln_util::enum_::Enum;
 use mln_util::geometry::FeatureType;
 use mln_util::{Color, Padding};
+use mln_vec_map::VecMap;
 pub use rapidjson::Writer;
 
 use crate::expression::{Formatted, Image, Value as ExpressionValue, ValueConverter};
@@ -200,8 +201,8 @@ impl<T: Stringify> Stringify for HashMap<String, T> {
     }
 }
 
-/// `mapbox::base::ValueObject` is a `BTreeMap` in the port (key order).
-impl<T: Stringify> Stringify for BTreeMap<String, T> {
+/// `mapbox::base::ValueObject` is a `VecMap` in the port (key order).
+impl<T: Stringify> Stringify for VecMap<String, T> {
     fn stringify(&self, writer: &mut Writer) {
         writer.start_object();
         for (key, value) in self {

@@ -151,7 +151,7 @@ pub fn emit(layer: &LayerSpec) -> String {
         imports.push("crate::renderer::property_evaluation_parameters::CrossfadeParameters".into());
     }
     imports.push("mln_util::immutable::Immutable".into());
-    imports.push("std::collections::BTreeSet".into());
+    imports.push("mln_vec_map::VecSet".into());
     w.imports(imports);
     w.blank();
 
@@ -256,7 +256,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.line("        self.evaluated.get_dependencies()");
     w.line("    }");
     w.blank();
-    w.line("    fn collect_evaluated_global_state_refs(&self, refs: &mut BTreeSet<String>) {");
+    w.line("    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {");
     w.line("        self.evaluated.collect_global_state_refs(refs);");
     w.line("    }");
     w.line("}");

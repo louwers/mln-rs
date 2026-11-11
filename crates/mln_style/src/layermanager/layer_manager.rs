@@ -3,10 +3,10 @@
 // platform/default/src/mln/layermanager/layer_manager.cpp
 // (`LayerManagerDefault`), style half.
 
-use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use mln_conversion::{Convertible, Error};
+use mln_vec_map::VecMap;
 
 use super::background_layer_factory::BackgroundLayerFactory;
 use super::circle_layer_factory::CircleLayerFactory;
@@ -24,7 +24,7 @@ use crate::layer::{Layer, LayerTypeInfo};
 
 pub struct LayerManager {
     factories: Vec<Box<dyn LayerFactory>>,
-    type_to_factory: BTreeMap<String, usize>,
+    type_to_factory: VecMap<String, usize>,
 }
 
 impl LayerManager {
@@ -36,7 +36,7 @@ impl LayerManager {
 
     /// `LayerManagerDefault::LayerManagerDefault()`.
     fn new_default() -> Self {
-        let mut manager = LayerManager { factories: Vec::new(), type_to_factory: BTreeMap::new() };
+        let mut manager = LayerManager { factories: Vec::new(), type_to_factory: VecMap::new() };
         manager.add_layer_type(Box::new(FillLayerFactory));
         manager.add_layer_type(Box::new(LineLayerFactory));
         manager.add_layer_type(Box::new(CircleLayerFactory));

@@ -160,7 +160,7 @@ macro_rules! layout_properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut std::collections::BTreeSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -186,7 +186,7 @@ macro_rules! layout_properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut std::collections::BTreeSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = <$prop as Property>::possibly_evaluated_global_state_refs(&self.$field) {
                         refs.extend(property_refs.iter().cloned());
                     })+

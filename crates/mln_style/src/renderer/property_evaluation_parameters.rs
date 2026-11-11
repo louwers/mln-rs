@@ -1,10 +1,10 @@
 // Ports src/mln/renderer/property_evaluation_parameters.hpp. It lives in
 // mln_style because style/properties.hpp needs it (a cut point of the C++ include cycle).
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mln_util::chrono::{Duration, TimePoint};
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::GlobalStateMap;
@@ -29,7 +29,7 @@ pub struct PropertyEvaluationParameters {
 
     /// The global-state properties that changed since the last evaluation;
     /// None means the changed keys are unknown (treat all as changed).
-    pub changed_global_state_keys: Option<Arc<BTreeSet<String>>>,
+    pub changed_global_state_keys: Option<Arc<VecSet<String>>>,
 
     pub zoom_changed: bool,
     pub layer_changed: bool,

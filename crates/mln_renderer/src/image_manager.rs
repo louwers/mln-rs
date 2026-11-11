@@ -9,7 +9,6 @@
 // is released, so a requestor may call back into the manager.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -18,6 +17,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImageType, Impl as Ima
 use mln_util::constants::DEFAULT_ON_DEMAND_IMAGES_CACHE_SIZE;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::gfx::dynamic_texture_atlas::ImageVersionMap;
 
@@ -40,7 +40,7 @@ impl ImageManagerObserver for NullObserver {}
 pub struct ImageRequestorBase {
     /// Pending requests are image requests that are waiting to be
     /// dispatched to the client.
-    pending_requests: RefCell<BTreeSet<String>>,
+    pending_requests: RefCell<VecSet<String>>,
 }
 
 /// `ImageRequestor`. Implementors call `ImageManager::remove_requestor_key`
@@ -81,13 +81,13 @@ type RequestorEntry = (Weak<dyn ImageRequestor>, ImageRequestPair);
 
 struct State {
     loaded: bool,
-    requestors: BTreeMap<RequestorKey, RequestorEntry>,
-    missing_image_requestors: BTreeMap<RequestorKey, RequestorEntry>,
-    requested_images: BTreeMap<String, BTreeMap<RequestorKey, Weak<dyn ImageRequestor>>>,
+    requestors: VecMap<RequestorKey, RequestorEntry>,
+    missing_image_requestors: VecMap<RequestorKey, RequestorEntry>,
+    requested_images: VecMap<String, VecMap<RequestorKey, Weak<dyn ImageRequestor>>>,
     requested_images_cache_size: usize,
     images: ImageMap,
     // Mirror of 'ImageMap images;' keys.
-    available_images: Immutable<BTreeSet<String>>,
+    available_images: Immutable<VecSet<String>>,
     updated_image_versions: ImageVersionMap,
 }
 
@@ -109,12 +109,12 @@ impl ImageManager {
             self_weak: self_weak.clone(),
             state: RefCell::new(State {
                 loaded: false,
-                requestors: BTreeMap::new(),
-                missing_image_requestors: BTreeMap::new(),
-                requested_images: BTreeMap::new(),
+                requestors: VecMap::new(),
+                missing_image_requestors: VecMap::new(),
+                requested_images: VecMap::new(),
                 requested_images_cache_size: 0,
                 images: ImageMap::new(),
-                available_images: Arc::new(BTreeSet::new()),
+                available_images: Arc::new(VecSet::new()),
                 updated_image_versions: ImageVersionMap::new(),
             }),
             observer: RefCell::new(Rc::new(NullObserver)),
@@ -318,7 +318,7 @@ impl ImageManager {
     }
 
     /// `getAvailableImages()`.
-    pub fn get_available_images(&self) -> Immutable<BTreeSet<String>> {
+    pub fn get_available_images(&self) -> Immutable<VecSet<String>> {
         self.state.borrow().available_images.clone()
     }
 
@@ -335,7 +335,7 @@ impl ImageManager {
         debug_assert!(state.missing_image_requestors.is_empty());
 
         state.images.clear();
-        state.available_images = Arc::new(BTreeSet::new());
+        state.available_images = Arc::new(VecSet::new());
         state.updated_image_versions.clear();
         state.requested_images.clear();
         state.loaded = false;

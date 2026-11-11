@@ -10,6 +10,7 @@ pub mod geojson_tile;
 pub mod geojson_tile_data;
 pub mod geometry_tile;
 pub mod geometry_tile_worker;
+pub mod ordered_replies;
 pub mod raster_dem_tile; // dem-heatmap
 pub mod raster_tile;
 pub mod tile_cache;

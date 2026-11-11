@@ -4,7 +4,6 @@
 // worker thread and shared with `Arc`); the render layer copies them into
 // the shared gfx vectors its drawables reference.
 
-use std::collections::BTreeMap;
 use std::sync::RwLock;
 use std::sync::atomic::Ordering;
 
@@ -19,6 +18,7 @@ use mln_util::Color;
 use mln_util::immutable::Immutable;
 use mln_util::serialization::payload::pod;
 use mln_util::sync::RwLockExt;
+use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::{Bucket, BucketBase};
@@ -56,18 +56,18 @@ pub struct CircleBucket {
     pub segments: Vec<SegmentBase>,
     /// Behind `RwLock`s: `update` (feature state) changes them while the
     /// bucket is shared.
-    pub paint_property_binders: BTreeMap<String, RwLock<CircleBinders>>,
+    pub paint_property_binders: VecMap<String, RwLock<CircleBinders>>,
     pub mode: MapMode,
 }
 
 impl CircleBucket {
     /// `CircleBucket(layerPaintProperties, mode, zoom)`.
     pub fn new(
-        layer_paint_properties: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
         mode: MapMode,
         zoom: f32,
     ) -> Self {
-        let mut paint_property_binders = BTreeMap::new();
+        let mut paint_property_binders = VecMap::new();
         for (id, properties) in layer_paint_properties {
             paint_property_binders.entry(id.clone()).or_insert_with(|| {
                 RwLock::new(CircleBinders::new(get_evaluated::<CircleLayerProperties>(properties), zoom))

@@ -5,7 +5,7 @@
 // Deviation: the message of a JSON syntax error is serde_json's, not
 // rapidjson's `GetParseError_En(code) + " at offset " + offset`.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 
 use feature::{Value, ValueObject};
 use mln_conversion::{Convertible, Error};
@@ -13,6 +13,7 @@ use mln_util::LatLng;
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::logging::{Event, Log};
+use mln_vec_map::VecSet;
 
 use crate::conversion::layer::{convert_layer, set_paint_properties};
 use crate::conversion::{Converter, convert, convert_source};
@@ -370,9 +371,9 @@ impl Parser {
     }
 
     /// Statically evaluate layer properties to determine what font stacks are used.
-    pub fn font_stacks(&self) -> BTreeSet<FontStack> {
+    pub fn font_stacks(&self) -> VecSet<FontStack> {
         // mln::fontStacks(impls) (src/mln/util/font_stack.cpp).
-        let mut result = BTreeSet::new();
+        let mut result = VecSet::new();
         for layer in &self.layers {
             layer.base_impl().populate_font_stack(&mut result);
         }

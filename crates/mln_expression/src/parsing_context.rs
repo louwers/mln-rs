@@ -2,11 +2,11 @@
 // src/mln/style/expression/parsing_context.cpp.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_conversion::{Convertible, get_json_type};
+use mln_vec_map::VecMap;
 
 use crate::assertion::Assertion;
 use crate::at::At;
@@ -50,7 +50,7 @@ pub struct ParsingError {
 pub type ParseResult = Option<Box<dyn Expression>>;
 
 /// The bindings of a `let` scope (`std::map<std::string, std::shared_ptr<Expression>>`).
-pub type Bindings = BTreeMap<String, Arc<dyn Expression>>;
+pub type Bindings = VecMap<String, Arc<dyn Expression>>;
 
 /// `detail::Scope`.
 pub struct Scope {

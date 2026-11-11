@@ -902,7 +902,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 }
                 let size = if compressed {
                     let raw = std::fs::read(&file_path).unwrap_or_default();
-                    mln_platform_default_image::compression::compress(&raw).map(|c| c.len() as u64).unwrap_or(0)
+                    mln_util::compression::compress(&raw).map(|c| c.len() as u64).unwrap_or(0)
                 } else {
                     std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0)
                 };

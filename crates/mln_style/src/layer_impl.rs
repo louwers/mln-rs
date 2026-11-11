@@ -6,11 +6,11 @@
 // `background_layer::Impl` holds an `ImplBase` and implements the trait.
 // `dyn Impl` derefs to its `ImplBase`, so `impl_.id` reads as in C++.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mln_style_types::VisibilityType;
 use mln_util::immutable::Immutable;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression};
@@ -65,7 +65,7 @@ impl ImplBase {
     /// The base `Layer::Impl::collectLayoutGlobalStateRefs` (the filter's
     /// global-state refs), which overrides call as
     /// `Layer::Impl::collectLayoutGlobalStateRefs(refs)`.
-    pub fn collect_filter_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    pub fn collect_filter_global_state_refs(&self, refs: &mut VecSet<String>) {
         if let Some(expression) = &self.filter.expression {
             crate::expression::collect_global_state_refs(expression.as_ref(), refs);
         }
@@ -73,7 +73,7 @@ impl ImplBase {
 }
 
 /// The virtual interface of `Layer::Impl`.
-pub trait Impl: AsAny + std::fmt::Debug {
+pub trait Impl: AsAny {
     fn base(&self) -> &ImplBase;
     fn base_mut(&mut self) -> &mut ImplBase;
 
@@ -90,7 +90,7 @@ pub trait Impl: AsAny + std::fmt::Debug {
     fn get_type_info(&self) -> &'static LayerTypeInfo;
 
     /// Populates the given `font_stack` with fonts being used by the layer.
-    fn populate_font_stack(&self, _font_stack: &mut BTreeSet<FontStack>) {}
+    fn populate_font_stack(&self, _font_stack: &mut VecSet<FontStack>) {}
 
     /// Collect the style dependencies for this layer
     fn get_dependencies(&self) -> Dependency {
@@ -105,7 +105,7 @@ pub trait Impl: AsAny + std::fmt::Debug {
 
     /// Collect the global-state properties referenced by expressions that
     /// affect tile layout, mirroring get_layout_dependencies().
-    fn collect_layout_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.base().collect_filter_global_state_refs(refs);
     }
 }
@@ -130,5 +130,16 @@ pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Immutable<
     match impl_.clone().into_any_arc().downcast::<T>() {
         Ok(typed) => typed,
         Err(_) => panic!("static_immutable_cast: layer impl type mismatch"),
+    }
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn Impl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Layer::Impl")
+            .field("id", &self.base().id)
+            .field("type", &self.get_type_info().type_)
+            .finish_non_exhaustive()
     }
 }

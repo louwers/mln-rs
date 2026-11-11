@@ -17,7 +17,6 @@
 // (C++ `util::interpolate(a, b, float t)`).
 
 use std::cell::RefCell;
-use std::collections::BTreeSet;
 use std::fmt::Debug;
 
 use mln_expression::expression::FeatureState;
@@ -26,6 +25,7 @@ use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_EASE;
 use mln_util::interpolate::Interpolate;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, ValueConverter};
@@ -44,7 +44,7 @@ pub trait PropertyValueLike: Clone + Default + Debug {
     fn is_undefined(&self) -> bool;
     fn is_data_driven(&self) -> bool;
     fn get_dependencies(&self) -> Dependency;
-    fn get_global_state_refs(&self) -> Option<&BTreeSet<String>>;
+    fn get_global_state_refs(&self) -> Option<&VecSet<String>>;
     fn has_data_driven_property_difference(&self, other: &Self) -> bool;
 }
 
@@ -67,7 +67,7 @@ impl<T: Clone + Debug + PartialEq> PropertyValueLike for PropertyValue<T> {
         PropertyValue::get_dependencies(self)
     }
 
-    fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         PropertyValue::get_global_state_refs(self)
     }
 
@@ -218,7 +218,7 @@ pub trait Property: 'static {
     }
 
     /// `PossiblyEvaluated::collectGlobalStateRefs(const P&, ...)`.
-    fn possibly_evaluated_global_state_refs(_value: &Self::PossiblyEvaluatedType) -> Option<&BTreeSet<String>> {
+    fn possibly_evaluated_global_state_refs(_value: &Self::PossiblyEvaluatedType) -> Option<&VecSet<String>> {
         None
     }
 
@@ -241,8 +241,8 @@ pub enum FeatureEvaluationExtra<'a> {
     None,
     Canonical(&'a CanonicalTileID),
     State(&'a FeatureState),
-    Images(&'a BTreeSet<String>),
-    ImagesCanonical(&'a BTreeSet<String>, &'a CanonicalTileID),
+    Images(&'a VecSet<String>),
+    ImagesCanonical(&'a VecSet<String>, &'a CanonicalTileID),
 }
 
 /// `template <class T> static T evaluate(float, const GeometryTileFeature&, [const
@@ -438,7 +438,7 @@ macro_rules! paint_properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut std::collections::BTreeSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = self.$field.get_value().get_global_state_refs() {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -456,7 +456,7 @@ macro_rules! paint_properties {
                     result
                 }
 
-                pub fn collect_global_state_refs(&self, refs: &mut std::collections::BTreeSet<String>) {
+                pub fn collect_global_state_refs(&self, refs: &mut mln_vec_map::VecSet<String>) {
                     $(if let Some(property_refs) = <$prop as Property>::possibly_evaluated_global_state_refs(&self.$field) {
                         refs.extend(property_refs.iter().cloned());
                     })+
@@ -555,7 +555,7 @@ macro_rules! __possibly_evaluated_feature_methods {
             &self,
             z: f32,
             feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-            available_images: &std::collections::BTreeSet<String>,
+            available_images: &mln_vec_map::VecSet<String>,
         ) -> <P as $crate::properties::Property>::Type
         where
             P: $crate::properties::Property,
@@ -575,7 +575,7 @@ macro_rules! __possibly_evaluated_feature_methods {
             &self,
             z: f32,
             feature: &dyn mln_tile_id::geometry_tile_data::GeometryTileFeature,
-            available_images: &std::collections::BTreeSet<String>,
+            available_images: &mln_vec_map::VecSet<String>,
             canonical: &mln_tile_id::CanonicalTileID,
         ) -> <P as $crate::properties::Property>::Type
         where

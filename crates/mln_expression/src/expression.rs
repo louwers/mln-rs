@@ -7,7 +7,7 @@
 // `getKind()` + `static_cast`; the port uses `downcast` (`Any`).
 
 use std::any::Any;
-use std::collections::BTreeSet;
+use std::borrow::Cow;
 use std::fmt;
 
 use feature::{Feature, Identifier as FeatureIdentifier, Value as MbglValue, ValueObject};
@@ -15,6 +15,7 @@ use mln_text::glyph::FontFaces;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature};
 use mln_util::geometry::{FeatureType, to_feature_type};
+use mln_vec_map::VecSet;
 
 use crate::compound_expression::CompoundExpression;
 use crate::literal::Literal;
@@ -55,7 +56,7 @@ pub struct EvaluationContext<'a> {
     /// Contains formatted section object, `std::unordered_map<std::string, Value>`.
     pub formatted_section: Option<&'a Value>,
     pub feature_state: Option<&'a FeatureState>,
-    pub available_images: Option<&'a BTreeSet<String>>,
+    pub available_images: Option<&'a VecSet<String>>,
     pub canonical: Option<&'a CanonicalTileID>,
     pub global_state: Option<&'a GlobalStateMap>,
     /// The style's font faces, which let "is-supported-script" accept the
@@ -123,7 +124,7 @@ impl<'a> EvaluationContext<'a> {
         self
     }
 
-    pub fn with_available_images(mut self, available_images: Option<&'a BTreeSet<String>>) -> Self {
+    pub fn with_available_images(mut self, available_images: Option<&'a VecSet<String>>) -> Self {
         self.available_images = available_images;
         self
     }
@@ -296,6 +297,14 @@ pub trait Expression: AsAny + Send + Sync {
     fn base(&self) -> &ExpressionBase;
 
     fn evaluate(&self, params: &EvaluationContext<'_>) -> EvaluationResult;
+
+    /// The value a literal always evaluates to, which callers can borrow
+    /// instead of cloning it on each evaluation. `None` for any other
+    /// expression.
+    fn literal_value(&self) -> Option<&Value> {
+        None
+    }
+
     fn each_child<'a>(&'a self, visit: &mut dyn FnMut(&'a dyn Expression));
 
     /// `operator==`.
@@ -388,7 +397,7 @@ where
 
 /// Collect the names of the global-state properties referenced by
 /// "global-state" expressions in the given expression tree.
-pub fn collect_global_state_refs(expression: &dyn Expression, refs: &mut BTreeSet<String>) {
+pub fn collect_global_state_refs(expression: &dyn Expression, refs: &mut VecSet<String>) {
     if !expression.has(Dependency::GLOBAL_STATE) {
         return;
     }
@@ -414,7 +423,7 @@ pub fn collect_global_state_refs(expression: &dyn Expression, refs: &mut BTreeSe
 /// Whether any of the global-state keys referenced by an expression is among
 /// the changed keys. A null set on either side means "unknown" and is
 /// conservatively treated as a match.
-pub fn global_state_refs_intersect(refs: Option<&BTreeSet<String>>, changed_keys: Option<&BTreeSet<String>>) -> bool {
+pub fn global_state_refs_intersect(refs: Option<&VecSet<String>>, changed_keys: Option<&VecSet<String>>) -> bool {
     match (refs, changed_keys) {
         (Some(refs), Some(changed_keys)) => refs.iter().any(|key| changed_keys.contains(key)),
         _ => true,
@@ -491,7 +500,7 @@ pub fn evaluate_feature_with_images(
     zoom: Option<f32>,
     feature: &Feature<f64>,
     color_ramp_parameter: Option<f64>,
-    available_images: &BTreeSet<String>,
+    available_images: &VecSet<String>,
 ) -> EvaluationResult {
     let f = GeoJSONFeature::new(feature);
     e.evaluate(
@@ -506,7 +515,7 @@ pub fn evaluate_feature_with_canonical(
     zoom: Option<f32>,
     feature: &Feature<f64>,
     color_ramp_parameter: Option<f64>,
-    available_images: &BTreeSet<String>,
+    available_images: &VecSet<String>,
     canonical: &CanonicalTileID,
 ) -> EvaluationResult {
     let f = GeoJSONFeature::with_canonical(feature, canonical);
@@ -525,6 +534,17 @@ pub fn evaluate_accumulated(
 ) -> EvaluationResult {
     let f = GeoJSONFeature::new(feature);
     e.evaluate(&EvaluationContext::from_accumulated(accumulated, Some(&f)))
+}
+
+/// `evaluate`, borrowing a literal's value instead of cloning it.
+pub(crate) fn evaluate_ref<'a>(
+    expression: &'a dyn Expression,
+    params: &EvaluationContext<'_>,
+) -> Result<Cow<'a, Value>, EvaluationError> {
+    match expression.literal_value() {
+        Some(value) => Ok(Cow::Borrowed(value)),
+        None => expression.evaluate(params).map(Cow::Owned),
+    }
 }
 
 /// `toExpressionValue(mln::Value)`, used by the feature accessors.

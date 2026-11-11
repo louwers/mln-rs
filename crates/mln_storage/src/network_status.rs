@@ -5,12 +5,12 @@
 // `Send + Sync` senders, keyed by an id the subscriber keeps for
 // `unsubscribe`.
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use mln_actor::AsyncTaskSender;
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 
 /// `NetworkStatus::Status`
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub enum Status {
 }
 
 static ONLINE: AtomicBool = AtomicBool::new(true);
-static OBSERVERS: Mutex<BTreeMap<u64, AsyncTaskSender>> = Mutex::new(BTreeMap::new());
+static OBSERVERS: Mutex<VecMap<u64, AsyncTaskSender>> = Mutex::new(VecMap::new());
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 /// `NetworkStatus`

@@ -85,7 +85,7 @@ impl SourceBase {
 }
 
 /// `style::Source`.
-pub trait Source: std::fmt::Debug {
+pub trait Source {
     fn base(&self) -> &SourceBase;
 
     fn as_any(&self) -> &dyn Any;
@@ -188,4 +188,13 @@ pub fn set_max_overscale_factor_for_parent_tiles(source: &dyn Source, overscale_
         return;
     }
     mutate_impl(source, |impl_| impl_.base_mut().set_max_overscale_factor_for_parent_tiles(overscale_factor));
+}
+
+// Debug is not a supertrait, for the reason at `impl Debug for dyn Layer`
+// (layer.rs).
+impl std::fmt::Debug for dyn Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let base = self.base_impl();
+        f.debug_struct("Source").field("id", &base.id).field("type", &base.type_).finish_non_exhaustive()
+    }
 }

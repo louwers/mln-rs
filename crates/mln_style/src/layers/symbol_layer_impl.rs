@@ -9,13 +9,13 @@
 // `expression::FormatSectionOverride`s, is in mln_renderer
 // (format_section_override.rs).
 
-use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use mln_expression::format_expression::{FormatExpression, FormatExpressionSection};
 use mln_expression::value::from_expression_value;
 use mln_util::constants::{LAST_RESORT_ALPHABETIC_FONT, LAST_RESORT_PAN_UNICODE_FONT};
 use mln_util::logging::{Event, Log};
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, Expression, Formatted, FormattedSection, Kind, Literal, Type, downcast};
@@ -251,7 +251,7 @@ impl layer::Impl for Impl {
         Impl::static_type_info()
     }
 
-    fn populate_font_stack(&self, font_stack: &mut BTreeSet<FontStack>) {
+    fn populate_font_stack(&self, font_stack: &mut VecSet<FontStack>) {
         if self.layout.get::<TextField>().is_undefined() {
             return;
         }
@@ -288,7 +288,7 @@ impl layer::Impl for Impl {
         self.layout.get_dependencies() | self.base.get_filter_dependencies()
     }
 
-    fn collect_layout_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_layout_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.layout.collect_global_state_refs(refs);
         self.base.collect_filter_global_state_refs(refs);
     }

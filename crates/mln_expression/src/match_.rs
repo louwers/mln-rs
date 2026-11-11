@@ -2,11 +2,11 @@
 // src/mln/style/expression/match.cpp. (The module is `match_` because
 // `match` is a Rust keyword.)
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use feature::Value as MbglValue;
 use mln_conversion::Convertible;
+use mln_vec_map::VecMap;
 
 use crate::check_subtype::check_subtype;
 use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
@@ -69,7 +69,7 @@ impl MatchLabel for i64 {
 }
 
 /// `Match<T>::Branches` (C++ `std::unordered_map`; ordered here).
-pub type Branches<T> = BTreeMap<T, Arc<dyn Expression>>;
+pub type Branches<T> = VecMap<T, Arc<dyn Expression>>;
 
 pub struct Match<T: MatchLabel> {
     base: ExpressionBase,
@@ -138,7 +138,7 @@ impl<T: MatchLabel> Expression for Match<T> {
         let mut serialized = vec![MbglValue::String(self.get_operator()), self.input.serialize()];
 
         // Sort so serialization has an arbitrary defined order, even though
-        // branch order doesn't affect evaluation (the BTreeMap is sorted).
+        // branch order doesn't affect evaluation (the VecMap is sorted).
 
         // Group branches by unique match expression to support condensed
         // serializations of the form [case1, case2, ...] -> matchExpression

@@ -8,7 +8,7 @@
 // validate UTF-8, serde_json rejects invalid UTF-8.
 
 use geometry::Point;
-use mln_platform_default_image::decode_image;
+use mln_image::decode_image;
 use mln_style_types::image::{Image, ImageContent, ImageStretches, Impl, TextFit};
 use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::image::PremultipliedImage;
@@ -227,7 +227,17 @@ fn get_text_fit(value: &JSValue, property: &str, name: &str) -> Option<TextFit> 
 /// the image decoder's exception).
 pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<Immutable<Impl>>, ExceptionPtr> {
     let raster = decode_image(encoded_image).map_err(RuntimeError::ptr)?;
+    parse_sprite_images(id, &raster, json)
+}
 
+/// Port-only: `parseSprite` after its `decodeImage`, for an image decoded
+/// elsewhere (the SpriteLoader decodes through mln_image's
+/// `decoder`, which may answer later).
+pub fn parse_sprite_images(
+    id: &str,
+    raster: &PremultipliedImage,
+    json: &[u8],
+) -> Result<Vec<Immutable<Impl>>, ExceptionPtr> {
     // `doc.Parse<0>(json.c_str())`: the string ends at the first NUL.
     let json = match json.iter().position(|&b| b == 0) {
         Some(nul) => &json[..nul],
@@ -259,7 +269,7 @@ pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<I
 
             let image = create_style_image(
                 &complete_name,
-                &raster,
+                raster,
                 x as i32,
                 y as i32,
                 width as i32,

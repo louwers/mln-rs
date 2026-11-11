@@ -2,7 +2,8 @@
 // src/mln/shaders/program_parameters.cpp
 
 use std::cell::OnceCell;
-use std::collections::BTreeMap;
+
+use mln_vec_map::VecMap;
 
 use crate::backend::Type as BackendType;
 use crate::shaders::shader_source::BuiltIn;
@@ -26,8 +27,8 @@ impl ProgramSource {
 #[derive(Clone, Debug)]
 pub struct ProgramParameters {
     // C++ uses an unordered_map; the order only affects the defines string
-    // and its hash (a cache key), so a BTreeMap keeps it deterministic.
-    defines: BTreeMap<String, String>,
+    // and its hash (a cache key), so a VecMap keeps it deterministic.
+    defines: VecMap<String, String>,
     defines_hash: u64,
     program_type: BuiltIn,
     defines_str: OnceCell<String>,
@@ -47,7 +48,7 @@ fn to_string_decimal(value: f32) -> String {
 
 impl ProgramParameters {
     pub fn new(pixel_ratio: f32, overdraw: bool) -> Self {
-        let mut defines = BTreeMap::new();
+        let mut defines = VecMap::new();
         defines.insert("DEVICE_PIXEL_RATIO".to_owned(), to_string_decimal(pixel_ratio));
         if overdraw {
             defines.insert("OVERDRAW_INSPECTOR".to_owned(), String::new());
@@ -109,7 +110,7 @@ impl ProgramParameters {
         })
     }
 
-    pub fn get_defines(&self) -> &BTreeMap<String, String> {
+    pub fn get_defines(&self) -> &VecMap<String, String> {
         &self.defines
     }
 

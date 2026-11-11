@@ -8,7 +8,7 @@ pub mod sprite_parser;
 
 pub use sprite_loader::SpriteLoader;
 pub use sprite_loader_observer::SpriteLoaderObserver;
-pub use sprite_parser::{create_style_image, parse_sprite};
+pub use sprite_parser::{create_style_image, parse_sprite, parse_sprite_images};
 
 #[cfg(test)]
 mod tests;

@@ -1,11 +1,10 @@
 // Ports src/mln/renderer/possibly_evaluated_property_value.hpp (a cut point of the C++ include cycle).
 
-use std::collections::BTreeSet;
-
 use mln_expression::expression::FeatureState;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::GeometryTileFeature;
 use mln_util::interpolate::Interpolate;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, ValueConverter};
@@ -114,7 +113,7 @@ impl<T: Clone> PossiblyEvaluatedPropertyValue<T> {
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PossiblyEvaluatedPropertyValue::Constant(_) => None,
             PossiblyEvaluatedPropertyValue::Expression(expression) => expression.get_global_state_refs(),
@@ -159,7 +158,7 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
         &self,
         feature: &dyn GeometryTileFeature,
         zoom: f32,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         canonical: &CanonicalTileID,
         default_value: T,
     ) -> Faded<T>
@@ -200,7 +199,7 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         match self {
             PossiblyEvaluatedFadedPropertyValue::Constant(_) => None,
             PossiblyEvaluatedFadedPropertyValue::Expression(expression) => expression.get_global_state_refs(),

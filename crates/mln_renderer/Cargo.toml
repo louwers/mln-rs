@@ -15,6 +15,18 @@ name = "mln_renderer"
 # The doc comments have no examples to run.
 doctest = false
 
+[features]
+default = ["font-face-shaper"]
+# The style's font faces shaped in-process with mln_text's HBShaper
+# (HarfRust), the default FontFaceEngine (src/text/font_face_engine.rs). The
+# workspace's packages depend on this crate without its default features,
+# and those that render (mln-rs, examples/glfw, tools/render-test, and
+# through it tools/bench) turn this one on. The browser build (examples/web)
+# leaves it off: HarfRust, skrifa and the FreeType port go into its second
+# module, crates/mln_web_shaper, which its map loads only for styles with font
+# faces.
+font-face-shaper = []
+
 [dependencies]
 bytemuck.workspace = true
 earcut.workspace = true
@@ -24,9 +36,9 @@ libstdcxx.workspace = true
 mln_actor.workspace = true
 mln_expression.workspace = true
 mln_gfx.workspace = true
+mln_image.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
-mln_platform_default_image.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
 mln_style_types.workspace = true
@@ -34,6 +46,7 @@ mln_text.workspace = true
 mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
+mln_vec_map.workspace = true
 nunicode.workspace = true
 polylabel.workspace = true
 postcard.workspace = true
@@ -61,6 +74,11 @@ path = "tests/source_test.rs"
 [[test]]
 name = "bucket_test"
 path = "tests/bucket_test.rs"
+
+# Ports test/layout/sort_key.test.cpp.
+[[test]]
+name = "sort_key_test"
+path = "tests/sort_key_test.rs"
 
 # The VectorTile tests of test/tile/vector_tile.test.cpp.
 [[test]]

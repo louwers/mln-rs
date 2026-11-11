@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use mln_platform_default_image::decode_image;
+use mln_image::decode_image;
 use mln_renderer::pattern_atlas::PatternAtlas;
 use mln_style_types::image::Impl as ImageImpl;
 use mln_util::image::PremultipliedImage;

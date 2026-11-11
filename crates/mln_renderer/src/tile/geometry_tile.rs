@@ -28,7 +28,7 @@
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -49,6 +49,7 @@ use mln_tile_id::OverscaledTileID;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::bucket::BucketPtr;
@@ -238,7 +239,7 @@ pub struct GeometryTileInner {
 }
 
 impl GeometryTileInner {
-    fn available_images(&self) -> Immutable<BTreeSet<String>> {
+    fn available_images(&self) -> Immutable<VecSet<String>> {
         self.image_manager.get_available_images()
     }
 

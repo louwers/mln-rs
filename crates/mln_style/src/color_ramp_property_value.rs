@@ -1,10 +1,10 @@
 // Ports include/mln/style/color_ramp_property_value.hpp.
 
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use mln_expression::value::from_expression_value;
 use mln_util::Color;
+use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
 
 use crate::expression::{Dependency, EvaluationContext, Expression, GlobalStateMap, collect_global_state_refs};
@@ -27,7 +27,7 @@ use crate::serialization::shared_expression;
 #[serde(from = "ColorRampParts", into = "ColorRampParts")]
 pub struct ColorRampPropertyValue {
     value: Option<Arc<dyn Expression>>,
-    global_state_refs: Option<Arc<BTreeSet<String>>>,
+    global_state_refs: Option<Arc<VecSet<String>>>,
 }
 
 impl PartialEq for ColorRampPropertyValue {
@@ -60,7 +60,7 @@ impl ColorRampPropertyValue {
     pub fn new(value: Option<Arc<dyn Expression>>) -> Self {
         let global_state_refs = match &value {
             Some(expression) if expression.has(Dependency::GLOBAL_STATE) => {
-                let mut refs = BTreeSet::new();
+                let mut refs = VecSet::new();
                 collect_global_state_refs(expression.as_ref(), &mut refs);
                 Some(Arc::new(refs))
             }
@@ -106,7 +106,7 @@ impl ColorRampPropertyValue {
         }
     }
 
-    pub fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
     }
 }
@@ -134,7 +134,7 @@ impl PropertyValueLike for ColorRampPropertyValue {
         ColorRampPropertyValue::get_dependencies(self)
     }
 
-    fn get_global_state_refs(&self) -> Option<&BTreeSet<String>> {
+    fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         ColorRampPropertyValue::get_global_state_refs(self)
     }
 

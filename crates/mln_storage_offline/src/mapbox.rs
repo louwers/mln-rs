@@ -6,14 +6,13 @@
 // std::regex, ECMAScript syntax: the patterns are built from the tile server
 // templates the same way and mean the same in both).
 
-use std::collections::BTreeMap;
-
 use mln_style_types::SourceType;
 use mln_util::constants::TILE_SIZE_I;
 use mln_util::mapbox::is_canonical_url;
 use mln_util::tile_server_options::TileServerOptions;
 use mln_util::tileset::Tileset;
 use mln_util::url::{Path, URL};
+use mln_vec_map::VecMap;
 use regex::Regex;
 
 fn ends_with(s: &str, search: &str) -> bool {
@@ -58,7 +57,7 @@ fn replace_tokens(template: &str, token_pattern: &str) -> String {
 }
 
 /// `createTokenMap(urlTemplate, url)`.
-fn create_token_map(url_template: &str, url: &str) -> BTreeMap<String, String> {
+fn create_token_map(url_template: &str, url: &str) -> VecMap<String, String> {
     let parsed_url = URL::new(url);
 
     // e.g. tiles/satellite/tiles.json
@@ -96,7 +95,7 @@ fn create_token_map(url_template: &str, url: &str) -> BTreeMap<String, String> {
     }
 
     // `std::copy` into a `std::map`: the first of equal keys wins.
-    let mut token_map = BTreeMap::new();
+    let mut token_map = VecMap::new();
     for (key, value) in token_list {
         token_map.entry(key).or_insert(value);
     }

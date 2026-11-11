@@ -15,7 +15,7 @@ use mln_style_types::{
 };
 use mln_util::{Color, Padding};
 use mln_util::immutable::Immutable;
-use std::collections::BTreeSet;
+use mln_vec_map::VecSet;
 
 crate::layout_property!(
     /// `struct IconAllowOverlap : LayoutProperty<bool>`:
@@ -550,7 +550,7 @@ impl LayerProperties for SymbolLayerProperties {
         self.evaluated.get_dependencies()
     }
 
-    fn collect_evaluated_global_state_refs(&self, refs: &mut BTreeSet<String>) {
+    fn collect_evaluated_global_state_refs(&self, refs: &mut VecSet<String>) {
         self.evaluated.collect_global_state_refs(refs);
     }
 }

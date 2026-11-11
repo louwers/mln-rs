@@ -1,17 +1,17 @@
 // Ports src/mln/renderer/style_diff.hpp and src/mln/renderer/style_diff.cpp.
 //
 // C++ keeps added/removed/changed in `std::unordered_map`s; iteration order
-// of those maps is unspecified there. The port uses `BTreeMap` (ordered by
+// of those maps is unspecified there. The port uses `VecMap` (ordered by
 // id); where the renderer iterates them (creating/removing render layers),
 // the order has no observable effect.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use mln_style::collection::ImmutableVector;
 use mln_style::{image, layer, source};
 use mln_util::immutable::Immutable;
 use mln_util::longest_common_subsequence::longest_common_subsequence;
+use mln_vec_map::VecMap;
 
 #[derive(Clone, Debug)]
 pub struct StyleChange<T: ?Sized> {
@@ -21,14 +21,14 @@ pub struct StyleChange<T: ?Sized> {
 
 #[derive(Clone, Debug)]
 pub struct StyleDifference<T: ?Sized> {
-    pub added: BTreeMap<String, Immutable<T>>,
-    pub removed: BTreeMap<String, Immutable<T>>,
-    pub changed: BTreeMap<String, StyleChange<T>>,
+    pub added: VecMap<String, Immutable<T>>,
+    pub removed: VecMap<String, Immutable<T>>,
+    pub changed: VecMap<String, StyleChange<T>>,
 }
 
 impl<T: ?Sized> Default for StyleDifference<T> {
     fn default() -> Self {
-        StyleDifference { added: BTreeMap::new(), removed: BTreeMap::new(), changed: BTreeMap::new() }
+        StyleDifference { added: VecMap::new(), removed: VecMap::new(), changed: VecMap::new() }
     }
 }
 

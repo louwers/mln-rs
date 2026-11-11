@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use mln_platform_default_image::encode_png;
+use mln_image::encode_png;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
@@ -82,7 +82,7 @@ fn parses_our_manifest() {
 
     // Every render and query test is found.
     let test_paths = manifest.get_test_paths();
-    assert_eq!(test_paths.len(), 1443 + 152);
+    assert_eq!(test_paths.len(), 1444 + 152);
     let default = test_paths
         .iter()
         .find(|t| t.style_path.ends_with("/render-tests/background-color/default/style.json"))

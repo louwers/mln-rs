@@ -13,7 +13,7 @@
 // shape-annotation and feature-extension queries, debug layer groups.
 
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -33,6 +33,7 @@ use mln_util::exception::{ExceptionPtr, RuntimeError};
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::change_request::{ChangeRequest, UniqueChangeRequestVec};
 use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlas, DynamicTextureAtlasPtr};
@@ -56,8 +57,8 @@ use crate::update_parameters::UpdateParameters;
 /// The keys whose values differ between two global state snapshots. Values
 /// of unchanged keys are copied verbatim between snapshots, so exact
 /// equality is sufficient here.
-fn diff_global_state_keys(previous: &GlobalStateMap, current: &GlobalStateMap) -> BTreeSet<String> {
-    let mut keys = BTreeSet::new();
+fn diff_global_state_keys(previous: &GlobalStateMap, current: &GlobalStateMap) -> VecSet<String> {
+    let mut keys = VecSet::new();
     for (key, value) in current.iter() {
         match previous.get(key) {
             Some(prev) if prev == value => {}
@@ -227,7 +228,7 @@ pub struct RenderOrchestrator {
 
     /// `std::multimap<int32_t, LayerGroupBasePtr>`: ordered by layer index,
     /// insertion order within an index.
-    layer_groups_by_layer_index: BTreeMap<i32, Vec<LayerGroupBasePtr>>,
+    layer_groups_by_layer_index: VecMap<i32, Vec<LayerGroupBasePtr>>,
 
     /// The `layerTweakers` (weak pointers) each C++ LayerGroupBase holds,
     /// keyed by the layer group's id (see change_request.rs).
@@ -288,12 +289,12 @@ impl RenderOrchestrator {
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             thread_pool,
             global_state: None,
-            layer_groups_by_layer_index: BTreeMap::new(),
+            layer_groups_by_layer_index: VecMap::new(),
             layer_group_tweakers: HashMap::new(),
             globe_depth_pass: crate::globe_depth_pass::GlobeDepthPass::default(),
             sky_pass: crate::sky_pass::SkyPass::default(),
-            debug_layer_groups: BTreeMap::new(), // layers: debug
-            render_targets: Vec::new(),          // dem-heatmap
+            debug_layer_groups: VecMap::new(), // layers: debug
+            render_targets: Vec::new(),        // dem-heatmap
             pending_changes: Vec::new(),
         }
     }
@@ -362,7 +363,7 @@ impl RenderOrchestrator {
         });
 
         let global_state_changed = !ptr_eq_option(&self.global_state, &update_parameters.global_state);
-        let mut changed_global_state_keys: Option<Arc<BTreeSet<String>>> = None;
+        let mut changed_global_state_keys: Option<Arc<VecSet<String>>> = None;
         if global_state_changed {
             if let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state) {
                 changed_global_state_keys = Some(Arc::new(diff_global_state_keys(previous, current)));
@@ -530,7 +531,7 @@ impl RenderOrchestrator {
         // TODO(port): glyphManager->evict(fontStacks(*layerImpls)).
 
         // Update layers for class and zoom changes.
-        let mut constants_mask_changed: BTreeSet<String> = BTreeSet::new();
+        let mut constants_mask_changed: VecSet<String> = VecSet::new();
         for layer in &self.ordered_layers {
             let mut layer = layer.borrow_mut();
             let id = layer.get_id().to_owned();
@@ -595,7 +596,7 @@ impl RenderOrchestrator {
         render_tree_parameters.light = self.render_light.get_evaluated().clone();
         render_tree_parameters.sky = self.render_sky.as_ref().map(|render_sky| render_sky.get_evaluated().clone());
 
-        let mut layer_render_items: BTreeMap<u32, LayerRenderItem> = BTreeMap::new();
+        let mut layer_render_items: VecMap<u32, LayerRenderItem> = VecMap::new();
 
         // Reserve size for filteredLayersForSource if there are sources.
         if !self.source_impls.is_empty() {
@@ -649,7 +650,7 @@ impl RenderOrchestrator {
                                 } else if changed_global_state_keys.is_none() {
                                     true
                                 } else {
-                                    let mut refs = BTreeSet::new();
+                                    let mut refs = VecSet::new();
                                     base_impl.collect_layout_global_state_refs(&mut refs);
                                     layer.base().evaluated_properties.collect_evaluated_global_state_refs(&mut refs);
                                     mln_style::expression::global_state_refs_intersect(
@@ -782,7 +783,7 @@ impl RenderOrchestrator {
         use crate::text::placement::Placement;
         let mut symbol_buckets_changed = false;
         let mut symbol_buckets_added = false;
-        let mut used_symbol_layers: BTreeSet<String> = BTreeSet::new();
+        let mut used_symbol_layers: VecSet<String> = VecSet::new();
         let longitude =
             update_parameters.transform_state.get_lat_lng(mln_util::geo::WrapMode::Unwrapped).longitude() as f32;
         for layer in layers_need_placement.iter().rev() {
@@ -1307,7 +1308,7 @@ impl RenderOrchestrator {
         options: &crate::query::RenderedQueryOptions,
         layers: &crate::geometry::feature_index::QueryLayers<'_>,
     ) -> Result<Vec<mln_util::feature::Feature>, ExceptionPtr> {
-        let mut source_ids: BTreeSet<String> = BTreeSet::new();
+        let mut source_ids: VecSet<String> = VecSet::new();
         let mut filtered_layers = crate::geometry::feature_index::QueryLayers::new();
         for (id, layer) in layers {
             if !layer.needs_rendering() || !layer.supports_zoom(self.zoom_history.last_zoom) {

@@ -5,7 +5,7 @@
 // `uint32_t` arithmetic on `tileY` wraps (`wrapping_*`); shifts by the zoom
 // mask the count like x86 does (`wrapping_shl`), as in mln_tile_id.
 
-use std::collections::{BTreeMap, VecDeque, btree_map};
+use std::collections::VecDeque;
 use std::iter::Peekable;
 
 use geometry::Point;
@@ -14,12 +14,13 @@ use mln_tile_id::UnwrappedTileID;
 use mln_util::geo::LatLng;
 use mln_util::geometry::{FeatureType, Geometry, MultiPoint, Polygon, to_feature_type};
 use mln_util::projection::Projection;
+use mln_vec_map::VecMap;
 
 use crate::util::tile_cover::std_sort;
 
 pub type Bounds = Vec<Bound>;
 /// `std::map<uint32_t, Bounds>`.
-pub type BoundsMap = BTreeMap<u32, Bounds>;
+pub type BoundsMap = VecMap<u32, Bounds>;
 
 /// A chain of points from a local minimum to a local maximum. `winding`
 /// indicates the direction of the original geometry.
@@ -368,7 +369,7 @@ pub struct Impl {
 
     /// `boundsMap` together with the `currentBounds` iterator into it: the
     /// entries not yet moved into `active_bounds`, in key order.
-    current_bounds: Peekable<btree_map::IntoIter<u32, Bounds>>,
+    current_bounds: Peekable<mln_vec_map::IntoIter<u32, Bounds>>,
     /// List of bounds that begin at or before `tileY`
     active_bounds: Bounds,
 

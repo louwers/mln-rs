@@ -1,0 +1,18 @@
+[package]
+name = "mln-rs-vec-map"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+include.workspace = true
+
+[lib]
+name = "mln_vec_map"
+
+[dependencies]
+serde.workspace = true
+
+[lints]
+workspace = true

@@ -1,6 +1,6 @@
 // Ports test/storage/sync_file_source.test.cpp: a file source that answers
 // inside `request`, under a Map that loads a style through it. A separate
-// test target because it needs mln_map and mln_platform_default, which
+// test target because it needs mln_map and mln_headless, which
 // depend on mln_storage.
 
 use std::collections::HashMap;
@@ -8,8 +8,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use mln_actor::RunLoop;
+use mln_headless::HeadlessFrontend;
 use mln_map::{Map, MapOptions, NullMapObserver};
-use mln_platform_default::HeadlessFrontend;
 use mln_storage::response::{Error, Reason};
 use mln_storage::{AsyncRequest, Callback, ClientOptions, FileSource, Resource, ResourceOptions, Response};
 use mln_util::size::Size;

@@ -18,10 +18,8 @@
 // `ETag`, `Retry-After`, `X-Rate-Limit-Reset`). Status codes map to the same
 // Response fields and errors.
 //
-// The transfer itself is an `HttpTransport`: ureq by default, or another HTTP
-// stack a host sets with `set_transport` (in the browser, its fetch, which
-// finishes requests from the event loop). Where ureq doesn't build (wasm, the
-// browser), there is no default.
+// The transfer itself is an `HttpTransport`: ureq natively, the browser's
+// fetch on wasm, or another HTTP stack a host sets with `set_transport`.
 //
 // Differences: ureq sends `Accept-Encoding: gzip` and
 // decodes gzip (curl: "gzip, deflate"); a connection failure's message is
@@ -146,13 +144,13 @@ pub trait HttpTransport: Send + Sync {
 static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
 
 /// Sets the transport of the `HTTPFileSource`s created from now on, instead of
-/// the default (ureq): for a host with its own HTTP stack, such as a
-/// browser's fetch.
+/// the default (ureq natively, fetch on wasm): for a host with its own HTTP
+/// stack.
 pub fn set_transport(transport: Arc<dyn HttpTransport>) {
     *TRANSPORT.lock_unpoisoned() = Some(transport);
 }
 
-/// The transport `set_transport` set, else ureq.
+/// The transport `set_transport` set, else the default.
 fn current_transport() -> Arc<dyn HttpTransport> {
     if let Some(transport) = TRANSPORT.lock_unpoisoned().clone() {
         return transport;
@@ -165,18 +163,9 @@ fn default_transport() -> Arc<dyn HttpTransport> {
     Arc::new(transport::Transport::new())
 }
 
-/// ureq doesn't build here, so requests fail until a host sets a transport.
 #[cfg(target_family = "wasm")]
 fn default_transport() -> Arc<dyn HttpTransport> {
-    struct NoTransport;
-    impl HttpTransport for NoTransport {
-        fn start(&self, request: TransferRequest) {
-            let message =
-                format!("no HTTP transport for {} (see http_file_source::set_transport)", request.resource.url);
-            request.finish(Err(Box::new(Error::new(Reason::Connection, message))));
-        }
-    }
-    Arc::new(NoTransport)
+    Arc::new(crate::fetch_transport::FetchTransport)
 }
 
 /// The response half of `HTTPRequest`, from a finished transfer: the header

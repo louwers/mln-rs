@@ -18,7 +18,7 @@
 // TODO(port): thread priority.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::VecDeque;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -34,6 +34,7 @@ use mln_util::logging::{Event, Log};
 use mln_util::mapbox;
 use mln_util::sync::MutexExt;
 use mln_util::tile_server_options::TileServerOptions;
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
@@ -144,15 +145,15 @@ struct ThreadState {
     /// Requests in any state are in `all_requests`. Requests in the pending
     /// state are in `pending_requests`. Requests in the active state are in
     /// `active_requests`.
-    all_requests: RefCell<BTreeSet<u64>>,
+    all_requests: RefCell<VecSet<u64>>,
     pending_requests: RefCell<PendingRequests>,
-    active_requests: RefCell<BTreeSet<u64>>,
+    active_requests: RefCell<VecSet<u64>>,
 
     online: Cell<bool>,
     maximum_concurrent_requests: Cell<u32>,
     http_file_source: HTTPFileSource,
     resource_transform: RefCell<ResourceTransform>,
-    tasks: RefCell<BTreeMap<u64, Rc<OnlineFileRequest>>>,
+    tasks: RefCell<VecMap<u64, Rc<OnlineFileRequest>>>,
 }
 
 /// `OnlineFileSourceThread`
@@ -484,14 +485,14 @@ impl OnlineFileSourceThread {
         let state = Rc::new(ThreadState {
             resource_options: RefCell::new(resource_options),
             client_options: RefCell::new(client_options),
-            all_requests: RefCell::new(BTreeSet::new()),
+            all_requests: RefCell::new(VecSet::new()),
             pending_requests: RefCell::new(PendingRequests::default()),
-            active_requests: RefCell::new(BTreeSet::new()),
+            active_requests: RefCell::new(VecSet::new()),
             online: Cell::new(true),
             maximum_concurrent_requests: Cell::new(DEFAULT_MAXIMUM_CONCURRENT_REQUESTS),
             http_file_source,
             resource_transform: RefCell::new(ResourceTransform::default()),
-            tasks: RefCell::new(BTreeMap::new()),
+            tasks: RefCell::new(VecMap::new()),
         });
         let weak = Rc::downgrade(&state);
         let reachability = AsyncTask::new(move || {

@@ -9,7 +9,6 @@
 // TODO(port): `setResourceTransform`; MBGL_TIMING logs.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::{Rc, Weak};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,6 +16,7 @@ use std::sync::{Arc, Mutex};
 use mln_actor::{ActorRef, Thread};
 use mln_util::client_options::ClientOptions;
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};
@@ -35,7 +35,7 @@ struct ThreadInner {
     online_file_source: FileSourcePtr,
     mbtiles_file_source: FileSourcePtr,
     pmtiles_file_source: FileSourcePtr,
-    tasks: RefCell<BTreeMap<u64, Box<dyn AsyncRequest>>>,
+    tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
 /// `MainResourceLoaderThread`.
@@ -102,7 +102,7 @@ impl MainResourceLoaderThread {
                 online_file_source,
                 mbtiles_file_source,
                 pmtiles_file_source,
-                tasks: RefCell::new(BTreeMap::new()),
+                tasks: RefCell::new(VecMap::new()),
             }),
         }
     }

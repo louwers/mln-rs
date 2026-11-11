@@ -16,16 +16,16 @@
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use mln_actor::{ActorRef, Thread};
-use mln_platform_default_image::compression::{decompress, is_compressed};
 use mln_util::client_options::ClientOptions;
+use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::{FILE_PROTOCOL, PMTILES_PROTOCOL};
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 use pmtiles::{EntryV3, HeaderV3};
 use serde_json::Value as Json;
 
@@ -33,7 +33,7 @@ use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType};
 use crate::file_source_manager::FileSourceManager;
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
-use crate::mbtiles_file_source::{Document, strtol};
+use crate::json_document::{Document, strtol};
 use crate::resource::{Kind, LoadingMethod, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Error, Reason, Response};
@@ -81,11 +81,11 @@ struct State {
     client_options: Arc<Mutex<ClientOptions>>,
 
     file_source: RefCell<Option<Arc<dyn FileSource>>>,
-    header_cache: RefCell<BTreeMap<String, HeaderV3>>,
-    metadata_cache: RefCell<BTreeMap<String, String>>,
-    directory_cache: RefCell<BTreeMap<String, BTreeMap<String, Vec<EntryV3>>>>,
-    directory_cache_control: RefCell<BTreeMap<String, Vec<String>>>,
-    tasks: RefCell<BTreeMap<u64, Box<dyn AsyncRequest>>>,
+    header_cache: RefCell<VecMap<String, HeaderV3>>,
+    metadata_cache: RefCell<VecMap<String, String>>,
+    directory_cache: RefCell<VecMap<String, VecMap<String, Vec<EntryV3>>>>,
+    directory_cache_control: RefCell<VecMap<String, Vec<String>>>,
+    tasks: RefCell<VecMap<u64, Box<dyn AsyncRequest>>>,
 }
 
 impl State {
@@ -684,11 +684,11 @@ impl PMTilesFileSource {
                     resource_options: ro,
                     client_options: co,
                     file_source: RefCell::new(None),
-                    header_cache: RefCell::new(BTreeMap::new()),
-                    metadata_cache: RefCell::new(BTreeMap::new()),
-                    directory_cache: RefCell::new(BTreeMap::new()),
-                    directory_cache_control: RefCell::new(BTreeMap::new()),
-                    tasks: RefCell::new(BTreeMap::new()),
+                    header_cache: RefCell::new(VecMap::new()),
+                    metadata_cache: RefCell::new(VecMap::new()),
+                    directory_cache: RefCell::new(VecMap::new()),
+                    directory_cache_control: RefCell::new(VecMap::new()),
+                    tasks: RefCell::new(VecMap::new()),
                 }),
             }),
             resource_options,

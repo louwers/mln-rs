@@ -1,6 +1,6 @@
 // Ports OfflineDownload.ResourceOfflineUsageUnset of
 // test/storage/offline_download.test.cpp, which renders a map after the
-// download (a separate target for the mln_map / mln_platform_default deps).
+// download (a separate target for the mln_map / mln_headless deps).
 // C++ opens the database through test::SQLite3TestFS without limiting it
 // (a pass-through); the port opens a file in the temporary directory
 // directly.
@@ -11,9 +11,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
+use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapMode, MapObserver, MapOptions, RenderFrameStatus, RenderMode};
-use mln_platform_default::HeadlessFrontend;
-use mln_platform_default_image::compression::compress;
 use mln_storage::offline::{
     OfflineRegionDownloadState, OfflineRegionMetadata, OfflineRegionObserver, OfflineRegionStatus,
     OfflineTilePyramidRegionDefinition,
@@ -23,6 +22,7 @@ use mln_storage::resource::{Priority, Usage};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Resource, Response};
 use mln_storage_offline::OfflineDownload;
+use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
 use mln_util::tile_server_options::TileServerOptions;
 

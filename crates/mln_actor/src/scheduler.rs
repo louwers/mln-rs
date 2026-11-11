@@ -180,23 +180,45 @@ pub fn schedule_and_reply_value<R, TaskFn, ReplyFn>(
     TaskFn: FnOnce() -> R + Send + 'static,
     ReplyFn: FnOnce(R) + 'static,
 {
+    schedule_and_reply_later(scheduler, tag, move |respond: Respond<R>| respond(task()), reply);
+}
+
+/// Where a task of `schedule_and_reply_later` hands its result.
+pub type Respond<R> = Box<dyn FnOnce(R) + Send>;
+
+/// Port-only: `scheduleAndReplyValue` for a task whose result may come
+/// after it returns (an image the browser decodes): `task` runs on
+/// `scheduler` with a `Respond` to call once with its result, then or later
+/// and from any thread, and `reply(result)` runs on the current thread's
+/// scheduler. A `Respond` dropped without a call drops the reply.
+pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
+    scheduler: &dyn Scheduler,
+    tag: SimpleIdentity,
+    task: TaskFn,
+    reply: ReplyFn,
+) where
+    R: Send + 'static,
+    TaskFn: FnOnce(Respond<R>) + Send + 'static,
+    ReplyFn: FnOnce(R) + 'static,
+{
     let reply_scheduler = Arc::downgrade(&get_current());
     let reply = LocalObject::new(RefCell::new(Some(reply)));
     scheduler.schedule_tagged(
         tag,
         Box::new(move || {
             if let Some(reply_scheduler) = reply_scheduler.upgrade() {
-                let result = task();
-                reply_scheduler.schedule_tagged(
-                    tag,
-                    Box::new(move || {
-                        if let Some(reply) = reply.take() {
-                            if let Some(reply) = reply.borrow_mut().take() {
-                                reply(result);
+                task(Box::new(move |result| {
+                    reply_scheduler.schedule_tagged(
+                        tag,
+                        Box::new(move || {
+                            if let Some(reply) = reply.take() {
+                                if let Some(reply) = reply.borrow_mut().take() {
+                                    reply(result);
+                                }
                             }
-                        }
-                    }),
-                );
+                        }),
+                    );
+                }));
             }
         }),
     );
@@ -233,5 +255,15 @@ impl TaggedScheduler {
         ReplyFn: FnOnce(R) + 'static,
     {
         schedule_and_reply_value(&*self.scheduler, self.tag, task, reply);
+    }
+
+    /// `schedule_and_reply_later` on this scheduler and tag.
+    pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(&self, task: TaskFn, reply: ReplyFn)
+    where
+        R: Send + 'static,
+        TaskFn: FnOnce(Respond<R>) + Send + 'static,
+        ReplyFn: FnOnce(R) + 'static,
+    {
+        schedule_and_reply_later(&*self.scheduler, self.tag, task, reply);
     }
 }

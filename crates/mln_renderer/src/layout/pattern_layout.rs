@@ -12,7 +12,7 @@
 // again in `create_bucket` (C++ keeps the `unique_ptr<GeometryTileFeature>`).
 // Getting a feature twice yields the same feature.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_style::PropertyEvaluationParameters;
@@ -29,6 +29,7 @@ use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryTileFeature, G
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::{VecMap, VecSet};
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;
@@ -87,10 +88,12 @@ pub trait PatternLayoutSpec: 'static {
         zoom: f32,
         canonical: &CanonicalTileID,
     ) -> f32;
+    /// The sort key when it is the same for every feature.
+    fn constant_sort_key(layout: &Self::Layout) -> Option<f32>;
     /// `std::make_shared<BucketType>(layout, layerPropertiesMap, zoom, overscaling)`.
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> Self::Bucket;
@@ -101,7 +104,7 @@ pub trait PatternLayoutSpec: 'static {
 
 /// `PatternLayout<...>`.
 pub struct PatternLayout<S: PatternLayoutSpec> {
-    pub layer_properties_map: BTreeMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>>,
     pub bucket_leader_id: String,
 
     pub features: Vec<PatternFeature>,
@@ -132,7 +135,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         group: &[Immutable<dyn LayerProperties>],
         source_layer: &dyn GeometryTileLayer,
         image_dependencies: &mut ImageDependencies,
-        available_images: &BTreeSet<String>,
+        available_images: &VecSet<String>,
         sorted: bool,
     ) -> Result<Self, ExceptionPtr> {
         debug_assert!(!group.is_empty());
@@ -147,7 +150,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         let bucket_leader_id = leader_impl.id.clone();
 
         let mut has_pattern = false;
-        let mut layer_properties_map: BTreeMap<String, Immutable<dyn LayerProperties>> = BTreeMap::new();
+        let mut layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             let pattern_property = S::pattern_property(layer_properties);
@@ -164,6 +167,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
             layer_properties_map.entry(layer_id).or_insert_with(|| layer_properties.clone());
         }
 
+        let constant_sort_key = if sorted { S::constant_sort_key(&layout) } else { None };
         let mut features: Vec<PatternFeature> = Vec::new();
         let feature_count = source_layer.feature_count();
         for i in 0..feature_count {
@@ -226,7 +230,9 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
 
             feature.check()?;
 
-            if sorted {
+            if let Some(sort_key) = constant_sort_key {
+                features.push(PatternFeature { i, sort_key, patterns: pattern_dependency_map });
+            } else if sorted {
                 // PatternFeatureInserter<SortKeyPropertyType>::insert
                 let sort_key = S::sort_key(&layout, &*feature, zoom, &parameters.tile_id.canonical);
                 feature.check()?;
@@ -238,6 +244,11 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
                 // PatternFeatureInserter<void>::insert
                 features.push(PatternFeature { i, sort_key: 0.0, patterns: pattern_dependency_map });
             }
+        }
+        if constant_sort_key.is_some() {
+            // Inserting at the lower bound puts each feature before the
+            // earlier ones with an equal key: keep that order without a sort.
+            features.reverse();
         }
 
         Ok(PatternLayout {
@@ -370,9 +381,12 @@ impl PatternLayoutSpec for FillLayoutSpec {
     ) -> f32 {
         layout.get::<FillSortKey>().evaluate_feature_canonical(feature, zoom, canonical, FillSortKey::default_value())
     }
+    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
+        layout.get::<FillSortKey>().constant()
+    }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> FillBucket {
@@ -412,9 +426,12 @@ impl PatternLayoutSpec for LineLayoutSpec {
     ) -> f32 {
         layout.get::<LineSortKey>().evaluate_feature_canonical(feature, zoom, canonical, LineSortKey::default_value())
     }
+    fn constant_sort_key(layout: &Self::Layout) -> Option<f32> {
+        layout.get::<LineSortKey>().constant()
+    }
     fn create_bucket(
         layout: &Self::Layout,
-        layer_properties_map: &BTreeMap<String, Immutable<dyn LayerProperties>>,
+        layer_properties_map: &VecMap<String, Immutable<dyn LayerProperties>>,
         zoom: f32,
         overscaling: u32,
     ) -> LineBucket {

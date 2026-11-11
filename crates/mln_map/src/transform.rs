@@ -1,19 +1,30 @@
-// Ports src/mln/map/transform.hpp and src/mln/map/transform.cpp.
+// Ports src/mln/map/transform.hpp and src/mln/map/transform.cpp, with
+// maplibre-native-ffi's patches 0015 (independent camera animations,
+// maplibre/maplibre-native#4637), 0043 (cancel transitions by id) and 0085
+// (gesture momentum).
 //
-// The C++ transition lambdas capture `this` and mutate `state`. Here the
-// stored transition functions take `&mut Transform` as an argument; like
-// C++ `updateTransitions`, they are moved out of the Transform before they
-// are called.
+// The C++ transition lambdas capture `this`. Here a command's frame function
+// takes the state as an argument and returns the camera at its progress,
+// which `apply_transitions` composes with the other commands' cameras.
+//
+// The C++ guards against callbacks that re-enter the Transform (an observer
+// or an AnimationOptions callback that cancels or starts a command while
+// `startTransition` or `updateTransitions` runs) have no port: the Rust
+// callbacks can't borrow the Transform that is calling them.
 
+use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
 
 use geometry::Point;
 use mln_map_types::{
-    AnimationOptions, CameraOptions, CenterAndBearing, ConstrainMode, FreeCameraOptions, NorthOrientation,
-    ProjectionMode, TransformState, TransformStateProperties, VerticalPerspectiveProjection, ViewportMode,
+    AnimationOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate, CameraUpdateMode,
+    CameraVelocity, CenterAndBearing, ConstrainMode, FreeCameraOptions, GesturePhase, MomentumDecay,
+    MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TransformState,
+    TransformStateProperties, TransitionEnd, TransitionOutcome, VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_style_types::ProjectionDefinition;
+use mln_util::UnitBezier;
 use mln_util::chrono::{Clock, Duration, TimePoint};
 use mln_util::constants::{DEFAULT_TRANSITION_EASE, M2PI, PITCH_MAX};
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -22,7 +33,12 @@ use mln_util::logging::{Event, Log};
 use mln_util::projection::Projection;
 use mln_util::size::Size;
 
-use crate::map_observer::CameraChangeMode;
+use crate::map_observer::{CameraChange, CameraChangeMode, CameraChangeSource};
+
+/// A frame time older than this is stale (see [`Transform::frame_time`]):
+/// longer than a frame at 10 fps, so any host that draws sets a fresh one
+/// first.
+pub const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
 
 /// `std::min`.
 fn std_min(a: f64, b: f64) -> f64 {
@@ -88,32 +104,424 @@ fn std_to_string(value: f64) -> String {
 }
 
 /// `TransformObserver` (src/mln/map/transform.hpp).
+///
+/// The camera callbacks take a [`CameraChange`] (see `MapObserver`).
 pub trait TransformObserver {
-    fn on_camera_will_change(&self, _mode: CameraChangeMode) {}
+    fn on_camera_will_change(&self, _change: CameraChange) {}
     fn on_camera_is_changing(&self) {}
-    fn on_camera_did_change(&self, _mode: CameraChangeMode) {}
+    fn on_camera_did_change(&self, _change: CameraChange) {}
 }
 
 /// `TransformObserver::nullObserver()`.
 pub struct NullTransformObserver;
 impl TransformObserver for NullTransformObserver {}
 
-type FrameFn = Rc<dyn Fn(&mut TransformState, f64)>;
-type TransitionFrameFn = Box<dyn FnMut(&mut Transform, TimePoint) -> bool>;
-type TransitionFinishFn = Box<dyn FnMut(&mut Transform)>;
+/// A command's camera at an eased progress: every field set, except a
+/// center or padding the frame could not compute (logged), which keeps the
+/// current one.
+type FrameFn = Rc<dyn Fn(&TransformState, f64) -> CameraOptions>;
 /// `std::function<ProjectionDefinition(double zoom)>`.
 pub type ProjectionForZoomFn = Rc<dyn Fn(f64) -> ProjectionDefinition>;
+
+// `Transform::CameraField`.
+const CENTER: u16 = 1 << 0;
+const ZOOM: u16 = 1 << 1;
+const BEARING: u16 = 1 << 2;
+const PITCH: u16 = 1 << 3;
+const PADDING: u16 = 1 << 4;
+const ALTITUDE: u16 = 1 << 5;
+const ROLL: u16 = 1 << 6;
+const FOV: u16 = 1 << 7;
+
+/// `Transform::cameraFields`: the fields a command sets.
+fn camera_fields(camera: &CameraOptions) -> u16 {
+    let field = |set: bool, field: u16| if set { field } else { 0 };
+    field(camera.center.is_some(), CENTER)
+        | field(camera.zoom.is_some(), ZOOM)
+        | field(camera.bearing.is_some(), BEARING)
+        | field(camera.pitch.is_some(), PITCH)
+        | field(camera.padding.is_some(), PADDING)
+        | field(camera.center_altitude.is_some(), ALTITUDE)
+        | field(camera.roll.is_some(), ROLL)
+        | field(camera.fov.is_some(), FOV)
+}
+
+/// `Transform::Transition`: one camera command.
+struct Transition {
+    /// Remaining property ownership; replacement removes fields from this
+    /// mask.
+    fields: Cell<u16>,
+    /// Replacing any coupled field relinquishes all coupled fields together.
+    coupled_fields: u16,
+    /// Properties classified as moving at command start; intersected with
+    /// `fields` when reporting movement, so replaced properties no longer
+    /// contribute. A momentum adds the fields its settling moves.
+    moving_fields: Cell<u16>,
+    start: TimePoint,
+    /// A momentum extends it for its settling.
+    duration: Cell<Duration>,
+    animation: AnimationOptions,
+    frame: FrameFn,
+    anchor: Option<ScreenCoordinate>,
+    anchor_lat_lng: LatLng,
+    /// Set for a momentum, which moves the camera relative to where it
+    /// stands instead of through `frame`.
+    momentum: Option<RefCell<MomentumState>>,
+    /// Why the command ends, once something other than time ends it:
+    /// `Cancelled`, or `Replaced` when later commands took all its fields.
+    /// Set through [`Transition::ended_by`], where cancellation wins.
+    stopped: Cell<Option<TransitionOutcome>>,
+    /// What started the command, which the change that ends it reports.
+    source: CameraChangeSource,
+    /// For a gesture's momentum, the gesture's serial: its end ends the
+    /// gesture, unless another one started since.
+    gesture: Option<u64>,
+}
+
+impl Transition {
+    fn new(
+        fields: u16,
+        coupled_fields: u16,
+        moving_fields: u16,
+        start: TimePoint,
+        duration: Duration,
+        animation: &AnimationOptions,
+        frame: FrameFn,
+        source: CameraChangeSource,
+    ) -> Transition {
+        Transition {
+            fields: Cell::new(fields),
+            coupled_fields,
+            moving_fields: Cell::new(moving_fields),
+            start,
+            duration: Cell::new(duration),
+            animation: animation.clone(),
+            frame,
+            anchor: None,
+            anchor_lat_lng: LatLng::default(),
+            momentum: None,
+            stopped: Cell::new(None),
+            source,
+            gesture: None,
+        }
+    }
+
+    fn mode(&self) -> CameraChangeMode {
+        if self.duration.get() != Duration::zero() { CameraChangeMode::Animated } else { CameraChangeMode::Immediate }
+    }
+
+    /// Records why the command stops: `Cancelled` or `Replaced`. A
+    /// cancellation wins over a replacement, as maplibre-native-ffi reports
+    /// it.
+    fn ended_by(&self, outcome: TransitionOutcome) {
+        if self.stopped.get() != Some(TransitionOutcome::Cancelled) {
+            self.stopped.set(Some(outcome));
+        }
+    }
+
+    /// How the command ended, with a momentum's leftover speed: why it
+    /// stopped, else `Replaced` if later commands took every momentum part,
+    /// else `Completed`.
+    fn end(&self) -> TransitionEnd {
+        let (velocity, momentum_replaced) =
+            self.momentum.as_ref().map(|m| m.borrow().end()).unwrap_or((CameraVelocity::default(), false));
+        let outcome = self.stopped.get().unwrap_or(if momentum_replaced {
+            TransitionOutcome::Replaced
+        } else {
+            TransitionOutcome::Completed
+        });
+        TransitionEnd { outcome, velocity }
+    }
+
+    /// The elapsed share of the duration, in [0, 1]; 1 for an immediate
+    /// command.
+    fn progress(&self, now: TimePoint) -> f64 {
+        let duration = self.duration.get();
+        if duration == Duration::zero() {
+            return 1.0;
+        }
+        mln_math::clamp_f64((now - self.start).count() as f64 / duration.count() as f64, 0.0, 1.0)
+    }
+}
+
+/// A `Duration` in seconds.
+fn seconds_f64(duration: Duration) -> f64 {
+    duration.count() as f64 / 1e9
+}
+
+/// `MomentumState::Glide`: how far one part moves, over how long, and along
+/// which curve.
+#[derive(Clone, Copy, Default)]
+struct Glide {
+    distance: f64,
+    duration: Duration,
+    /// For friction, the decay rate per second.
+    rate: f64,
+    /// For an eased glide, the curve it follows.
+    easing: Option<MomentumEasing>,
+}
+
+impl Glide {
+    /// Plans a release at `speed`, or returns nothing when it doesn't move.
+    fn plan(speed: f64, decay: &MomentumDecay) -> Option<Glide> {
+        if !(speed > 0.0) || speed < decay.min_speed {
+            return None;
+        }
+        let mut speed = std_min(speed, decay.max_speed);
+        let mut glide = Glide::default();
+        let seconds;
+        match decay.model {
+            MomentumDecayModel::Friction => {
+                let half_life = seconds_f64(decay.half_life);
+                if !(half_life > 0.0) || !(decay.stop_speed > 0.0) {
+                    return None;
+                }
+                glide.rate = std::f64::consts::LN_2 / half_life;
+                speed = std_min(speed, decay.stop_speed + glide.rate * decay.max_distance);
+                if speed <= decay.stop_speed {
+                    return None;
+                }
+                seconds = (speed / decay.stop_speed).ln() / glide.rate;
+                glide.distance = (speed - decay.stop_speed) / glide.rate;
+            }
+            MomentumDecayModel::Ease => {
+                glide.distance = std_min(decay.distance, decay.max_distance);
+                seconds = seconds_f64(decay.duration);
+                glide.easing = Some(decay.easing);
+            }
+        }
+        // A glide too long for the clock doesn't move. The bound is
+        // exclusive, as in flyTo(), because Duration::max() rounds up as a
+        // double.
+        if !(glide.distance > 0.0) || !(seconds > 0.0) || seconds >= seconds_f64(Duration::max()) {
+            return None;
+        }
+        // duration_cast truncates.
+        glide.duration = Duration::from_nanos((seconds * 1e9) as i64);
+        if glide.duration <= Duration::zero() {
+            return None;
+        }
+        Some(glide)
+    }
+
+    /// The share of the distance covered after `elapsed`, from 0 to 1.
+    fn progress(&self, elapsed: Duration) -> f64 {
+        if elapsed >= self.duration {
+            return 1.0;
+        }
+        if elapsed <= Duration::zero() {
+            return 0.0;
+        }
+        let t = seconds_f64(elapsed);
+        let total = seconds_f64(self.duration);
+        match self.easing {
+            None => (-self.rate * t).exp_m1() / (-self.rate * total).exp_m1(),
+            Some(easing) => bezier(&easing).solve(t / total, 1e-6),
+        }
+    }
+
+    /// The share of the distance covered per second after `elapsed`.
+    fn speed(&self, elapsed: Duration) -> f64 {
+        if elapsed >= self.duration {
+            return 0.0;
+        }
+        let t = std_max(0.0, seconds_f64(elapsed));
+        let total = seconds_f64(self.duration);
+        let Some(easing) = self.easing else {
+            return self.rate * (-self.rate * t).exp() / -(-self.rate * total).exp_m1();
+        };
+        // The slope dy/dx of the curve, from its derivatives in its own
+        // parameter, which starts just past 0 where both can be 0.
+        let ease = bezier(&easing);
+        let p = std_max(ease.solve_curve_x(t / total, 1e-6), 1e-6);
+        let cy = 3.0 * easing.y1;
+        let by = 3.0 * (easing.y2 - easing.y1) - cy;
+        let ay = 1.0 - cy - by;
+        let dy = (3.0 * ay * p + 2.0 * by) * p + cy;
+        let dx = ease.sample_curve_derivative_x(p);
+        if dx > 0.0 { dy / dx / total } else { 0.0 }
+    }
+}
+
+fn bezier(easing: &MomentumEasing) -> UnitBezier {
+    UnitBezier::new(easing.x1, easing.y1, easing.x2, easing.y2)
+}
+
+/// `MomentumState::Part`: one part of a running momentum.
+#[derive(Clone, Copy, Default)]
+struct MomentumPart {
+    /// The fields that this part needs to keep moving or to settle.
+    fields: u16,
+    glide: Glide,
+    /// The share of the distance already applied.
+    applied: f64,
+    moving: bool,
+    /// Where the part may settle once it stops moving.
+    snap: Option<MomentumSnap>,
+    snap_pending: bool,
+    /// The change that the settling makes, while it runs, when it started,
+    /// and its eased share applied.
+    snap_delta: Option<f64>,
+    snap_start: Duration,
+    snap_applied: f64,
+}
+
+impl MomentumPart {
+    fn active(&self) -> bool {
+        self.moving || self.snap_pending || self.snap_delta.is_some()
+    }
+}
+
+// The scalar parts of a momentum, in `MomentumState::scalars`.
+const MOMENTUM_ZOOM: usize = 0;
+const MOMENTUM_BEARING: usize = 1;
+const MOMENTUM_PITCH: usize = 2;
+
+/// `Transform::MomentumState`: a momentum under way.
+struct MomentumState {
+    options: CameraMomentum,
+    /// The pan's distance, with its direction.
+    pan_total: ScreenCoordinate,
+    pan: MomentumPart,
+    /// The zoom, bearing and pitch parts, and each one's signed distance.
+    scalars: [MomentumPart; 3],
+    scalar_totals: [f64; 3],
+    /// Whether another command took a field that a moving part needed.
+    replaced: bool,
+    /// When the last frame applied the momentum, from its start.
+    elapsed: Duration,
+}
+
+impl MomentumState {
+    fn anchor(&self, part: usize) -> Option<ScreenCoordinate> {
+        match part {
+            MOMENTUM_ZOOM => self.options.zoom_anchor,
+            MOMENTUM_BEARING => self.options.bearing_anchor,
+            _ => self.options.pitch_anchor,
+        }
+    }
+
+    /// Stops the parts that lost a field they need, and returns the fields
+    /// that the rest still need.
+    fn retain(&mut self, owned: u16) -> u16 {
+        let mut needed = 0;
+        let mut replaced = false;
+        for part in std::iter::once(&mut self.pan).chain(self.scalars.iter_mut()) {
+            if !part.active() {
+                continue;
+            }
+            if part.fields & owned != part.fields {
+                replaced |= part.moving || part.snap_delta.is_some();
+                part.moving = false;
+                part.snap_pending = false;
+                part.snap_delta = None;
+                continue;
+            }
+            needed |= part.fields;
+        }
+        self.replaced |= replaced;
+        needed
+    }
+
+    /// The speed of the parts still moving, as of the last frame, which left
+    /// the camera where it stands, and whether another command stopped a
+    /// part early by taking a field it needed.
+    fn end(&self) -> (CameraVelocity, bool) {
+        let mut velocity = CameraVelocity::default();
+        if self.pan.moving {
+            let share = self.pan.glide.speed(self.elapsed);
+            velocity.pan = ScreenCoordinate::new(self.pan_total.x * share, self.pan_total.y * share);
+        }
+        let speed = |i: usize| {
+            let part = &self.scalars[i];
+            if part.moving { self.scalar_totals[i] * part.glide.speed(self.elapsed) } else { 0.0 }
+        };
+        velocity.zoom = speed(MOMENTUM_ZOOM);
+        velocity.bearing = speed(MOMENTUM_BEARING);
+        velocity.pitch = speed(MOMENTUM_PITCH);
+        (velocity, self.replaced)
+    }
+}
+
+/// The change that `snap` makes to `value`, or zero when it stays. A
+/// circular value, the bearing, has its targets within one turn from the
+/// offset, and takes the shorter way around to the nearest.
+fn snap_delta(value: f64, snap: &MomentumSnap, circular: bool) -> f64 {
+    if !(snap.spacing > 0.0) {
+        return 0.0;
+    }
+    let delta = if circular {
+        let turn = value - snap.offset - 360.0 * ((value - snap.offset) / 360.0).floor();
+        let below = (turn / snap.spacing).floor() * snap.spacing;
+        let above = std_min(below + snap.spacing, 360.0);
+        if turn - below <= above - turn { below - turn } else { above - turn }
+    } else {
+        // `f64::round` rounds halfway away from zero, as std::round does.
+        snap.offset + ((value - snap.offset) / snap.spacing).round() * snap.spacing - value
+    };
+    if delta.abs() <= snap.tolerance { delta } else { 0.0 }
+}
+
+/// The value that a part of a momentum moves, for its snap.
+fn momentum_value(state: &TransformState, part: usize) -> f64 {
+    match part {
+        MOMENTUM_ZOOM => state.get_zoom(),
+        MOMENTUM_BEARING => -mln_math::rad2deg(state.get_bearing()),
+        _ => mln_math::rad2deg(state.get_pitch()),
+    }
+}
 
 pub struct Transform {
     observer: Rc<dyn TransformObserver>,
     state: TransformState,
 
-    transition_start: TimePoint,
-    transition_duration: Duration,
-    transition_frame_fn: Option<TransitionFrameFn>,
-    transition_finish_fn: Option<TransitionFinishFn>,
+    latest_transition_start: TimePoint,
+    latest_transition_duration: Duration,
+    transitions: Vec<Rc<Transition>>,
+    /// What the commands being started come from: a command unless a gesture
+    /// or a momentum starts them (see [`Self::with_source`]).
+    source: CameraChangeSource,
+    gesture: GestureState,
+    /// The host's current frame time (see [`Self::set_frame_time`]).
+    frame_time: Option<TimePoint>,
     projection_for_zoom: Option<ProjectionForZoomFn>,
     globe_free_bearing: bool,
+}
+
+/// The gesture that camera deltas and updates with a phase make, as
+/// maplibre-native-ffi tracks it.
+#[derive(Clone, Copy, Debug, Default)]
+struct GestureState {
+    /// Between its first `Begin` or `Update` and its `End` or `Cancel`.
+    active: bool,
+    /// Counts gestures, so that an earlier gesture's momentum doesn't end a
+    /// later gesture.
+    serial: u64,
+    /// The fields the gesture changed (`ZOOM`, `BEARING`, `PITCH`), which
+    /// alone may settle.
+    changed: u16,
+}
+
+impl GestureState {
+    /// Records the fields a gesture's change moves.
+    fn change(&mut self, zoom: bool, bearing: bool, pitch: bool) {
+        self.changed |=
+            (if zoom { ZOOM } else { 0 }) | (if bearing { BEARING } else { 0 }) | (if pitch { PITCH } else { 0 });
+    }
+
+    /// Drops the snaps of the parts the gesture didn't change: only what it
+    /// changed settles.
+    fn mask_snaps(&self, momentum: &mut CameraMomentum) {
+        if self.changed & ZOOM == 0 {
+            momentum.zoom_snap = None;
+        }
+        if self.changed & BEARING == 0 {
+            momentum.bearing_snap = None;
+        }
+        if self.changed & PITCH == 0 {
+            momentum.pitch_snap = None;
+        }
+    }
 }
 
 impl Transform {
@@ -125,10 +533,12 @@ impl Transform {
         Transform {
             observer,
             state: TransformState::new(constrain_mode, viewport_mode),
-            transition_start: TimePoint::default(),
-            transition_duration: Duration::zero(),
-            transition_frame_fn: None,
-            transition_finish_fn: None,
+            latest_transition_start: TimePoint::default(),
+            latest_transition_duration: Duration::zero(),
+            transitions: Vec::new(),
+            source: CameraChangeSource::Command,
+            gesture: GestureState::default(),
+            frame_time: None,
             projection_for_zoom: None,
             globe_free_bearing: false,
         }
@@ -139,10 +549,12 @@ impl Transform {
         Transform {
             observer: Rc::new(NullTransformObserver),
             state,
-            transition_start: TimePoint::default(),
-            transition_duration: Duration::zero(),
-            transition_frame_fn: None,
-            transition_finish_fn: None,
+            latest_transition_start: TimePoint::default(),
+            latest_transition_duration: Duration::zero(),
+            transitions: Vec::new(),
+            source: CameraChangeSource::Command,
+            gesture: GestureState::default(),
+            frame_time: None,
             projection_for_zoom: None,
             globe_free_bearing: false,
         }
@@ -159,7 +571,7 @@ impl Transform {
             return Ok(());
         }
 
-        self.observer.on_camera_will_change(CameraChangeMode::Immediate);
+        self.observer.on_camera_will_change(CameraChange::default());
         self.state.set_size(size);
         let mut scale = self.state.get_scale();
         let mut x = self.state.get_x();
@@ -182,7 +594,7 @@ impl Transform {
             // setLatLngZoom does.
             let zoom = self.state.scale_zoom(scale);
             self.state.set_lat_lng_zoom(&lat_lng(lat, lon), zoom);
-            self.observer.on_camera_did_change(CameraChangeMode::Immediate);
+            self.observer.on_camera_did_change(CameraChange::default());
 
             return Ok(());
         }
@@ -195,7 +607,7 @@ impl Transform {
                 .with_z(Some(z)),
         );
 
-        self.observer.on_camera_did_change(CameraChangeMode::Immediate);
+        self.observer.on_camera_did_change(CameraChange::default());
         Ok(())
     }
 
@@ -207,8 +619,7 @@ impl Transform {
     }
 
     /// Change any combination of center, zoom, bearing, and pitch, without a
-    /// transition. The map will retain the current values for any options
-    /// not included in `options`.
+    /// transition. Omitted options keep their current animations.
     pub fn jump_to(&mut self, camera: &CameraOptions) {
         // On the globe the zoom decides how close to a pole the center can be.
         // GL JS's jump bounds the center by the zoom it lands on, where its
@@ -230,8 +641,8 @@ impl Transform {
     }
 
     /// Change any combination of center, zoom, bearing, pitch and edgeInsets,
-    /// with a smooth animation between old and new values. The map will
-    /// retain the current values for any options not included in `options`.
+    /// with a smooth animation between old and new values. Omitted options
+    /// keep their current animations and timing.
     pub fn ease_to(&mut self, input_camera: &CameraOptions, animation: &AnimationOptions) {
         let mut camera = *input_camera;
         let globe = self.state.is_globe_rendering();
@@ -294,9 +705,7 @@ impl Transform {
         };
 
         if zoom.is_nan() || bearing.is_nan() || pitch.is_nan() || roll.is_nan() || fov.is_nan() {
-            if let Some(finish) = &animation.transition_finish_fn {
-                finish();
-            }
+            end_unstarted(animation, TransitionOutcome::Cancelled);
             return;
         }
 
@@ -335,20 +744,12 @@ impl Transform {
 
         // Minimize rotation by taking the shorter path around the circle.
         bearing = normalize_angle(bearing, self.state.get_bearing());
-        let normalized = normalize_angle(self.state.get_bearing(), bearing);
-        self.state.set_bearing(normalized);
 
         let start_zoom = self.state.get_zoom();
-        let start_bearing = self.state.get_bearing();
+        let start_bearing = normalize_angle(self.state.get_bearing(), bearing);
         let start_pitch = self.state.get_pitch();
         let start_roll = self.state.get_roll();
         let start_fov = self.state.get_field_of_view() as f64;
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_panning_in_progress(Some(unwrapped_lat_lng != start_lat_lng))
-                .with_scaling_in_progress(Some(zoom != start_zoom))
-                .with_rotating_in_progress(Some(bearing != start_bearing)),
-        );
         let start_edge_insets = self.state.get_edge_insets();
 
         // On the globe the zoom is eased in equator terms so the planet holds
@@ -386,10 +787,10 @@ impl Transform {
         };
         let moves_around_anchor = camera.anchor.is_some() && camera.center.is_none();
 
-        let frame: FrameFn = Rc::new(move |state: &mut TransformState, t: f64| {
-            if globe {
+        let frame: FrameFn = Rc::new(move |state: &TransformState, t: f64| {
+            let (frame_lat_lng, frame_zoom) = if globe {
                 // An anchor moves the center a frame at a time (see
-                // start_transition), so it stays, and the zoom follows its
+                // apply_transitions), so it stays, and the zoom follows its
                 // latitude to keep the planet's size.
                 let mut frame_lat_lng =
                     if moves_around_anchor { state.get_lat_lng(WrapMode::Unwrapped) } else { lat_lng_end };
@@ -413,44 +814,42 @@ impl Transform {
                         start_zoom
                     };
                 }
-                state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
+                (Some(frame_lat_lng), frame_zoom)
             } else {
                 let frame_point = interpolate(&start_point, &end_point, t);
-                let frame_zoom = interpolate(&start_zoom, &zoom, t);
-                if let Some(frame_lat_lng) =
-                    frame_unproject(&frame_point, state.zoom_scale(start_zoom), WrapMode::Unwrapped)
-                {
-                    state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
-                }
-            }
-            state.set_center_altitude(interpolate(&start_center_alt, &center_alt, t));
-            if bearing != start_bearing {
-                state.set_bearing(mln_math::wrap(interpolate(&start_bearing, &bearing, t), -PI, PI));
-            }
-            if padding != start_edge_insets {
-                // Interpolate edge insets
-                if let Some(insets) = frame_edge_insets(
-                    interpolate(&start_edge_insets.top, &padding.top, t),
-                    interpolate(&start_edge_insets.left, &padding.left, t),
-                    interpolate(&start_edge_insets.bottom, &padding.bottom, t),
-                    interpolate(&start_edge_insets.right, &padding.right, t),
-                ) {
-                    state.set_edge_insets(&insets);
-                }
-            }
-            let max_pitch = get_max_pitch_for_edge_insets(state, &state.get_edge_insets());
-            if pitch != start_pitch || max_pitch < start_pitch {
-                state.set_pitch(std_min(max_pitch, interpolate(&start_pitch, &pitch, t)));
-            }
-            if roll != start_roll {
-                state.set_roll(interpolate(&start_roll, &roll, t));
-            }
-            if fov != start_fov {
-                state.set_field_of_view(interpolate(&start_fov, &fov, t));
-            }
+                (
+                    frame_unproject(&frame_point, state.zoom_scale(start_zoom), WrapMode::Unwrapped),
+                    interpolate(&start_zoom, &zoom, t),
+                )
+            };
+            CameraOptions::default()
+                .with_center(frame_lat_lng)
+                .with_zoom(Some(frame_zoom))
+                .with_center_altitude(Some(interpolate(&start_center_alt, &center_alt, t)))
+                .with_bearing(Some(-mln_math::rad2deg(mln_math::wrap(
+                    interpolate(&start_bearing, &bearing, t),
+                    -PI,
+                    PI,
+                ))))
+                .with_padding(interpolate_edge_insets(&start_edge_insets, &padding, t))
+                .with_pitch(Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, t))))
+                .with_roll(Some(mln_math::rad2deg(interpolate(&start_roll, &roll, t))))
+                .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, t))))
         });
 
-        self.start_transition(&camera, animation, frame, duration);
+        // On the globe the zoom keeps the planet's size as the center's
+        // latitude changes, and a zoom moves the center when it bounds it
+        // closer to the equator, so an ease that moves the center sets both
+        // (an anchored one gets its center from the anchor).
+        let moves_center = input_camera.center.is_some() || lat_lng_end.wrapped() != start_lat_lng.wrapped();
+        let fields = if globe && moves_around_anchor {
+            input_camera.with_zoom(Some(zoom))
+        } else if globe && moves_center {
+            input_camera.with_center(Some(lat_lng_end)).with_zoom(Some(zoom))
+        } else {
+            *input_camera
+        };
+        self.start_transition(&fields, animation, frame, duration, false);
     }
 
     /// This method implements an “optimal path” animation, as detailed in:
@@ -514,9 +913,7 @@ impl Transform {
             || fov.is_nan()
             || self.state.get_size().is_empty()
         {
-            if let Some(finish) = &animation.transition_finish_fn {
-                finish();
-            }
+            end_unstarted(animation, TransitionOutcome::Cancelled);
             return;
         }
 
@@ -545,10 +942,8 @@ impl Transform {
 
         // Minimize rotation by taking the shorter path around the circle.
         bearing = normalize_angle(bearing, self.state.get_bearing());
-        let normalized = normalize_angle(self.state.get_bearing(), bearing);
-        self.state.set_bearing(normalized);
         let start_zoom = self.state.scale_zoom(self.state.get_scale());
-        let start_bearing = self.state.get_bearing();
+        let start_bearing = normalize_angle(self.state.get_bearing(), bearing);
         let start_pitch = self.state.get_pitch();
         let start_roll = self.state.get_roll();
         let start_fov = self.state.get_field_of_view() as f64;
@@ -690,16 +1085,8 @@ impl Transform {
             // duration_cast<Duration>(duration<double>(S / velocity))
             Duration::from_nanos((total_s / velocity * 1_000_000_000.0) as i64)
         };
-        if duration == Duration::zero() {
-            // Perform an instantaneous transition.
-            self.jump_to(&camera);
-            if let Some(finish) = &animation.transition_finish_fn {
-                finish();
-            }
-            return;
-        }
-
         let start_scale = self.state.get_scale();
+        let start_edge_insets = self.state.get_edge_insets();
         let delta_latitude = if globe {
             VerticalPerspectiveProjection::difference_of_angles_degrees(
                 start_lat_lng.latitude(),
@@ -716,21 +1103,14 @@ impl Transform {
         } else {
             0.0
         };
-        self.state.set_properties(
-            &TransformStateProperties::default()
-                .with_panning_in_progress(Some(true))
-                .with_scaling_in_progress(Some(true))
-                .with_rotating_in_progress(Some(bearing != start_bearing)),
-        );
-        let start_edge_insets = self.state.get_edge_insets();
 
-        let frame: FrameFn = Rc::new(move |state: &mut TransformState, k: f64| {
+        let frame: FrameFn = Rc::new(move |state: &TransformState, k: f64| {
             // s: The distance traveled along the flight path, measured in
             // ρ-screenfuls.
             let s = k * total_s;
             let us = if k == 1.0 { 1.0 } else { u(s) };
 
-            if globe {
+            let (frame_lat_lng, frame_zoom) = if globe {
                 let mut frame_lat_lng = lat_lng_end;
                 let mut frame_zoom = zoom;
                 if k < 1.0 {
@@ -752,7 +1132,7 @@ impl Transform {
                         frame_zoom = zoom;
                     }
                 }
-                state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
+                (Some(frame_lat_lng), frame_zoom)
             } else {
                 // Calculate the current point and zoom level along the flight
                 // path.
@@ -769,40 +1149,24 @@ impl Transform {
                 }
 
                 // Convert to geographic coordinates and set the new viewpoint.
-                if let Some(frame_lat_lng) = frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped) {
-                    state.set_lat_lng_zoom(&frame_lat_lng, frame_zoom);
-                }
-            }
-            state.set_center_altitude(interpolate(&start_center_alt, &center_alt, us));
-            if bearing != start_bearing {
-                state.set_bearing(mln_math::wrap(interpolate(&start_bearing, &bearing, k), -PI, PI));
-            }
-
-            if padding != start_edge_insets {
-                // Interpolate edge insets
-                if let Some(insets) = frame_edge_insets(
-                    interpolate(&start_edge_insets.top, &padding.top, k),
-                    interpolate(&start_edge_insets.left, &padding.left, k),
-                    interpolate(&start_edge_insets.bottom, &padding.bottom, k),
-                    interpolate(&start_edge_insets.right, &padding.right, k),
-                ) {
-                    state.set_edge_insets(&insets);
-                }
-            }
-
-            if pitch != start_pitch {
-                state.set_pitch(interpolate(&start_pitch, &pitch, k));
-            }
-            if roll != start_roll {
-                // C++ sets the pitch here (sic).
-                state.set_pitch(interpolate(&start_roll, &roll, k));
-            }
-            if fov != start_fov {
-                state.set_field_of_view(interpolate(&start_fov, &fov, k));
-            }
+                (frame_unproject(&frame_point, start_scale, WrapMode::Unwrapped), frame_zoom)
+            };
+            CameraOptions::default()
+                .with_center(frame_lat_lng)
+                .with_zoom(Some(frame_zoom))
+                .with_center_altitude(Some(interpolate(&start_center_alt, &center_alt, us)))
+                .with_bearing(Some(-mln_math::rad2deg(mln_math::wrap(
+                    interpolate(&start_bearing, &bearing, k),
+                    -PI,
+                    PI,
+                ))))
+                .with_padding(interpolate_edge_insets(&start_edge_insets, &padding, k))
+                .with_pitch(Some(mln_math::rad2deg(interpolate(&start_pitch, &pitch, k))))
+                .with_roll(Some(mln_math::rad2deg(interpolate(&start_roll, &roll, k))))
+                .with_fov(Some(mln_math::rad2deg(interpolate(&start_fov, &fov, k))))
         });
 
-        self.start_transition(&camera, animation, frame, duration);
+        self.start_transition(input_camera, animation, frame, duration, !linear_zoom_interpolation);
     }
 
     // MARK: - Position
@@ -846,22 +1210,27 @@ impl Transform {
                 &ScreenCoordinate::new(offset.x, -offset.y),
             );
             let start_zoom = self.get_zoom();
-            self.state.set_properties(
-                &TransformStateProperties::default()
-                    .with_panning_in_progress(Some(true))
-                    .with_rotating_in_progress(Some(true)),
-            );
-            let frame: FrameFn = Rc::new(move |state: &mut TransformState, t: f64| {
+            let frame: FrameFn = Rc::new(move |state: &TransformState, t: f64| {
                 let camera = VerticalPerspectiveProjection::interpolate_camera(&start, &end, t);
                 let center = state.constrained_center(&camera.center, state.get_zoom());
-                state.set_lat_lng_zoom(
-                    &center,
-                    start_zoom
-                        + VerticalPerspectiveProjection::zoom_adjustment(start.center.latitude(), center.latitude()),
-                );
-                state.set_bearing(-mln_math::deg2rad(camera.bearing));
+                CameraOptions::default()
+                    .with_center(Some(center))
+                    .with_zoom(Some(
+                        start_zoom
+                            + VerticalPerspectiveProjection::zoom_adjustment(
+                                start.center.latitude(),
+                                center.latitude(),
+                            ),
+                    ))
+                    .with_bearing(Some(camera.bearing))
             });
-            self.start_transition(&CameraOptions::default(), animation, frame, duration);
+            // The fling sets the center, the zoom that keeps the planet's
+            // size and the bearing.
+            let fields = CameraOptions::default()
+                .with_center(Some(end.center))
+                .with_zoom(Some(start_zoom))
+                .with_bearing(Some(end.bearing));
+            self.start_transition(&fields, animation, frame, duration, false);
             return Ok(());
         }
 
@@ -1092,6 +1461,8 @@ impl Transform {
         self.state.is_location_occluded(lat_lng)
     }
 
+    // MARK: - North Orientation
+
     pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
         self.state.set_north_orientation(orientation);
         self.constrain_and_set_properties();
@@ -1156,29 +1527,26 @@ impl Transform {
 
     // MARK: - Transition
 
+    /// Starts one camera command. `camera` is the command as given: the
+    /// fields it sets are the fields it takes over from the running
+    /// commands. A flight couples center and zoom; an anchored command
+    /// couples center with its fields. Replacing any field of a coupled
+    /// group stops the whole group, and a command left with no fields
+    /// finishes.
     fn start_transition(
         &mut self,
         camera: &CameraOptions,
         animation: &AnimationOptions,
         frame: FrameFn,
         duration: Duration,
+        flight: bool,
     ) {
-        if let Some(mut finish) = self.transition_finish_fn.take() {
-            // C++ calls the stored std::function in place; it is overwritten
-            // below.
-            finish(self);
-        }
+        let mut fields = camera_fields(camera);
+        let mut coupled_fields = if flight { CENTER | ZOOM } else { 0 };
+        fields |= coupled_fields;
 
-        let is_animated = duration != Duration::zero();
-        self.observer.on_camera_will_change(if is_animated {
-            CameraChangeMode::Animated
-        } else {
-            CameraChangeMode::Immediate
-        });
-
-        // Associate the anchor, if given, with a coordinate. Anchor and
-        // center points are mutually exclusive, with preference for the
-        // center point when both are set.
+        // An anchor controls center together with the properties it
+        // transforms. An explicit center takes precedence over an anchor.
         let mut anchor = if camera.center.is_some() { None } else { camera.anchor };
         let mut anchor_lat_lng = LatLng::default();
         if let Some(a) = anchor.as_mut() {
@@ -1187,7 +1555,11 @@ impl Transform {
             // anchor that has no LatLng (NaN or infinite); the port logs it
             // and ignores the anchor.
             match self.state.screen_coordinate_to_lat_lng(a, WrapMode::Unwrapped) {
-                Ok(lat_lng) => anchor_lat_lng = lat_lng,
+                Ok(lat_lng) => {
+                    anchor_lat_lng = lat_lng;
+                    fields |= CENTER;
+                    coupled_fields = fields;
+                }
                 Err(e) => {
                     Log::error(Event::General, &e);
                     anchor = None;
@@ -1195,172 +1567,767 @@ impl Transform {
             }
         }
 
-        self.transition_start = Clock::now();
-        self.transition_duration = duration;
+        let target = frame(&self.state, 1.0);
+        let panning = flight || anchor.is_some() || camera.center != Some(self.get_lat_lng(WrapMode::Unwrapped));
+        let scaling = flight || target.zoom != Some(self.get_zoom());
+        let rotating = target.bearing != Some(-mln_math::rad2deg(self.get_bearing()));
+        let moving_fields = (if panning { CENTER } else { 0 })
+            | (if scaling { ZOOM } else { 0 })
+            | (if rotating { BEARING } else { 0 });
 
-        let frame_animation = animation.clone();
-        self.transition_frame_fn = Some(Box::new(move |transform: &mut Transform, now: TimePoint| -> bool {
-            let t: f32 = if is_animated {
-                Duration::float_seconds_div(now - transform.transition_start, transform.transition_duration)
-            } else {
-                1.0
-            };
-            // On the globe the anchor is re-read every frame and the zoom
-            // around it is GL JS's blend of the exact solution and a damped
-            // heuristic; the exact solution alone jumps near the horizon.
-            let globe_zoom_around = anchor.is_some() && transform.state.is_globe_rendering();
-            // A frame can't return the C++ exception for an anchor with no
-            // LatLng; it is logged, and the anchor's location at the start
-            // stands in.
-            let zoom_location = match anchor {
-                Some(anchor) if globe_zoom_around => {
-                    transform.state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
-                        Log::error(Event::General, &e);
-                        anchor_lat_lng
-                    })
-                }
-                _ => anchor_lat_lng,
-            };
-            let zoom_before = transform.state.get_zoom();
-            if t >= 1.0 {
-                frame(&mut transform.state, 1.0);
-            } else {
-                let ease = frame_animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
-                frame(&mut transform.state, ease.solve(t as f64, 0.001));
-            }
+        let start = self.now();
+        let duration = if fields != 0 { duration } else { Duration::zero() };
+        self.latest_transition_start = start;
+        self.latest_transition_duration = duration;
+        let transition = Rc::new(Transition {
+            anchor,
+            anchor_lat_lng,
+            ..Transition::new(fields, coupled_fields, moving_fields, start, duration, animation, frame, self.source)
+        });
 
-            if let Some(anchor) = anchor {
-                if globe_zoom_around && transform.state.get_zoom() != zoom_before {
-                    let zoom_delta = transform.state.get_zoom() - zoom_before;
-                    VerticalPerspectiveProjection::zoom_around_point(
-                        &mut transform.state,
-                        &anchor,
-                        &zoom_location,
-                        zoom_delta,
-                        transform.globe_free_bearing,
-                    );
-                } else if let Err(e) = transform.state.move_lat_lng(&anchor_lat_lng, &anchor) {
-                    // The anchor had a LatLng at the start; a frame can't
-                    // return the C++ exception, so it is logged, as in
-                    // frame_edge_insets.
-                    Log::error(Event::General, &e);
-                }
-            }
+        let finished = self.release_fields(fields);
+        self.transitions.push(transition.clone());
+        self.update_movement_flags();
+        self.finish_transitions(&finished);
 
-            // At t = 1.0, a DidChangeAnimated notification should be sent
-            // from finish().
-            if t < 1.0 {
-                if let Some(frame_fn) = &frame_animation.transition_frame_fn {
-                    frame_fn(t as f64);
-                }
-                transform.observer.on_camera_is_changing();
-                false
-            } else {
-                // Indicate that we need to terminate this transition
-                true
-            }
-        }));
+        let animated = duration != Duration::zero();
+        self.observer.on_camera_will_change(CameraChange { mode: transition.mode(), source: self.source });
 
-        let finish_animation = animation.clone();
-        self.transition_finish_fn = Some(Box::new(move |transform: &mut Transform| {
-            transform.state.set_properties(
-                &TransformStateProperties::default()
-                    .with_panning_in_progress(Some(false))
-                    .with_scaling_in_progress(Some(false))
-                    .with_rotating_in_progress(Some(false)),
-            );
-            if let Some(finish) = &finish_animation.transition_finish_fn {
-                finish();
-            }
-            transform.observer.on_camera_did_change(if is_animated {
-                CameraChangeMode::Animated
-            } else {
-                CameraChangeMode::Immediate
-            });
-        }));
-
-        if !is_animated {
-            let update = self.transition_frame_fn.take();
-            let finish = self.transition_finish_fn.take();
-
-            if let Some(mut update) = update {
-                update(self, Clock::now());
-            }
-            if let Some(mut finish) = finish {
-                finish(self);
-            }
+        if !animated {
+            self.apply_transitions(std::slice::from_ref(&transition), start);
+            self.transitions.retain(|active| !Rc::ptr_eq(active, &transition));
+            self.update_movement_flags();
+            self.finish_transitions(&[transition]);
         }
     }
 
+    /// Composes the current camera with each of `active`'s cameras at `now`,
+    /// for the fields it still owns, then applies the result.
+    fn apply_transitions(&mut self, active: &[Rc<Transition>], now: TimePoint) {
+        // The center is unwrapped (TransformState::getCameraOptions).
+        let current = self.state.get_camera_options(None);
+        let mut camera = current;
+
+        for transition in active {
+            if transition.momentum.is_some() {
+                continue;
+            }
+            let t = transition.progress(now);
+            let ease = transition.animation.easing.unwrap_or(DEFAULT_TRANSITION_EASE);
+            let value = (transition.frame)(&self.state, if t == 1.0 { 1.0 } else { ease.solve(t, 0.001) });
+            let fields = transition.fields.get();
+            // A frame without a center or padding (see FrameFn) keeps the
+            // current one.
+            if fields & CENTER != 0 && value.center.is_some() {
+                camera.center = value.center;
+            }
+            if fields & ZOOM != 0 {
+                camera.zoom = value.zoom;
+            }
+            if fields & BEARING != 0 {
+                camera.bearing = value.bearing;
+            }
+            if fields & PITCH != 0 {
+                camera.pitch = value.pitch;
+            }
+            if fields & PADDING != 0 && value.padding.is_some() {
+                camera.padding = value.padding;
+            }
+            if fields & ALTITUDE != 0 {
+                camera.center_altitude = value.center_altitude;
+            }
+            if fields & ROLL != 0 {
+                camera.roll = value.roll;
+            }
+            if fields & FOV != 0 {
+                camera.fov = value.fov;
+            }
+        }
+
+        // An active anchor also applies to immediate changes of other
+        // properties.
+        let anchored = self
+            .transitions
+            .iter()
+            .rev()
+            .find(|transition| transition.anchor.is_some() && transition.fields.get() & CENTER != 0)
+            .cloned();
+
+        // On the globe the anchor is re-read every frame and the zoom around
+        // it is GL JS's blend of the exact solution and a damped heuristic;
+        // the exact solution alone jumps near the horizon. A frame can't
+        // return the C++ exception for an anchor with no LatLng; it is
+        // logged, and the anchor's location at the start stands in.
+        let globe_zoom_around = match &anchored {
+            Some(anchored) if self.state.is_globe_rendering() => anchored.anchor.map(|anchor| {
+                let location =
+                    self.state.screen_coordinate_to_lat_lng(&anchor, WrapMode::Unwrapped).unwrap_or_else(|e| {
+                        Log::error(Event::General, &e);
+                        anchored.anchor_lat_lng
+                    });
+                (location, self.state.get_zoom())
+            }),
+            _ => None,
+        };
+
+        // Compose the camera before applying constraints. In particular,
+        // padding and field of view determine the pitch limit, and center
+        // and zoom jointly determine the geographic bounds and altitude
+        // scale.
+        //
+        // C++ sets every angle from its degrees. The port leaves the angles
+        // no command changed as they are, so that converting them to degrees
+        // and back doesn't move them.
+        let padding = camera.padding.unwrap_or_default();
+        self.state.set_edge_insets(&padding);
+        if let Some(fov) = camera.fov.filter(|_| camera.fov != current.fov) {
+            self.state.set_field_of_view(mln_math::deg2rad(fov));
+        }
+        if let Some(bearing) = camera.bearing.filter(|_| camera.bearing != current.bearing) {
+            self.state.set_bearing(mln_math::deg2rad(-bearing));
+        }
+        if let Some(roll) = camera.roll.filter(|_| camera.roll != current.roll) {
+            self.state.set_roll(mln_math::deg2rad(roll));
+        }
+        let pitch = match camera.pitch.filter(|_| camera.pitch != current.pitch) {
+            Some(pitch) => mln_math::deg2rad(pitch),
+            None => self.state.get_pitch(),
+        };
+        self.state.set_pitch(std_min(get_max_pitch_for_edge_insets(&self.state, &padding), pitch));
+        let mut zoom = camera.zoom.unwrap_or_default();
+        self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
+        self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
+        if let Some(anchored) = anchored
+            && let Some(anchor) = anchored.anchor
+        {
+            match globe_zoom_around {
+                Some((location, zoom_before)) if self.state.get_zoom() != zoom_before => {
+                    let zoom_delta = self.state.get_zoom() - zoom_before;
+                    VerticalPerspectiveProjection::zoom_around_point(
+                        &mut self.state,
+                        &anchor,
+                        &location,
+                        zoom_delta,
+                        self.globe_free_bearing,
+                    );
+                }
+                // The anchor had a LatLng at the start; a frame can't return
+                // the C++ exception, so it is logged, as in frame_edge_insets.
+                _ => {
+                    if let Err(e) = self.state.move_lat_lng(&anchored.anchor_lat_lng, &anchor) {
+                        Log::error(Event::General, &e);
+                    }
+                }
+            }
+        }
+        self.state.set_center_altitude(camera.center_altitude.unwrap_or_default());
+    }
+
+    /// Reports the fields the running commands move as the state's panning,
+    /// scaling and rotating flags.
+    fn update_movement_flags(&mut self) {
+        let moving = self.transitions.iter().fold(0, |moving, t| moving | (t.fields.get() & t.moving_fields.get()));
+        self.state.set_properties(
+            &TransformStateProperties::default()
+                .with_panning_in_progress(Some(moving & CENTER != 0))
+                .with_scaling_in_progress(Some(moving & ZOOM != 0))
+                .with_rotating_in_progress(Some(moving & BEARING != 0)),
+        );
+    }
+
+    fn finish_transitions(&mut self, finished: &[Rc<Transition>]) {
+        for transition in finished {
+            self.end_gesture_momentum(transition.gesture);
+            if let Some(end_fn) = &transition.animation.transition_end_fn {
+                end_fn(&transition.end());
+            }
+            // This notification ends a command, not necessarily all camera
+            // motion.
+            self.observer.on_camera_did_change(CameraChange { mode: transition.mode(), source: transition.source });
+        }
+    }
+
+    /// Whether any camera command is still animating.
     pub fn in_transition(&self) -> bool {
-        self.transition_frame_fn.is_some()
+        !self.transitions.is_empty()
     }
 
     pub fn update_transitions(&mut self, now: TimePoint) {
-        // Use a temporary function to ensure that the transitionFrameFn
-        // lambda is called only once per update.
-        //
-        // This addresses the symptoms of
-        // https://github.com/mapbox/mapbox-gl-native/issues/11180 where
-        // setting a shape source to nil (or similar) in the
-        // `onCameraIsChanging` observer function causes
-        // `Map::Impl::onUpdate()` to be called which in turn calls this
-        // function (before the current iteration has completed), leading to
-        // an infinite loop. See
-        // https://github.com/mapbox/mapbox-gl-native/issues/5833 for a
-        // similar, related, issue.
-        //
-        // By temporarily nulling the `transitionFrameFn` (and then restoring
-        // it after the temporary has been called) we stop this recursion.
-        //
-        // It's important to note that the scope of this change is stop the
-        // above crashes. It doesn't address any potential deeper issue (for
-        // example user error, how often and when transition callbacks are
-        // called).
+        if self.transitions.is_empty() {
+            return;
+        }
 
-        let mut transition = self.transition_frame_fn.take();
-
-        let done = match transition.as_mut() {
-            Some(t) => t(self, now),
-            None => false,
-        };
-        if done {
-            // If the transition indicates that it is complete, then we should
-            // call the finish lambda (going via a temporary as above)
-            let finish = self.transition_finish_fn.take();
-
-            self.transition_finish_fn = None;
-            self.transition_frame_fn = None;
-
-            if let Some(mut finish) = finish {
-                finish(self);
+        let active = self.transitions.clone();
+        let absolute: Vec<_> = active.iter().filter(|t| t.momentum.is_none()).cloned().collect();
+        if !absolute.is_empty() {
+            self.apply_transitions(&absolute, now);
+        }
+        for transition in &active {
+            if transition.momentum.is_some() {
+                self.advance_momentum(transition, now);
             }
-        } else if self.transition_frame_fn.is_none() {
-            // We have to check `transitionFrameFn` is nil here, since a new
-            // transition may have been triggered in a user callback (from the
-            // transition call above)
-            self.transition_frame_fn = transition;
+        }
+
+        // Detach completed commands before calling user code, so that each
+        // command finishes exactly once.
+        let mut finished = Vec::new();
+        for transition in &active {
+            if now - transition.start >= transition.duration.get() || transition.fields.get() == 0 {
+                self.transitions.retain(|t| !Rc::ptr_eq(t, transition));
+                finished.push(transition.clone());
+            }
+        }
+        self.update_movement_flags();
+
+        for transition in &self.transitions {
+            if let Some(frame_fn) = &transition.animation.transition_frame_fn
+                && transition.duration.get() != Duration::zero()
+            {
+                frame_fn(transition.progress(now));
+            }
+        }
+        if !self.transitions.is_empty() {
+            self.observer.on_camera_is_changing();
+        }
+
+        self.finish_transitions(&finished);
+    }
+
+    /// `releaseFields`: takes `fields` from the running commands, and returns
+    /// the ones left with no fields, which the caller finishes.
+    fn release_fields(&mut self, fields: u16) -> Vec<Rc<Transition>> {
+        let mut finished = Vec::new();
+        for active in &self.transitions {
+            let mut replaced = fields;
+            if active.coupled_fields & replaced != 0 {
+                replaced |= active.coupled_fields;
+            }
+            active.fields.set(active.fields.get() & !replaced);
+            if let Some(momentum) = &active.momentum {
+                active.fields.set(momentum.borrow_mut().retain(active.fields.get()));
+            }
+            if active.fields.get() == 0 {
+                active.ended_by(TransitionOutcome::Replaced);
+                finished.push(active.clone());
+            }
+        }
+        self.transitions.retain(|active| active.fields.get() != 0);
+        finished
+    }
+
+    // MARK: - Momentum
+
+    /// Continues a gesture with momentum. The momentum replaces the running
+    /// animations of the fields that it moves, as a camera command does.
+    pub fn start_momentum(&mut self, options: &CameraMomentum, animation: &AnimationOptions) {
+        self.with_source(CameraChangeSource::Momentum, |transform| {
+            transform.start_momentum_now(options, animation, None)
+        });
+    }
+
+    /// Starts a momentum; `gesture` is the serial of the gesture it
+    /// continues, which ends with it.
+    fn start_momentum_now(&mut self, options: &CameraMomentum, animation: &AnimationOptions, gesture: Option<u64>) {
+        let momentum_change = |mode: CameraChangeMode| CameraChange { mode, source: CameraChangeSource::Momentum };
+        let mut momentum = MomentumState {
+            options: *options,
+            pan_total: ScreenCoordinate::new(0.0, 0.0),
+            pan: MomentumPart::default(),
+            scalars: [MomentumPart::default(); 3],
+            scalar_totals: [0.0; 3],
+            replaced: false,
+            elapsed: Duration::zero(),
+        };
+        let mut moving = 0;
+        let mut settling = 0;
+        let mut motion = Duration::zero();
+        if let Some(velocity) = options.pan_velocity {
+            let speed = velocity.x.hypot(velocity.y);
+            if let Some(glide) = Glide::plan(speed, &options.pan_decay) {
+                momentum.pan = MomentumPart { fields: CENTER, glide, moving: true, ..Default::default() };
+                moving |= CENTER;
+                motion = glide.duration;
+                let scale = glide.distance / speed;
+                momentum.pan_total = ScreenCoordinate::new(velocity.x * scale, velocity.y * scale);
+            }
+        }
+        let scalars = [
+            (options.zoom_velocity, &options.zoom_decay, options.zoom_anchor, options.zoom_snap, ZOOM),
+            (options.bearing_velocity, &options.bearing_decay, options.bearing_anchor, options.bearing_snap, BEARING),
+            (options.pitch_velocity, &options.pitch_decay, options.pitch_anchor, options.pitch_snap, PITCH),
+        ];
+        let mut instant = true;
+        for (i, (velocity, decay, anchor, snap, field)) in scalars.into_iter().enumerate() {
+            let part = &mut momentum.scalars[i];
+            part.fields = field | if anchor.is_some() { CENTER } else { 0 };
+            if let Some(velocity) = velocity
+                && let Some(glide) = Glide::plan(velocity.abs(), decay)
+            {
+                part.glide = glide;
+                part.moving = true;
+                moving |= part.fields;
+                motion = motion.max(glide.duration);
+                momentum.scalar_totals[i] = glide.distance.copysign(velocity);
+            }
+            // Without motion, a part settles only if it is near a target now.
+            part.snap = snap;
+            part.snap_pending = snap.is_some_and(|snap| {
+                part.moving || snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING) != 0.0
+            });
+            if part.snap_pending {
+                settling |= part.fields;
+                if snap.is_some_and(|snap| snap.duration != Duration::zero()) {
+                    instant = false;
+                }
+            }
+        }
+
+        let start = self.now();
+        self.latest_transition_start = start;
+        self.latest_transition_duration = motion;
+
+        // A momentum that doesn't move ends at once, without a camera change,
+        // and instant snaps without motion settle at once.
+        if moving == 0 && (settling == 0 || instant) {
+            if settling != 0 {
+                let finished = self.release_fields(settling);
+                self.update_movement_flags();
+                self.finish_transitions(&finished);
+                self.observer.on_camera_will_change(momentum_change(CameraChangeMode::Immediate));
+                for i in 0..momentum.scalars.len() {
+                    let part = &mut momentum.scalars[i];
+                    let Some(snap) = part.snap.filter(|_| part.snap_pending) else { continue };
+                    part.snap_pending = false;
+                    let delta = snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING);
+                    self.step_scalar(i, delta, momentum.anchor(i));
+                }
+            }
+            self.end_gesture_momentum(gesture);
+            end_unstarted(animation, TransitionOutcome::Completed);
+            if settling != 0 {
+                self.observer.on_camera_did_change(momentum_change(CameraChangeMode::Immediate));
+            }
+            return;
+        }
+
+        let fields = moving | settling;
+        let transition = Rc::new(Transition {
+            momentum: Some(RefCell::new(momentum)),
+            gesture,
+            ..Transition::new(
+                fields,
+                0,
+                moving,
+                start,
+                motion,
+                animation,
+                Rc::new(|_, _| CameraOptions::default()),
+                CameraChangeSource::Momentum,
+            )
+        });
+        let finished = self.release_fields(fields);
+        self.transitions.push(transition);
+        self.update_movement_flags();
+        self.finish_transitions(&finished);
+        // C++ checks here that the finish callbacks didn't replace or cancel
+        // the momentum, which they can't in Rust (see the top of the file).
+        self.observer.on_camera_will_change(momentum_change(CameraChangeMode::Animated));
+    }
+
+    /// Runs `start` with the commands it starts attributed to `source`.
+    fn with_source<R>(&mut self, source: CameraChangeSource, start: impl FnOnce(&mut Self) -> R) -> R {
+        let previous = std::mem::replace(&mut self.source, source);
+        let result = start(self);
+        self.source = previous;
+        result
+    }
+
+    /// Steps the zoom, bearing or pitch part of a momentum.
+    fn step_scalar(&mut self, part: usize, amount: f64, anchor: Option<ScreenCoordinate>) -> bool {
+        match part {
+            MOMENTUM_ZOOM => self.step_zoom(amount, anchor),
+            MOMENTUM_BEARING => {
+                self.step_bearing(amount, anchor);
+                true
+            }
+            _ => self.step_pitch(amount, anchor),
         }
     }
 
-    pub fn get_transition_start(&self) -> TimePoint {
-        self.transition_start
+    fn advance_momentum(&mut self, transition: &Transition, now: TimePoint) {
+        let Some(momentum) = &transition.momentum else { return };
+        let mut momentum = momentum.borrow_mut();
+        let elapsed = now - transition.start;
+        momentum.elapsed = elapsed;
+
+        let advance = |part: &mut MomentumPart| -> f64 {
+            if !part.moving {
+                return 0.0;
+            }
+            let progress = part.glide.progress(elapsed);
+            let fraction = progress - part.applied;
+            part.applied = progress;
+            if progress >= 1.0 {
+                part.moving = false;
+            }
+            fraction
+        };
+        // A part that bounds or limits hold in place stops.
+        let fraction = advance(&mut momentum.pan);
+        if fraction != 0.0 {
+            let total = momentum.pan_total;
+            if !self.step_pan(ScreenCoordinate::new(total.x * fraction, total.y * fraction)) {
+                momentum.pan.moving = false;
+            }
+        }
+        for i in 0..momentum.scalars.len() {
+            let anchor = momentum.anchor(i);
+            let total = momentum.scalar_totals[i];
+            let part = &mut momentum.scalars[i];
+            let fraction = advance(part);
+            if fraction != 0.0 && !self.step_scalar(i, total * fraction, anchor) {
+                part.moving = false;
+            }
+            // The part settles once it stops moving, which can be before its
+            // planned end when bounds, limits, or commands stopped it.
+            if part.snap_pending && !part.moving {
+                part.snap_pending = false;
+                let snap = part.snap.unwrap_or_default();
+                let delta = snap_delta(momentum_value(&self.state, i), &snap, i == MOMENTUM_BEARING);
+                if delta != 0.0 {
+                    part.snap_delta = Some(delta);
+                    part.snap_start = elapsed;
+                    transition.duration.set(transition.duration.get().max(elapsed + snap.duration));
+                    transition.moving_fields.set(transition.moving_fields.get() | part.fields);
+                }
+            }
+            if let Some(delta) = part.snap_delta {
+                let duration = part.snap.unwrap_or_default().duration;
+                let t = if duration == Duration::zero() {
+                    1.0
+                } else {
+                    mln_math::clamp_f64(seconds_f64(elapsed - part.snap_start) / seconds_f64(duration), 0.0, 1.0)
+                };
+                let eased = if t >= 1.0 { 1.0 } else { DEFAULT_TRANSITION_EASE.solve(t, 0.001) };
+                let fraction = eased - part.snap_applied;
+                part.snap_applied = eased;
+                let moved = fraction == 0.0 || self.step_scalar(i, delta * fraction, anchor);
+                if t >= 1.0 || !moved {
+                    part.snap_delta = None;
+                }
+            }
+        }
+
+        // Parts that ran to their end give up their fields.
+        transition.fields.set(momentum.retain(transition.fields.get()));
     }
 
-    pub fn get_transition_duration(&self) -> Duration {
-        self.transition_duration
+    /// The anchor `anchor` (from the top left) as a state point, from the
+    /// bottom left, with the LatLng under it; `None` without one. C++
+    /// throws std::domain_error for an anchor that has no LatLng; the port
+    /// logs it and ignores the anchor.
+    fn momentum_anchor(&self, anchor: Option<ScreenCoordinate>) -> Option<(ScreenCoordinate, LatLng)> {
+        let anchor = anchor?;
+        let point = ScreenCoordinate::new(anchor.x, self.state.get_size().height as f64 - anchor.y);
+        match self.state.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
+            Ok(lat_lng) => Some((point, lat_lng)),
+            Err(e) => {
+                Log::error(Event::General, &e);
+                None
+            }
+        }
+    }
+
+    /// Moves the center so that `lat_lng` is at `point` again, keeping the
+    /// altitude in meters, which moving the center keeps in pixels.
+    fn hold_momentum_anchor(&mut self, anchor: Option<(ScreenCoordinate, LatLng)>) {
+        let Some((point, lat_lng)) = anchor else { return };
+        let altitude = self.state.get_center_altitude();
+        if let Err(e) = self.state.move_lat_lng(&lat_lng, &point) {
+            Log::error(Event::General, &e);
+        }
+        self.state.set_center_altitude(altitude);
+    }
+
+    // Momentum steps, applied to the state as it stands. Each returns whether
+    // it moved the camera, which bounds and limits can prevent.
+
+    fn step_pan(&mut self, offset: ScreenCoordinate) -> bool {
+        // Each step moves the content no farther than a drag moves it in one
+        // event, so the travel on screen stays even at high pitch. A frame
+        // that would need more steps than a frame can afford takes longer
+        // ones.
+        const MAX_STEP: f64 = 16.0;
+        const MAX_STEPS: f64 = 100.0;
+        let distance = offset.x.hypot(offset.y);
+        if !(distance > 0.0) {
+            return true;
+        }
+        let before = self.get_lat_lng(WrapMode::Unwrapped);
+        let altitude = self.state.get_center_altitude();
+        let steps = std_min((distance / MAX_STEP).ceil(), MAX_STEPS);
+        let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
+        let bounded = self.state.get_lat_lng_bounds() != LatLngBounds::default();
+        for _ in 0..steps as u32 {
+            let size = self.state.get_size();
+            let center = self.state.get_edge_insets().get_center(size.width as u16, size.height as u16);
+            let point = ScreenCoordinate::new(center.x - step.x, center.y - step.y);
+            // C++ throws std::domain_error for a step that has no LatLng; the
+            // port logs it and stops the step.
+            let unwrapped = match self.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
+                Ok(lat_lng) => lat_lng,
+                Err(e) => {
+                    Log::error(Event::General, &e);
+                    break;
+                }
+            };
+            let mut camera =
+                CameraOptions::default().with_center(Some(if bounded { unwrapped } else { unwrapped.wrapped() }));
+            let mut zoom = self.state.get_zoom();
+            self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
+            self.state.set_lat_lng_zoom(&camera.center.unwrap_or(unwrapped), zoom);
+        }
+        self.state.set_center_altitude(altitude);
+        self.get_lat_lng(WrapMode::Unwrapped) != before
+    }
+
+    fn step_zoom(&mut self, zoom: f64, anchor: Option<ScreenCoordinate>) -> bool {
+        let before = self.state.get_zoom();
+        let altitude = self.state.get_center_altitude();
+        let anchor = self.momentum_anchor(anchor);
+        let mut target = mln_math::clamp_f64(before + zoom, self.state.get_min_zoom(), self.state.get_max_zoom());
+        let center = self.get_lat_lng(WrapMode::Unwrapped);
+        let mut camera = CameraOptions::default().with_center(Some(center));
+        self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut target);
+        self.state.set_lat_lng_zoom(&camera.center.unwrap_or(center), target);
+        // The altitude in meters holds before the anchor correction, which
+        // reads the projection, and through the correction's change of
+        // center.
+        self.state.set_center_altitude(altitude);
+        self.hold_momentum_anchor(anchor);
+        self.state.get_zoom() != before
+    }
+
+    fn step_bearing(&mut self, bearing: f64, anchor: Option<ScreenCoordinate>) {
+        let anchor = self.momentum_anchor(anchor);
+        self.state.set_bearing(mln_math::wrap(self.state.get_bearing() - mln_math::deg2rad(bearing), -PI, PI));
+        self.hold_momentum_anchor(anchor);
+    }
+
+    fn step_pitch(&mut self, pitch: f64, anchor: Option<ScreenCoordinate>) -> bool {
+        let anchor = self.momentum_anchor(anchor);
+        let before = self.state.get_pitch();
+        let max_pitch = get_max_pitch_for_edge_insets(&self.state, &self.state.get_edge_insets());
+        self.state.set_pitch(mln_math::clamp_f64(
+            before + mln_math::deg2rad(pitch),
+            self.state.get_min_pitch(),
+            max_pitch,
+        ));
+        if self.state.get_pitch() == before {
+            return false;
+        }
+        self.hold_momentum_anchor(anchor);
+        true
+    }
+
+    /// Puts the camera's animations on the host's frame clock: commands start
+    /// at the latest frame's time rather than at `Clock::now()` when they are
+    /// made, and the map samples them at it. Each frame then shows its
+    /// animations exactly one frame further on, whenever the input or the
+    /// map's update ran, and an animation started between frames moves by
+    /// that frame's interval on the next one: no frame repeats the
+    /// camera, and none skips ahead. `None` goes back to `Clock::now()`.
+    ///
+    /// Orbis starts animations on the first frame after the call, which
+    /// keeps the camera still for that frame; a glide that continues a drag
+    /// would pause there.
+    pub fn set_frame_time(&mut self, time: Option<TimePoint>) {
+        self.frame_time = time;
+    }
+
+    /// The host's frame time, unless it is stale: older than
+    /// [`STALE_FRAME_TIME`], as when the host stopped drawing frames or
+    /// forgot to set it this frame. A stale frame time would start a command
+    /// in the past, which the next frame would show already under way or
+    /// over.
+    pub fn frame_time(&self) -> Option<TimePoint> {
+        self.fresh_frame_time(Clock::now())
+    }
+
+    fn fresh_frame_time(&self, now: TimePoint) -> Option<TimePoint> {
+        self.frame_time.filter(|&time| now - time <= STALE_FRAME_TIME)
+    }
+
+    /// When commands start: the frame time, or now.
+    fn now(&self) -> TimePoint {
+        let now = Clock::now();
+        self.fresh_frame_time(now).unwrap_or(now)
+    }
+
+    /// Timing of the most recently started command, even after it finishes.
+    /// Other commands may still be active.
+    pub fn get_latest_transition_start(&self) -> TimePoint {
+        self.latest_transition_start
+    }
+
+    /// See [`get_latest_transition_start`](Self::get_latest_transition_start).
+    pub fn get_latest_transition_duration(&self) -> Duration {
+        self.latest_transition_duration
     }
 
     pub fn cancel_transitions(&mut self) {
-        if let Some(mut finish) = self.transition_finish_fn.take() {
-            finish(self);
+        let finished = std::mem::take(&mut self.transitions);
+        for transition in &finished {
+            transition.ended_by(TransitionOutcome::Cancelled);
         }
+        self.update_movement_flags();
+        self.finish_transitions(&finished);
+    }
 
-        self.transition_frame_fn = None;
-        self.transition_finish_fn = None;
+    /// `cancelTransitions(uint64_t transitionId)`: cancels the commands whose
+    /// [`AnimationOptions::transition_id`] equals `transition_id`, leaves the
+    /// others running, and returns whether any command ended.
+    pub fn cancel_transitions_with_id(&mut self, transition_id: u64) -> bool {
+        let (finished, running): (Vec<_>, Vec<_>) = std::mem::take(&mut self.transitions)
+            .into_iter()
+            .partition(|transition| transition.animation.transition_id == Some(transition_id));
+        self.transitions = running;
+        if finished.is_empty() {
+            return false;
+        }
+        for transition in &finished {
+            transition.ended_by(TransitionOutcome::Cancelled);
+        }
+        self.update_movement_flags();
+        self.finish_transitions(&finished);
+        true
     }
 
     // MARK: - Gesture
+
+    /// Moves the camera relative to where it is, as a gesture does
+    /// (maplibre-native-ffi's `mln_map_apply_camera_delta`). See
+    /// [`CameraDelta`].
+    pub fn apply_camera_delta(&mut self, delta: &CameraDelta) -> Result<(), CameraError> {
+        delta.validate()?;
+        let source = gesture_source(delta.phase);
+        let pans = delta.offset.is_some();
+        let eases = delta.scale.is_some() || delta.bearing.is_some() || delta.pitch.is_some();
+        // With momentum, the command's end is the momentum's, and the delta's
+        // own changes, which can't animate, apply before it starts.
+        // Otherwise the pan and the ease end the command together.
+        let parts = match delta.momentum {
+            Some(_) => AnimationOptions::default(),
+            None => joint_end(&delta.animation, u32::from(pans) + u32::from(eases)),
+        };
+        self.gesture_phase_before(delta.phase);
+        if delta.phase != GesturePhase::None {
+            self.gesture.change(
+                delta.scale.is_some_and(|scale| scale != 1.0),
+                delta.bearing.is_some_and(|bearing| bearing != 0.0),
+                delta.pitch.is_some_and(|pitch| pitch != 0.0),
+            );
+        }
+        self.with_source(source, |transform| {
+            if let Some(offset) = delta.offset {
+                // Validation keeps the offset finite, so it has a LatLng.
+                let _ = transform.move_by(&offset, &parts);
+            }
+            if eases {
+                let current = transform.get_camera_options(None);
+                let target = CameraOptions {
+                    zoom: delta.scale.map(|scale| current.zoom.unwrap_or(0.0) + scale.log2()),
+                    bearing: delta.bearing.map(|bearing| current.bearing.unwrap_or(0.0) + bearing),
+                    pitch: delta.pitch.map(|pitch| current.pitch.unwrap_or(0.0) + pitch),
+                    anchor: delta.anchor,
+                    ..CameraOptions::default()
+                };
+                transform.ease_to(&target, &parts);
+            }
+        });
+        match delta.momentum {
+            Some(mut momentum) => {
+                self.gesture.mask_snaps(&mut momentum);
+                // The gesture ends as its momentum starts, rather than in
+                // `gesture_phase_after`, so that a momentum with nothing to
+                // move, which ends at once, ends it too.
+                self.gesture.active = false;
+                let serial = self.gesture.serial;
+                self.with_source(CameraChangeSource::Momentum, |transform| {
+                    transform.start_momentum_now(&momentum, &delta.animation, Some(serial))
+                });
+            }
+            None if !pans && !eases => end_unstarted(&delta.animation, TransitionOutcome::Completed),
+            None => {}
+        }
+        self.gesture_phase_after(delta.phase, delta.momentum.is_some());
+        Ok(())
+    }
+
+    /// Moves the camera to absolute values, as a command or a gesture
+    /// (maplibre-native-ffi's `mln_map_update_camera`). See [`CameraUpdate`].
+    pub fn update_camera(&mut self, update: &CameraUpdate) {
+        self.gesture_phase_before(update.phase);
+        if update.phase != GesturePhase::None {
+            // A gesture's update can repeat a field it doesn't change.
+            let current = self.get_camera_options(None);
+            let changes = |value: Option<f64>, now: Option<f64>| value.is_some() && value != now;
+            self.gesture.change(
+                changes(update.camera.zoom, current.zoom),
+                changes(update.camera.bearing, current.bearing),
+                changes(update.camera.pitch, current.pitch),
+            );
+        }
+        self.with_source(gesture_source(update.phase), |transform| match update.mode {
+            CameraUpdateMode::Jump => {
+                transform.ease_to(&update.camera, &AnimationOptions { duration: None, ..update.animation.clone() })
+            }
+            CameraUpdateMode::Ease => transform.ease_to(&update.camera, &update.animation),
+            CameraUpdateMode::Fly => transform.fly_to(&update.camera, &update.animation, false),
+        });
+        self.gesture_phase_after(update.phase, false);
+    }
+
+    /// `Begin` cancels the running commands, and `Begin` and `Update` mark
+    /// the gesture, before its change applies, so that the change follows
+    /// the gesture rules (an ease doesn't fly, and wraps the longitude as a
+    /// drag). The first phase after a gesture ended starts a new one, which
+    /// an earlier gesture's momentum no longer ends.
+    fn gesture_phase_before(&mut self, phase: GesturePhase) {
+        if phase != GesturePhase::None && (phase == GesturePhase::Begin || !self.gesture.active) {
+            self.gesture = GestureState { serial: self.gesture.serial.wrapping_add(1), ..GestureState::default() };
+        }
+        if phase == GesturePhase::Begin {
+            self.cancel_transitions();
+        }
+        if matches!(phase, GesturePhase::Begin | GesturePhase::Update) {
+            self.gesture.active = true;
+            self.set_gesture_in_progress(true);
+        }
+    }
+
+    /// `Cancel` cancels the running commands after its change applies, and
+    /// `End` and `Cancel` end the gesture: at once, or when its momentum
+    /// ends.
+    fn gesture_phase_after(&mut self, phase: GesturePhase, momentum: bool) {
+        if phase == GesturePhase::Cancel {
+            self.cancel_transitions();
+        }
+        if matches!(phase, GesturePhase::End | GesturePhase::Cancel) {
+            self.gesture.active = false;
+            if !momentum {
+                self.set_gesture_in_progress(false);
+            }
+        }
+    }
+
+    /// The end of a gesture's momentum ends the gesture, unless another
+    /// gesture started since.
+    fn end_gesture_momentum(&mut self, gesture: Option<u64>) {
+        if gesture == Some(self.gesture.serial) && !self.gesture.active {
+            self.set_gesture_in_progress(false);
+        }
+    }
 
     pub fn set_gesture_in_progress(&mut self, in_progress: bool) {
         self.state.set_gesture_in_progress(in_progress);
@@ -1416,6 +2383,74 @@ impl Transform {
         self.cancel_transitions();
         self.state.set_free_camera_options(options);
     }
+}
+
+impl Drop for Transform {
+    /// Ends the running commands as closed, as maplibre-native-ffi does when
+    /// a map closes, so that every command's end function runs once.
+    fn drop(&mut self) {
+        for transition in std::mem::take(&mut self.transitions) {
+            if let Some(end_fn) = &transition.animation.transition_end_fn {
+                let TransitionEnd { velocity, .. } = transition.end();
+                end_fn(&TransitionEnd { outcome: TransitionOutcome::Closed, velocity });
+            }
+        }
+    }
+}
+
+fn gesture_source(phase: GesturePhase) -> CameraChangeSource {
+    if phase == GesturePhase::None { CameraChangeSource::Command } else { CameraChangeSource::Gesture }
+}
+
+/// Animation options for the `count` commands that one camera delta starts,
+/// whose end function runs once, when the last of them ends, with the
+/// outcome that covers them all: cancelled if any was, otherwise closed if
+/// any was, otherwise replaced if any was (maplibre-native-ffi's
+/// `CommandTransitions`).
+fn joint_end(animation: &AnimationOptions, count: u32) -> AnimationOptions {
+    let Some(end_fn) = animation.transition_end_fn.clone().filter(|_| count > 1) else {
+        return animation.clone();
+    };
+    let remaining = Cell::new(count);
+    let outcome = Cell::new(TransitionOutcome::Completed);
+    let joint = move |end: &TransitionEnd| {
+        let worst = match (outcome.get(), end.outcome) {
+            (TransitionOutcome::Cancelled, _) | (_, TransitionOutcome::Cancelled) => TransitionOutcome::Cancelled,
+            (TransitionOutcome::Closed, _) | (_, TransitionOutcome::Closed) => TransitionOutcome::Closed,
+            (TransitionOutcome::Replaced, _) | (_, TransitionOutcome::Replaced) => TransitionOutcome::Replaced,
+            _ => TransitionOutcome::Completed,
+        };
+        outcome.set(worst);
+        remaining.set(remaining.get() - 1);
+        if remaining.get() == 0 {
+            end_fn(&TransitionEnd { outcome: worst, velocity: end.velocity });
+        }
+    };
+    AnimationOptions { transition_end_fn: Some(Rc::new(joint)), ..animation.clone() }
+}
+
+/// Ends a command that started no transition: one that failed before it
+/// moved the camera, or a momentum with nothing to move.
+fn end_unstarted(animation: &AnimationOptions, outcome: TransitionOutcome) {
+    if let Some(end_fn) = &animation.transition_end_fn {
+        end_fn(&TransitionEnd { outcome, ..TransitionEnd::default() });
+    }
+}
+
+/// An animation frame's padding, `t` of the way from `start` to `end`; `None`
+/// when it has none (see [`frame_edge_insets`]). C++ interpolates the insets
+/// even when they don't change; the port keeps them, so that infinite insets
+/// don't log on every frame.
+fn interpolate_edge_insets(start: &EdgeInsets, end: &EdgeInsets, t: f64) -> Option<EdgeInsets> {
+    if start == end {
+        return Some(*end);
+    }
+    frame_edge_insets(
+        interpolate(&start.top, &end.top, t),
+        interpolate(&start.left, &end.left, t),
+        interpolate(&start.bottom, &end.bottom, t),
+        interpolate(&start.right, &end.right, t),
+    )
 }
 
 /// We don't want to show horizon: limit max pitch based on edge insets.

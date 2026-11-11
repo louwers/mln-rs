@@ -65,7 +65,7 @@ fn png(width: u32, height: u32) -> Data {
     for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
         pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
     }
-    Arc::new(mln_platform_default_image::encode_png(&image))
+    Arc::new(mln_image::encode_png(&image))
 }
 
 /// A raster worker's message for its tile when the tile reaches it directly.
@@ -195,7 +195,7 @@ fn raster_dem_tiles_cross() {
             for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
                 pixel.copy_from_slice(&[pixels[0], (i % 256) as u8, pixels[1], 255]);
             }
-            Arc::new(mln_platform_default_image::encode_png(&image))
+            Arc::new(mln_image::encode_png(&image))
         };
         let left_direct = parsed_dem(raster_dem_direct(Some(other(&[9, 200])), encoding)).unwrap();
         let left_through = parsed_dem(raster_dem_through_codec(Some(other(&[9, 200])), encoding)).unwrap();

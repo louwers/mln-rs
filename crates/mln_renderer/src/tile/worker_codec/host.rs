@@ -18,7 +18,7 @@
 // C++, rather than no answer, which would leave the tile pending.
 
 use std::cell::RefCell;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -29,6 +29,7 @@ use mln_util::exception::RuntimeError;
 use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, Log};
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
+use mln_vec_map::VecSet;
 
 use super::envelope::{About, Encoded, MessageKind};
 use super::worker_side::{WorkerAction, WorkerCodec};
@@ -75,11 +76,11 @@ enum Hosted {
 /// What a geometry tile's worker has of its tile's data and of its layers.
 #[derive(Default)]
 struct Sent {
-    data: Kept<(Option<SharedTileData>, Immutable<BTreeSet<String>>)>,
+    data: Kept<(Option<SharedTileData>, Immutable<VecSet<String>>)>,
     layers: Kept<(
         Vec<Immutable<dyn LayerProperties>>,
         Option<Arc<GlobalStateMap>>,
-        Immutable<BTreeSet<String>>,
+        Immutable<VecSet<String>>,
         SubdivisionGranularitySetting,
     )>,
 }

@@ -9,18 +9,20 @@
 // thread the result is the same. If two threads create the same file source
 // at once, the first one registered wins and the other is dropped.
 
-use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use mln_util::client_options::ClientOptions;
 use mln_util::string::to_string_u64;
 use mln_util::sync::MutexExt;
+use mln_vec_map::VecMap;
 
 use crate::asset_file_source::AssetFileSource;
+#[cfg(feature = "sqlite")]
 use crate::database_file_source::DatabaseFileSource;
 use crate::file_source::{FileSource, FileSourceType};
 use crate::local_file_source::LocalFileSource;
 use crate::main_resource_loader::MainResourceLoader;
+#[cfg(feature = "sqlite")]
 use crate::mbtiles_file_source::MBTilesFileSource;
 use crate::online_file_source::OnlineFileSource;
 use crate::pmtiles_file_source::PMTilesFileSource;
@@ -38,7 +40,7 @@ struct FileSourceInfo {
 #[derive(Default)]
 struct Impl {
     file_sources: Vec<FileSourceInfo>,
-    file_source_factories: BTreeMap<FileSourceType, FileSourceFactory>,
+    file_source_factories: VecMap<FileSourceType, FileSourceFactory>,
 }
 
 /// `FileSourceManager`: a singleton (`get()`) that creates and shares file
@@ -69,6 +71,7 @@ impl FileSourceManager {
                     Arc::new(AssetFileSource::new(resource_options, client_options)) as Arc<dyn FileSource>
                 }),
             );
+            #[cfg(feature = "sqlite")]
             manager.register_file_source_factory(
                 FileSourceType::Database,
                 Arc::new(|resource_options: &ResourceOptions, client_options: &ClientOptions| {
@@ -81,6 +84,7 @@ impl FileSourceManager {
                     Arc::new(LocalFileSource::new(resource_options, client_options)) as Arc<dyn FileSource>
                 }),
             );
+            #[cfg(feature = "sqlite")]
             manager.register_file_source_factory(
                 FileSourceType::Mbtiles,
                 Arc::new(|resource_options: &ResourceOptions, client_options: &ClientOptions| {

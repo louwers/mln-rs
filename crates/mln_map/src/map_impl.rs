@@ -35,7 +35,7 @@ use mln_util::exception::{NotFoundException, StyleLoadException, StyleParseExcep
 use mln_util::identity::SimpleIdentity;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
-use crate::map_observer::{CameraChangeMode, MapLoadError, MapObserver, RenderFrameStatus};
+use crate::map_observer::{CameraChange, MapLoadError, MapObserver, RenderFrameStatus};
 use crate::map_options::MapOptions;
 use crate::transform::{Transform, TransformObserver};
 
@@ -53,14 +53,14 @@ struct MapTransformObserver {
 }
 
 impl TransformObserver for MapTransformObserver {
-    fn on_camera_will_change(&self, mode: CameraChangeMode) {
-        self.observer.on_camera_will_change(mode);
+    fn on_camera_will_change(&self, change: CameraChange) {
+        self.observer.on_camera_will_change(change);
     }
     fn on_camera_is_changing(&self) {
         self.observer.on_camera_is_changing();
     }
-    fn on_camera_did_change(&self, mode: CameraChangeMode) {
-        self.observer.on_camera_did_change(mode);
+    fn on_camera_did_change(&self, change: CameraChange) {
+        self.observer.on_camera_did_change(change);
     }
 }
 
@@ -288,7 +288,11 @@ impl MapImpl {
             return;
         }
 
-        let time_point = if self.mode == MapMode::Continuous { Clock::now() } else { TimePoint::max() };
+        let time_point = if self.mode == MapMode::Continuous {
+            self.transform.borrow().frame_time().unwrap_or_else(Clock::now)
+        } else {
+            TimePoint::max()
+        };
 
         self.transform.borrow_mut().update_transitions(time_point);
         let zoom = self.transform.borrow().get_zoom();

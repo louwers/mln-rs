@@ -4,7 +4,7 @@
 // the features its filter accepted and gets the features again from the
 // source layer in `create_bucket`.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use mln_map_types::MapMode;
@@ -20,6 +20,7 @@ use mln_util::constants::EXTENT;
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_util::sync::RwLockExt;
+use mln_vec_map::VecMap;
 
 use crate::bucket::{Bucket, BucketPtr};
 use crate::bucket_parameters::BucketParameters;
@@ -37,7 +38,7 @@ pub struct CircleFeature {
 
 /// `CircleLayout`.
 pub struct CircleLayout {
-    pub layer_properties_map: BTreeMap<String, Immutable<dyn LayerProperties>>,
+    pub layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>>,
     pub bucket_leader_id: String,
 
     /// `std::list<CircleFeature> features`.
@@ -74,10 +75,12 @@ impl CircleLayout {
         let mut evaluation_parameters = PropertyEvaluationParameters::new(zoom);
         evaluation_parameters.global_state = parameters.global_state.clone();
         let layout = unevaluated_layout.evaluate(&evaluation_parameters);
+        let sort_key_property = layout.get::<CircleSortKey>();
+        let constant_sort_key = if sort_features_by_key { sort_key_property.constant() } else { None };
         let source_layer_id = leader_impl.source_layer.clone();
         let bucket_leader_id = leader_impl.id.clone();
 
-        let mut layer_properties_map: BTreeMap<String, Immutable<dyn LayerProperties>> = BTreeMap::new();
+        let mut layer_properties_map: VecMap<String, Immutable<dyn LayerProperties>> = VecMap::new();
         for layer_properties in group {
             let layer_id = layer_properties.base_impl.id.clone();
             layer_properties_map.entry(layer_id).or_insert_with(|| layer_properties.clone());
@@ -102,13 +105,22 @@ impl CircleLayout {
                 continue;
             }
 
-            let sort_key_property = layout.get::<CircleSortKey>();
+            if let Some(sort_key) = constant_sort_key {
+                features.push(CircleFeature { i, sort_key });
+                continue;
+            }
+
             let sort_key = sort_key_property.evaluate_feature(&*feature, zoom, CircleSortKey::default_value());
             feature.check()?;
             let circle_feature = CircleFeature { i, sort_key };
             // std::lower_bound: the first feature whose key is not less.
             let sort_position = features.partition_point(|f| f.sort_key < sort_key);
             features.insert(sort_position, circle_feature);
+        }
+        if constant_sort_key.is_some() {
+            // Inserting at the lower bound puts each feature before the
+            // earlier ones with an equal key: keep that order without a sort.
+            features.reverse();
         }
 
         Ok(CircleLayout {

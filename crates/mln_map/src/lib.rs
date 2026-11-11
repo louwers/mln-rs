@@ -13,10 +13,15 @@ pub mod transform;
 
 pub use map::Map;
 pub use map_impl::{StillImageCallback, StyleMut};
-pub use map_observer::{CameraChangeMode, MapLoadError, MapObserver, NullMapObserver, RenderFrameStatus, RenderMode};
+pub use map_observer::{
+    CameraChange, CameraChangeMode, CameraChangeSource, MapLoadError, MapObserver, NullMapObserver, RenderFrameStatus,
+    RenderMode,
+};
 pub use map_options::MapOptions;
 pub use map_projection::MapProjection;
 pub use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, FreeCameraOptions, MapDebugOptions, MapMode,
-    NorthOrientation, ProjectionMode, TileLodMode, TransformState, ViewportMode,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
+    CameraUpdateMode, CameraVelocity, ConstrainMode, FreeCameraOptions, GesturePhase, MapDebugOptions, MapMode,
+    MomentumDecay, MomentumDecayModel, MomentumEasing, MomentumSnap, NorthOrientation, ProjectionMode, TileLodMode,
+    TransformState, TransitionEnd, TransitionOutcome, ViewportMode,
 };
