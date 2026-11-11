@@ -21,7 +21,7 @@ use crate::generated::types::{
     MLN_LOG_SEVERITY_WARNING, mln_buffer_view, mln_diagnostic, mln_log_event, mln_log_handler, mln_log_severity,
     mln_log_severity_flags, mln_status,
 };
-use crate::{THREAD_STACK_SIZE, lock};
+use crate::lock;
 
 abi::versioned!(mln_log_handler);
 
@@ -100,10 +100,7 @@ fn deliver_later(record: Record) -> Result<(), Record> {
     let mut thread = lock(&LOG_THREAD);
     if thread.is_none() {
         let (sender, receiver) = mpsc::channel::<Record>();
-        let started = std::thread::Builder::new()
-            .name("mln-log".to_owned())
-            .stack_size(THREAD_STACK_SIZE)
-            .spawn(move || receiver.into_iter().for_each(deliver));
+        let started = mln_util::thread::builder("mln-log").spawn(move || receiver.into_iter().for_each(deliver));
         if started.is_err() {
             return Err(record);
         }

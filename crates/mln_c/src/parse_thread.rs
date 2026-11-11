@@ -9,7 +9,7 @@
 use std::sync::{Mutex, mpsc};
 
 use crate::error::Error;
-use crate::{THREAD_STACK_SIZE, lock};
+use crate::lock;
 
 type Job = Box<dyn FnOnce() + Send>;
 
@@ -22,9 +22,7 @@ fn jobs() -> Result<mpsc::Sender<Job>, Error> {
         return Ok(jobs.clone());
     }
     let (sender, receiver) = mpsc::channel::<Job>();
-    std::thread::Builder::new()
-        .name("mln-parse".to_owned())
-        .stack_size(THREAD_STACK_SIZE)
+    mln_util::thread::builder("mln-parse")
         .spawn(move || {
             for job in receiver {
                 job();

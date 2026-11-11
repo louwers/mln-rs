@@ -50,11 +50,6 @@ mod generated {
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-/// The stack of each thread that this crate starts: room for the deepest JSON
-/// that the parser accepts and the expressions built from it, with a wide
-/// margin in unoptimized builds too.
-const THREAD_STACK_SIZE: usize = 2 << 20;
-
 /// Locks `mutex`, poisoned or not: no code that holds one of this crate's
 /// locks leaves the data half-changed if it panics.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
