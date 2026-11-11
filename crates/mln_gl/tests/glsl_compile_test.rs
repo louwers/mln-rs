@@ -53,17 +53,22 @@ fn properties(source: &ShaderSource) -> BTreeSet<String> {
     names
 }
 
-/// The names of the uniform blocks `glsl` declares.
-fn declared_blocks(glsl: &str) -> BTreeSet<String> {
-    let mut names = BTreeSet::new();
+/// The names of the uniform blocks `glsl` declares, in declaration order.
+fn declared_blocks_in_order(glsl: &str) -> Vec<String> {
+    let mut names = Vec::new();
     for (start, _) in glsl.match_indices("uniform ") {
         let rest = &glsl[start + "uniform ".len()..];
         let end = rest.find(|c: char| !c.is_ascii_alphanumeric() && c != '_').unwrap_or(rest.len());
         if rest[end..].trim_start().starts_with('{') {
-            names.insert(rest[..end].to_owned());
+            names.push(rest[..end].to_owned());
         }
     }
     names
+}
+
+/// The names of the uniform blocks `glsl` declares.
+fn declared_blocks(glsl: &str) -> BTreeSet<String> {
+    declared_blocks_in_order(glsl).into_iter().collect()
 }
 
 /// WebGL2 rejects a draw whose program has a uniform block without a buffer,
@@ -82,6 +87,21 @@ fn every_declared_uniform_block_has_a_table_entry() {
                 );
             }
         }
+    }
+}
+
+/// SwiftShader, which Chrome's WebGL falls back to without a GPU, misreads a
+/// fragment shader whose blocks shared with the vertex shader don't come
+/// first, in the vertex shader's order (maplibre/maplibre-native#4625).
+#[test]
+fn fragment_shaders_declare_shared_uniform_blocks_first() {
+    for &shader_id in REGISTERED_SHADERS {
+        let source = shader_source(shader_id).expect("a registered shader has a source");
+        let vertex = declared_blocks_in_order(source.glsl.vertex);
+        let fragment = declared_blocks_in_order(source.glsl.fragment);
+        let shared: Vec<&String> = vertex.iter().filter(|block| fragment.contains(block)).collect();
+        let leading: Vec<&String> = fragment.iter().take(shared.len()).collect();
+        assert_eq!(leading, shared, "{}: fragment shader's leading uniform blocks", source.name);
     }
 }
 

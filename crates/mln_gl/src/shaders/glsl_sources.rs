@@ -55,6 +55,9 @@
 //   WGSL does (C++'s GLSL draws both from one vertex buffer with normals).
 // - ClippingMaskProgram has a globe variant, which projects through the
 //   projection block as the other shaders do.
+// - Fragment shaders declare the uniform blocks they share with their vertex
+//   shader first, in the vertex shader's order, which SwiftShader needs
+//   (maplibre/maplibre-native#4625, ffi patch 0011, and `line_gradient_sdf`).
 
 use super::shader_source::GlslShaderSource;
 
@@ -229,19 +232,7 @@ void main() {
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_b * u_pattern_size_b, u_tile_units_to_pixels, a_pos);
 }
 "#,
-    fragment: r#"layout (std140) uniform GlobalPaintParamsUBO {
-    highp vec2 u_pattern_atlas_texsize;
-    highp vec2 u_units_to_pixels;
-    highp vec2 u_world_size;
-    highp float u_camera_to_center_distance;
-    highp float u_symbol_fade_change;
-    highp float u_aspect_ratio;
-    highp float u_pixel_ratio;
-    highp float u_map_zoom;
-    lowp float global_pad1;
-};
-
-layout (std140) uniform BackgroundPatternPropsUBO {
+    fragment: r#"layout (std140) uniform BackgroundPatternPropsUBO {
     highp vec2 u_pattern_tl_a;
     highp vec2 u_pattern_br_a;
     highp vec2 u_pattern_tl_b;
@@ -252,6 +243,18 @@ layout (std140) uniform BackgroundPatternPropsUBO {
     highp float u_scale_b;
     highp float u_mix;
     highp float u_opacity;
+};
+
+layout (std140) uniform GlobalPaintParamsUBO {
+    highp vec2 u_pattern_atlas_texsize;
+    highp vec2 u_units_to_pixels;
+    highp vec2 u_world_size;
+    highp float u_camera_to_center_distance;
+    highp float u_symbol_fade_change;
+    highp float u_aspect_ratio;
+    highp float u_pixel_ratio;
+    highp float u_map_zoom;
+    lowp float global_pad1;
 };
 
 uniform sampler2D u_image;
@@ -3110,14 +3113,7 @@ lowp float floorwidth = u_floorwidth;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
-    highp float u_mix;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
+    fragment: r#"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -3127,6 +3123,13 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_floorwidth;
     lowp float props_pad1;
     lowp float props_pad2;
+};
+
+layout (std140) uniform LineSDFTilePropsUBO {
+    highp float u_sdfgamma;
+    highp float u_mix;
+    lowp float tileprops_pad1;
+    lowp float tileprops_pad2;
 };
 
 uniform sampler2D u_image;
@@ -3956,14 +3959,7 @@ lowp float floorwidth = u_floorwidth;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LineSDFTilePropsUBO {
-    highp float u_sdfgamma;
-    highp float u_mix;
-    lowp float tileprops_pad1;
-    lowp float tileprops_pad2;
-};
-
-layout (std140) uniform LineEvaluatedPropsUBO {
+    fragment: r#"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -3973,6 +3969,13 @@ layout (std140) uniform LineEvaluatedPropsUBO {
     lowp float u_floorwidth;
     lowp float props_pad1;
     lowp float props_pad2;
+};
+
+layout (std140) uniform LineSDFTilePropsUBO {
+    highp float u_sdfgamma;
+    highp float u_mix;
+    lowp float tileprops_pad1;
+    lowp float tileprops_pad2;
 };
 
 uniform sampler2D u_image;
@@ -4945,13 +4948,6 @@ lowp float opacity = u_opacity;
 "#,
     fragment: r#"uniform sampler2D u_texture;
 
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    highp float u_gamma_scale;
-    lowp float tileprops_pad1;
-};
-
 layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp vec4 u_text_fill_color;
     highp vec4 u_text_halo_color;
@@ -4965,6 +4961,13 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
     lowp float props_pad2;
+};
+
+layout (std140) uniform SymbolTilePropsUBO {
+    bool u_is_text;
+    bool u_is_halo;
+    highp float u_gamma_scale;
+    lowp float tileprops_pad1;
 };
 
 in highp vec2 v_tex;
@@ -5234,13 +5237,6 @@ lowp float halo_blur = u_halo_blur;
 "#,
     fragment: r#"#define SDF_PX 8.0
 
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    highp float u_gamma_scale;
-    lowp float tileprops_pad1;
-};
-
 layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp vec4 u_text_fill_color;
     highp vec4 u_text_halo_color;
@@ -5254,6 +5250,13 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
     lowp float props_pad2;
+};
+
+layout (std140) uniform SymbolTilePropsUBO {
+    bool u_is_text;
+    bool u_is_halo;
+    highp float u_gamma_scale;
+    lowp float tileprops_pad1;
 };
 
 uniform sampler2D u_texture;
@@ -5583,13 +5586,6 @@ lowp float halo_blur = u_halo_blur;
 #define SDF 1.0
 #define ICON 0.0
 
-layout (std140) uniform SymbolTilePropsUBO {
-    bool u_is_text;
-    bool u_is_halo;
-    highp float u_gamma_scale;
-    lowp float tileprops_pad1;
-};
-
 layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp vec4 u_text_fill_color;
     highp vec4 u_text_halo_color;
@@ -5603,6 +5599,13 @@ layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp float u_icon_halo_width;
     highp float u_icon_halo_blur;
     lowp float props_pad2;
+};
+
+layout (std140) uniform SymbolTilePropsUBO {
+    bool u_is_text;
+    bool u_is_halo;
+    highp float u_gamma_scale;
+    lowp float tileprops_pad1;
 };
 
 uniform sampler2D u_texture;
