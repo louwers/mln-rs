@@ -186,42 +186,6 @@ pub unsafe extern "C" fn mln_apple_frame_pacer_create(
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_dart_wake_create(
-    post_cobject: *mut ::core::ffi::c_void,
-    port: i64,
-    out_wake: *mut mln_wake,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_binding_dart_wake_create")
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_owner_finalize(token: *mut ::core::ffi::c_void) {}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_owner_token_create(
-    handle: u64,
-) -> *mut ::core::ffi::c_void {
-    core::ptr::null_mut()
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_owner_token_destroy(
-    token: *mut ::core::ffi::c_void,
-) {}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_binding_render_session_abandon_at_exit(
-    session: mln_render_session,
-    out_result: *mut mln_render_abandon_result,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(
-            out_diagnostic,
-            "mln_binding_render_session_abandon_at_exit",
-        )
-    }
-}
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_map_attach_android_hardware_buffer_ring(

@@ -52,8 +52,8 @@ impl Drop for TransformRequest {
 static TRANSFORM_REQUESTS: HandleTable<TransformRequest> = HandleTable::new(HandleKind::ResourceTransformRequest);
 
 /// Ends `request`, which fails it if no answer came first.
-fn release(request: mln_resource_transform_request) {
-    drop(TRANSFORM_REQUESTS.remove(request));
+pub(crate) fn release(request: mln_resource_transform_request) -> Result<(), Error> {
+    TRANSFORM_REQUESTS.remove(request).map(drop)
 }
 
 /// A handle that a queued call carries: dropping the call before it runs
@@ -71,7 +71,7 @@ impl PendingRequest {
 
 impl Drop for PendingRequest {
     fn drop(&mut self) {
-        release(self.0);
+        let _ = release(self.0);
     }
 }
 
@@ -209,7 +209,7 @@ pub unsafe extern "C" fn mln_resource_transform_request_complete(
         answer(request, Ok(url.to_owned()))
     });
     if status != MLN_STATUS_OK {
-        release(request);
+        let _ = release(request);
     }
     status
 }
@@ -248,7 +248,7 @@ pub unsafe extern "C" fn mln_resource_transform_request_fail(
         answer(request, Err(resources::resource_error(error.reason, message.to_owned(), retry_after)))
     });
     if status != MLN_STATUS_OK {
-        release(request);
+        let _ = release(request);
     }
     status
 }
@@ -256,7 +256,7 @@ pub unsafe extern "C" fn mln_resource_transform_request_fail(
 /// `mln_resource_transform_request_release()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_resource_transform_request_release(request: mln_resource_transform_request) {
-    release(request);
+    let _ = release(request);
 }
 
 /// The headers that header transform callbacks are setting now, by the

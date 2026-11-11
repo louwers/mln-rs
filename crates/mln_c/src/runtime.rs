@@ -118,11 +118,13 @@ pub unsafe extern "C" fn mln_runtime_release(
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_runtime_dispose(runtime: mln_runtime, out_diagnostic: *mut mln_diagnostic) -> mln_status {
-    export!(out_diagnostic, {
-        let object = RUNTIMES.remove(runtime)?;
-        object.runtime.dispose()?;
-        Ok(())
-    })
+    export!(out_diagnostic, { dispose(runtime) })
+}
+
+/// Releases `runtime` without waiting, as `mln_runtime_dispose()` does.
+pub(crate) fn dispose(runtime: mln_runtime) -> Result<(), Error> {
+    RUNTIMES.remove(runtime)?.runtime.dispose()?;
+    Ok(())
 }
 
 /// Sends a runtime command's result to its optional completion.

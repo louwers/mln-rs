@@ -24,6 +24,7 @@ mod export;
 
 mod abi;
 mod base;
+mod binding_support;
 mod buffer;
 mod callback;
 mod camera;

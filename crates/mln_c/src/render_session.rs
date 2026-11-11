@@ -19,9 +19,9 @@ use crate::generated::types::{
     MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_D3D12_FENCE, MLN_GPU_SYNC_KIND_FLAG_METAL_SHARED_EVENT,
     MLN_GPU_SYNC_KIND_FLAG_OPEN_GL_FENCE, MLN_GPU_SYNC_KIND_FLAG_QUEUE_ORDER, MLN_GPU_SYNC_KIND_FLAG_SYNC_FD,
     MLN_GPU_SYNC_KIND_FLAG_VULKAN_TIMELINE_SEMAPHORE, MLN_RENDER_ABANDON_DISPOSITION_CLEAN,
-    MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD, MLN_RENDER_DRIVER_CORE_WORKER, MLN_RENDER_RESULT_FAILED,
-    MLN_RENDER_RESULT_NO_UPDATE, MLN_RENDER_RESULT_RENDERED, MLN_RENDER_RESULT_SUPERSEDED,
-    MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION,
+    MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED, MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD,
+    MLN_RENDER_DRIVER_CORE_WORKER, MLN_RENDER_RESULT_FAILED, MLN_RENDER_RESULT_NO_UPDATE, MLN_RENDER_RESULT_RENDERED,
+    MLN_RENDER_RESULT_SUPERSEDED, MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION,
     MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_SESSION_CAPABILITY_READBACK,
     MLN_RENDER_SESSION_STATE_ABANDONED, MLN_RENDER_SESSION_STATE_ATTACHED, MLN_RENDER_SESSION_STATE_ATTACHING,
     MLN_RENDER_SESSION_STATE_DETACHED, MLN_RENDER_SESSION_STATE_DETACHING, MLN_RENDER_SESSION_STATE_FAILED,
@@ -442,8 +442,13 @@ pub unsafe extern "C" fn mln_render_session_drain_frame_results(
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_render_frame_batch_release(batch: mln_render_frame_batch) {
     if batch != handles::NULL {
-        let _ = BATCHES.remove(batch);
+        let _ = release_batch(batch);
     }
+}
+
+/// Releases `batch`, as `mln_render_frame_batch_release()` does.
+pub(crate) fn release_batch(batch: mln_render_frame_batch) -> Result<(), Error> {
+    BATCHES.remove(batch).map(drop)
 }
 
 // MARK: - Work
@@ -649,18 +654,39 @@ pub unsafe extern "C" fn mln_render_session_abandon(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, non_null(out_result), {
-        let result = mln_render_abandon_result {
-            size: size_of::<mln_render_abandon_result>() as u32,
-            disposition: MLN_RENDER_ABANDON_DISPOSITION_CLEAN,
-            quarantined_resource_count: 0,
-            reserved: 0,
-        };
         // Checked before the abandon, which can't be undone.
         // SAFETY: the caller's contract.
-        unsafe { abi::write_sized(out_result, &result) }?;
+        unsafe { abi::write_sized(out_result, &abandon_result(0)) }?;
         resolve(session)?.session.abandon()?;
         Ok(())
     })
+}
+
+/// What an abandon reports when it kept `kept` graphics objects until the
+/// process exits.
+pub(crate) fn abandon_result(kept: u32) -> mln_render_abandon_result {
+    mln_render_abandon_result {
+        size: size_of::<mln_render_abandon_result>() as u32,
+        disposition: if kept == 0 {
+            MLN_RENDER_ABANDON_DISPOSITION_CLEAN
+        } else {
+            MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED
+        },
+        quarantined_resource_count: kept,
+        reserved: 0,
+    }
+}
+
+/// Abandons `session` without graphics calls, keeping its graphics objects
+/// until the process exits, and returns how many it keeps.
+pub(crate) fn abandon_keeping_graphics(session: mln_render_session) -> Result<u32, Error> {
+    Ok(resolve(session)?.session.abandon_keeping_graphics()?)
+}
+
+/// Releases `session` in any state without graphics calls past the one in
+/// progress, keeping its graphics objects until the process exits.
+pub(crate) fn dispose_keeping_graphics(session: mln_render_session) -> Result<(), Error> {
+    Ok(SESSIONS.remove(session)?.session.dispose_keeping_graphics()?)
 }
 
 /// `mln_render_session_release()`.
@@ -704,7 +730,7 @@ pub unsafe extern "C" fn mln_render_session_dispose(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use core::ffi::c_void;
     use std::sync::mpsc;
     use std::time::{Duration, Instant};
@@ -712,8 +738,8 @@ mod tests {
     use super::*;
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
-        MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_UNSUPPORTED, mln_completion_result,
-        mln_offscreen_descriptor, mln_queue_lock, mln_texture_readback_result, mln_wake,
+        MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_UNSUPPORTED, mln_completion_result, mln_map,
+        mln_offscreen_descriptor, mln_queue_lock, mln_runtime, mln_texture_readback_result, mln_wake,
     };
     use crate::map::mln_map_set_style_json;
     use crate::map::tests::{create_map, options, release_map, view};
@@ -736,7 +762,7 @@ mod tests {
         mln_render_session_attach_options { driver: MLN_RENDER_DRIVER_CORE_WORKER, ..sized() }
     }
 
-    fn snapshot(session: mln_render_session) -> Result<mln_render_session_snapshot, mln_status> {
+    pub(crate) fn snapshot(session: mln_render_session) -> Result<mln_render_session_snapshot, mln_status> {
         let mut snapshot = sized::<mln_render_session_snapshot>();
         // SAFETY: a local snapshot.
         match unsafe { mln_render_session_get_snapshot(session, &mut snapshot, NO_DIAGNOSTIC) } {
@@ -804,6 +830,33 @@ mod tests {
         let demand = mln_frame_demand { flags, token, ..sized() };
         // SAFETY: a local demand.
         unsafe { mln_render_session_demand_frame(session, &demand, NO_DIAGNOSTIC) }
+    }
+
+    /// A runtime, a map, and an offscreen session that rendered a frame of it.
+    pub(crate) fn rendered_session() -> (mln_runtime, mln_map, mln_render_session) {
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let descriptor =
+            mln_offscreen_descriptor { logical_size: mln_logical_size { width: 16, height: 16 }, ..sized() };
+        let mut session = 0;
+        let attached = Waiter::new();
+        // SAFETY: local arguments.
+        let status = unsafe {
+            let options = attach_options();
+            mln_map_attach_offscreen(map, &descriptor, &options, 0, &mut session, &attached.descriptor, NO_DIAGNOSTIC)
+        };
+        assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
+        assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, 1), MLN_STATUS_OK);
+        assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED);
+        (runtime, map, session)
+    }
+
+    /// Releases `session`, and waits until it let go of its map.
+    pub(crate) fn release_session(session: mln_render_session) {
+        let released = Waiter::new();
+        // SAFETY: a local completion.
+        assert_eq!(unsafe { mln_render_session_release(session, &released.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(released.status(), MLN_STATUS_OK);
     }
 
     #[test]

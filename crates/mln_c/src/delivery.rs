@@ -270,9 +270,13 @@ pub unsafe extern "C" fn mln_delivery_queue_create(
 /// `mln_delivery_queue_release()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_delivery_queue_release(queue: mln_delivery_queue) {
-    if let Ok(queue) = QUEUES.remove(queue) {
-        queue.close();
-    }
+    let _ = release(queue);
+}
+
+/// Releases `queue`, as `mln_delivery_queue_release()` does.
+pub(crate) fn release(queue: mln_delivery_queue) -> Result<(), Error> {
+    QUEUES.remove(queue)?.close();
+    Ok(())
 }
 
 /// `mln_delivery_queue_dispatch()`.

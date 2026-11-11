@@ -2,6 +2,20 @@
 
 use super::types::*;
 
+const _: unsafe extern "C" fn(
+    *mut ::core::ffi::c_void,
+    i64,
+    *mut mln_wake,
+    *mut mln_diagnostic,
+) -> mln_status = crate::binding_support::mln_binding_dart_wake_create;
+const _: unsafe extern "C" fn(*mut ::core::ffi::c_void) = crate::binding_support::mln_binding_owner_finalize;
+const _: unsafe extern "C" fn(u64) -> *mut ::core::ffi::c_void = crate::binding_support::mln_binding_owner_token_create;
+const _: unsafe extern "C" fn(*mut ::core::ffi::c_void) = crate::binding_support::mln_binding_owner_token_destroy;
+const _: unsafe extern "C" fn(
+    mln_render_session,
+    *mut mln_render_abandon_result,
+    *mut mln_diagnostic,
+) -> mln_status = crate::binding_support::mln_binding_render_session_abandon_at_exit;
 const _: unsafe extern "C" fn() -> u32 = crate::base::mln_c_version;
 const _: unsafe extern "C" fn(
     mln_canonical_tile_id,

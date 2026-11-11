@@ -49,11 +49,11 @@ struct RequestObject {
 static REQUESTS: HandleTable<RequestObject> = HandleTable::new(HandleKind::ResourceRequest);
 
 /// Ends `handle`, which fails its request if no answer came first.
-fn release(handle: mln_resource_request) {
-    if let Ok(object) = REQUESTS.remove(handle) {
-        let request = lock(&object.request).take();
-        drop(request);
-    }
+pub(crate) fn release(handle: mln_resource_request) -> Result<(), Error> {
+    let object = REQUESTS.remove(handle)?;
+    let request = lock(&object.request).take();
+    drop(request);
+    Ok(())
 }
 
 /// A handle that a queued call carries: dropping the call before it runs
@@ -71,7 +71,7 @@ impl PendingHandle {
 
 impl Drop for PendingHandle {
     fn drop(&mut self) {
-        release(self.0);
+        let _ = release(self.0);
     }
 }
 
@@ -409,7 +409,7 @@ pub unsafe extern "C" fn mln_resource_request_complete(
         answer(handle, |request| request.respond(response))
     });
     if status != MLN_STATUS_OK {
-        release(handle);
+        let _ = release(handle);
     }
     status
 }
@@ -426,7 +426,7 @@ pub unsafe extern "C" fn mln_resource_request_pass_through(
 ) -> mln_status {
     let status = export!(out_diagnostic, { answer(handle, ResourceRequest::pass_through) });
     if status != MLN_STATUS_OK {
-        release(handle);
+        let _ = release(handle);
     }
     status
 }
@@ -519,7 +519,7 @@ pub unsafe extern "C" fn mln_resource_request_set_cancel_callback(
 /// `mln_resource_request_release()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_resource_request_release(handle: mln_resource_request) {
-    release(handle);
+    let _ = release(handle);
 }
 
 #[cfg(test)]

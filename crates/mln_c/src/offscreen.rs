@@ -88,8 +88,13 @@ pub unsafe extern "C" fn mln_offscreen_device_create(
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_offscreen_device_release(device: mln_offscreen_device) {
     if device != handles::NULL {
-        let _ = DEVICES.remove(device);
+        let _ = release_device(device);
     }
+}
+
+/// Releases `device`, as `mln_offscreen_device_release()` does.
+pub(crate) fn release_device(device: mln_offscreen_device) -> Result<(), Error> {
+    DEVICES.remove(device).map(drop)
 }
 
 /// `mln_map_attach_offscreen()`.

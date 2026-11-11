@@ -251,10 +251,12 @@ pub unsafe extern "C" fn mln_map_release(
 /// `out_diagnostic` is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_map_dispose(map: mln_map, out_diagnostic: *mut mln_diagnostic) -> mln_status {
-    export!(out_diagnostic, {
-        let object = MAPS.remove(map)?;
-        retire(object, None)
-    })
+    export!(out_diagnostic, { dispose(map) })
+}
+
+/// Releases `map` without waiting, as `mln_map_dispose()` does.
+pub(crate) fn dispose(map: mln_map) -> Result<(), Error> {
+    retire(MAPS.remove(map)?, None)
 }
 
 fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) -> mln_map_snapshot {

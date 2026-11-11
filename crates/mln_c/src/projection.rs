@@ -159,8 +159,13 @@ pub unsafe extern "C" fn mln_map_projection_create(
 /// `mln_map_projection_release()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_map_projection_release(projection: mln_map_projection) {
+    let _ = release(projection);
+}
+
+/// Releases `projection`, as `mln_map_projection_release()` does.
+pub(crate) fn release(projection: mln_map_projection) -> Result<(), Error> {
     // A call that is running finishes with its own reference.
-    let _ = PROJECTIONS.remove(projection);
+    PROJECTIONS.remove(projection).map(drop)
 }
 
 /// `mln_map_projection_get_camera()`.

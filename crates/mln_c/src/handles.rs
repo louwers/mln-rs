@@ -63,7 +63,7 @@ impl HandleKind {
         Self::FramePacer,
     ];
 
-    fn of(handle: u64) -> Option<Self> {
+    pub(crate) fn of(handle: u64) -> Option<Self> {
         let byte = (handle >> (INDEX_BITS + GENERATION_BITS)) as u8;
         Self::ALL.into_iter().find(|kind| *kind as u8 == byte)
     }

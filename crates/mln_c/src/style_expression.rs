@@ -161,8 +161,13 @@ pub unsafe extern "C" fn mln_style_expression_create(
 /// `mln_style_expression_release()`.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_style_expression_release(expression: mln_style_expression) {
+    let _ = release(expression);
+}
+
+/// Releases `expression`, as `mln_style_expression_release()` does.
+pub(crate) fn release(expression: mln_style_expression) -> Result<(), Error> {
     // An evaluation that is running finishes with its own reference.
-    let _ = EXPRESSIONS.remove(expression);
+    EXPRESSIONS.remove(expression).map(drop)
 }
 
 /// `mln_style_expression_get_info()`.
