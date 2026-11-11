@@ -38,6 +38,51 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::render_target::mln_logical_extent_physical_size;
 const _: unsafe extern "C" fn(
     mln_map,
+    mln_buffer_view,
+    *const mln_custom_geometry_source_options,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_add_custom_geometry_source;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_custom_vector_source_options,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_add_custom_vector_source;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_geo_json_source_options,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_add_geo_json_source;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_lat_lng,
+    usize,
+    *const mln_premultiplied_rgba8_image,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_add_image_source_image;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_add_style_layer_json;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_add_style_source_json;
+const _: unsafe extern "C" fn(
+    mln_map,
     *const mln_camera_delta,
     *const mln_completion,
     *mut mln_diagnostic,
@@ -128,6 +173,17 @@ const _: unsafe extern "C" fn(
     mln_map,
     *const mln_completion,
     *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_global_state;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_image_source_coordinates;
+const _: unsafe extern "C" fn(
+    mln_map,
+    *const mln_completion,
+    *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_get_loaded_style_json;
 const _: unsafe extern "C" fn(
     mln_map,
@@ -136,15 +192,102 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::map::mln_map_get_snapshot;
 const _: unsafe extern "C" fn(
     mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_image;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_layer;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_layer_json;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_layer_property;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_light_property;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_source;
+const _: unsafe extern "C" fn(
+    mln_map,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_transition_options;
+const _: unsafe extern "C" fn(
+    mln_map,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_get_style_url;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_lat_lng_bounds,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_invalidate_custom_geometry_source_region;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_invalidate_custom_geometry_source_tile;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_lat_lng_bounds,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_invalidate_custom_vector_source_region;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_invalidate_custom_vector_source_tile;
 const _: unsafe extern "C" fn(
     mln_map,
     *const mln_camera_options,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::camera::mln_map_lat_lng_bounds_for_camera;
+const _: unsafe extern "C" fn(
+    mln_map,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_list_style_layers;
+const _: unsafe extern "C" fn(
+    mln_map,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_list_style_sources;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_move_style_layer;
 const _: unsafe extern "C" fn(
     *const mln_map_view,
     *mut mln_map_projection,
@@ -219,6 +362,24 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::map::mln_map_remove_feature_state;
 const _: unsafe extern "C" fn(
     mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_remove_style_image;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_remove_style_layer;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_remove_style_source;
+const _: unsafe extern "C" fn(
+    mln_map,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_request_repaint;
@@ -234,6 +395,39 @@ const _: unsafe extern "C" fn(
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::camera::mln_map_set_bounds;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_custom_geometry_source_tile_data;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_custom_geometry_source_tile_error;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    mln_style_vector_tile_encoding,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_custom_vector_source_tile_data;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_canonical_tile_id,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_custom_vector_source_tile_error;
 const _: unsafe extern "C" fn(
     mln_map,
     mln_map_debug_flags,
@@ -261,6 +455,56 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::camera::mln_map_set_free_camera_options;
 const _: unsafe extern "C" fn(
     mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_geo_json_source_data;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    bool,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_geo_json_source_synchronous_tiling;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_geo_json_source_url;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_global_state_property;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_lat_lng,
+    usize,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_image_source_coordinates;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_premultiplied_rgba8_image,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_image_source_image;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_image_source_url;
+const _: unsafe extern "C" fn(
+    mln_map,
     *const mln_projection_mode_options,
     *const mln_completion,
     *mut mln_diagnostic,
@@ -274,9 +518,51 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,
+    *const mln_premultiplied_rgba8_image,
+    *const mln_style_image_options,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_style_image;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_set_style_json;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_style_layer_property;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_style_light_json;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_style_light_property;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    bool,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_style_source_volatile;
+const _: unsafe extern "C" fn(
+    mln_map,
+    *const mln_style_transition_options,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_set_style_transition_options;
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,
