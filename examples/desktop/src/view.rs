@@ -640,7 +640,8 @@ impl View {
         }
         let size = self.backend.framebuffer_size();
         // The new backend configures the window's surface before the old one
-        // goes, which leaves it as it is.
+        // goes, which leaves it as it is, or has given it up.
+        self.backend.release_surface();
         let backend = match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
             Ok(backend) => backend,
             Err(e) => {

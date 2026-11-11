@@ -78,6 +78,10 @@ pub(crate) enum UserEvent {
     /// thread makes it.
     #[cfg(target_os = "macos")]
     MakeLayer(mpsc::Sender<Result<MetalLayer, String>>),
+    /// The window, sent back on the channel, for a backend that presents to
+    /// it through EGL.
+    #[cfg(target_os = "linux")]
+    Window(mpsc::Sender<Arc<Window>>),
     SetTitle(String),
     RequestSize(LogicalSize<f64>),
     /// What egui asks of the window after a frame: its cursor, a link to open.
@@ -447,6 +451,10 @@ impl ApplicationHandler<UserEvent> for Host {
             #[cfg(target_os = "macos")]
             UserEvent::MakeLayer(reply) => {
                 let _ = reply.send(open.metal_layer());
+            }
+            #[cfg(target_os = "linux")]
+            UserEvent::Window(reply) => {
+                let _ = reply.send(open.window.clone());
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::Ui(output) => open.egui.handle_platform_output(&open.window, *output),

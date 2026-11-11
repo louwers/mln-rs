@@ -7,7 +7,10 @@
 //
 // The WebGPU logo (assets/webgpu.svg) is W3C's, under CC BY 4.0, which the
 // about panel credits; the Metal logo (assets/metal.svg) is Apple's, from
-// Wikimedia Commons, where it is in the public domain.
+// Wikimedia Commons, where it is in the public domain. The OpenGL logo
+// (assets/opengl.svg) is from Wikimedia Commons too, vectorised by Vulphere:
+// too simple for copyright, so in the public domain, and a trademark of
+// Hewlett Packard Enterprise that the Khronos Group uses under licence.
 
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Order, Rect, Response, RichText, Sense, Shadow,
@@ -306,11 +309,8 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
         palette.panel().inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
             ui.set_width(PANEL_WIDTH);
             ui.label(RichText::new("mln-rs").size(16.0).strong());
-            ui.label(if Kind::ALL.len() > 1 {
-                "A map renderer in Rust, drawing MapLibre styles with Metal or WebGPU."
-            } else {
-                "A map renderer in Rust, drawing MapLibre styles with WebGPU."
-            });
+            let backends: Vec<&str> = Kind::ALL.iter().map(|kind| kind.name()).collect();
+            ui.label(format!("A map renderer in Rust, drawing MapLibre styles with {}.", backends.join(" or ")));
             ui.add_space(8.0);
             egui::Grid::new("gestures").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
                 for (gesture, how) in GESTURES {
@@ -420,10 +420,13 @@ enum Piece {
 /// The backend's logo and name, at the bottom left; a click switches to the
 /// next backend.
 fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions: &mut Vec<Action>) {
-    let logo = match backend {
+    // The logos are 18 points high; OpenGL's is a wordmark of 12 by 5.
+    let (logo, width) = match backend {
         #[cfg(target_os = "macos")]
-        Kind::Metal => egui::include_image!("../assets/metal.svg"),
-        Kind::WebGpu => egui::include_image!("../assets/webgpu.svg"),
+        Kind::Metal => (egui::include_image!("../assets/metal.svg"), 18.0),
+        Kind::WebGpu => (egui::include_image!("../assets/webgpu.svg"), 18.0),
+        #[cfg(target_os = "linux")]
+        Kind::OpenGl => (egui::include_image!("../assets/opengl.svg"), 43.2),
     };
     let index = Kind::ALL.iter().position(|&kind| kind == backend).unwrap_or(0);
     let next = Kind::ALL[(index + 1) % Kind::ALL.len()];
@@ -434,7 +437,7 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
-                    ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(18.0)));
+                    ui.add(egui::Image::new(logo).fit_to_exact_size(vec2(width, 18.0)));
                     ui.add(
                         egui::Label::new(RichText::new(backend.name()).size(12.0).color(palette.ink)).selectable(false),
                     );

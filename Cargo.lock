@@ -830,6 +830,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_glow"
+version = "0.37.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9275ca5cc35a6b7c94e0e8cedf22542f66cb0cf45ed8ab2657c78ff49fec7268"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "glow",
+ "log",
+ "profiling",
+]
+
+[[package]]
 name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2173,11 +2186,13 @@ dependencies = [
  "egui-wgpu",
  "egui-winit",
  "egui_extras",
+ "egui_glow",
  "fontdb",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-gestures",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-math",
@@ -2315,9 +2330,11 @@ dependencies = [
  "bytemuck",
  "glow",
  "khronos-egl",
+ "libloading",
  "mln-rs-gfx",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "raw-window-handle",
  "wasm-bindgen",
  "web-sys",
 ]

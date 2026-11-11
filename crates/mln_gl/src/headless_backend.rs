@@ -4,7 +4,7 @@
 // `Backend::Create<Backend::Type::OpenGL>`.
 //
 // Differences from C++:
-// - The EGL library is loaded at run time, and its display is Mesa's
+// - The EGL library is loaded at run time (egl.rs), and its display is Mesa's
 //   surfaceless platform where the library has it, so that no window system
 //   is needed; elsewhere it is the default display, as in C++.
 // - The context is OpenGL ES 3.0 on every platform.
@@ -27,11 +27,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::context::Context;
+use crate::egl::{Egl, library};
 use crate::renderable_resource::{RenderableResource, RenderableResourceBox, downcast_resource};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
 use crate::types::{FramebufferID, RenderbufferID};
-
-type Egl = egl::DynamicInstance<egl::EGL1_4>;
 
 /// `EGL_PLATFORM_SURFACELESS_MESA` (EGL_MESA_platform_surfaceless).
 const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
@@ -39,7 +38,7 @@ const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
 /// The EGL library and its display (`EGLDisplayConfig`), which every
 /// headless backend of the process shares. The display stays initialized.
 struct EglDisplay {
-    egl: Egl,
+    egl: &'static Egl,
     display: egl::Display,
     config: egl::Config,
 }
@@ -57,9 +56,7 @@ impl EglDisplay {
     }
 
     fn open() -> Result<EglDisplay, String> {
-        // SAFETY: loading the system's EGL runs its initializers, which a
-        // conforming library lets any process do.
-        let egl = unsafe { Egl::load_required() }.map_err(|e| format!("Failed to load EGL: {e}"))?;
+        let egl = library()?;
         let client_extensions =
             egl.query_string(None, egl::EXTENSIONS).ok().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let surfaceless = client_extensions.split(' ').any(|e| e == "EGL_MESA_platform_surfaceless");

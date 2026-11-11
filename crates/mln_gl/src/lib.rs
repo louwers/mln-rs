@@ -19,7 +19,8 @@
 //! The GLSL comes from the C++ headers, with the port's changes
 //! (`shaders::glsl_sources`).
 //!
-//! `HeadlessBackend` renders into a framebuffer of an EGL context, and
+//! `HeadlessBackend` renders into a framebuffer of an EGL context,
+//! `SurfaceBackend` into a Wayland or X11 window through EGL, and
 //! `CanvasBackend` into the canvas of a WebGL2 context.
 
 // OpenGL through glow is the FFI here.
@@ -47,7 +48,11 @@ pub mod vertex_buffer_resource;
 #[cfg(target_arch = "wasm32")]
 pub mod canvas_backend;
 #[cfg(not(target_arch = "wasm32"))]
+mod egl;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod headless_backend;
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+pub mod surface_backend;
 
 #[cfg(target_arch = "wasm32")]
 pub use canvas_backend::CanvasBackend;
@@ -55,3 +60,5 @@ pub use context::Context;
 #[cfg(not(target_arch = "wasm32"))]
 pub use headless_backend::HeadlessBackend;
 pub use renderer_backend::RendererBackend;
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+pub use surface_backend::SurfaceBackend;

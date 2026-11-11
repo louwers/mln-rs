@@ -5,7 +5,7 @@
 // as C++'s do through `Context& -> getBackend()`.
 //
 // `getDefaultRenderable()` is implemented by the platform backends
-// (HeadlessBackend, CanvasBackend), which embed this struct.
+// (HeadlessBackend, SurfaceBackend, CanvasBackend), which embed this struct.
 //
 // Not ported: `assumeFramebufferBinding`, `assumeViewport`,
 // `assumeScissorTest` and the checks that go with them, for hosts that bind
@@ -13,6 +13,7 @@
 // the functions.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
 use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
@@ -34,7 +35,9 @@ pub trait PlatformContext {
 /// The context state the backend and its `Context` share.
 pub struct BackendImpl {
     // Dropped before the platform's context, which its functions belong to.
-    gl: Gl,
+    // An `Arc` for the code that draws beside the backend with a library
+    // that wants one (a window's overlay); it stays on the context's thread.
+    gl: Arc<Gl>,
     /// The context `gl` calls, for the calls that take a JS array.
     #[cfg(target_family = "wasm")]
     webgl2: web_sys::WebGl2RenderingContext,
@@ -43,6 +46,12 @@ pub struct BackendImpl {
 
 impl BackendImpl {
     pub fn gl(&self) -> &Gl {
+        &self.gl
+    }
+
+    /// The GL functions, to share with code that draws on the context's
+    /// thread.
+    pub fn gl_shared(&self) -> &Arc<Gl> {
         &self.gl
     }
 
@@ -72,6 +81,8 @@ impl RendererBackend {
     /// context.
     #[cfg(not(target_family = "wasm"))]
     pub fn new(context_mode: ContextMode, gl: Gl, platform: Box<dyn PlatformContext>) -> Self {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let gl = Arc::new(gl);
         RendererBackend { base: RendererBackendBase::new(context_mode), impl_: Rc::new(BackendImpl { gl, platform }) }
     }
 
@@ -82,7 +93,8 @@ impl RendererBackend {
         webgl2: web_sys::WebGl2RenderingContext,
         platform: Box<dyn PlatformContext>,
     ) -> Self {
-        let gl = glow::Context::from_webgl2_context(webgl2.clone());
+        #[allow(clippy::arc_with_non_send_sync)]
+        let gl = Arc::new(glow::Context::from_webgl2_context(webgl2.clone()));
         RendererBackend {
             base: RendererBackendBase::new(context_mode),
             impl_: Rc::new(BackendImpl { gl, webgl2, platform }),

@@ -7,8 +7,9 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# The desktop example app: the map in a winit window, on the WebGPU backend,
-# with egui's controls over it; never released.
+# The desktop example app: the map in a winit window, on the WebGPU backend
+# (or Metal on macOS, or OpenGL ES on Linux), with egui's controls over it;
+# never released.
 publish = false
 autotests = false
 
@@ -53,6 +54,12 @@ objc2-foundation.workspace = true
 objc2-metal.workspace = true
 objc2-quartz-core.workspace = true
 raw-window-metal.workspace = true
+
+# The OpenGL ES backend, which presents to the window through EGL, and the
+# controls drawn in its context (gl_overlay.rs).
+[target.'cfg(target_os = "linux")'.dependencies]
+egui_glow.workspace = true
+mln_gl.workspace = true
 
 # Loads the OpenFreeMap Liberty style over HTTPS through the Map's file
 # sources (OnlineFileSource -> HTTPFileSource) and Style::loadURL, and parses

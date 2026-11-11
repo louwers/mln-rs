@@ -6,13 +6,15 @@
 // - view.rs: the render thread, which owns the RunLoop, the map, its
 //   renderer and the surface, applies the messages and draws.
 // - ui.rs: the controls, which view.rs lays out and an overlay of the window's
-//   backend paints over the map (overlay.rs, metal_overlay.rs).
+//   backend paints over the map (overlay.rs, metal_overlay.rs,
+//   gl_overlay.rs).
 //
 // Command line: -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
 // -s/--style URL, -t/--apikey KEY, -c/--cache FILE, -x/--lon, -y/--lat,
 // -a/--alt, --fov, -z/--zoom, --bearing, -p/--pitch, -r/--roll,
-// -P/--maxPitch, --backend (metal, the default on macOS, or webgpu: wgpu,
-// the default elsewhere; see backend.rs), and for checking the app:
+// -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
+// default elsewhere, or opengl: OpenGL ES, on Linux; see backend.rs), and for
+// checking the app:
 // --readback FILE.png (write the presented frame once the map is idle, see
 // view.rs), --quit-after SECONDS, --gesture-test (scripted input through the
 // view's handlers) and --no-system-fonts: without it, the map falls back to
@@ -20,6 +22,8 @@
 // (system_fonts.rs).
 
 mod backend;
+#[cfg(target_os = "linux")]
+mod gl_overlay;
 mod host;
 #[cfg(target_os = "macos")]
 mod metal_layer;
@@ -56,7 +60,8 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -p[degrees], --pitch=[degrees]    Pitch
       -r[degrees], --roll=[degrees]     Roll
       -P[degrees], --maxPitch=[degrees] Max Pitch
-      --backend=[backend]               Rendering backend: metal (macOS) or webgpu
+      --backend=[backend]               Rendering backend: metal (macOS), webgpu
+                                        or opengl (Linux)
       --readback=[file.png]             Write the frame once the map is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit

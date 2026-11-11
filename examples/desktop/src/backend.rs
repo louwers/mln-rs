@@ -1,7 +1,13 @@
 // The window's renderer backend: Metal by default on macOS, WebGPU (through
-// wgpu) everywhere, picked with --backend and switched in the controls.
-// C++'s GLFW app builds one backend and ignores the flag. On macOS both
-// present to the window's one CAMetalLayer (metal_layer.rs).
+// wgpu) everywhere, and OpenGL ES on Linux, picked with --backend and
+// switched in the controls. C++'s GLFW app builds one backend and ignores the
+// flag. On macOS both present to the window's one CAMetalLayer
+// (metal_layer.rs). On Linux OpenGL ES presents through EGL to the window's
+// Wayland surface or X11 window, which takes one API's frames at a time: the
+// backend that goes gives it up before the next one takes it.
+//
+// OpenGL ES is Linux's only: EGL is no system library on Windows, and macOS
+// has neither it nor OpenGL ES.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -22,6 +28,8 @@ pub(crate) enum Kind {
     #[cfg(target_os = "macos")]
     Metal,
     WebGpu,
+    #[cfg(target_os = "linux")]
+    OpenGl,
 }
 
 impl Kind {
@@ -31,13 +39,17 @@ impl Kind {
             #[cfg(target_os = "macos")]
             "metal" => Ok(Kind::Metal),
             "webgpu" => Ok(Kind::WebGpu),
+            #[cfg(target_os = "linux")]
+            "opengl" => Ok(Kind::OpenGl),
             _ => Err(format!("Unknown backend '{name}' (available: {})", Kind::NAMES)),
         }
     }
 
     #[cfg(target_os = "macos")]
     const NAMES: &str = "metal, webgpu";
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "linux")]
+    const NAMES: &str = "webgpu, opengl";
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     const NAMES: &str = "webgpu";
 
     /// The backends this platform has.
@@ -45,6 +57,8 @@ impl Kind {
         #[cfg(target_os = "macos")]
         Kind::Metal,
         Kind::WebGpu,
+        #[cfg(target_os = "linux")]
+        Kind::OpenGl,
     ];
 
     /// The backend's name in the controls.
@@ -53,6 +67,8 @@ impl Kind {
             #[cfg(target_os = "macos")]
             Kind::Metal => "Metal",
             Kind::WebGpu => "WebGPU",
+            #[cfg(target_os = "linux")]
+            Kind::OpenGl => "OpenGL ES",
         }
     }
 }
@@ -71,6 +87,8 @@ pub(crate) enum SurfaceBackend {
     #[cfg(target_os = "macos")]
     Metal(Rc<mln_mtl::SurfaceBackend>),
     WebGpu(Rc<mln_webgpu::SurfaceBackend>),
+    #[cfg(target_os = "linux")]
+    OpenGl(Rc<mln_gl::SurfaceBackend>),
 }
 
 impl SurfaceBackend {
@@ -102,6 +120,14 @@ impl SurfaceBackend {
                 let backend = mln_webgpu::SurfaceBackend::new(make_surface, framebuffer_size, cap_frame_rate)?;
                 Ok(SurfaceBackend::WebGpu(Rc::new(backend)))
             }
+            #[cfg(target_os = "linux")]
+            Kind::OpenGl => {
+                let (reply, window) = mpsc::channel();
+                proxy.send_event(UserEvent::Window(reply)).map_err(|_| closed())?;
+                let window = window.recv().map_err(|_| closed())?;
+                let backend = mln_gl::SurfaceBackend::new(window, framebuffer_size, cap_frame_rate)?;
+                Ok(SurfaceBackend::OpenGl(Rc::new(backend)))
+            }
         }
     }
 
@@ -110,6 +136,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(_) => Kind::Metal,
             SurfaceBackend::WebGpu(_) => Kind::WebGpu,
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(_) => Kind::OpenGl,
         }
     }
 
@@ -119,6 +147,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.get_framebuffer_size(),
             SurfaceBackend::WebGpu(backend) => backend.get_framebuffer_size(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.get_framebuffer_size(),
         }
     }
 
@@ -144,6 +174,10 @@ impl SurfaceBackend {
                     backend.get_swap_chain_format()
                 )
             }
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => {
+                format!("Rendering with {} (OpenGL ES through EGL)", backend.get_renderer_name())
+            }
         }
     }
 
@@ -156,6 +190,8 @@ impl SurfaceBackend {
                 let info = backend.get_adapter_info();
                 format!("{} (wgpu {:?})", info.name, info.backend)
             }
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => format!("{} (OpenGL ES)", backend.get_renderer_name()),
         }
     }
 
@@ -165,6 +201,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.set_overlay(Some(crate::metal_overlay::metal_overlay(paint))),
             SurfaceBackend::WebGpu(backend) => backend.set_overlay(Some(crate::overlay::webgpu_overlay(paint))),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.set_overlay(Some(crate::gl_overlay::gl_overlay(paint))),
         }
     }
 
@@ -173,6 +211,17 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.clone(),
             SurfaceBackend::WebGpu(backend) => backend.clone(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.clone(),
+        }
+    }
+
+    /// Gives the window up for the backend made next, which couldn't take it
+    /// otherwise. This one takes it back with its next frame.
+    pub(crate) fn release_surface(&self) {
+        #[cfg(target_os = "linux")]
+        if let SurfaceBackend::OpenGl(backend) = self {
+            backend.release_surface();
         }
     }
 
@@ -183,6 +232,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.acquire_next_texture(),
             SurfaceBackend::WebGpu(backend) => backend.acquire_next_texture(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.acquire_next_texture(),
         }
     }
 
@@ -191,6 +242,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.set_framebuffer_size(size),
             SurfaceBackend::WebGpu(backend) => backend.set_framebuffer_size(size),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.set_framebuffer_size(size),
         }
     }
 
@@ -200,6 +253,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.request_readback(),
             SurfaceBackend::WebGpu(backend) => backend.request_readback(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.request_readback(),
         }
     }
 
@@ -209,6 +264,8 @@ impl SurfaceBackend {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.take_readback(),
             SurfaceBackend::WebGpu(backend) => backend.take_readback(),
+            #[cfg(target_os = "linux")]
+            SurfaceBackend::OpenGl(backend) => backend.take_readback(),
         }
     }
 }
