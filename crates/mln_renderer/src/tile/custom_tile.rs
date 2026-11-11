@@ -1,6 +1,6 @@
-// Ports src/mln/tile/custom_geometry_tile.hpp and
-// src/mln/tile/custom_geometry_tile.cpp, with the request tracking of ffi
-// patches 0069 and 0070.
+// Ports src/mln/tile/custom_geometry_tile.{hpp,cpp} and
+// src/mln/tile/custom_vector_tile.{hpp,cpp}, with the request tracking of
+// ffi patches 0051, 0069 and 0070, and 0052's MLT data.
 //
 // A custom tile is a GeometryTile whose data a custom source's loader hands
 // it. It's generic over that data, as the loader is (see
@@ -20,6 +20,7 @@ use mln_style::custom_tile_loader::{CustomTileLoader, CustomTileSubscriber, Subs
 use mln_style::expression::GlobalStateMap;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::sources::custom_geometry_source::CustomGeometryTileLoader;
+use mln_style::sources::custom_vector_source::{CustomVectorTileData, CustomVectorTileLoader, TileDataFormat};
 use mln_style::sources::geojson_source::TileFeatures;
 use mln_tile_id::OverscaledTileID;
 use mln_util::exception::ExceptionPtr;
@@ -108,6 +109,9 @@ pub struct CustomTile<D: Clone + Send + 'static> {
 /// `CustomGeometryTile`.
 pub type CustomGeometryTile = CustomTile<Arc<TileFeatures>>;
 
+/// `CustomVectorTile`.
+pub type CustomVectorTile = CustomTile<CustomVectorTileData>;
+
 impl<D: Clone + Send + 'static> CustomTile<D> {
     fn with_converter(
         overscaled_tile_id: OverscaledTileID,
@@ -176,6 +180,38 @@ impl CustomGeometryTile {
             observer,
             Box::new(|features: Arc<TileFeatures>| Some(Arc::new(GeoJSONTileData::from_shared(features)))),
             true,
+        )
+    }
+}
+
+impl CustomVectorTile {
+    /// `CustomVectorTile(const OverscaledTileID&, std::string sourceID,
+    /// const TileParameters&, ActorRef<CustomVectorTileLoader>,
+    /// TileObserver*, bool fastPFOREnabled)`: MLT data is decoded with
+    /// `fast_pfor_enabled`.
+    pub fn new(
+        overscaled_tile_id: OverscaledTileID,
+        source_id: String,
+        parameters: &TileParameters<'_>,
+        loader: PoolActorRef<CustomVectorTileLoader>,
+        observer: Option<Rc<dyn TileObserver>>,
+        fast_pfor_enabled: bool,
+    ) -> Self {
+        Self::with_converter(
+            overscaled_tile_id,
+            source_id,
+            parameters,
+            loader,
+            observer,
+            Box::new(move |(data, format): CustomVectorTileData| {
+                data.map(|data| match format {
+                    TileDataFormat::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)) as SharedTileData,
+                    TileDataFormat::Mlt => {
+                        Arc::new(mln_tile::VectorMLTTileData::new(data, fast_pfor_enabled)) as SharedTileData
+                    }
+                })
+            }),
+            false,
         )
     }
 }

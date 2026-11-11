@@ -6,6 +6,7 @@
 // tile_lod (mln_headless, which has the HeadlessFrontend).
 
 mod custom_geometry_tile;
+mod custom_vector_tile;
 mod raster_dem_tile;
 mod raster_tile;
 mod tile_coordinate;

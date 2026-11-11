@@ -30,6 +30,9 @@ use mln_style::layers::{
 use mln_style::observer::SourceObserver;
 use mln_style::source::{self, Source};
 use mln_style::sources::custom_geometry_source::{CustomGeometrySource, Options as CustomGeometrySourceOptions};
+use mln_style::sources::custom_vector_source::{
+    CustomVectorSource, Options as CustomVectorSourceOptions, TileDataFormat,
+};
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource, create_geojson_data};
 use mln_style::sources::geojson_source_impl;
 use mln_style::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
@@ -559,6 +562,46 @@ fn custom_geometry_source_set_tile_error() {
     test.run_loop.invoke(move || {
         handle.set_tile_error(CanonicalTileID::new(0, 0, 0), RuntimeError::ptr("failed"));
     });
+
+    test.run();
+}
+
+// Port-only: Source.CustomGeometrySourceSetTileData for a custom vector
+// source.
+#[test]
+fn custom_vector_source_set_tile_data() {
+    let test = SourceTest::new();
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let end = test.end_handle();
+        *observer.tile_changed.borrow_mut() = Some(Box::new(move |source_id, _tile_id| {
+            assert_eq!("source", source_id);
+            end();
+        }));
+    }
+    *observer.tile_error.borrow_mut() = Some(Box::new(|_, _, _| panic!("Should never be called")));
+
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+    let source = CustomVectorSource::new("source", CustomVectorSourceOptions::default());
+    source.load_description(&file_source);
+
+    let mut layer = LineLayer::new("id", "source");
+    layer.set_source_layer("water");
+    let layer_properties: Immutable<dyn LayerProperties> =
+        Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
+
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    render_source.set_observer(observer);
+    render_source.update(
+        source.base_impl(),
+        &[layer_properties],
+        true,
+        true,
+        &test.tile_parameters(MapMode::Continuous),
+    );
+
+    let handle = source.handle();
+    test.run_loop.invoke(move || handle.set_tile_data(CanonicalTileID::new(0, 0, 0), None, TileDataFormat::Mvt));
 
     test.run();
 }
