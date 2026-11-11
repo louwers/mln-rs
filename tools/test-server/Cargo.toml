@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 description.workspace = true
 license.workspace = true
+license-file.workspace = true
 repository.workspace = true
 include.workspace = true
 # The HTTP test server of the C++ unit tests, for the tests' dev-dependencies;
