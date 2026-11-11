@@ -1,7 +1,9 @@
-// The window's renderer backend: Metal by default on macOS, WebGPU (through
-// wgpu) everywhere, picked with --backend and switched in the controls.
-// C++'s GLFW app builds one backend and ignores the flag. On macOS both
-// present to the window's one CAMetalLayer (metal_layer.rs).
+// The window's renderer backend: Metal by default on macOS, Vulkan elsewhere
+// than on Apple's platforms, WebGPU (through wgpu, the default where there
+// is no Metal) everywhere, picked with --backend and switched in the
+// controls. C++'s GLFW app builds one backend and ignores the flag. On macOS
+// both present to the window's one CAMetalLayer (metal_layer.rs); elsewhere
+// each makes its own surface of the window (vulkan_surface.rs for Vulkan).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -20,6 +22,8 @@ use crate::overlay::Paint;
 pub(crate) enum Kind {
     #[cfg(target_os = "macos")]
     Metal,
+    #[cfg(not(target_vendor = "apple"))]
+    Vulkan,
     WebGpu,
 }
 
@@ -29,28 +33,43 @@ impl Kind {
         match name {
             #[cfg(target_os = "macos")]
             "metal" => Ok(Kind::Metal),
+            #[cfg(not(target_vendor = "apple"))]
+            "vulkan" => Ok(Kind::Vulkan),
             "webgpu" => Ok(Kind::WebGpu),
             _ => Err(format!("Unknown backend '{name}' (available: {})", Kind::NAMES)),
         }
     }
 
-    #[cfg(target_os = "macos")]
-    const NAMES: &str = "metal, webgpu";
-    #[cfg(not(target_os = "macos"))]
-    const NAMES: &str = "webgpu";
+    const NAMES: &str = if cfg!(target_os = "macos") {
+        "metal, webgpu"
+    } else if cfg!(target_vendor = "apple") {
+        "webgpu"
+    } else {
+        "vulkan, webgpu"
+    };
 
     /// The backends this platform has.
     pub(crate) const ALL: &[Kind] = &[
         #[cfg(target_os = "macos")]
         Kind::Metal,
+        #[cfg(not(target_vendor = "apple"))]
+        Kind::Vulkan,
         Kind::WebGpu,
     ];
+
+    /// The backend after this one in `ALL`, around to the first.
+    pub(crate) fn next(self) -> Kind {
+        let index = Kind::ALL.iter().position(|&kind| kind == self).unwrap_or(0);
+        Kind::ALL[(index + 1) % Kind::ALL.len()]
+    }
 
     /// The backend's name in the controls.
     pub(crate) fn name(self) -> &'static str {
         match self {
             #[cfg(target_os = "macos")]
             Kind::Metal => "Metal",
+            #[cfg(not(target_vendor = "apple"))]
+            Kind::Vulkan => "Vulkan",
             Kind::WebGpu => "WebGPU",
         }
     }
@@ -69,7 +88,22 @@ impl Default for Kind {
 pub(crate) enum SurfaceBackend {
     #[cfg(target_os = "macos")]
     Metal(Rc<mln_mtl::SurfaceBackend>),
+    #[cfg(not(target_vendor = "apple"))]
+    Vulkan(Rc<mln_vulkan::SurfaceBackend>),
     WebGpu(Rc<mln_webgpu::SurfaceBackend>),
+}
+
+const CLOSED: &str = "The window closed before it had a surface";
+
+/// A wgpu surface of the window for `instance`, which the window's thread
+/// makes when asked through `proxy`.
+fn make_surface(
+    proxy: &EventLoopProxy<UserEvent>,
+    instance: &wgpu::Instance,
+) -> Result<wgpu::Surface<'static>, String> {
+    let (reply, surface) = mpsc::channel();
+    proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| CLOSED.to_owned())?;
+    surface.recv().map_err(|_| CLOSED.to_owned())?
 }
 
 impl SurfaceBackend {
@@ -81,7 +115,6 @@ impl SurfaceBackend {
         framebuffer_size: Size,
         cap_frame_rate: bool,
     ) -> Result<SurfaceBackend, String> {
-        const CLOSED: &str = "The window closed before it had a surface";
         match kind {
             #[cfg(target_os = "macos")]
             Kind::Metal => {
@@ -91,13 +124,14 @@ impl SurfaceBackend {
                 let backend = mln_mtl::SurfaceBackend::new(layer.into_layer(), framebuffer_size, cap_frame_rate)?;
                 Ok(SurfaceBackend::Metal(Rc::new(backend)))
             }
+            #[cfg(not(target_vendor = "apple"))]
+            Kind::Vulkan => {
+                let provider = Rc::new(crate::vulkan_surface::WindowSurface::new(proxy)?);
+                let backend = mln_vulkan::SurfaceBackend::new(provider, framebuffer_size, cap_frame_rate)?;
+                Ok(SurfaceBackend::Vulkan(Rc::new(backend)))
+            }
             Kind::WebGpu => {
-                let proxy = proxy.clone();
-                let make_surface = move |instance: &wgpu::Instance| {
-                    let (reply, surface) = mpsc::channel();
-                    proxy.send_event(UserEvent::MakeSurface(instance.clone(), reply)).map_err(|_| CLOSED.to_owned())?;
-                    surface.recv().map_err(|_| CLOSED.to_owned())?
-                };
+                let make_surface = |instance: &wgpu::Instance| make_surface(proxy, instance);
                 let backend = mln_webgpu::SurfaceBackend::new(make_surface, framebuffer_size, cap_frame_rate)?;
                 Ok(SurfaceBackend::WebGpu(Rc::new(backend)))
             }
@@ -108,6 +142,8 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(_) => Kind::Metal,
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(_) => Kind::Vulkan,
             SurfaceBackend::WebGpu(_) => Kind::WebGpu,
         }
     }
@@ -117,6 +153,8 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.get_framebuffer_size(),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.get_framebuffer_size(),
             SurfaceBackend::WebGpu(backend) => backend.get_framebuffer_size(),
         }
     }
@@ -130,6 +168,14 @@ impl SurfaceBackend {
                     "Rendering with {} (Metal), surface format {:?}",
                     backend.get_device_name(),
                     backend.get_pixel_format()
+                )
+            }
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => {
+                format!(
+                    "Rendering with {} (Vulkan), surface format {:?}",
+                    backend.get_device_name(),
+                    backend.get_color_format()
                 )
             }
             SurfaceBackend::WebGpu(backend) => {
@@ -151,6 +197,8 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => format!("{} (Metal)", backend.get_device_name()),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => format!("{} (Vulkan)", backend.get_device_name()),
             SurfaceBackend::WebGpu(backend) => {
                 let info = backend.get_adapter_info();
                 format!("{} (wgpu {:?})", info.name, info.backend)
@@ -163,6 +211,8 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.set_overlay(Some(crate::metal_overlay::metal_overlay(paint))),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.set_overlay(Some(crate::vulkan_overlay::vulkan_overlay(paint))),
             SurfaceBackend::WebGpu(backend) => backend.set_overlay(Some(crate::overlay::webgpu_overlay(paint))),
         }
     }
@@ -171,16 +221,20 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.clone(),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.clone(),
             SurfaceBackend::WebGpu(backend) => backend.clone(),
         }
     }
 
-    /// Takes the surface's next texture ahead of a frame; false when there
-    /// is none right now.
+    /// Takes the surface's next texture ahead of a frame, where the backend
+    /// has it then; false when there is none to draw into right now.
     pub(crate) fn acquire_next_texture(&self) -> bool {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.acquire_next_texture(),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.acquire_next_texture(),
             SurfaceBackend::WebGpu(backend) => backend.acquire_next_texture(),
         }
     }
@@ -189,7 +243,44 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.set_framebuffer_size(size),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.set_framebuffer_size(size),
             SurfaceBackend::WebGpu(backend) => backend.set_framebuffer_size(size),
+        }
+    }
+
+    /// Gives the window up for another backend, which makes its own
+    /// surface of it: a window presents one swapchain at a time. On macOS
+    /// there is nothing to give up: the backends present to the one layer.
+    pub(crate) fn release_surface(&self) {
+        match self {
+            #[cfg(target_os = "macos")]
+            SurfaceBackend::Metal(_) | SurfaceBackend::WebGpu(_) => {}
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.release_surface(),
+            #[cfg(not(target_os = "macos"))]
+            SurfaceBackend::WebGpu(backend) => backend.release_surface(),
+        }
+    }
+
+    /// Takes the window back after `release_surface`, when no other backend
+    /// took it.
+    pub(crate) fn restore_surface(&self, proxy: &EventLoopProxy<UserEvent>) -> Result<(), String> {
+        match self {
+            #[cfg(target_os = "macos")]
+            SurfaceBackend::Metal(_) => Ok(()),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => {
+                backend.restore_surface();
+                Ok(())
+            }
+            SurfaceBackend::WebGpu(backend) => {
+                if backend.has_surface() {
+                    return Ok(());
+                }
+                let instance = backend.webgpu_backend().get_instance().ok_or("The backend has no instance")?;
+                backend.set_surface(make_surface(proxy, &instance)?, backend.get_framebuffer_size())
+            }
         }
     }
 
@@ -198,6 +289,8 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.request_readback(),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.request_readback(),
             SurfaceBackend::WebGpu(backend) => backend.request_readback(),
         }
     }
@@ -207,6 +300,8 @@ impl SurfaceBackend {
         match self {
             #[cfg(target_os = "macos")]
             SurfaceBackend::Metal(backend) => backend.take_readback(),
+            #[cfg(not(target_vendor = "apple"))]
+            SurfaceBackend::Vulkan(backend) => backend.take_readback(),
             SurfaceBackend::WebGpu(backend) => backend.take_readback(),
         }
     }

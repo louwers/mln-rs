@@ -641,13 +641,19 @@ impl View {
             return;
         }
         let size = self.backend.framebuffer_size();
-        // The renderer goes before its backend. The new backend configures
-        // the window's surface before the old one goes, which leaves it as
-        // it is.
+        // The renderer goes before its backend, and the backend gives the
+        // window up before the new one makes its surface of it. The old
+        // backend itself goes once the new one is there.
         self.frontend.release();
+        self.backend.release_surface();
         match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
             Ok(backend) => self.backend = backend,
-            Err(e) => Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name())),
+            Err(e) => {
+                Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
+                if let Err(e) = self.backend.restore_surface(&self.proxy) {
+                    Log::error(Event::GraphicsBackend, &e);
+                }
+            }
         }
         let renderer_backend = self.backend.renderer_backend();
         let renderer = Renderer::new(renderer_backend.clone(), self.pixel_ratio as f32, None);
@@ -824,7 +830,8 @@ impl View {
     /// Once the style is loaded, feeds a scripted sequence of messages (drag,
     /// scroll, double click, rotate, pitch, trackpad pinch, keys) through the
     /// same handlers as the window's, and the controls' actions, logs the
-    /// camera after each, then closes.
+    /// camera after each, resizes the window, switches to the next backend
+    /// and back where there are two, then closes.
     fn run_gesture_test(&mut self) {
         let Some(test) = self.gesture_test.as_mut() else {
             return;
@@ -904,6 +911,10 @@ impl View {
             15 => {
                 let _ = self.proxy.send_event(UserEvent::RequestSize(LogicalSize::new(800.0, 600.0)));
                 ("window resize to 800x600", vec![], vec![], vec![])
+            }
+            16 | 17 if Kind::ALL.len() > 1 => {
+                let next = self.backend.kind().next();
+                ("switch to the next backend", vec![], vec![], vec![Action::SetBackend(next)])
             }
             _ => {
                 Log::info(Event::General, "Gesture test: done");

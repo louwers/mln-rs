@@ -7,7 +7,10 @@
 //
 // The WebGPU logo (assets/webgpu.svg) is W3C's, under CC BY 4.0, which the
 // about panel credits; the Metal logo (assets/metal.svg) is Apple's, from
-// Wikimedia Commons, where it is in the public domain.
+// Wikimedia Commons, where it is in the public domain; the Vulkan logo
+// (assets/vulkan.svg) is Khronos's, from Wikimedia Commons. Vulkan and the
+// Vulkan logo are trademarks of the Khronos Group, which the about panel
+// says.
 
 use egui::{
     Align2, Color32, CornerRadius, CursorIcon, Frame, Id, Margin, Order, Rect, Response, RichText, Sense, Shadow,
@@ -306,11 +309,8 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
         palette.panel().inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
             ui.set_width(PANEL_WIDTH);
             ui.label(RichText::new("mln-rs").size(16.0).strong());
-            ui.label(if Kind::ALL.len() > 1 {
-                "A map renderer in Rust, drawing MapLibre styles with Metal or WebGPU."
-            } else {
-                "A map renderer in Rust, drawing MapLibre styles with WebGPU."
-            });
+            let backends: Vec<&str> = Kind::ALL.iter().map(|kind| kind.name()).collect();
+            ui.label(format!("A map renderer in Rust, drawing MapLibre styles with {}.", backends.join(" or ")));
             ui.add_space(8.0);
             egui::Grid::new("gestures").num_columns(2).spacing([12.0, 4.0]).show(ui, |ui| {
                 for (gesture, how) in GESTURES {
@@ -357,6 +357,15 @@ fn about_panel(ctx: &egui::Context, palette: &Palette, shown: &Shown<'_>, action
                     );
                 });
             }
+            #[cfg(not(target_vendor = "apple"))]
+            ui.add(
+                egui::Label::new(
+                    RichText::new("Vulkan and the Vulkan logo are trademarks of the Khronos Group Inc.")
+                        .size(11.0)
+                        .color(palette.muted),
+                )
+                .wrap(),
+            );
         });
     });
 }
@@ -423,10 +432,10 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
     let logo = match backend {
         #[cfg(target_os = "macos")]
         Kind::Metal => egui::include_image!("../assets/metal.svg"),
+        #[cfg(not(target_vendor = "apple"))]
+        Kind::Vulkan => egui::include_image!("../assets/vulkan.svg"),
         Kind::WebGpu => egui::include_image!("../assets/webgpu.svg"),
     };
-    let index = Kind::ALL.iter().position(|&kind| kind == backend).unwrap_or(0);
-    let next = Kind::ALL[(index + 1) % Kind::ALL.len()];
     layer("backend", Align2::LEFT_BOTTOM, vec2(GAP, -GAP)).show(ctx, |ui| {
         let response = palette
             .control()
@@ -434,6 +443,9 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 6.0;
+                    // A logo fits in a square, at its own proportions: the
+                    // label is as tall with one that is wider than high.
+                    ui.set_min_height(18.0);
                     ui.add(egui::Image::new(logo).fit_to_exact_size(Vec2::splat(18.0)));
                     ui.add(
                         egui::Label::new(RichText::new(backend.name()).size(12.0).color(palette.ink)).selectable(false),
@@ -443,7 +455,7 @@ fn backend_label(ctx: &egui::Context, palette: &Palette, backend: Kind, actions:
             .response
             .interact(Sense::click());
         if response.on_hover_cursor(CursorIcon::PointingHand).clicked() {
-            actions.push(Action::SetBackend(next));
+            actions.push(Action::SetBackend(backend.next()));
         }
     });
 }

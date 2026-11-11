@@ -7,8 +7,8 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# The desktop example app: the map in a winit window, on the WebGPU backend,
-# with egui's controls over it; never released.
+# The desktop example app: the map in a winit window, on the WebGPU, Metal or
+# Vulkan backend, with egui's controls over it; never released.
 publish = false
 autotests = false
 
@@ -53,6 +53,12 @@ objc2-foundation.workspace = true
 objc2-metal.workspace = true
 objc2-quartz-core.workspace = true
 raw-window-metal.workspace = true
+
+# The Vulkan backend, the window's surface for it (vulkan_surface.rs) and the
+# controls drawn on Vulkan (vulkan_overlay.rs).
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
+ash.workspace = true
+mln_vulkan.workspace = true
 
 # Loads the OpenFreeMap Liberty style over HTTPS through the Map's file
 # sources (OnlineFileSource -> HTTPFileSource) and Style::loadURL, and parses
