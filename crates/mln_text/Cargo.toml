@@ -14,6 +14,7 @@ name = "mln_text"
 doctest = false
 
 [dependencies]
+flate2.workspace = true
 harfrust.workspace = true
 mln_math.workspace = true
 mln_style_types.workspace = true
@@ -23,6 +24,7 @@ protozero.workspace = true
 serde.workspace = true
 skrifa.workspace = true
 unicode-bidi.workspace = true
+wuff.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true

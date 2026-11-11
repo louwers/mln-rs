@@ -45,9 +45,13 @@ impl FreeTypeFace {
     }
 
     /// `FreeTypeFace(const char* fontData, size_t fontDataSize, const FreeTypeLibrary&)`.
-    /// The face keeps `font_data` instead of copying it.
+    /// The face keeps `font_data` instead of copying it, unless it is a WOFF
+    /// or WOFF2 file: then it keeps the font decoded from it, and isn't valid
+    /// when that fails.
     pub fn from_memory(font_data: impl Into<FontData>, _lib: &FreeTypeLibrary) -> Self {
-        let memory_file = font_data.into();
+        let Ok(memory_file) = crate::woff::to_sfnt(font_data.into()) else {
+            return FreeTypeFace { memory_file: FontData::default(), face: None, scaler: Arc::default() };
+        };
         let face = match ft::face::Face::open(memory_file.as_bytes()) {
             Ok(mut face) => {
                 Self::force_ucs2_charmap(&mut face);

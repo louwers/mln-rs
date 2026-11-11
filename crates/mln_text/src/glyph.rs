@@ -259,7 +259,8 @@ impl Shaping {
 pub type FontFaceRange = (u32, u32);
 
 /// The bytes of a font file that an app already holds, such as a
-/// memory-mapped file, shared without a copy.
+/// memory-mapped file, shared without a copy. A font face's file can be
+/// TrueType or OpenType (a collection's first font), WOFF or WOFF2.
 #[derive(Clone)]
 pub struct FontData(Arc<dyn AsRef<[u8]> + Send + Sync>);
 

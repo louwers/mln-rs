@@ -23,6 +23,7 @@ pub mod language_tag;
 pub mod local_glyph_rasterizer;
 pub mod shaping;
 pub mod tagged_string;
+pub mod woff;
 #[rustfmt::skip]
 mod hb_ucd_table;
 mod rasterize;

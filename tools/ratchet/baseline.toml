@@ -288,7 +288,7 @@
 "crates/mln_style/src/tests/property_expression.rs" = 2
 "crates/mln_style/src/tests/style.rs" = 2
 "crates/mln_style_types/src/position.rs" = 1
-"crates/mln_text/src/ft/face.rs" = 10
+"crates/mln_text/src/ft/face.rs" = 9
 "crates/mln_text/src/rasterize.rs" = 3
 "crates/mln_text/src/tagged_string.rs" = 1
 "crates/mln_tile/src/geometry_tile_data.rs" = 1

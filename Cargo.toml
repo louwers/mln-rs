@@ -133,6 +133,9 @@ skrifa = { version = "0.49.0" }
 # Candidate for ICU's ubidi (platform/default/src/mln/text/bidi.cpp); kept only
 # if //difftest/shaping shows it matches ICU on the test corpus.
 unicode-bidi = { version = "0.3.18" }
+# WOFF2 font faces (mln_text's woff): pure Rust, no unsafe. Only its Brotli
+# decoder: mln_text decodes WOFF 1.0 itself, with FreeType's checks.
+wuff = { version = "0.2.10", default-features = false, features = ["brotli"] }
 # decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp) natively; pure
 # Rust. The browser build decodes JPEG with the browser instead.
 zune-jpeg = { version = "0.5.15" }
