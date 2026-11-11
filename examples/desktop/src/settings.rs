@@ -1,4 +1,4 @@
-// Ports platform/glfw/settings_json.hpp (the fields and their defaults).
+// The fields and defaults of platform/glfw/settings_json.hpp.
 //
 // TODO(port): `load()`/`save()` of /tmp/mbgl-native.cfg (C++ restores the
 // last camera at startup and saves it at exit); the port always starts from
@@ -6,9 +6,9 @@
 
 use mln_util::constants::{DEFAULT_FOV, DEFAULT_PITCH_MAX};
 
-/// `Settings_JSON`
+/// The camera and options the app starts with (`Settings_JSON`).
 #[derive(Clone, Debug)]
-pub struct SettingsJSON {
+pub struct Settings {
     pub longitude: f64,
     pub latitude: f64,
     pub altitude: f64,
@@ -18,16 +18,13 @@ pub struct SettingsJSON {
     pub roll: f64,
     pub fov: f64,
     pub max_pitch: f64,
-    pub axonometric: bool,
-    pub x_skew: f64,
-    pub y_skew: f64,
     pub debug: u32,
     pub online: bool,
 }
 
-impl Default for SettingsJSON {
+impl Default for Settings {
     fn default() -> Self {
-        SettingsJSON {
+        Settings {
             longitude: 0.0,
             latitude: 0.0,
             altitude: 0.0,
@@ -37,9 +34,6 @@ impl Default for SettingsJSON {
             roll: 0.0,
             fov: mln_math::rad2deg(DEFAULT_FOV),
             max_pitch: mln_math::rad2deg(DEFAULT_PITCH_MAX),
-            axonometric: false,
-            x_skew: 0.0,
-            y_skew: 1.0,
             debug: 0,
             online: true,
         }

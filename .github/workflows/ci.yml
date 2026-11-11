@@ -30,18 +30,13 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # GLFW for examples/glfw (glfw-sys finds it, X11 and Wayland through
-      # pkg-config), and lavapipe for the GPU tests on Linux.
+      # Lavapipe for the GPU tests on Linux.
       - name: Install system packages
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libglfw3-dev libvulkan1 libwayland-dev libx11-dev mesa-vulkan-drivers pkg-config
+          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
           echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
-
-      - name: Install system packages
-        if: runner.os == 'macOS'
-        run: brew install glfw pkgconf
 
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-llvm-cov' }
@@ -88,11 +83,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libglfw3-dev libwayland-dev libx11-dev pkg-config
-
       - uses: taiki-e/install-action@v2
         with: { tool: just }
 
@@ -119,11 +109,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libglfw3-dev libwayland-dev libx11-dev pkg-config
-
       - uses: taiki-e/install-action@v2
         with: { tool: just }
 
@@ -145,11 +130,6 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libglfw3-dev libwayland-dev libx11-dev pkg-config
 
       - uses: taiki-e/install-action@v2
         with: { tool: just }

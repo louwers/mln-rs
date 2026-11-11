@@ -96,6 +96,10 @@ impl Rig {
         self.send(Input::PointerUp { id, position: p(x, y) });
     }
 
+    fn pinch(&mut self, scale: f64, rotation: f64, phase: PinchPhase) {
+        self.send(Input::Pinch { center: p(200.0, 200.0), scale, rotation, phase });
+    }
+
     fn key(&mut self, key: Key, modifiers: Modifiers) {
         self.send(Input::Key { key, modifiers });
     }
@@ -244,6 +248,83 @@ fn pinching_zooms_and_twisting_rotates_around_the_fingers() {
     assert!((rig.bearing() + 76.5).abs() < 1.0, "{}", rig.bearing());
     let under = rig.project(ground);
     assert!(distance(under, p(400.0, 300.0)) < 1.0, "{under:?}");
+}
+
+#[test]
+fn platform_pinches_zoom_turn_and_glide() {
+    let mut rig = Rig::new();
+    let ground = rig.unproject(p(200.0, 200.0));
+    rig.pinch(1.0, 0.0, PinchPhase::Begin);
+    assert!(rig.input.is_active() && rig.camera.is_gesture_in_progress());
+    for _ in 0..10 {
+        rig.now += 16.0;
+        rig.pinch(2f64.powf(0.05), -2.0, PinchPhase::Update);
+    }
+    // Half a level in, and 20 degrees counterclockwise: the bearing rises.
+    assert!((rig.zoom() - 12.5).abs() < 1e-9, "{}", rig.zoom());
+    assert!((rig.bearing() - 20.0).abs() < 1e-9, "{}", rig.bearing());
+    let under = rig.project(ground);
+    assert!(distance(under, p(200.0, 200.0)) < 1e-5, "{under:?}");
+    rig.pinch(1.0, 0.0, PinchPhase::End);
+    assert!(!rig.input.is_active());
+    assert!(rig.camera.is_gesture_in_progress(), "the gesture lasts through its glide");
+    rig.settle();
+    // 0.05 levels and 2 degrees per 16 ms glide on, as touch pinches do.
+    assert!(rig.zoom() > 12.7, "{}", rig.zoom());
+    assert!(rig.bearing() > 25.0, "{}", rig.bearing());
+    assert!(!rig.camera.is_gesture_in_progress());
+    let under = rig.project(ground);
+    assert!(distance(under, p(200.0, 200.0)) < 1e-3, "the glide holds the center: {under:?}");
+}
+
+#[test]
+fn a_cancelled_platform_pinch_doesnt_glide_and_a_touch_takes_over() {
+    // An update without a begin begins.
+    let mut rig = Rig::new();
+    for _ in 0..10 {
+        rig.now += 16.0;
+        rig.pinch(2f64.powf(0.05), 0.0, PinchPhase::Update);
+    }
+    rig.pinch(1.0, 0.0, PinchPhase::Cancel);
+    assert_eq!(rig.settle(), 0);
+    assert!(!rig.camera.is_gesture_in_progress());
+    assert!((rig.zoom() - 12.5).abs() < 1e-9);
+
+    rig.pinch(2.0, 0.0, PinchPhase::Begin);
+    assert!((rig.zoom() - 13.5).abs() < 1e-9, "a begin applies its own scale");
+    rig.down(1, PointerKind::Touch, 300.0, 300.0);
+    rig.pinch(2.0, 0.0, PinchPhase::Update);
+    rig.pinch(1.0, 0.0, PinchPhase::End);
+    assert!((rig.zoom() - 13.5).abs() < 1e-9, "the touch has the map");
+    rig.up(1, 300.0, 300.0);
+    assert_eq!(rig.settle(), 0);
+}
+
+#[test]
+fn a_platform_pinch_held_still_before_it_ends_doesnt_glide() {
+    let mut rig = Rig::new();
+    rig.pinch(1.0, 0.0, PinchPhase::Begin);
+    for _ in 0..10 {
+        rig.now += 16.0;
+        rig.pinch(2f64.powf(0.05), 1.0, PinchPhase::Update);
+    }
+    rig.now += 300.0;
+    rig.pinch(1.0, 0.0, PinchPhase::End);
+    let (zoom, bearing) = (rig.zoom(), rig.bearing());
+    rig.settle();
+    assert!((rig.zoom() - zoom).abs() < 1e-9);
+    // Only the bearing snap could move it, and -10 degrees is past its 7.
+    assert!((rig.bearing() - bearing).abs() < 1e-9);
+}
+
+#[test]
+fn a_platform_pinch_stops_a_notch_ease() {
+    let mut rig = Rig::new();
+    rig.send(notches(p(400.0, 300.0), -1.0));
+    rig.pinch(1.0, 0.0, PinchPhase::Begin);
+    rig.settle();
+    assert!((rig.zoom() - 12.0).abs() < 1e-9, "{}", rig.zoom());
+    rig.pinch(1.0, 0.0, PinchPhase::End);
 }
 
 #[test]
@@ -788,7 +869,7 @@ fn a_key_step_during_a_scroll_leaves_the_scroll_going() {
 }
 
 /// A host's own step: zoom in by `levels`, around `at` or the center, over
-/// 500 ms (the GLFW app's `+`).
+/// 500 ms (the desktop app's `+`).
 fn host_zoom(levels: f64, at: Option<ScreenCoordinate>) -> CameraDelta {
     CameraDelta {
         scale: Some(levels.exp2()),

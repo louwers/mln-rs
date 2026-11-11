@@ -1,5 +1,5 @@
 [package]
-name = "mln-rs-glfw"
+name = "mln-rs-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,30 +7,19 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# Ports platform/glfw (the GLFW example app) on the WebGPU backend; never
-# released. It links the system GLFW (`glfw` in Cargo.toml).
+# The desktop example app (platform/glfw's app, on winit and the WebGPU
+# backend); never released.
 publish = false
 autotests = false
 
-[lib]
-name = "mln_glfw"
-
-# The app: OpenFreeMap Liberty in a window (main.cpp). `just glfw`.
+# The app: OpenFreeMap Liberty in a window. `just desktop`.
 [[bin]]
-name = "mln-glfw"
+name = "mln-desktop"
 path = "src/main.rs"
-doc = false
-
-# Opens a window, clears its wgpu surface through the gfx path, reads the
-# presented frame back and checks it. Needs a display (Wayland or X11).
-[[bin]]
-name = "glfw_surface_smoke"
-path = "tools/surface_smoke.rs"
 doc = false
 
 [dependencies]
 feature.workspace = true
-glfw.workspace = true
 mln_actor.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
@@ -45,11 +34,12 @@ mln_util.workspace = true
 mln_webgpu.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
+winit.workspace = true
 
 # Loads the OpenFreeMap Liberty style over HTTPS through the Map's file
 # sources (OnlineFileSource -> HTTPFileSource) and Style::loadURL, and parses
 # it. Needs network access, so it is ignored by default: `cargo test -p
-# mln-rs-glfw -- --ignored`.
+# mln-rs-desktop -- --ignored`.
 [[test]]
 name = "liberty_style_test"
 path = "tests/liberty_style_test.rs"
