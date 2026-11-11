@@ -12,6 +12,13 @@
 //! host-independent: hosts feed [`Input`]s with their timestamps and call
 //! [`GestureRecognizer::frame`] once a display frame, and it keeps no clock
 //! or thread of its own, so it runs in the browser too.
+//!
+//! Hosts read two clocks each frame: the recognizer's, in milliseconds on any
+//! clock their input events use (`performance.now()`, `glfwGetTime`), which
+//! times taps, releases and scrolls; and the map's `Clock::now()`, which they
+//! give [`Map::set_frame_time`](mln_map::Map::set_frame_time) and which times
+//! the camera's animations. The two never meet, so their epochs don't
+//! matter.
 
 mod camera;
 mod input;

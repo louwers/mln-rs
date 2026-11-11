@@ -8,7 +8,7 @@ use mln_map::{MomentumDecay, MomentumSnap};
 /// momentum defaults. The crate's README compares each with ffi, Orbis,
 /// Compose and GL JS.
 ///
-/// Distances are in logical pixels and times in milliseconds.
+/// Distances are in logical pixels, and times in milliseconds (`_ms`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GestureOptions {
     /// How far a press may move and still be a click; drags start past it.
@@ -16,7 +16,7 @@ pub struct GestureOptions {
     /// How far apart two taps of a double tap may be, and the most time
     /// between them. A two-finger tap's fingers may move this far.
     pub tap_tolerance: f64,
-    pub tap_interval: f64,
+    pub tap_interval_ms: f64,
     /// Degrees of bearing per pixel of a sideways rotate drag: ffi's demo's
     /// 0.5 (GL JS, Compose and Orbis turn 0.8).
     pub drag_rotate: f64,
@@ -34,7 +34,7 @@ pub struct GestureOptions {
     /// over GL JS's 200 ms. Provisional: unlike glides, no one has measured
     /// the native map apps' notches yet (see the README).
     pub notch_zoom: f64,
-    pub notch_duration: f64,
+    pub notch_duration_ms: f64,
     /// Zoom levels per pixel of continuous scroll, toward the user zooming
     /// in: ffi's demo's and Compose's 1/300. Provisional, as `notch_zoom`.
     pub scroll_zoom_rate: f64,
@@ -46,7 +46,7 @@ pub struct GestureOptions {
     pub max_scroll_zoom: f64,
     /// A scroll is one gesture until this long after its last event and its
     /// eases (Compose's and GL JS's 200 ms).
-    pub scroll_idle: f64,
+    pub scroll_idle_ms: f64,
     /// Keyboard steps: pixels of pan, degrees of bearing, degrees of pitch.
     pub key_pan: f64,
     pub key_bearing: f64,
@@ -86,18 +86,18 @@ impl GestureOptions {
     pub const DEFAULT: GestureOptions = GestureOptions {
         click_tolerance: 3.0,
         tap_tolerance: 30.0,
-        tap_interval: 500.0,
+        tap_interval_ms: 500.0,
         drag_rotate: 0.5,
         drag_pitch: 0.5,
         tap_drag_zoom: 1.0 / 128.0,
         pinch_zoom_threshold: 0.1,
         rotate_threshold: 25.0,
         notch_zoom: 1.0 / 3.0,
-        notch_duration: 200.0,
+        notch_duration_ms: 200.0,
         scroll_zoom_rate: 1.0 / 300.0,
         pinch_zoom_rate: 1.0 / 100.0,
         max_scroll_zoom: 1.0,
-        scroll_idle: 200.0,
+        scroll_idle_ms: 200.0,
         key_pan: 100.0,
         key_bearing: 15.0,
         key_pitch: 10.0,

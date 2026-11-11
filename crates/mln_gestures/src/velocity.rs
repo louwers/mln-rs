@@ -10,16 +10,16 @@
 //! the last move has no velocity: the pointer held still.
 
 /// How far back the motion counts, in milliseconds (ffi's demo).
-const HORIZON: f64 = 100.0;
+const HORIZON_MS: f64 = 100.0;
 /// A release this long after the last move means the pointer stopped
 /// (Compose's `AssumePointerMoveStoppedMilliseconds`).
-const STOPPED: f64 = 40.0;
+const STOPPED_MS: f64 = 40.0;
 
 /// One value's samples over time.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct VelocityTracker {
     /// (time in milliseconds, value), oldest first: the samples of the last
-    /// [`HORIZON`], and the one before them, where the window starts.
+    /// [`HORIZON_MS`], and the one before them, where the window starts.
     samples: Vec<(f64, f64)>,
 }
 
@@ -49,7 +49,7 @@ impl VelocityTracker {
     /// Drops the samples before the window that ends at `time`, but keeps
     /// where it starts.
     fn trim(&mut self, time: f64) {
-        let keep = self.samples.iter().rposition(|&(t, _)| t <= time - HORIZON).unwrap_or(0);
+        let keep = self.samples.iter().rposition(|&(t, _)| t <= time - HORIZON_MS).unwrap_or(0);
         self.samples.drain(..keep);
     }
 
@@ -62,10 +62,10 @@ impl VelocityTracker {
         let Some(&(newest, end)) = self.samples.last() else {
             return 0.0;
         };
-        if now - newest > STOPPED {
+        if now - newest > STOPPED_MS {
             return 0.0;
         }
-        let start = self.samples.iter().rev().find(|&&(t, _)| t <= now - HORIZON).unwrap_or(&self.samples[0]);
+        let start = self.samples.iter().rev().find(|&&(t, _)| t <= now - HORIZON_MS).unwrap_or(&self.samples[0]);
         let seconds = (now - start.0) / 1000.0;
         if seconds > 0.0 { (end - start.1) / seconds } else { 0.0 }
     }

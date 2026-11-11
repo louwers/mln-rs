@@ -21,17 +21,27 @@ use crate::velocity::VelocityTracker;
 
 /// The eases of a double-click or key step (GL JS and ffi's demo) and of a
 /// box zoom (GL JS).
-const STEP_EASE: i64 = 300;
-const BOX_EASE: i64 = 500;
+const STEP_EASE_MS: i64 = 300;
+const BOX_EASE_MS: i64 = 500;
 /// GL JS's `defaultEasing` and `easeOut`.
 const EASE_X1: f64 = 0.25;
 const EASE_Y1: f64 = 0.1;
-const EASE: UnitBezier = UnitBezier::new(EASE_X1, EASE_Y1, 0.25, 1.0);
+const EASE_X2: f64 = 0.25;
+const EASE_Y2: f64 = 1.0;
+const EASE: UnitBezier = UnitBezier::new(EASE_X1, EASE_Y1, EASE_X2, EASE_Y2);
 const EASE_OUT: UnitBezier = UnitBezier::new(0.0, 0.0, 0.58, 1.0);
 /// A pinch whose last finger lifted this long ago still lends its release
 /// its motion; until then the remaining finger's motion doesn't count, as it
 /// belongs to lifting the other (Compose's `ContactReleaseMillis`).
-const STAGED_RELEASE: f64 = 100.0;
+const STAGED_RELEASE_MS: f64 = 100.0;
+/// Two fingers decide whether they tilt once both have moved this far
+/// (pixels), or once one alone has moved for this long (GL JS
+/// `TwoFingersTouchPitchHandler`).
+const PITCH_DECIDE_PX: f64 = 2.0;
+const PITCH_DECIDE_MS: f64 = 100.0;
+/// The length of a retargeted notch ease's first control point from the
+/// curve's origin, as GL JS's `_smoothOutEasing` keeps it.
+const NOTCH_EASE_HANDLE: f64 = 0.27;
 
 /// A screen point or offset, for the arithmetic `ScreenCoordinate` lacks.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -253,7 +263,7 @@ impl Tracking {
         // contact changes do; a pan carried on longer than the velocity
         // horizon has left it behind.
         if let Some((at, staged)) = self.staged.take()
-            && now - at <= STAGED_RELEASE
+            && now - at <= STAGED_RELEASE_MS
         {
             if release.pan.is_none() {
                 release.pan = staged.pan;
@@ -282,7 +292,7 @@ impl Tracking {
         for tracker in &mut self.trackers {
             tracker.reset();
         }
-        self.not_before = now + STAGED_RELEASE;
+        self.not_before = now + STAGED_RELEASE_MS;
     }
 }
 
@@ -346,14 +356,14 @@ struct NotchEase {
     /// Levels to zoom from the ease's start, and how many it has zoomed.
     distance: f64,
     applied: f64,
-    /// The first control point of its curve; the second is (0.25, 1).
+    /// The first control point of its curve; the second is [`EASE`]'s.
     x1: f64,
     y1: f64,
 }
 
 impl NotchEase {
     fn curve(&self) -> UnitBezier {
-        UnitBezier::new(self.x1, self.y1, 0.25, 1.0)
+        UnitBezier::new(self.x1, self.y1, EASE_X2, EASE_Y2)
     }
 
     /// The share of the ease's time elapsed at `now`.
@@ -510,7 +520,7 @@ impl GestureRecognizer {
         let Some(mut scroll) = self.scroll else {
             return false;
         };
-        let duration = self.options.notch_duration;
+        let duration = self.options.notch_duration_ms;
         if let Some(mut ease) = scroll.ease {
             let target = ease.value(now, duration);
             let max = self.options.max_scroll_zoom;
@@ -522,7 +532,7 @@ impl GestureRecognizer {
             let done = ease.progress(now, duration) >= 1.0 && ease.applied == ease.distance;
             scroll.ease = (!done).then_some(ease);
             if done {
-                scroll.idle_until = scroll.idle_until.max(now + self.options.scroll_idle);
+                scroll.idle_until = scroll.idle_until.max(now + self.options.scroll_idle_ms);
             }
         }
         if scroll.ease.is_none() && now >= scroll.idle_until {
@@ -712,7 +722,7 @@ impl GestureRecognizer {
                     pitch: (vector.y.abs() > vector.x.abs()).then_some(false),
                     single_since: None,
                     panning: false,
-                    tap: now - self.pointers[0].down_at < self.options.tap_interval
+                    tap: now - self.pointers[0].down_at < self.options.tap_interval_ms
                         && matches!(self.mode, Mode::Pressed { .. }),
                 });
                 self.tracking.record(now, Step::default());
@@ -811,13 +821,13 @@ impl GestureRecognizer {
         // Two fingers moving up or down together tilt, and do nothing else
         // (GL JS `TwoFingersTouchPitchHandler`).
         if pinch.pitch.is_none() {
-            let (moved_a, moved_b) = (va.length() >= 2.0, vb.length() >= 2.0);
+            let (moved_a, moved_b) = (va.length() >= PITCH_DECIDE_PX, vb.length() >= PITCH_DECIDE_PX);
             if moved_a && moved_b {
                 let vertical = |v: V2| v.y.abs() > v.x.abs();
                 pinch.pitch = Some(vertical(va) && vertical(vb) && (va.y > 0.0) == (vb.y > 0.0));
             } else if moved_a || moved_b {
                 let since = *pinch.single_since.get_or_insert(now);
-                if now - since >= 100.0 {
+                if now - since >= PITCH_DECIDE_MS {
                     pinch.pitch = Some(false);
                 }
             }
@@ -890,7 +900,7 @@ impl GestureRecognizer {
                 if !self.pointers.is_empty() {
                     // Lifting one finger continues as a one-finger pan;
                     // lifting the second ends a two-finger tap.
-                    let tap = pinch.tap && now - pointer.down_at < self.options.tap_interval;
+                    let tap = pinch.tap && now - pointer.down_at < self.options.tap_interval_ms;
                     self.mode = if tap {
                         Mode::Pinch(pinch)
                     } else {
@@ -947,7 +957,7 @@ impl GestureRecognizer {
     fn tap(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer, button: Button, shift: bool, now: f64) {
         let position = pointer.position;
         self.events.push(GestureEvent::Click { position: position.into(), button });
-        if button != Button::Primary || now - pointer.down_at > self.options.tap_interval {
+        if button != Button::Primary || now - pointer.down_at > self.options.tap_interval_ms {
             return;
         }
         if self.follows_tap(pointer.kind, position, now) {
@@ -980,7 +990,7 @@ impl GestureRecognizer {
     /// Whether a press of `kind` at `position` is the second of a double tap.
     fn follows_tap(&self, kind: PointerKind, position: V2, now: f64) -> bool {
         self.last_tap.is_some_and(|(at, time, k)| {
-            k == kind && now - time < self.options.tap_interval && at.distance(position) < self.options.tap_tolerance
+            k == kind && now - time < self.options.tap_interval_ms && at.distance(position) < self.options.tap_tolerance
         })
     }
 
@@ -1002,7 +1012,7 @@ impl GestureRecognizer {
         let update = CameraUpdate {
             mode: CameraUpdateMode::Ease,
             camera: CameraOptions::default().with_center(Some(center)).with_zoom(Some(target)),
-            animation: self.animation(BOX_EASE, EASE),
+            animation: self.animation(BOX_EASE_MS, EASE),
             phase: GesturePhase::None,
         };
         self.step_to(camera, update);
@@ -1011,7 +1021,7 @@ impl GestureRecognizer {
     /// Double-click, double-tap and two-finger-tap zoom: one level around a
     /// point, eased (GL JS, 300 ms).
     fn zoom_step(&mut self, camera: &mut dyn GestureCamera, at: V2, delta: f64) {
-        let animation = self.animation(STEP_EASE, EASE);
+        let animation = self.animation(STEP_EASE_MS, EASE);
         let step =
             CameraDelta { scale: Some(delta.exp2()), anchor: Some(at.into()), animation, ..CameraDelta::default() };
         self.eased_step(camera, step);
@@ -1038,7 +1048,7 @@ impl GestureRecognizer {
         let options = self.options;
         let mut scroll = self.scroll.unwrap_or(Scroll { anchor: position, idle_until: now, ease: None });
         scroll.anchor = position;
-        scroll.idle_until = now + options.scroll_idle;
+        scroll.idle_until = now + options.scroll_idle_ms;
         self.begin(camera);
         match delta {
             WheelDelta::Pixels(pixels) => {
@@ -1050,17 +1060,17 @@ impl GestureRecognizer {
             }
             WheelDelta::Notches(notches) => {
                 let step = -notches * options.notch_zoom;
-                let duration = options.notch_duration;
+                let duration = options.notch_duration_ms;
                 let (distance, (x1, y1)) = match scroll.ease {
                     Some(ease) if ease.progress(now, duration) < 1.0 => {
                         // Whatever the ease hasn't applied yet carries over.
                         let distance = ease.distance - ease.applied + step;
                         // The new curve's starting slope, dy/dx = y1/x1,
                         // times distance / duration is the current speed;
-                        // its first control point stays 0.27 from the
-                        // origin, as GL JS's does.
+                        // its first control point stays NOTCH_EASE_HANDLE
+                        // from the origin, as GL JS's does.
                         let slope = if distance != 0.0 { ease.speed(now, duration) * duration / distance } else { 0.0 };
-                        let x1 = 0.27 / (1.0 + slope * slope).sqrt();
+                        let x1 = NOTCH_EASE_HANDLE / (1.0 + slope * slope).sqrt();
                         (distance, (x1, slope * x1))
                     }
                     Some(ease) => (ease.distance - ease.applied + step, (EASE_X1, EASE_Y1)),
@@ -1089,7 +1099,7 @@ impl GestureRecognizer {
             }
             return boxing;
         }
-        let animation = self.animation(STEP_EASE, EASE_OUT);
+        let animation = self.animation(STEP_EASE_MS, EASE_OUT);
         let (pan, bearing, pitch) = (self.options.key_pan, self.options.key_bearing, self.options.key_pitch);
         let mut step = CameraDelta { animation, ..CameraDelta::default() };
         match (key, modifiers.shift) {
