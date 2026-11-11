@@ -92,6 +92,10 @@ pub struct TileBase {
     pub pending: Cell<bool>,
     pub loaded: Cell<bool>,
 
+    /// The [`SourceFeatureState`](crate::source_state::SourceFeatureState)
+    /// version this tile's buckets hold; 0 for buckets that have none.
+    pub feature_state_version: Cell<u64>,
+
     observer: RefCell<Rc<dyn TileObserver>>,
 }
 
@@ -109,6 +113,7 @@ impl TileBase {
             renderable: Cell::new(false),
             pending: Cell::new(false),
             loaded: Cell::new(false),
+            feature_state_version: Cell::new(0),
             observer: RefCell::new(observer.unwrap_or_else(|| Rc::new(NullTileObserver))),
         }
     }

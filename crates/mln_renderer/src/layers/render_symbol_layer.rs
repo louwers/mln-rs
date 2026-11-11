@@ -367,6 +367,10 @@ struct DrawableRefresh {
     binders: bool,
 }
 
+impl DrawableRefresh {
+    const ALL: DrawableRefresh = DrawableRefresh { opacity: true, dynamic: true, sort: true, binders: true };
+}
+
 /// `updateTileDrawable(drawable, bucket, paintProps, evaluated)`: replaces
 /// the attributes (and indices) of an existing drawable that placement,
 /// sorting or feature state changed. Halo and fill drawables share their
@@ -395,10 +399,6 @@ fn update_tile_drawable(
         drawable.set_data(Some(Box::new(draw_data)));
     }
 
-    if !(refresh.opacity || refresh.dynamic || refresh.sort || refresh.binders) {
-        return;
-    }
-
     let buffer = if is_text {
         &state.text
     } else if sdf_icons {
@@ -406,6 +406,22 @@ fn update_tile_drawable(
     } else {
         &state.icon
     };
+
+    // A drawable whose symbols are all hidden by placement draws nothing.
+    // Its attributes aren't refreshed while it is disabled, so it refreshes
+    // all of them when placement shows it again.
+    let was_enabled = drawable.get_enabled();
+    if refresh.opacity || refresh.sort {
+        drawable.set_enabled(buffer.segment_has_visible_vertices(draw_data.segment));
+    }
+    if !drawable.get_enabled() {
+        return;
+    }
+    let refresh = if was_enabled { refresh } else { DrawableRefresh::ALL };
+
+    if !(refresh.opacity || refresh.dynamic || refresh.sort || refresh.binders) {
+        return;
+    }
 
     if let Some(attrs) = drawable.get_vertex_attributes().cloned() {
         let key = Rc::as_ptr(&attrs) as *const ();
@@ -1006,7 +1022,7 @@ impl RenderLayer for RenderSymbolLayer {
                     sort: seen.sort != current_versions.sort,
                     binders: seen.binder != current_versions.binder,
                 },
-                None => DrawableRefresh { opacity: true, dynamic: true, sort: true, binders: true },
+                None => DrawableRefresh::ALL,
             };
 
             debug_assert!(bucket.paint_properties.contains_key(self.get_id()));
@@ -1155,6 +1171,7 @@ impl RenderLayer for RenderSymbolLayer {
             if buffer.triangles.is_empty() {
                 continue;
             }
+            let visible = buffer.segment_has_visible_vertices(group.segment);
 
             let evaluated = get_evaluated::<SymbolLayerProperties>(&render_data.layer_properties);
             let Some(bucket_paint_properties) = bucket.paint_properties.get(self.get_id()) else {
@@ -1303,6 +1320,7 @@ impl RenderLayer for RenderSymbolLayer {
                         is_offset,
                         segment: group.segment,
                     })));
+                    drawable.set_enabled(visible);
 
                     tile_layer_group.add_drawable(passes, &tile_id, drawable);
                     self.base.stats.drawables_added += 1;

@@ -5,13 +5,14 @@
 // go as bytes, and replies come back as bytes and payloads, transferred.
 //
 // From the page: first {module, canvas, ports, width, height, ratio, style,
-// camera}, then {readPixels}, {resize: [width, height]} in CSS pixels, and
-// {input, args}: a call of WebMap's input methods (pointer_down,
-// pointer_move, pointer_up, pointer_cancel, wheel, key, blur) whose last
-// argument is the event's time as performance.timeOrigin + timeStamp. To the
-// page: {status}, {loaded: {loadedMs, replies}} once the map is fully
-// loaded, {pixels: {width, height, pixels}} for each readPixels, and {box}
-// when a Shift-drag's box changes ([x0, y0, x1, y1], or null).
+// fallbackFontFaces, camera, localIdeographFontFamily}, then {readPixels},
+// {resize: [width, height]} in CSS pixels, and {input, args}: a call of
+// WebMap's input methods (pointer_down, pointer_move, pointer_up,
+// pointer_cancel, wheel, key, blur) whose last argument is the event's time
+// as performance.timeOrigin + timeStamp. To the page: {status}, {loaded:
+// {loadedMs, replies}} once the map is fully loaded, {pixels: {width,
+// height, pixels}} for each readPixels, and {box} when a Shift-drag's box
+// changes ([x0, y0, x1, y1], or null).
 
 import init, { WebMap } from './pkg/mln_web.js';
 
@@ -23,7 +24,7 @@ onmessage = ({ data }) => {
   else early.push(data);
 };
 
-async function run({ module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera }) {
+async function run({ module, canvas, ports, width, height, ratio, style, fallbackFontFaces, camera, localIdeographFontFamily }) {
   await init({ module_or_path: module });
 
   // The map's work between frames (finished fetches, worker replies, queued
@@ -46,7 +47,8 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
     return shaper;
   };
   const map = await WebMap.create(canvas, width, height, ratio, ports.length,
-    (instance, bytes) => ports[instance].postMessage(bytes, [bytes.buffer]), wake, loadShaper);
+    (instance, bytes) => ports[instance].postMessage(bytes, [bytes.buffer]), wake, loadShaper,
+    localIdeographFontFamily);
 
   ticks.port1.onmessage = () => {
     tickScheduled = false;

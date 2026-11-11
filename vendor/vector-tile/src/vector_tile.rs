@@ -183,6 +183,27 @@ impl<'l, 'a> Feature<'l, 'a> {
         Ok(properties)
     }
 
+    /// Port-only: calls `visit` with the key and value indices of each tag
+    /// pair, in order. Throws if any pair would make `getValue` throw: an
+    /// odd number of tag ids, or a key or value index out of range.
+    pub fn for_each_tag(&self, mut visit: impl FnMut(u32, u32)) -> Result<(), Error> {
+        let mut start_itr = self.tags_iter.begin();
+        let end_itr = self.tags_iter.end();
+        while start_itr != end_itr {
+            let tag_key: u32 = start_itr.post_increment()?.deref()?;
+            if start_itr == end_itr {
+                return Err(Error::Runtime("uneven number of feature tag ids".to_owned()));
+            }
+            let tag_val: u32 = start_itr.post_increment()?.deref()?;
+            if self.layer.values.len() <= tag_val as usize {
+                return Err(Error::Runtime("feature referenced out of range value".to_owned()));
+            }
+            at(&self.layer.keys, tag_key as usize)?;
+            visit(tag_key, tag_val);
+        }
+        Ok(())
+    }
+
     pub fn get_id(&self) -> &Identifier {
         &self.id
     }
@@ -431,6 +452,11 @@ impl<'a> Layer<'a> {
     /// `getName()` (UTF-8-lossy; see the crate docs).
     pub fn get_name(&self) -> String {
         lossy(&self.name)
+    }
+
+    /// Port-only: the key table, which tags index.
+    pub fn keys(&self) -> &[DataView<'a>] {
+        &self.keys
     }
 
     /// The name as the bytes of the tile.

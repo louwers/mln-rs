@@ -49,10 +49,10 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
-use crate::Args;
 use crate::frontend::Frontend;
 use crate::host::{Inbox, Message, UserEvent};
 use crate::settings::Settings;
+use crate::{Args, system_fonts};
 
 /// What the render thread starts with.
 pub(crate) struct Launch {
@@ -150,6 +150,9 @@ pub(crate) fn run(launch: Launch) {
     let run_loop = RunLoop::new();
     inbox.set_waker(run_loop.handle());
 
+    // Finds the system fonts while the surface and the map get ready.
+    let font_discovery = (!args.no_system_fonts).then(|| std::thread::spawn(system_fonts::fallback_font_faces));
+
     let framebuffer_size = Size::new(size.width, size.height);
     let surface_proxy = proxy.clone();
     let make_surface = move |instance: &wgpu::Instance| {
@@ -216,7 +219,7 @@ pub(crate) fn run(launch: Launch) {
     let shared =
         Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
     let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
-    let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32);
+    let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32, None);
     let frontend = Frontend::new(renderer, renderer_backend, shared.clone());
     let map_size = logical_size(size, pixel_ratio);
 
@@ -302,6 +305,16 @@ pub(crate) fn run(launch: Launch) {
             }
         },
     };
+    if let Some(font_discovery) = font_discovery {
+        let faces = font_discovery.join().unwrap_or_default();
+        if faces.is_empty() {
+            Log::info(Event::Setup, "No system fonts found for complex scripts or CJK");
+        } else {
+            let families: Vec<&str> = faces.iter().map(|face| face.family.as_str()).collect();
+            Log::info(Event::Setup, format!("Falling back to system fonts: {}", families.join(", ")));
+        }
+        view.map.get_style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
+    }
     view.map.get_style_mut().load_url(&style);
 
     view.run();

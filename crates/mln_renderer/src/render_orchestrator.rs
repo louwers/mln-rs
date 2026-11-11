@@ -27,6 +27,7 @@ use mln_style::layer_properties::LayerProperties;
 use mln_style::map::zoom_history::ZoomHistory;
 use mln_style::{PropertyEvaluationParameters, TransitionOptions, TransitionParameters, image, layer, source};
 use mln_text::GlyphCache;
+use mln_text::local_glyph_rasterizer::DefaultLocalGlyphRasterizer;
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::{Duration, TimePoint};
 use mln_util::constants::DEFAULT_TRANSITION_DURATION;
@@ -138,7 +139,22 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
             ),
         );
         if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_glyphs_error(font_stack, glyph_range, error.clone());
             observer.on_resource_error(error);
+        }
+    }
+
+    /// `onGlyphsLoaded(fontStack, range)`.
+    fn on_glyphs_loaded(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
+        if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_glyphs_loaded(font_stack, range);
+        }
+    }
+
+    /// `onGlyphsRequested(fontStack, range)`.
+    fn on_glyphs_requested(&self, font_stack: &mln_util::font_stack::FontStack, range: &mln_text::glyph::GlyphRange) {
+        if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_glyphs_requested(font_stack, range);
         }
     }
 }
@@ -246,15 +262,22 @@ impl RenderOrchestrator {
     /// `RenderOrchestrator(bool backgroundLayerAsColor, TaggedScheduler&,
     /// const std::optional<std::string>& localFontFamily,
     /// std::shared_ptr<GlyphCache>)`.
-    // TODO(port): local font family (glyph manager). C++ gets the map's
-    // thread pool; the port uses the background pool with its own tag.
-    pub fn new(background_layer_as_color: bool, glyph_cache: Arc<GlyphCache>) -> Self {
+    // C++ gets the map's thread pool; the port uses the background pool
+    // with its own tag.
+    pub fn new(
+        background_layer_as_color: bool,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
         let observer: SharedObserver = Rc::new(RefCell::new(None));
         // `imageManager->setObserver(this)`.
         let image_manager = ImageManager::create();
         image_manager.set_observer(Some(Rc::new(OrchestratorImageObserver { observer: observer.clone() })));
         // symbols: `glyphManager->setObserver(this)`.
-        let glyph_manager = GlyphManager::with_glyph_cache(None, glyph_cache);
+        let glyph_manager = GlyphManager::with_glyph_cache(
+            Some(Box::new(DefaultLocalGlyphRasterizer::new(local_font_family))),
+            glyph_cache,
+        );
         glyph_manager.set_observer(Some(Rc::new(OrchestratorGlyphObserver { observer: observer.clone() })));
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         RenderOrchestrator {

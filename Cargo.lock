@@ -773,6 +773,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fontdb"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2660c5e9157bf76d2db1294e4a9feba604ef610819a3b591088d0d8392a3290f"
+dependencies = [
+ "log",
+ "memmap2",
+ "slotmap",
+ "tinyvec",
+]
+
+[[package]]
 name = "foreign-types"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1531,13 +1543,16 @@ version = "0.0.10"
 dependencies = [
  "libc",
  "mln-rs-actor",
+ "mln-rs-feature",
  "mln-rs-gfx",
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-pixelmatch",
  "mln-rs-render-test",
+ "mln-rs-renderer",
  "mln-rs-storage",
+ "mln-rs-style",
  "mln-rs-text",
  "mln-rs-util",
  "mln-rs-webgpu",
@@ -1570,6 +1585,7 @@ version = "0.0.10"
 name = "mln-rs-desktop"
 version = "0.0.10"
 dependencies = [
+ "fontdb",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-gestures",
@@ -1580,9 +1596,11 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-text",
  "mln-rs-util",
  "mln-rs-webgpu",
  "serde_json",
+ "skrifa",
  "wgpu",
  "winit",
 ]
@@ -1711,6 +1729,7 @@ dependencies = [
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
+ "mln-rs-style-types",
  "mln-rs-test-server",
  "mln-rs-text",
  "mln-rs-util",
@@ -2003,6 +2022,7 @@ name = "mln-rs-text"
 version = "0.0.10"
 dependencies = [
  "harfrust",
+ "js-sys",
  "mln-rs-math",
  "mln-rs-protozero",
  "mln-rs-style-types",
@@ -2011,6 +2031,8 @@ dependencies = [
  "serde",
  "skrifa",
  "unicode-bidi",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]
@@ -3412,6 +3434,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "slotmap"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bdd58c3c93c3d278ca835519292445cb4b0d4dc59ccfdf7ceadaab3f8aeb4038"
+dependencies = [
+ "version_check",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.16.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3670,6 +3701,12 @@ dependencies = [
  "bytemuck",
  "strict-num",
 ]
+
+[[package]]
+name = "tinyvec"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
 
 [[package]]
 name = "tokio"

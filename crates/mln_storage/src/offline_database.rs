@@ -13,7 +13,15 @@
 // Prepared statements are rusqlite's per-connection statement cache
 // (`prepare_cached`) instead of the `statements` map; both are dropped with
 // the connection.
+//
+// Port-only (maplibre/maplibre-native#4748): a cache hit queues its row's
+// `accessed` timestamp instead of writing it in a transaction of its own.
+// The owner flushes the queue (`flush_accessed`, see `set_accessed_callback`);
+// closing the database, changing its path, reopening it read-only, resizing
+// the cache, deleting a region and a full queue flush it too, and `put`'s
+// eviction writes it in its own transaction.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use mln_util::chrono::{Timestamp, now};
@@ -39,6 +47,10 @@ use crate::sqlite3::{
 
 /// `util::mapbox::DEFAULT_OFFLINE_TILE_COUNT_LIMIT`.
 pub const DEFAULT_OFFLINE_TILE_COUNT_LIMIT: u64 = 6000;
+
+/// The most rows whose `accessed` timestamp waits to be written. Reads of
+/// other rows while the queue is full don't update their timestamps.
+pub const MAX_PENDING_ACCESSED: usize = 4096;
 
 /// `MapboxTileLimitExceededException` (`util::Exception("Mapbox tile limit
 /// exceeded")`).
@@ -181,6 +193,24 @@ pub struct OfflineDatabase {
 
     autopack: bool,
     read_only: bool,
+
+    /// `accessed` timestamps (seconds) of cache hits not yet written, by
+    /// row id.
+    pending_resource_accessed: BTreeMap<i64, i64>,
+    pending_tile_accessed: BTreeMap<i64, i64>,
+    /// Set when `put`'s eviction wrote the pending timestamps in its
+    /// transaction, so they are dropped once it commits.
+    pending_applied_for_eviction: bool,
+    /// The last flush failed: a full queue waits for the next scheduled
+    /// flush instead of retrying on every read.
+    accessed_flush_failed: bool,
+    accessed_callback: Option<Box<dyn FnMut() + Send>>,
+}
+
+impl Drop for OfflineDatabase {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
 }
 
 impl OfflineDatabase {
@@ -208,6 +238,11 @@ impl OfflineDatabase {
             current_ambient_cache_size: None,
             autopack: true,
             read_only: false,
+            pending_resource_accessed: BTreeMap::new(),
+            pending_tile_accessed: BTreeMap::new(),
+            pending_applied_for_eviction: false,
+            accessed_flush_failed: false,
+            accessed_callback: None,
         };
         if let Err(e) = db.initialize() {
             db.handle_error(&e, "open database");
@@ -280,9 +315,91 @@ impl OfflineDatabase {
     }
 
     fn cleanup(&mut self) {
+        self.flush_accessed();
+        self.discard_pending_accessed();
         // Deleting these SQLite objects may result in exceptions (rusqlite
         // closes on drop and ignores the result).
         self.db = None;
+    }
+
+    /// Sets the callback that runs after a cache hit leaves `accessed`
+    /// timestamps waiting to be written; the owner then calls
+    /// [`flush_accessed`](Self::flush_accessed) later. It runs inside `get`
+    /// and `get_region_resource`, so it must not use this database.
+    pub fn set_accessed_callback(&mut self, callback: Box<dyn FnMut() + Send>) {
+        self.accessed_callback = Some(callback);
+    }
+
+    /// The number of rows whose `accessed` timestamp waits to be written.
+    pub fn pending_accessed_count(&self) -> usize {
+        self.pending_resource_accessed.len() + self.pending_tile_accessed.len()
+    }
+
+    /// Writes the waiting `accessed` timestamps in one transaction, never
+    /// moving a row's timestamp back. Returns false and keeps them waiting
+    /// when that fails or the database is read-only or closed.
+    pub fn flush_accessed(&mut self) -> bool {
+        if self.pending_accessed_count() == 0 {
+            return true;
+        }
+        if self.read_only || self.db.is_none() {
+            return false;
+        }
+        match self.with_transaction(TransactionMode::Immediate, Self::apply_pending_accessed) {
+            Ok(()) => {
+                self.discard_pending_accessed();
+                true
+            }
+            Err(e) => {
+                self.accessed_flush_failed = true;
+                self.handle_error(&e, "flush accessed timestamps");
+                false
+            }
+        }
+    }
+
+    fn discard_pending_accessed(&mut self) {
+        self.pending_resource_accessed.clear();
+        self.pending_tile_accessed.clear();
+        self.accessed_flush_failed = false;
+    }
+
+    /// Runs the `accessed` updates in the open transaction.
+    fn apply_pending_accessed(&mut self) -> DbResult<()> {
+        self.get_db()?;
+        let Some(db) = &self.db else {
+            return Ok(());
+        };
+        let conn = db.conn();
+        for (sql, pending) in [
+            ("UPDATE resources SET accessed = MAX(accessed, ?1) WHERE id = ?2", &self.pending_resource_accessed),
+            ("UPDATE tiles SET accessed = MAX(accessed, ?1) WHERE id = ?2", &self.pending_tile_accessed),
+        ] {
+            if pending.is_empty() {
+                continue;
+            }
+            let mut stmt = conn.prepare_cached(sql)?;
+            for (id, accessed) in pending {
+                stmt.execute(params![accessed, id])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Queues the `accessed` timestamp of a cache hit, used for LRU
+    /// eviction.
+    fn queue_accessed(&mut self, tile: bool, id: i64) {
+        if self.read_only {
+            return;
+        }
+        let accessed = now().secs_since_epoch();
+        let full = self.pending_accessed_count() >= MAX_PENDING_ACCESSED;
+        let pending = if tile { &mut self.pending_tile_accessed } else { &mut self.pending_resource_accessed };
+        if let Some(existing) = pending.get_mut(&id) {
+            *existing = (*existing).max(accessed);
+        } else if !full {
+            pending.insert(id, accessed);
+        }
     }
 
     fn disabled(&mut self) -> bool {
@@ -346,6 +463,7 @@ impl OfflineDatabase {
     fn remove_existing(&mut self) -> DbResult<()> {
         Log::warning(Event::Database, "Removing existing incompatible offline database");
 
+        self.discard_pending_accessed();
         let filename = match &self.db {
             Some(db) => db.get_filename(),
             None => self.path.clone(),
@@ -511,7 +629,21 @@ impl OfflineDatabase {
     }
 
     fn get_internal(&mut self, resource: &Resource) -> DbResult<Option<(Response, u64)>> {
-        if let Some(tile_data) = tile_data(resource) { self.get_tile(tile_data) } else { self.get_resource(resource) }
+        let result = if let Some(tile_data) = tile_data(resource) {
+            self.get_tile(tile_data)
+        } else {
+            self.get_resource(resource)
+        }?;
+        if self.pending_accessed_count() >= MAX_PENDING_ACCESSED && !self.accessed_flush_failed {
+            self.flush_accessed();
+        }
+        if result.is_some()
+            && self.pending_accessed_count() > 0
+            && let Some(callback) = &mut self.accessed_callback
+        {
+            callback();
+        }
+        Ok(result)
     }
 
     fn has_internal(&mut self, resource: &Resource) -> DbResult<Option<i64>> {
@@ -533,7 +665,13 @@ impl OfflineDatabase {
                 return Ok((false, 0));
             }
 
-            self.with_transaction(TransactionMode::Immediate, |this| this.put_internal(resource, response, true))
+            self.pending_applied_for_eviction = false;
+            let result =
+                self.with_transaction(TransactionMode::Immediate, |this| this.put_internal(resource, response, true))?;
+            if self.pending_applied_for_eviction {
+                self.discard_pending_accessed();
+            }
+            Ok(result)
         })();
         match result {
             Ok(result) => result,
@@ -569,7 +707,7 @@ impl OfflineDatabase {
         let mut stats = None;
         if evict {
             let s = DatabaseSizeChangeStats::new(self)?;
-            if !self.evict(size, &s)? {
+            if !self.evict(size, &s, true)? {
                 Log::info(Event::Database, "Unable to make space for entry");
                 return Ok((false, 0));
             }
@@ -597,34 +735,9 @@ impl OfflineDatabase {
         Ok((inserted, size))
     }
 
-    fn update_accessed(&mut self, sql: &str, params: impl rusqlite::Params) -> DbResult<()> {
-        // Update accessed timestamp used for LRU eviction.
-        if self.read_only {
-            return Ok(());
-        }
-        match self.execute(sql, params) {
-            Ok(_) => Ok(()),
-            Err(DatabaseError::Sqlite(ex)) => {
-                if ex.code == result_code::NOT_A_DB || ex.code == result_code::CORRUPT {
-                    return Err(DatabaseError::Sqlite(ex));
-                }
-                // If we don't have any indication that the database is
-                // corrupt, continue as usual.
-                Log::record(
-                    EventSeverity::Warning,
-                    Event::Database,
-                    ex.code as i64,
-                    &format!("Can't update timestamp: {}", ex.message),
-                );
-                Ok(())
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    /// Reads `etag, expires, must_revalidate, modified, data, compressed` of
-    /// the first row, as getResource/getTile do.
-    fn read_response(row: &rusqlite::Row<'_>) -> DbResult<(Response, u64)> {
+    /// Reads `etag, expires, must_revalidate, modified, data, compressed,
+    /// id` of the first row, as getResource/getTile do.
+    fn read_response(row: &rusqlite::Row<'_>) -> DbResult<(Response, u64, i64)> {
         let mut response = Response::new();
         let mut size = 0u64;
 
@@ -647,24 +760,23 @@ impl OfflineDatabase {
             }
         }
 
-        Ok((response, size))
+        Ok((response, size, get_i64(row, 6)?))
     }
 
     fn get_resource(&mut self, resource: &Resource) -> DbResult<Option<(Response, u64)>> {
         let key = Self::cache_key(resource);
-        self.update_accessed(
-            "UPDATE resources SET accessed = ?1 WHERE url = ?2",
-            params![now().secs_since_epoch(), key],
-        )?;
-
-        self.query_row(
-            //        0      1            2            3       4      5
-            "SELECT etag, expires, must_revalidate, modified, data, compressed \
+        let row = self.query_row(
+            //        0      1            2            3       4      5          6
+            "SELECT etag, expires, must_revalidate, modified, data, compressed, id \
              FROM resources \
              WHERE url = ?",
             params![key],
             Self::read_response,
-        )
+        )?;
+        Ok(row.map(|(response, size, id)| {
+            self.queue_accessed(false, id);
+            (response, size)
+        }))
     }
 
     fn has_resource(&mut self, resource: &Resource) -> DbResult<Option<i64>> {
@@ -754,20 +866,9 @@ impl OfflineDatabase {
     }
 
     fn get_tile(&mut self, tile: &TileData) -> DbResult<Option<(Response, u64)>> {
-        self.update_accessed(
-            "UPDATE tiles \
-             SET accessed       = ?1 \
-             WHERE url_template = ?2 \
-               AND pixel_ratio  = ?3 \
-               AND x            = ?4 \
-               AND y            = ?5 \
-               AND z            = ?6 ",
-            params![now().secs_since_epoch(), tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
-        )?;
-
-        self.query_row(
-            //        0      1           2,            3,      4,      5
-            "SELECT etag, expires, must_revalidate, modified, data, compressed \
+        let row = self.query_row(
+            //        0      1           2,            3,      4,      5,         6
+            "SELECT etag, expires, must_revalidate, modified, data, compressed, id \
              FROM tiles \
              WHERE url_template = ?1 \
                AND pixel_ratio  = ?2 \
@@ -776,7 +877,11 @@ impl OfflineDatabase {
                AND z            = ?5 ",
             params![tile.url_template, tile.pixel_ratio, tile.x, tile.y, tile.z],
             Self::read_response,
-        )
+        )?;
+        Ok(row.map(|(response, size, id)| {
+            self.queue_accessed(true, id);
+            (response, size)
+        }))
     }
 
     fn has_tile(&mut self, tile: &TileData) -> DbResult<Option<i64>> {
@@ -917,6 +1022,8 @@ impl OfflineDatabase {
     pub fn clear_ambient_cache(&mut self) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
+            // The deleted rows' ids may be reused.
+            self.discard_pending_accessed();
 
             self.execute(
                 "DELETE FROM tiles \
@@ -1175,11 +1282,13 @@ impl OfflineDatabase {
     pub fn delete_region(&mut self, region: OfflineRegion) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
+            // Eviction uses the stored timestamps if this fails.
+            self.flush_accessed();
 
             self.execute("DELETE FROM regions WHERE id = ?", params![region.get_id()])?;
 
             let stats = DatabaseSizeChangeStats::new(self)?;
-            self.evict(0, &stats)?;
+            self.evict(0, &stats, false)?;
             if self.autopack {
                 self.vacuum()?;
             }
@@ -1466,7 +1575,15 @@ impl OfflineDatabase {
     // delete an arbitrary number of old cache entries. The free pages
     // approach saves us from calling VACUUM or keeping a running total,
     // which can be costly.
-    fn evict(&mut self, needed_free_size: u64, stats: &DatabaseSizeChangeStats) -> DbResult<bool> {
+    //
+    // `apply_accessed` (put only) writes the pending `accessed` timestamps in
+    // the caller's transaction before choosing what to evict.
+    fn evict(
+        &mut self,
+        needed_free_size: u64,
+        stats: &DatabaseSizeChangeStats,
+        apply_accessed: bool,
+    ) -> DbResult<bool> {
         self.check_flags()?;
         let ambient_cache_size = if self.init_ambient_cache_size()?.is_none() {
             self.current_ambient_cache_size.expect("initialized ambient cache size")
@@ -1476,6 +1593,13 @@ impl OfflineDatabase {
         let mut new_ambient_cache_size =
             ambient_cache_size.wrapping_add(needed_free_size).wrapping_add(stats.page_size());
 
+        if apply_accessed
+            && new_ambient_cache_size > self.maximum_ambient_cache_size
+            && self.pending_accessed_count() > 0
+        {
+            self.apply_pending_accessed()?;
+            self.pending_applied_for_eviction = true;
+        }
         while new_ambient_cache_size > self.maximum_ambient_cache_size {
             let accessed = self.query_row(
                 "SELECT max(accessed) \
@@ -1601,6 +1725,8 @@ impl OfflineDatabase {
 
     /// `setMaximumAmbientCacheSize(uint64_t)`.
     pub fn set_maximum_ambient_cache_size(&mut self, size: u64) -> Option<DatabaseError> {
+        // Eviction uses the stored timestamps if this fails.
+        self.flush_accessed();
         let previous_maximum_ambient_cache_size = self.maximum_ambient_cache_size;
 
         // C++ lets errors other than SQLite's escape here; they are returned.
@@ -1616,7 +1742,7 @@ impl OfflineDatabase {
                 > self.maximum_ambient_cache_size
             {
                 let stats = DatabaseSizeChangeStats::new(self)?;
-                self.evict(0, &stats)?;
+                self.evict(0, &stats, false)?;
                 if self.autopack {
                     self.vacuum()?;
                 }

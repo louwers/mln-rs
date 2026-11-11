@@ -320,6 +320,7 @@ impl GeometryTileInner {
 
         *self.layout_result.borrow_mut() = Some(Rc::new(result));
         *self.bucket_geometry.borrow_mut() = Rc::default();
+        self.base.feature_state_version.set(0);
         if self.atlas_textures.borrow().is_none() {
             *self.atlas_textures.borrow_mut() = Some(Rc::new(TileAtlasTextures::default()));
         }

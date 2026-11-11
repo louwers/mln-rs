@@ -3,7 +3,7 @@
 // Methods take `&self` (the observer is shared with the map as
 // `Rc<dyn MapObserver>`); implementations use `Cell`/`RefCell` for state.
 
-use mln_renderer::ExceptionPtr;
+use mln_renderer::{ExceptionPtr, FontStack, GlyphRange};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapLoadError {
@@ -66,7 +66,7 @@ pub struct RenderFrameStatus {
 }
 
 // TODO(port): onSourceChanged(style::Source&), onRegisterShaders, shader
-// compile callbacks, glyph/tile/sprite request callbacks.
+// compile callbacks, tile/sprite request callbacks.
 /// `MapObserver`. All methods have the C++ default (empty) bodies.
 ///
 /// The camera callbacks take a [`CameraChange`], where C++ passes only its
@@ -92,6 +92,10 @@ pub trait MapObserver {
         true
     }
     fn on_render_error(&self, _error: ExceptionPtr) {}
+    fn on_glyphs_loaded(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
+    /// A glyph range of a font stack failed to load or parse.
+    fn on_glyphs_error(&self, _font_stack: &FontStack, _range: &GlyphRange, _error: ExceptionPtr) {}
+    fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
     /// Called with a description of a corrupted symbol detected by the
     /// symbol guard checks.
     fn on_symbol_error(&self, _message: &str) {}

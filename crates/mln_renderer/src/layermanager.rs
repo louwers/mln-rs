@@ -134,7 +134,12 @@ pub fn create_layout(
     let type_info = parameters.bucket_parameters.layer_type;
     if std::ptr::eq(type_info, CircleLayerImpl::static_type_info()) {
         // CircleLayerFactory::createLayout
-        return Ok(Some(Box::new(CircleLayout::with_source_layer(parameters.bucket_parameters, layers, tile_layer)?)));
+        return Ok(Some(Box::new(CircleLayout::with_source_layer(
+            parameters.bucket_parameters,
+            layers,
+            tile_layer,
+            parameters.filter_groups,
+        )?)));
     }
     if std::ptr::eq(type_info, FillLayerImpl::static_type_info()) {
         // FillLayerFactory::createLayout: the FillSortKey instantiation

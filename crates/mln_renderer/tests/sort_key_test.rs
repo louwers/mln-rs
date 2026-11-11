@@ -12,6 +12,7 @@ use mln_renderer::buckets::symbol_bucket::SymbolBucket;
 use mln_renderer::buckets::{CircleBucket, FillBucket, LineBucket};
 use mln_renderer::geometry::feature_index::FeatureIndex;
 use mln_renderer::layermanager;
+use mln_renderer::layout::filter_groups::FilterGroups;
 use mln_renderer::layout::layout::{LayoutParameters, SourceLayer};
 use mln_renderer::render_layer::LayerRenderData;
 use mln_renderer::tile::geojson_tile_data::GeoJSONTileData;
@@ -127,6 +128,7 @@ fn create_bucket(properties: Immutable<dyn LayerProperties>, shape: Shape) -> Bu
             glyph_dependencies: &mut glyph_dependencies,
             image_dependencies: &mut image_dependencies,
             available_images: &available_images,
+            filter_groups: &mut FilterGroups::default(),
         },
         SourceLayer::new(data.clone(), ""),
         &[properties],

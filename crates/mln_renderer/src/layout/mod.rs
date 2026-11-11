@@ -3,6 +3,7 @@
 
 pub mod circle_layout;
 pub mod clip_lines;
+pub mod filter_groups;
 #[allow(clippy::module_inception)]
 pub mod layout;
 pub mod merge_lines;

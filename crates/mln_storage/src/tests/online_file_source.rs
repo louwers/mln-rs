@@ -684,8 +684,12 @@ fn low_high_priority_requests() {
         }),
     ));
 
-    fs.resume();
+    // Online before resuming (C++ sets it after), so the online thread takes
+    // every queued request with the network up. If it saw the switch between
+    // two of them, those taken offline would wait for the reachability
+    // notification and start after the later ones, low priority included.
     NetworkStatus::set(Status::Online);
+    fs.resume();
     run_loop.run();
 }
 
@@ -758,8 +762,9 @@ fn low_high_priority_requests_many() {
         collector.borrow_mut().push(r);
     }
 
-    fs.resume();
+    // Online before resuming, as in LowHighPriorityRequests.
     NetworkStatus::set(Status::Online);
+    fs.resume();
     run_loop.run();
 }
 

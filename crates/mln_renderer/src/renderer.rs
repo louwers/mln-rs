@@ -23,17 +23,22 @@ pub struct Renderer {
 impl Renderer {
     /// `Renderer(gfx::RendererBackend&, float pixelRatio, const
     /// std::optional<std::string>& localFontFamily = std::nullopt)`: a
-    /// renderer with a glyph cache of its own.
-    // TODO(port): localFontFamily (glyph rasterization, M5).
-    pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32) -> Self {
-        Self::with_glyph_cache(backend, pixel_ratio, Arc::default())
+    /// renderer with a glyph cache of its own. `local_font_family` is the
+    /// platform's `LocalGlyphRasterizer`'s (see `DefaultLocalGlyphRasterizer`).
+    pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32, local_font_family: Option<String>) -> Self {
+        Self::with_glyph_cache(backend, pixel_ratio, local_font_family, Arc::default())
     }
 
     /// `Renderer(gfx::RendererBackend&, float pixelRatio, localFontFamily,
     /// std::shared_ptr<GlyphCache>)`: renderers given the same `GlyphCache`
     /// share the glyphs they parse from glyph PBFs.
-    pub fn with_glyph_cache(backend: Rc<dyn RendererBackend>, pixel_ratio: f32, glyph_cache: Arc<GlyphCache>) -> Self {
-        Renderer { impl_: Some(Box::new(RendererImpl::new(backend, pixel_ratio, glyph_cache))) }
+    pub fn with_glyph_cache(
+        backend: Rc<dyn RendererBackend>,
+        pixel_ratio: f32,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
+        Renderer { impl_: Some(Box::new(RendererImpl::new(backend, pixel_ratio, local_font_family, glyph_cache))) }
     }
 
     fn impl_ref(&self) -> &RendererImpl {

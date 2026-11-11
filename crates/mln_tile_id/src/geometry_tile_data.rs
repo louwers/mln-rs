@@ -140,6 +140,25 @@ pub trait GeometryTileLayer {
     fn get_feature(&self, index: usize) -> Result<Box<dyn GeometryTileFeature + '_>, ExceptionPtr>;
 
     fn get_name(&self) -> String;
+
+    /// Port-only: the features in groups whose members have the same
+    /// geometry type and the same values under each of `keys` (or lack each
+    /// alike), so that an expression reading only those of a feature gives
+    /// every member the same result. `None` if the layer can't group them
+    /// cheaply, or nearly every feature would be a group of its own.
+    fn group_features(&self, keys: &[String]) -> Option<FeatureGroups> {
+        let _ = keys;
+        None
+    }
+}
+
+/// Port-only: [`GeometryTileLayer::group_features`].
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FeatureGroups {
+    /// Each feature's group.
+    pub of_feature: Vec<u32>,
+    /// Each group's first feature; groups are numbered in feature order.
+    pub first: Vec<usize>,
 }
 
 /// `GeometryTileData`.

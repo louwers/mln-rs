@@ -97,10 +97,15 @@ pub fn all() -> Vec<Case> {
         let name = format!("Still/{}", view.name);
         cases.push(Case::new(name, move |cx| still(cx, &view)));
     }
+    for (icons, overlap) in [(256, false), (1024, false), (1024, true)] {
+        let name = format!("Still/CollidingIcons/{icons}{}", if overlap { "-overlap" } else { "" });
+        cases.push(Case::new(name.clone(), move |cx| still_colliding_icons(cx, &name, icons, overlap)));
+    }
     cases.push(Case::new("Frame/Throughput", frame_throughput));
     cases.push(Case::new("Frame/Paced", frame_paced));
     cases.push(Case::new("Frame/Idle", frame_idle));
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
+    cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     for view in views() {
         let name = format!("Load/Style/{}", view.name);
         cases.push(Case::new(name, move |cx| load_style(cx, &view)));
@@ -133,6 +138,48 @@ fn still(cx: &Context, view: &View) -> Metrics {
     if let Some(dir) = &cx.frames {
         nudge(&mut scene, 0);
         write_frame(dir, &format!("Still/{}", view.name), &scene.render_still());
+    }
+    meter.finish()
+}
+
+/// A still frame of `icons` icons at one point, each with its own sort key,
+/// so that each is a drawable of its own. Without `overlap`, placement
+/// hides all but one.
+fn still_colliding_icons(cx: &Context, name: &str, icons: usize, overlap: bool) -> Metrics {
+    let features: Vec<String> = (0..icons)
+        .map(|i| {
+            format!(
+                r#"{{"type":"Feature","properties":{{"rank":{i}}},"geometry":{{"type":"Point","coordinates":[5,5]}}}}"#
+            )
+        })
+        .collect();
+    let style = format!(
+        r#"{{"version":8,"sources":{{"points":{{"type":"geojson","maxzoom":0,
+            "data":{{"type":"FeatureCollection","features":[{}]}}}}}},
+            "layers":[{{"id":"symbols","type":"symbol","source":"points","layout":{{
+            "icon-image":"marker","symbol-sort-key":["get","rank"],"icon-allow-overlap":{overlap}}}}}]}}"#,
+        features.join(",")
+    );
+    let center = LatLng::new(5.0, 5.0).expect("a center");
+    let mut scene = Scene::new(Size::new(256, 256), Mode::Still);
+    scene.jump(center, 4.0);
+    scene.load_json(&style);
+    scene.add_image("marker", PremultipliedImage::from_vec(Size::new(16, 16), vec![255; 16 * 16 * 4]));
+    let nudge = |scene: &mut Scene, i: usize| scene.jump(center, 4.0 + 0.001 * (i % 2) as f64);
+    for i in 0..10 {
+        nudge(&mut scene, i);
+        scene.render_still();
+    }
+    let mut meter = Meter::new();
+    for i in 0..cx.iterations(100) {
+        meter.time(|| {
+            nudge(&mut scene, i);
+            scene.render_still()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        nudge(&mut scene, 0);
+        write_frame(dir, name, &scene.render_still());
     }
     meter.finish()
 }
@@ -262,6 +309,61 @@ fn frame_throughput(cx: &Context) -> Metrics {
             scene.pump();
             scene.render_frame()
         });
+    }
+    let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", p95);
+    metrics.lead("frame_p99_ms", p99);
+    metrics
+}
+
+/// Frames of Frame/Throughput over the basemap with its buildings and a
+/// street overlay colored by feature state, after every building and street
+/// of the loaded tiles was given a state; no state changes while it pans.
+fn frame_feature_state(cx: &Context) -> Metrics {
+    const LAP: usize = 240;
+    const SOURCE_LAYERS: [&str; 2] = ["buildings", "streets"];
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let selected =
+        |on: &str, off: &str| serde_json::json!(["case", ["boolean", ["feature-state", "selected"], false], on, off]);
+    let layers = style["layers"].as_array_mut().expect("the style has layers");
+    let buildings = layers.iter_mut().find(|layer| layer["id"] == "buildings").expect("the buildings layer");
+    buildings["paint"]["fill-color"] = selected("#c9a28f", "#d9d0c9");
+    let streets = layers.iter().position(|layer| layer["source-layer"] == "streets").expect("a streets layer");
+    layers.insert(
+        streets,
+        serde_json::json!({
+            "id": "selected-streets",
+            "type": "line",
+            "source": "basemap",
+            "source-layer": "streets",
+            "paint": {"line-color": selected("#e55e5e", "rgba(0, 0, 0, 0)"), "line-width": 6},
+        }),
+    );
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    scene.load_json(&style.to_string());
+    scene.settle();
+    for index in 0..LAP {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        scene.pump();
+        scene.render_frame();
+    }
+    for source_layer in SOURCE_LAYERS {
+        scene.select_every_feature("basemap", source_layer);
+    }
+    scene.settle();
+    let mut meter = Meter::new();
+    for index in 0..cx.iterations(100) {
+        scene.jump(circle(index, LAP), BASEMAP_ZOOM);
+        meter.time(|| {
+            scene.pump();
+            scene.render_frame()
+        });
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/FeatureState", &scene.read_frame());
     }
     let (p95, p99) = (percentile(meter.times(), 95.0), percentile(meter.times(), 99.0));
     let mut metrics = meter.finish();

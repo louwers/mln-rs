@@ -43,10 +43,15 @@ impl RendererImpl {
     /// `Renderer::Impl(gfx::RendererBackend&, float pixelRatio,
     /// const std::optional<std::string>& localFontFamily,
     /// std::shared_ptr<GlyphCache>)`.
-    pub fn new(backend: Rc<dyn RendererBackend>, pixel_ratio: f32, glyph_cache: Arc<GlyphCache>) -> Self {
+    pub fn new(
+        backend: Rc<dyn RendererBackend>,
+        pixel_ratio: f32,
+        local_font_family: Option<String>,
+        glyph_cache: Arc<GlyphCache>,
+    ) -> Self {
         let background_layer_as_color = !backend.context_is_shared();
         RendererImpl {
-            orchestrator: RenderOrchestrator::new(background_layer_as_color, glyph_cache),
+            orchestrator: RenderOrchestrator::new(background_layer_as_color, local_font_family, glyph_cache),
             backend,
             observer: None,
             pixel_ratio,

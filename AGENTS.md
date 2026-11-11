@@ -33,3 +33,7 @@ message and PR description, not the code.
 ## Pull requests
 
 Open a PR as a draft until it's ready to merge.
+
+A PR that claims a performance change includes measurements in its
+description. A PR that changes what users see includes before and after
+screenshots, attached with `gh pr edit --attach` or `gh pr create --attach`.

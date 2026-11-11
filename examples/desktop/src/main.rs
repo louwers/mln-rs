@@ -17,8 +17,10 @@
 // the short forms to the flags and keeps --bearing/--fov long-only.
 //
 // Options of this app alone: --readback FILE.png (write the presented frame
-// once the map is idle, see view.rs), --quit-after SECONDS and
-// --gesture-test (scripted input through the view's handlers).
+// once the map is idle, see view.rs), --quit-after SECONDS, --gesture-test
+// (scripted input through the view's handlers) and --no-system-fonts:
+// without it, the map falls back to system fonts for the scripts that its
+// glyph PBFs can't shape, and for CJK (system_fonts.rs).
 //
 // TODO(port): SIGINT handling (C++ closes the window; here Ctrl-C ends the
 // process), the plugin registration, settings load/save, the action
@@ -27,6 +29,7 @@
 mod frontend;
 mod host;
 mod settings;
+mod system_fonts;
 mod view;
 
 use crate::settings::Settings;
@@ -56,6 +59,7 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       --readback=[file.png]             Write the frame once the map is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit
+      --no-system-fonts                 Don't fall back to system fonts for complex scripts and CJK
 ";
 
 /// The command line.
@@ -79,6 +83,7 @@ pub(crate) struct Args {
     pub(crate) readback: Option<String>,
     pub(crate) quit_after: Option<f64>,
     pub(crate) gesture_test: bool,
+    pub(crate) no_system_fonts: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -128,6 +133,7 @@ fn parse_args() -> Result<Args, String> {
             "readback" => args.readback = Some(value(&name)?),
             "quit-after" => args.quit_after = Some(number(value(&name)?, &name)?),
             "gesture-test" => args.gesture_test = true,
+            "no-system-fonts" => args.no_system_fonts = true,
             _ => return Err(format!("Flag could not be matched: {name}")),
         }
     }

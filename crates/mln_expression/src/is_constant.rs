@@ -2,7 +2,9 @@
 // src/mln/style/expression/is_constant.cpp.
 
 use crate::compound_expression::CompoundExpression;
-use crate::expression::{Expression, Kind, downcast};
+use crate::expression::{Dependency, Expression, Kind, downcast};
+use crate::literal::Literal;
+use crate::value::Value;
 
 pub fn is_global_property_constant(expression: &dyn Expression, properties: &[&str]) -> bool {
     if expression.get_kind() == Kind::CompoundExpression {
@@ -100,4 +102,54 @@ pub fn is_runtime_constant(expression: &dyn Expression) -> bool {
         }
     });
     runtime_constant
+}
+
+/// Port-only: the property keys `expression` reads, sorted and without
+/// duplicates, if they and the geometry type are all it reads of a feature:
+/// not its id, its geometry, its feature state, all its properties or a key
+/// it computes. The expression then gives features with the same geometry
+/// type and the same values under those keys the same result.
+pub fn feature_property_keys(expression: &dyn Expression) -> Option<Vec<String>> {
+    let mut keys = Vec::new();
+    if !collect_feature_property_keys(expression, &mut keys) {
+        return None;
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    Some(keys)
+}
+
+fn collect_feature_property_keys(expression: &dyn Expression, keys: &mut Vec<String>) -> bool {
+    match expression.get_kind() {
+        Kind::Within | Kind::Distance | Kind::FormatSectionOverride => return false,
+        Kind::CompoundExpression => {
+            let Some(e) = downcast::<CompoundExpression>(expression) else {
+                return false;
+            };
+            let signature = e.signature();
+            if signature.dependencies.intersects(Dependency::FEATURE) {
+                let reads_key = match signature.name {
+                    "get" | "has" => e.get_parameter_count() == Some(1),
+                    "filter-==" | "filter-<" | "filter->" | "filter-<=" | "filter->=" | "filter-has" | "filter-in" => {
+                        true
+                    }
+                    "geometry-type" | "filter-type-==" | "filter-type-in" => false,
+                    _ => return false,
+                };
+                if reads_key {
+                    let key = e.args().first().and_then(|arg| downcast::<Literal>(&**arg));
+                    match key.map(Literal::get_value) {
+                        Some(Value::String(key)) => keys.push(key.clone()),
+                        _ => return false,
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    let mut groupable = true;
+    expression.each_child(&mut |e| {
+        groupable = groupable && collect_feature_property_keys(e, keys);
+    });
+    groupable
 }

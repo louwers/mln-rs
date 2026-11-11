@@ -6,7 +6,7 @@ pub mod geometry_tile_data;
 pub mod tile_id;
 
 pub use geometry_tile_data::{
-    EncodedTileData, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData,
+    EncodedTileData, FeatureGroups, GeometryCollection, GeometryCoordinate, GeometryCoordinates, GeometryTileData,
     GeometryTileFeature, GeometryTileLayer,
 };
 pub use tile_id::{CanonicalTileID, OverscaledTileID, UnwrappedTileID};
