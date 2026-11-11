@@ -22,8 +22,8 @@ use std::sync::Arc;
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{CameraOptions, MapDebugOptions, MapMode, TileLodMode};
 use mln_renderer::{
-    ExceptionPtr, FontStack, GlyphRange, RenderMode, RendererFrontend, RendererObserver, RenderingStats,
-    UpdateParameters,
+    ExceptionPtr, FontStack, GlyphRange, OverscaledTileID, RenderMode, RendererFrontend, RendererObserver,
+    RenderingStats, TileOperation, UpdateParameters,
 };
 use mln_storage::FileSource;
 use mln_style::Style;
@@ -65,15 +65,15 @@ impl TransformObserver for MapTransformObserver {
 
 /// A style::Observer call, queued while the style is borrowed mutably.
 enum StyleEvent {
-    SourceChanged,
+    SourceChanged(String),
     Update,
     StyleLoading,
     StyleLoaded,
     StyleError(ExceptionPtr),
     ResourceError(ExceptionPtr),
-    SpriteLoaded,
-    SpriteError,
-    SpriteRequested,
+    SpriteLoaded(Option<Sprite>),
+    SpriteError(Option<Sprite>, ExceptionPtr),
+    SpriteRequested(Option<Sprite>),
     /// Port-only: a `Style::loadURL` response is waiting (see
     /// `Observer::on_style_response`).
     StyleResponse,
@@ -93,8 +93,8 @@ impl MapStyleObserver {
 }
 
 impl SourceObserver for MapStyleObserver {
-    fn on_source_changed(&self, _source: &dyn Source) {
-        self.dispatch(StyleEvent::SourceChanged);
+    fn on_source_changed(&self, source: &dyn Source) {
+        self.dispatch(StyleEvent::SourceChanged(source.get_id()));
     }
 }
 
@@ -114,14 +114,14 @@ impl StyleObserver for MapStyleObserver {
     fn on_resource_error(&self, error: ExceptionPtr) {
         self.dispatch(StyleEvent::ResourceError(error));
     }
-    fn on_sprite_loaded(&self, _sprite: Option<&Sprite>) {
-        self.dispatch(StyleEvent::SpriteLoaded);
+    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
+        self.dispatch(StyleEvent::SpriteLoaded(sprite.cloned()));
     }
-    fn on_sprite_error(&self, _sprite: Option<&Sprite>, _error: ExceptionPtr) {
-        self.dispatch(StyleEvent::SpriteError);
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+        self.dispatch(StyleEvent::SpriteError(sprite.cloned(), error));
     }
-    fn on_sprite_requested(&self, _sprite: Option<&Sprite>) {
-        self.dispatch(StyleEvent::SpriteRequested);
+    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
+        self.dispatch(StyleEvent::SpriteRequested(sprite.cloned()));
     }
     fn on_style_response(&self) {
         self.dispatch(StyleEvent::StyleResponse);
@@ -252,15 +252,15 @@ impl MapImpl {
 
     fn handle_style_event(&self, event: StyleEvent) {
         match event {
-            StyleEvent::SourceChanged => self.on_source_changed(),
+            StyleEvent::SourceChanged(source_id) => self.on_source_changed(&source_id),
             StyleEvent::Update => self.on_update(),
             StyleEvent::StyleLoading => self.on_style_loading(),
             StyleEvent::StyleLoaded => self.on_style_loaded(),
             StyleEvent::StyleError(error) => self.on_style_error(error),
             StyleEvent::ResourceError(error) => RendererObserver::on_resource_error(self, error),
-            // TODO(port): MapObserver::onSpriteLoaded / onSpriteError /
-            // onSpriteRequested (and the action journal).
-            StyleEvent::SpriteLoaded | StyleEvent::SpriteError | StyleEvent::SpriteRequested => {}
+            StyleEvent::SpriteLoaded(sprite) => self.on_sprite_loaded(sprite.as_ref()),
+            StyleEvent::SpriteError(sprite, error) => self.on_sprite_error(sprite.as_ref(), error),
+            StyleEvent::SpriteRequested(sprite) => self.on_sprite_requested(sprite.as_ref()),
             // C++ parses inside the file source callback (the lambda in
             // Style::Impl::loadURL); the observer calls the parse makes are
             // queued while the style is borrowed and replayed here.
@@ -273,8 +273,8 @@ impl MapImpl {
 
     // MARK: - Map::Impl StyleObserver
 
-    fn on_source_changed(&self) {
-        // TODO(port): observer.onSourceChanged(source).
+    fn on_source_changed(&self, source_id: &str) {
+        self.observer.on_source_changed(source_id);
     }
 
     pub fn on_update(&self) {
@@ -361,6 +361,18 @@ impl MapImpl {
         let description = error.to_string();
 
         self.observer.on_did_fail_loading_map(type_, &description);
+    }
+
+    fn on_sprite_loaded(&self, sprite: Option<&Sprite>) {
+        self.observer.on_sprite_loaded(sprite);
+    }
+
+    fn on_sprite_error(&self, sprite: Option<&Sprite>, error: ExceptionPtr) {
+        self.observer.on_sprite_error(sprite, error);
+    }
+
+    fn on_sprite_requested(&self, sprite: Option<&Sprite>) {
+        self.observer.on_sprite_requested(sprite);
     }
 
     // MARK: - Map
@@ -488,6 +500,10 @@ impl RendererObserver for MapImpl {
 
     fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
         self.observer.on_glyphs_requested(font_stack, range);
+    }
+
+    fn on_tile_action(&self, op: TileOperation, id: &OverscaledTileID, source_id: &str) {
+        self.observer.on_tile_action(op, id, source_id);
     }
 }
 

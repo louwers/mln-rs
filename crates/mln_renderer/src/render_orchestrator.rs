@@ -185,9 +185,10 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
 
     /// `onTileAction(RenderSource&, TileOperation, const OverscaledTileID&,
     /// const std::string&)`.
-    fn on_tile_action(&self, _source_id: &str, _op: TileOperation, _tile_id: &OverscaledTileID, _tile_source_id: &str) {
-        // TODO(port): observer->onTileAction(op, id, sourceID)
-        // (RendererObserver tile callbacks).
+    fn on_tile_action(&self, _source_id: &str, op: TileOperation, tile_id: &OverscaledTileID, tile_source_id: &str) {
+        if let Some(observer) = shared_observer(&self.observer) {
+            observer.on_tile_action(op, tile_id, tile_source_id);
+        }
     }
 }
 

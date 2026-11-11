@@ -6,8 +6,11 @@ pub use mln_gfx::rendering_stats::{
     FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, RenderingStats, SourceLayerID,
 };
 pub use mln_text::glyph::GlyphRange;
+pub use mln_tile_id::OverscaledTileID;
 pub use mln_util::exception::ExceptionPtr;
 pub use mln_util::font_stack::FontStack;
+
+pub use crate::tile::TileOperation;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u32)]
@@ -20,7 +23,7 @@ pub enum RenderMode {
 ///
 /// C++ has four `onDidFinishRenderingFrame` overloads that forward to each
 /// other; the port keeps the one the renderer calls (with the stats).
-// TODO(port): `onRegisterShaders`, shader compile callbacks, tile callbacks,
+// TODO(port): `onRegisterShaders`, shader compile callbacks,
 // `SymbolErrorObserver::onSymbolError`.
 pub trait RendererObserver {
     /// Signals that a repaint is required.
@@ -64,6 +67,10 @@ pub trait RendererObserver {
 
     /// A glyph range of a font stack was requested.
     fn on_glyphs_requested(&self, _font_stack: &FontStack, _range: &GlyphRange) {}
+
+    /// A tile of the source `source_id` went through `op`: a request, a
+    /// response, the start or end of its parse, an error or a cancel.
+    fn on_tile_action(&self, _op: TileOperation, _id: &OverscaledTileID, _source_id: &str) {}
 
     /// Render layer or drawable failed.
     fn on_render_error(&self, _error: ExceptionPtr) {}

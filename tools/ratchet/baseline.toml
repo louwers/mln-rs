@@ -210,7 +210,7 @@
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
 "crates/mln_map/src/map.rs" = 4
-"crates/mln_map/src/map_impl.rs" = 8
+"crates/mln_map/src/map_impl.rs" = 6
 "crates/mln_map/src/map_observer.rs" = 1
 "crates/mln_map/tests/gtest_action_journal.rs" = 7
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
@@ -223,7 +223,7 @@
 "crates/mln_renderer/src/layers/render_heatmap_layer.rs" = 2
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 1
 "crates/mln_renderer/src/render_layer.rs" = 2
-"crates/mln_renderer/src/render_orchestrator.rs" = 17
+"crates/mln_renderer/src/render_orchestrator.rs" = 16
 "crates/mln_renderer/src/render_source.rs" = 3
 "crates/mln_renderer/src/render_static_data.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1

@@ -25,7 +25,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
     NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
-use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
+use mln_renderer::{OverscaledTileID, RendererFrontend, RendererObserver, TileOperation, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
@@ -36,6 +36,7 @@ use mln_storage::{
 use mln_style::conversion::layer::convert_layer;
 use mln_style::conversion::{Convertible, Error as ConversionError};
 use mln_style::custom_tile_loader::TileFunction;
+use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
@@ -49,6 +50,7 @@ use mln_style::sources::custom_geometry_source::{
 use mln_style::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
+use mln_style::sprite::Sprite;
 use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{PropertyValue, TransitionOptions, source};
 use mln_style_types::VisibilityType;
@@ -1338,6 +1340,125 @@ fn glyph_range_errors_reach_the_observer() {
     );
 }
 
+// The map observer hears each sprite the style requests, and whether it
+// loaded or failed.
+#[test]
+fn sprite_events_reach_the_observer() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+
+    let serve = |kind: Kind, file: &'static str| {
+        test.file_source.set_response(kind, move |resource| {
+            if resource.url.starts_with("test://sprites/good") {
+                Some(file_response(file))
+            } else {
+                let mut response = Response::new();
+                response.error = Some(Box::new(ResponseError::new(Reason::NotFound, "Not found by the test")));
+                Some(response)
+            }
+        });
+    };
+    serve(Kind::SpriteJSON, "test/fixtures/resources/sprite.json");
+    serve(Kind::SpriteImage, "test/fixtures/resources/sprite.png");
+
+    let requested: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
+    let loaded: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
+    let errors: Rc<RefCell<Vec<(Option<Sprite>, String)>>> = Rc::default();
+    let r = requested.clone();
+    test.observer.on_sprite_requested_callback.set(move |sprite| r.borrow_mut().push(sprite));
+    let (l, e, run_loop) = (loaded.clone(), errors.clone(), test.run_loop.clone());
+    let stop_when_settled = move || {
+        if l.borrow().len() == 1 && !e.borrow().is_empty() {
+            run_loop.stop();
+        }
+    };
+    let (l, stop) = (loaded.clone(), stop_when_settled.clone());
+    test.observer.on_sprite_loaded_callback.set(move |sprite| {
+        l.borrow_mut().push(sprite);
+        stop();
+    });
+    // The file source retries a failed request, so a failure can repeat.
+    let (e, stop) = (errors.clone(), stop_when_settled);
+    test.observer.on_sprite_error_callback.set(move |(sprite, error)| {
+        let error = (sprite, error.to_string());
+        if !e.borrow().contains(&error) {
+            e.borrow_mut().push(error);
+        }
+        stop();
+    });
+
+    test.load_json(
+        r#"{
+            "version": 8,
+            "sprite": [{"id": "good", "url": "test://sprites/good"}, {"id": "bad", "url": "test://sprites/bad"}],
+            "sources": {},
+            "layers": [{"id": "background", "type": "background"}]
+        }"#,
+    );
+    run_with_timeout(&test.run_loop, 10);
+
+    let good = Some(Sprite::new("good", "test://sprites/good"));
+    let bad = Some(Sprite::new("bad", "test://sprites/bad"));
+    assert_eq!(requested.take(), [good.clone(), bad.clone()]);
+    assert_eq!(loaded.take(), [good]);
+    assert_eq!(errors.take(), [(bad, "Not found by the test".to_owned())]);
+}
+
+// A style without a sprite loads an empty one, which the observer hears as
+// `None`, with no request before it.
+#[test]
+fn a_style_without_a_sprite_reports_it_loaded() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let requested = Rc::new(Cell::new(0));
+    let loaded: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
+    let r = requested.clone();
+    test.observer.on_sprite_requested_callback.set(move |_| r.set(r.get() + 1));
+    let l = loaded.clone();
+    test.observer.on_sprite_loaded_callback.set(move |sprite| l.borrow_mut().push(sprite));
+
+    test.load_json(r#"{"version": 8, "sources": {}, "layers": []}"#);
+
+    assert_eq!(requested.get(), 0);
+    assert_eq!(loaded.take(), [None]);
+}
+
+// The observer hears a source change both when it comes from a file source
+// response, as a TileJSON, and when it's made through the map's style, as
+// new GeoJSON data, which it hears once the style is no longer borrowed.
+#[test]
+fn source_changes_reach_the_observer() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.file_source.set_response(Kind::Source, |_| Some(file_response("test/fixtures/resources/source_vector.json")));
+
+    let changed: Rc<RefCell<Vec<String>>> = Rc::default();
+    let (c, run_loop) = (changed.clone(), test.run_loop.clone());
+    test.observer.on_source_changed_callback.set(move |source_id| {
+        c.borrow_mut().push(source_id);
+        run_loop.stop();
+    });
+
+    test.load_json(
+        r#"{
+            "version": 8,
+            "sources": {
+                "described": {"type": "vector", "url": "test://tiles.json"},
+                "points": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}
+            },
+            "layers": []
+        }"#,
+    );
+    run_with_timeout(&test.run_loop, 10);
+    assert_eq!(changed.take(), ["described"]);
+
+    {
+        let mut map = test.map();
+        let style = map.get_style_mut();
+        let source = style.get_source("points").unwrap().as_any().downcast_ref::<GeoJSONSource>().unwrap();
+        source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(1.0, 1.0)))).unwrap();
+        assert!(changed.borrow().is_empty());
+    }
+    assert_eq!(changed.take(), ["points"]);
+}
+
 const ISSUE12432_STYLE: &str = r#"{
       "version": 8,
       "sources": {
@@ -2312,13 +2433,117 @@ fn invalid_utf8_in_tile() {
 }
 
 // gtest: Map.ObserveTileLifecycle
+// TODO(port): the half of the gtest that checks the pre/post compile events
+// of the fill and fill-outline shaders (MapObserver has no shader callbacks).
 #[test]
-#[ignore = "TODO(port): MapObserver::onTileAction and onPre/PostCompileShader (TileOperation); see map.test.cpp:1843"]
 fn observe_tile_lifecycle() {
-    // test/map/map.test.cpp:1843: checks the order of the tile operations
-    // (RequestedFromCache/Network, LoadFromCache/Network, StartParse,
-    // EndParse, Cancelled) for the four z10 tiles around San Francisco and
-    // the pre/post compile events of the fill and fill-outline shaders.
+    let _run_loop = RunLoop::new();
+
+    let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
+    // We expect to see a valid lifecycle for every tile in this list.
+    let expected_tiles = [
+        OverscaledTileID::with_zxy(10, 0, 10, 163, 395),
+        OverscaledTileID::with_zxy(10, 0, 10, 163, 396),
+        OverscaledTileID::with_zxy(10, 0, 10, 164, 395),
+        OverscaledTileID::with_zxy(10, 0, 10, 164, 396),
+        // Lower zooms can also be seen, but not always, so we ignore them.
+    ];
+
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let tile_ops = tile_ops.clone();
+        observer.on_tile_action_callback.set(move |(op, id, source_id)| {
+            if source_id == "mapbox" {
+                tile_ops.borrow_mut().push((id, op));
+            }
+        });
+    }
+
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let mut map = Map::with_resource_options(
+        &frontend,
+        observer.clone(),
+        MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
+        &ResourceOptions::default()
+            .with_cache_path(":memory:")
+            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        &ClientOptions::default(),
+    )
+    .unwrap();
+    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+    let mut layer = FillLayer::new("landcover", "mapbox");
+    layer.set_source_layer("landcover");
+    layer.set_fill_color(&PropertyValue::Constant(Color::new(0.0, 1.0, 0.0, 1.0)));
+    map.get_style_mut().add_layer(Box::new(layer), None).unwrap();
+    map.jump_to(&cam().with_center(Some(ll(37.8, -122.5))).with_zoom(Some(10.0)));
+    frontend.render(&mut map).unwrap();
+
+    use TileOperation::*;
+    let tile_ops = tile_ops.borrow();
+    for tile in expected_tiles {
+        let mut stage = NullOp;
+        let mut parsing = false;
+
+        for (index, (id, op)) in tile_ops.iter().enumerate() {
+            if *id != tile {
+                continue;
+            }
+            let context = format!("{tile} op {index}: {op:?} after {stage:?}");
+            match op {
+                RequestedFromCache => {
+                    assert_eq!(stage, NullOp, "{context}");
+                }
+                RequestedFromNetwork => {
+                    // Parsing happens concurrently with the file source
+                    // request and can start and stop between requests
+                    assert!(matches!(stage, StartParse | EndParse | LoadFromCache), "{context}");
+                }
+                LoadFromNetwork => {
+                    // Parsing happens concurrently with the file source
+                    // request and can start and stop between requests
+                    assert!(matches!(stage, StartParse | EndParse | RequestedFromNetwork), "{context}");
+                }
+                LoadFromCache => {
+                    assert!(matches!(stage, RequestedFromCache | StartParse), "{context}");
+                }
+                StartParse => {
+                    // Parsing is expected to be started early during the
+                    // request process by a call to `setLayers`
+                    assert!(
+                        matches!(stage, RequestedFromCache | RequestedFromNetwork | LoadFromCache | LoadFromNetwork),
+                        "{context}"
+                    );
+                    // We must not already be parsing when seeing this marker.
+                    assert!(!parsing, "{context}");
+                    parsing = true;
+                }
+                Cancelled => {
+                    assert!(
+                        matches!(
+                            stage,
+                            RequestedFromCache | RequestedFromNetwork | LoadFromNetwork | LoadFromCache | StartParse
+                        ),
+                        "{context}"
+                    );
+                    parsing = false;
+                }
+                EndParse => {
+                    // A parse that a newer response interrupts isn't
+                    // cancelled, so EndParse can follow the network request
+                    // or response as well as StartParse.
+                    assert!(matches!(stage, StartParse | LoadFromNetwork | RequestedFromNetwork), "{context}");
+                    // We must have been parsing to see the EndParse marker.
+                    assert!(parsing, "{context}");
+                    parsing = false;
+                }
+                NullOp | Error => panic!("{context}"),
+            }
+            stage = *op;
+        }
+
+        assert!(matches!(stage, EndParse | Cancelled), "{tile} ends at {stage:?}");
+        assert!(!parsing, "{tile} is still parsing");
+    }
 }
 
 // gtest: Map.EmptyPlacementDoesNotRequestRepaint

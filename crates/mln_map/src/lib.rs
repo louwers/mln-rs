@@ -26,5 +26,6 @@ pub use mln_map_types::{
     TransformState, TransitionEnd, TransitionOutcome, ViewportMode,
 };
 pub use mln_renderer::{
-    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, RenderingStats, SourceLayerID,
+    FeatureInfo, FrameRenderedFeaturesMap, LayerFeaturesMap, NDCBound, OverscaledTileID, RenderingStats, SourceLayerID,
+    TileOperation,
 };
