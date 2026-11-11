@@ -16,17 +16,28 @@ permissions:
 jobs:
   # Every test (`just ci-coverage`): the libraries' tests and the shared
   # render, query and expression suites (the render and query suites twice:
-  # also with the tile workers behind the worker codec), on Linux (wgpu
-  # renders through Vulkan/lavapipe) and macOS (through Metal), with their
-  # line coverage uploaded to Codecov (codecov.yml). The differential tests
-  # against the C++ core are in louwers/mln-rs-difftests.
+  # also with the tile workers behind the worker codec), with their line
+  # coverage uploaded to Codecov (codecov.yml). The headless renders go
+  # through each backend of a platform: WebGPU on Linux (wgpu on
+  # Vulkan/lavapipe), and on macOS WebGPU (wgpu on Metal) and the Metal
+  # backend itself (MLN_RENDER_BACKEND=metal), under Metal's API validation,
+  # which aborts on an error. The differential tests against the C++ core
+  # are in louwers/mln-rs-difftests.
   test:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-26.04, macos-26]
+        backend: [webgpu]
+        include:
+          - os: macos-26
+            backend: metal
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      MLN_RENDER_BACKEND: ${{ matrix.backend }}
+      MTL_DEBUG_LAYER: ${{ matrix.backend == 'metal' && '1' || '0' }}
+      MTL_DEBUG_LAYER_ERROR_MODE: assert
     steps:
       - uses: actions/checkout@v7
 
@@ -61,7 +72,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: render-tests-${{ runner.os }}
+          name: render-tests-${{ runner.os }}-${{ matrix.backend }}
           path: |
             target/llvm-cov-target/tmp/render_tests
             target/llvm-cov-target/tmp/render_tests_through_the_codec
