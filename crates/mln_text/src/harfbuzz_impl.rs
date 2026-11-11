@@ -24,7 +24,7 @@ use harfrust::{Buffer, Direction, Feature, Language, Script, ShapeOptions, Shape
 use mln_util::sync::MutexExt;
 
 use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
-use crate::glyph::{Glyph, GlyphID, GlyphIDType};
+use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz::HBShapeAdjust;
 use crate::hb_ft::HbFtFont;
 use crate::hb_ucd;
@@ -70,13 +70,13 @@ fn hb_tiny_features() -> [Feature; 3] {
 
 /// A table of a font file, in the file's own bytes.
 struct TableBytes {
-    data: Arc<Vec<u8>>,
+    data: FontData,
     range: std::ops::Range<usize>,
 }
 
 impl AsRef<[u8]> for TableBytes {
     fn as_ref(&self) -> &[u8] {
-        &self.data[self.range.clone()]
+        &self.data.as_bytes()[self.range.clone()]
     }
 }
 
@@ -94,7 +94,7 @@ fn hb_tiny_font(face: &FreeTypeFace) -> Option<Font> {
         }
         let &(offset, length) = tables.get(&bytes)?;
         let range = offset..offset + length;
-        let table = data.get(range.clone())?;
+        let table = data.as_bytes().get(range.clone())?;
         if (&bytes == b"GSUB" || &bytes == b"GPOS") && table.len() >= 4 {
             // HB_NO_VAR: find_variations_index never finds one. Version 1.0
             // headers have no FeatureVariations offset.
@@ -113,7 +113,7 @@ fn hb_tiny_font(face: &FreeTypeFace) -> Option<Font> {
 
 impl Impl {
     /// `HBShaper::Impl::Impl`: `hb_ft_font_create` + `hb_buffer_create`.
-    pub fn new(type_: GlyphIDType, font_file_data: impl Into<Arc<Vec<u8>>>, lib: &FreeTypeLibrary) -> Self {
+    pub fn new(type_: GlyphIDType, font_file_data: impl Into<FontData>, lib: &FreeTypeLibrary) -> Self {
         let face = FreeTypeFace::from_memory(font_file_data, lib);
         let font = if face.is_valid() { hb_tiny_font(&face) } else { None };
         Impl { type_, face, font, plans: Mutex::new(HashMap::new()) }

@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use mln_text::HBShapeAdjust;
-use mln_text::glyph::{Glyph, GlyphID, GlyphIDType};
+use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use mln_util::sync::MutexExt;
 
 /// A font file loaded for shaping: what `HBShaper` does for GlyphManager.
@@ -37,7 +37,7 @@ pub trait FontFaceEngine: Send + Sync {
     /// `HBShaper(type, fontFileData)`, once `prepare` reported the engine
     /// ready: `None` when `data` isn't a font the engine can read. The
     /// shaper may keep `data` (the response's bytes) instead of copying it.
-    fn load(&self, type_: GlyphIDType, data: Arc<Vec<u8>>) -> Option<Box<dyn FontFaceShaper>>;
+    fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>>;
 }
 
 static ENGINE: Mutex<Option<Arc<dyn FontFaceEngine>>> = Mutex::new(None);
@@ -76,7 +76,7 @@ fn default_engine() -> Arc<dyn FontFaceEngine> {
                 .to_owned()));
         }
 
-        fn load(&self, _type: GlyphIDType, _data: Arc<Vec<u8>>) -> Option<Box<dyn FontFaceShaper>> {
+        fn load(&self, _type: GlyphIDType, _data: FontData) -> Option<Box<dyn FontFaceShaper>> {
             None
         }
     }
@@ -85,9 +85,7 @@ fn default_engine() -> Arc<dyn FontFaceEngine> {
 
 #[cfg(feature = "font-face-shaper")]
 mod in_process {
-    use std::sync::Arc;
-
-    use mln_text::glyph::{Glyph, GlyphID, GlyphIDType};
+    use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
     use mln_text::{FreeTypeLibrary, HBShapeAdjust, HBShaper};
 
     use super::{FontFaceEngine, FontFaceShaper};
@@ -101,7 +99,7 @@ mod in_process {
         }
 
         /// `loadHBShaper`'s `HBShaper(type, data, ftLibrary)` and `valid()`.
-        fn load(&self, type_: GlyphIDType, data: Arc<Vec<u8>>) -> Option<Box<dyn FontFaceShaper>> {
+        fn load(&self, type_: GlyphIDType, data: FontData) -> Option<Box<dyn FontFaceShaper>> {
             let shaper = HBShaper::new(type_, data, &FreeTypeLibrary::new());
             shaper.valid().then(|| Box::new(shaper) as Box<dyn FontFaceShaper>)
         }
