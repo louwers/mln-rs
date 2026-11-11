@@ -63,38 +63,24 @@ fn make_fullscreen_layer_group(
     Some(layer_group)
 }
 
-/// The direction of the sun in the globe's frame, where the atmosphere traces
-/// its rays (`get_inverse_globe_view_projection_matrix`). A map-anchored light
-/// is fixed to the globe, so its direction is already in that frame. A
-/// viewport-anchored light is fixed to the view, so it goes back through the
-/// globe's rotation into the view (`globe_view_projection_matrix`), inverted.
-///
-/// Deviation: C++ turns the map-anchored light through that rotation and
-/// leaves the viewport-anchored one as is, which is GL JS's `getSunPos`, but
-/// GL JS traces the atmosphere in view space. So in C++ a viewport light stays
-/// over one place on the globe and a map light moves across it with the
-/// camera. GL JS's projection/globe/atmosphere/light-position-map and
-/// ligth-position-viewport render tests show what the port draws;
-/// render-tests/sky/atmosphere-globe, which expects the C++ lighting, is on
-/// tools/render-test/ignores/rust-port.json.
 fn sun_position(light: &EvaluatedLight, state: &TransformState, blend: f32) -> [f32; 4] {
     let position = light.get::<LightPosition>().get_cartesian();
     let mut sun: Vec4 = [-f64::from(position[0]), -f64::from(position[1]), -f64::from(position[2]), 0.0];
 
-    if *light.get::<LightAnchor>() == LightAnchorType::Viewport {
-        let center = state.get_lat_lng(WrapMode::Unwrapped);
+    if *light.get::<LightAnchor>() == LightAnchorType::Map {
         let mut m: Mat4 = [0.0; 16];
         matrix::identity(&mut m);
         let a = m;
-        matrix::rotate_y(&mut m, &a, center.longitude() * PI / 180.0);
+        matrix::rotate_z(&mut m, &a, state.get_roll());
         let a = m;
-        matrix::rotate_x(&mut m, &a, -center.latitude() * PI / 180.0);
+        matrix::rotate_x(&mut m, &a, -state.get_pitch());
         let a = m;
-        matrix::rotate_z(&mut m, &a, state.get_bearing());
+        matrix::rotate_z(&mut m, &a, -state.get_bearing());
+        let center = state.get_lat_lng(WrapMode::Unwrapped);
         let a = m;
-        matrix::rotate_x(&mut m, &a, state.get_pitch());
+        matrix::rotate_x(&mut m, &a, center.latitude() * PI / 180.0);
         let a = m;
-        matrix::rotate_z(&mut m, &a, -state.get_roll());
+        matrix::rotate_y(&mut m, &a, -center.longitude() * PI / 180.0);
         let a = sun;
         matrix::transform_mat4(&mut sun, &a, &m);
     }
@@ -247,58 +233,5 @@ impl SkyPass {
 
     pub fn has_atmosphere(&self) -> bool {
         self.atmosphere_layer_group.as_ref().is_some_and(|group| !group.borrow().empty())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use mln_style_types::Position;
-    use mln_util::geo::LatLng;
-
-    use super::*;
-
-    fn light(anchor: LightAnchorType, position: [f32; 3]) -> EvaluatedLight {
-        let mut light = EvaluatedLight::default();
-        *light.get_mut::<LightAnchor>() = anchor;
-        *light.get_mut::<LightPosition>() = Position::new(position);
-        light
-    }
-
-    fn camera(latitude: f64, longitude: f64, bearing: f64) -> TransformState {
-        let mut state = TransformState::default();
-        state.set_size(Size::new(512, 512));
-        state.set_lat_lng_zoom(&LatLng::new(latitude, longitude).unwrap(), 1.0);
-        state.set_bearing(bearing);
-        state
-    }
-
-    fn assert_sun(expected: [f32; 3], sun: [f32; 4]) {
-        for (expected, actual) in expected.iter().zip(sun) {
-            assert!((expected - actual).abs() < 1e-5, "expected {expected:?}, got {sun:?}");
-        }
-    }
-
-    // In the globe's frame +x points to 0°N 90°E, +y to the North Pole and
-    // +z to 0°N 0°E.
-
-    // As GL JS's projection/globe/atmosphere/light-position-map: wherever the
-    // camera is, a map light at [1.5, 90, 90] stays over 0°N 90°E.
-    #[test]
-    fn map_light_stays_over_one_place() {
-        let light = light(LightAnchorType::Map, [1.5, 90.0, 90.0]);
-        for state in [camera(0.0, 0.0, 0.0), camera(0.0, 160.0, 0.0), camera(30.0, 160.0, 0.6)] {
-            assert_sun([1.5, 0.0, 0.0], sun_position(&light, &state, 1.0));
-        }
-    }
-
-    // As GL JS's projection/globe/atmosphere/ligth-position-viewport: a
-    // viewport light at [1.5, 90, 90] stays on the right of the view, which
-    // is east of the center: over 0°N 90°E seen from 0°N 0°E, over 0°N 180°
-    // seen from 0°N 90°E.
-    #[test]
-    fn viewport_light_stays_on_screen() {
-        let light = light(LightAnchorType::Viewport, [1.5, 90.0, 90.0]);
-        assert_sun([1.5, 0.0, 0.0], sun_position(&light, &camera(0.0, 0.0, 0.0), 1.0));
-        assert_sun([0.0, 0.0, -1.5], sun_position(&light, &camera(0.0, 90.0, 0.0), 1.0));
     }
 }

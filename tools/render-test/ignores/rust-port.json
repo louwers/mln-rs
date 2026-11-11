@@ -5,6 +5,5 @@
   "render-tests/fill-outline-color/zoom-and-property-function": "C++ WebGPU fails it too (metrics/ignores/platform-macos-webgpu.json): data-driven fill outlines are 1px line primitives on WebGPU",
   "render-tests/fill-pattern/uneven-pattern": "TODO(port): beyond M1",
   "render-tests/fill-pattern/wrapping-with-interpolation": "TODO(port): beyond M1",
-  "render-tests/icon-text-fit/textFit-grid-long": "C++ Vulkan fails it too (metrics/ignores/platform-linux-vulkan.json, windows-vulkan.json): the stretched box's half-pixel edges rasterize differently per backend (GL/Metal/iOS/Android-Vulkan baselines all differ in that cell; ours has the iOS box height)",
-  "render-tests/sky/atmosphere-globe": "C++ turns its map-anchored sun twice (sky_pass.rs, sun_position): the port lights the globe as GL JS's projection/globe/atmosphere/light-position-map does, from the left here, where this expectation has the lit side on the right"
+  "render-tests/icon-text-fit/textFit-grid-long": "C++ Vulkan fails it too (metrics/ignores/platform-linux-vulkan.json, windows-vulkan.json): the stretched box's half-pixel edges rasterize differently per backend (GL/Metal/iOS/Android-Vulkan baselines all differ in that cell; ours has the iOS box height)"
 }
