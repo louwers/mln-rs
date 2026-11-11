@@ -6,7 +6,7 @@
 // it calls the observer; here the data map's borrow ends first, so an
 // observer may call back into the loader.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
@@ -26,6 +26,9 @@ use crate::sprite_parser::parse_sprite_images;
 /// `SpriteLoader::Data`.
 #[derive(Default)]
 struct SpriteData {
+    /// Which `load` this data is for, so a parse of an earlier load's data
+    /// doesn't answer for this one.
+    load: u64,
     image: Option<Data>,
     json: Option<Data>,
     json_request: Option<Box<dyn AsyncRequest>>,
@@ -36,6 +39,8 @@ struct Inner {
     data_map: RefCell<VecMap<String, SpriteData>>,
     observer: RefCell<Rc<dyn SpriteLoaderObserver>>,
     thread_pool: TaggedScheduler,
+    /// Counts the calls to `load`.
+    loads: Cell<u64>,
 }
 
 /// `SpriteLoader`.
@@ -91,11 +96,11 @@ impl Inner {
 
     /// `emitSpriteLoadedIfComplete(style::Sprite)`.
     fn emit_sprite_loaded_if_complete(self: &Rc<Self>, sprite: Sprite) {
-        let (image, json) = {
+        let (image, json, load) = {
             let data_map = self.data_map.borrow();
             let data = data_map.get(&sprite.id).expect("sprite data");
             match (&data.image, &data.json) {
-                (Some(image), Some(json)) => (image.clone(), json.clone()),
+                (Some(image), Some(json)) => (image.clone(), json.clone(), data.load),
                 _ => return,
             }
         };
@@ -118,6 +123,10 @@ impl Inner {
             /* resultClosure */
             move |result: ParseResult| {
                 if let Some(this) = factory.upgrade() {
+                    let current = this.data_map.borrow().get(&sprite.id).map(|data| data.load);
+                    if current != Some(load) {
+                        return;
+                    }
                     let observer = this.observer();
                     match result.error {
                         Some(error) => observer.on_sprite_error(Some(sprite), error),
@@ -138,6 +147,7 @@ impl SpriteLoader {
                 data_map: RefCell::new(VecMap::new()),
                 observer: RefCell::new(Rc::new(NullSpriteLoaderObserver)),
                 thread_pool,
+                loads: Cell::new(0),
             }),
         }
     }
@@ -157,7 +167,10 @@ impl SpriteLoader {
 
         // `dataMap[id] = std::make_unique<Data>()`: a previous load's
         // requests are cancelled (outside the borrow).
-        let previous = self.inner.data_map.borrow_mut().insert(id.clone(), SpriteData::default());
+        let load = self.inner.loads.get() + 1;
+        self.inner.loads.set(load);
+        let previous =
+            self.inner.data_map.borrow_mut().insert(id.clone(), SpriteData { load, ..SpriteData::default() });
         drop(previous);
 
         let make_callback = |part: Part| {
@@ -181,6 +194,15 @@ impl SpriteLoader {
         if let Some(data) = self.inner.data_map.borrow_mut().get_mut(&id) {
             data.sprite_request = Some(sprite_request);
         }
+    }
+
+    /// Sets the pixel ratio for the loads from now on. Returns whether
+    /// they fetch the sprites at another resolution than before, so that a
+    /// sprite loaded already needs loading again.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) -> bool {
+        let before = Resource::sprite_json("", self.pixel_ratio).url;
+        self.pixel_ratio = pixel_ratio;
+        Resource::sprite_json("", pixel_ratio).url != before
     }
 
     /// `setObserver(SpriteLoaderObserver*)`.

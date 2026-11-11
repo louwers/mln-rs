@@ -32,7 +32,7 @@ pub struct RenderResult {
 
 struct Shared {
     size: Cell<Size>,
-    pixel_ratio: f32,
+    pixel_ratio: Cell<f32>,
     frame_time: Cell<f64>,
     backend: Rc<dyn GfxHeadlessBackend>,
     /// `backend` as the renderer's backend.
@@ -169,7 +169,7 @@ impl HeadlessFrontend {
     ) -> Self {
         let shared = Rc::new(Shared {
             size: Cell::new(size),
-            pixel_ratio,
+            pixel_ratio: Cell::new(pixel_ratio),
             frame_time: Cell::new(0.0),
             backend,
             renderer_backend,
@@ -204,7 +204,24 @@ impl HeadlessFrontend {
     pub fn set_size(&mut self, size: Size) {
         if self.shared.size.get() != size {
             self.shared.size.set(size);
-            self.shared.backend.set_size(physical_size(size, self.shared.pixel_ratio));
+            self.shared.backend.set_size(physical_size(size, self.shared.pixel_ratio.get()));
+        }
+    }
+
+    pub fn get_pixel_ratio(&self) -> f32 {
+        self.shared.pixel_ratio.get()
+    }
+
+    /// Renders at `pixel_ratio` from now on, which should be the map's
+    /// (`Map::set_pixel_ratio`): sizes the backend for it, and sets the
+    /// renderer's.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
+        if self.shared.pixel_ratio.get() != pixel_ratio {
+            self.shared.pixel_ratio.set(pixel_ratio);
+            self.shared.backend.set_size(physical_size(self.shared.size.get(), pixel_ratio));
+            if let Some(renderer) = self.shared.renderer.borrow_mut().as_mut() {
+                renderer.set_pixel_ratio(pixel_ratio);
+            }
         }
     }
 
@@ -374,7 +391,7 @@ impl Shared {
             renderer.get_or_insert_with(|| {
                 Renderer::with_glyph_cache(
                     self.renderer_backend.clone(),
-                    self.pixel_ratio,
+                    self.pixel_ratio.get(),
                     None,
                     self.glyph_cache.clone(),
                 )

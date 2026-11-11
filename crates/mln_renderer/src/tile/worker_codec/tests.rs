@@ -98,6 +98,7 @@ fn set_layers(layers: &[Immutable<dyn LayerProperties>], correlation_id: u64) ->
         global_state: None,
         available_images: Arc::new(VecSet::new()),
         subdivision_granularity: SubdivisionGranularitySetting::none(),
+        pixel_ratio: 1.0,
         correlation_id,
     }
 }
@@ -586,7 +587,7 @@ fn layers_are_defined_once() {
     let mut layers = layers(&[FILL, LINE]);
     let first = map.message(TILE, set_layers(&layers, 1)).unwrap();
     let second = map.message(TILE, set_layers(&layers, 2)).unwrap();
-    assert!(second.len() * 20 < first.len(), "{} bytes, then {}", first.len(), second.len());
+    assert!(second.len() * 15 < first.len(), "{} bytes, then {}", first.len(), second.len());
 
     // Evaluated again (another zoom), the layers' properties travel again,
     // but not the layers or their expressions.

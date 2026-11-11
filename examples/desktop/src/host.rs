@@ -61,6 +61,8 @@ pub(crate) enum Message {
     Ui(egui::RawInput),
     /// The window's new size in physical pixels.
     Resized(PhysicalSize<u32>),
+    /// The window's new scale factor, as on a display of another density.
+    ScaleFactorChanged(f64),
     Focused {
         focused: bool,
         at: Instant,
@@ -350,6 +352,10 @@ impl ApplicationHandler<UserEvent> for Host {
             // The render thread drops the map, then says it has ended.
             WindowEvent::CloseRequested => open.inbox.send(Message::Close),
             WindowEvent::Resized(size) => open.inbox.send(Message::Resized(size)),
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                open.pixel_ratio = scale_factor;
+                open.inbox.send(Message::ScaleFactorChanged(scale_factor));
+            }
             WindowEvent::Focused(focused) => open.inbox.send(Message::Focused { focused, at: Instant::now() }),
             WindowEvent::ModifiersChanged(state) => open.modifiers = modifiers(state.state()),
             WindowEvent::KeyboardInput { event, is_synthetic: false, .. } if !response.consumed => {

@@ -97,6 +97,11 @@ path = "tests/gtest_symbol_rendering.rs"
 name = "debug_options_test"
 path = "tests/debug_options_test.rs"
 
+# Map::set_pixel_ratio and HeadlessFrontend::set_pixel_ratio.
+[[test]]
+name = "pixel_ratio_test"
+path = "tests/pixel_ratio_test.rs"
+
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }

@@ -322,6 +322,9 @@ async function run(
       case 'resize':
         map.resize(data.width, data.height);
         break;
+      case 'pixelRatio':
+        map.set_pixel_ratio(data.ratio);
+        break;
       case 'style':
         map.set_style_url(data.url);
         started = performance.now();

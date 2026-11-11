@@ -234,6 +234,13 @@ pub trait Tile {
     /// parse.
     fn set_subdivision_granularity(&self, _value: &SubdivisionGranularitySetting) {}
 
+    /// Sets the pixel ratio the tile lays its layers out for, from the next
+    /// `set_layers` on. Returns whether the tile needs laying out again for
+    /// it.
+    fn set_pixel_ratio(&self, _pixel_ratio: f32) -> bool {
+        false
+    }
+
     fn set_layers(&self, _layers: &[Immutable<dyn LayerProperties>], _global_state: Option<Arc<GlobalStateMap>>) {}
 
     fn set_mask(&self, _mask: TileMask) {}

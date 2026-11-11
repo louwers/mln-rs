@@ -1065,6 +1065,31 @@ impl Map {
         Ok(())
     }
 
+    /// Sets the map's pixel ratio: device pixels per logical pixel. The
+    /// renderer draws the next frame at the new ratio and lays the loaded
+    /// tiles out again without loading them, and the style loads its sprites
+    /// again where the ratio picks their other resolution.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// ratio that isn't finite and positive.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) -> Result<(), Error> {
+        if !pixel_ratio.is_finite() || pixel_ratio <= 0.0 {
+            return Err(Error::invalid_argument(format!("pixel ratio {pixel_ratio} isn't finite and positive")));
+        }
+        self.process_events();
+        if pixel_ratio == self.pixel_ratio {
+            return Ok(());
+        }
+        self.pixel_ratio = pixel_ratio;
+        self.style.impl_.set_pixel_ratio(pixel_ratio);
+        self.on_update();
+        Ok(())
+    }
+
+    pub fn get_pixel_ratio(&self) -> f32 {
+        self.pixel_ratio
+    }
+
     pub fn set_frustum_offset(&mut self, frustum_offset: &EdgeInsets) {
         self.process_events();
         self.transform.set_frustum_offset(frustum_offset);

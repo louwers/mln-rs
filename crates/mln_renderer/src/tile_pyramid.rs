@@ -93,10 +93,17 @@ where
             tile = self.cache.pop_any_wrap(id);
         }
         let tile = match tile {
-            Some(tile) => tile,
+            Some(tile) => {
+                // A tile cached before the pixel ratio changed.
+                if tile.set_pixel_ratio(self.parameters.pixel_ratio) {
+                    tile.set_layers(self.layers, self.parameters.global_state.clone());
+                }
+                tile
+            }
             None => {
                 let tile = (self.create_tile)(id, self.observer.clone())?;
                 tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
+                tile.set_pixel_ratio(self.parameters.pixel_ratio);
                 tile.set_layers(self.layers, self.parameters.global_state.clone());
                 tile
             }
@@ -117,7 +124,10 @@ where
             tile.set_necessity(necessity);
         }
 
-        if self.needs_relayout {
+        // A new pixel ratio lays the tile out again, without the relayout
+        // that drops the cached tiles.
+        let pixel_ratio_changed = tile.set_pixel_ratio(self.parameters.pixel_ratio);
+        if self.needs_relayout || pixel_ratio_changed {
             tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
             tile.set_layers(self.layers, self.parameters.global_state.clone());
         }

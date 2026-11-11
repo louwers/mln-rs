@@ -62,6 +62,21 @@ impl RendererImpl {
         }
     }
 
+    pub fn pixel_ratio(&self) -> f32 {
+        self.pixel_ratio
+    }
+
+    /// The shaders build the pixel ratio in on some backends, so a new
+    /// ratio takes new shaders, and new drawables that use them.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
+        if pixel_ratio == self.pixel_ratio {
+            return;
+        }
+        self.pixel_ratio = pixel_ratio;
+        self.static_data = None;
+        self.orchestrator.release_shaders();
+    }
+
     pub fn render(&mut self, render_tree: &RenderTree, update_parameters: &Arc<UpdateParameters>) {
         let backend = self.backend.clone();
         let context = backend.get_context();

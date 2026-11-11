@@ -49,6 +49,20 @@ impl Renderer {
         self.impl_.as_deref_mut().expect("renderer impl")
     }
 
+    /// Draws at `pixel_ratio` device pixels per logical pixel from the next
+    /// frame on, which should be the map's (`Map::set_pixel_ratio`). The
+    /// renderer makes its shaders and drawables again, and keeps its
+    /// tiles. The host sizes the backend's framebuffer for the new ratio.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
+        let backend = self.impl_ref().backend.clone();
+        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
+        self.impl_mut().set_pixel_ratio(pixel_ratio);
+    }
+
+    pub fn get_pixel_ratio(&self) -> f32 {
+        self.impl_ref().pixel_ratio()
+    }
+
     pub fn mark_context_lost(&mut self) {
         self.impl_mut().orchestrator.mark_context_lost();
     }

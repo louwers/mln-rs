@@ -320,6 +320,18 @@ impl WebMap {
         self.map.set_size(size).map_err(js_error)
     }
 
+    /// Draws the map at `pixel_ratio` device pixels per CSS pixel from now
+    /// on, as on a display of another density, keeping its tiles, and sizes
+    /// the surface for it.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f64) -> Result<(), JsValue> {
+        self.map.set_pixel_ratio(pixel_ratio as f32).map_err(js_error)?;
+        self.pixel_ratio = pixel_ratio;
+        self.frontend.renderer.set_pixel_ratio(pixel_ratio as f32);
+        let size = self.map.get_map_options().size();
+        self.frontend.backend.set_framebuffer_size(physical(size, pixel_ratio));
+        Ok(())
+    }
+
     /// A reply from the tile worker in Web Worker `instance`, as
     /// `TileWorker::run` returns it: its bytes, then its payloads. The bytes
     /// are copied into wasm memory; the payloads stay JS arrays, which a

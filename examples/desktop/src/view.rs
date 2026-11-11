@@ -65,7 +65,8 @@ pub(crate) struct Launch {
     pub settings: Settings,
     /// The controls' egui context, which the window's thread feeds.
     pub ui: egui::Context,
-    /// The window's scale factor when it opened: the map's pixel ratio.
+    /// The window's scale factor when it opened: the map's first pixel
+    /// ratio.
     pub pixel_ratio: f64,
     /// The window's size in physical pixels.
     pub size: PhysicalSize<u32>,
@@ -482,6 +483,7 @@ impl View {
                 None => self.ui_input = Some(input),
             },
             Message::Resized(size) => self.on_resize(size),
+            Message::ScaleFactorChanged(pixel_ratio) => self.on_scale_factor_changed(pixel_ratio),
             Message::Focused { focused, at } => {
                 if !focused {
                     // A drag the window can't see the end of ends here.
@@ -509,6 +511,20 @@ impl View {
             Log::warning(Event::General, e.message);
         }
         self.dirty = true;
+    }
+
+    /// Draws the map at `pixel_ratio` from now on, keeping its tiles, and
+    /// sizes it in logical pixels of the new ratio. The window's `Resized`
+    /// that follows brings the new physical size, where it changed.
+    fn on_scale_factor_changed(&mut self, pixel_ratio: f64) {
+        if let Err(e) = self.map.set_pixel_ratio(pixel_ratio as f32) {
+            Log::warning(Event::General, e.message);
+            return;
+        }
+        self.pixel_ratio = pixel_ratio;
+        self.renderer.set_pixel_ratio(pixel_ratio as f32);
+        let size = self.backend.framebuffer_size();
+        self.on_resize(PhysicalSize::new(size.width, size.height));
     }
 
     /// The keys the map takes, which the controls didn't: the arrows pan

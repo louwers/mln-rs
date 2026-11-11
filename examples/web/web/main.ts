@@ -397,6 +397,19 @@ new ResizeObserver(() => {
   toMap({ type: 'resize', width: canvas.clientWidth, height: canvas.clientHeight });
 }).observe(canvas);
 
+// A window that moves to a display of another density draws at its pixel
+// ratio, unless the page's parameters fix the ratio.
+if (!params.has('ratio')) {
+  const watchRatio = (current: number) => {
+    matchMedia(`(resolution: ${current}dppx)`).addEventListener('change', () => {
+      const next = window.devicePixelRatio || 1;
+      toMap({ type: 'pixelRatio', ratio: next });
+      watchRatio(next);
+    }, { once: true });
+  };
+  watchRatio(ratio);
+}
+
 // The camera in the hash, #zoom/lat/lon[/bearing/pitch], or null.
 function cameraFromHash(hash: string): Camera | null {
   const parts = hash.slice(1).split('/').map(Number);

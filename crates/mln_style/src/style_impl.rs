@@ -257,6 +257,8 @@ pub struct Impl {
     default_camera: CameraOptions,
 
     pixel_ratio: f32,
+    /// The parsed style's sprites.
+    sprites: Vec<Sprite>,
 
     pub mutated: bool,
     pub loaded: bool,
@@ -323,6 +325,7 @@ impl Impl {
             name: String::new(),
             default_camera: CameraOptions::default(),
             pixel_ratio,
+            sprites: Vec::new(),
             mutated: false,
             loaded: false,
         }
@@ -457,6 +460,7 @@ impl Impl {
         self.set_sky(parser.sky.clone());
         self.set_projection(parser.projection.clone());
 
+        self.sprites = parser.sprites.clone();
         if let Some(file_source) = self.file_source.clone() {
             if parser.sprites.is_empty() {
                 // We identify no sprite with 'default' as string in the sprite loading status.
@@ -878,6 +882,23 @@ impl Impl {
 
     pub fn pixel_ratio(&self) -> f32 {
         self.pixel_ratio
+    }
+
+    /// Sets the pixel ratio that the style loads its sprites for. Where
+    /// that picks the sprites' other resolution, the style loads them
+    /// again, and keeps its images until the new ones arrive.
+    pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
+        self.pixel_ratio = pixel_ratio;
+        if !self.sprite_loader.set_pixel_ratio(pixel_ratio) {
+            return;
+        }
+        let Some(file_source) = self.file_source.clone() else {
+            return;
+        };
+        for sprite in &self.sprites {
+            self.shared.borrow_mut().sprites_loading_status.insert(sprite.id.clone(), false);
+            self.sprite_loader.load(Some(sprite.clone()), &*file_source);
+        }
     }
 
     // SpriteLoaderObserver implementation.

@@ -242,6 +242,7 @@ pub struct GeometryTileInner {
 
     show_collision_boxes: Cell<bool>,
     subdivision_granularity: Cell<SubdivisionGranularitySetting>,
+    pixel_ratio: Cell<f32>,
 
     fade_state: Cell<FadeState>,
 }
@@ -535,6 +536,7 @@ impl GeometryTile {
                 mode: parameters.mode,
                 show_collision_boxes: Cell::new(show_collision_boxes),
                 subdivision_granularity: Cell::new(SubdivisionGranularitySetting::none()),
+                pixel_ratio: Cell::new(parameters.pixel_ratio),
                 fade_state: Cell::new(FadeState::Loaded),
             }
         });
@@ -647,6 +649,7 @@ impl Tile for GeometryTile {
             global_state,
             available_images,
             subdivision_granularity,
+            pixel_ratio: inner.pixel_ratio.get(),
             correlation_id,
         });
     }
@@ -663,6 +666,10 @@ impl Tile for GeometryTile {
 
     fn set_subdivision_granularity(&self, value: &SubdivisionGranularitySetting) {
         self.inner.subdivision_granularity.set(*value);
+    }
+
+    fn set_pixel_ratio(&self, pixel_ratio: f32) -> bool {
+        self.inner.pixel_ratio.replace(pixel_ratio) != pixel_ratio
     }
 
     fn set_observer(&self, observer: Rc<dyn TileObserver>) {

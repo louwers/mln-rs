@@ -275,6 +275,10 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         self.tile.set_show_collision_boxes(show);
     }
 
+    fn set_pixel_ratio(&self, pixel_ratio: f32) -> bool {
+        self.tile.set_pixel_ratio(pixel_ratio)
+    }
+
     // layers: feature state
     fn set_feature_state(&self, states: &crate::bucket::LayerFeatureStates) {
         self.tile.set_feature_state(states);

@@ -63,6 +63,7 @@ export type ToMap =
   | { type: 'fetches' }
   | { type: 'idle' }
   | { type: 'resize'; width: number; height: number }
+  | { type: 'pixelRatio'; ratio: number }
   | { type: 'style'; url: string }
   | { type: 'jumpTo'; camera: Camera }
   | { type: 'resetNorth' }

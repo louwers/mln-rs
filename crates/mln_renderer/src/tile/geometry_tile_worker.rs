@@ -90,13 +90,15 @@ pub enum WorkerMessage {
         correlation_id: u64,
     },
     /// `setLayers(layers, globalState, availableImages,
-    /// subdivisionGranularity, correlationID)`.
+    /// subdivisionGranularity, correlationID)`, with the pixel ratio to lay
+    /// the layers out for.
     SetLayers {
         #[serde(with = "fields::layers")]
         layers: Vec<Immutable<dyn LayerProperties>>,
         global_state: Option<Arc<GlobalStateMap>>,
         available_images: Immutable<VecSet<String>>,
         subdivision_granularity: SubdivisionGranularitySetting,
+        pixel_ratio: f32,
         correlation_id: u64,
     },
     /// `setAvailableImages(availableImages, correlationID)`: parse again
@@ -269,8 +271,12 @@ impl GeometryTileWorker {
                 global_state,
                 available_images,
                 subdivision_granularity,
+                pixel_ratio,
                 correlation_id,
-            } => self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id),
+            } => {
+                self.pixel_ratio = pixel_ratio;
+                self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id)
+            }
             WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
                 self.set_available_images(available_images, correlation_id)
             }

@@ -83,6 +83,7 @@ struct Sent {
         Option<Arc<GlobalStateMap>>,
         Immutable<VecSet<String>>,
         SubdivisionGranularitySetting,
+        f32,
     )>,
 }
 
@@ -121,6 +122,7 @@ impl Sent {
                 global_state,
                 available_images,
                 subdivision_granularity,
+                pixel_ratio,
                 correlation_id,
             } => {
                 self.layers = Kept::Sent((
@@ -128,6 +130,7 @@ impl Sent {
                     global_state.clone(),
                     available_images.clone(),
                     *subdivision_granularity,
+                    *pixel_ratio,
                 ));
                 self.data.error().map(|error| (error, *correlation_id))
             }
@@ -135,7 +138,7 @@ impl Sent {
                 if let Kept::Sent((_, images)) = &mut self.data {
                     *images = available_images.clone();
                 }
-                if let Kept::Sent((_, _, images, _)) = &mut self.layers {
+                if let Kept::Sent((_, _, images, _, _)) = &mut self.layers {
                     *images = available_images.clone();
                 }
                 self.data.error().or_else(|| self.layers.error()).map(|error| (error, *correlation_id))
@@ -156,12 +159,13 @@ impl Sent {
             MessageKind::SetData => {
                 self.data = Kept::Failed(error);
                 match &self.layers {
-                    Kept::Sent((layers, global_state, available_images, subdivision_granularity)) => {
+                    Kept::Sent((layers, global_state, available_images, subdivision_granularity, pixel_ratio)) => {
                         Some(WorkerMessage::SetLayers {
                             layers: layers.clone(),
                             global_state: global_state.clone(),
                             available_images: available_images.clone(),
                             subdivision_granularity: *subdivision_granularity,
+                            pixel_ratio: *pixel_ratio,
                             correlation_id,
                         })
                     }

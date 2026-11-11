@@ -215,6 +215,9 @@ pub struct RenderOrchestrator {
 
     /// Vector with reference wrappers to the layers in style order.
     ordered_layers: Vec<RenderLayerPtr>,
+    /// Whether the next update makes the render layers again, for new
+    /// shaders.
+    remake_render_layers: bool,
     filtered_layers_for_source: Vec<Immutable<dyn LayerProperties>>,
 
     thread_pool: TaggedScheduler,
@@ -298,6 +301,7 @@ impl RenderOrchestrator {
             placed_symbol_data_collected: false,
             tile_cache_enabled: true,
             ordered_layers: Vec::new(),
+            remake_render_layers: false,
             filtered_layers_for_source: Vec::new(),
             tile_worker_transport: Rc::new(InProcessTransport::new(thread_pool.clone())),
             thread_pool,
@@ -496,7 +500,7 @@ impl RenderOrchestrator {
         // Remove removed images from sprite atlas.
         for id in image_diff.removed.keys() {
             self.image_manager.remove_image(id);
-            // TODO(port): patternAtlas->removePattern(id) (background-pattern).
+            self.pattern_atlas.borrow_mut().remove_pattern(id);
         }
 
         // Add added images to sprite atlas.
@@ -507,7 +511,7 @@ impl RenderOrchestrator {
         // Update changed images.
         for change in image_diff.changed.values() {
             if self.image_manager.update_image(change.after.clone()) {
-                // TODO(port): patternAtlas->removePattern(id) (background-pattern).
+                self.pattern_atlas.borrow_mut().remove_pattern(&change.after.id);
                 has_image_diff = true;
             }
         }
@@ -517,9 +521,25 @@ impl RenderOrchestrator {
 
         let layer_diff = diff_layers(&self.layer_impls, &update_parameters.layers);
         self.layer_impls = update_parameters.layers.clone();
-        let layers_added_or_removed = !layer_diff.added.is_empty() || !layer_diff.removed.is_empty();
 
         let mut changes: UniqueChangeRequestVec = Vec::new();
+
+        // Make each render layer again from its layer, without the relayout
+        // that adding the layer would take.
+        let render_layers_remade = std::mem::take(&mut self.remake_render_layers);
+        if render_layers_remade {
+            for render_layer in self.render_layers.values_mut() {
+                let impl_ = render_layer.borrow().base().base_impl.clone();
+                let Some(new_layer) = layermanager::create_render_layer(&impl_) else {
+                    continue;
+                };
+                render_layer.borrow_mut().layer_removed(&mut changes);
+                new_layer.borrow_mut().transition(&added_layer_transition_parameters);
+                *render_layer = new_layer;
+            }
+        }
+        let layers_added_or_removed =
+            render_layers_remade || !layer_diff.added.is_empty() || !layer_diff.removed.is_empty();
 
         // Remove render layers for removed layers.
         for id in layer_diff.removed.keys() {
@@ -575,7 +595,8 @@ impl RenderOrchestrator {
         for layer in &self.ordered_layers {
             let mut layer = layer.borrow_mut();
             let id = layer.get_id().to_owned();
-            let layer_added_or_changed = layer_diff.added.contains_key(&id) || layer_diff.changed.contains_key(&id);
+            let layer_added_or_changed =
+                render_layers_remade || layer_diff.added.contains_key(&id) || layer_diff.changed.contains_key(&id);
             evaluation_parameters.layer_changed = layer_added_or_changed;
             evaluation_parameters.has_crossfade = layer.has_crossfade();
 
@@ -1031,6 +1052,18 @@ impl RenderOrchestrator {
 
         self.image_manager.clear();
         // TODO(port): glyphManager->evict(fontStacks(*layerImpls)).
+    }
+
+    /// Drops what holds the renderer's shaders: the render layers, the sky
+    /// and globe depth passes, and the debug drawables. The next update
+    /// makes them again, from the shaders the renderer has then. The
+    /// sources keep their tiles, and the tiles their layout.
+    pub fn release_shaders(&mut self) {
+        self.remake_render_layers = true;
+        self.debug_layer_groups.clear(); // layers: debug
+        self.debug_layer_tweakers.clear(); // layers: debug
+        self.sky_pass = crate::sky_pass::SkyPass::default();
+        self.globe_depth_pass = crate::globe_depth_pass::GlobeDepthPass::default();
     }
 
     /// symbols: C++ `Renderer::render` recreates the dynamic texture atlas
