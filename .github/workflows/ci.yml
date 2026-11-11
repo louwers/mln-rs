@@ -95,8 +95,10 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake libclang-dev libvulkan-dev mesa-vulkan-drivers
-          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+          sudo apt-get install -y --no-install-recommends cmake libclang-dev libvulkan-dev
+
+      - name: Install lavapipe
+        uses: ./.github/actions/lavapipe
 
       - uses: taiki-e/install-action@v2
         with: { tool: just }

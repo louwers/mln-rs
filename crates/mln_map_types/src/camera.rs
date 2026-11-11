@@ -307,7 +307,9 @@ impl std::fmt::Display for CameraError {
         f.write_str(match self {
             CameraError::NotFinite => "camera delta offset, anchor, bearing and pitch must be finite",
             CameraError::InvalidScale => "camera delta scale must be finite and positive",
-            CameraError::AnchorWithoutChange => "a camera delta anchor requires offset, scale, bearing, or pitch",
+            CameraError::AnchorWithoutChange => {
+                "a camera delta anchor requires scale, bearing, or pitch, or an offset to hold"
+            }
             CameraError::MomentumOutsideEnd => "only a camera delta in the end phase carries momentum",
             CameraError::MomentumWithAnimation => {
                 "a camera delta with momentum sets only the transition ID and end function of its animation"
