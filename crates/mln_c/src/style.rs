@@ -4,11 +4,11 @@
 use core::ffi::c_void;
 use std::sync::Arc;
 
-use ::mln_runtime::{Applied, CustomSourceCallbacks, LayerInfo, SourceInfo, SourceKind};
+use ::mln_runtime::{Applied, CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind};
 use mln_style::TransitionOptions;
 use mln_style::image::{ImageContent, Impl as StyleImage, TextFit};
 use mln_style::sources::custom_geometry_source::TileOptions;
-use mln_style::sources::{GeoJSONOptions, TileDataFormat};
+use mln_style::sources::TileDataFormat;
 use mln_tile_id::CanonicalTileID;
 use mln_util::chrono::Duration;
 use mln_util::constants;
@@ -364,16 +364,26 @@ fn tolerance(tolerance: f64) -> Result<f64, Error> {
     }
 }
 
+/// A zoom level as a whole number, which saturates at the largest `u8`, so
+/// that the runtime reports a level past its limit.
+fn whole_zoom_level(zoom: f64, name: &str) -> Result<u8, Error> {
+    if zoom.is_finite() && zoom >= 0.0 && zoom.fract() == 0.0 {
+        Ok(zoom.min(f64::from(u8::MAX)) as u8)
+    } else {
+        Err(Error::invalid_argument(format!("{name} must be a whole zoom level")))
+    }
+}
+
 /// The options of a GeoJSON source, with the defaults for the fields that
-/// `options` leaves unset, or for all of them when it is null. The cluster
-/// properties parse on the parse thread.
+/// `options` leaves unset, or for all of them when it is null.
 ///
 /// # Safety
 ///
 /// `options` is null or valid for the header's use of it.
-unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result<GeoJSONOptions, Error> {
+unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result<GeoJsonSourceOptions, Error> {
+    let mut result = GeoJsonSourceOptions::default();
     if options.is_null() {
-        return Ok(GeoJSONOptions::default());
+        return Ok(result);
     }
     // SAFETY: the caller's contract.
     let options = unsafe { abi::read_sized(options) }?;
@@ -387,35 +397,24 @@ unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result
         | MLN_GEO_JSON_SOURCE_OPTION_LINE_METRICS
         | MLN_GEO_JSON_SOURCE_OPTION_CLUSTER;
     let fields = abi::Fields::new(options.fields, known, "mln_geo_json_source_options.fields")?;
-    let mut result = GeoJSONOptions::default();
-    // Tiling stops at zoom 24, and a cluster ID holds its zoom level plus one
-    // in five bits.
     if let Some(zoom) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_MAX_ZOOM, options.max_zoom) {
-        result.maxzoom = whole_zoom(zoom, 24, "max_zoom")?;
+        result.max_zoom = whole_zoom_level(zoom, "max_zoom")?;
     }
     if let Some(zoom) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_MIN_ZOOM, options.min_zoom) {
-        result.minzoom = whole_zoom(zoom, 24, "min_zoom")?;
+        result.min_zoom = whole_zoom_level(zoom, "min_zoom")?;
     }
     if let Some(zoom) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MAX_ZOOM, options.cluster_max_zoom) {
-        result.cluster_max_zoom = whole_zoom(zoom, 30, "cluster_max_zoom")?;
-    }
-    if result.minzoom > result.maxzoom {
-        return Err(Error::invalid_argument("min_zoom must be less than or equal to max_zoom"));
+        result.cluster_max_zoom = whole_zoom_level(zoom, "cluster_max_zoom")?;
     }
     if let Some(value) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_TOLERANCE, options.tolerance) {
-        result.tolerance = tolerance(value)?;
+        result.tolerance = value;
     }
+    // A width past the runtime's limit saturates, and the runtime reports it.
     if let Some(buffer) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_BUFFER, options.buffer) {
-        result.buffer = u16::try_from(buffer)
-            .ok()
-            .filter(|buffer| *buffer <= 512)
-            .ok_or_else(|| Error::invalid_argument("buffer must be at most 512"))?;
+        result.buffer = u16::try_from(buffer).unwrap_or(u16::MAX);
     }
     if let Some(radius) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_RADIUS, options.cluster_radius) {
-        result.cluster_radius = u16::try_from(radius)
-            .ok()
-            .filter(|radius| *radius <= 4095)
-            .ok_or_else(|| Error::invalid_argument("cluster_radius must be at most 4095"))?;
+        result.cluster_radius = u16::try_from(radius).unwrap_or(u16::MAX);
     }
     if let Some(points) = fields.get(MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MIN_POINTS, options.cluster_min_points) {
         result.cluster_min_points = usize::try_from(points)
@@ -426,28 +425,13 @@ unsafe fn geojson_options(options: *const mln_geo_json_source_options) -> Result
     // SAFETY: the caller's contract.
     let properties = unsafe { buffer::text(options.cluster_properties, "cluster_properties") }?;
     if !properties.is_empty() {
-        let json = properties.to_owned();
-        result.cluster_properties = parse_thread::run(move || parse_cluster_properties(&json))??;
+        result.cluster_properties = Some(properties.to_owned());
+        // The header rejects malformed cluster properties from the call
+        // itself, so they parse here first, on the parse thread.
+        let checked = result.clone();
+        parse_thread::run(move || checked.check_cluster_properties())??;
     }
     Ok(result)
-}
-
-/// Cluster properties parse through the style's conversion of a GeoJSON
-/// source, as its one member.
-fn parse_cluster_properties(json: &str) -> Result<mln_style::sources::geojson_source::ClusterProperties, Error> {
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|error| Error::invalid_argument(format!("cluster_properties is not valid JSON: {error}")))?;
-    if !value.is_object() {
-        return Err(Error::invalid_argument("cluster_properties must contain a JSON object"));
-    }
-    let wrapper = serde_json::json!({ "clusterProperties": value });
-    let mut error = mln_conversion::Error::default();
-    let options = <GeoJSONOptions as mln_style::conversion::Converter>::convert(
-        &mln_conversion::Convertible::from(&wrapper),
-        &mut error,
-    )
-    .ok_or_else(|| Error::invalid_argument(format!("GeoJSON source options: {}", error.message)))?;
-    Ok(options.cluster_properties)
 }
 
 // MARK: - Results
@@ -483,7 +467,10 @@ const fn vector_encoding(encoding: VectorEncoding) -> mln_style_vector_tile_enco
 }
 
 /// A GeoJSON source's options with every field set.
-fn from_geojson_options(options: &GeoJSONOptions, cluster_properties: mln_buffer_view) -> mln_geo_json_source_options {
+fn from_geojson_options(
+    options: &GeoJsonSourceOptions,
+    cluster_properties: mln_buffer_view,
+) -> mln_geo_json_source_options {
     mln_geo_json_source_options {
         size: size_of::<mln_geo_json_source_options>() as u32,
         fields: MLN_GEO_JSON_SOURCE_OPTION_MIN_ZOOM
@@ -495,8 +482,8 @@ fn from_geojson_options(options: &GeoJSONOptions, cluster_properties: mln_buffer
             | MLN_GEO_JSON_SOURCE_OPTION_CLUSTER_MIN_POINTS
             | MLN_GEO_JSON_SOURCE_OPTION_LINE_METRICS
             | MLN_GEO_JSON_SOURCE_OPTION_CLUSTER,
-        min_zoom: options.minzoom.into(),
-        max_zoom: options.maxzoom.into(),
+        min_zoom: options.min_zoom.into(),
+        max_zoom: options.max_zoom.into(),
         tolerance: options.tolerance,
         cluster_max_zoom: options.cluster_max_zoom.into(),
         cluster_properties,
@@ -526,7 +513,7 @@ impl LentSource {
             url: LentText::new(info.url.as_deref().unwrap_or_default()),
             tile_urls: info.tiles.iter().flat_map(|tiles| &tiles.urls).map(|url| LentText::new(url)).collect(),
             cluster_properties: LentText::new(
-                info.geojson.as_ref().map(|geojson| geojson.cluster_properties.as_str()).unwrap_or_default(),
+                info.geojson.as_ref().and_then(|geojson| geojson.cluster_properties.as_deref()).unwrap_or_default(),
             ),
             info,
         }
@@ -585,7 +572,7 @@ impl LentSource {
         let geo_json = match &info.geojson {
             Some(geojson) => {
                 fields |= MLN_STYLE_SOURCE_INFO_GEO_JSON;
-                from_geojson_options(&geojson.options, self.cluster_properties.view())
+                from_geojson_options(geojson, self.cluster_properties.view())
             }
             // SAFETY: zeros are valid options, which report no fields.
             None => unsafe { core::mem::zeroed() },
@@ -2021,11 +2008,22 @@ mod tests {
     }
 
     #[test]
-    fn cluster_properties_parse_as_expressions() {
-        let parsed = parse_cluster_properties(r#"{"total":["+",["get","weight"]]}"#).unwrap();
-        assert_eq!(parsed.keys().collect::<Vec<_>>(), ["total"]);
-        assert!(parse_cluster_properties("[]").unwrap_err().message().contains("must contain a JSON object"));
-        assert!(parse_cluster_properties(r#"{"total":5}"#).unwrap_err().message().contains("GeoJSON source options"));
-        assert!(parse_cluster_properties(r#"{"total":NaN}"#).unwrap_err().message().contains("cluster_properties"));
+    fn geojson_options_reject_malformed_cluster_properties_at_once() {
+        let options = |properties: &'static str| mln_geo_json_source_options {
+            size: size_of::<mln_geo_json_source_options>() as u32,
+            cluster_properties: mln_buffer_view { data: properties.as_ptr().cast(), size: properties.len() },
+            // SAFETY: zeros are valid options, which set no fields.
+            ..unsafe { core::mem::zeroed() }
+        };
+        let check = |properties| {
+            // SAFETY: local options, whose text outlives the call.
+            unsafe { geojson_options(&options(properties)) }
+        };
+        let parsed = check(r#"{"total":["+",["get","weight"]]}"#).unwrap();
+        assert_eq!(parsed.cluster_properties.as_deref(), Some(r#"{"total":["+",["get","weight"]]}"#));
+        assert!(check("[]").unwrap_err().message().contains("must contain a JSON object"));
+        assert!(check(r#"{"total":5}"#).unwrap_err().message().contains("GeoJSON source options"));
+        assert!(check(r#"{"total":NaN}"#).unwrap_err().message().contains("cluster_properties"));
+        assert_eq!(check("").unwrap(), GeoJsonSourceOptions::default());
     }
 }

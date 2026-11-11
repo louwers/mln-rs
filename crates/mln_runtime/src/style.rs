@@ -52,12 +52,134 @@ pub struct SourceTiles {
     pub raster_encoding: Option<RasterEncoding>,
 }
 
-/// The options of a GeoJSON source, as a source reports them.
-#[derive(Clone, Debug)]
-pub struct GeoJsonSourceInfo {
-    pub options: Immutable<GeoJSONOptions>,
-    /// The `clusterProperties` object as JSON, or empty for none.
-    pub cluster_properties: String,
+/// The options of a GeoJSON source, which stay fixed for as long as the
+/// style holds it. The defaults are the style specification's.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GeoJsonSourceOptions {
+    /// The lowest zoom level that the source has tiles for.
+    pub min_zoom: u8,
+    /// The highest zoom level that the source has tiles for, at most 24.
+    pub max_zoom: u8,
+    /// How far geometry simplifies, in tile pixels: finite and not negative.
+    pub tolerance: f64,
+    /// How far each tile reaches past its edges, in tile pixels, at most 512.
+    pub buffer: u16,
+    /// Whether line features carry their length, for `line-progress`.
+    pub line_metrics: bool,
+    /// Whether points gather into clusters.
+    pub cluster: bool,
+    /// How far apart points cluster, in pixels, at most 4095.
+    pub cluster_radius: u16,
+    /// The highest zoom level that clusters points, at most 30.
+    pub cluster_max_zoom: u8,
+    /// How many points make a cluster.
+    pub cluster_min_points: usize,
+    /// The
+    /// [`clusterProperties`](https://maplibre.org/maplibre-style-spec/sources/#clusterproperties)
+    /// object as JSON text, which the runtime's thread parses.
+    pub cluster_properties: Option<String>,
+    pub attribution: Option<String>,
+}
+
+impl Default for GeoJsonSourceOptions {
+    fn default() -> Self {
+        GeoJsonSourceOptions::from_core(&GeoJSONOptions::default())
+    }
+}
+
+impl GeoJsonSourceOptions {
+    fn from_core(options: &GeoJSONOptions) -> Self {
+        GeoJsonSourceOptions {
+            min_zoom: options.minzoom,
+            max_zoom: options.maxzoom,
+            tolerance: options.tolerance,
+            buffer: options.buffer,
+            line_metrics: options.line_metrics,
+            cluster: options.cluster,
+            cluster_radius: options.cluster_radius,
+            cluster_max_zoom: options.cluster_max_zoom,
+            cluster_min_points: options.cluster_min_points,
+            cluster_properties: cluster_properties_json(options),
+            attribution: options.attribution.clone(),
+        }
+    }
+
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// option out of range.
+    fn check(&self) -> Result<(), Error> {
+        // Tiling stops at zoom 24, and a cluster ID holds its zoom level plus
+        // one in five bits.
+        if self.max_zoom > 24 {
+            return Err(Error::invalid_argument("max_zoom must be an integer within [0, 24]"));
+        }
+        if self.cluster_max_zoom > 30 {
+            return Err(Error::invalid_argument("cluster_max_zoom must be an integer within [0, 30]"));
+        }
+        if self.min_zoom > self.max_zoom {
+            return Err(Error::invalid_argument("min_zoom must be less than or equal to max_zoom"));
+        }
+        if !self.tolerance.is_finite() || self.tolerance < 0.0 {
+            return Err(Error::invalid_argument("tolerance must be finite and non-negative"));
+        }
+        if self.buffer > 512 {
+            return Err(Error::invalid_argument("buffer must be at most 512"));
+        }
+        if self.cluster_radius > 4095 {
+            return Err(Error::invalid_argument("cluster_radius must be at most 4095"));
+        }
+        Ok(())
+    }
+
+    /// Parses the cluster properties on this thread, for a caller that must
+    /// reject them before it sends the source, which
+    /// [`Map::add_geojson_source`] otherwise parses on the runtime's thread.
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// text that isn't a `clusterProperties` object.
+    pub fn check_cluster_properties(&self) -> Result<(), Error> {
+        self.cluster_properties.as_deref().map_or(Ok(()), |json| parse_cluster_properties(json).map(drop))
+    }
+
+    /// The core's options, with the cluster properties parsed.
+    fn into_core(self) -> Result<GeoJSONOptions, Error> {
+        let cluster_properties = match &self.cluster_properties {
+            Some(json) => parse_cluster_properties(json)?,
+            None => Default::default(),
+        };
+        Ok(GeoJSONOptions {
+            minzoom: self.min_zoom,
+            maxzoom: self.max_zoom,
+            tolerance: self.tolerance,
+            buffer: self.buffer,
+            line_metrics: self.line_metrics,
+            cluster: self.cluster,
+            cluster_radius: self.cluster_radius,
+            cluster_max_zoom: self.cluster_max_zoom,
+            cluster_min_points: self.cluster_min_points,
+            cluster_properties,
+            attribution: self.attribution,
+            ..GeoJSONOptions::default()
+        })
+    }
+}
+
+/// Parses a `clusterProperties` object through the style's conversion of a
+/// GeoJSON source, as its one member. Fails with
+/// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for text that isn't
+/// such an object.
+fn parse_cluster_properties(json: &str) -> Result<mln_style::sources::geojson_source::ClusterProperties, Error> {
+    let value: serde_json::Value = serde_json::from_str(json)
+        .map_err(|error| Error::invalid_argument(format!("cluster_properties is not valid JSON: {error}")))?;
+    if !value.is_object() {
+        return Err(Error::invalid_argument("cluster_properties must contain a JSON object"));
+    }
+    let wrapper = serde_json::json!({ "clusterProperties": value });
+    let mut error = mln_conversion::Error::default();
+    let options = <GeoJSONOptions as mln_style::conversion::Converter>::convert(
+        &mln_conversion::Convertible::from(&wrapper),
+        &mut error,
+    )
+    .ok_or_else(|| Error::invalid_argument(format!("GeoJSON source options: {}", error.message)))?;
+    Ok(options.cluster_properties)
 }
 
 /// A source of the map's style.
@@ -76,7 +198,7 @@ pub struct SourceInfo {
     pub tile_size: Option<u16>,
     /// A vector source's tile format.
     pub vector_encoding: Option<VectorEncoding>,
-    pub geojson: Option<GeoJsonSourceInfo>,
+    pub geojson: Option<GeoJsonSourceOptions>,
 }
 
 /// A layer of the map's style.
@@ -280,10 +402,10 @@ fn source_kind(source: &dyn Source) -> Option<SourceKind> {
     })
 }
 
-/// The `clusterProperties` of `options` as a JSON object, or empty for none.
-fn cluster_properties_json(options: &GeoJSONOptions) -> String {
+/// The `clusterProperties` of `options` as a JSON object.
+fn cluster_properties_json(options: &GeoJSONOptions) -> Option<String> {
     if options.cluster_properties.is_empty() {
-        return String::new();
+        return None;
     }
     let members = options
         .cluster_properties
@@ -293,7 +415,7 @@ fn cluster_properties_json(options: &GeoJSONOptions) -> String {
             (key.clone(), mln_conversion::value_to_json(&pair))
         })
         .collect::<serde_json::Map<_, _>>();
-    serde_json::Value::Object(members).to_string()
+    Some(serde_json::Value::Object(members).to_string())
 }
 
 fn source_info(source: &dyn Source) -> Option<SourceInfo> {
@@ -306,10 +428,8 @@ fn source_info(source: &dyn Source) -> Option<SourceInfo> {
     } else {
         any.downcast_ref::<ImageSource>().and_then(ImageSource::get_url)
     };
-    let geojson = any.downcast_ref::<GeoJSONSource>().map(|geojson| {
-        let options = geojson.get_options();
-        GeoJsonSourceInfo { cluster_properties: cluster_properties_json(&options), options }
-    });
+    let geojson =
+        any.downcast_ref::<GeoJSONSource>().map(|geojson| GeoJsonSourceOptions::from_core(&geojson.get_options()));
     let mut info = SourceInfo {
         id: source.get_id(),
         kind,
@@ -456,13 +576,19 @@ impl Map {
 
     /// Adds a GeoJSON source with no data and `options`, which stay fixed
     /// for as long as the style holds it.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
+    /// option out of range, and completes with it for cluster properties
+    /// that don't parse.
     pub fn add_geojson_source(
         &self,
         source_id: impl Into<String>,
-        options: GeoJSONOptions,
+        options: GeoJsonSourceOptions,
     ) -> Result<Completion<Applied>, Error> {
+        options.check()?;
         let source_id = source_id.into();
         self.command(move |map| {
+            let options = options.into_core()?;
             let style = map.get_style_mut();
             require_new_source(style, &source_id)?;
             style.add_source(Box::new(GeoJSONSource::new(source_id, Arc::new(options))))

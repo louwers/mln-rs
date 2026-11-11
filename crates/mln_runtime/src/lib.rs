@@ -41,4 +41,4 @@ pub use render::{
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};
-pub use style::{CustomSourceCallbacks, GeoJsonSourceInfo, LayerInfo, SourceInfo, SourceKind, SourceTiles};
+pub use style::{CustomSourceCallbacks, GeoJsonSourceOptions, LayerInfo, SourceInfo, SourceKind, SourceTiles};
