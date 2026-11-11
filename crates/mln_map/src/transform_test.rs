@@ -1127,6 +1127,28 @@ fn lat_lng_bounds() {
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 120.0);
 }
 
+// Port-only: the floor screen bounds set is the zoom a request below it
+// settles on, wherever the center is; the width decides on a square screen
+// and the height on a tall one.
+#[test]
+fn min_zoom_for_screen_bounds() {
+    let mut transform = new_transform();
+    transform.resize(Size::new(500, 500)).unwrap();
+    assert_eq!(None, transform.get_state().get_min_zoom_for_screen_bounds());
+    transform.set_lat_lng_bounds(LatLngBounds::hull(ll(40.0, -10.0), ll(70.0, 40.0))).unwrap();
+    assert_eq!(None, transform.get_state().get_min_zoom_for_screen_bounds());
+    transform.set_constrain_mode(ConstrainMode::Screen);
+    for (size, floor) in [(Size::new(500, 500), 2.81378), (Size::new(500, 1000), 3.65750)] {
+        transform.resize(size).unwrap();
+        let min_zoom = transform.get_state().get_min_zoom_for_screen_bounds().unwrap();
+        assert_near(min_zoom, floor, 1e-4);
+        for center in [ll(56.0, 11.0), ll(45.0, -5.0)] {
+            transform.ease_to(&cam().with_center(Some(center)).with_zoom(Some(1.0)), &AnimationOptions::default());
+            assert_near(transform.get_zoom(), min_zoom, 1e-9);
+        }
+    }
+}
+
 // gtest: Transform.ConstrainScreenToBounds
 #[test]
 fn constrain_screen_to_bounds() {
