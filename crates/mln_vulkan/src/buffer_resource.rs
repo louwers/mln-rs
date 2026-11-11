@@ -13,6 +13,11 @@
 //   throws `std::bad_alloc`.
 // - `clone()` and `shared()`, which C++ uses for the instance data of
 //   symbols and fill extrusions, are not ported.
+// - A uniform or storage buffer keeps its contents in CPU memory as well. An
+//   update is compared with that copy and a frame's copy is written from it,
+//   where C++ compares with and copies from the mapped memory: reading that
+//   is slow when the driver maps it write-combined.
+// - Other buffers are written without comparing.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -137,7 +142,11 @@ pub struct BufferResource {
     /// The size of a frame's copy of a uniform or storage buffer; 0 for
     /// other buffers, which have one copy.
     buffer_window_size: usize,
+    /// The version of `contents` each frame's copy holds.
     buffer_window_versions: RefCell<Vec<VersionType>>,
+    /// The contents of a uniform or storage buffer, `size` bytes; empty for
+    /// other buffers.
+    contents: RefCell<Vec<u8>>,
 }
 
 fn align_up(size: usize, align: usize) -> usize {
@@ -152,7 +161,9 @@ fn lcm(a: usize, b: usize) -> usize {
 }
 
 impl BufferResource {
-    /// Creates a buffer of `size` bytes holding `data` (zeros without it).
+    /// Creates a buffer of `size` bytes holding `data`. Without `data` a
+    /// uniform or storage buffer holds zeros, and the contents of other
+    /// buffers are unspecified.
     ///
     /// A uniform or storage buffer has a copy of its contents for each frame
     /// in flight, so that writing the next frame's doesn't change what the
@@ -168,6 +179,8 @@ impl BufferResource {
         let mut total_size = size;
         let mut buffer_window_size = 0;
         let mut buffer_window_versions = Vec::new();
+        let mut contents = Vec::new();
+        let mut version = 0;
 
         // TODO -> check avg minUniformBufferOffsetAlignment vs individual buffers
         if !usage.contains(vk::BufferUsageFlags::VERTEX_BUFFER)
@@ -185,6 +198,9 @@ impl BufferResource {
             let frame_count = backend.get_max_frames() as usize;
             total_size = buffer_window_size * frame_count;
             buffer_window_versions = vec![0; frame_count];
+            contents = vec![0; size];
+            // No frame's copy holds the contents yet.
+            version = 1;
         }
 
         let buffer_allocation =
@@ -196,10 +212,11 @@ impl BufferResource {
         let resource = BufferResource {
             context: context.weak(),
             size,
-            version: Cell::new(0),
+            version: Cell::new(version),
             buffer_allocation: buffer_allocation.filter(|allocation| !allocation.mapped_buffer().is_null()),
             buffer_window_size,
             buffer_window_versions: RefCell::new(buffer_window_versions),
+            contents: RefCell::new(contents),
         };
         if let Some(data) = data {
             resource.update(&data[..size.min(data.len())], 0);
@@ -266,7 +283,10 @@ impl BufferResource {
         self.version.get()
     }
 
-    /// Writes `data` at `offset` of the current frame's copy.
+    /// Writes `data` at `offset` of the buffer. The current frame's copy of
+    /// a uniform or storage buffer holds the new contents afterwards, and
+    /// the other frames' copies when they are next brought up to date
+    /// (`update_vulkan_buffer`).
     pub fn update(&self, data: &[u8], offset: usize) {
         debug_assert!(data.len() + offset <= self.size);
         let update_size = data.len().min(self.size.saturating_sub(offset));
@@ -276,25 +296,34 @@ impl BufferResource {
         if update_size == 0 {
             return;
         }
-        let frame = self.current_frame();
-        // SAFETY: the mapped memory holds every frame's copy of `size`
-        // bytes, `offset + update_size` is within one, and this thread is
-        // the only one that reads or writes it.
-        let contents = unsafe {
-            std::slice::from_raw_parts_mut(
-                allocation.mapped_buffer().add(self.get_vulkan_buffer_offset_of(frame) + offset),
-                update_size,
-            )
-        };
-        let mut window_versions = self.buffer_window_versions.borrow_mut();
-        if *contents == data[..update_size] {
-            if let Some(version) = window_versions.get_mut(usize::from(frame)) {
-                *version = self.version.get();
+        let data = &data[..update_size];
+
+        if self.buffer_window_size > 0 {
+            let changed = {
+                let mut contents = self.contents.borrow_mut();
+                let range = &mut contents[offset..offset + update_size];
+                let changed = *range != *data;
+                if changed {
+                    range.copy_from_slice(data);
+                }
+                changed
+            };
+            if changed {
+                self.contents_changed(update_size);
             }
+            self.update_vulkan_buffer(self.current_frame());
             return;
         }
-        contents.copy_from_slice(&data[..update_size]);
 
+        // SAFETY: the mapped memory is `size` bytes, `offset + update_size`
+        // is within it, and `data` is not part of it.
+        unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), allocation.mapped_buffer().add(offset), update_size) };
+        self.contents_changed(update_size);
+    }
+
+    /// Counts an update of `update_size` bytes and gives the contents a new
+    /// version.
+    fn contents_changed(&self, update_size: usize) {
         if let Some(context) = self.context.upgrade() {
             let mut stats = context.rendering_stats();
             stats.buffer_update_bytes += update_size;
@@ -304,40 +333,38 @@ impl BufferResource {
         let mut version = self.version.get().wrapping_add(1);
         if version == VersionType::MAX {
             version = 1;
-            window_versions.fill(0);
+            self.buffer_window_versions.borrow_mut().fill(0);
         }
         self.version.set(version);
-        if let Some(window_version) = window_versions.get_mut(usize::from(frame)) {
-            *window_version = version;
-        }
     }
 
-    /// `updateVulkanBuffer(destination, source)`: brings the frame
-    /// `destination`'s copy up to date with the frame `source`'s, if that
-    /// one is newer.
-    pub fn update_vulkan_buffer(&self, destination: u8, source: u8) {
-        if self.buffer_window_size == 0 || destination == source {
+    /// `updateVulkanBuffer(destination, source)`: brings the copy of the
+    /// frame `frame` up to date with the buffer's contents.
+    pub fn update_vulkan_buffer(&self, frame: u8) {
+        if self.buffer_window_size == 0 {
             return;
         }
         let Some(allocation) = &self.buffer_allocation else {
             return;
         };
         let mut window_versions = self.buffer_window_versions.borrow_mut();
-        let (destination, source) = (usize::from(destination), usize::from(source));
-        if destination >= window_versions.len() || source >= window_versions.len() {
+        let Some(window_version) = window_versions.get_mut(usize::from(frame)) else {
+            return;
+        };
+        if *window_version == self.version.get() {
             return;
         }
-        if window_versions[destination] < window_versions[source] {
-            // SAFETY: the two frames' copies are `size` bytes each, apart.
-            unsafe {
-                std::ptr::copy_nonoverlapping(
-                    allocation.mapped_buffer().add(self.buffer_window_size * source),
-                    allocation.mapped_buffer().add(self.buffer_window_size * destination),
-                    self.size,
-                );
-            }
-            window_versions[destination] = window_versions[source];
+        let contents = self.contents.borrow();
+        // SAFETY: the mapped memory holds a window of at least `size` bytes
+        // for each frame, and `contents` is `size` bytes outside it.
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                contents.as_ptr(),
+                allocation.mapped_buffer().add(self.get_vulkan_buffer_offset_of(frame)),
+                contents.len(),
+            );
         }
+        *window_version = self.version.get();
     }
 }
 

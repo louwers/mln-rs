@@ -319,9 +319,7 @@ impl UniformDescriptorSet {
         let dummy = BufferBinding { id: 0, buffer: context.get_dummy_buffer(), offset: 0, range: vk::WHOLE_SIZE };
         let mut bindings = [dummy; MAX_BUFFER_BINDINGS];
 
-        let frame_count = context.get_backend().get_max_frames() as u8;
         let current_index = context.get_current_frame_resource_index();
-        let prev_index = if current_index == 0 { frame_count - 1 } else { current_index - 1 };
         let first_id = if type_ == DescriptorSetType::Global { 0 } else { LAYER_SSBO_START_ID };
         for id in first_id..uniforms.allocated_size() {
             let Some(uniform_buffer) = uniforms.get(id).and_then(|b| b.as_any().downcast_ref::<UniformBuffer>()) else {
@@ -335,7 +333,7 @@ impl UniformDescriptorSet {
             if !resource.is_valid() {
                 continue;
             }
-            resource.update_vulkan_buffer(current_index, prev_index);
+            resource.update_vulkan_buffer(current_index);
             bindings[binding as usize] = BufferBinding {
                 id: resource.allocation_id(),
                 buffer: resource.get_vulkan_buffer(),
