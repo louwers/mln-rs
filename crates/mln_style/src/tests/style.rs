@@ -549,9 +549,7 @@ fn remove_source_in_use() {
 #[test]
 fn public_load_state_does_not_wait_for_resources() {
     let file_source =
-        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Asynchronous);
-    // TODO(port): StubFileSource::ResponseType::Manual (never answers here,
-    // as no run loop runs).
+        mln_storage::stub_file_source::StubFileSource::new(mln_storage::stub_file_source::ResponseType::Manual);
     let mut style = Style::with_file_source(
         Some(Arc::new(file_source)),
         1.0,
@@ -681,13 +679,22 @@ fn load_url_error() {
 // gtest: Style.LoadJSONCancelsPendingLoadURL
 #[test]
 fn load_json_cancels_pending_load_url() {
-    // C++ answers with ResponseType::Manual + respondToAll(); the stub
-    // answers asynchronously here (TODO(port): Manual), on run_once.
-    let (mut style, _observer, run_loop) = stub_with_style_response(|_| {
+    let file_source = Arc::new(mln_storage::stub_file_source::StubFileSource::new(
+        mln_storage::stub_file_source::ResponseType::Manual,
+    ));
+    file_source.set_response(mln_storage::Kind::Style, |_| {
         let mut response = mln_storage::Response::new();
         response.data = Some(Arc::new(read_file("test/fixtures/resources/style_vector.json").into_bytes()));
         Some(response)
     });
+    let mut style = Impl::with_file_source(
+        Some(file_source.clone()),
+        1.0,
+        mln_actor::TaggedScheduler::new(
+            mln_actor::scheduler::get_background(),
+            mln_util::identity::SimpleIdentity::new(),
+        ),
+    );
 
     // Start loading a URL (this will be pending)
     style.load_url("http://some-url");
@@ -707,7 +714,7 @@ fn load_json_cancels_pending_load_url() {
     assert_eq!("", style.get_url());
     assert!(style.get_json().contains("Test Style"));
 
-    run_loop.run_once();
+    file_source.respond_to_all();
     style.process_style_responses();
 
     // The style should still show our JSON content, not the URL content

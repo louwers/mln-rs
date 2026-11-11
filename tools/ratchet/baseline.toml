@@ -272,7 +272,6 @@
 "crates/mln_style/src/sources/tile_source.rs" = 3
 "crates/mln_style/src/style_impl.rs" = 1
 "crates/mln_style/src/tests/property_expression.rs" = 1
-"crates/mln_style/src/tests/style.rs" = 2
 "crates/mln_style_types/src/position.rs" = 1
 "crates/mln_text/src/ft/face.rs" = 9
 "crates/mln_text/src/rasterize.rs" = 3

@@ -11,6 +11,7 @@ use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
 use mln_style_types::SourceType;
+use mln_tile_id::CanonicalTileID;
 use mln_util::exception::ExceptionPtr;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
@@ -227,6 +228,108 @@ fn geojson_source_keeps_the_style_attribution() {
     source.load_description(&file_source);
     run_loop.run();
     assert!(*loaded.borrow());
+}
+
+/// A FeatureCollection of `count` points at 0, 0.
+fn geojson_points(count: usize) -> Arc<Vec<u8>> {
+    let feature = r#"{"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [0, 0]}}"#;
+    let features = vec![feature; count].join(",");
+    Arc::new(format!(r#"{{"type": "FeatureCollection", "features": [{features}]}}"#).into_bytes())
+}
+
+/// The number of features in tile 0/0/0 of `source`'s data.
+fn geojson_source_feature_count(source: &GeoJSONSource) -> usize {
+    let count = Rc::new(RefCell::new(0));
+    if let Some(data) = source.impl_().get_data().and_then(|data| data.upgrade()) {
+        let count = count.clone();
+        data.get_tile(
+            &CanonicalTileID::new(0, 0, 0),
+            Box::new(move |features| *count.borrow_mut() = features.len()),
+            true,
+        );
+    }
+    *count.borrow()
+}
+
+/// Runs `run_loop` until the background build of a URL response has
+/// replied. Nothing else posts to the loop in these tests.
+fn finish_geojson_build(run_loop: &RunLoop) {
+    while !run_loop.run_once() {
+        run_loop.wait_for_work();
+    }
+}
+
+/// A source observer that counts `on_source_loaded`.
+fn counting_loads() -> (Rc<StubStyleObserver>, Rc<RefCell<u32>>) {
+    let observer = Rc::new(StubStyleObserver::default());
+    let loads = Rc::new(RefCell::new(0));
+    {
+        let loads = loads.clone();
+        *observer.source_loaded.borrow_mut() = Some(Box::new(move |_| *loads.borrow_mut() += 1));
+    }
+    (observer, loads)
+}
+
+// gtest: Source.GeoJSONSourceDataReplacesBuildingURLData
+#[test]
+fn geojson_source_data_replaces_building_url_data() {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Manual);
+    file_source.set_response(Kind::Source, |_| {
+        let mut response = Response::new();
+        response.data = Some(geojson_points(1));
+        Some(response)
+    });
+    let (observer, loads) = counting_loads();
+
+    let source = GeoJSONSource::with_default_options("source");
+    source.set_observer(Some(observer.clone()));
+    source.set_url("url");
+    source.load_description(&file_source);
+    // The URL's data arrives and starts building in the background.
+    file_source.respond_to_all();
+
+    let data = geojson::parse(std::str::from_utf8(&geojson_points(2)).unwrap()).unwrap();
+    source.set_geojson(&data).unwrap();
+    finish_geojson_build(&run_loop);
+
+    assert_eq!(0, *loads.borrow());
+    assert_eq!(2, geojson_source_feature_count(&source));
+}
+
+// gtest: Source.GeoJSONSourceURLReplacesBuildingURLData
+#[test]
+fn geojson_source_url_replaces_building_url_data() {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Manual);
+    file_source.set_response(Kind::Source, |resource| {
+        let mut response = Response::new();
+        response.data = Some(geojson_points(if resource.url == "old" { 1 } else { 2 }));
+        Some(response)
+    });
+    let (observer, loads) = counting_loads();
+
+    let source = GeoJSONSource::with_default_options("source");
+    source.set_observer(Some(observer.clone()));
+    source.set_url("old");
+    source.load_description(&file_source);
+    // The old URL's data arrives and starts building in the background.
+    file_source.respond_to_all();
+
+    source.set_url("new");
+    finish_geojson_build(&run_loop);
+
+    assert_eq!(0, *loads.borrow());
+    assert!(!source.loaded());
+
+    // Request the new URL only now, so that its response can't arrive
+    // before the old build's reply runs.
+    source.load_description(&file_source);
+    file_source.respond_to_all();
+    finish_geojson_build(&run_loop);
+
+    assert_eq!(1, *loads.borrow());
+    assert_eq!(2, geojson_source_feature_count(&source));
 }
 
 fn as_vector(source: &dyn Source) -> &VectorSource {
