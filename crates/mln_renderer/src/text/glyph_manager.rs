@@ -338,9 +338,8 @@ impl GlyphManager {
             let entry = entries.entry(font_stack.clone()).or_default();
 
             if let Some(data) = &data {
-                let data = data.as_bytes();
                 let glyphs: Vec<Glyph> = if range.type_ == GlyphIDType::FontPBF {
-                    match parse_glyph_pbf(range, data) {
+                    match parse_glyph_pbf(range, data.as_bytes()) {
                         Ok(glyphs) => glyphs,
                         Err(error) => {
                             drop(entries);
@@ -348,12 +347,10 @@ impl GlyphManager {
                             return;
                         }
                     }
+                } else if self.load_hb_shaper(font_stack, range.type_, data.clone()) {
+                    vec![Glyph { id: GlyphID::with_type(0, range.type_), ..Glyph::default() }]
                 } else {
-                    if self.load_hb_shaper(font_stack, range.type_, Arc::new(data.to_vec())) {
-                        vec![Glyph { id: GlyphID::with_type(0, range.type_), ..Glyph::default() }]
-                    } else {
-                        Vec::new()
-                    }
+                    Vec::new()
                 };
 
                 for glyph in glyphs {
@@ -538,7 +535,7 @@ impl GlyphManager {
 
     /// `loadHBShaper(fontStack, type, data)`: false, as for an invalid
     /// font, when the engine failed to get ready.
-    fn load_hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType, data: Arc<Vec<u8>>) -> bool {
+    fn load_hb_shaper(&self, font_stack: &FontStack, type_: GlyphIDType, data: FontData) -> bool {
         if !self.engine_readiness.is_ready() {
             return false;
         }

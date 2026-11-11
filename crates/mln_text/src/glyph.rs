@@ -271,6 +271,23 @@ impl FontData {
     pub fn as_bytes(&self) -> &[u8] {
         (*self.0).as_ref()
     }
+
+    /// The same bytes, for readers that take any shared bytes.
+    pub fn shared(&self) -> Arc<dyn AsRef<[u8]> + Send + Sync> {
+        self.0.clone()
+    }
+}
+
+impl Default for FontData {
+    fn default() -> Self {
+        FontData::from(Vec::new())
+    }
+}
+
+impl From<Vec<u8>> for FontData {
+    fn from(bytes: Vec<u8>) -> Self {
+        FontData(Arc::new(bytes))
+    }
 }
 
 impl From<Arc<Vec<u8>>> for FontData {
