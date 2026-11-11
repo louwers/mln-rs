@@ -631,6 +631,71 @@ fn render_tile_set_source_update() {
     // source whose description has not loaded yet.
 }
 
+// gtest: Source.EmptyTileset
+#[test]
+fn empty_tileset() {
+    let test = SourceTest::new();
+    let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+    let source =
+        VectorSource::new("source", UrlOrTileset::Tileset(Tileset::default()), None, None, VectorEncoding::Mapbox);
+    source.load_description(&*file_source);
+    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let errors = observe_tile_errors(&mut *render_source);
+
+    let layers = Tiled::Vector.layers();
+    let fs: Arc<dyn FileSource> = file_source;
+    let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
+
+    render_source.update(source.base_impl(), &layers, true, true, &parameters);
+    assert!(render_source.is_loaded());
+
+    source.set_tiles(&["tiles".to_owned()]);
+    render_source.update(source.base_impl(), &layers, true, false, &parameters);
+    assert!(!render_source.is_loaded());
+
+    source.set_tiles(&[]);
+    render_source.update(source.base_impl(), &layers, true, false, &parameters);
+    assert!(render_source.is_loaded());
+
+    source.set_tiles(&["tiles".to_owned()]);
+    render_source.update(source.base_impl(), &layers, true, false, &parameters);
+    assert!(!render_source.is_loaded());
+
+    assert_eq!(0, *errors.borrow());
+}
+
+// As Source.EmptyTileset, for the raster and raster-dem render sources.
+#[test]
+fn empty_raster_tilesets_make_no_tiles() {
+    for kind in [Tiled::Raster, Tiled::RasterDEM] {
+        let test = SourceTest::new();
+        let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
+        let source = kind.source(UrlOrTileset::Tileset(Tileset::default()));
+        source.load_description(&*file_source);
+        let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+        let errors = observe_tile_errors(&mut *render_source);
+
+        let fs: Arc<dyn FileSource> = file_source;
+        let parameters = test.tile_parameters_with(MapMode::Continuous, Some(fs));
+        render_source.update(source.base_impl(), &kind.layers(), true, true, &parameters);
+
+        assert!(render_source.is_loaded());
+        assert_eq!(0, *errors.borrow());
+    }
+}
+
+/// Counts the tile errors `render_source` reports.
+fn observe_tile_errors(render_source: &mut dyn RenderSource) -> Rc<RefCell<usize>> {
+    let errors = Rc::new(RefCell::new(0));
+    let observer = Rc::new(StubRenderSourceObserver::default());
+    {
+        let errors = errors.clone();
+        *observer.tile_error.borrow_mut() = Some(Box::new(move |_, _, _| *errors.borrow_mut() += 1));
+    }
+    render_source.set_observer(observer);
+    errors
+}
+
 // gtest: Source.GeoJSONSourceTilesAfterDataReset
 #[test]
 fn geojson_source_tiles_after_data_reset() {

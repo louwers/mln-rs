@@ -116,7 +116,9 @@ impl RenderSource for RenderRasterSource {
             self.tile_source.tile_pyramid.clear_all();
         }
 
-        let Some(tileset) = self.cached_tileset.clone() else {
+        // A tileset without tiles makes no tiles, and the source counts as
+        // loaded until its tiles are set.
+        let Some(tileset) = self.cached_tileset.clone().filter(|tileset| !tileset.tiles.is_empty()) else {
             return;
         };
 
