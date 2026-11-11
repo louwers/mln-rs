@@ -1595,7 +1595,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         let sdf_alpha_b = smoothstep(sdf_edge - sdf_gamma_b, sdf_edge + sdf_gamma_b, color_b.a);
         return mix(color * sdf_alpha_a, color * sdf_alpha_b, props.fade) * alpha * opacity;
     }
-    return mix(color_a, color_b, props.fade) * opacity;
+    // The outline fades over a pixel from the line, as in the GL and Vulkan
+    // shaders; the C++ WebGPU source leaves `alpha` out here.
+    return mix(color_a, color_b, props.fade) * alpha * opacity;
 }
 "#),
     prelude: None,
