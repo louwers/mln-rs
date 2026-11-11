@@ -16,7 +16,9 @@
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
 
-use crate::error::{Error, ErrorKind};
+use mln_util::ErrorKind;
+
+use crate::error::Error;
 use crate::lock;
 
 /// `MLN_HANDLE_NULL`: the handle that names no object.

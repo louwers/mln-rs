@@ -13,7 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::callback::{UserData, Wake};
-use crate::error::{Error, ErrorKind};
+use mln_util::ErrorKind;
+
+use crate::error::Error;
 use crate::generated::types::{
     mln_delivery_queue, mln_delivery_queue_options, mln_diagnostic, mln_status, mln_user_data_release, mln_wake,
 };

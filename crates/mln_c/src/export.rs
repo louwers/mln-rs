@@ -121,7 +121,7 @@ mod tests {
     fn entry(pointer: *const u8, fail: bool, out_diagnostic: *mut mln_diagnostic) -> mln_status {
         export!(out_diagnostic, non_null(pointer), {
             if fail {
-                return Err(Error::new(crate::error::ErrorKind::NotFound, "nothing is there"));
+                return Err(Error::new(mln_util::ErrorKind::NotFound, "nothing is there"));
             }
             Ok(())
         })

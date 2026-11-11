@@ -13,7 +13,7 @@ use mln_util::size::Size;
 use crate::abi::{self, Fields};
 use crate::callback::Wake;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::generated::types::{
     MLN_FRAME_DEMAND_FORCE, MLN_FRAME_DEMAND_WAIT_FOR_UPDATE, MLN_GPU_SYNC_CPU_COMPLETE,
     MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_D3D12_FENCE, MLN_GPU_SYNC_KIND_FLAG_METAL_SHARED_EVENT,
@@ -130,12 +130,12 @@ impl AttachRequest {
     /// Fails with `MLN_STATUS_UNSUPPORTED` unless the caller asked for a core
     /// worker.
     pub(crate) fn require_core_worker(&self, message: &'static str) -> Result<(), Error> {
-        if self.driver == Driver::CoreWorker { Ok(()) } else { Err(Error::new(ErrorKind::Unsupported, message)) }
+        if self.driver == Driver::CoreWorker { Ok(()) } else { Err(Error::new(mln_util::ErrorKind::Unsupported, message)) }
     }
 
     /// Fails with `MLN_STATUS_UNSUPPORTED` when the caller set a queue lock.
     pub(crate) fn refuse_queue_lock(&self, message: &'static str) -> Result<(), Error> {
-        if self.has_queue_lock { Err(Error::new(ErrorKind::Unsupported, message)) } else { Ok(()) }
+        if self.has_queue_lock { Err(Error::new(mln_util::ErrorKind::Unsupported, message)) } else { Ok(()) }
     }
 
     fn wakes(&self) -> [&Wake; 3] {

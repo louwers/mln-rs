@@ -6,7 +6,7 @@ use mln_util::size::Size;
 
 use crate::abi::{self, Fields};
 use crate::completion::{self, Generations, PendingCompletion};
-use crate::error::{Error, ErrorKind};
+use crate::error::Error;
 use crate::generated::types::{
     MLN_OFFSCREEN_DEVICE_OPTION_ADAPTER_INDEX, MLN_OFFSCREEN_DEVICE_OPTION_CLIENT_API,
     MLN_OFFSCREEN_DEVICE_OPTION_SINGLE_CONTEXT, MLN_OPEN_GL_CLIENT_API_GL, MLN_OPEN_GL_CLIENT_API_GLES, mln_completion,
@@ -44,7 +44,7 @@ unsafe fn device_options(options: *const mln_offscreen_device_options) -> Result
             return Err(Error::invalid_argument("mln_offscreen_device_options.client_api must name an OpenGL API"));
         }
         return Err(Error::new(
-            ErrorKind::Unsupported,
+            mln_util::ErrorKind::Unsupported,
             "this library renders with no OpenGL API, so it takes no client_api",
         ));
     }

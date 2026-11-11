@@ -13,7 +13,9 @@ use crate::abi;
 use crate::buffer::{LentText, Strided};
 use crate::callback::{self, UserData};
 use crate::delivery::{Call, Hold, Queue};
-use crate::error::{Error, ErrorKind};
+use mln_util::ErrorKind;
+
+use crate::error::Error;
 use crate::generated::types::{MLN_STATUS_OK, mln_buffer_view, mln_completion, mln_completion_result};
 
 /// The generations that a map command's completion reports.
@@ -197,12 +199,6 @@ impl Completion {
             sink.deliver(result, generations);
         }
     }
-
-    /// Takes the acceptance back, for a call that fails after it accepted.
-    #[cfg_attr(not(test), expect(dead_code, reason = "no implemented function fails after it accepts"))]
-    pub(crate) fn revoke(mut self) -> Option<PendingCompletion> {
-        self.0.take().map(PendingCompletion)
-    }
 }
 
 /// Delivers the result of a runtime command to `sink` once it arrives:
@@ -357,8 +353,6 @@ mod tests {
         let (queue, _) = queue_with_abandon(Some(Log::abandon));
         drop(pending(&descriptor(log.pointer('1'), 0)));
         drop(pending(&descriptor(log.pointer('2'), queue)));
-        let revoked = pending(&descriptor(log.pointer('3'), queue)).accept().revoke();
-        drop(revoked);
         mln_delivery_queue_release(queue);
         assert_eq!(log.take(), "");
     }
