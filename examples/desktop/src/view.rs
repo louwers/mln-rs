@@ -38,7 +38,7 @@ use mln_map::{
     MapDebugOptions, MapObserver, MapOptions, NorthOrientation, RenderFrameStatus, TileLodMode,
 };
 use mln_renderer::Renderer;
-use mln_storage::{ClientOptions, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
+use mln_storage::{ClientOptions, DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_util::chrono::{Clock, Duration};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
@@ -215,6 +215,7 @@ pub(crate) fn run(launch: Launch) {
     // Resource loader controls top-level request processing and can resume /
     // pause all managed sources simultaneously.
     let resource_loader = manager.get_file_source(FileSourceType::ResourceLoader, &resource_options, &client_options);
+    let database_file_source = manager.get_file_source(FileSourceType::Database, &resource_options, &client_options);
 
     let shared =
         Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
@@ -277,6 +278,7 @@ pub(crate) fn run(launch: Launch) {
         online: settings.online,
         online_file_source,
         resource_loader,
+        database_file_source,
         paused: false,
         ordered_styles: map_tiler_configuration.default_styles(),
         style_index: 0,
@@ -407,6 +409,7 @@ struct View {
 
     online: bool,
     online_file_source: Option<Arc<dyn FileSource>>,
+    database_file_source: Option<Arc<dyn FileSource>>,
     resource_loader: Option<Arc<dyn FileSource>>,
     paused: bool,
     ordered_styles: Vec<DefaultStyle>,
@@ -630,10 +633,7 @@ impl View {
             }
             KeyCode::KeyZ => self.next_orientation(),
             KeyCode::KeyP => self.pause_resume(),
-            KeyCode::KeyI => {
-                // TODO(port): DatabaseFileSource::resetDatabase (the write path).
-                Log::warning(Event::Database, "Resetting the cache database is not ported yet");
-            }
+            KeyCode::KeyI => self.reset_cache(),
             KeyCode::KeyA => {
                 // XXX Fix precision loss in flyTo:
                 // https://github.com/mapbox/mapbox-gl-native/issues/4298
@@ -692,6 +692,19 @@ impl View {
     }
 
     /// `O`: main.cpp's online status callback.
+    fn reset_cache(&self) {
+        let database = self.database_file_source.as_deref().and_then(|source| source.as_any());
+        let Some(database) = database.and_then(|source| source.downcast_ref::<DatabaseFileSource>()) else {
+            Log::warning(Event::Database, "There is no cache database to reset");
+            return;
+        };
+        database.reset_database(|result| {
+            if let Err(e) = result {
+                Log::error(Event::Database, format!("Failed to reset cache: {e}"));
+            }
+        });
+    }
+
     fn toggle_online(&mut self) {
         let Some(online_file_source) = &self.online_file_source else {
             Log::warning(Event::Setup, "Cannot change online status. Network resource provider is not available.");

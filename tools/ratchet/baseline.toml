@@ -244,7 +244,7 @@
 "crates/mln_renderer/src/util/tile_cover.rs" = 1
 "crates/mln_renderer/tests/source_test.rs" = 6
 "crates/mln_storage/src/asset_file_source.rs" = 1
-"crates/mln_storage/src/database_file_source.rs" = 2
+"crates/mln_storage/src/database_file_source.rs" = 1
 "crates/mln_storage/src/local_file_source.rs" = 1
 "crates/mln_storage/src/main_resource_loader.rs" = 3
 "crates/mln_storage/src/mbtiles_file_source.rs" = 1
@@ -296,7 +296,7 @@
 "examples/desktop/src/frontend.rs" = 1
 "examples/desktop/src/main.rs" = 2
 "examples/desktop/src/settings.rs" = 1
-"examples/desktop/src/view.rs" = 11
+"examples/desktop/src/view.rs" = 10
 "tools/expression-test/src/parser.rs" = 2
 "tools/render-test/src/metadata.rs" = 2
 "tools/render-test/src/parser.rs" = 5

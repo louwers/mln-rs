@@ -1954,6 +1954,7 @@ dependencies = [
 name = "mln-rs-storage-offline"
 version = "0.0.10"
 dependencies = [
+ "httpmock",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",
