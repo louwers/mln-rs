@@ -40,7 +40,7 @@ pub struct MapOptions {
     /// that the style's fonts lack, as `Style::set_fallback_font_faces`
     /// takes it.
     pub fallback_font_faces: Option<String>,
-    /// Whether the renderers of the map keep tiles in memory after they
+    /// Whether the map's render sessions keep tiles in memory after they
     /// leave the view, so they show again without loading. On by default.
     pub tile_cache_enabled: bool,
 }
@@ -121,6 +121,7 @@ pub(crate) struct MapShared {
     runtime: Arc<RuntimeShared>,
     mode: MapMode,
     pixel_ratio: f32,
+    tile_cache_enabled: bool,
     /// The render session attached to the map, from its attach until its
     /// detach completes.
     session: Mutex<Option<SessionClaim>>,
@@ -136,17 +137,13 @@ pub(crate) struct MapShared {
 }
 
 impl MapShared {
-    pub(crate) fn new(
-        id: MapId,
-        runtime: Arc<RuntimeShared>,
-        options: &mln_map::MapOptions,
-        published: Arc<Published>,
-    ) -> Self {
+    pub(crate) fn new(id: MapId, runtime: Arc<RuntimeShared>, options: &MapOptions, published: Arc<Published>) -> Self {
         MapShared {
             id,
             runtime,
-            mode: options.map_mode(),
-            pixel_ratio: options.pixel_ratio(),
+            mode: options.map.map_mode(),
+            pixel_ratio: options.map.pixel_ratio(),
+            tile_cache_enabled: options.tile_cache_enabled,
             session: Mutex::new(None),
             sent: Mutex::new(1),
             released: AtomicBool::new(false),
@@ -559,6 +556,10 @@ impl Map {
 
     pub(crate) fn pixel_ratio(&self) -> f32 {
         self.shared.pixel_ratio
+    }
+
+    pub(crate) fn tile_cache_enabled(&self) -> bool {
+        self.shared.tile_cache_enabled
     }
 
     pub(crate) fn glyph_cache(&self) -> Arc<GlyphCache> {
@@ -1144,8 +1145,6 @@ pub(crate) struct MapEntry {
     pub(crate) callback_sources: CallbackSources,
     /// The GeoJSON data that commands set and that is still being built.
     pub(crate) geojson_updates: GeoJsonUpdates,
-    #[expect(dead_code, reason = "the renderers of the map's render sessions read it")]
-    pub(crate) tile_cache_enabled: bool,
 }
 
 impl MapEntry {
@@ -1228,7 +1227,6 @@ pub(crate) fn create(
             feature_state: FeatureStateStore::default(),
             callback_sources: CallbackSources::default(),
             geojson_updates: GeoJsonUpdates::default(),
-            tile_cache_enabled: options.tile_cache_enabled,
         },
     );
     flush(core, id, outbox);

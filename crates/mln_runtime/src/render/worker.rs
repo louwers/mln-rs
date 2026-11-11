@@ -111,6 +111,8 @@ pub(crate) struct Init {
     pub(crate) size: Size,
     pub(crate) pixel_ratio: f32,
     pub(crate) glyph_cache: Arc<GlyphCache>,
+    /// Whether the renderer keeps tiles that left the view.
+    pub(crate) tile_cache_enabled: bool,
 }
 
 /// What a session renders into, before its thread builds it.
@@ -149,7 +151,8 @@ impl Gfx {
     /// How many graphics objects a `Gfx` holds: the renderer and its backend.
     const OBJECTS: u32 = 2;
 
-    fn new(target: TargetInit, size: Size, pixel_ratio: f32, glyph_cache: Arc<GlyphCache>) -> Result<Gfx, Error> {
+    fn new(init: Init) -> Result<Gfx, Error> {
+        let Init { target, size, pixel_ratio, glyph_cache, tile_cache_enabled } = init;
         let size = physical_size(size, pixel_ratio);
         let (backend, renderer_backend): (Backend, Rc<dyn RendererBackend>) = match target {
             TargetInit::Offscreen(device) => {
@@ -165,7 +168,8 @@ impl Gfx {
                 (Backend::Surface(backend.clone()), backend)
             }
         };
-        let renderer = Renderer::with_glyph_cache(renderer_backend, pixel_ratio, None, glyph_cache);
+        let mut renderer = Renderer::with_glyph_cache(renderer_backend, pixel_ratio, None, glyph_cache);
+        renderer.set_tile_cache_enabled(tile_cache_enabled);
         Ok(Gfx { renderer, backend })
     }
 
@@ -349,7 +353,8 @@ impl Worker {
         })));
         // A session that a detach or abandon reached first needs no renderer.
         let attaching = shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Attaching;
-        let built = attaching.then(|| Gfx::new(init.target, init.size, init.pixel_ratio, init.glyph_cache));
+        let pixel_ratio = init.pixel_ratio;
+        let built = attaching.then(|| Gfx::new(init));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
@@ -375,7 +380,7 @@ impl Worker {
         Worker {
             shared,
             gfx,
-            pixel_ratio: init.pixel_ratio,
+            pixel_ratio,
             reader: None,
             map_events: None,
             renderer_events,
