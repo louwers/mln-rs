@@ -253,7 +253,7 @@ impl WebMap {
             dirty: Cell::new(false),
         }));
         let observer = Rc::new(ConsoleMapObserver::default());
-        let map = Map::with_resource_options(
+        let mut map = Map::with_resource_options(
             &frontend,
             observer.clone(),
             MapOptions::new().with_size(size).with_pixel_ratio(pixel_ratio as f32),
@@ -261,6 +261,10 @@ impl WebMap {
             &ClientOptions::default(),
         )
         .map_err(js_error)?;
+        // The page always rotates (right- or Ctrl-drag, a two-finger twist),
+        // so drags and zooms on the globe turn the bearing with the planet,
+        // and a drag carries on over a pole, as in the desktop app.
+        map.set_globe_free_bearing(true);
         Ok(WebMap {
             map,
             frontend,
