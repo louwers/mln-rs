@@ -671,6 +671,143 @@ fn geojson_source_tiles_after_data_reset() {
     assert!(render_source.is_loaded()); // Tiles are reset in static mode.
 }
 
+/// Runs `run_loop` until a task or async handle has run.
+fn run_until_work(run_loop: &RunLoop) {
+    while !run_loop.run_once() {
+        run_loop.wait_for_work();
+    }
+}
+
+/// A circle layer "id" on "source", as layer properties.
+fn circle_layers() -> Vec<Immutable<dyn LayerProperties>> {
+    let layer = CircleLayer::new("id", "source");
+    vec![Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())))]
+}
+
+/// A GeoJSON source rendered with a circle layer. Its data is clustered,
+/// which slices a tile within the call in either mode, so whether the tiles
+/// complete within an update shows only how they lay out.
+struct SynchronousUpdateSource {
+    options: Immutable<GeoJSONOptions>,
+    source: GeoJSONSource,
+    render_source: RenderGeoJSONSource,
+    layers: Vec<Immutable<dyn LayerProperties>>,
+}
+
+impl SynchronousUpdateSource {
+    fn new(test: &SourceTest, synchronous_update: bool) -> Self {
+        let options: Immutable<GeoJSONOptions> =
+            Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
+        let source = GeoJSONSource::new("source", options.clone());
+        let render_source = RenderGeoJSONSource::new(
+            source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
+            &test.thread_pool,
+        );
+        SynchronousUpdateSource { options, source, render_source, layers: circle_layers() }
+    }
+
+    /// Sets new data and updates the render source, as a frame would.
+    fn update(&mut self, test: &SourceTest) {
+        let geojson = geojson::parse(
+            r#"{"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {},
+                "geometry": {"type": "Point", "coordinates": [1.1, 1.1]}}]}"#,
+        )
+        .unwrap();
+        self.source
+            .set_geojson_data(Some(create_geojson_data(&geojson, scheduler::get_sequenced(), &self.options).unwrap()));
+        let mut parameters = test.tile_parameters(MapMode::Continuous);
+        parameters.is_update_synchronous = self.source.is_update_synchronous();
+        self.render_source.update(self.source.base_impl(), &self.layers, true, true, &parameters);
+    }
+}
+
+// gtest: Source.GeoJSONSourceSynchronousUpdateOverrideAppliesToExistingTiles
+#[test]
+fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
+    let test = SourceTest::new();
+
+    let mut synchronous = SynchronousUpdateSource::new(&test, true);
+    synchronous.update(&test);
+    assert!(synchronous.render_source.is_loaded()); // The tiles complete within the update.
+    synchronous.source.set_override_synchronous_update(false);
+    synchronous.update(&test);
+    assert!(!synchronous.render_source.is_loaded()); // The tiles now lay out in the background.
+
+    let mut asynchronous = SynchronousUpdateSource::new(&test, false);
+    asynchronous.update(&test);
+    assert!(!asynchronous.render_source.is_loaded());
+    while !asynchronous.render_source.is_loaded() {
+        run_until_work(&test.run_loop);
+    }
+    asynchronous.source.set_override_synchronous_update(true);
+    asynchronous.update(&test);
+    assert!(asynchronous.render_source.is_loaded()); // The tiles now complete within the update.
+}
+
+/// Holds the tasks it is given until the test runs them.
+#[derive(Default)]
+struct HeldScheduler {
+    tasks: Mutex<Vec<scheduler::Task>>,
+}
+
+impl scheduler::Scheduler for HeldScheduler {
+    fn schedule(&self, task: scheduler::Task) {
+        self.tasks.lock().unwrap().push(task);
+    }
+
+    fn wait_for_empty(&self) {}
+}
+
+// gtest: Source.GeoJSONSourceSlicesInlineWhileABackgroundSliceRuns
+#[test]
+fn geojson_source_slices_inline_while_a_background_slice_runs() {
+    let mut test = SourceTest::new();
+    // At zoom 3 the index slices its tiles on demand, which fills its tile cache.
+    test.transform.jump_to(&CameraOptions { center: Some(LatLng::default()), zoom: Some(3.0), ..Default::default() });
+
+    // Unclustered data slices on this scheduler while the source is asynchronous.
+    let slicer = Arc::new(HeldScheduler::default());
+    let source = GeoJSONSource::with_default_options("source");
+    let geojson = geojson::parse(
+        r#"{"type": "Polygon", "coordinates": [[[-10, -10], [10, -10], [10, 10], [-10, 10], [-10, -10]]]}"#,
+    )
+    .unwrap();
+    source.set_geojson_data(Some(
+        create_geojson_data(&geojson, slicer.clone(), &GeoJSONOptions::default_options()).unwrap(),
+    ));
+    let mut render_source = RenderGeoJSONSource::new(
+        source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
+        &test.thread_pool,
+    );
+    let layers = circle_layers();
+    let update = |render_source: &mut RenderGeoJSONSource| {
+        let mut parameters = test.tile_parameters(MapMode::Continuous);
+        parameters.is_update_synchronous = source.is_update_synchronous();
+        render_source.update(source.base_impl(), &layers, true, true, &parameters);
+    };
+
+    update(&mut render_source);
+    assert!(!slicer.tasks.lock().unwrap().is_empty());
+    assert!(!render_source.is_loaded());
+
+    // The queued slices run in the background while the source turns
+    // synchronous and recreates its tiles, which slice the same index inline.
+    source.set_override_synchronous_update(true);
+    let tasks = std::mem::take(&mut *slicer.tasks.lock().unwrap());
+    let background = std::thread::spawn(move || {
+        for task in tasks {
+            task();
+        }
+    });
+    update(&mut render_source);
+    background.join().unwrap();
+    assert!(render_source.is_loaded()); // The new tiles complete within the update.
+
+    // The background slices reply to tiles that no longer exist.
+    run_until_work(&test.run_loop);
+    assert!(render_source.is_loaded());
+}
+
 type Records = Arc<Mutex<Vec<((EventSeverity, Event, String), bool)>>>;
 
 struct Recorder(Records);

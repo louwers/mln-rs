@@ -74,13 +74,19 @@ fn supercluster_extension(
 pub struct RenderGeoJSONSource {
     tile_source: RenderTileSource,
     data: Option<Weak<dyn GeoJSONData>>,
+    /// The mode the tiles in the pyramid were created with.
+    tiles_update_synchronously: bool,
 }
 
 impl RenderGeoJSONSource {
     /// `RenderGeoJSONSource(Immutable<style::GeoJSONSource::Impl>, const TaggedScheduler&)`.
     pub fn new(impl_: Arc<geojson_source_impl::Impl>, thread_pool: &TaggedScheduler) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
-        RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_, thread_pool), data: None }
+        RenderGeoJSONSource {
+            tile_source: RenderTileSource::new(impl_, thread_pool),
+            data: None,
+            tiles_update_synchronously: false,
+        }
     }
 
     /// `impl()`.
@@ -121,6 +127,13 @@ impl RenderSource for RenderGeoJSONSource {
         self.tile_source.base.base_impl = base_impl;
 
         self.tile_source.base.enabled = needs_rendering;
+
+        // A tile lays out in the mode it was created with, so a mode change
+        // recreates the tiles.
+        if parameters.is_update_synchronous != self.tiles_update_synchronously {
+            self.tiles_update_synchronously = parameters.is_update_synchronous;
+            self.tile_source.tile_pyramid.clear_all();
+        }
 
         let impl_ = self.impl_();
         let data = impl_.get_data().and_then(|weak| weak.upgrade());

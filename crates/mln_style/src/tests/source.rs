@@ -19,7 +19,7 @@ use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 use crate::conversion::tileset::SourceOptions;
 use crate::observer::SourceObserver;
 use crate::source::Source;
-use crate::sources::geojson_source::GeoJSONSource;
+use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::image_source::ImageSource;
 use crate::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 
@@ -163,6 +163,25 @@ fn geojson_source_url_update() {
     assert!(*loaded.borrow());
     assert!(source.loaded());
     assert!(source.impl_().get_data().and_then(|d| d.upgrade()).is_some());
+}
+
+// gtest: Source.GeoJSONSourceSynchronousUpdateOverrideReplacesTheOption
+#[test]
+fn geojson_source_synchronous_update_override_replaces_the_option() {
+    let options = GeoJSONOptions { synchronous_update: true, ..Default::default() };
+    let source = GeoJSONSource::new("source", Arc::new(options));
+    assert!(source.is_update_synchronous());
+
+    source.set_override_synchronous_update(false);
+    assert!(!source.is_update_synchronous());
+
+    source.set_override_synchronous_update(true);
+    assert!(source.is_update_synchronous());
+
+    let asynchronous = GeoJSONSource::with_default_options("asynchronous");
+    assert!(!asynchronous.is_update_synchronous());
+    asynchronous.set_override_synchronous_update(true);
+    assert!(asynchronous.is_update_synchronous());
 }
 
 fn as_vector(source: &dyn Source) -> &VectorSource {
