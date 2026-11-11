@@ -4,18 +4,22 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mln_actor::{RunLoop, Timer};
 use mln_util::chrono::Duration;
+use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
-use super::{local_callback, req, serial};
+use super::{delete_file, local_callback, req, serial, temp_path};
 use crate::ClientOptions;
 use crate::database_file_source::DatabaseFileSource;
 use crate::file_source::{FileSource, FileSourceType};
 use crate::file_source_manager::FileSourceManager;
+use crate::offline_database::OfflineDatabase;
 use crate::resource::{Kind, LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
+use crate::sqlite3::{Database, OpenFlag, Query, Statement};
 
 fn dbfs() -> Arc<dyn FileSource> {
     FileSourceManager::get()
@@ -153,4 +157,126 @@ fn can_request() {
         None,
         LoadingMethod::NetworkOnly
     )));
+}
+
+/// Counts the database thread's failed `accessed` flushes whose message
+/// contains `marker`; other records go on to the default output.
+struct FlushFailures {
+    count: Arc<AtomicUsize>,
+    marker: String,
+}
+
+impl Observer for FlushFailures {
+    fn on_record(&self, _: EventSeverity, event: Event, _: i64, msg: &str) -> bool {
+        if event != Event::Database
+            || !msg.starts_with("Can't flush accessed timestamps")
+            || !msg.contains(&self.marker)
+        {
+            return false;
+        }
+        self.count.fetch_add(1, Ordering::SeqCst);
+        true
+    }
+}
+
+/// Deletes a database and its journals, now and when dropped.
+struct DeleteDatabase(String);
+
+impl DeleteDatabase {
+    fn new(path: String) -> Self {
+        let cleanup = DeleteDatabase(path);
+        cleanup.delete();
+        cleanup
+    }
+
+    fn delete(&self) {
+        delete_file(&self.0);
+        delete_file(&format!("{}-wal", self.0));
+        delete_file(&format!("{}-journal", self.0));
+    }
+}
+
+impl Drop for DeleteDatabase {
+    fn drop(&mut self) {
+        self.delete();
+    }
+}
+
+struct RemoveObserver;
+
+impl Drop for RemoveObserver {
+    fn drop(&mut self) {
+        Log::remove_observer();
+    }
+}
+
+fn cached_request(run_loop: &RunLoop, source: &DatabaseFileSource, resource: &Resource) -> Response {
+    let result: Rc<RefCell<Option<Response>>> = Rc::new(RefCell::new(None));
+    let (out, stop) = (result.clone(), run_loop.clone());
+    let _req = source.request(
+        resource,
+        Box::new(move |res: Response| {
+            *out.borrow_mut() = Some(res);
+            stop.stop();
+        }),
+    );
+    run_loop.run();
+    result.borrow_mut().take().expect("response")
+}
+
+fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !done() {
+        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+// The real database thread and timer: a failed flush of cache hits'
+// `accessed` timestamps must not retry while idle, and the next cache hit
+// must retry it.
+// gtest: DatabaseFileSource.FailedAccessedFlushWaitsForNextRead
+#[test]
+fn failed_accessed_flush_waits_for_next_read() {
+    let run_loop = RunLoop::new();
+    let path = temp_path("maintenance.db");
+    let _delete_database = DeleteDatabase::new(path.clone());
+    let resource =
+        Resource::with_tile_data(Kind::Unknown, "https://example.com/maintenance", None, LoadingMethod::CacheOnly);
+    let mut response = Response::new();
+    response.data = Some(Arc::new(b"cached".to_vec()));
+    OfflineDatabase::new(&path, &ResourceOptions::default().tile_server_options()).put(&resource, &response);
+
+    let marker = format!("accessed failure {path}");
+    let sql = Database::open(&path, OpenFlag::ReadWriteCreate).unwrap();
+    sql.exec("UPDATE resources SET accessed = 0").unwrap();
+    sql.exec(&format!(
+        "CREATE TRIGGER fail_accessed BEFORE UPDATE OF accessed ON resources \
+         BEGIN SELECT RAISE(ABORT, '{marker}'); END"
+    ))
+    .unwrap();
+    let failures = Arc::new(AtomicUsize::new(0));
+    Log::set_observer(Box::new(FlushFailures { count: failures.clone(), marker }));
+    let _remove_observer = RemoveObserver;
+
+    let source = DatabaseFileSource::new(&ResourceOptions::default().with_cache_path(&path), &ClientOptions::default());
+    let cached = cached_request(&run_loop, &source, &resource);
+    assert!(cached.error.is_none());
+    assert_eq!(response.data, cached.data);
+
+    wait_until("the failed flush", || failures.load(Ordering::SeqCst) > 0);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    assert_eq!(1, failures.load(Ordering::SeqCst), "failed flush retried while idle");
+
+    sql.exec("DROP TRIGGER fail_accessed").unwrap();
+    let cached = cached_request(&run_loop, &source, &resource);
+    assert!(cached.error.is_none());
+    wait_until("the retried flush", || {
+        let conn = sql.conn();
+        let mut stmt = Statement::new(&conn, "SELECT accessed FROM resources").unwrap();
+        let mut query = Query::new(&mut stmt);
+        assert!(query.run().unwrap());
+        query.get_i64(0).unwrap() > 0
+    });
+    assert_eq!(1, failures.load(Ordering::SeqCst));
 }

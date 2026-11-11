@@ -16,10 +16,12 @@
 // packDatabase, invalidate/clear ambient cache, setMaximumAmbientCacheSize.
 
 use std::cell::RefCell;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use feature::Value;
-use mln_actor::{ActorRef, Thread, scheduler};
+use mln_actor::{ActorRef, Thread, Timer, scheduler};
+use mln_util::chrono::Duration;
 use mln_util::client_options::ClientOptions;
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
@@ -35,16 +37,27 @@ use crate::resource::{LoadingMethod, Resource, StoragePolicy};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Error, Reason, Response};
 
+/// How long cache hits' `accessed` timestamps wait, so that the reads of a
+/// map load share one write.
+const ACCESSED_FLUSH_DELAY: Duration = Duration::from_millis(250);
+
 /// `DatabaseFileSourceThread`: owns the OfflineDatabase on the database
 /// thread.
 pub struct DatabaseFileSourceThread {
     db: RefCell<OfflineDatabase>,
     #[allow(dead_code)]
     online_file_source: Option<Arc<dyn FileSource>>,
+    self_ref: ActorRef<DatabaseFileSourceThread>,
+    accessed_flush_timer: Timer,
+    /// A flush of the `accessed` timestamps is scheduled. A failed flush
+    /// isn't rescheduled until the next cache hit, so an idle map stays
+    /// idle.
+    accessed_flush_scheduled: Arc<AtomicBool>,
 }
 
 impl DatabaseFileSourceThread {
     fn new(
+        self_ref: ActorRef<DatabaseFileSourceThread>,
         online_file_source: Option<Arc<dyn FileSource>>,
         cache_path: &str,
         tile_server_options: &TileServerOptions,
@@ -53,10 +66,31 @@ impl DatabaseFileSourceThread {
             Some(online) => online.get_resource_options().tile_server_options(),
             None => tile_server_options.clone(),
         };
+        let mut db = OfflineDatabase::new(cache_path, &tile_server_options);
+        let accessed_flush_scheduled = Arc::new(AtomicBool::new(false));
+        let (scheduled, actor) = (accessed_flush_scheduled.clone(), self_ref.clone());
+        db.set_accessed_callback(Box::new(move || {
+            if !scheduled.swap(true, Ordering::Relaxed) {
+                actor.invoke(DatabaseFileSourceThread::start_accessed_flush_timer);
+            }
+        }));
         DatabaseFileSourceThread {
-            db: RefCell::new(OfflineDatabase::new(cache_path, &tile_server_options)),
+            db: RefCell::new(db),
             online_file_source,
+            self_ref,
+            accessed_flush_timer: Timer::new(),
+            accessed_flush_scheduled,
         }
+    }
+
+    fn start_accessed_flush_timer(&self) {
+        let actor = self.self_ref.clone();
+        self.accessed_flush_timer.start(ACCESSED_FLUSH_DELAY, Duration::zero(), move || {
+            actor.invoke(|t: &DatabaseFileSourceThread| {
+                t.accessed_flush_scheduled.store(false, Ordering::Relaxed);
+                t.db.borrow_mut().flush_accessed();
+            });
+        });
     }
 
     /// `request(const Resource&, const ActorRef<FileSourceRequest>&)`.
@@ -143,8 +177,8 @@ impl DatabaseFileSource {
         let cache_path = resource_options.cache_path().to_owned();
         let tile_server_options = resource_options.tile_server_options();
         // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_DATABASE).
-        let thread = Thread::new("DatabaseFileSource", move |_| {
-            DatabaseFileSourceThread::new(online_file_source, &cache_path, &tile_server_options)
+        let thread = Thread::new("DatabaseFileSource", move |self_ref| {
+            DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path, &tile_server_options)
         });
         DatabaseFileSource {
             impl_: Impl {
