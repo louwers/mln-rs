@@ -3,10 +3,8 @@
 // `normalize{Source,Style,Sprite,Glyphs,Tile}URL`), which the online file
 // source applies to every request.
 //
-// TODO(port): the canonicalize* half (`isNormalizedURL`,
-// `isNormalizedSourceURL`, `createTokenMap`, `canonicalizeTileURL`,
-// `canonicalizeTileset`, `canonicalize{Source,Sprite,Glyph}URL`), used for
-// tilesets and offline cache keys.
+// The canonicalize* half, used for tilesets and offline cache keys, is
+// mln_storage_offline::mapbox: it needs the `regex` crate.
 
 use crate::logging::{Event, Log};
 use crate::tile_server_options::TileServerOptions;

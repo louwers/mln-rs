@@ -45,6 +45,7 @@ use mln_style::sources::image_source::ImageSource;
 use mln_style::sources::tile_source::{UrlOrTileset, VectorSource};
 use mln_style::style_property::Kind as StylePropertyKind;
 use mln_style::{PropertyValue, TransitionOptions};
+use mln_style_types::VisibilityType;
 use mln_test_server::HttpServer;
 use mln_text::glyph::{GlyphIDType, GlyphRange};
 use mln_util::Color;
@@ -1144,12 +1145,55 @@ fn dont_load_unneeded_tiles() {
 
 // gtest: Map.ContinuousRendering
 #[test]
-#[ignore = "TODO(port): AssetFileSource (the style's asset:// URLs under ResourceOptions::withAssetPath); also TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:922"]
+#[ignore = "TEST_DISABLED_ON_CI (timing-dependent); see map.test.cpp:922"]
 fn continuous_rendering() {
-    // test/map/map.test.cpp:922: a Continuous map over
-    // ResourceOptions().withCachePath(":memory:").withAssetPath(
-    // "test/fixtures/api/assets") loads test/fixtures/api/water.json and must
-    // stop rendering (no frame for 1 s) within 10 s.
+    let run_loop = RunLoop::new();
+
+    let did_not_stop = Rc::new(Cell::new(false));
+    let emergency_shutoff = Timer::new();
+    {
+        let run_loop = run_loop.clone();
+        let did_not_stop = did_not_stop.clone();
+        emergency_shutoff.start(Duration::from_secs(10), Duration::zero(), move || {
+            run_loop.stop();
+            did_not_stop.set(true);
+        });
+    }
+
+    let timer = Rc::new(Timer::new());
+
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+
+    let observer = Rc::new(StubMapObserver::default());
+    {
+        let timer = Rc::downgrade(&timer);
+        let run_loop = run_loop.clone();
+        observer.did_finish_rendering_frame_callback.set(move |_| {
+            // Start a timer that ends the test one second from now. If we are
+            // continuing to render indefinitely, the timer will be constantly
+            // restarted and never trigger. Instead, the emergency shutoff above
+            // will trigger, failing the test.
+            if let Some(timer) = timer.upgrade() {
+                let run_loop = run_loop.clone();
+                timer.start(Duration::from_secs(1), Duration::zero(), move || run_loop.stop());
+            }
+        });
+    }
+
+    let mut map = Map::with_resource_options(
+        &frontend,
+        observer.clone(),
+        MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),
+        &ResourceOptions::default()
+            .with_cache_path(":memory:")
+            .with_asset_path(cpp_root().join("test/fixtures/api/assets").to_str().unwrap()),
+        &ClientOptions::default(),
+    )
+    .unwrap();
+    map.get_style_mut().load_json(&read_file("test/fixtures/api/water.json"));
+
+    run_loop.run();
+    assert!(!did_not_stop.get(), "Did not stop rendering");
 }
 
 // gtest: Map.NoContentTiles
@@ -2027,7 +2071,7 @@ fn resource_error() {
 
 // gtest: Map.StencilOverflow
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource and RenderResult::stats (gfx::RenderingStats::stencilUpdates); see map.test.cpp:1767"]
+#[ignore = "TODO(port): CustomGeometrySource; see map.test.cpp:1767"]
 fn stencil_overflow() {
     // test/map/map.test.cpp:1767: a CustomGeometrySource with 16 px tiles at
     // z5 renders without crashing; ASSERT_LE(0, result.stats.stencilUpdates).
@@ -2101,7 +2145,7 @@ fn invalid_utf8_in_tile() {
 
 // gtest: Map.ObserveTileLifecycle
 #[test]
-#[ignore = "TODO(port): MapObserver::onTileAction and onPre/PostCompileShader (TileOperation), and AssetFileSource for the asset:// style; see map.test.cpp:1843"]
+#[ignore = "TODO(port): MapObserver::onTileAction and onPre/PostCompileShader (TileOperation); see map.test.cpp:1843"]
 fn observe_tile_lifecycle() {
     // test/map/map.test.cpp:1843: checks the order of the tile operations
     // (RequestedFromCache/Network, LoadFromCache/Network, StartParse,
@@ -2476,19 +2520,48 @@ fn location_indicator_accuracy_colors_transition() {
 
 // gtest: Map.RenderingStatisticsTrackDrawsAcrossFrames
 #[test]
-#[ignore = "TODO(port): HeadlessFrontend::RenderResult::stats (gfx::RenderingStats numFrames/numDrawCalls/totalDrawCalls); see map.test.cpp:2321"]
 fn rendering_statistics_track_draws_across_frames() {
-    // test/map/map.test.cpp:2321: numFrames counts up per render, numDrawCalls
-    // is the frame's and totalDrawCalls the running sum; a hidden circle layer
-    // draws nothing.
+    let test = MapTest::new();
+    test.load_json(
+        r#"{"version":8,"sources":{"points":{"type":"geojson","data":{
+        "type":"Point","coordinates":[0,0]}}},"layers":[{"id":"circle","type":"circle","source":"points"}]}"#,
+    );
+    let first = test.render().stats;
+    assert!(first.num_frames > 0);
+    assert!(first.num_draw_calls > 0);
+    assert!(first.total_draw_calls >= first.num_draw_calls);
+
+    let second = test.render().stats;
+    assert_eq!(first.num_frames + 1, second.num_frames);
+    assert!(second.num_draw_calls > 0);
+    assert_eq!(first.total_draw_calls + second.num_draw_calls, second.total_draw_calls);
+
+    test.map().get_style_mut().get_layer_mut("circle").expect("circle layer").set_visibility(VisibilityType::None);
+    let empty = test.render().stats;
+    assert_eq!(second.num_frames + 1, empty.num_frames);
+    assert_eq!(0, empty.num_draw_calls);
+    assert_eq!(second.total_draw_calls, empty.total_draw_calls);
 }
 
 // gtest: Map.LocationIndicatorWithoutImages
 #[test]
-#[ignore = "TODO(port): RenderResult::stats (numDrawCalls) and RenderLocationIndicatorLayer; see map.test.cpp:2342"]
 fn location_indicator_without_images() {
-    // test/map/map.test.cpp:2342: a location-indicator with accuracy-radius 0
-    // and no images produces no draw call.
+    let test = MapTest::new();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {},
+      "layers": [{
+        "id": "location",
+        "type": "location-indicator",
+        "paint": {"location": [0, 0, 0], "accuracy-radius": 0}
+      }]
+    }"#,
+    );
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(16.0)));
+
+    // Neither the accuracy circle nor any image should produce a draw call.
+    assert_eq!(test.render().stats.num_draw_calls, 0);
 }
 
 /// The capturing `RendererFrontend` of TileSelectionOptionsPublishUpdates.

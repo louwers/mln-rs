@@ -43,7 +43,7 @@ fn render_without_callback() {
 
 // gtest: CustomGeometrySource.Grid
 #[test]
-#[ignore = "TODO(port): CustomGeometrySource, and AssetFileSource for test/fixtures/api/water.json's asset:// URLs; see custom_geometry_source.test.cpp:19"]
+#[ignore = "TODO(port): CustomGeometrySource; see custom_geometry_source.test.cpp:19"]
 fn grid() {
     // test/api/custom_geometry_source.test.cpp:19: a CustomGeometrySource
     // whose fetchTileFunction sets 0.1-degree grid lines per tile, drawn by a
@@ -53,7 +53,7 @@ fn grid() {
 
 // gtest: CustomLayer.Basic
 #[test]
-#[ignore = "OpenGL-only in C++ (returns early on other backends; the CustomLayerHost draws with GL calls); also TODO(port): CustomLayer and AssetFileSource; see custom_layer.test.cpp:93"]
+#[ignore = "OpenGL-only in C++ (returns early on other backends; the CustomLayerHost draws with GL calls); also TODO(port): CustomLayer; see custom_layer.test.cpp:93"]
 fn basic() {
     // test/api/custom_layer.test.cpp:93: a GL CustomLayer drawing a triangle
     // under a fill layer (test/fixtures/custom_layer/basic, 0.0006, 0.1).

@@ -207,7 +207,7 @@
 "crates/mln_headless/tests/gtest_annotations.rs" = 28
 "crates/mln_headless/tests/gtest_api.rs" = 2
 "crates/mln_headless/tests/gtest_feature_tracking.rs" = 14
-"crates/mln_headless/tests/gtest_map.rs" = 14
+"crates/mln_headless/tests/gtest_map.rs" = 11
 "crates/mln_headless/tests/gtest_map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_memory.rs" = 2
 "crates/mln_headless/tests/gtest_query.rs" = 5
@@ -298,12 +298,10 @@
 "crates/mln_util/src/geo.rs" = 2
 "crates/mln_util/src/geometry.rs" = 1
 "crates/mln_util/src/logging.rs" = 1
-"crates/mln_util/src/mapbox.rs" = 1
 "crates/mln_util/src/projection.rs" = 3
 "crates/mln_util/src/projection_test.rs" = 1
 "crates/mln_util/src/tileset.rs" = 1
 "crates/mln_util/src/vectors.rs" = 1
-"crates/mln_util/tests/gtest/mapbox.rs" = 15
 "crates/mln_webgpu/src/context.rs" = 4
 "crates/mln_webgpu/src/drawable.rs" = 1
 "crates/mln_webgpu/src/offscreen_texture.rs" = 1

@@ -36,6 +36,11 @@ regex.workspace = true
 name = "offline_download_map_test"
 path = "tests/offline_download_map.rs"
 
+# Ports test/util/mapbox.test.cpp.
+[[test]]
+name = "gtest_mapbox"
+path = "tests/gtest_mapbox.rs"
+
 [dev-dependencies]
 mln_headless = { package = "mln-rs-headless", path = "../mln_headless" }
 mln_map = { package = "mln-rs-map", path = "../mln_map" }

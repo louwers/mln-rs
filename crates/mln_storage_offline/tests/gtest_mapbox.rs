@@ -1,17 +1,16 @@
-// Ports test/util/mapbox.test.cpp.
-//
-// mln_util::mapbox ports the normalize* half of util/mapbox.cpp. The
-// canonicalize* half (`canonicalizeTileURL`, `canonicalizeTileset`,
-// `canonicalize{Source,Sprite,Glyph}URL`) is a TODO(port) there: it needs
-// std::regex (ECMAScript) matching of the URL templates and
-// `style::SourceType`, which lives above mln_util. The tests that call it
-// are #[ignore]d; their canonicalize assertions are kept as comments, the
-// normalize ones as code.
+// Ports test/util/mapbox.test.cpp: the normalize* half of util/mapbox.cpp
+// is mln_util::mapbox, the canonicalize* half this crate's mapbox module.
 
+use mln_storage_offline::mapbox::{
+    canonicalize_glyph_url, canonicalize_source_url, canonicalize_sprite_url, canonicalize_tile_url,
+    canonicalize_tileset,
+};
+use mln_style_types::SourceType;
 use mln_util::mapbox::{
     normalize_glyphs_url, normalize_source_url, normalize_sprite_url, normalize_style_url, normalize_tile_url,
 };
 use mln_util::tile_server_options::TileServerOptions;
+use mln_util::tileset::Tileset;
 
 fn mapbox_tile_server_options() -> TileServerOptions {
     TileServerOptions::mapbox_configuration()
@@ -185,38 +184,206 @@ fn tile_url() {
 
 // gtest: Mapbox.CanonicalURL
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileURL"]
 fn canonical_url() {
-    // test/util/mapbox.test.cpp:163: 22 canonicalizeTileURL cases (mapbox
-    // configuration; vector .pbf with and without access_token and custom
-    // parameters, raster .jpg/.jpg70/.png at tile sizes 256 ({ratio}) and
-    // 512 (@2x), and the pass-through inputs "", "http://path",
-    // "http://api.mapbox.com/v4/", ".../{y}." and ".../{y}/.").
+    let mapbox = mapbox_tile_server_options();
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://a.tiles.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://b.tiles.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf",
+        canonicalize_tile_url(&mapbox, "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf", SourceType::Vector, 512)
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf?access_token=key",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf",
+        canonicalize_tile_url(
+            &mapbox,
+            "https://api.mapbox.cn/v4/a.b/{z}/{x}/{y}.vector.pbf?access_token=key",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b,c.d/{z}/{x}/{y}.vector.pbf",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b,c.d/{z}/{x}/{y}.vector.pbf?access_token=key",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf?custom=parameter",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://a.tiles.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf?access_token=key&custom=parameter",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf?custom=parameter",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://a.tiles.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf?custom=parameter&access_token=key",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}.vector.pbf?custom=parameter&second=param",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://a.tiles.mapbox.com/v4/a.b/{z}/{x}/{y}.vector.pbf?custom=parameter&access_token=key&second=param",
+            SourceType::Vector,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}{ratio}.jpg",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.jpg?access_token=key",
+            SourceType::Raster,
+            256
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}{ratio}.jpg70",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.jpg70?access_token=key",
+            SourceType::Raster,
+            256
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}@2x.jpg",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.jpg?access_token=key",
+            SourceType::Raster,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}@2x.jpg70",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.jpg70?access_token=key",
+            SourceType::Raster,
+            512
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}{ratio}.png",
+        canonicalize_tile_url(&mapbox, "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.png", SourceType::Raster, 256)
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}{ratio}.png",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.png?access_token=key",
+            SourceType::Raster,
+            256
+        )
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}@2x.png",
+        canonicalize_tile_url(&mapbox, "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.png", SourceType::Raster, 512)
+    );
+    assert_eq!(
+        "mapbox://tiles/a.b/{z}/{x}/{y}@2x.png",
+        canonicalize_tile_url(
+            &mapbox,
+            "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.png?access_token=key",
+            SourceType::Raster,
+            512
+        )
+    );
+
+    // We don't ever expect to see these inputs, but be safe anyway.
+    assert_eq!("", canonicalize_tile_url(&mapbox, "", SourceType::Raster, 256));
+    assert_eq!("http://path", canonicalize_tile_url(&mapbox, "http://path", SourceType::Raster, 256));
+    assert_eq!(
+        "http://api.mapbox.com/v4/",
+        canonicalize_tile_url(&mapbox, "http://api.mapbox.com/v4/", SourceType::Raster, 256)
+    );
+    assert_eq!(
+        "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.",
+        canonicalize_tile_url(&mapbox, "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}.", SourceType::Raster, 256)
+    );
+    assert_eq!(
+        "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}/.",
+        canonicalize_tile_url(&mapbox, "http://api.mapbox.com/v4/a.b/{z}/{x}/{y}/.", SourceType::Raster, 256)
+    );
 }
 
 // gtest: Mapbox.CanonicalizeRasterTileset
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileset"]
 fn canonicalize_raster_tileset() {
-    // Tileset { tiles: ["http://a.tiles.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.png?access_token=key"] },
-    // canonicalizeTileset(mapbox, tileset, "mapbox://mapbox.satellite", SourceType::Raster, 256)
-    // -> tiles[0] == "mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png"
+    let mut tileset = Tileset {
+        tiles: vec!["http://a.tiles.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}.png?access_token=key".to_owned()],
+        ..Tileset::default()
+    };
+
+    canonicalize_tileset(
+        &mapbox_tile_server_options(),
+        &mut tileset,
+        "mapbox://mapbox.satellite",
+        SourceType::Raster,
+        256,
+    );
+
+    assert_eq!("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", tileset.tiles[0]);
 }
 
 // gtest: Mapbox.CanonicalizeVectorTileset
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileset"]
 fn canonicalize_vector_tileset() {
-    // Tileset { tiles: ["http://a.tiles.mapbox.com/v4/mapbox.streets/{z}/{x}/{y}.vector.pbf?access_token=key"] },
-    // canonicalizeTileset(mapbox, tileset, "mapbox://mapbox.streets", SourceType::Vector, 512)
-    // -> tiles[0] == "mapbox://tiles/mapbox.streets/{z}/{x}/{y}.vector.pbf"
+    let mut tileset = Tileset {
+        tiles: vec!["http://a.tiles.mapbox.com/v4/mapbox.streets/{z}/{x}/{y}.vector.pbf?access_token=key".to_owned()],
+        ..Tileset::default()
+    };
+
+    canonicalize_tileset(
+        &mapbox_tile_server_options(),
+        &mut tileset,
+        "mapbox://mapbox.streets",
+        SourceType::Vector,
+        512,
+    );
+
+    assert_eq!("mapbox://tiles/mapbox.streets/{z}/{x}/{y}.vector.pbf", tileset.tiles[0]);
 }
 
 // MapLibre tests
 
 // gtest: MapLibre.CanonicalURL
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileURL"]
 fn maplibre_canonical_url() {
     let maplibre = map_libre_tile_server_options();
     assert_eq!(
@@ -231,9 +398,15 @@ fn maplibre_canonical_url() {
         "https://demotiles.maplibre.org/font/{fontstack}/{start}-{end}.pbf",
         normalize_glyphs_url(&maplibre, "maplibre://fonts/{fontstack}/{start}-{end}.pbf", "")
     );
-    // EXPECT_EQ("maplibre://tiles/tiles/{z}/{x}/{y}.pbf",
-    //           canonicalizeTileURL(maplibre, "https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf",
-    //                               SourceType::Vector, 512));
+    assert_eq!(
+        "maplibre://tiles/tiles/{z}/{x}/{y}.pbf",
+        canonicalize_tile_url(
+            &maplibre,
+            "https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf",
+            SourceType::Vector,
+            512
+        )
+    );
 }
 
 // MapTiler tests
@@ -259,7 +432,6 @@ fn maptiler_style_url() {
 
 // gtest: MapTiler.SourceURL
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeSourceURL"]
 fn maptiler_source_url() {
     let maptiler = map_tiler_tile_server_options();
     assert_eq!(
@@ -274,17 +446,25 @@ fn maptiler_source_url() {
         "https://api.maptiler.com/tiles/7ac429c7-c96e-46dd-8c3e-13d48988986a/tiles.json?key=abcdef",
         normalize_source_url(&maptiler, "maptiler://sources/7ac429c7-c96e-46dd-8c3e-13d48988986a", "abcdef").unwrap()
     );
-    // canonicalizeSourceURL(maptiler, "https://api.maptiler.com/tiles/v3/tiles.json?key=abcdef")
-    //   == "maptiler://sources/v3"
-    // canonicalizeSourceURL(maptiler, "https://api.maptiler.com/tiles/outdoor/tiles.json?key=abcdef")
-    //   == "maptiler://sources/outdoor"
-    // canonicalizeSourceURL(maptiler, "https://api.maptiler.com/tiles/7ac429c7-c96e-46dd-8c3e-13d48988986a/tiles.json?key=abcdef")
-    //   == "maptiler://sources/7ac429c7-c96e-46dd-8c3e-13d48988986a"
+    assert_eq!(
+        "maptiler://sources/v3",
+        canonicalize_source_url(&maptiler, "https://api.maptiler.com/tiles/v3/tiles.json?key=abcdef")
+    );
+    assert_eq!(
+        "maptiler://sources/outdoor",
+        canonicalize_source_url(&maptiler, "https://api.maptiler.com/tiles/outdoor/tiles.json?key=abcdef")
+    );
+    assert_eq!(
+        "maptiler://sources/7ac429c7-c96e-46dd-8c3e-13d48988986a",
+        canonicalize_source_url(
+            &maptiler,
+            "https://api.maptiler.com/tiles/7ac429c7-c96e-46dd-8c3e-13d48988986a/tiles.json?key=abcdef"
+        )
+    );
 }
 
 // gtest: MapTiler.SourceURLPassThrough
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeSourceURL"]
 fn maptiler_source_url_pass_through() {
     let maptiler = map_tiler_tile_server_options();
     assert_eq!("", normalize_source_url(&maptiler, "", "").unwrap());
@@ -293,14 +473,16 @@ fn maptiler_source_url_pass_through() {
         "https://api.tileserver.com/map?key=1234",
         normalize_source_url(&maptiler, "https://api.tileserver.com/map?key=1234", "").unwrap()
     );
-    // canonicalizeSourceURL(maptiler, "http://dummy") == "http://dummy"
-    // canonicalizeSourceURL(maptiler, "https://api.tileserver.com/map?key=1234") == same
-    // canonicalizeSourceURL(maptiler, "") == ""
+    assert_eq!("http://dummy", canonicalize_source_url(&maptiler, "http://dummy"));
+    assert_eq!(
+        "https://api.tileserver.com/map?key=1234",
+        canonicalize_source_url(&maptiler, "https://api.tileserver.com/map?key=1234")
+    );
+    assert_eq!("", canonicalize_source_url(&maptiler, ""));
 }
 
 // gtest: MapTiler.GlyphsURL
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeGlyphURL"]
 fn maptiler_glyphs_url() {
     let maptiler = map_tiler_tile_server_options();
     // Glyphs
@@ -312,15 +494,18 @@ fn maptiler_glyphs_url() {
         "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key=abcdef",
         normalize_glyphs_url(&maptiler, "maptiler://fonts/{fontstack}/{range}.pbf", "abcdef")
     );
-    // canonicalizeGlyphURL(maptiler, "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf")
-    //   == "maptiler://fonts/{fontstack}/{range}.pbf"
-    // canonicalizeGlyphURL(maptiler, "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key=abcdef")
-    //   == "maptiler://fonts/{fontstack}/{range}.pbf"
+    assert_eq!(
+        "maptiler://fonts/{fontstack}/{range}.pbf",
+        canonicalize_glyph_url(&maptiler, "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf")
+    );
+    assert_eq!(
+        "maptiler://fonts/{fontstack}/{range}.pbf",
+        canonicalize_glyph_url(&maptiler, "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key=abcdef")
+    );
 }
 
 // gtest: MapTiler.GlyphsURLPassThrough
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeGlyphURL"]
 fn maptiler_glyphs_url_pass_through() {
     let maptiler = map_tiler_tile_server_options();
     assert_eq!("", normalize_glyphs_url(&maptiler, "", ""));
@@ -329,14 +514,16 @@ fn maptiler_glyphs_url_pass_through() {
         "https://api.tileserver.com/map?key=1234",
         normalize_glyphs_url(&maptiler, "https://api.tileserver.com/map?key=1234", "")
     );
-    // canonicalizeGlyphURL(maptiler, "http://dummy") == "http://dummy"
-    // canonicalizeGlyphURL(maptiler, "https://api.tileserver.com/map?key=1234") == same
-    // canonicalizeGlyphURL(maptiler, "") == ""
+    assert_eq!("http://dummy", canonicalize_glyph_url(&maptiler, "http://dummy"));
+    assert_eq!(
+        "https://api.tileserver.com/map?key=1234",
+        canonicalize_glyph_url(&maptiler, "https://api.tileserver.com/map?key=1234")
+    );
+    assert_eq!("", canonicalize_glyph_url(&maptiler, ""));
 }
 
 // gtest: MapTiler.Sprites
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeSpriteURL"]
 fn maptiler_sprites() {
     let maptiler = map_tiler_tile_server_options();
     // Sprites
@@ -344,13 +531,14 @@ fn maptiler_sprites() {
         "https://api.maptiler.com/maps/streets/sprite",
         normalize_sprite_url(&maptiler, "maptiler://sprites/streets/sprite", "")
     );
-    // canonicalizeSpriteURL(maptiler, "https://api.maptiler.com/maps/streets/sprite")
-    //   == "maptiler://sprites/streets/sprite"
+    assert_eq!(
+        "maptiler://sprites/streets/sprite",
+        canonicalize_sprite_url(&maptiler, "https://api.maptiler.com/maps/streets/sprite")
+    );
 }
 
 // gtest: MapTiler.SpritesURLPassThrough
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeSpriteURL"]
 fn maptiler_sprites_url_pass_through() {
     let maptiler = map_tiler_tile_server_options();
     assert_eq!("", normalize_sprite_url(&maptiler, "", ""));
@@ -359,14 +547,16 @@ fn maptiler_sprites_url_pass_through() {
         "https://api.tileserver.com/map?key=1234",
         normalize_sprite_url(&maptiler, "https://api.tileserver.com/map?key=1234", "")
     );
-    // canonicalizeSpriteURL(maptiler, "http://dummy") == "http://dummy"
-    // canonicalizeSpriteURL(maptiler, "https://api.tileserver.com/map?key=1234") == same
-    // canonicalizeSpriteURL(maptiler, "") == ""
+    assert_eq!("http://dummy", canonicalize_sprite_url(&maptiler, "http://dummy"));
+    assert_eq!(
+        "https://api.tileserver.com/map?key=1234",
+        canonicalize_sprite_url(&maptiler, "https://api.tileserver.com/map?key=1234")
+    );
+    assert_eq!("", canonicalize_sprite_url(&maptiler, ""));
 }
 
 // gtest: MapTiler.Tiles
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileURL"]
 fn maptiler_tiles() {
     let maptiler = map_tiler_tile_server_options();
     // Tiles
@@ -378,13 +568,19 @@ fn maptiler_tiles() {
         "https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=abcdef",
         normalize_tile_url(&maptiler, "maptiler://tiles/tiles/v3/{z}/{x}/{y}.pbf", "abcdef")
     );
-    // canonicalizeTileURL(maptiler, "https://api.maptiler.com/tiles/contours/{z}/{x}/{y}.pbf?key=abcdef",
-    //                     SourceType::Vector, 512) == "maptiler://tiles/tiles/contours/{z}/{x}/{y}.pbf"
+    assert_eq!(
+        "maptiler://tiles/tiles/contours/{z}/{x}/{y}.pbf",
+        canonicalize_tile_url(
+            &maptiler,
+            "https://api.maptiler.com/tiles/contours/{z}/{x}/{y}.pbf?key=abcdef",
+            SourceType::Vector,
+            512
+        )
+    );
 }
 
 // gtest: MapTiler.TilesURLPassThrough
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileURL"]
 fn maptiler_tiles_url_pass_through() {
     let maptiler = map_tiler_tile_server_options();
     assert_eq!("", normalize_tile_url(&maptiler, "", ""));
@@ -393,25 +589,48 @@ fn maptiler_tiles_url_pass_through() {
         "https://api.tileserver.com/map?key=1234",
         normalize_tile_url(&maptiler, "https://api.tileserver.com/map?key=1234", "")
     );
-    // canonicalizeTileURL(maptiler, "http://dummy", Vector, 512) == "http://dummy"
-    // canonicalizeTileURL(maptiler, "https://api.tileserver.com/map?key=1234", Vector, 512) == same
-    // canonicalizeTileURL(maptiler, "", Vector, 512) == ""
+    assert_eq!("http://dummy", canonicalize_tile_url(&maptiler, "http://dummy", SourceType::Vector, 512));
+    assert_eq!(
+        "https://api.tileserver.com/map?key=1234",
+        canonicalize_tile_url(&maptiler, "https://api.tileserver.com/map?key=1234", SourceType::Vector, 512)
+    );
+    assert_eq!("", canonicalize_tile_url(&maptiler, "", SourceType::Vector, 512));
 }
 
 // gtest: MapTiler.CanonicalizeRasterTileset
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileset"]
 fn maptiler_canonicalize_raster_tileset() {
-    // Tileset { tiles: ["https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key=abcdef"] },
-    // canonicalizeTileset(maptiler, tileset, "maptiler://tiles/satellite", SourceType::Raster, 256)
-    // -> tiles[0] == "maptiler://tiles/tiles/satellite/{z}/{x}/{y}{ratio}.jpg"
+    let mut tileset = Tileset {
+        tiles: vec!["https://api.maptiler.com/tiles/satellite/{z}/{x}/{y}.jpg?key=abcdef".to_owned()],
+        ..Tileset::default()
+    };
+
+    canonicalize_tileset(
+        &map_tiler_tile_server_options(),
+        &mut tileset,
+        "maptiler://tiles/satellite",
+        SourceType::Raster,
+        256,
+    );
+
+    assert_eq!("maptiler://tiles/tiles/satellite/{z}/{x}/{y}{ratio}.jpg", tileset.tiles[0]);
 }
 
 // gtest: MapTiler.CanonicalizeVectorTileset
 #[test]
-#[ignore = "TODO(port): util::mapbox canonicalizeTileset"]
 fn maptiler_canonicalize_vector_tileset() {
-    // Tileset { tiles: ["https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=abcdef"] },
-    // canonicalizeTileset(maptiler, tileset, "maptiler://tiles/streets", SourceType::Vector, 512)
-    // -> tiles[0] == "maptiler://tiles/tiles/v3/{z}/{x}/{y}.pbf"
+    let mut tileset = Tileset {
+        tiles: vec!["https://api.maptiler.com/tiles/v3/{z}/{x}/{y}.pbf?key=abcdef".to_owned()],
+        ..Tileset::default()
+    };
+
+    canonicalize_tileset(
+        &map_tiler_tile_server_options(),
+        &mut tileset,
+        "maptiler://tiles/streets",
+        SourceType::Vector,
+        512,
+    );
+
+    assert_eq!("maptiler://tiles/tiles/v3/{z}/{x}/{y}.pbf", tileset.tiles[0]);
 }
