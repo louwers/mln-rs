@@ -37,14 +37,18 @@ mod handles;
 mod logging;
 mod map;
 mod offline;
+mod offscreen;
 mod parse_thread;
 mod plugin;
 mod projection;
+mod query;
+mod render_session;
 mod render_target;
 mod resources;
 mod runtime;
 mod style;
 mod style_expression;
+mod texture;
 mod transforms;
 mod url_rules;
 
