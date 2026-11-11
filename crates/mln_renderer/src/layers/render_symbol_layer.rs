@@ -310,7 +310,10 @@ fn set_layout_attributes(buffer: &Buffer, attribs: &mut VertexAttributeArray) {
         attr.set_shared_raw_data(Some(layout_data.clone()), 8, 0, layout_size, AttributeDataType::UShort4);
     }
     if let Some(attr) = attribs.set(ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
-        attr.set_shared_raw_data(Some(layout_data), 16, 0, layout_size, AttributeDataType::Short4);
+        attr.set_shared_raw_data(Some(layout_data.clone()), 16, 0, layout_size, AttributeDataType::Short4);
+    }
+    if let Some(attr) = attribs.set(ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE, -1, AttributeDataType::Invalid, 0) {
+        attr.set_shared_raw_data(Some(layout_data), 24, 0, layout_size, AttributeDataType::UShort2);
     }
 }
 

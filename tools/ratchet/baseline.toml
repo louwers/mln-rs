@@ -94,7 +94,6 @@
 "crates/mln_sprite/src/sprite_loader.rs" = 1
 "crates/mln_sprite/src/sprite_parser.rs" = 1
 "crates/mln_storage/src/database_file_source.rs" = 1
-"crates/mln_storage/src/http_file_source.rs" = 1
 "crates/mln_storage/src/json_document.rs" = 1
 "crates/mln_storage/src/mbtiles_file_source.rs" = 1
 "crates/mln_storage/src/offline.rs" = 1
@@ -103,6 +102,7 @@
 "crates/mln_storage/src/resource_transform.rs" = 1
 "crates/mln_storage/src/sqlite3.rs" = 4
 "crates/mln_storage/src/stub_file_source.rs" = 2
+"crates/mln_storage/src/ureq_transport.rs" = 1
 "crates/mln_storage_offline/src/mapbox.rs" = 2
 "crates/mln_style/src/color_ramp_property_value.rs" = 2
 "crates/mln_style/src/conversion/function.rs" = 3

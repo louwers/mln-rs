@@ -226,4 +226,6 @@ pub const ID_SYMBOL_COLOR_ATTRIBUTE: usize = 6;
 pub const ID_SYMBOL_HALO_COLOR_ATTRIBUTE: usize = 7;
 pub const ID_SYMBOL_HALO_WIDTH_ATTRIBUTE: usize = 8;
 pub const ID_SYMBOL_HALO_BLUR_ATTRIBUTE: usize = 9;
-pub const SYMBOL_ATTRIBUTE_COUNT: usize = 10;
+// Port-only: the quad's atlas origin (`SymbolLayoutVertex::a4`).
+pub const ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE: usize = 10;
+pub const SYMBOL_ATTRIBUTE_COUNT: usize = 11;

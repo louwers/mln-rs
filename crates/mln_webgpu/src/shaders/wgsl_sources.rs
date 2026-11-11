@@ -147,12 +147,12 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // Sample pattern A
     let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
-    let pos_a = mix(props.pattern_tl_a / texsize, props.pattern_br_a / texsize, imagecoord_a);
+    let pos_a = atlas_pos(props.pattern_tl_a / texsize, (props.pattern_br_a - props.pattern_tl_a) / texsize * imagecoord_a);
     let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
 
     // Sample pattern B
     let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
-    let pos_b = mix(props.pattern_tl_b / texsize, props.pattern_br_b / texsize, imagecoord_b);
+    let pos_b = atlas_pos(props.pattern_tl_b / texsize, (props.pattern_br_b - props.pattern_tl_b) / texsize * imagecoord_b);
     let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
 
     // Mix patterns and apply opacity
@@ -938,10 +938,10 @@ struct VertexOutput {
     @location(1) pos_a: vec2<f32>,
     @location(2) pos_b: vec2<f32>,
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) pattern_from: vec4<f32>,
+    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) pattern_to: vec4<f32>,
+    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
 };
 
@@ -1105,10 +1105,10 @@ struct FragmentInput {
     @location(1) pos_a: vec2<f32>,
     @location(2) pos_b: vec2<f32>,
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) pattern_from: vec4<f32>,
+    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) pattern_to: vec4<f32>,
+    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
 };
 
@@ -1167,11 +1167,11 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let pattern_br_b = pattern_to.zw;
 
     let imagecoord_a = gl_mod(in.pos_a, vec2<f32>(1.0));
-    let pos_a = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, imagecoord_a);
+    let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
     let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
 
     let imagecoord_b = gl_mod(in.pos_b, vec2<f32>(1.0));
-    let pos_b = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, imagecoord_b);
+    let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
     let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
 
     let pattern_color = mix(color_a, color_b, props.fade);
@@ -1346,10 +1346,10 @@ struct VertexOutput {
     @location(3) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) pattern_from: vec4<f32>,
+    @location(4) @interpolate(flat) pattern_from: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) pattern_to: vec4<f32>,
+    @location(5) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
     @location(6) opacity: f32,
@@ -1498,10 +1498,10 @@ struct FragmentInput {
     @location(3) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(4) pattern_from: vec4<f32>,
+    @location(4) @interpolate(flat) pattern_from: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(5) pattern_to: vec4<f32>,
+    @location(5) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
     @location(6) opacity: f32,
@@ -1561,12 +1561,12 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // Sample pattern A
     let imagecoord_a = gl_mod(in.v_pos_a, vec2<f32>(1.0));
-    let pos_a = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, imagecoord_a);
+    let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
     let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
 
     // Sample pattern B
     let imagecoord_b = gl_mod(in.v_pos_b, vec2<f32>(1.0));
-    let pos_b = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, imagecoord_b);
+    let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
     let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
 
     // Mix patterns and apply opacity
@@ -1904,10 +1904,10 @@ struct VertexOutput {
     @location(2) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) pattern_from: vec4<f32>,
+    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) pattern_to: vec4<f32>,
+    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
     @location(5) opacity: f32,
@@ -2049,10 +2049,10 @@ struct FragmentInput {
     @location(2) color: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_from
-    @location(3) pattern_from: vec4<f32>,
+    @location(3) @interpolate(flat) pattern_from: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_pattern_to
-    @location(4) pattern_to: vec4<f32>,
+    @location(4) @interpolate(flat) pattern_to: vec4<f32>,
 #endif
 #ifndef HAS_UNIFORM_u_opacity
     @location(5) opacity: f32,
@@ -2112,12 +2112,12 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     // Sample pattern A
     let imagecoord_a = gl_mod(in.v_pos_a, vec2<f32>(1.0));
-    let pos_a = mix(pattern_tl_a / tileProps.texsize, pattern_br_a / tileProps.texsize, imagecoord_a);
+    let pos_a = atlas_pos(pattern_tl_a / tileProps.texsize, (pattern_br_a - pattern_tl_a) / tileProps.texsize * imagecoord_a);
     let color_a = textureSample(pattern_texture, texture_sampler, pos_a);
 
     // Sample pattern B
     let imagecoord_b = gl_mod(in.v_pos_b, vec2<f32>(1.0));
-    let pos_b = mix(pattern_tl_b / tileProps.texsize, pattern_br_b / tileProps.texsize, imagecoord_b);
+    let pos_b = atlas_pos(pattern_tl_b / tileProps.texsize, (pattern_br_b - pattern_tl_b) / tileProps.texsize * imagecoord_b);
     let color_b = textureSample(pattern_texture, texture_sampler, pos_b);
 
     // Mix patterns and apply opacity
@@ -3287,8 +3287,8 @@ struct VertexOutput {
     @location(3) v_linesofar: f32,
     @location(4) v_blur: f32,
     @location(5) v_opacity: f32,
-    @location(6) v_pattern_from: vec4<f32>,
-    @location(7) v_pattern_to: vec4<f32>,
+    @location(6) @interpolate(flat) v_pattern_from: vec4<f32>,
+    @location(7) @interpolate(flat) v_pattern_to: vec4<f32>,
     @location(8) v_floorwidth: f32,
 };
 
@@ -3461,8 +3461,8 @@ struct FragmentInput {
     @location(3) v_linesofar: f32,
     @location(4) v_blur: f32,
     @location(5) v_opacity: f32,
-    @location(6) v_pattern_from: vec4<f32>,
-    @location(7) v_pattern_to: vec4<f32>,
+    @location(6) @interpolate(flat) v_pattern_from: vec4<f32>,
+    @location(7) @interpolate(flat) v_pattern_to: vec4<f32>,
     @location(8) v_floorwidth: f32,
 };
 
@@ -3554,9 +3554,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     let texel_size = 1.0 / tileProps.texsize;
     let half_texel = 0.5 * texel_size;
-    var pos_a = mix(pattern_tl_a * texel_size - texel_size, pattern_br_a * texel_size + texel_size, vec2<f32>(x_a, y));
+    var pos_a = atlas_pos((pattern_tl_a - 1.0) * texel_size, (pattern_br_a - pattern_tl_a + 2.0) * texel_size * vec2<f32>(x_a, y));
     pos_a = clamp(pos_a, (pattern_tl_a - 1.0) * texel_size + half_texel, (pattern_br_a + 1.0) * texel_size - half_texel);
-    var pos_b = mix(pattern_tl_b * texel_size - texel_size, pattern_br_b * texel_size + texel_size, vec2<f32>(x_b, y));
+    var pos_b = atlas_pos((pattern_tl_b - 1.0) * texel_size, (pattern_br_b - pattern_tl_b + 2.0) * texel_size * vec2<f32>(x_b, y));
     pos_b = clamp(pos_b, (pattern_tl_b - 1.0) * texel_size + half_texel, (pattern_br_b + 1.0) * texel_size - half_texel);
 
     let color_a = textureSample(pattern_texture, pattern_sampler, pos_a);
@@ -4237,6 +4237,15 @@ fn get_pattern_pos(pixel_coord_upper: vec2<f32>, pixel_coord_lower: vec2<f32>,
     let offset = gl_mod(offset_b, pattern_size);
     return (tile_units_to_pixels * pos + offset) / pattern_size;
 }
+
+// The atlas texture coordinate of an image's origin plus an offset from it,
+// both normalized by a power-of-two atlas size. Snapping the offset to 2^-24
+// makes the sum exact, so the sampled position, and the pixels, don't depend
+// on where the image sits in the atlas. Adding an unsnapped offset rounds it
+// to a precision that depends on the origin.
+fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
+    return origin + round(offset * 16777216.0) / 16777216.0;
+}
 "#),
 };
 
@@ -4374,6 +4383,7 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_opacity
     @location(8) opacity: f32,
 #endif
+    @location(9) tex_origin: vec2<u32>,
 };
 
 struct VertexOutput {
@@ -4383,6 +4393,7 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_opacity
     @location(2) opacity: f32,
 #endif
+    @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
@@ -4472,7 +4483,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let position = drawable.coord_matrix * vec4<f32>(pos0 + rotation_matrix * posOffset, 0.0, 1.0);
 
     out.position = position;
-    out.tex = a_tex / drawable.texsize;
+    let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
+    out.tex = (a_tex - tex_origin) / drawable.texsize;
+    out.tex_origin = tex_origin / drawable.texsize;
     out.fade_opacity = fade_opacity;
 #ifndef HAS_UNIFORM_u_opacity
     out.opacity = final_opacity;
@@ -4488,6 +4501,7 @@ struct FragmentInput {
 #ifndef HAS_UNIFORM_u_opacity
     @location(2) opacity: f32,
 #endif
+    @location(3) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
 @group(0) @binding(3) var<storage, read> tilePropsVector: array<SymbolTilePropsUBO>;
@@ -4505,7 +4519,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #else
     let opacity = select(props.icon_opacity, props.text_opacity, tileProps.is_text != 0u) * in.opacity;
 #endif
-    return textureSample(image, texture_sampler, in.tex) * opacity;
+    return textureSample(image, texture_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity;
 }
 "#),
     prelude: Some(r#"
@@ -4612,6 +4626,7 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_halo_blur
     @location(12) halo_blur: f32,
 #endif
+    @location(13) tex_origin: vec2<u32>,
 };
 
 struct VertexOutput {
@@ -4635,6 +4650,7 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_halo_blur
     @location(8) halo_blur: f32,
 #endif
+    @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
@@ -4717,7 +4733,9 @@ fn main(in: VertexInput) -> VertexOutput {
     let position = drawable.coord_matrix * vec4<f32>(pos0, 0.0, 1.0);
 
     out.position = position;
-    out.tex = a_tex / drawable.texsize;
+    let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
+    out.tex = (a_tex - tex_origin) / drawable.texsize;
+    out.tex_origin = tex_origin / drawable.texsize;
     out.gamma_scale = position.w;
     out.fontScale = fontScale;
     out.fade_opacity = fo;
@@ -4761,6 +4779,7 @@ struct FragmentInput {
 #ifndef HAS_UNIFORM_u_halo_blur
     @location(8) halo_blur: f32,
 #endif
+    @location(9) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
@@ -4811,7 +4830,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         inner_edge = inner_edge + gamma_scaled;
     }
 
-    let sample = textureSample(glyph_atlas, texture_sampler, in.tex);
+    let sample = textureSample(glyph_atlas, texture_sampler, atlas_pos(in.tex_origin, in.tex));
     let dist = select(sample.a, sample.r, tileProps.is_text != 0u);
     var alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
 
@@ -4930,6 +4949,7 @@ struct VertexInput {
 #ifndef HAS_UNIFORM_u_halo_blur
     @location(11) halo_blur: f32,
 #endif
+    @location(12) tex_origin: vec2<u32>,
 };
 
 struct VertexOutput {
@@ -4954,6 +4974,7 @@ struct VertexOutput {
 #ifndef HAS_UNIFORM_u_halo_blur
     @location(9) halo_blur: f32,
 #endif
+    @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
@@ -5041,7 +5062,9 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = position;
 
     let inv_tex = 1.0 / select(drawable.texsize, drawable.texsize_icon, is_icon != 0.0);
-    out.tex = a_tex * inv_tex;
+    let tex_origin = vec2<f32>(f32(in.tex_origin.x), f32(in.tex_origin.y));
+    out.tex = (a_tex - tex_origin) * inv_tex;
+    out.tex_origin = tex_origin * inv_tex;
     out.gamma_scale = gamma_scale;
     out.fontScale = fontScale;
     out.fade_opacity = fo;
@@ -5088,6 +5111,7 @@ struct FragmentInput {
 #ifndef HAS_UNIFORM_u_halo_blur
     @location(9) halo_blur: f32,
 #endif
+    @location(10) @interpolate(flat) tex_origin: vec2<f32>,
 };
 
 @group(0) @binding(0) var<uniform> paintParams: GlobalPaintParamsUBO;
@@ -5130,7 +5154,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     if (in.is_icon != 0.0) {
         let alpha = opacity * in.fade_opacity;
-        let iconSample = textureSampleLevel(icon_image, icon_sampler, in.tex, 0.0);
+        let iconSample = textureSampleLevel(icon_image, icon_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
         return iconSample * alpha;
     }
 
@@ -5146,7 +5170,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         inner_edge = inner_edge + gamma_scaled;
     }
 
-    let sample = textureSampleLevel(glyph_image, glyph_sampler, in.tex, 0.0);
+    let sample = textureSampleLevel(glyph_image, glyph_sampler, atlas_pos(in.tex_origin, in.tex), 0.0);
     let dist = select(sample.a, sample.r, tileProps.is_text != 0u);
     var alpha = smoothstep(inner_edge - gamma_scaled, inner_edge + gamma_scaled, dist);
 

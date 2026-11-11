@@ -115,4 +115,5 @@ The WGSL shaders come from the C++ core's `include/mln/shaders/webgpu/*.hpp`.
 `just vendor-shaders [maplibre-native checkout]` extracts them, unchanged,
 into `crates/mln_webgpu/src/shaders/wgsl_sources.rs` (default checkout:
 `../maplibre-native`). Rerun it when the C++ shaders change, and commit the
-result.
+result. mln-rs's copy also has edits of its own, which a rerun reverts: keep
+them when you review the diff.

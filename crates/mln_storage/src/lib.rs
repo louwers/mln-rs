@@ -31,6 +31,8 @@ pub mod mbtiles_file_source;
 #[cfg(feature = "sqlite")]
 pub mod merge_sideloaded;
 pub mod network_status;
+#[cfg(target_vendor = "apple")]
+mod nsurlsession_transport;
 pub mod offline;
 #[cfg(feature = "sqlite")]
 pub mod offline_database;
@@ -45,6 +47,8 @@ pub mod response;
 #[cfg(feature = "sqlite")]
 pub mod sqlite3;
 pub mod stub_file_source;
+#[cfg(not(any(target_family = "wasm", target_vendor = "apple")))]
+mod ureq_transport;
 
 pub use asset_file_source::AssetFileSource;
 pub use async_request::AsyncRequest;
