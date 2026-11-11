@@ -439,6 +439,47 @@ fn a_notch_mid_ease_adds_up_without_slowing_the_zoom() {
     assert!((rig.zoom() - (zoom + 2.0 / 3.0)).abs() < 1e-9, "{}", rig.zoom() - zoom);
 }
 
+/// Spins the wheel at `at` faster than notches ease, 10 notches a frame for
+/// a second (`direction` 1 zooms out), then turns back a notch; returns the
+/// zoom it reached and the zoom once the notch back settles. Each notch
+/// retargets the ease to the limit, which the zoom closes in on.
+fn spin_into_a_limit_and_back(rig: &mut Rig, at: ScreenCoordinate, direction: f64) -> (f64, f64) {
+    for _ in 0..60 {
+        rig.send(notches(at, 10.0 * direction));
+        rig.frame();
+    }
+    let limit = rig.zoom();
+    rig.send(notches(at, -direction));
+    rig.settle();
+    (limit, rig.zoom())
+}
+
+#[test]
+fn notches_past_a_zoom_limit_dont_hold_the_zoom_there() {
+    let at = p(400.0, 300.0);
+    for (zoom, direction) in [(2.0, 1.0), (20.0, -1.0)] {
+        let mut rig = Rig::new();
+        rig.camera.jump_to(&CameraOptions::default().with_zoom(Some(zoom)));
+        let (limit, back) = spin_into_a_limit_and_back(&mut rig, at, direction);
+        let (min, max) = rig.camera.zoom_range();
+        assert!((limit - if direction > 0.0 { min } else { max }).abs() < 1e-6, "{limit}");
+        assert!((back - (limit + direction / 3.0)).abs() < 1e-6, "{}", back - limit);
+    }
+}
+
+#[test]
+fn notches_on_the_globe_zoom_out_to_the_floor_at_the_center_latitude() {
+    let mut rig = Rig::new();
+    rig.camera.set_projection_definition(&ProjectionDefinition::from_name("vertical-perspective"));
+    rig.camera
+        .jump_to(&CameraOptions::default().with_center(Some(LatLng::new(60.0, 20.0).unwrap())).with_zoom(Some(1.0)));
+    let (limit, back) = spin_into_a_limit_and_back(&mut rig, p(400.0, 300.0), 1.0);
+    // The floor at 60° is a level below the plain minimum.
+    assert!((limit - rig.camera.get_state().get_min_zoom_at_latitude(60.0)).abs() < 1e-6, "{limit}");
+    assert!(limit < rig.camera.get_state().get_min_zoom() - 0.5, "{limit}");
+    assert!((back - (limit + 1.0 / 3.0)).abs() < 1e-6, "{}", back - limit);
+}
+
 #[test]
 fn pixels_zoom_at_once_and_a_pinch_three_times_as_fast() {
     let mut rig = Rig::new();
