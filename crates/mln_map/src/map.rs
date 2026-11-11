@@ -367,7 +367,13 @@ impl Map {
                     self.emit(MapEvent::RenderFrameStarted);
                 }
             }
-            RendererEvent::RenderFrameFinished { mode, needs_repaint, placement_changed, still_image_request_id, stats } => {
+            RendererEvent::RenderFrameFinished {
+                mode,
+                needs_repaint,
+                placement_changed,
+                still_image_request_id,
+                stats,
+            } => {
                 self.on_render_frame_finished(mode, needs_repaint, placement_changed, still_image_request_id, stats);
             }
             RendererEvent::RenderMapStarted => {

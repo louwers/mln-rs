@@ -9,12 +9,12 @@
 use core::ffi::c_void;
 use std::sync::Arc;
 
+use mln_util::ErrorKind;
+
 use crate::abi;
 use crate::buffer::{LentText, Strided};
 use crate::callback::{self, UserData};
 use crate::delivery::{Call, Hold, Queue};
-use mln_util::ErrorKind;
-
 use crate::error::Error;
 use crate::generated::types::{MLN_STATUS_OK, mln_buffer_view, mln_completion, mln_completion_result};
 

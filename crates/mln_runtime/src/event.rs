@@ -19,7 +19,10 @@ pub enum EventSource {
     Runtime,
     /// A map: a snapshot of it with `generation` or a later one includes
     /// what the event reports.
-    Map { id: MapId, generation: u64 },
+    Map {
+        id: MapId,
+        generation: u64,
+    },
 }
 
 impl EventSource {

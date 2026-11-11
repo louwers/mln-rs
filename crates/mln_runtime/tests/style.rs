@@ -87,10 +87,7 @@ fn a_geojson_source_reports_the_options_its_data_needs() {
     assert!(properties.contains("\"total\""), "{properties}");
 
     // The reported properties parse back into the same expressions.
-    let wrapper = format!(
-        r#"{{"type":"geojson","data":"fixture://copy.geojson","clusterProperties":{}}}"#,
-        properties
-    );
+    let wrapper = format!(r#"{{"type":"geojson","data":"fixture://copy.geojson","clusterProperties":{}}}"#, properties);
     wait(map.add_style_source_json("copy", wrapper));
     let copy = wait(map.style_source("copy")).unwrap().geojson.unwrap();
     assert_eq!(copy.cluster_properties, options.cluster_properties);
@@ -131,7 +128,8 @@ fn a_geojson_source_checks_its_options() {
     assert!(refused(GeoJsonSourceOptions { tolerance: f64::NAN, ..defaults() }).contains("tolerance"));
     assert!(refused(GeoJsonSourceOptions { buffer: 513, ..defaults() }).contains("512"));
     assert!(refused(GeoJsonSourceOptions { cluster_radius: 4096, ..defaults() }).contains("4095"));
-    let limits = GeoJsonSourceOptions { max_zoom: 24, cluster_max_zoom: 30, buffer: 512, cluster_radius: 4095, ..defaults() };
+    let limits =
+        GeoJsonSourceOptions { max_zoom: 24, cluster_max_zoom: 30, buffer: 512, cluster_radius: 4095, ..defaults() };
     wait(map.add_geojson_source("limits", limits));
 
     // Cluster properties parse on the runtime's thread.
@@ -146,7 +144,9 @@ fn a_geojson_source_checks_its_options() {
 fn geojson_data_checks_its_source_and_its_options() {
     let (_runtime, map) = styled_map();
     wait(map.add_geojson_source("plain", GeoJsonSourceOptions::default()));
-    wait(map.add_geojson_source("clustered", GeoJsonSourceOptions { cluster: true, ..GeoJsonSourceOptions::default() }));
+    wait(
+        map.add_geojson_source("clustered", GeoJsonSourceOptions { cluster: true, ..GeoJsonSourceOptions::default() }),
+    );
     wait(map.set_geojson_source_data("clustered", point_collection("kept")));
 
     let refused = |source: &str, data: &str| {

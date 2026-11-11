@@ -499,7 +499,11 @@ pub unsafe extern "C" fn mln_map_get_style_url(
 ) -> mln_status {
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
-        unsafe { query(map, completion, ::mln_runtime::Map::style_url, |url| LentText::new(url.as_deref().unwrap_or_default())) }
+        unsafe {
+            query(map, completion, ::mln_runtime::Map::style_url, |url| {
+                LentText::new(url.as_deref().unwrap_or_default())
+            })
+        }
     })
 }
 

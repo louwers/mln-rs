@@ -425,7 +425,10 @@ mod tests {
             placement_changed: false,
             rendering_stats: Arc::new(stats),
         };
-        let events = [event(EventSource::Map { id: MapId(1), generation: 9 }, RuntimeEventKind::Map(MapEvent::RenderFrameFinished(status)))];
+        let events = [event(
+            EventSource::Map { id: MapId(1), generation: 9 },
+            RuntimeEventKind::Map(MapEvent::RenderFrameFinished(status)),
+        )];
         EventBatch::new(&events, 0, |_| 1).lend(|view| {
             // SAFETY: the batch's one event.
             let event = unsafe { &*view.events };

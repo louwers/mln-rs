@@ -130,7 +130,11 @@ impl AttachRequest {
     /// Fails with `MLN_STATUS_UNSUPPORTED` unless the caller asked for a core
     /// worker.
     pub(crate) fn require_core_worker(&self, message: &'static str) -> Result<(), Error> {
-        if self.driver == Driver::CoreWorker { Ok(()) } else { Err(Error::new(mln_util::ErrorKind::Unsupported, message)) }
+        if self.driver == Driver::CoreWorker {
+            Ok(())
+        } else {
+            Err(Error::new(mln_util::ErrorKind::Unsupported, message))
+        }
     }
 
     /// Fails with `MLN_STATUS_UNSUPPORTED` when the caller set a queue lock.
@@ -746,11 +750,10 @@ pub(crate) mod tests {
     use crate::diagnostic::tests::{diagnostic, message};
     use crate::generated::types::{
         MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_INVALID_STATE, MLN_STATUS_UNSUPPORTED, mln_completion_result, mln_map,
-        mln_map_snapshot,
-        mln_offscreen_descriptor, mln_queue_lock, mln_runtime, mln_texture_readback_result, mln_wake,
+        mln_map_snapshot, mln_offscreen_descriptor, mln_queue_lock, mln_runtime, mln_texture_readback_result, mln_wake,
     };
-    use crate::map::{mln_map_dispose, mln_map_get_snapshot, mln_map_release, mln_map_set_style_json};
     use crate::map::tests::{create_map, options, release_map, view};
+    use crate::map::{mln_map_dispose, mln_map_get_snapshot, mln_map_release, mln_map_set_style_json};
     use crate::offscreen::mln_map_attach_offscreen;
     use crate::runtime::mln_runtime_release;
     use crate::runtime::tests::{Waiter, create, release};
