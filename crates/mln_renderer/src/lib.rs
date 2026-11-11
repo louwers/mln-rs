@@ -48,5 +48,5 @@ pub mod util;
 
 pub use renderer::Renderer;
 pub use renderer_frontend::RendererFrontend;
-pub use renderer_observer::{ExceptionPtr, FontStack, GlyphRange, RenderMode, RendererObserver};
+pub use renderer_observer::{ExceptionPtr, FontStack, GlyphRange, RenderMode, RendererObserver, RenderingStats};
 pub use update_parameters::UpdateParameters;

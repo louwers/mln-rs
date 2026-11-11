@@ -48,7 +48,7 @@ fn validate_events() {
 
 // gtest: ActionJournal.RenderingStats
 #[test]
-#[ignore = "TODO(port): util::ActionJournal, and MapObserver::RenderFrameStatus::renderingStats"]
+#[ignore = "TODO(port): util::ActionJournal (its renderingStats event)"]
 fn rendering_stats() {
     // test/util/action_journal.test.cpp:432: onDidFinishRenderingFrame stats
     // are aggregated per withRenderingStatsReportInterval(2).

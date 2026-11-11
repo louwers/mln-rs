@@ -22,7 +22,7 @@ use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::HeadlessFrontend;
 use mln_map::{
     AnimationOptions, BoundOptions, CameraOptions, ConstrainMode, Map, MapMode, MapOptions, MapProjection,
-    NorthOrientation, ProjectionMode, RenderMode, TileLodMode, ViewportMode,
+    NorthOrientation, ProjectionMode, RenderFrameStatus, RenderMode, TileLodMode, ViewportMode,
 };
 use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::network_status::{NetworkStatus, Status as NetworkStatusType};
@@ -2174,7 +2174,7 @@ fn empty_placement_does_not_request_repaint() {
     for frame in 0..2 {
         status.set(None);
         test.frontend.render_frame();
-        let value = status.get().expect("rendered a frame");
+        let value = status.take().expect("rendered a frame");
         assert!(!value.needs_repaint, "frame {frame}");
     }
 
@@ -2194,7 +2194,7 @@ fn empty_placement_does_not_request_repaint() {
     test.run_loop.run_once();
     status.set(None);
     test.frontend.render_frame();
-    let value = status.get().expect("rendered a frame");
+    let value = status.take().expect("rendered a frame");
     assert!(value.needs_repaint);
 }
 
@@ -2518,14 +2518,14 @@ fn location_indicator_accuracy_colors_transition() {
     assert!(count_green_pixels(&result) > 0, "The accuracy border should finish transitioning to green");
 }
 
+const CIRCLE_STYLE: &str = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{
+    "type":"Point","coordinates":[0,0]}}},"layers":[{"id":"circle","type":"circle","source":"points"}]}"#;
+
 // gtest: Map.RenderingStatisticsTrackDrawsAcrossFrames
 #[test]
 fn rendering_statistics_track_draws_across_frames() {
     let test = MapTest::new();
-    test.load_json(
-        r#"{"version":8,"sources":{"points":{"type":"geojson","data":{
-        "type":"Point","coordinates":[0,0]}}},"layers":[{"id":"circle","type":"circle","source":"points"}]}"#,
-    );
+    test.load_json(CIRCLE_STYLE);
     let first = test.render().stats;
     assert!(first.num_frames > 0);
     assert!(first.num_draw_calls > 0);
@@ -2541,6 +2541,35 @@ fn rendering_statistics_track_draws_across_frames() {
     assert_eq!(second.num_frames + 1, empty.num_frames);
     assert_eq!(0, empty.num_draw_calls);
     assert_eq!(second.total_draw_calls, empty.total_draw_calls);
+}
+
+// The map observer gets each frame's rendering stats with its status.
+#[test]
+fn frame_status_carries_rendering_stats() {
+    let test = MapTest::with_mode(1.0, MapMode::Continuous);
+    let last = Rc::new(RefCell::new(None::<RenderFrameStatus>));
+    {
+        let last = last.clone();
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |status| {
+            let done = status.mode == RenderMode::Full && !status.needs_repaint;
+            *last.borrow_mut() = Some(status);
+            if done {
+                run_loop.stop();
+            }
+        });
+    }
+    test.load_json(CIRCLE_STYLE);
+    run_with_timeout(&test.run_loop, 10);
+    test.observer.did_finish_rendering_frame_callback.clear();
+
+    let status = last.borrow_mut().take().expect("rendered a frame");
+    let stats = &status.rendering_stats;
+    assert!(stats.num_frames > 0);
+    assert!(stats.num_draw_calls > 0);
+    assert!(stats.total_draw_calls >= stats.num_draw_calls);
+    let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+    assert_eq!(**stats, *test.frontend.get_backend().get_context().rendering_stats());
 }
 
 // gtest: Map.LocationIndicatorWithoutImages

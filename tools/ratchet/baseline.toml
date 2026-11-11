@@ -216,7 +216,7 @@
 "crates/mln_image/src/image.rs" = 4
 "crates/mln_map/src/map.rs" = 4
 "crates/mln_map/src/map_impl.rs" = 8
-"crates/mln_map/src/map_observer.rs" = 2
+"crates/mln_map/src/map_observer.rs" = 1
 "crates/mln_map/tests/gtest_action_journal.rs" = 7
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
 "crates/mln_renderer/src/bucket.rs" = 1

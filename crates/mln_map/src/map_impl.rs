@@ -22,7 +22,8 @@ use std::sync::Arc;
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{CameraOptions, MapDebugOptions, MapMode, TileLodMode};
 use mln_renderer::{
-    ExceptionPtr, FontStack, GlyphRange, RenderMode, RendererFrontend, RendererObserver, UpdateParameters,
+    ExceptionPtr, FontStack, GlyphRange, RenderMode, RendererFrontend, RendererObserver, RenderingStats,
+    UpdateParameters,
 };
 use mln_storage::FileSource;
 use mln_style::Style;
@@ -398,7 +399,13 @@ impl RendererObserver for MapImpl {
         }
     }
 
-    fn on_did_finish_rendering_frame(&self, render_mode: RenderMode, needs_repaint: bool, placement_changed: bool) {
+    fn on_did_finish_rendering_frame(
+        &self,
+        render_mode: RenderMode,
+        needs_repaint: bool,
+        placement_changed: bool,
+        stats: Arc<RenderingStats>,
+    ) {
         self.renderer_fully_loaded.set(render_mode == RenderMode::Full);
 
         // TODO(port): renderingStatsView->update(*style, *stats).
@@ -411,6 +418,7 @@ impl RendererObserver for MapImpl {
                 },
                 needs_repaint,
                 placement_changed,
+                rendering_stats: stats,
             };
             self.observer.on_did_finish_rendering_frame(&frame_status);
 

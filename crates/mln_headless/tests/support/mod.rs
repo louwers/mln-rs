@@ -212,7 +212,7 @@ impl MapObserver for StubMapObserver {
         self.did_finish_loading_style_callback.call(());
     }
     fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
-        self.did_finish_rendering_frame_callback.call(*status);
+        self.did_finish_rendering_frame_callback.call(status.clone());
     }
     fn on_did_become_idle(&self) {
         self.did_become_idle_callback.call(());

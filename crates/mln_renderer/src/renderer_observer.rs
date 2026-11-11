@@ -1,5 +1,8 @@
 // Ports include/mln/renderer/renderer_observer.hpp
 
+use std::sync::Arc;
+
+pub use mln_gfx::rendering_stats::RenderingStats;
 pub use mln_text::glyph::GlyphRange;
 pub use mln_util::exception::ExceptionPtr;
 pub use mln_util::font_stack::FontStack;
@@ -15,8 +18,7 @@ pub enum RenderMode {
 ///
 /// C++ has four `onDidFinishRenderingFrame` overloads that forward to each
 /// other; the port keeps the one the renderer calls (with the stats).
-// TODO(port): `gfx::RenderingStats` in on_did_finish_rendering_frame,
-// `onRegisterShaders`, shader compile callbacks, tile callbacks,
+// TODO(port): `onRegisterShaders`, shader compile callbacks, tile callbacks,
 // `SymbolErrorObserver::onSymbolError`.
 pub trait RendererObserver {
     /// Signals that a repaint is required.
@@ -32,8 +34,15 @@ pub trait RendererObserver {
     fn on_will_start_rendering_frame(&self) {}
 
     /// End of frame, booleans flags that a repaint is required and that
-    /// placement changed.
-    fn on_did_finish_rendering_frame(&self, _mode: RenderMode, _repaint: bool, _placement_changed: bool) {}
+    /// placement changed. `stats` are the context's counters after the frame.
+    fn on_did_finish_rendering_frame(
+        &self,
+        _mode: RenderMode,
+        _repaint: bool,
+        _placement_changed: bool,
+        _stats: Arc<RenderingStats>,
+    ) {
+    }
 
     /// Final frame.
     fn on_did_finish_rendering_map(&self) {}

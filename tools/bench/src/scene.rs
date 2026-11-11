@@ -132,14 +132,14 @@ pub enum Mode {
 #[derive(Default)]
 struct Observer {
     frames: Cell<u64>,
-    last_frame: Cell<Option<RenderFrameStatus>>,
+    last_frame: RefCell<Option<RenderFrameStatus>>,
     failure: RefCell<Option<String>>,
 }
 
 impl MapObserver for Observer {
     fn on_did_finish_rendering_frame(&self, status: &RenderFrameStatus) {
         self.frames.set(self.frames.get() + 1);
-        self.last_frame.set(Some(*status));
+        *self.last_frame.borrow_mut() = Some(status.clone());
     }
 
     fn on_did_fail_loading_map(&self, _error: MapLoadError, what: &str) {
@@ -254,7 +254,7 @@ impl Scene {
     pub fn render_frame(&mut self) -> RenderFrameStatus {
         self.frontend.render_frame();
         self.wait_for_gpu();
-        self.observer.last_frame.get().expect("the renderer reports each frame")
+        self.observer.last_frame.borrow().clone().expect("the renderer reports each frame")
     }
 
     fn wait_for_gpu(&self) {
@@ -320,7 +320,11 @@ impl Scene {
     /// Whether the last frame showed the view complete with nothing left to
     /// animate.
     pub fn is_settled(&self) -> bool {
-        self.observer.last_frame.get().is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
+        self.observer
+            .last_frame
+            .borrow()
+            .as_ref()
+            .is_some_and(|status| status.mode == RenderMode::Full && !status.needs_repaint)
     }
 
     /// Drops every loaded tile and the renderer's other data, as after a

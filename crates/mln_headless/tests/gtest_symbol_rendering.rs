@@ -273,7 +273,7 @@ fn continuous_collision_visibility_fades_and_reappears() {
             let Some(map) = map.upgrade() else {
                 return;
             };
-            let draw_calls = stats(&frontend).num_draw_calls;
+            let draw_calls = status.rendering_stats.num_draw_calls;
             match phase.get() {
                 Phase::Initial => {
                     if status.needs_repaint {

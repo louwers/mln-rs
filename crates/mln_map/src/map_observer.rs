@@ -3,7 +3,9 @@
 // Methods take `&self` (the observer is shared with the map as
 // `Rc<dyn MapObserver>`); implementations use `Cell`/`RefCell` for state.
 
-use mln_renderer::{ExceptionPtr, FontStack, GlyphRange};
+use std::sync::Arc;
+
+use mln_renderer::{ExceptionPtr, FontStack, GlyphRange, RenderingStats};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapLoadError {
@@ -56,13 +58,16 @@ pub enum RenderMode {
     Full,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RenderFrameStatus {
     pub mode: RenderMode,
     /// In continuous mode, shows that there are ongoing transitions.
     pub needs_repaint: bool,
     pub placement_changed: bool,
-    // TODO(port): rendering_stats: Arc<gfx::RenderingStats>.
+    /// The render context's counters after this frame: per-frame ones such
+    /// as `num_draw_calls` count this frame, running ones such as
+    /// `total_draw_calls` and `num_frames` count every frame so far.
+    pub rendering_stats: Arc<RenderingStats>,
 }
 
 // TODO(port): onSourceChanged(style::Source&), onRegisterShaders, shader

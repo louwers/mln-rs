@@ -369,9 +369,9 @@ impl RendererImpl {
         let rendering_time = context.rendering_stats().rendering_time;
         context.rendering_stats().encoding_time = render_tree.get_elapsed_time() - rendering_time;
 
-        // TODO(port): auto stats = std::make_shared<gfx::RenderingStats>(
-        // context.threadSafeCopyRenderingStats()) with the frame's rendered
-        // features, passed to the observer.
+        // TODO(port): stats->frameRenderedFeatures =
+        // orchestrator.moveFrameRenderedFeatures().
+        let stats = Arc::new(context.thread_safe_copy_rendering_stats());
         drop(parameters);
 
         if let Some(observer) = &observer {
@@ -379,6 +379,7 @@ impl RendererImpl {
                 if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
                 render_tree_parameters.needs_repaint,
                 render_tree_parameters.placement_changed,
+                stats,
             );
         }
 
