@@ -200,14 +200,16 @@ pub fn into_font_faces(faces: Vec<SystemFontFace>) -> FontFaces {
 }
 
 /// The face of `db` that draws `script` best: the first of its preferred
-/// families, else a family named for it, upright and closest to regular
-/// weight, that has a glyph for its letter. Only the first face of a font
+/// families, else a family named for it (not a monospaced one), upright and closest to regular
+/// weight (as drawn, within `MIN_WEIGHT..=MAX_WEIGHT`), that has a glyph for
+/// its letter. Only the first face of a font
 /// collection counts, the one the map's font loader reads.
 fn pick_face<'a>(db: &'a fontdb::Database, script: &Script) -> Option<&'a fontdb::FaceInfo> {
     let rank = |info: &fontdb::FaceInfo| -> Option<usize> {
         info.families.iter().find_map(|(family, _)| {
             script.families.iter().position(|preferred| preferred.eq_ignore_ascii_case(family)).or_else(|| {
-                script.keywords.iter().any(|keyword| family.contains(keyword)).then_some(script.families.len())
+                (!family.contains("Mono") && script.keywords.iter().any(|keyword| family.contains(keyword)))
+                    .then_some(script.families.len())
             })
         })
     };
@@ -217,11 +219,34 @@ fn pick_face<'a>(db: &'a fontdb::Database, script: &Script) -> Option<&'a fontdb
         .filter_map(|info| {
             let rank = rank(info)?;
             let slanted = info.style != fontdb::Style::Normal;
-            Some((rank, slanted, info.weight.0.abs_diff(fontdb::Weight::NORMAL.0), info))
+            let weight = drawn_weight(db, info)?;
+            if !(MIN_WEIGHT..=MAX_WEIGHT).contains(&weight) {
+                return None;
+            }
+            Some((rank, slanted, weight.abs_diff(fontdb::Weight::NORMAL.0), info))
         })
         .collect();
     candidates.sort_by_key(|&(rank, slanted, weight, _)| (rank, slanted, weight));
     candidates.into_iter().map(|(.., info)| info).find(|info| covers(db, info.id, script.probe))
+}
+
+/// The lightest and heaviest weights a fallback face may draw at. Every
+/// label in the face's script draws at its one weight, whatever the font
+/// stack asks for, so a face far from regular is worse than the glyph PBFs.
+const MIN_WEIGHT: u16 = 300;
+const MAX_WEIGHT: u16 = 600;
+
+/// The weight the map draws the face at. The font-face engine has no font
+/// variations, so a variable font draws at its default instance: the
+/// default of its `wght` axis, which can be far from its family's regular
+/// weight (Fedora's Noto Sans CJK variable font defaults to Thin, 100).
+fn drawn_weight(db: &fontdb::Database, info: &fontdb::FaceInfo) -> Option<u16> {
+    db.with_face_data(info.id, |data, index| {
+        let font = skrifa::FontRef::from_index(data, index).ok()?;
+        let wght = font.axes().iter().find(|axis| axis.tag() == skrifa::Tag::new(b"wght"));
+        Some(wght.map_or(info.weight.0, |axis| axis.default_value().round() as u16))
+    })
+    .flatten()
 }
 
 /// Whether the face has a glyph for `c`.
