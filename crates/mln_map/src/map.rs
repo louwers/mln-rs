@@ -15,6 +15,7 @@ use mln_style::Style;
 use mln_util::chrono::TimePoint;
 use mln_util::exception::MisuseException;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
+use mln_util::geometry::{Geometry, for_each_point};
 use mln_util::size::Size;
 
 use crate::map_impl::{MapImpl, StillImageCallback, StillImageRequest, StyleMut};
@@ -358,7 +359,24 @@ impl Map {
             .with_pitch(Some(mln_math::rad2deg(transform.get_pitch()))))
     }
 
-    // TODO(port): cameraForGeometry.
+    /// `cameraForGeometry(geometry, padding, bearing, pitch)`: the camera
+    /// that fits every point of `geometry` (x longitude, y latitude), as
+    /// [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits them. `Err`:
+    /// as that, and the std::domain_error of the C++ LatLng constructor for
+    /// a point with no LatLng (an infinite or NaN coordinate, or a latitude
+    /// beyond ±90°).
+    pub fn camera_for_geometry(
+        &self,
+        geometry: &Geometry<f64>,
+        padding: &EdgeInsets,
+        bearing: Option<f64>,
+        pitch: Option<f64>,
+    ) -> Result<CameraOptions, String> {
+        let mut points = Vec::new();
+        for_each_point(geometry, &mut |point| points.push(*point));
+        let lat_lngs = points.iter().map(|point| LatLng::new(point.y, point.x)).collect::<Result<Vec<_>, _>>()?;
+        self.camera_for_lat_lngs(&lat_lngs, padding, bearing, pitch)
+    }
 
     /// `latLngBoundsForCameraUnwrapped(camera)`.
     /// `Err`: as [`lat_lng_bounds_for_camera`](Self::lat_lng_bounds_for_camera).

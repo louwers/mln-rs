@@ -336,6 +336,37 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
     assert_double_eq(test.map().get_bounds().max_pitch.unwrap(), 60.0);
 }
 
+/// A geometry fits as its points do, wherever they sit in it.
+#[test]
+fn geometry_to_camera() {
+    use mln_util::geometry::{Geometry as G, Point as P};
+    let test = MapTest::new();
+    let points: Vec<P<f64>> = lat_lngs().iter().map(|ll| P::new(ll.longitude(), ll.latitude())).collect();
+    let geometry = G::GeometryCollection(vec![
+        G::Point(points[0]),
+        G::Polygon(vec![vec![points[1], points[2], points[1]]]),
+        G::Empty,
+    ]);
+
+    let expected = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
+    let fitted = test.map().camera_for_geometry(&geometry, &EdgeInsets::default(), Some(23.0), Some(20.0)).unwrap();
+    assert_double_eq(fitted.zoom.unwrap(), expected.zoom.unwrap());
+    assert_double_eq(fitted.center.unwrap().latitude(), expected.center.unwrap().latitude());
+    assert_double_eq(fitted.center.unwrap().longitude(), expected.center.unwrap().longitude());
+    assert_double_eq(fitted.bearing.unwrap(), 23.0);
+    assert_double_eq(fitted.pitch.unwrap(), 20.0);
+
+    let fitted = test.map().camera_for_geometry(&G::LineString(points), &EdgeInsets::default(), None, None).unwrap();
+    let expected = test.map().camera_for_lat_lngs(&lat_lngs(), &EdgeInsets::default(), None, None).unwrap();
+    assert_double_eq(fitted.zoom.unwrap(), expected.zoom.unwrap());
+
+    // No points: the camera as cameraForLatLngs leaves it, unset.
+    assert!(test.map().camera_for_geometry(&G::Empty, &EdgeInsets::default(), None, None).unwrap().zoom.is_none());
+    // A point with no LatLng.
+    let bad = G::MultiPoint(vec![P::new(0.0, 0.0), P::new(0.0, 91.0)]);
+    assert!(test.map().camera_for_geometry(&bad, &EdgeInsets::default(), None, None).is_err());
+}
+
 // gtest: Map.CameraToLatLngBounds
 #[test]
 fn camera_to_lat_lng_bounds() {
