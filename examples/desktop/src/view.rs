@@ -1,5 +1,5 @@
-// The render thread: the RunLoop, the map, its renderer and the window's
-// surface, after platform/glfw/glfw_view.cpp and main.cpp.
+// The render thread: the RunLoop, the map, its renderer, the window's surface
+// and the controls over the map (ui.rs).
 //
 // The thread sleeps in the RunLoop until it has work: a message from the
 // window (host.rs), a task (a tile or style response) or a timer. A frame
@@ -8,22 +8,22 @@
 // per refresh of the display the window opened on, or as fast as they can in
 // benchmark mode.
 //
-// Mouse, touch, wheel, trackpad and arrow-key input goes to a
-// `GestureRecognizer` (mln_gestures), which replaces the C++ view's
-// hand-rolled pan, zoom, rotate and pitch handlers and continues releases
-// with the map's momentum.
+// Mouse, touch, wheel, trackpad and the arrow, `+` and `-` keys go to a
+// `GestureRecognizer` (mln_gestures), which moves the camera and continues
+// releases with the map's momentum.
 //
-// Key bindings: those that map onto ported APIs (see `on_key`); the others
-// (annotations, snapshots, queries, custom sources, extrusion/route/feature
-// state demos, render-test writer, free camera demo, location indicator,
-// rendering stats) log that they are not ported. TODO(port) each.
+// The controls lay out in egui on this thread, in the frames that have their
+// input, a repaint they asked for, or a new frame of the map. egui paints
+// them over the map's frame before it is presented
+// (`SurfaceBackend::set_overlay`); when only the controls change, the map
+// draws its last frame again under them.
 //
 // For checking frames without screenshots: `--readback <file.png>` writes the
 // presented frame once the map is idle (or at exit), `--quit-after <seconds>`
 // closes the window; the style report prints once which layers and sources
 // the renderer skips.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -31,11 +31,11 @@ use std::sync::{Arc, mpsc};
 use std::time::Instant;
 
 use mln_actor::{RunLoop, Timer};
-use mln_gestures::{Button, GestureRecognizer, Input, Modifiers, PinchPhase, PointerKind, WheelDelta};
+use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PinchPhase, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map,
-    MapDebugOptions, MapObserver, MapOptions, NorthOrientation, RenderFrameStatus, TileLodMode,
+    AnimationOptions, BoundOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapDebugOptions,
+    MapObserver, MapOptions,
 };
 use mln_renderer::Renderer;
 use mln_storage::{ClientOptions, DatabaseFileSource, FileSource, FileSourceManager, FileSourceType, ResourceOptions};
@@ -43,8 +43,9 @@ use mln_util::chrono::{Clock, Duration};
 use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_util::tile_server_options::{DefaultStyle, TileServerOptions};
+use mln_util::tile_server_options::TileServerOptions;
 use mln_webgpu::SurfaceBackend;
+use mln_webgpu::surface_backend::OverlayTarget;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
@@ -52,12 +53,16 @@ use winit::keyboard::KeyCode;
 use crate::frontend::Frontend;
 use crate::host::{Inbox, Message, UserEvent};
 use crate::settings::Settings;
+use crate::styles::{self, Style};
+use crate::ui::{Action, Controls, Shown};
 use crate::{Args, system_fonts};
 
 /// What the render thread starts with.
 pub(crate) struct Launch {
     pub args: Args,
     pub settings: Settings,
+    /// The controls' egui context, which the window's thread feeds.
+    pub ui: egui::Context,
     /// The window's scale factor when it opened: the map's pixel ratio.
     pub pixel_ratio: f64,
     /// The window's size in physical pixels.
@@ -91,17 +96,7 @@ struct Observer {
 
 impl MapObserver for Observer {
     fn on_did_finish_loading_style(&self) {
-        // C++: if (show3DExtrusions) toggle3DExtrusions(show3DExtrusions);
-        // TODO(port): 3D extrusions. The view reports the style once.
         self.shared.style_loaded.set(true);
-    }
-
-    fn on_will_start_rendering_frame(&self) {
-        // TODO(port): updatePuckState() (location indicator).
-    }
-
-    fn on_did_finish_rendering_frame(&self, _status: &RenderFrameStatus) {
-        // TODO(port): rendered feature logging (status.renderingStats).
     }
 
     fn on_did_become_idle(&self) {
@@ -109,44 +104,76 @@ impl MapObserver for Observer {
     }
 }
 
-const HELP: &str = "
-================================================================================
+/// Where the app opens without `--style` or MLN_STYLE_URL.
+const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
-- Press `X` to reset the transform
-- Press `N` to reset north
-- Press `O` to toggle online connectivity
-- Press `S` to cycle through bundled styles
-- Press `Z` to cycle through north orientations
-- Press `A` to cycle through Mapbox offices in the world + dateline monument
-- Press `U` to toggle pitch bounds
-- Press `P` to pause tile requests
-- Press `+`/`-` to zoom in/out
-- Press the arrow keys to pan, `Shift` + left/right to rotate, `Shift` + up/down to tilt
+/// The controls' last frame, which the overlay paints over each frame of the
+/// map until the next.
+#[derive(Default)]
+struct Paint {
+    primitives: Vec<egui::ClippedPrimitive>,
+    /// The textures to update before painting, and to free after.
+    textures: egui::TexturesDelta,
+    pixels_per_point: f32,
+}
 
-- Mouse drag to pan; release while moving to glide
-- Right mouse drag, or `Control` + mouse drag, to rotate and tilt
-- Hold `Shift` + mouse drag to zoom to a box (the box isn't drawn)
-- Scroll to zoom (a wheel notch eases a third of a level); double click to zoom in, `Shift` + double click to zoom out
-- Pinch and twist a trackpad (macOS) or a touchscreen to zoom and rotate
+impl Drop for Paint {
+    fn drop(&mut self) {
+        // The window closes with these unpainted, which is fine.
+        self.textures.clear();
+    }
+}
 
-- Press `Tab` to cycle through the map debug options
-- Press `F6` to cycle through Tile LOD modes
-- Press `F7` to lower the zoom level without changing the camera
-- Press `F8` to higher the zoom level without changing the camera
-- Press `Esc` to quit (or to cancel a box zoom)
-
-(Not ported yet: annotations 1-0/K/L/W/M/C/Q, B, D, E, F, F1, G, H, I, J, R, T, Y.)
-
-================================================================================
-";
-
-/// The OpenFreeMap Liberty style, which opens without `--style` or
-/// MLN_STYLE_URL.
-const LIBERTY: &str = "https://tiles.openfreemap.org/styles/liberty";
+/// The overlay that paints the controls: egui's renderer on the map's device,
+/// made with the first frame.
+fn controls_overlay(paint: Rc<RefCell<Paint>>) -> mln_webgpu::surface_backend::Overlay {
+    let mut renderer: Option<egui_wgpu::Renderer> = None;
+    Box::new(move |target: &OverlayTarget<'_>| {
+        let renderer = renderer.get_or_insert_with(|| {
+            egui_wgpu::Renderer::new(target.device, target.format, egui_wgpu::RendererOptions::default())
+        });
+        let mut paint = paint.borrow_mut();
+        let mut textures = std::mem::take(&mut paint.textures);
+        for (id, deltas) in &textures.set {
+            for delta in deltas {
+                renderer.update_texture(target.device, target.queue, *id, delta);
+            }
+        }
+        if !paint.primitives.is_empty() {
+            let screen = egui_wgpu::ScreenDescriptor {
+                size_in_pixels: [target.size.width, target.size.height],
+                pixels_per_point: paint.pixels_per_point,
+            };
+            let mut encoder =
+                target.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("controls") });
+            let mut commands =
+                renderer.update_buffers(target.device, target.queue, &mut encoder, &paint.primitives, &screen);
+            {
+                let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("controls"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target.view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store },
+                    })],
+                    ..Default::default()
+                });
+                renderer.render(&mut pass.forget_lifetime(), &paint.primitives, &screen);
+            }
+            commands.push(encoder.finish());
+            target.queue.submit(commands);
+        }
+        for id in &textures.free {
+            renderer.free_texture(id);
+        }
+        textures.clear();
+    })
+}
 
 /// Opens the map in the window and runs it until the window closes.
 pub(crate) fn run(launch: Launch) {
-    let Launch { args, mut settings, pixel_ratio, size, frame_interval, start, inbox, proxy } = launch;
+    let Launch { args, settings, ui, pixel_ratio, size, frame_interval, start, inbox, proxy } = launch;
     let run_loop = RunLoop::new();
     inbox.set_waker(run_loop.handle());
 
@@ -171,6 +198,7 @@ pub(crate) fn run(launch: Launch) {
         }
     };
     let info = backend.get_adapter_info();
+    let adapter = format!("{} ({:?})", info.name, info.backend);
     Log::info(
         Event::Render,
         format!(
@@ -182,7 +210,8 @@ pub(crate) fn run(launch: Launch) {
             backend.get_swap_chain_format()
         ),
     );
-    print!("{HELP}");
+    let paint = Rc::new(RefCell::new(Paint::default()));
+    backend.set_overlay(Some(controls_overlay(paint.clone())));
 
     if args.benchmark {
         Log::info(Event::General, "BENCHMARK MODE: Some optimizations are disabled.");
@@ -191,20 +220,19 @@ pub(crate) fn run(launch: Launch) {
     // Set access token if present
     let apikey = args.apikey.clone().or_else(|| std::env::var("MLN_API_KEY").ok()).unwrap_or_default();
     let cache_db = args.cache.clone().unwrap_or_else(|| "/tmp/mbgl-cache.db".to_owned());
-    let map_tiler_configuration = TileServerOptions::map_tiler_configuration();
     let resource_options = ResourceOptions::default()
         .with_cache_path(cache_db)
         .with_api_key(apikey)
-        .with_tile_server_options(map_tiler_configuration.clone());
+        .with_tile_server_options(TileServerOptions::map_tiler_configuration());
     let client_options = ClientOptions::default();
 
     let manager = FileSourceManager::get();
-    let online_file_source = manager.get_file_source(FileSourceType::Network, &resource_options, &client_options);
+    let database_file_source = manager.get_file_source(FileSourceType::Database, &resource_options, &client_options);
     if !settings.online {
-        match &online_file_source {
+        match manager.get_file_source(FileSourceType::Network, &resource_options, &client_options) {
             Some(online) => {
                 online.set_property("online-status", &feature::Value::Bool(false));
-                Log::warning(Event::Setup, "Application is offline. Press `O` to toggle online status.");
+                Log::warning(Event::Setup, "Application is offline.");
             }
             None => Log::warning(
                 Event::Setup,
@@ -212,10 +240,6 @@ pub(crate) fn run(launch: Launch) {
             ),
         }
     }
-    // Resource loader controls top-level request processing and can resume /
-    // pause all managed sources simultaneously.
-    let resource_loader = manager.get_file_source(FileSourceType::ResourceLoader, &resource_options, &client_options);
-    let database_file_source = manager.get_file_source(FileSourceType::Database, &resource_options, &client_options);
 
     let shared =
         Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
@@ -224,7 +248,6 @@ pub(crate) fn run(launch: Launch) {
     let frontend = Frontend::new(renderer, renderer_backend, shared.clone());
     let map_size = logical_size(size, pixel_ratio);
 
-    // TODO(port): ActionJournalOptions, withRenderedFeatureInfo(showFeatures).
     let mut map = match Map::with_resource_options(
         &frontend,
         Rc::new(Observer { shared: shared.clone() }),
@@ -254,6 +277,12 @@ pub(crate) fn run(launch: Launch) {
     );
     map.set_debug(MapDebugOptions(settings.debug));
 
+    let style_url = match &args.style {
+        Some(style) if !style.contains("://") => format!("file://{style}"),
+        Some(style) => style.clone(),
+        None => std::env::var("MLN_STYLE_URL").unwrap_or_else(|_| DEFAULT_STYLE.to_owned()),
+    };
+
     let mut view = View {
         run_loop,
         wake: Timer::new(),
@@ -268,6 +297,17 @@ pub(crate) fn run(launch: Launch) {
         shared,
         gestures: GestureRecognizer::default(),
         gestures_animating: false,
+        ui,
+        controls: Controls::default(),
+        ui_input: None,
+        ui_repaint_at: None,
+        ui_shapes: Vec::new(),
+        paint,
+        database_file_source,
+        styles: styles::styles(),
+        style: styles::style_for(&style_url),
+        adapter,
+        frame_report: String::new(),
         benchmark: args.benchmark,
         pixel_ratio,
         size: map_size,
@@ -275,16 +315,6 @@ pub(crate) fn run(launch: Launch) {
         frames: 0,
         frame_time: 0.0,
         last_reported: Instant::now(),
-        online: settings.online,
-        online_file_source,
-        resource_loader,
-        database_file_source,
-        paused: false,
-        ordered_styles: map_tiler_configuration.default_styles(),
-        style_index: 0,
-        next_place: 0,
-        tile_lod_defaults: None,
-        tile_lod_profile: 0,
         gesture_test: args.gesture_test.then_some(GestureTest { step: 0, next_at: None }),
         readback_path: args.readback.as_ref().map(PathBuf::from),
         readback_requested: false,
@@ -292,21 +322,6 @@ pub(crate) fn run(launch: Launch) {
         style_reported: false,
     };
 
-    // Load style
-    let style = match &args.style {
-        Some(style) if !style.contains("://") => format!("file://{style}"),
-        Some(style) => style.clone(),
-        None => match std::env::var("MLN_STYLE_URL") {
-            Ok(url) => {
-                view.set_window_title(&url);
-                url
-            }
-            Err(_) => {
-                view.set_window_title("OpenFreeMap Liberty");
-                LIBERTY.to_owned()
-            }
-        },
-    };
     if let Some(font_discovery) = font_discovery {
         let faces = font_discovery.join().unwrap_or_default();
         if faces.is_empty() {
@@ -317,39 +332,26 @@ pub(crate) fn run(launch: Launch) {
         }
         view.map.get_style_mut().set_fallback_font_face_list(system_fonts::into_font_faces(faces));
     }
-    view.map.get_style_mut().load_url(&style);
+    let style = view.style.clone();
+    view.load_style(style);
 
     view.run();
 
-    // Save settings
     let camera = view.map.get_camera_options(None);
-    if let Some(center) = camera.center {
-        settings.latitude = center.latitude();
-        settings.longitude = center.longitude();
-    }
-    settings.altitude = camera.center_altitude.unwrap_or(settings.altitude);
-    settings.zoom = camera.zoom.unwrap_or(settings.zoom);
-    settings.bearing = camera.bearing.unwrap_or(settings.bearing);
-    settings.pitch = camera.pitch.unwrap_or(settings.pitch);
-    settings.roll = camera.roll.unwrap_or(settings.roll);
-    settings.fov = camera.fov.unwrap_or(settings.fov);
-    // TODO(port): settings.save().
+    let center = camera.center.unwrap_or_default();
     Log::info(
         Event::General,
         format!(
-            "Exit location: --lat=\"{:.6}\" --lon=\"{:.6}\" --alt=\"{:.6}\" --zoom=\"{:.6}\" --bearing=\"{:.6}\" --roll=\"{:.6}\" --fov=\"{:.6}\" --maxPitch=\"{:.6}\"",
-            settings.latitude,
-            settings.longitude,
-            settings.altitude,
-            settings.zoom,
-            settings.bearing,
-            settings.roll,
-            settings.fov,
-            settings.max_pitch
+            "Exit location: --lat={:.6} --lon={:.6} --zoom={:.6} --bearing={:.6} --pitch={:.6}",
+            center.latitude(),
+            center.longitude(),
+            camera.zoom.unwrap_or_default(),
+            camera.bearing.unwrap_or_default(),
+            camera.pitch.unwrap_or_default(),
         ),
     );
-    // Drop order as in C++: the map resets the renderer, then the frontend,
-    // then the backend's surface, while the window is still open.
+    // Drop order: the map resets the renderer, then the frontend, then the
+    // backend's surface, while the window is still open.
     let View { map, frontend, backend, .. } = view;
     drop(map);
     drop(frontend);
@@ -367,15 +369,6 @@ fn log_error(result: Result<(), String>) {
     if let Err(e) = result {
         Log::error(Event::General, &e);
     }
-}
-
-fn animation_ms(ms: i64) -> AnimationOptions {
-    AnimationOptions::new(Duration::from_millis(ms))
-}
-
-/// `+` and `-`: the C++ binding's 500 ms scale around the cursor.
-fn key_zoom(scale: f64, at: ScreenCoordinate) -> CameraDelta {
-    CameraDelta { scale: Some(scale), anchor: Some(at), animation: animation_ms(500), ..CameraDelta::default() }
 }
 
 struct View {
@@ -396,6 +389,21 @@ struct View {
     /// The recognizer eases a scroll, and wants frames.
     gestures_animating: bool,
 
+    ui: egui::Context,
+    controls: Controls,
+    /// The controls' input since their last frame.
+    ui_input: Option<egui::RawInput>,
+    /// When the controls asked for their next frame (a tooltip's delay).
+    ui_repaint_at: Option<Instant>,
+    /// The controls' last frame, to tell whether a frame changed them.
+    ui_shapes: Vec<egui::epaint::ClippedShape>,
+    paint: Rc<RefCell<Paint>>,
+    database_file_source: Option<Arc<dyn FileSource>>,
+    styles: Vec<Style>,
+    style: Style,
+    adapter: String,
+    frame_report: String,
+
     benchmark: bool,
     pixel_ratio: f64,
     /// The map's size, in logical pixels.
@@ -407,24 +415,11 @@ struct View {
     frame_time: f32,
     last_reported: Instant,
 
-    online: bool,
-    online_file_source: Option<Arc<dyn FileSource>>,
-    database_file_source: Option<Arc<dyn FileSource>>,
-    resource_loader: Option<Arc<dyn FileSource>>,
-    paused: bool,
-    ordered_styles: Vec<DefaultStyle>,
-    style_index: usize,
-
     gesture_test: Option<GestureTest>,
     readback_path: Option<PathBuf>,
     readback_requested: bool,
     quit_at: Option<Instant>,
     style_reported: bool,
-
-    // C++ function-local statics.
-    next_place: usize,
-    tile_lod_defaults: Option<(f64, f64, f64, TileLodMode)>,
-    tile_lod_profile: u8,
 }
 
 impl View {
@@ -433,9 +428,14 @@ impl View {
         at.saturating_duration_since(self.start).as_secs_f64() * 1000.0
     }
 
-    /// `setWindowTitle(const std::string&)`
-    fn set_window_title(&self, title: &str) {
-        let _ = self.proxy.send_event(UserEvent::SetTitle(format!("MapLibre Native: {title}")));
+    /// Loads `style` and names the window after it.
+    fn load_style(&mut self, style: Style) {
+        self.map.get_style_mut().load_url(&style.url);
+        let name = if style.name.is_empty() { style.url.clone() } else { style.name.clone() };
+        let _ = self.proxy.send_event(UserEvent::SetTitle(format!("mln-rs: {name}")));
+        self.style = style;
+        self.style_reported = false;
+        self.shared.style_loaded.set(false);
     }
 
     /// Frames and work until the window closes. A readback that never
@@ -472,18 +472,16 @@ impl View {
             || self.gestures_animating
             || self.benchmark
             || !self.inbox.is_empty()
+            || self.ui_input.is_some()
             || self.next_deadline().is_some_and(|at| at <= now)
             || (self.readback_path.is_some() && (self.readback_requested || self.shared.idle.get()))
     }
 
-    /// When a frame is due without input: the gesture test's next step, or
-    /// the quit timer.
+    /// When a frame is due without input: the controls' repaint, the gesture
+    /// test's next step, or the quit timer.
     fn next_deadline(&self) -> Option<Instant> {
         let test = self.gesture_test.as_ref().and_then(|t| t.next_at.or(self.style_reported.then_some(self.start)));
-        match (test, self.quit_at) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        [self.ui_repaint_at, test, self.quit_at].into_iter().flatten().min()
     }
 
     /// Sleeps in the RunLoop until it has work, or until `deadline`.
@@ -503,7 +501,8 @@ impl View {
     }
 
     /// One frame: the surface's next texture, the messages that came while
-    /// waiting for it, the recognizer's eases, and the map's frame.
+    /// waiting for it, the recognizer's eases, the controls, and the map's
+    /// frame.
     fn frame(&mut self) {
         // Wait for the display first, so that the frame takes the input that
         // came meanwhile.
@@ -514,16 +513,21 @@ impl View {
         for message in self.inbox.take() {
             self.handle(message);
         }
-        let now = self.ms(Instant::now());
-        self.gestures_animating = self.gestures.frame(&mut self.map, now);
+        let now = Instant::now();
+        let ms = self.ms(now);
+        self.gestures_animating = self.gestures.frame(&mut self.map, ms);
 
         // A perf probe: `MLN_PAN_PX=<px>` pans the map by that many pixels
         // every frame, reversing every 2 s (so it stays over the same area),
         // so the "Frame time" log measures continuous camera movement.
         if let Some(dx) = std::env::var("MLN_PAN_PX").ok().and_then(|v| v.parse::<f64>().ok()) {
-            let dx = if (now / 2000.0) as i64 % 2 == 0 { dx } else { -dx };
+            let dx = if (ms / 2000.0) as i64 % 2 == 0 { dx } else { -dx };
             log_error(self.map.move_by(&ScreenCoordinate::new(dx, 0.0), &AnimationOptions::default()));
             self.shared.invalidate();
+        }
+
+        if self.ui_input.is_some() || self.shared.dirty.get() || self.ui_repaint_at.is_some_and(|at| at <= now) {
+            self.controls_frame(now);
         }
 
         // No texture right now (e.g. a timeout while the compositor is busy,
@@ -538,13 +542,16 @@ impl View {
     fn handle(&mut self, message: Message) {
         match message {
             Message::Input { input, at } => self.gesture(input, at),
-            Message::Key { code, pressed, modifiers, cursor, at } => self.on_key(code, pressed, modifiers, cursor, at),
+            Message::Key { code, pressed, modifiers, at } => self.on_key(code, pressed, modifiers, at),
+            Message::Ui(input) => match &mut self.ui_input {
+                Some(pending) => pending.append(input),
+                None => self.ui_input = Some(input),
+            },
             Message::Resized(size) => self.on_resize(size),
             Message::Focused { focused, at } => {
                 if !focused {
                     // A drag the window can't see the end of ends here.
                     self.gesture(Input::Blur, at);
-                    // Focus lost.
                     self.frontend.with_renderer(|renderer| renderer.reduce_memory_use());
                 }
             }
@@ -560,13 +567,6 @@ impl View {
         self.gestures.take_events();
     }
 
-    /// One of the C++ bindings' eased steps, through the recognizer, so the
-    /// camera reports it as a gesture and it doesn't end a drag or lose a
-    /// running notch ease's zoom.
-    fn key_step(&mut self, step: CameraDelta) {
-        log_error(self.gestures.step(&mut self.map, step).map_err(|e| format!("{e:?}")));
-    }
-
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
         self.backend.set_framebuffer_size(Size::new(size.width, size.height));
         self.size = logical_size(size, self.pixel_ratio);
@@ -577,172 +577,113 @@ impl View {
         self.shared.invalidate();
     }
 
-    /// `onKey`. The arrow keys go to the gesture recognizer, which pans,
-    /// rotates and tilts with them (C++ binds none of them), and repeat while
-    /// held. The other bindings act on release, as in C++.
-    fn on_key(&mut self, code: KeyCode, pressed: bool, mods: Modifiers, cursor: ScreenCoordinate, at: Instant) {
-        let arrow = match code {
-            KeyCode::ArrowLeft => Some(mln_gestures::Key::Left),
-            KeyCode::ArrowRight => Some(mln_gestures::Key::Right),
-            KeyCode::ArrowUp => Some(mln_gestures::Key::Up),
-            KeyCode::ArrowDown => Some(mln_gestures::Key::Down),
-            _ => None,
+    /// The keys the map takes, which the controls didn't: the arrows pan
+    /// (Shift: rotate and tilt), `+` and `-` zoom, each repeating while held,
+    /// and Escape ends a box zoom.
+    fn on_key(&mut self, code: KeyCode, pressed: bool, modifiers: Modifiers, at: Instant) {
+        let key = match code {
+            KeyCode::ArrowLeft => Key::Left,
+            KeyCode::ArrowRight => Key::Right,
+            KeyCode::ArrowUp => Key::Up,
+            KeyCode::ArrowDown => Key::Down,
+            KeyCode::Equal | KeyCode::NumpadAdd => Key::ZoomIn,
+            KeyCode::Minus | KeyCode::NumpadSubtract => Key::ZoomOut,
+            KeyCode::Escape => Key::Escape,
+            _ => return,
         };
-        if let Some(arrow) = arrow {
-            if pressed {
-                self.gesture(Input::Key { key: arrow, modifiers: mods }, at);
-            }
-            return;
-        }
         if pressed {
-            // TODO(port): W, 1-0, M (annotations) on press/repeat.
-            return;
+            self.gesture(Input::Key { key, modifiers }, at);
         }
-        let no_mods = mods == Modifiers::default();
-        match code {
-            // Escape cancels a box zoom being drawn, else quits.
-            KeyCode::Escape => {
-                if self.gestures.box_zoom().is_some() {
-                    self.gesture(Input::Key { key: mln_gestures::Key::Escape, modifiers: mods }, at);
-                } else {
-                    self.quit = true;
-                }
-            }
-            KeyCode::Tab => self.cycle_debug_options(),
-            // The C++ bindings' steps, through the recognizer, so the camera
-            // reports them as the user's, as the recognizer's keys are.
-            KeyCode::NumpadAdd | KeyCode::Equal => self.key_step(key_zoom(1.1, cursor)),
-            KeyCode::NumpadSubtract | KeyCode::Minus => self.key_step(key_zoom(1.0 / 1.1, cursor)),
-            KeyCode::KeyX if no_mods => self.map.jump_to(
-                &CameraOptions::default()
-                    .with_center(Some(LatLng::default()))
-                    .with_zoom(Some(0.0))
-                    .with_bearing(Some(0.0))
-                    .with_pitch(Some(0.0)),
-            ),
-            KeyCode::KeyO => self.toggle_online(),
-            KeyCode::KeyS => self.change_style(),
-            KeyCode::KeyN if no_mods => {
+    }
+
+    /// The controls' frame: lays them out with their input, carries out what
+    /// they ask, and draws the map again under them when they changed.
+    fn controls_frame(&mut self, now: Instant) {
+        let mut input = self.ui_input.take().unwrap_or_default();
+        input.time = Some(now.saturating_duration_since(self.start).as_secs_f64());
+
+        let camera = self.map.get_camera_options(None);
+        let style = self.map.get_style();
+        let attributions: Vec<String> = style
+            .get_sources()
+            .iter()
+            .filter_map(|source| source.get_attribution())
+            .filter(|attribution| !attribution.is_empty())
+            .collect();
+        let style_name = style.get_name();
+        drop(style);
+        let status = [self.adapter.clone(), self.frame_report.clone()];
+        let shown = Shown {
+            styles: &self.styles,
+            style: &self.style,
+            style_name: &style_name,
+            loading: !self.map.is_fully_loaded(),
+            bearing: camera.bearing.unwrap_or_default(),
+            pitch: camera.pitch.unwrap_or_default(),
+            attributions: &attributions,
+            debug: self.map.get_debug(),
+            status: &status,
+        };
+        let mut actions = Vec::new();
+        let controls = &mut self.controls;
+        let output = self.ui.run_pass(input, |ctx| actions = controls.show(ctx, &shown));
+
+        let _ = self.proxy.send_event(UserEvent::Ui(Box::new(output.platform_output)));
+        self.ui_repaint_at = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map(|viewport| viewport.repaint_delay)
+            .filter(|delay| *delay < std::time::Duration::from_secs(3600))
+            .map(|delay| now + delay);
+        if output.shapes != self.ui_shapes || !output.textures_delta.is_empty() {
+            let primitives = self.ui.tessellate(output.shapes.clone(), output.pixels_per_point);
+            let mut paint = self.paint.borrow_mut();
+            paint.primitives = primitives;
+            paint.pixels_per_point = output.pixels_per_point;
+            paint.textures.append(output.textures_delta);
+            self.ui_shapes = output.shapes;
+            self.shared.invalidate();
+        }
+        for action in actions {
+            self.apply(action, now);
+        }
+    }
+
+    /// Carries out what the controls ask.
+    fn apply(&mut self, action: Action, now: Instant) {
+        match action {
+            Action::ZoomIn => self.gesture(Input::Key { key: Key::ZoomIn, modifiers: Modifiers::default() }, now),
+            Action::ZoomOut => self.gesture(Input::Key { key: Key::ZoomOut, modifiers: Modifiers::default() }, now),
+            Action::ResetNorth => {
                 let north = CameraUpdate {
                     mode: CameraUpdateMode::Ease,
-                    camera: CameraOptions::default().with_bearing(Some(0.0)),
-                    animation: animation_ms(500),
+                    camera: CameraOptions::default().with_bearing(Some(0.0)).with_pitch(Some(0.0)),
+                    animation: AnimationOptions::new(Duration::from_millis(500)),
                     phase: GesturePhase::None,
                 };
                 self.gestures.step_to(&mut self.map, north);
             }
-            KeyCode::KeyZ => self.next_orientation(),
-            KeyCode::KeyP => self.pause_resume(),
-            KeyCode::KeyI => self.reset_cache(),
-            KeyCode::KeyA => {
-                // XXX Fix precision loss in flyTo:
-                // https://github.com/mapbox/mapbox-gl-native/issues/4298
-                let places = [
-                    (-16.796665, -179.999983), // Dateline monument
-                    (12.9810542, 77.6345551),  // Mapbox Bengaluru, India
-                    (-13.15607, -74.21773),    // Mapbox Peru
-                    (37.77572, -122.4158818),  // Mapbox SF, USA
-                    (38.91318, -77.03255),     // Mapbox DC, USA
-                ];
-                let (lat, lng) = places[self.next_place];
-                self.next_place = (self.next_place + 1) % places.len();
-                let camera = CameraOptions::default()
-                    .with_center(LatLng::new(lat, lng).ok())
-                    .with_zoom(Some(20.0))
-                    .with_pitch(Some(30.0));
-                self.map.fly_to(&camera, &AnimationOptions::new(Duration::from_secs(10)));
-            }
-            KeyCode::KeyD => {
-                // TODO(port): the bounds annotation.
-                Log::warning(Event::General, "Camera bounds cycling is not ported yet");
-            }
-            KeyCode::KeyU => {
-                let bounds = self.map.get_bounds();
-                if bounds.min_pitch == Some(mln_math::rad2deg(mln_util::constants::PITCH_MIN))
-                    && bounds.max_pitch == Some(mln_math::rad2deg(mln_util::constants::PITCH_MAX))
-                {
-                    Log::info(Event::General, "Limiting pitch bounds to [30, 40] degrees");
-                    let _ = self.map.set_bounds(&BoundOptions::default().with_min_pitch(30.0).with_max_pitch(40.0));
-                } else {
-                    Log::info(Event::General, "Resetting pitch bounds to [0, 60] degrees");
-                    let _ = self.map.set_bounds(&BoundOptions::default().with_min_pitch(0.0).with_max_pitch(60.0));
+            Action::PickStyle(index) => {
+                if let Some(style) = self.styles.get(index).cloned() {
+                    self.load_style(style);
                 }
             }
-            KeyCode::F6 => self.cycle_tile_lod_profile(),
-            KeyCode::F7 => self.tile_lod_zoom_shift(false),
-            KeyCode::F8 => self.tile_lod_zoom_shift(true),
-            KeyCode::KeyQ
-            | KeyCode::KeyC
-            | KeyCode::KeyB
-            | KeyCode::KeyK
-            | KeyCode::KeyL
-            | KeyCode::KeyR
-            | KeyCode::KeyE
-            | KeyCode::KeyT
-            | KeyCode::KeyF
-            | KeyCode::F1
-            | KeyCode::KeyH
-            | KeyCode::KeyJ
-            | KeyCode::KeyG
-            | KeyCode::KeyY => {
-                Log::warning(Event::General, format!("Key {code:?}: not ported yet"));
-            }
-            _ => {}
+            Action::SetDebug(debug) => self.map.set_debug(debug),
+            Action::ResetCache => self.reset_cache(),
         }
     }
 
-    /// `O`: main.cpp's online status callback.
+    /// Empties the cache database.
     fn reset_cache(&self) {
         let database = self.database_file_source.as_deref().and_then(|source| source.as_any());
         let Some(database) = database.and_then(|source| source.downcast_ref::<DatabaseFileSource>()) else {
             Log::warning(Event::Database, "There is no cache database to reset");
             return;
         };
-        database.reset_database(|result| {
-            if let Err(e) = result {
-                Log::error(Event::Database, format!("Failed to reset cache: {e}"));
-            }
+        database.reset_database(|result| match result {
+            Ok(()) => Log::info(Event::Database, "Reset the cache"),
+            Err(e) => Log::error(Event::Database, format!("Failed to reset cache: {e}")),
         });
-    }
-
-    fn toggle_online(&mut self) {
-        let Some(online_file_source) = &self.online_file_source else {
-            Log::warning(Event::Setup, "Cannot change online status. Network resource provider is not available.");
-            return;
-        };
-        self.online = !self.online;
-        online_file_source.set_property("online-status", &feature::Value::Bool(self.online));
-        Log::info(
-            Event::Setup,
-            format!(
-                "Application is {}. Press `O` to toggle online status.",
-                if self.online { "online" } else { "offline" }
-            ),
-        );
-    }
-
-    /// `S`: main.cpp's change style callback.
-    fn change_style(&mut self) {
-        if self.ordered_styles.is_empty() {
-            return;
-        }
-        self.style_index = (self.style_index + 1) % self.ordered_styles.len();
-        let new_style = self.ordered_styles[self.style_index].clone();
-        self.map.get_style_mut().load_url(new_style.get_url());
-        self.set_window_title(new_style.get_name());
-        Log::info(Event::Setup, format!("Changed style to: {}", new_style.get_name()));
-    }
-
-    /// `P`: main.cpp's pause/resume callback.
-    fn pause_resume(&mut self) {
-        if let Some(resource_loader) = &self.resource_loader {
-            if self.paused {
-                resource_loader.resume();
-            } else {
-                resource_loader.pause();
-            }
-        }
-        self.paused = !self.paused;
     }
 
     /// `render()`
@@ -752,31 +693,26 @@ impl View {
         }
         self.shared.dirty.set(false);
         let started = Instant::now();
-
-        // TODO(port): animateRouteCallback, updateAnimatedAnnotations.
         {
             let backend: Rc<dyn RendererBackend> = self.backend.clone();
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             self.frontend.render();
         }
-        // TODO(port): updateFreeCameraDemo.
-
         self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);
         if self.benchmark {
             self.shared.invalidate();
         }
     }
 
-    /// `report(float duration)`
+    /// `report(float duration)`: the frame time, logged and shown in the
+    /// controls' panel once a second.
     fn report(&mut self, duration: f32) {
         self.frames += 1;
         self.frame_time += duration;
         if self.last_reported.elapsed().as_secs_f64() >= 1.0 {
             self.frame_time /= self.frames as f32;
-            Log::info(
-                Event::Render,
-                format!("Frame time: {:.2}ms ({:.2}fps)", self.frame_time, 1000.0 / self.frame_time),
-            );
+            self.frame_report = format!("Frame time: {:.2} ms ({:.0} fps)", self.frame_time, 1000.0 / self.frame_time);
+            Log::info(Event::Render, &self.frame_report);
             self.frames = 0;
             self.frame_time = 0.0;
             self.last_reported = Instant::now();
@@ -811,102 +747,6 @@ impl View {
             Log::info(Event::General, "--quit-after: closing the window");
             self.quit = true;
         }
-    }
-
-    fn with_map(&mut self, f: impl FnOnce(&mut Map)) {
-        f(&mut self.map);
-    }
-
-    /// `cycleDebugOptions()`
-    fn cycle_debug_options(&mut self) {
-        self.with_map(|map| {
-            let mut debug = map.get_debug();
-            if debug.contains(MapDebugOptions::OVERDRAW) {
-                debug = MapDebugOptions::NO_DEBUG;
-            } else if debug.contains(MapDebugOptions::COLLISION) {
-                debug = MapDebugOptions::OVERDRAW;
-            } else if debug.contains(MapDebugOptions::TIMESTAMPS) {
-                debug |= MapDebugOptions::COLLISION;
-            } else if debug.contains(MapDebugOptions::PARSE_STATUS) {
-                debug |= MapDebugOptions::TIMESTAMPS;
-            } else if debug.contains(MapDebugOptions::TILE_BORDERS) {
-                debug |= MapDebugOptions::PARSE_STATUS;
-            } else {
-                debug = MapDebugOptions::TILE_BORDERS;
-            }
-            map.set_debug(debug);
-        });
-    }
-
-    /// `nextOrientation()`
-    fn next_orientation(&mut self) {
-        self.with_map(|map| {
-            let next = match map.get_map_options().north_orientation() {
-                NorthOrientation::Upwards => NorthOrientation::Rightwards,
-                NorthOrientation::Rightwards => NorthOrientation::Downwards,
-                NorthOrientation::Downwards => NorthOrientation::Leftwards,
-                _ => NorthOrientation::Upwards,
-            };
-            map.set_north_orientation(next);
-        });
-    }
-
-    /// `cycleTileLodProfile(map)`
-    fn cycle_tile_lod_profile(&mut self) {
-        let map = &mut self.map;
-        let defaults = *self.tile_lod_defaults.get_or_insert_with(|| {
-            (
-                map.get_tile_lod_min_radius(),
-                map.get_tile_lod_scale(),
-                map.get_tile_lod_pitch_threshold(),
-                map.get_tile_lod_mode(),
-            )
-        });
-        self.tile_lod_profile = (self.tile_lod_profile + 1) % 5;
-        match self.tile_lod_profile {
-            0 => {
-                map.set_tile_lod_min_radius(defaults.0);
-                map.set_tile_lod_scale(defaults.1);
-                map.set_tile_lod_pitch_threshold(defaults.2);
-                map.set_tile_lod_mode(defaults.3);
-                Log::info(Event::General, "Tile LOD profile: default");
-            }
-            1 => {
-                // When LOD is off we set a maximum PitchThreshold
-                map.set_tile_lod_pitch_threshold(std::f64::consts::PI);
-                Log::info(Event::General, "Tile LOD profile: disabled");
-            }
-            2 => {
-                map.set_tile_lod_min_radius(2.0);
-                map.set_tile_lod_scale(1.5);
-                map.set_tile_lod_pitch_threshold(std::f64::consts::PI / 4.0);
-                Log::info(Event::General, "Tile LOD profile: reduced");
-            }
-            3 => {
-                map.set_tile_lod_min_radius(1.0);
-                map.set_tile_lod_scale(2.0);
-                map.set_tile_lod_pitch_threshold(0.0);
-                Log::info(Event::General, "Tile LOD profile: aggressive");
-            }
-            _ => {
-                map.set_tile_lod_scale(1.0);
-                map.set_tile_lod_pitch_threshold(0.0);
-                map.set_tile_lod_mode(TileLodMode::Distance);
-                Log::info(Event::General, "Tile LOD profile: distance-based");
-            }
-        }
-        map.trigger_repaint();
-    }
-
-    /// `tileLodZoomShift(map, positive)`
-    fn tile_lod_zoom_shift(&mut self, positive: bool) {
-        self.with_map(|map| {
-            const STEP: f64 = 0.25;
-            let shift = (map.get_tile_lod_zoom_shift() + if positive { STEP } else { -STEP }).clamp(-2.5, 2.5);
-            Log::info(Event::GraphicsBackend, format!("Zoom shift: {shift:.6}"));
-            map.set_tile_lod_zoom_shift(shift);
-            map.trigger_repaint();
-        });
     }
 
     fn save_readback(&mut self) {
@@ -995,7 +835,8 @@ struct GestureTest {
 impl View {
     /// Once the style is loaded, feeds a scripted sequence of messages (drag,
     /// scroll, double click, rotate, pitch, trackpad pinch, keys) through the
-    /// same handlers as the window's, logs the camera after each, then closes.
+    /// same handlers as the window's, and the controls' actions, logs the
+    /// camera after each, then closes.
     fn run_gesture_test(&mut self) {
         let Some(test) = self.gesture_test.as_mut() else {
             return;
@@ -1032,13 +873,12 @@ impl View {
         };
         let wheel = |delta: WheelDelta| Input::Wheel { position: center, delta, modifiers: none };
         let pinch = |scale: f64, rotation: f64, phase: PinchPhase| Input::Pinch { center, scale, rotation, phase };
-        let key = |code: KeyCode, pressed: bool| (code, pressed);
-        let (name, inputs, keys): (&str, Vec<Input>, Vec<(KeyCode, bool)>) = match step {
-            0 => ("start", vec![], vec![]),
-            1 => ("drag (pan, then glide) by (200, 100)", drag(Button::Primary, none, 200.0, 100.0), vec![]),
-            2 => ("scroll up 5 wheel notches (eased)", vec![wheel(WheelDelta::Notches(-1.0)); 5], vec![]),
-            3 => ("scroll down 2 wheel notches (eased)", vec![wheel(WheelDelta::Notches(1.0)); 2], vec![]),
-            4 => ("scroll a trackpad up 240 px", vec![wheel(WheelDelta::Pixels(-30.0)); 8], vec![]),
+        let (name, inputs, keys, actions): (&str, Vec<Input>, Vec<KeyCode>, Vec<Action>) = match step {
+            0 => ("start", vec![], vec![], vec![]),
+            1 => ("drag (pan, then glide) by (200, 100)", drag(Button::Primary, none, 200.0, 100.0), vec![], vec![]),
+            2 => ("scroll up 5 wheel notches (eased)", vec![wheel(WheelDelta::Notches(-1.0)); 5], vec![], vec![]),
+            3 => ("scroll down 2 wheel notches (eased)", vec![wheel(WheelDelta::Notches(1.0)); 2], vec![], vec![]),
+            4 => ("scroll a trackpad up 240 px", vec![wheel(WheelDelta::Pixels(-30.0)); 8], vec![], vec![]),
             5 => (
                 "double click (zoom in, animated)",
                 vec![
@@ -1049,10 +889,11 @@ impl View {
                     Input::PointerUp { id: 0, position: center },
                 ],
                 vec![],
+                vec![],
             ),
-            6 => ("ctrl+drag (rotate)", drag(Button::Primary, ctrl, 150.0, 0.0), vec![]),
-            7 => ("right drag up (tilt)", drag(Button::Secondary, none, 0.0, -120.0), vec![]),
-            8 => ("shift+drag (box zoom)", drag(Button::Primary, shift, 200.0, 150.0), vec![]),
+            6 => ("ctrl+drag (rotate)", drag(Button::Primary, ctrl, 150.0, 0.0), vec![], vec![]),
+            7 => ("right drag up (tilt)", drag(Button::Secondary, none, 0.0, -120.0), vec![], vec![]),
+            8 => ("shift+drag (box zoom)", drag(Button::Primary, shift, 200.0, 150.0), vec![], vec![]),
             9 => (
                 "trackpad pinch (zoom out half a level, turn 20 degrees counterclockwise, then glide)",
                 std::iter::once(pinch(1.0, 0.0, PinchPhase::Begin))
@@ -1060,15 +901,21 @@ impl View {
                     .chain(std::iter::once(pinch(1.0, 0.0, PinchPhase::End)))
                     .collect(),
                 vec![],
+                vec![],
             ),
-            10 => ("key Right (pan, animated)", vec![], vec![key(KeyCode::ArrowRight, true)]),
-            11 => ("key N (reset north, animated)", vec![], vec![key(KeyCode::KeyN, false)]),
-            12 => ("key - (zoom out, animated)", vec![], vec![key(KeyCode::Minus, false)]),
-            13 => ("key Tab (debug: tile borders)", vec![], vec![key(KeyCode::Tab, false)]),
-            14 => ("key Tab (debug: parse status)", vec![], vec![key(KeyCode::Tab, false)]),
+            10 => ("key Right (pan, animated)", vec![], vec![KeyCode::ArrowRight], vec![]),
+            11 => ("compass (reset north and tilt, animated)", vec![], vec![], vec![Action::ResetNorth]),
+            12 => ("key - (zoom out, animated)", vec![], vec![KeyCode::Minus], vec![]),
+            13 => ("zoom in button (animated)", vec![], vec![], vec![Action::ZoomIn]),
+            14 => (
+                "debug overlays: tile borders and parse status",
+                vec![],
+                vec![],
+                vec![Action::SetDebug(MapDebugOptions::TILE_BORDERS | MapDebugOptions::PARSE_STATUS)],
+            ),
             15 => {
                 let _ = self.proxy.send_event(UserEvent::RequestSize(LogicalSize::new(800.0, 600.0)));
-                ("window resize to 800x600", vec![], vec![])
+                ("window resize to 800x600", vec![], vec![], vec![])
             }
             _ => {
                 Log::info(Event::General, "Gesture test: done");
@@ -1084,8 +931,11 @@ impl View {
             self.handle(Message::Input { input, at: time });
             time += std::time::Duration::from_millis(16);
         }
-        for (code, pressed) in keys {
-            self.handle(Message::Key { code, pressed, modifiers: none, cursor: center, at: time });
+        for code in keys {
+            self.handle(Message::Key { code, pressed: true, modifiers: none, at: time });
+        }
+        for action in actions {
+            self.apply(action, time);
         }
         let camera = self.map.get_camera_options(None);
         let center = camera.center.unwrap_or_default();

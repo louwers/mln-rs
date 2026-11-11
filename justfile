@@ -151,7 +151,7 @@ get-crate-field field package=main_crate:  (assert-cmd 'jq')
 get-msrv package=main_crate:  (get-crate-field 'rust_version' package)
 
 # It builds with the Cargo profile in `profile`: `just profile=release desktop` runs an optimized build.
-[doc('Run the desktop app: OpenFreeMap Liberty in a window (needs a display). Arguments go to the app')]
+[doc('Run the desktop app: a map in a window, with its controls (needs a display). Arguments go to the app')]
 [positional-arguments]
 desktop *args:  _dev-shell
     {{dev_shell}} cargo run --profile {{profile}} -p mln-rs-desktop --bin mln-desktop -- "$@"

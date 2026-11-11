@@ -25,6 +25,8 @@
 //   The copy is mapped asynchronously: natively `swap` waits for it, and in
 //   the browser, where nothing can wait for the GPU, `take_readback` returns
 //   it once the event loop has mapped it.
+// - Port-only: `set_overlay` draws over each frame before it is presented,
+//   such as an app's controls over the map.
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -80,6 +82,20 @@ fn surface_options(capabilities: &wgpu::SurfaceCapabilities) -> (wgpu::TextureUs
     };
     (usage, present_mode)
 }
+/// Port-only: what an overlay draws into (`SurfaceBackend::set_overlay`):
+/// the frame's swapchain texture, after the map and before it is presented.
+pub struct OverlayTarget<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub view: &'a wgpu::TextureView,
+    pub format: wgpu::TextureFormat,
+    /// In physical pixels.
+    pub size: Size,
+}
+
+/// Port-only: draws over a frame (`SurfaceBackend::set_overlay`). It submits
+/// its own commands to the queue.
+pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
 /// The current swapchain texture and its view (`currentTexture`,
 /// `currentTextureView`).
@@ -123,6 +139,7 @@ pub struct SurfaceState {
     /// The copy of the frame `request_readback` asked for, until mapped.
     pending_readback: RefCell<Option<PendingReadback>>,
     readback: RefCell<Option<PremultipliedImage>>,
+    overlay: RefCell<Option<Overlay>>,
 }
 
 /// Port-only: a frame copied into a buffer, waiting to be mapped.
@@ -183,6 +200,15 @@ impl SurfaceState {
             let current = if self.frame_presented.get() { None } else { self.current.borrow_mut().take() };
             {
                 if let Some(current) = current {
+                    if let Some(overlay) = self.overlay.borrow_mut().as_mut() {
+                        overlay(&OverlayTarget {
+                            device: &self.device,
+                            queue: &self.queue,
+                            view: &current.view,
+                            format: self.swap_chain_format,
+                            size: self.last_configured_size.get(),
+                        });
+                    }
                     if self.readback_requested.get() {
                         self.readback_requested.set(false);
                         *self.pending_readback.borrow_mut() = self.copy_texture(&current.texture.texture);
@@ -655,6 +681,7 @@ impl SurfaceBackend {
             readback_requested: Cell::new(false),
             pending_readback: RefCell::new(None),
             readback: RefCell::new(None),
+            overlay: RefCell::new(None),
         });
 
         // Configure surface
@@ -794,6 +821,13 @@ impl SurfaceBackend {
         state.reconfigure_surface();
         Ok(())
     }
+
+    /// Port-only: draws `overlay` over each frame from now on, after the map
+    /// and before the frame is presented (and read back), or stops with
+    /// `None`.
+    pub fn set_overlay(&self, overlay: Option<Overlay>) {
+        *self.state.overlay.borrow_mut() = overlay;
+    }
 }
 
 impl Drop for SurfaceBackend {
@@ -803,6 +837,7 @@ impl Drop for SurfaceBackend {
         self.renderer_backend.reset_context();
         self.state.current.borrow_mut().take();
         self.state.depth_stencil.borrow_mut().take();
+        self.state.overlay.borrow_mut().take();
         self.state.process_events();
         self.set_resource(None);
     }

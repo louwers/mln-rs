@@ -187,6 +187,11 @@ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parki
 # libraries at run time (`wayland-dlopen`, x11-dl), so builds need no system
 # development packages.
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"] }
+# examples/desktop's controls over the map: egui, drawn with the map's wgpu
+# device, its input from winit. `links` opens the attribution's links.
+egui = { version = "0.37.0", default-features = false, features = ["default_fonts"] }
+egui-wgpu = { version = "0.37.0", default-features = false }
+egui-winit = { version = "0.37.0", default-features = false, features = ["links", "wayland", "x11"] }
 
 # Lints for every package (`[lints] workspace = true`): clippy's default set,
 # with warnings denied in CI (the `lint` job), except the lints whose fix

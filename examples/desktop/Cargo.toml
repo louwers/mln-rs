@@ -7,18 +7,21 @@ description.workspace = true
 license.workspace = true
 repository.workspace = true
 include.workspace = true
-# The desktop example app (platform/glfw's app, on winit and the WebGPU
-# backend); never released.
+# The desktop example app: the map in a winit window, on the WebGPU backend,
+# with egui's controls over it; never released.
 publish = false
 autotests = false
 
-# The app: OpenFreeMap Liberty in a window. `just desktop`.
+# The app: a map in a window. `just desktop`.
 [[bin]]
 name = "mln-desktop"
 path = "src/main.rs"
 doc = false
 
 [dependencies]
+egui.workspace = true
+egui-wgpu.workspace = true
+egui-winit.workspace = true
 feature.workspace = true
 fontdb.workspace = true
 mln_actor.workspace = true
