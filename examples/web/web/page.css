@@ -150,54 +150,20 @@ button {
   stroke: none;
 }
 
-/* The style button: the style's colors as three bands, its name and who
-   makes it. */
+/* The style button: the style's name and who makes it. */
 
 .style-button {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-width: 168px;
-  padding: 6px 10px 6px 6px;
+  min-width: 152px;
+  padding: 6px 10px;
   text-align: left;
   cursor: pointer;
 }
 
 .style-button:hover {
   background-image: linear-gradient(var(--hover), var(--hover));
-}
-
-.swatch {
-  display: grid;
-  grid-template-rows: 3fr 2fr;
-  grid-template-columns: 1fr 1fr;
-  flex: none;
-  width: 32px;
-  height: 32px;
-  overflow: hidden;
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 1px var(--line);
-}
-
-/* Land over water, with a road across the land. */
-.swatch i:nth-child(1) {
-  grid-area: 1 / 1 / 2 / 3;
-  background: var(--land);
-}
-
-.swatch i:nth-child(2) {
-  grid-area: 2 / 1 / 3 / 3;
-  background: var(--water);
-}
-
-.swatch i:nth-child(3) {
-  grid-area: 1 / 1 / 2 / 3;
-  align-self: center;
-  height: 3px;
-  margin: 0 4px;
-  transform: rotate(-14deg);
-  border-radius: 2px;
-  background: var(--road);
 }
 
 .style-text {
@@ -269,9 +235,8 @@ button {
 .style-option {
   display: flex;
   align-items: center;
-  gap: 10px;
   width: 100%;
-  padding: 6px;
+  padding: 6px 10px;
   border: 0;
   border-radius: var(--radius);
   background: none;

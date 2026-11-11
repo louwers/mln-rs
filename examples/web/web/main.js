@@ -309,18 +309,9 @@ $('compass').addEventListener('click', () => map.postMessage({ resetNorth: true 
 // The style button and its list.
 let loading = true;
 let styleName = '';
-function paintSwatch(element, swatch) {
-  element.hidden = !swatch;
-  if (!swatch) return;
-  const [land, water, road] = swatch;
-  element.style.setProperty('--land', land);
-  element.style.setProperty('--water', water);
-  element.style.setProperty('--road', road);
-}
 function showStyle() {
   $('style-name').textContent = current.key === null ? styleName || current.name : current.name;
   $('style-detail').textContent = fatal ? 'Stopped' : loading ? 'Loading…' : current.provider;
-  paintSwatch($('style-swatch'), current.swatch);
   document.documentElement.dataset.theme = current.dark ? 'dark' : 'light';
   for (const option of $('style-list').querySelectorAll('.style-option')) {
     option.setAttribute('aria-current', String(option.dataset.key === current.key));
@@ -345,9 +336,7 @@ $('style-list').replaceChildren(...STYLES.map((option) => {
   button.type = 'button';
   button.className = 'style-option';
   button.dataset.key = option.key;
-  button.innerHTML = `<span class="swatch" aria-hidden="true"><i></i><i></i><i></i></span>
-    <span class="style-text"><span class="style-name"></span><span class="style-detail"></span></span>`;
-  paintSwatch(button.querySelector('.swatch'), option.swatch);
+  button.innerHTML = '<span class="style-text"><span class="style-name"></span><span class="style-detail"></span></span>';
   button.querySelector('.style-name').textContent = option.name;
   button.querySelector('.style-detail').textContent = option.provider;
   button.addEventListener('click', () => pickStyle(option));
