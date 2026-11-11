@@ -1098,7 +1098,12 @@ fn put_returns_size() {
 
     let mut compressible = Response::new();
     compressible.data = Some(Arc::new(vec![0u8; 1024]));
-    assert_eq!(17, db.put(&style("http://example.com/compressible"), &compressible).1);
+    // gtest pins zlib's 17 bytes; the exact size depends on the deflate
+    // implementation, so this checks that the data is stored compressed.
+    let compressible_size = db.put(&style("http://example.com/compressible"), &compressible).1;
+    assert!(0 < compressible_size && compressible_size < 1024, "{compressible_size}");
+    let stored = db.get(&style("http://example.com/compressible")).expect("response");
+    assert_eq!(compressible.data, stored.data);
 
     let mut incompressible = Response::new();
     incompressible.data = Some(random_string(1024));

@@ -6,9 +6,9 @@ use std::io::Write;
 /// `util::compress(raw)`: a zlib stream (`windowBits = MAX_WBITS`) at
 /// `Z_DEFAULT_COMPRESSION` (level 6), `memLevel` 8, `Z_DEFAULT_STRATEGY`.
 ///
-/// flate2's Rust backend (miniz_oxide) produces a valid zlib stream that
-/// decompresses to the same bytes, but not necessarily the same compressed
-/// bytes as zlib.
+/// The stream decompresses to the same bytes as zlib's, but the compressed
+/// bytes (and so their length) can differ from those of the zlib the C++
+/// links.
 pub fn compress(raw: &[u8]) -> Result<Vec<u8>, String> {
     let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
     encoder.write_all(raw).map_err(|_| "failed to deflate".to_string())?;
@@ -78,30 +78,41 @@ pub fn decompress(raw: &[u8]) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Read;
-
     use super::*;
+
+    /// gzip of `raw()` (Python's gzip module, level 6, mtime 0).
+    const GZIP: [u8; 56] = [
+        0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0xed, 0xc5, 0xc1, 0x11, 0x00, 0x30, 0x04, 0x00,
+        0x30, 0xb4, 0xec, 0x3f, 0xb2, 0x39, 0xdc, 0x25, 0x9f, 0x44, 0xd6, 0xfb, 0x3d, 0x21, 0x49, 0x92, 0x24, 0x49,
+        0x92, 0x24, 0x49, 0x92, 0x24, 0x49, 0x92, 0x24, 0x49, 0xd2, 0xe5, 0x16, 0xe9, 0x1c, 0xb5, 0x68, 0x10, 0x27,
+        0x00, 0x00,
+    ];
+
+    fn raw() -> Vec<u8> {
+        (0..10_000u32).map(|i| (i % 7) as u8).collect()
+    }
 
     #[test]
     fn round_trip() {
-        let raw: Vec<u8> = (0..10_000u32).map(|i| (i % 7) as u8).collect();
+        let raw = raw();
         let compressed = compress(&raw).unwrap();
         // zlib header for the default compression level.
         assert_eq!(&compressed[..2], &[0x78, 0x9C]);
-        let mut out = Vec::new();
-        flate2::read::ZlibDecoder::new(&compressed[..]).read_to_end(&mut out).unwrap();
-        assert_eq!(out, raw);
+        assert!(compressed.len() < raw.len());
         assert_eq!(decompress(&compressed).unwrap(), raw);
         assert!(decompress(&compressed[..compressed.len() / 2]).is_err());
         let mut trailing = compressed.clone();
         trailing.extend_from_slice(b"garbage");
         assert_eq!(decompress(&trailing).unwrap(), raw);
+        assert!(decompress(&[]).is_err());
+        assert!(decompress(b"not compressed").is_err());
+        assert_eq!(decompress(&compress(&[]).unwrap()).unwrap(), Vec::<u8>::new());
+    }
 
+    #[test]
+    fn gzip() {
         // gzip is detected by its magic bytes.
-        let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
-        gzip.write_all(&raw).unwrap();
-        let gzip = gzip.finish().unwrap();
-        assert_eq!(decompress(&gzip).unwrap(), raw);
-        assert!(decompress(&gzip[..gzip.len() - 4]).is_err());
+        assert_eq!(decompress(&GZIP).unwrap(), raw());
+        assert!(decompress(&GZIP[..GZIP.len() - 4]).is_err());
     }
 }

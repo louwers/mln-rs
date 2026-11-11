@@ -92,10 +92,9 @@ bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
 # different area; see difftest/earcut_crate). Only that comparison uses it, so
 # a newer release can be re-checked.
 earcut_crate = { package = "earcut", version = "0.4.5" }
-# zlib backend (libz-sys) instead of miniz_oxide: util::compress output must
-# be byte-identical to the zlib the C++ links (offline database stored sizes
-# and ambient-cache accounting; OfflineDatabase.PutReturnsSize).
-flate2 = { version = "1.1.11", default-features = false, features = ["zlib"] }
+# zlib-rs backend: pure Rust, so neither native nor wasm32 builds need a C
+# compiler or a system zlib.
+flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
 harfrust = { version = "0.15.0" }
 # The HTTP test server of the tests (tools/test-server).
 httpmock = { version = "0.9.0", default-features = false }
