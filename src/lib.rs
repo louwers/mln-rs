@@ -29,14 +29,9 @@ pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
 pub use mln_renderer;
-pub use mln_runtime::{
-    self, Applied, AttachOptions, CacheDatabaseOperation, CameraQuery, CommandGroup, Completion, DemandMode, Driver,
-    DriverWork, Error, ErrorKind, EventHandler, EventMask, EventSource, EventType, FrameDemand, FrameDisposition,
-    FrameResult, HostDevice, Map, MapId, MapOptions, MapSnapshot, Offline, OffscreenDevice, OffscreenDeviceOptions,
-    RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
-    RenderedQueryGeometry, RenderedQueryOptions, ResourceProvider, ResourceRequest, Runtime, RuntimeEvent,
-    RuntimeEventKind, RuntimeOptions, SourceQueryOptions, Surface, Wake,
-};
+// Every runtime type is at the root, so the root can't miss one that a
+// root type's methods take or return.
+pub use mln_runtime::{self, *};
 pub use mln_sprite;
 pub use mln_storage;
 pub use mln_storage_offline;
