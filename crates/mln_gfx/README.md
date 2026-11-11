@@ -5,7 +5,7 @@
 > any release without notice. Depend on [`mln-rs`](https://crates.io/crates/mln-rs)
 > instead: it re-exports this crate as `mln_rs::mln_gfx`.
 
-Ports the backend-independent graphics abstractions of the C++ core (`include/mln/gfx`, `src/mln/gfx` and the backend-independent shader code), which the WebGPU backend implements.
+Ports the backend-independent graphics abstractions of the C++ core (`include/mln/gfx`, `src/mln/gfx` and the backend-independent shader code), which the WebGPU and Metal backends implement.
 
 Part of [mln-rs](https://github.com/louwers/mln-rs),
 a Rust port of the [MapLibre Native](https://github.com/maplibre/maplibre-native)

@@ -362,22 +362,26 @@ update-testdata checkout=cpp:
     done
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
-# Rerun it when the C++ shaders change, and commit the result.
-[doc("Vendor the C++ core's WGSL shaders, unchanged, into crates/mln_webgpu/src/shaders/wgsl_sources.rs")]
+# Rerun it when the C++ shaders change, and commit the result. Both files also carry the port's own changes to the shaders,
+# which rerunning reverts: reapply them first.
+[doc("Vendor the C++ core's WGSL and MSL shaders into crates/mln_webgpu/src/shaders/wgsl_sources.rs and crates/mln_mtl/src/shaders/msl_sources.rs")]
 vendor-shaders checkout=cpp:
     #!/usr/bin/env bash
     set -euo pipefail
     shopt -s nullglob
-    headers=({{quote(checkout)}}/include/mln/shaders/webgpu/*.hpp)
-    if [[ ${#headers[@]} -eq 0 ]]; then
-        echo "no WGSL headers in {{checkout}}/include/mln/shaders/webgpu" >&2
+    wgsl_headers=({{quote(checkout)}}/include/mln/shaders/webgpu/*.hpp)
+    msl_headers=({{quote(checkout)}}/include/mln/shaders/mtl/*.hpp)
+    if [[ ${#wgsl_headers[@]} -eq 0 || ${#msl_headers[@]} -eq 0 ]]; then
+        echo "no WGSL or MSL headers in {{checkout}}/include/mln/shaders/{webgpu,mtl}" >&2
         exit 1
     fi
     tool_dir="$(mktemp -d)"
     trap 'rm -rf "$tool_dir"' EXIT
     rustc --edition 2024 -O -o "$tool_dir/extract_wgsl" crates/mln_webgpu/tools/extract_wgsl.rs
-    "$tool_dir/extract_wgsl" crates/mln_webgpu/src/shaders/wgsl_sources.rs "${headers[@]}"
-    echo "vendored ${#headers[@]} headers from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
+    rustc --edition 2024 -O -o "$tool_dir/extract_msl" crates/mln_mtl/tools/extract_msl.rs
+    "$tool_dir/extract_wgsl" crates/mln_webgpu/src/shaders/wgsl_sources.rs "${wgsl_headers[@]}"
+    "$tool_dir/extract_msl" crates/mln_mtl/src/shaders/msl_sources.rs "${msl_headers[@]}"
+    echo "vendored ${#wgsl_headers[@]} WGSL and ${#msl_headers[@]} MSL headers from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
 _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')

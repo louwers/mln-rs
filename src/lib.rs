@@ -24,6 +24,8 @@ pub use mln_image;
 pub use mln_map;
 pub use mln_map_types;
 pub use mln_math;
+/// Empty except on Apple platforms.
+pub use mln_mtl;
 pub use mln_renderer;
 pub use mln_sprite;
 pub use mln_storage;

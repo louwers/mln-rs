@@ -257,8 +257,10 @@ impl Scene {
         self.observer.last_frame.borrow().clone().expect("the renderer reports each frame")
     }
 
+    /// The Metal backend finishes a frame before `render_frame` returns (its
+    /// swap waits for the command buffer); WebGPU's is left to the device.
     fn wait_for_gpu(&self) {
-        if let Some(device) = self.webgpu().get_device() {
+        if let Some(device) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_device) {
             device.poll(wgpu::PollType::wait_indefinitely()).expect("the GPU finishes the frame");
         }
     }
@@ -370,17 +372,18 @@ impl Scene {
         })
     }
 
-    fn webgpu(&self) -> &mln_webgpu::HeadlessBackend {
-        self.frontend
-            .get_backend()
-            .as_any()
-            .downcast_ref::<mln_webgpu::HeadlessBackend>()
-            .expect("the headless frontend renders through WebGPU")
+    /// The WebGPU backend, unless the frontend renders through Metal.
+    fn webgpu(&self) -> Option<&mln_webgpu::HeadlessBackend> {
+        self.frontend.get_backend().as_any().downcast_ref::<mln_webgpu::HeadlessBackend>()
     }
 
-    /// The adapter's description, and whether it is a software rasterizer.
+    /// The GPU's description, and whether it is a software rasterizer.
     pub fn gpu(&self) -> (String, bool) {
-        let Some(info) = self.webgpu().get_adapter_info() else {
+        #[cfg(target_vendor = "apple")]
+        if let Some(metal) = self.frontend.get_backend().as_any().downcast_ref::<mln_mtl::HeadlessBackend>() {
+            return (format!("{} (Metal)", metal.get_device_name()), false);
+        }
+        let Some(info) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_adapter_info) else {
             return ("no adapter".to_string(), true);
         };
         let name = info.name.to_lowercase();

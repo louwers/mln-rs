@@ -1,12 +1,19 @@
 // Ports src/mln/renderer/layers/line_layer_tweaker.hpp and
-// src/mln/renderer/layers/line_layer_tweaker.cpp (MLN_RENDER_BACKEND_WEBGPU
-// and MLN_UBO_CONSOLIDATION branches; the GPU expressions are Metal-only).
+// src/mln/renderer/layers/line_layer_tweaker.cpp (MLN_RENDER_BACKEND_METAL,
+// MLN_RENDER_BACKEND_WEBGPU and MLN_UBO_CONSOLIDATION branches, the backend
+// picked by the context).
+//
+// TODO(port): the GPU expressions of the Metal branch
+// (`updateGPUExpressions`, `gfx::Backend::getEnableGPUExpressionEval`), off
+// by default in C++: on Metal the expression UBO is all zeros and no
+// property is marked as evaluated on the GPU.
 
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::line_layer_ubo::*;
 use mln_gfx::shaders::shader_defines::{
-    ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_IMAGE_TEXTURE,
-    ID_LINE_TILE_PROPS_UBO,
+    ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
+    ID_LINE_IMAGE_TEXTURE, ID_LINE_TILE_PROPS_UBO,
 };
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
@@ -61,6 +68,8 @@ pub struct LineLayerTweaker {
     evaluated_props_uniform_buffer: Option<UniformBufferPtr>,
     drawable_uniform_buffer: Option<UniformBufferPtr>,
     tile_props_uniform_buffer: Option<UniformBufferPtr>,
+    /// Metal: the `LineExpressionUBO`.
+    expression_uniform_buffer: Option<UniformBufferPtr>,
     expression_mask: u32,
 }
 
@@ -71,6 +80,7 @@ impl LineLayerTweaker {
             evaluated_props_uniform_buffer: None,
             drawable_uniform_buffer: None,
             tile_props_uniform_buffer: None,
+            expression_uniform_buffer: None,
             expression_mask: line_expression_mask::NONE,
         }
     }
@@ -105,30 +115,34 @@ impl LayerTweaker for LineLayerTweaker {
         let zoom = parameters.state.get_zoom() as f32;
         let int_zoom = parameters.state.get_integer_zoom();
 
+        let metal = context.backend_type() == BackendType::Metal;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
             use line_expression_mask::*;
-            // MLN_RENDER_BACKEND_WEBGPU
             self.expression_mask = NONE;
-            if evaluated.get::<LineColor>().is_constant() {
-                self.expression_mask |= COLOR;
-            }
-            if evaluated.get::<LineBlur>().is_constant() {
-                self.expression_mask |= BLUR;
-            }
-            if evaluated.get::<LineOpacity>().is_constant() {
-                self.expression_mask |= OPACITY;
-            }
-            if evaluated.get::<LineGapWidth>().is_constant() {
-                self.expression_mask |= GAP_WIDTH;
-            }
-            if evaluated.get::<LineOffset>().is_constant() {
-                self.expression_mask |= OFFSET;
-            }
-            if evaluated.get::<LineWidth>().is_constant() {
-                self.expression_mask |= WIDTH;
-            }
-            if evaluated.get::<LineFloorWidth>().is_constant() {
-                self.expression_mask |= FLOOR_WIDTH;
+            // On Metal, the mask marks the properties evaluated on the GPU
+            // (none, see the top of the file); on WebGPU, the constant ones.
+            if !metal {
+                if evaluated.get::<LineColor>().is_constant() {
+                    self.expression_mask |= COLOR;
+                }
+                if evaluated.get::<LineBlur>().is_constant() {
+                    self.expression_mask |= BLUR;
+                }
+                if evaluated.get::<LineOpacity>().is_constant() {
+                    self.expression_mask |= OPACITY;
+                }
+                if evaluated.get::<LineGapWidth>().is_constant() {
+                    self.expression_mask |= GAP_WIDTH;
+                }
+                if evaluated.get::<LineOffset>().is_constant() {
+                    self.expression_mask |= OFFSET;
+                }
+                if evaluated.get::<LineWidth>().is_constant() {
+                    self.expression_mask |= WIDTH;
+                }
+                if evaluated.get::<LineFloorWidth>().is_constant() {
+                    self.expression_mask |= FLOOR_WIDTH;
+                }
             }
 
             let props_ubo = LineEvaluatedPropsUBO {
@@ -148,6 +162,13 @@ impl LayerTweaker for LineLayerTweaker {
         layer_group
             .mutable_uniform_buffers()
             .set(ID_LINE_EVALUATED_PROPS_UBO, self.evaluated_props_uniform_buffer.clone());
+        if metal {
+            if self.expression_uniform_buffer.is_none() {
+                self.expression_uniform_buffer =
+                    Some(context.create_uniform_buffer(&[0; LINE_EXPRESSION_UBO_SIZE], false, false));
+            }
+            layer_group.mutable_uniform_buffers().set(ID_LINE_EXPRESSION_UBO, self.expression_uniform_buffer.clone());
+        }
 
         let mut i: u32 = 0;
         let count = layer_group.get_drawable_count();

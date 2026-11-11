@@ -26,6 +26,10 @@ mln_text.workspace = true
 mln_util.workspace = true
 mln_webgpu.workspace = true
 
+# The Metal backend, which MLN_RENDER_BACKEND=metal picks (headless_frontend.rs).
+[target.'cfg(target_vendor = "apple")'.dependencies]
+mln_mtl.workspace = true
+
 # The M1 background render tests through Map -> HeadlessFrontend, without the
 # render-test runner (see the file comment).
 [[test]]

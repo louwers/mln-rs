@@ -1,5 +1,7 @@
 // Ports src/mln/renderer/renderer_impl.hpp and src/mln/renderer/renderer_impl.cpp
-// (non-OpenGL, non-Metal branches; the port's backend is WebGPU).
+// (the non-OpenGL branches). The Metal branch's autorelease pool is the Metal
+// backend's (mln_mtl renderer_backend.rs), and its frame capture, off in
+// C++, is not ported.
 
 use std::rc::{Rc, Weak};
 use std::sync::Arc;

@@ -1,9 +1,10 @@
 // Ports src/mln/renderer/paint_parameters.hpp and src/mln/renderer/paint_parameters.cpp
-// (non-OpenGL backend branches; the port's backend is WebGPU).
+// (the Metal and WebGPU branches, picked by the context's backend).
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::color_mode::{BlendFunction, LinearBlend, Mask};
 use mln_gfx::paint_parameters::PaintParameters as GfxPaintParameters;
 use mln_gfx::render_pass::RenderPass as GfxRenderPass;
@@ -235,7 +236,23 @@ impl<'a> PaintParameters<'a> {
         self.next_stencil_id = 1;
         self.tile_clipping_mask_ids.clear();
 
-        // WebGPU clears stencil through render pass descriptor
+        if self.context.backend_type() == BackendType::Metal {
+            // Metal doesn't have an equivalent of `glClear`, so we clear the
+            // buffer by drawing zero to (0:0,0).
+            let matrix = self.matrix_for_tile(&UnwrappedTileID::new(0, 0, 0), false);
+            let tile_ubo = [ClipUBO {
+                matrix: std::array::from_fn(|i| matrix[i] as f32),
+                stencil_ref: 0,
+                pad1: 0.0,
+                pad2: 0.0,
+                pad3: 0.0,
+            }];
+            if let Some(render_pass) = self.render_pass.as_deref() {
+                let _debug_group = render_pass.create_debug_group("tile-clip-mask-clear");
+                self.context.render_tile_clipping_masks(render_pass, self.shaders, &tile_ubo);
+            }
+        }
+        // WebGPU clears the stencil through the render pass descriptor.
         self.context.rendering_stats().stencil_clears += 1;
     }
 
@@ -263,7 +280,7 @@ impl<'a> PaintParameters<'a> {
             self.clear_stencil();
         }
 
-        // MLN_RENDER_BACKEND_WEBGPU
+        // MLN_RENDER_BACKEND_METAL and MLN_RENDER_BACKEND_WEBGPU, the same.
         let mut tile_ubos: Vec<ClipUBO> = Vec::new();
         for tile_id in tile_ids {
             let stencil_id = self.next_stencil_id;

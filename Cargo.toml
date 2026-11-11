@@ -53,6 +53,7 @@ mln_image = { package = "mln-rs-image", path = "crates/mln_image", version = "=0
 mln_map = { package = "mln-rs-map", path = "crates/mln_map", version = "=0.0.10" }
 mln_map_types = { package = "mln-rs-map-types", path = "crates/mln_map_types", version = "=0.0.10" }
 mln_math = { package = "mln-rs-math", path = "crates/mln_math", version = "=0.0.10" }
+mln_mtl = { package = "mln-rs-mtl", path = "crates/mln_mtl", version = "=0.0.10" }
 # Without its default feature, the in-process font-face shaper: the packages
 # that render turn it on (crates/mln_renderer/Cargo.toml).
 mln_renderer = { package = "mln-rs-renderer", path = "crates/mln_renderer", version = "=0.0.10", default-features = false }
@@ -164,6 +165,38 @@ objc2-foundation = { version = "0.3.2", default-features = false, features = [
     "NSURLResponse",
     "NSURLSession",
 ] }
+# Apple platforms: the Metal backend (crates/mln_mtl) and its CAMetalLayer.
+objc2-metal = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "MTLAllocation",
+    "MTLArgument",
+    "MTLBlitCommandEncoder",
+    "MTLBuffer",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLCommandQueue",
+    "MTLDepthStencil",
+    "MTLDevice",
+    "MTLDrawable",
+    "MTLLibrary",
+    "MTLPixelFormat",
+    "MTLRenderCommandEncoder",
+    "MTLRenderPass",
+    "MTLRenderPipeline",
+    "MTLResource",
+    "MTLSampler",
+    "MTLTexture",
+    "MTLTypes",
+    "MTLVertexDescriptor",
+] }
+objc2-core-foundation = { version = "0.3.2", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-quartz-core = { version = "0.3.2", default-features = false, features = [
+    "std",
+    "objc2-core-foundation",
+    "objc2-metal",
+    "CALayer",
+    "CAMetalLayer",
+] }
 # examples/web: the browser's API through wasm-bindgen (whose CLI must be
 # this exact version).
 js-sys = { version = "0.3.107" }
@@ -182,6 +215,8 @@ web-time = { version = "1.1.0" }
 # wasm32-unknown-unknown the browser's WebGPU (examples/web). Not its
 # default GLES backend, which nothing selects.
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "dx12", "metal", "vulkan", "webgpu"] }
+# examples/desktop: the CAMetalLayer of the window's view on macOS.
+raw-window-metal = { version = "1.1.0" }
 # examples/desktop's window and input. On Linux it loads the X11 and Wayland
 # libraries at run time (`wayland-dlopen`, x11-dl), so builds need no system
 # development packages.
@@ -263,6 +298,7 @@ mln_image.workspace = true
 mln_map.workspace = true
 mln_map_types.workspace = true
 mln_math.workspace = true
+mln_mtl.workspace = true
 mln_renderer = { workspace = true, features = ["font-face-shaper"] }
 mln_sprite.workspace = true
 # The ambient cache, offline regions and mbtiles:// sources, as in C++.

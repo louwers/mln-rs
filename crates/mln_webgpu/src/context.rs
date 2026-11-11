@@ -18,6 +18,7 @@ use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 
+use mln_gfx::backend::Type as BackendType;
 use mln_gfx::color_mode::ColorMode;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::depth_mode::DepthMode;
@@ -362,6 +363,10 @@ impl GfxContext for Context {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+
+    fn backend_type(&self) -> BackendType {
+        BackendType::WebGPU
     }
 
     fn begin_frame(&self) {

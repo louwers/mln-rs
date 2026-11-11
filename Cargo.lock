@@ -1522,6 +1522,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-nunicode",
  "mln-rs-pmtiles",
  "mln-rs-polylabel",
@@ -1564,6 +1565,7 @@ dependencies = [
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-map",
+ "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-render-test",
  "mln-rs-renderer",
@@ -1609,12 +1611,16 @@ dependencies = [
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-text",
  "mln-rs-util",
  "mln-rs-webgpu",
+ "objc2 0.6.5",
+ "objc2-quartz-core 0.3.2",
+ "raw-window-metal",
  "serde_json",
  "skrifa",
  "wgpu",
@@ -1743,6 +1749,7 @@ dependencies = [
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-renderer",
  "mln-rs-storage",
@@ -1810,6 +1817,21 @@ dependencies = [
 [[package]]
 name = "mln-rs-math"
 version = "0.0.10"
+
+[[package]]
+name = "mln-rs-mtl"
+version = "0.0.10"
+dependencies = [
+ "bytemuck",
+ "mln-rs-gfx",
+ "mln-rs-tile-id",
+ "mln-rs-util",
+ "objc2 0.6.5",
+ "objc2-core-foundation",
+ "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
+ "objc2-quartz-core 0.3.2",
+]
 
 [[package]]
 name = "mln-rs-nunicode"

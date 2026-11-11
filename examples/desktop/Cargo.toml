@@ -39,6 +39,13 @@ skrifa.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
+# The Metal backend, and the CAMetalLayer it presents to (metal_layer.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+mln_mtl.workspace = true
+objc2.workspace = true
+objc2-quartz-core.workspace = true
+raw-window-metal.workspace = true
+
 # Loads the OpenFreeMap Liberty style over HTTPS through the Map's file
 # sources (OnlineFileSource -> HTTPFileSource) and Style::loadURL, and parses
 # it. Needs network access, so it is ignored by default: `cargo test -p

@@ -26,6 +26,8 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Fullscreen, Window, WindowId};
 
 use crate::Args;
+#[cfg(target_os = "macos")]
+use crate::metal_layer::MetalLayer;
 use crate::settings::Settings;
 use crate::view::{self, Launch};
 
@@ -62,6 +64,10 @@ pub(crate) enum UserEvent {
     /// A surface for the window, from this instance, sent back on the
     /// channel. The window's thread makes it.
     MakeSurface(wgpu::Instance, mpsc::Sender<Result<wgpu::Surface<'static>, String>>),
+    /// A Metal layer in the window, sent back on the channel. The window's
+    /// thread makes it.
+    #[cfg(target_os = "macos")]
+    MakeLayer(mpsc::Sender<Result<MetalLayer, String>>),
     SetTitle(String),
     RequestSize(LogicalSize<f64>),
     /// The render thread has dropped the map and ended.
@@ -332,6 +338,10 @@ impl ApplicationHandler<UserEvent> for Host {
                     .create_surface(open.window.clone())
                     .map_err(|e| format!("Failed to create a surface for the window: {e}"));
                 let _ = reply.send(surface);
+            }
+            #[cfg(target_os = "macos")]
+            UserEvent::MakeLayer(reply) => {
+                let _ = reply.send(MetalLayer::new(&open.window));
             }
             UserEvent::SetTitle(title) => open.window.set_title(&title),
             UserEvent::RequestSize(size) => {

@@ -27,12 +27,12 @@ use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::Instant;
 
 use mln_actor::{RunLoop, Timer};
 use mln_gestures::{Button, GestureRecognizer, Input, Modifiers, PinchPhase, PointerKind, WheelDelta};
-use mln_gfx::{BackendScope, RendererBackend, ScopeType};
+use mln_gfx::{BackendScope, ScopeType};
 use mln_map::{
     AnimationOptions, BoundOptions, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map,
     MapDebugOptions, MapObserver, MapOptions, NorthOrientation, RenderFrameStatus, TileLodMode,
@@ -44,11 +44,11 @@ use mln_util::geo::{LatLng, ScreenCoordinate};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::tile_server_options::{DefaultStyle, TileServerOptions};
-use mln_webgpu::SurfaceBackend;
 use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
+use crate::backend::SurfaceBackend;
 use crate::frontend::Frontend;
 use crate::host::{Inbox, Message, UserEvent};
 use crate::settings::Settings;
@@ -154,34 +154,15 @@ pub(crate) fn run(launch: Launch) {
     let font_discovery = (!args.no_system_fonts).then(|| std::thread::spawn(system_fonts::fallback_font_faces));
 
     let framebuffer_size = Size::new(size.width, size.height);
-    let surface_proxy = proxy.clone();
-    let make_surface = move |instance: &wgpu::Instance| {
-        let (reply, surface) = mpsc::channel();
-        surface_proxy
-            .send_event(UserEvent::MakeSurface(instance.clone(), reply))
-            .map_err(|_| "The window closed before it had a surface".to_owned())?;
-        surface.recv().map_err(|_| "The window closed before it had a surface".to_owned())?
-    };
     // Vsync unless benchmarking.
-    let backend = match SurfaceBackend::new(make_surface, framebuffer_size, !args.benchmark) {
-        Ok(backend) => Rc::new(backend),
+    let backend = match SurfaceBackend::new(args.backend, &proxy, framebuffer_size, !args.benchmark) {
+        Ok(backend) => backend,
         Err(e) => {
             Log::error(Event::GraphicsBackend, &e);
             return;
         }
     };
-    let info = backend.get_adapter_info();
-    Log::info(
-        Event::Render,
-        format!(
-            "Rendering with {} ({:?}, driver {} {}), surface format {:?}",
-            info.name,
-            info.backend,
-            info.driver,
-            info.driver_info,
-            backend.get_swap_chain_format()
-        ),
-    );
+    Log::info(Event::Render, backend.describe());
     print!("{HELP}");
 
     if args.benchmark {
@@ -218,7 +199,7 @@ pub(crate) fn run(launch: Launch) {
 
     let shared =
         Rc::new(ViewShared { dirty: Cell::new(false), style_loaded: Cell::new(false), idle: Cell::new(false) });
-    let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
+    let renderer_backend = backend.renderer_backend();
     let renderer = Renderer::new(renderer_backend.clone(), pixel_ratio as f32, None);
     let frontend = Frontend::new(renderer, renderer_backend, shared.clone());
     let map_size = logical_size(size, pixel_ratio);
@@ -386,7 +367,7 @@ struct View {
     frame_interval: std::time::Duration,
     next_frame_at: Instant,
 
-    backend: Rc<SurfaceBackend>,
+    backend: SurfaceBackend,
     frontend: Frontend,
     map: Map,
     shared: Rc<ViewShared>,
@@ -742,7 +723,7 @@ impl View {
 
         // TODO(port): animateRouteCallback, updateAnimatedAnnotations.
         {
-            let backend: Rc<dyn RendererBackend> = self.backend.clone();
+            let backend = self.backend.renderer_backend();
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             self.frontend.render();
         }

@@ -11,10 +11,13 @@
 // options by hand): -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
 // -s/--style URL, -t/--apikey KEY, -c/--cache FILE, -x/--lon, -y/--lat,
 // -a/--alt, --fov, -z/--zoom, --bearing, -p/--pitch, -r/--roll,
-// -P/--maxPitch. TODO(port): --testDir, --backend, --actionJournalDir,
+// -P/--maxPitch, --backend. TODO(port): --testDir, --actionJournalDir,
 // -F/--showFeatures (rendered feature info). C++ declares `-b` twice
 // (benchmark and bearing) and `-F` twice (showFeatures and fov); this gives
 // the short forms to the flags and keeps --bearing/--fov long-only.
+//
+// --backend picks the renderer backend: metal (the default on macOS) or
+// webgpu (wgpu, the default elsewhere); C++ ignores it (backend.rs).
 //
 // Options of this app alone: --readback FILE.png (write the presented frame
 // once the map is idle, see view.rs), --quit-after SECONDS, --gesture-test
@@ -26,8 +29,11 @@
 // process), the plugin registration, settings load/save, the action
 // journal, resetting the database (`I`).
 
+mod backend;
 mod frontend;
 mod host;
+#[cfg(target_os = "macos")]
+mod metal_layer;
 mod settings;
 mod system_fonts;
 mod view;
@@ -56,6 +62,7 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -p[degrees], --pitch=[degrees]    Pitch
       -r[degrees], --roll=[degrees]     Roll
       -P[degrees], --maxPitch=[degrees] Max Pitch
+      --backend=[backend]               Rendering backend: metal (macOS) or webgpu
       --readback=[file.png]             Write the frame once the map is idle
       --quit-after=[seconds]            Close the window after this time
       --gesture-test                    Replay scripted input, log the camera, quit
@@ -84,6 +91,7 @@ pub(crate) struct Args {
     pub(crate) quit_after: Option<f64>,
     pub(crate) gesture_test: bool,
     pub(crate) no_system_fonts: bool,
+    pub(crate) backend: backend::Kind,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -134,6 +142,7 @@ fn parse_args() -> Result<Args, String> {
             "quit-after" => args.quit_after = Some(number(value(&name)?, &name)?),
             "gesture-test" => args.gesture_test = true,
             "no-system-fonts" => args.no_system_fonts = true,
+            "backend" => args.backend = backend::Kind::parse(&value(&name)?)?,
             _ => return Err(format!("Flag could not be matched: {name}")),
         }
     }

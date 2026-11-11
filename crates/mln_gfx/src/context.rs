@@ -15,6 +15,7 @@ use std::rc::Rc;
 
 use mln_util::size::Size;
 
+use crate::backend::Type as BackendType;
 use crate::color_mode::ColorMode;
 use crate::command_encoder::CommandEncoder;
 use crate::context_observer::ContextObserver;
@@ -62,6 +63,11 @@ pub trait Context: Any {
     fn get_observer(&self) -> Option<Rc<dyn ContextObserver>> {
         self.context_base().observer.borrow().clone()
     }
+
+    /// The backend this context is of. C++ builds one backend and asks
+    /// `gfx::Backend::GetType()`; the port can build both and asks the
+    /// context.
+    fn backend_type(&self) -> BackendType;
 
     fn begin_frame(&self);
     fn end_frame(&self);

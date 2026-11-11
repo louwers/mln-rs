@@ -22,12 +22,12 @@ use mln_gfx::polyline_generator::PolylineGeneratorOptions;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shaders::line_layer_ubo::{
-    LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
+    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, line_expression_mask,
 };
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_BLUR_VERTEX_ATTRIBUTE, ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO,
-    ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
-    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+    ID_LINE_EXPRESSION_UBO, ID_LINE_GAP_WIDTH_VERTEX_ATTRIBUTE, ID_LINE_OFFSET_VERTEX_ATTRIBUTE,
+    ID_LINE_OPACITY_VERTEX_ATTRIBUTE, ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
 };
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::{
@@ -377,9 +377,13 @@ impl LayerTweaker for PolylineLayerTweaker {
         // We would need to set up `idLineExpressionUBO` if the expression
         // mask isn't empty
         debug_assert!(self.props_ubo.expression_mask == line_expression_mask::NONE);
-        // C++ also stores a LineExpressionUBO of null GPU expressions; those
-        // are Metal-only and the WebGPU line shaders do not bind it (see
-        // mln_gfx::shaders::line_layer_ubo).
+        // No GPU expressions; only the Metal line shaders read it.
+        layer_group.mutable_uniform_buffers().create_or_update(
+            ID_LINE_EXPRESSION_UBO,
+            &[0; LINE_EXPRESSION_UBO_SIZE],
+            context,
+            false,
+        );
 
         let mut i: u32 = 0;
         let mut drawable_ubo_vector = vec![LineDrawableUnionUBO::default(); layer_group.get_drawable_count()];

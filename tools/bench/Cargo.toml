@@ -43,5 +43,10 @@ serde.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
 
+# The Metal backend, which MLN_RENDER_BACKEND=metal picks in the headless
+# frontend (scene.rs describes and waits for it).
+[target.'cfg(target_vendor = "apple")'.dependencies]
+mln_mtl.workspace = true
+
 [lints]
 workspace = true

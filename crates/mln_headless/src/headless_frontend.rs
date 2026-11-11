@@ -4,6 +4,10 @@
 // `HeadlessFrontend` is a handle: the state lives in an `Rc`, and `Clone`
 // shares it. The Map keeps a clone as its `RendererFrontend` (C++: a
 // reference), so `frontend.render(&mut map)` works while the map holds it.
+//
+// C++ renders with the one backend it was built with. The port renders with
+// WebGPU, or with Metal on Apple platforms when the environment variable
+// MLN_RENDER_BACKEND is `metal`.
 
 use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
@@ -17,8 +21,9 @@ use mln_map::{CameraOptions, Map, TransformState};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_text::GlyphCache;
 use mln_util::image::PremultipliedImage;
+#[cfg(target_vendor = "apple")]
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use mln_webgpu::HeadlessBackend;
 
 /// `HeadlessFrontend::RenderResult`.
 pub struct RenderResult {
@@ -30,7 +35,7 @@ struct Shared {
     size: Cell<Size>,
     pixel_ratio: f32,
     frame_time: Cell<f64>,
-    backend: Rc<HeadlessBackend>,
+    backend: Rc<dyn GfxHeadlessBackend>,
     async_invalidate: RefCell<Option<AsyncTask>>,
     invalidate_on_update: bool,
     renderer: RefCell<Option<Renderer>>,
@@ -40,6 +45,27 @@ struct Shared {
 #[derive(Clone)]
 pub struct HeadlessFrontend {
     shared: Rc<Shared>,
+}
+
+/// The headless backend MLN_RENDER_BACKEND asks for (`gfx::Backend::Create`),
+/// as the gfx headless backend and as the renderer's backend.
+fn create_backend(
+    size: Size,
+    swap_behavior: SwapBehaviour,
+    context_mode: ContextMode,
+) -> (Rc<dyn GfxHeadlessBackend>, Rc<dyn RendererBackend>) {
+    #[cfg(target_vendor = "apple")]
+    if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("metal")) {
+        match mln_mtl::HeadlessBackend::new(size, swap_behavior, context_mode) {
+            Ok(backend) => {
+                let backend = Rc::new(backend);
+                return (backend.clone(), backend);
+            }
+            Err(e) => Log::error(Event::Render, format!("{e}; rendering with WebGPU instead")),
+        }
+    }
+    let backend = Rc::new(mln_webgpu::HeadlessBackend::new(size, swap_behavior, context_mode));
+    (backend.clone(), backend)
 }
 
 /// `{static_cast<uint32_t>(size.width * pixelRatio), static_cast<uint32_t>(size.height * pixelRatio)}`.
@@ -81,8 +107,7 @@ impl HeadlessFrontend {
         invalidate_on_update: bool,
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
-        let backend = Rc::new(HeadlessBackend::new(physical_size(size, pixel_ratio), swap_behavior, context_mode));
-        let renderer_backend: Rc<dyn RendererBackend> = backend.clone();
+        let (backend, renderer_backend) = create_backend(physical_size(size, pixel_ratio), swap_behavior, context_mode);
         let shared = Rc::new(Shared {
             size: Cell::new(size),
             pixel_ratio,
