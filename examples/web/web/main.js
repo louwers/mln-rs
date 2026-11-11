@@ -1,7 +1,7 @@
 // The page: it runs no wasm itself. It compiles the module, gives its canvas
 // to the map's Web Worker (map-worker.js) as an OffscreenCanvas, and starts
-// the tile workers' Web Workers (worker.js), each connected to the map's by
-// a MessageChannel, so that their requests and replies never pass through
+// the tile workers' Web Workers (worker.js) while the module compiles, each
+// connected to the map's by a MessageChannel, so that their requests and replies never pass through
 // this thread. Each Web Worker instantiates the same module with its own
 // memory, so nothing needs SharedArrayBuffer or COOP/COEP headers.
 //
@@ -49,17 +49,21 @@ canvas.height = Math.round(canvas.clientHeight * ratio);
 
 const localFamily = params.get('localIdeographFontFamily') ?? 'sans-serif';
 
-const module = await WebAssembly.compileStreaming(fetch('./pkg/mln_web_bg.wasm'));
+const compiling = WebAssembly.compileStreaming(fetch('./pkg/mln_web_bg.wasm'));
 
+// The Web Workers load their scripts while the module downloads and
+// compiles, and get it once it has.
 const count = number('workers', Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 2) - 1)));
-const ports = Array.from({ length: count }, () => {
+const tileWorkers = Array.from({ length: count }, () => new Worker('./worker.js', { type: 'module' }));
+const map = new Worker('./map-worker.js', { type: 'module' });
+
+const module = await compiling;
+const ports = tileWorkers.map((worker) => {
   const channel = new MessageChannel();
-  const worker = new Worker('./worker.js', { type: 'module' });
   worker.postMessage({ module, port: channel.port2 }, [channel.port2]);
   return channel.port1;
 });
 
-const map = new Worker('./map-worker.js', { type: 'module' });
 const offscreen = canvas.transferControlToOffscreen();
 map.postMessage({
   module,
