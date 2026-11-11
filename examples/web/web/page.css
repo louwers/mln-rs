@@ -359,10 +359,15 @@ a {
 /* The comparison (compare.js): GL JS's map over the canvas, right of the
    divider at --split. */
 
-.gl-map {
+.gl-layer {
   position: fixed;
   inset: 0;
   clip-path: inset(0 0 0 var(--split, 50%));
+}
+
+.gl-map {
+  width: 100%;
+  height: 100%;
 }
 
 .divider {

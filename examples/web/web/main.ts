@@ -496,6 +496,7 @@ async function setComparing(on: boolean) {
       style,
       camera: latestCamera,
       follow: (next) => toMap({ type: 'follow', camera: next }),
+      stop: () => toMap({ type: 'stop' }),
     });
     // Closed, or the style changed, while GL JS loaded.
     if (!comparing) {

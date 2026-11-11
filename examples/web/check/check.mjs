@@ -6,8 +6,10 @@
 // its Web Workers (the map's or a tile worker's) or the native runner reports
 // an error, or when a view's tiles got no worker replies. It also makes the
 // map's wasm instance and a tile worker's panic (the page's `panic`), and
-// fails unless the page stops and shows the panic. CI runs it (the `web`
-// job); see ../README.md.
+// fails unless the page stops and shows the panic, and opens a comparison
+// with GL JS (the page's `compare`), and fails unless GL JS's map covers
+// the page's and takes the input right of the divider. CI runs it (the
+// `web` job); see ../README.md.
 //
 //   node examples/web/check/check.mjs [options]
 //
@@ -190,7 +192,14 @@ if (views.length === 0) throw new Error(`no view matches ${options.filter}`);
 // The page as Vite builds it, as it deploys.
 const root = path.join(here, '../dist');
 if (!existsSync(path.join(root, 'index.html'))) throw new Error('no dist: run `just web` first');
-const types = { '.html': 'text/html', '.js': 'text/javascript', '.wasm': 'application/wasm', '.json': 'application/json' };
+const types = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.wasm': 'application/wasm',
+  '.json': 'application/json',
+};
 
 // Every URL the page loads is on this server: `/fixtures/<scheme>/<rest>`
 // serves the cache's `<scheme>://<rest>`.
@@ -554,6 +563,9 @@ try {
     console.log(`a panic in ${instance}: ${failure ?? 'the page stopped and showed it'}`);
     if (failure) failures.push(`a panic in ${instance}: ${failure}`);
   }
+  const comparing = await checkCompare(browser, views[0]);
+  console.log(`a comparison with GL JS: ${comparing ?? "GL JS's map covers the page's, right of the divider"}`);
+  if (comparing) failures.push(`a comparison with GL JS: ${comparing}`);
 } finally {
   await browser.close();
   server.close();
@@ -562,6 +574,47 @@ try {
 if (failures.length > 0) {
   console.log(`\nfailed:\n  ${failures.join('\n  ')}`);
   process.exitCode = 1;
+}
+
+/**
+ * Loads `view` in the whole window with a comparison with GL JS (the page's
+ * `compare`); returns how GL JS's map failed to cover the page's map, or to
+ * take the input right of the divider, if it did.
+ */
+async function checkCompare(browser, view) {
+  const url = new URL(pageUrl(view, workers));
+  for (const name of ['width', 'height', 'ratio']) url.searchParams.delete(name);
+  url.searchParams.set('compare', '');
+  const session = await open(browser, url.href);
+  try {
+    return await evaluate(
+      browser,
+      session,
+      `(async () => {
+        const deadline = performance.now() + 60000;
+        let gl;
+        while (!(gl = document.querySelector('.gl-map canvas'))) {
+          if (performance.now() > deadline) return "GL JS's map did not open";
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        const map = document.getElementById('map');
+        const box = (element) => {
+          const { left, top, width, height } = element.getBoundingClientRect();
+          return [left, top, width, height].map(Math.round).join(',');
+        };
+        if (box(gl) !== box(map)) return \`GL JS's map is at \${box(gl)}, the page's at \${box(map)}\`;
+        const { top, height, left, width } = map.getBoundingClientRect();
+        const at = (x) => document.elementFromPoint(left + width * x, top + height / 2);
+        if (!gl.parentElement.closest('.gl-layer')?.contains(at(0.75))) return "GL JS's map takes no input right of the divider";
+        if (at(0.25) !== map) return "the page's map takes no input left of the divider";
+        return null;
+      })()`,
+    );
+  } catch (error) {
+    return firstLines(error.message);
+  } finally {
+    await session.close();
+  }
 }
 
 /**

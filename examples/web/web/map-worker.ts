@@ -296,6 +296,11 @@ async function run(
       case 'follow':
         map.follow(...data.camera);
         break;
+      case 'stop': {
+        const [lat = 0, lon = 0, zoom = 0, bearing = 0, pitch = 0] = map.camera();
+        map.follow(lat, lon, zoom, bearing, pitch);
+        break;
+      }
       case 'input': {
         applyInput(map, data.input);
         const [x0, y0, x1, y1] = map.box_zoom() ?? [];

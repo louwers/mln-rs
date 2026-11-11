@@ -56,6 +56,8 @@ export type ToMap =
   | { type: 'resetNorth' }
   // Another map's camera, which this one follows.
   | { type: 'follow'; camera: Camera }
+  // Stop the camera's own motion: an ease, momentum, a wheel's eased zoom.
+  | { type: 'stop' }
   | { type: 'input'; input: Input };
 
 export interface Loaded {
