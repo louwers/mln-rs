@@ -18,9 +18,20 @@
 //   swapchain is made with the identity transform.
 // - `getAcquireTimeout` is not ported: acquiring an image waits.
 // - A swapchain's images can be copied from when the surface allows it, so
-//   a queued read needs no new swapchain.
+//   a queued read needs no new swapchain; when it doesn't, the read is
+//   dropped with a warning.
 // - A resource without a platform surface counts as an offscreen frame
 //   buffer in the rendering stats, as an offscreen texture does.
+// - A swapchain isn't made for an empty extent, which a minimized window
+//   can have: the resource then has no images until it is made again.
+// - A frame that acquired no image has no framebuffer, and `swap` submits
+//   it without copying or presenting.
+// - Port-only: `release_surface` destroys the swapchain and the surface
+//   while the resource lives, for a window that goes or gets another
+//   backend; the provider makes the surface again as it does a lost one.
+// - Port-only: `set_overlay` draws over each frame in a render pass of its
+//   own, after the frame's passes and before the frame is copied for
+//   reading and submitted (`SurfaceBackend::set_overlay`).
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -38,6 +49,7 @@ use mln_util::size::Size;
 
 use crate::context::{Context, RenderPassKey};
 use crate::renderer_backend::{BackendImpl, SurfaceProvider};
+use crate::surface_backend::{Overlay, OverlayTarget};
 use crate::texture2d::{ImageAllocation, Texture2D, Texture2DUsage, transition_image};
 
 pub trait RenderableResource {
@@ -97,9 +109,16 @@ struct SurfaceState {
     acquire_semaphores: Vec<vk::Semaphore>,
     present_semaphores: Vec<vk::Semaphore>,
     color_format: vk::Format,
+    /// Whether the images can be copied from (`TRANSFER_SRC`).
+    readable: bool,
 
     depth_allocation: Option<ImageAllocation>,
     depth_format: vk::Format,
+
+    /// The overlay's render pass, and its framebuffer for each image, made
+    /// with the first frame an overlay draws over.
+    overlay_render_pass: vk::RenderPass,
+    overlay_framebuffers: Vec<vk::Framebuffer>,
 
     surface_read: bool,
     read_texture: Option<Texture2D>,
@@ -116,6 +135,7 @@ pub struct SurfaceRenderableResource {
     /// backend's `swap`).
     read_every_frame: bool,
     state: RefCell<SurfaceState>,
+    overlay: RefCell<Option<Overlay>>,
 }
 
 impl SurfaceRenderableResource {
@@ -149,11 +169,15 @@ impl SurfaceRenderableResource {
                 acquire_semaphores: Vec::new(),
                 present_semaphores: Vec::new(),
                 color_format: vk::Format::UNDEFINED,
+                readable: false,
                 depth_allocation: None,
                 depth_format: vk::Format::UNDEFINED,
+                overlay_render_pass: vk::RenderPass::null(),
+                overlay_framebuffers: Vec::new(),
                 surface_read: false,
                 read_texture: None,
             }),
+            overlay: RefCell::new(None),
         });
         resource.init(context, size.width, size.height);
         if surface.is_none() {
@@ -210,6 +234,7 @@ impl SurfaceRenderableResource {
     fn init_color(&self, state: &mut SurfaceState, w: u32, h: u32) {
         state.color_format = vk::Format::R8G8B8A8_UNORM;
         state.extent = vk::Extent2D { width: w, height: h };
+        state.readable = true;
 
         let image_info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -275,7 +300,8 @@ impl SurfaceRenderableResource {
 
         // When reading from the swapchain enable source transfer usage.
         let mut image_usage = vk::ImageUsageFlags::COLOR_ATTACHMENT;
-        if capabilities.supported_usage_flags.contains(vk::ImageUsageFlags::TRANSFER_SRC) {
+        state.readable = capabilities.supported_usage_flags.contains(vk::ImageUsageFlags::TRANSFER_SRC);
+        if state.readable {
             image_usage |= vk::ImageUsageFlags::TRANSFER_SRC;
         }
 
@@ -289,6 +315,9 @@ impl SurfaceRenderableResource {
                 height: h.max(capabilities.min_image_extent.height).min(capabilities.max_image_extent.height),
             }
         };
+        if extent.width == 0 || extent.height == 0 {
+            return Err("The surface is empty".to_owned());
+        }
 
         let mut swapchain_image_count = capabilities.min_image_count + 1;
         // check surface limits (0 is unlimited)
@@ -464,11 +493,8 @@ impl SurfaceRenderableResource {
         state.render_pass = context.get_render_pass(RenderPassKey {
             color_format: state.color_format,
             depth_format: Some(state.depth_format),
-            color_final_layout: if has_surface {
-                vk::ImageLayout::PRESENT_SRC_KHR
-            } else {
-                vk::ImageLayout::TRANSFER_SRC_OPTIMAL
-            },
+            color_final_layout: Self::color_final_layout(has_surface),
+            color_load: false,
         });
 
         // create swapchain framebuffers
@@ -490,13 +516,19 @@ impl SurfaceRenderableResource {
         true
     }
 
+    /// The layout the frame's passes leave an image in: ready to be
+    /// presented, or to be copied for reading.
+    fn color_final_layout(has_surface: bool) -> vk::ImageLayout {
+        if has_surface { vk::ImageLayout::PRESENT_SRC_KHR } else { vk::ImageLayout::TRANSFER_SRC_OPTIMAL }
+    }
+
     /// Destroys what `init` made, but the swapchain and the surface.
     fn destroy_images(&self, state: &mut SurfaceState) {
         let device = self.backend.get_device();
         // SAFETY: the device is idle, and these objects are this
         // resource's.
         unsafe {
-            for framebuffer in state.swapchain_framebuffers.drain(..) {
+            for framebuffer in state.swapchain_framebuffers.drain(..).chain(state.overlay_framebuffers.drain(..)) {
                 device.destroy_framebuffer(framebuffer, None);
             }
             for view in state.swapchain_image_views.drain(..) {
@@ -510,6 +542,39 @@ impl SurfaceRenderableResource {
         state.depth_allocation = None;
         state.color_allocations.clear();
         state.read_texture = None;
+    }
+
+    /// Destroys the swapchain and the surface, whose images are gone
+    /// (`destroy_images`).
+    fn destroy_surface(&self, state: &mut SurfaceState) {
+        // SAFETY: the device is idle, and the swapchain and the surface are
+        // this resource's.
+        unsafe {
+            if state.swapchain != vk::SwapchainKHR::null()
+                && let Some(loader) = self.backend.get_swapchain_loader()
+            {
+                loader.destroy_swapchain(state.swapchain, None);
+            }
+            if state.surface != vk::SurfaceKHR::null() {
+                self.backend.get_surface_loader().destroy_surface(state.surface, None);
+            }
+        }
+        state.swapchain = vk::SwapchainKHR::null();
+        state.surface = vk::SurfaceKHR::null();
+    }
+
+    /// Port-only: destroys the swapchain and the surface, once the frames
+    /// in flight are done. The resource has no images until
+    /// `recreate_swapchain(true)` makes the surface again.
+    pub fn release_surface(&self) {
+        let mut state = self.state.borrow_mut();
+        let state = &mut *state;
+        if state.surface == vk::SurfaceKHR::null() {
+            return;
+        }
+        self.backend.wait_idle("surface release");
+        self.destroy_images(state);
+        self.destroy_surface(state);
     }
 
     /// `recreateSwapchain(recreateSurface)`: makes the swapchain, and the
@@ -530,20 +595,7 @@ impl SurfaceRenderableResource {
             self.destroy_images(state);
 
             if recreate_surface {
-                // SAFETY: the device is idle, and the swapchain and the
-                // surface are this resource's.
-                unsafe {
-                    if state.swapchain != vk::SwapchainKHR::null()
-                        && let Some(loader) = self.backend.get_swapchain_loader()
-                    {
-                        loader.destroy_swapchain(state.swapchain, None);
-                    }
-                    if state.surface != vk::SurfaceKHR::null() {
-                        self.backend.get_surface_loader().destroy_surface(state.surface, None);
-                    }
-                }
-                state.swapchain = vk::SwapchainKHR::null();
-                state.surface = vk::SurfaceKHR::null();
+                self.destroy_surface(state);
                 let Some(provider) = &self.provider else {
                     return false;
                 };
@@ -566,10 +618,94 @@ impl SurfaceRenderableResource {
         self.state.borrow_mut().extent = vk::Extent2D { width: size.width, height: size.height };
     }
 
-    /// `queueSurfaceRead()`: has the frame being recorded copied for
-    /// `read_image`.
+    /// `queueSurfaceRead()`: has the frame being recorded, or else the next
+    /// one, copied for `read_image`.
     pub fn queue_surface_read(&self) {
         self.state.borrow_mut().surface_read = true;
+    }
+
+    /// Whether a frame is still to be copied for `read_image`.
+    pub fn is_surface_read_queued(&self) -> bool {
+        self.state.borrow().surface_read
+    }
+
+    /// Port-only: draws `overlay` over each frame from now on, or stops
+    /// with `None` (`SurfaceBackend::set_overlay`).
+    pub fn set_overlay(&self, overlay: Option<Overlay>) {
+        *self.overlay.borrow_mut() = overlay;
+    }
+
+    /// The overlay's render pass and its framebuffer for the acquired
+    /// image, with the image's extent. The pass has the color attachment
+    /// only, and draws over what the frame's passes left in it.
+    fn overlay_target(&self, context: &Context) -> Option<(vk::RenderPass, vk::Framebuffer, vk::Extent2D)> {
+        let mut state = self.state.borrow_mut();
+        let state = &mut *state;
+        if state.overlay_framebuffers.is_empty() {
+            let render_pass = context.get_render_pass(RenderPassKey {
+                color_format: state.color_format,
+                depth_format: None,
+                color_final_layout: Self::color_final_layout(state.surface != vk::SurfaceKHR::null()),
+                color_load: true,
+            });
+            if render_pass == vk::RenderPass::null() {
+                return None;
+            }
+            state.overlay_render_pass = render_pass;
+            for image_view in &state.swapchain_image_views {
+                let create_info = vk::FramebufferCreateInfo::default()
+                    .render_pass(render_pass)
+                    .attachments(std::slice::from_ref(image_view))
+                    .width(state.extent.width)
+                    .height(state.extent.height)
+                    .layers(1);
+                // SAFETY: the view is live and of the render pass's format.
+                match unsafe { self.backend.get_device().create_framebuffer(&create_info, None) } {
+                    Ok(framebuffer) => state.overlay_framebuffers.push(framebuffer),
+                    Err(_) => {
+                        Log::error(Event::Render, "Vulkan framebuffer creation failed");
+                        break;
+                    }
+                }
+            }
+        }
+        let framebuffer = state.overlay_framebuffers.get(state.acquired_image_index as usize).copied()?;
+        Some((state.overlay_render_pass, framebuffer, state.extent))
+    }
+
+    /// Has the overlay draw over the acquired image, at the end of the
+    /// frame.
+    fn draw_overlay(&self, context: &Context) {
+        let mut overlay = self.overlay.borrow_mut();
+        let Some(overlay) = overlay.as_mut() else {
+            return;
+        };
+        let Some((render_pass, framebuffer, extent)) = self.overlay_target(context) else {
+            return;
+        };
+        let device = self.backend.get_device();
+        let command_buffer = context.get_command_buffer();
+        let begin_info = vk::RenderPassBeginInfo::default()
+            .render_pass(render_pass)
+            .framebuffer(framebuffer)
+            .render_area(vk::Rect2D { offset: vk::Offset2D::default(), extent });
+        self.backend.begin_debug_label(command_buffer, "overlay", [0.0; 4]);
+        // SAFETY: the frame's command buffer is recording outside a render
+        // pass, and the framebuffer is the render pass's, over the acquired
+        // image in the layout the frame's passes left it in.
+        unsafe { device.cmd_begin_render_pass(command_buffer, &begin_info, vk::SubpassContents::INLINE) };
+        context.set_render_pass_active(true);
+        overlay(&OverlayTarget {
+            context,
+            device,
+            command_buffer,
+            render_pass,
+            size: Size::new(extent.width, extent.height),
+        });
+        // SAFETY: the command buffer is in the overlay's render pass.
+        unsafe { device.cmd_end_render_pass(command_buffer) };
+        context.set_render_pass_active(false);
+        self.backend.end_debug_label(command_buffer);
     }
 
     /// Whether the surface's images can be blitted into the read texture,
@@ -669,8 +805,8 @@ impl SurfaceRenderableResource {
 impl RenderableResource for SurfaceRenderableResource {
     fn bind(&self) {}
 
-    /// `swap()`: submits the frame, copying it for `read_image` first if a
-    /// read is queued.
+    /// `swap()`: submits the frame, after the overlay has drawn over it and
+    /// it was copied for `read_image` if a read is queued.
     fn swap(&self) {
         let Some(context) = self.context.upgrade() else {
             return;
@@ -678,13 +814,23 @@ impl RenderableResource for SurfaceRenderableResource {
         if self.read_every_frame {
             self.queue_surface_read();
         }
-        let surface_read = self.state.borrow().surface_read;
-        if surface_read {
+        // A read stays queued over a frame without an image.
+        let has_image = context.frame_has_image();
+        if has_image {
+            self.draw_overlay(&context);
+        }
+        let surface_read = has_image && self.state.borrow().surface_read;
+        let readable = self.state.borrow().readable;
+        if surface_read && readable {
             self.copy_surface_to_read_texture(&context);
         }
         context.submit_frame();
         if surface_read {
-            context.wait_frame();
+            if readable {
+                context.wait_frame();
+            } else {
+                Log::warning(Event::Render, "The surface's images can't be read");
+            }
             self.state.borrow_mut().surface_read = false;
         }
     }
@@ -697,7 +843,12 @@ impl RenderableResource for SurfaceRenderableResource {
         self.state.borrow().render_pass
     }
 
+    /// The framebuffer of the acquired image, null in a frame that acquired
+    /// none.
     fn get_framebuffer(&self) -> vk::Framebuffer {
+        if !self.context.upgrade().is_some_and(|context| context.frame_has_image()) {
+            return vk::Framebuffer::null();
+        }
         let state = self.state.borrow();
         state.swapchain_framebuffers.get(state.acquired_image_index as usize).copied().unwrap_or_default()
     }
@@ -720,17 +871,6 @@ impl Drop for SurfaceRenderableResource {
         }
         // specific order
         self.destroy_images(state);
-        // SAFETY: the device is idle, and the swapchain and the surface are
-        // this resource's.
-        unsafe {
-            if state.swapchain != vk::SwapchainKHR::null()
-                && let Some(loader) = self.backend.get_swapchain_loader()
-            {
-                loader.destroy_swapchain(state.swapchain, None);
-            }
-            if state.surface != vk::SurfaceKHR::null() {
-                self.backend.get_surface_loader().destroy_surface(state.surface, None);
-            }
-        }
+        self.destroy_surface(state);
     }
 }

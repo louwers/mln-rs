@@ -1,6 +1,7 @@
 //! Ports the C++ Vulkan backend (`src/mln/vulkan`, `include/mln/vulkan`,
-//! `include/mln/shaders/vulkan`, `src/mln/shaders/vulkan`, and the headless
-//! backend from platform/default) onto the `ash` bindings.
+//! `include/mln/shaders/vulkan`, `src/mln/shaders/vulkan`, the headless
+//! backend from platform/default and the window backend from platform/glfw)
+//! onto the `ash` bindings.
 //!
 //! The C++ backend calls Vulkan through vulkan-hpp, allocates with
 //! VulkanMemoryAllocator and compiles its GLSL with glslang; this port makes
@@ -32,6 +33,7 @@ pub mod render_pass;
 pub mod renderable_resource;
 pub mod renderer_backend;
 pub mod shaders;
+pub mod surface_backend;
 pub mod texture2d;
 pub mod tile_layer_group;
 pub mod uniform_buffer;
@@ -41,3 +43,4 @@ pub mod vertex_buffer_resource;
 pub use context::Context;
 pub use headless_backend::HeadlessBackend;
 pub use renderer_backend::RendererBackend;
+pub use surface_backend::SurfaceBackend;

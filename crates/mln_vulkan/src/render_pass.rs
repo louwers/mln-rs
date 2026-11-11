@@ -29,6 +29,9 @@ pub struct RenderPass {
 }
 
 impl RenderPass {
+    /// Begins a pass over `descriptor`'s renderable. Without a framebuffer
+    /// to draw into, as in a frame that acquired no image, the pass isn't
+    /// encoding (`is_encoding`) and what is drawn in it is skipped.
     pub fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
         let context = command_encoder.get_context().clone();
         let command_buffer = command_encoder.get_command_buffer();
@@ -77,7 +80,6 @@ impl RenderPass {
                 pass.context.set_render_pass_active(true);
             }
         }
-        debug_assert!(pass.encoding);
 
         pass.context.perform_cleanup();
         pass

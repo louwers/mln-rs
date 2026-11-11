@@ -23,7 +23,12 @@
 //   the renderer's `rawGlobeTileMesh` (see
 //   `gfx::Context::render_globe_tile_clipping_masks`).
 // - Errors C++ throws (a failed wait for a frame, a surface that stays out
-//   of date) are logged.
+//   of date) are logged. A frame that acquires no image, for a swapchain or
+//   a surface that couldn't be made again, is recorded without a
+//   framebuffer for the default renderable, and submitted without
+//   presenting.
+// - Port-only: `request_surface_recreation` has the platform surface made
+//   again without it being lost (`SurfaceBackend::restore_surface`).
 //
 // TODO(port): `createDynamicTexture`, `createRenderTarget`,
 // `createRenderbufferResource` and the render jobs of the backend thread
@@ -125,6 +130,10 @@ pub struct RenderPassKey {
     pub depth_format: Option<vk::Format>,
     /// The layout the pass leaves the color attachment in.
     pub color_final_layout: vk::ImageLayout,
+    /// Whether the pass draws over what the color attachment holds, which
+    /// is in `color_final_layout` when the pass begins, instead of clearing
+    /// it.
+    pub color_load: bool,
 }
 
 #[derive(Default)]
@@ -176,6 +185,10 @@ pub struct Context {
     frame_recording: Cell<bool>,
     /// Whether the frame's command buffer is inside a render pass.
     render_pass_active: Cell<bool>,
+    /// Whether the frame has an image of the default renderable to draw
+    /// into: without a platform surface always, with one when it was
+    /// acquired from the swapchain.
+    frame_image_acquired: Cell<bool>,
 
     surface: RefCell<Weak<SurfaceRenderableResource>>,
     surface_update_requested: Cell<bool>,
@@ -287,6 +300,7 @@ impl Context {
             frame_serial: Cell::new(0),
             frame_recording: Cell::new(false),
             render_pass_active: Cell::new(false),
+            frame_image_acquired: Cell::new(false),
             surface: RefCell::new(Weak::new()),
             surface_update_requested: Cell::new(false),
             surface_lost: Cell::new(false),
@@ -456,7 +470,9 @@ impl Context {
     }
 
     fn run_deletion_queues(&self) {
-        for index in 0..self.frame_resources.borrow().len() {
+        // Not borrowed while the tasks run: they reach the frames.
+        let frame_count = self.frame_resources.borrow().len();
+        for index in 0..frame_count {
             self.run_deletion_queue(index);
         }
     }
@@ -517,6 +533,12 @@ impl Context {
         self.render_pass_active.set(active);
     }
 
+    /// Whether a frame is being recorded that has an image of the default
+    /// renderable to draw into.
+    pub(crate) fn frame_has_image(&self) -> bool {
+        self.frame_recording.get() && self.frame_image_acquired.get()
+    }
+
     /// `requestSurfaceUpdate(useDelay)`: has the swapchain rebuilt, a few
     /// frames from now or before the next one.
     pub fn request_surface_update(&self, use_delay: bool) {
@@ -528,6 +550,13 @@ impl Context {
         }
         self.surface_update_requested.set(true);
         self.surface_update_latency.set(if use_delay { self.backend.get_max_frames() as i32 * 3 } else { 0 });
+    }
+
+    /// Has the platform surface made again, as a lost one is, and its
+    /// swapchain with it, before the next frame.
+    pub fn request_surface_recreation(&self) {
+        self.surface_lost.set(true);
+        self.request_surface_update(false);
     }
 
     /// `updateSurface()`
@@ -578,7 +607,13 @@ impl Context {
         else {
             return;
         };
-        let surface = self.surface.borrow().upgrade().filter(|surface| surface.has_platform_surface());
+        // A frame that acquired no image has nothing to present, and no
+        // semaphore to wait for.
+        let surface = self
+            .surface
+            .borrow()
+            .upgrade()
+            .filter(|surface| surface.has_platform_surface() && self.frame_image_acquired.get());
 
         // Submit frame commands.
         let command_buffers = [command_buffer];
@@ -795,7 +830,8 @@ impl Context {
     /// The render pass over attachments of `key`'s formats, null if the
     /// device can't make it.
     ///
-    /// Every pass clears its attachments. A pass with depth and stencil
+    /// A pass clears its attachments, unless it loads the color
+    /// (`RenderPassKey::color_load`). A pass with depth and stencil
     /// (`SurfaceRenderableResource::initRenderPass`) keeps the color only; a
     /// pass without (`OffscreenTextureResource::createRenderPass`) leaves
     /// the color attachment ready to be sampled.
@@ -806,11 +842,11 @@ impl Context {
         let color_attachment = vk::AttachmentDescription::default()
             .format(key.color_format)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .load_op(vk::AttachmentLoadOp::CLEAR)
+            .load_op(if key.color_load { vk::AttachmentLoadOp::LOAD } else { vk::AttachmentLoadOp::CLEAR })
             .store_op(vk::AttachmentStoreOp::STORE)
             .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE)
             .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
-            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .initial_layout(if key.color_load { key.color_final_layout } else { vk::ImageLayout::UNDEFINED })
             .final_layout(key.color_final_layout);
         let color_attachment_ref =
             [vk::AttachmentReference::default().attachment(0).layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL)];
@@ -854,6 +890,17 @@ impl Context {
                     .src_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
                     .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE)
                     .dependency_flags(vk::DependencyFlags::BY_REGION),
+            ];
+        } else if key.color_load {
+            // The pass before wrote the color, which this one blends over.
+            dependencies = vec![
+                vk::SubpassDependency::default()
+                    .src_subpass(vk::SUBPASS_EXTERNAL)
+                    .dst_subpass(0)
+                    .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                    .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                    .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                    .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_READ | vk::AccessFlags::COLOR_ATTACHMENT_WRITE),
             ];
         } else {
             dependencies = vec![
@@ -980,7 +1027,8 @@ impl Context {
         let Some(shader) = as_vulkan_shader(&shader_ptr) else {
             return false;
         };
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding())
+        else {
             return false;
         };
 
@@ -1072,7 +1120,8 @@ impl Context {
         let Some(shader) = as_vulkan_shader(&shader_ptr) else {
             return false;
         };
-        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>() else {
+        let Some(render_pass) = render_pass.as_any().downcast_ref::<RenderPass>().filter(|pass| pass.is_encoding())
+        else {
             return false;
         };
 
@@ -1242,10 +1291,11 @@ impl GfxContext for Context {
 
         let device = self.backend.get_device();
         let surface = self.surface.borrow().upgrade();
-        let platform_surface = surface.as_ref().is_some_and(|surface| surface.has_platform_surface());
+        // Asked again after each update, which makes a lost surface anew.
+        let platform_surface = || surface.as_ref().is_some_and(|surface| surface.has_platform_surface());
 
         // A lost surface may have been destroyed by a failed recreation.
-        if (platform_surface || self.surface_lost.get()) && self.surface_update_requested.get() {
+        if (platform_surface() || self.surface_lost.get()) && self.surface_update_requested.get() {
             self.surface_update_latency.set(self.surface_update_latency.get() - 1);
             if self.surface_update_latency.get() <= 0 {
                 self.update_surface();
@@ -1261,10 +1311,14 @@ impl GfxContext for Context {
 
             let frame_index = self.frame_resource_index.get();
             match &surface {
-                Some(surface) if platform_surface => {
+                Some(surface) if platform_surface() => {
                     let Some(loader) = self.backend.get_swapchain_loader() else {
                         break;
                     };
+                    // A swapchain that couldn't be rebuilt has no images.
+                    if surface.get_image_count() == 0 {
+                        break;
+                    }
                     // SAFETY: the swapchain and the semaphore are the
                     // surface's, and the semaphore isn't waited on.
                     let result = unsafe {
@@ -1293,9 +1347,14 @@ impl GfxContext for Context {
                             self.update_surface();
                             continue;
                         }
-                        Err(error) => Log::error(Event::Render, format!("acquireNextImageKHR result: {error}")),
+                        Err(error) => {
+                            Log::error(Event::Render, format!("acquireNextImageKHR result: {error}"));
+                            break;
+                        }
                     }
                 }
+                // The lost surface couldn't be made again.
+                Some(_) if self.surface_lost.get() => break,
                 Some(surface) => surface.set_acquired_image_index(u32::from(frame_index)),
                 None => {}
             }
@@ -1306,6 +1365,7 @@ impl GfxContext for Context {
         if !acquired {
             Log::error(Event::Render, "acquireNextImageKHR failed");
         }
+        self.frame_image_acquired.set(acquired);
 
         let command_buffer = self.get_command_buffer();
         // SAFETY: the frame that used the command buffer is done.

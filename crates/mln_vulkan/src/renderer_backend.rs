@@ -28,6 +28,7 @@
 
 use std::cell::RefCell;
 use std::ffi::{CStr, c_char, c_void};
+use std::io::Write as _;
 use std::mem::ManuallyDrop;
 use std::rc::Rc;
 
@@ -130,7 +131,10 @@ unsafe extern "system" fn debug_utils_callback(
     };
     let is_error = severity.contains(vk::DebugUtilsMessageSeverityFlagsEXT::ERROR);
     if is_error && !user_data.is_null() {
-        eprintln!("Vulkan validation error: {message}\n{}", std::backtrace::Backtrace::force_capture());
+        // Written to the stream itself: the test harness captures what
+        // `eprintln!` prints, and drops it when the process aborts.
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let _ = writeln!(std::io::stderr(), "Vulkan validation error: {message}\n{backtrace}");
         std::process::abort();
     }
     let severity = if is_error {
