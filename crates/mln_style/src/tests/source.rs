@@ -6,6 +6,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
+use mln_conversion::Convertible;
 use mln_storage::response::{Error as ResponseError, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{Kind, Response};
@@ -16,6 +17,9 @@ use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
+use super::util::parse_json;
+use crate::conversion::Error;
+use crate::conversion::source::convert_source;
 use crate::conversion::tileset::SourceOptions;
 use crate::observer::SourceObserver;
 use crate::source::Source;
@@ -182,6 +186,47 @@ fn geojson_source_synchronous_update_override_replaces_the_option() {
     assert!(!asynchronous.is_update_synchronous());
     asynchronous.set_override_synchronous_update(true);
     assert!(asynchronous.is_update_synchronous());
+}
+
+// gtest: Source.GeoJSONSourceKeepsTheStyleAttribution
+#[test]
+fn geojson_source_keeps_the_style_attribution() {
+    let run_loop = RunLoop::new();
+    let file_source = StubFileSource::new(ResponseType::Asynchronous);
+
+    let mut error = Error::default();
+    let value = parse_json(
+        r#"{"type": "geojson", "attribution": "Fixture data", "data": {"type": "FeatureCollection", "features": []}}"#,
+    );
+    let converted = convert_source(&Convertible::from(&value), &mut error, "source");
+    let converted = converted.unwrap_or_else(|| panic!("{}", error.message));
+    let source = converted.as_any().downcast_ref::<GeoJSONSource>().expect("a GeoJSONSource");
+    assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
+
+    let observer = Rc::new(StubStyleObserver::default());
+    source.set_observer(Some(observer.clone()));
+    source.set_geojson(&geojson::parse(r#"{"type": "Point", "coordinates": [1.1, 1.1]}"#).unwrap()).unwrap();
+    assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
+
+    file_source.set_response(Kind::Source, |_| {
+        let mut response = Response::new();
+        response.data = Some(Arc::new(br#"{"type": "Point", "coordinates": [2.2, 2.2]}"#.to_vec()));
+        Some(response)
+    });
+    let loaded = Rc::new(RefCell::new(false));
+    {
+        let loaded = loaded.clone();
+        let handle = run_loop.handle();
+        *observer.source_loaded.borrow_mut() = Some(Box::new(move |source| {
+            assert_eq!(Some("Fixture data".to_owned()), source.get_attribution());
+            *loaded.borrow_mut() = true;
+            handle.stop();
+        }));
+    }
+    source.set_url("url");
+    source.load_description(&file_source);
+    run_loop.run();
+    assert!(*loaded.borrow());
 }
 
 fn as_vector(source: &dyn Source) -> &VectorSource {

@@ -54,6 +54,10 @@ pub struct GeoJSONOptions {
 
     // Update options
     pub synchronous_update: bool,
+
+    /// The style's attribution for the source, reported by
+    /// `Source::get_attribution`.
+    pub attribution: Option<String>,
 }
 
 impl Default for GeoJSONOptions {
@@ -71,6 +75,7 @@ impl Default for GeoJSONOptions {
             cluster_min_points: 2,
             cluster_properties: ClusterProperties::new(),
             synchronous_update: false,
+            attribution: None,
         }
     }
 }
@@ -90,6 +95,7 @@ impl std::fmt::Debug for GeoJSONOptions {
             .field("cluster_min_points", &self.cluster_min_points)
             .field("cluster_properties", &self.cluster_properties.keys().collect::<Vec<_>>())
             .field("synchronous_update", &self.synchronous_update)
+            .field("attribution", &self.attribution)
             .finish()
     }
 }

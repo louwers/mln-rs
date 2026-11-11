@@ -106,6 +106,14 @@ impl Converter for GeoJSONOptions {
             }
         }
 
+        if let Some(attribution_value) = value.object_member("attribution") {
+            let Some(attribution) = attribution_value.to_string() else {
+                error.message = "source attribution must be a string".to_owned();
+                return None;
+            };
+            options.attribution = Some(attribution);
+        }
+
         if let Some(cluster_properties) = value.object_member("clusterProperties") {
             if !cluster_properties.is_object() {
                 error.message = "GeoJSON source clusterProperties value must be an object".to_owned();

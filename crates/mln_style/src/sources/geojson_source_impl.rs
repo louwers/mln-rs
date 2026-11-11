@@ -268,7 +268,7 @@ impl source_impl::Impl for Impl {
     }
 
     fn get_attribution(&self) -> Option<String> {
-        None
+        self.options.attribution.clone()
     }
 
     fn is_update_synchronous(&self) -> bool {
