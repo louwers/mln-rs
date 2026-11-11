@@ -21,6 +21,7 @@ pub mod file_source;
 pub mod file_source_manager;
 pub mod file_source_request;
 pub mod http_file_source;
+pub mod http_header_transform;
 pub mod http_timeout;
 mod json_document;
 pub mod local_file_request;

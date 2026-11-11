@@ -10,6 +10,10 @@
 //! rustls-platform-verifier; SChannel through native-tls on Windows), as curl
 //! does with the system's CA bundle. A proxy comes from the environment
 //! (`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, ...), as for curl.
+//!
+//! ureq follows redirects with every header it was given, so a request with
+//! the host's headers follows them here instead, and drops those headers
+//! once a redirect leaves their origin.
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, mpsc};
@@ -26,7 +30,7 @@ use ureq::unversioned::transport::{
     ConnectProxyConnector, ConnectionDetails, Connector, Either, TcpConnector, Transport as UreqTransport,
 };
 
-use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header};
+use crate::http_file_source::{HttpTransport, Transfer, TransferRequest, range_header, same_origin};
 use crate::resource::Resource;
 use crate::response::{Error, Reason};
 
@@ -185,7 +189,7 @@ fn worker(client: &Client, requests: &Mutex<mpsc::Receiver<TransferRequest>>) {
         if request.is_cancelled() {
             continue;
         }
-        let transfer = client.transfer(request.resource());
+        let transfer = client.transfer(request.resource(), request.headers());
         request.finish(transfer);
     }
 }
@@ -253,8 +257,56 @@ impl Client {
         Client { agent }
     }
 
-    fn transfer(&self, resource: &Resource) -> Result<Transfer, Box<Error>> {
-        let mut request = self.agent.get(&resource.url);
+    /// Fetches `resource` with the host's `headers`.
+    fn transfer(&self, resource: &Resource, headers: &[(String, String)]) -> Result<Transfer, Box<Error>> {
+        let mut url = resource.url.clone();
+        let mut headers = headers;
+        let mut redirects = 0;
+        loop {
+            let mut http_response = self.call(resource, &url, headers)?;
+            let status = http_response.status().as_u16();
+            if !headers.is_empty()
+                && matches!(status, 301 | 302 | 303 | 307 | 308)
+                && let Some(next) = http_response
+                    .headers()
+                    .get("location")
+                    .and_then(|location| location.to_str().ok())
+                    .and_then(|location| redirect_url(&url, location))
+            {
+                if redirects == self.agent.config().max_redirects() {
+                    return Err(error(ureq::Error::TooManyRedirects));
+                }
+                redirects += 1;
+                if !same_origin(&url, &next) {
+                    headers = &[];
+                }
+                url = next;
+                continue;
+            }
+            let response_headers = http_response
+                .headers()
+                .iter()
+                .filter_map(|(name, value)| Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned())))
+                .collect();
+            let status = i64::from(status);
+            let body = if status == 200 || status == 206 {
+                http_response.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(error)
+            } else {
+                Ok(Vec::new())
+            };
+            return Ok(Transfer { status, headers: response_headers, body });
+        }
+    }
+
+    /// One GET of `url` for `resource`, with the host's `headers`. ureq
+    /// follows the redirects of a request without them.
+    fn call(
+        &self,
+        resource: &Resource,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<ureq::http::Response<ureq::Body>, Box<Error>> {
+        let mut request = self.agent.get(url);
         if let Some(range) = range_header(resource) {
             request = request.header("Range", range);
         }
@@ -268,20 +320,96 @@ impl Client {
             request = request.header("If-Modified-Since", rfc1123(prior_modified));
         }
 
-        let mut http_response = request.call().map_err(error)?;
-        let headers = http_response
-            .headers()
-            .iter()
-            .filter_map(|(name, value)| Some((name.as_str().to_owned(), value.to_str().ok()?.to_owned())))
-            .collect();
-        let status = i64::from(http_response.status().as_u16());
-        let body = if status == 200 || status == 206 {
-            http_response.body_mut().with_config().limit(u64::MAX).read_to_vec().map_err(error)
+        for (name, value) in headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        if headers.is_empty() {
+            request.call().map_err(error)
         } else {
-            Ok(Vec::new())
-        };
-        Ok(Transfer { status, headers, body })
+            request.config().max_redirects(0).build().call().map_err(error)
+        }
     }
+}
+
+/// The URL a redirect from `current` to `location` goes to: `location`
+/// resolved against `current` (RFC 3986, section 5.2), or `None` when it
+/// isn't an `http` or `https` URL.
+fn redirect_url(current: &str, location: &str) -> Option<String> {
+    let has_http_scheme = |url: &str| {
+        url.get(..7).is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+            || url.get(..8).is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"))
+    };
+    if has_http_scheme(location) {
+        return Some(location.to_owned());
+    }
+    if has_url_scheme(location) || !has_http_scheme(current) {
+        return None;
+    }
+
+    let scheme_end = current.find("://")?;
+    let scheme = &current[..scheme_end];
+    if location.starts_with("//") {
+        return Some(format!("{scheme}:{location}"));
+    }
+
+    let authority_start = scheme_end + 3;
+    let origin_end =
+        current[authority_start..].find(['/', '?', '#']).map_or(current.len(), |index| authority_start + index);
+    let origin = &current[..origin_end];
+    let path_end = current.find(['?', '#']).unwrap_or(current.len()).max(origin_end);
+    if location.starts_with('/') {
+        let (path, suffix) = split_url_path_suffix(location);
+        return Some(format!("{origin}{}{suffix}", remove_dot_segments(path)));
+    }
+    if location.starts_with('?') {
+        return Some(format!("{}{location}", &current[..path_end]));
+    }
+    if location.starts_with('#') {
+        let fragment_start = current.find('#').unwrap_or(current.len());
+        return Some(format!("{}{location}", &current[..fragment_start]));
+    }
+
+    let current_path = &current[origin_end..path_end];
+    let directory = current_path.rfind('/').map_or("/", |index| &current_path[..=index]);
+    let (path, suffix) = split_url_path_suffix(location);
+    Some(format!("{origin}{}{suffix}", remove_dot_segments(&format!("{directory}{path}"))))
+}
+
+/// Whether `value` starts with a scheme (a `:` before any `/`, `?` or `#`).
+fn has_url_scheme(value: &str) -> bool {
+    value.find([':', '/', '?', '#']).is_some_and(|index| value.as_bytes()[index] == b':')
+}
+
+/// A URL reference's path, and its query and fragment.
+fn split_url_path_suffix(value: &str) -> (&str, &str) {
+    value.split_at(value.find(['?', '#']).unwrap_or(value.len()))
+}
+
+/// `path` without its `.` and `..` segments.
+fn remove_dot_segments(path: &str) -> String {
+    if !path.split('/').any(|segment| segment == "." || segment == "..") {
+        return path.to_owned();
+    }
+    let has_trailing_slash = path.ends_with('/') || path.ends_with("/.") || path.ends_with("/..");
+    let mut segments = Vec::new();
+    for segment in path.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            segment => segments.push(segment),
+        }
+    }
+    let mut normalized = String::new();
+    if path.starts_with('/') {
+        normalized.push('/');
+    }
+    normalized.push_str(&segments.join("/"));
+    if (has_trailing_slash && !normalized.ends_with('/')) || normalized.is_empty() {
+        normalized.push('/');
+    }
+    normalized
 }
 
 #[cfg(test)]
@@ -369,12 +497,59 @@ mod tests {
         );
 
         let started = Instant::now();
-        let transfer = client.transfer(&Resource::style("http://mapeak.test/style.json")).unwrap();
+        let transfer = client.transfer(&Resource::style("http://mapeak.test/style.json"), &[]).unwrap();
         assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
         assert_eq!(200, transfer.status);
         assert_eq!(b"ok".to_vec(), transfer.body.unwrap());
         // The families alternate: the IPv4 address goes second, after
         // HAPPY_EYEBALLS_DELAY.
         assert_eq!([dropped[0], server], attempts.lock().unwrap()[..2]);
+    }
+
+    #[test]
+    fn a_location_resolves_against_the_current_url() {
+        let current = "https://tiles.localhost:8443/styles/v1/style.json?key=1#top";
+        let cases = [
+            ("https://other.localhost/a", Some("https://other.localhost/a")),
+            ("HTTP://other.localhost/a", Some("HTTP://other.localhost/a")),
+            ("//cdn.localhost/b", Some("https://cdn.localhost/b")),
+            ("/root.json", Some("https://tiles.localhost:8443/root.json")),
+            ("/a/../b/./c.json?x#y", Some("https://tiles.localhost:8443/b/c.json?x#y")),
+            ("next.json", Some("https://tiles.localhost:8443/styles/v1/next.json")),
+            ("../up.json", Some("https://tiles.localhost:8443/styles/up.json")),
+            ("?key=2", Some("https://tiles.localhost:8443/styles/v1/style.json?key=2")),
+            ("#bottom", Some("https://tiles.localhost:8443/styles/v1/style.json?key=1#bottom")),
+            ("ftp://files.localhost/a", None),
+            ("mailto:someone@tiles.localhost", None),
+        ];
+        for (location, expected) in cases {
+            assert_eq!(redirect_url(current, location).as_deref(), expected, "{location}");
+        }
+    }
+
+    #[test]
+    fn a_relative_location_needs_an_http_current_url() {
+        assert_eq!(redirect_url("file:///a/b.json", "c.json"), None);
+        assert_eq!(redirect_url("no-scheme", "/c.json"), None);
+        assert_eq!(redirect_url("http://host.localhost", "c.json").as_deref(), Some("http://host.localhost/c.json"));
+        assert_eq!(redirect_url("http://host.localhost?q", "c.json").as_deref(), Some("http://host.localhost/c.json"));
+    }
+
+    #[test]
+    fn dot_segments_are_removed_from_a_path() {
+        let cases = [
+            ("/a/b/c", "/a/b/c"),
+            ("/a/./b", "/a/b"),
+            ("/a/../b", "/b"),
+            ("/../a", "/a"),
+            ("/a/b/..", "/a/"),
+            ("/a/.", "/a/"),
+            ("/..", "/"),
+            ("a/../b", "b"),
+            ("/a//b/../c", "/a/c"),
+        ];
+        for (path, expected) in cases {
+            assert_eq!(remove_dot_segments(path), expected, "{path}");
+        }
     }
 }

@@ -1928,6 +1928,7 @@ name = "mln-rs-storage"
 version = "0.0.10"
 dependencies = [
  "block2 0.6.2",
+ "httpmock",
  "js-sys",
  "mln-rs-actor",
  "mln-rs-feature",

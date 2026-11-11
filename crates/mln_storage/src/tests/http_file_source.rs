@@ -1,9 +1,11 @@
 // Ports test/storage/http_file_source.test.cpp against the test server
 // (mln_test_server, one per test) instead of the C++ one on port 3000.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
+use httpmock::MockServer;
 use mln_actor::RunLoop;
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Timestamp, now};
@@ -11,7 +13,8 @@ use mln_util::chrono::{Timestamp, now};
 use super::{Req, req};
 use crate::ClientOptions;
 use crate::file_source::FileSource;
-use crate::http_file_source::HTTPFileSource;
+use crate::http_file_source::{HTTPFileSource, same_origin};
+use crate::http_header_transform::HttpHeaderTransform;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
@@ -325,4 +328,108 @@ fn load() {
     }
 
     run_loop.run();
+}
+
+const TOKEN_HEADER: &str = "X-Test-Token";
+const TOKEN_VALUE: &str = "secret-token";
+
+/// Adds the token header to every request, recording the kind and URL of
+/// each.
+fn token_transform(seen: Arc<Mutex<Vec<(Kind, String)>>>) -> HttpHeaderTransform {
+    HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
+        seen.lock().unwrap().push((kind, url.to_owned()));
+        vec![(TOKEN_HEADER.to_owned(), TOKEN_VALUE.to_owned())]
+    })))
+}
+
+/// Loads `url` with `fs`, and returns the response.
+fn load_once(fs: &HTTPFileSource, kind: Kind, url: String) -> Response {
+    let run_loop = RunLoop::new();
+    let result = Rc::new(RefCell::new(None));
+    let (r, stop) = (result.clone(), run_loop.clone());
+    let _req = fs.request(
+        &Resource::new(kind, url),
+        Box::new(move |res: Response| {
+            *r.borrow_mut() = Some(res);
+            stop.stop();
+        }),
+    );
+    run_loop.run();
+    result.take().expect("response")
+}
+
+#[test]
+fn a_header_transform_adds_headers_until_cleared() {
+    let server = MockServer::start();
+    let with_token = server.mock(|when, then| {
+        when.method("GET").path("/with-token.json").header(TOKEN_HEADER, TOKEN_VALUE);
+        then.status(200).body("with token");
+    });
+    let after_clear = server.mock(|when, then| {
+        when.method("GET").path("/after-clear.json").header_missing(TOKEN_HEADER);
+        then.status(200).body("after clear");
+    });
+    let fs = http_file_source();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    fs.set_http_header_transform(token_transform(seen.clone()));
+
+    let res = load_once(&fs, Kind::Style, server.url("/with-token.json"));
+    assert_eq!(None, res.error);
+    assert_eq!(b"with token", data(&res));
+    assert_eq!(vec![(Kind::Style, server.url("/with-token.json"))], *seen.lock().unwrap());
+
+    fs.set_http_header_transform(HttpHeaderTransform::default());
+    let res = load_once(&fs, Kind::Style, server.url("/after-clear.json"));
+    assert_eq!(None, res.error);
+    assert_eq!(b"after clear", data(&res));
+    assert_eq!(1, seen.lock().unwrap().len());
+    with_token.assert_calls(1);
+    after_clear.assert_calls(1);
+}
+
+#[test]
+fn a_redirect_keeps_headers_only_within_the_origin() {
+    let other = MockServer::start();
+    let elsewhere = other.mock(|when, then| {
+        when.method("GET").path("/elsewhere.json").header_missing(TOKEN_HEADER);
+        then.status(200).body("elsewhere");
+    });
+    let server = MockServer::start();
+    server.mock(|when, then| {
+        when.method("GET").path("/same-origin.json").header(TOKEN_HEADER, TOKEN_VALUE);
+        then.status(302).header("Location", "/redirected.json");
+    });
+    let redirected = server.mock(|when, then| {
+        when.method("GET").path("/redirected.json").header(TOKEN_HEADER, TOKEN_VALUE);
+        then.status(200).body("redirected");
+    });
+    server.mock(|when, then| {
+        when.method("GET").path("/cross-origin.json").header(TOKEN_HEADER, TOKEN_VALUE);
+        then.status(302).header("Location", other.url("/elsewhere.json"));
+    });
+    let fs = http_file_source();
+    fs.set_http_header_transform(token_transform(Arc::default()));
+
+    let res = load_once(&fs, Kind::Style, server.url("/same-origin.json"));
+    assert_eq!(None, res.error);
+    assert_eq!(b"redirected", data(&res));
+    redirected.assert_calls(1);
+
+    let res = load_once(&fs, Kind::Style, server.url("/cross-origin.json"));
+    assert_eq!(None, res.error);
+    assert_eq!(b"elsewhere", data(&res));
+    elsewhere.assert_calls(1);
+}
+
+#[test]
+fn origins_compare_scheme_host_and_effective_port() {
+    assert!(same_origin("https://EXAMPLE.test/a", "https://example.test:443/b"));
+    assert!(same_origin("http://example.test?a", "http://user@example.test:80#b"));
+    assert!(same_origin("http://[::1]:8080/a", "http://[::1]:8080/b"));
+    assert!(!same_origin("http://example.test/a", "https://example.test/b"));
+    assert!(!same_origin("https://example.test/a", "https://other.test/b"));
+    assert!(!same_origin("https://example.test:444/a", "https://example.test/b"));
+    assert!(!same_origin("http://[::1]:8080/a", "http://[::1]:8081/b"));
+    assert!(!same_origin("file:///a", "file:///a"));
+    assert!(!same_origin("http:///a", "http:///a"));
 }

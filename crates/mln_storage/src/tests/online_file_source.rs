@@ -5,8 +5,8 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 
 use feature::Value;
 use mln_actor::{RunLoop, Timer};
@@ -18,6 +18,7 @@ use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
 use crate::ClientOptions;
 use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
+use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Priority, Resource};
@@ -886,4 +887,43 @@ fn retry_failed_resource_transform() {
     );
 
     run_loop.run();
+}
+
+// The header transform sees the URL that the resource transform wrote, and
+// runs again for a retry.
+#[test]
+fn a_header_transform_runs_for_every_attempt() {
+    let _serial = serial();
+    let server = HttpServer::new();
+    let run_loop = RunLoop::new();
+    let fs = online_file_source();
+
+    let target = server.url("/temporary-error");
+    let rewritten = target.clone();
+    fs.set_resource_transform(ResourceTransform::new(Some(Arc::new(
+        move |_kind: Kind, _url: &str, finished: FinishedCallback| finished(Ok(rewritten.clone())),
+    ))));
+    let urls = Arc::new(Mutex::new(Vec::new()));
+    let seen = urls.clone();
+    fs.set_http_header_transform(HttpHeaderTransform::new(Some(Arc::new(move |kind: Kind, url: &str| {
+        seen.lock().unwrap().push((kind, url.to_owned()));
+        vec![("X-Test-Token".to_owned(), "secret-token".to_owned())]
+    }))));
+
+    let responses = Rc::new(Cell::new(0));
+    let stop = run_loop.clone();
+    let _req = fs.request(
+        &Resource::new(Kind::Source, "localhost://temporary-error"),
+        Box::new(move |res: Response| {
+            responses.set(responses.get() + 1);
+            if responses.get() == 2 {
+                assert_eq!(None, res.error);
+                assert_eq!(b"Hello World!", data(&res));
+                stop.stop();
+            }
+        }),
+    );
+
+    run_loop.run();
+    assert_eq!(vec![(Kind::Source, target.clone()), (Kind::Source, target)], *urls.lock().unwrap());
 }

@@ -41,6 +41,7 @@ use crate::async_request::AsyncRequest;
 use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::http_file_source::HTTPFileSource;
+use crate::http_header_transform::HttpHeaderTransform;
 use crate::http_timeout::{error_retry_timeout, expiration_timeout};
 use crate::network_status::{NetworkStatus, Status};
 use crate::resource::{Kind, Priority, Resource};
@@ -570,6 +571,10 @@ impl OnlineFileSourceThread {
         *self.state.resource_transform.borrow_mut() = transform;
     }
 
+    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        self.state.http_file_source.set_http_header_transform(transform);
+    }
+
     fn set_resource_options(&self, options: ResourceOptions) {
         *self.state.resource_options.borrow_mut() = options;
     }
@@ -769,6 +774,10 @@ impl FileSource for OnlineFileSource {
 
     fn set_resource_transform(&self, transform: ResourceTransform) {
         self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_resource_transform(transform));
+    }
+
+    fn set_http_header_transform(&self, transform: HttpHeaderTransform) {
+        self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_http_header_transform(transform));
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {

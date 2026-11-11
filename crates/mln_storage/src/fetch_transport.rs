@@ -1,6 +1,12 @@
 //! The browser's `fetch` as the `HttpTransport`. The browser's HTTP cache does
 //! the caching. A host can hand it responses it fetched ahead
 //! (`set_fetch_preloads`).
+//!
+//! The host's headers (`TransferRequest::headers`) go with the request, which
+//! makes a cross-origin request one that the server must allow in its CORS
+//! preflight. fetch follows a redirect with every header it was given, and
+//! can't drop them when the redirect leaves the origin, so a request with the
+//! host's headers doesn't follow redirects: a redirect fails it.
 
 use std::cell::RefCell;
 
@@ -42,30 +48,41 @@ pub(crate) struct FetchTransport;
 
 impl HttpTransport for FetchTransport {
     fn start(&self, request: TransferRequest) {
-        let url = request.resource().url.clone();
-        let range = http_file_source::range_header(request.resource());
         wasm_bindgen_futures::spawn_local(async move {
             if request.is_cancelled() {
                 return;
             }
-            let transfer = fetch(&url, range.as_deref()).await.map_err(|error| {
-                let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
-                Box::new(Error::new(Reason::Connection, message))
-            });
+            let transfer = fetch(&request).await;
             request.finish(transfer);
         });
     }
 }
 
-async fn fetch(url: &str, range: Option<&str>) -> Result<Transfer, JsValue> {
+async fn fetch(request: &TransferRequest) -> Result<Transfer, Box<Error>> {
+    let connection_error = |error: JsValue| {
+        let message = error.as_string().unwrap_or_else(|| format!("{error:?}"));
+        Box::new(Error::new(Reason::Connection, message))
+    };
+    let url = &request.resource().url;
+    let range = http_file_source::range_header(request.resource());
     let early = match range {
         None => preloaded(url).await,
         Some(_) => None,
     };
     let response = match early {
         Some(response) => response,
-        None => request(url, range).await?,
+        None => send(url, range.as_deref(), request.headers()).await.map_err(connection_error)?,
     };
+    if response.type_() == web_sys::ResponseType::Opaqueredirect {
+        return Err(Box::new(Error::new(
+            Reason::Other,
+            "A request with the host's HTTP headers can't follow a redirect in the browser",
+        )));
+    }
+    transfer(&response).await.map_err(connection_error)
+}
+
+async fn transfer(response: &web_sys::Response) -> Result<Transfer, JsValue> {
     let mut headers = Vec::new();
     if let Some(entries) = js_sys::try_iter(&response.headers())? {
         for entry in entries {
@@ -84,12 +101,20 @@ async fn fetch(url: &str, range: Option<&str>) -> Result<Transfer, JsValue> {
     Ok(Transfer { status, headers, body })
 }
 
-async fn request(url: &str, range: Option<&str>) -> Result<web_sys::Response, JsValue> {
+async fn send(url: &str, range: Option<&str>, extra: &[(String, String)]) -> Result<web_sys::Response, JsValue> {
     let init = web_sys::RequestInit::new();
-    if let Some(range) = range {
+    if range.is_some() || !extra.is_empty() {
         let headers = web_sys::Headers::new()?;
-        headers.set("Range", range)?;
+        if let Some(range) = range {
+            headers.set("Range", range)?;
+        }
+        for (name, value) in extra {
+            headers.set(name, value)?;
+        }
         init.set_headers(&headers);
+    }
+    if !extra.is_empty() {
+        init.set_redirect(web_sys::RequestRedirect::Manual);
     }
     let request = web_sys::Request::new_with_str_and_init(url, &init)?;
     JsFuture::from(global_fetch(&request)).await?.dyn_into()
