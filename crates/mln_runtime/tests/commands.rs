@@ -1,6 +1,6 @@
 // Command order, completions and the lifecycle of runtimes and maps. They
 // follow maplibre-native-ffi's ABI tests (tests/native/abi/runtime/
-// lifecycle.c, completion/completion.c and map/command_groups.c at b20632a)
+// lifecycle.c, completion/completion.c and map/command_groups.c at eae96a42c)
 // where those test the same rules.
 
 mod support;

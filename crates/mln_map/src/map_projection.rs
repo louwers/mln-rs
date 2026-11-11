@@ -48,6 +48,12 @@ impl MapProjection {
         point
     }
 
+    /// Whether the globe hides `lat_lng` from the camera; a Mercator view
+    /// hides nothing.
+    pub fn is_location_occluded(&self, lat_lng: &LatLng) -> bool {
+        self.state.is_location_occluded(lat_lng)
+    }
+
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite
     /// pixel.
     pub fn lat_lng_for_pixel(&self, pixel: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {

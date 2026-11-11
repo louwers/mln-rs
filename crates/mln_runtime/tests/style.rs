@@ -1,6 +1,6 @@
 // The map handle's style commands. They follow maplibre-native-ffi's ABI
 // tests (tests/native/abi/style/{sources,custom_sources,geojson,layers}.c at
-// b20632a) where those test the same rules.
+// eae96a42c) where those test the same rules.
 
 mod support;
 
@@ -11,6 +11,7 @@ use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, R
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::sources::custom_geometry_source::TileOptions;
+use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::range::Range;
@@ -393,4 +394,30 @@ fn a_command_inside_a_group_names_the_update_that_its_end_shows() {
     wait(map.add_style_layer_json(r#"{"id":"b","type":"background"}"#, None));
     assert_eq!(wait(map.end_command_group()).render_update_generation, before + 1);
     assert_eq!(map.snapshot().unwrap().update_generation, before + 1);
+}
+
+#[test]
+fn root_properties_change_the_live_style_and_the_view() {
+    let (_runtime, map) = styled_map();
+    let snapshot = map.snapshot().unwrap();
+    assert!(!snapshot.globe_rendering && !snapshot.globe_free_bearing);
+    assert_eq!(snapshot.view.projection, ProjectionDefinition::new(ProjectionType::Mercator));
+
+    wait(map.set_style_root_property("projection", r#"{"type":"globe"}"#));
+    assert_eq!(wait(map.style_root_property("projection")).as_deref(), Some(r#"{"type":"globe"}"#));
+    let snapshot = map.snapshot().unwrap();
+    assert!(snapshot.globe_rendering);
+    assert_eq!(snapshot.view.projection, ProjectionDefinition::new(ProjectionType::VerticalPerspective));
+
+    wait(map.set_globe_free_bearing_enabled(true));
+    assert!(map.snapshot().unwrap().globe_free_bearing);
+
+    wait(map.set_style_root_property("sky", r#"{"atmosphere-blend":0.25}"#));
+    assert_eq!(wait(map.style_root_property("sky")).as_deref(), Some(r#"{"atmosphere-blend":0.25}"#));
+    assert_eq!(ErrorKind::Unsupported, wait_err(map.set_style_root_property("terrain", r#"{"source":"dem"}"#)).kind);
+    assert_eq!(ErrorKind::InvalidArgument, wait_err(map.set_style_root_property("layers", "[]")).kind);
+    assert_eq!(ErrorKind::InvalidArgument, wait_err(map.style_root_property("sources")).kind);
+
+    wait(map.set_style_root_property("projection", "null"));
+    assert!(!map.snapshot().unwrap().globe_rendering);
 }

@@ -1,6 +1,7 @@
 //! One view of a map: the camera, size and projection that a map snapshot or a
 //! rendered frame shows.
 
+use mln_style_types::ProjectionDefinition;
 use mln_util::constants;
 use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation};
@@ -76,6 +77,10 @@ pub struct MapView {
     /// unset takes the default of [`TransformState`].
     pub projection_mode: ProjectionMode,
     pub viewport: Viewport,
+    /// The style's projection at the camera's zoom. A view from a map never
+    /// names `globe`, which [`to_state`](Self::to_state) resolves at the
+    /// camera's zoom.
+    pub projection: ProjectionDefinition,
 }
 
 impl MapView {
@@ -96,6 +101,7 @@ impl MapView {
                 viewport_mode: state.get_viewport_mode(),
                 frustum_offset: state.get_frustum_offset(),
             },
+            projection: state.get_projection_definition(),
         }
     }
 
@@ -115,6 +121,9 @@ impl MapView {
         let camera = &self.camera;
         let viewport = &self.viewport;
         let mut state = TransformState::new(ConstrainMode::None, viewport.viewport_mode);
+        // First, so that the camera takes the projection's range of zooms
+        // and latitudes.
+        state.set_projection_definition(&self.projection.at_zoom(camera.zoom));
         state.set_max_zoom(constants::MAX_ZOOM);
         state.set_max_pitch(constants::PITCH_MAX);
         state.set_size(self.extent.size);
@@ -148,8 +157,15 @@ impl MapView {
         if !finite.iter().all(|value| value.is_finite()) {
             return Err(Error::invalid_argument("view camera members must be finite"));
         }
+        let projection = &self.projection;
+        if !projection.transition.is_finite() {
+            return Err(Error::invalid_argument("view projection transition must be finite"));
+        }
         let limits = TransformState::default();
-        if !(constants::MIN_ZOOM..=constants::MAX_ZOOM).contains(&camera.zoom)
+        // The globe lets the zoom fall below the minimum toward the poles.
+        let globe = projection.at_zoom(camera.zoom).transition_state() > 0.0;
+        let min_zoom = limits.get_min_zoom_at_latitude_with(camera.center.latitude(), globe);
+        if !(min_zoom..=constants::MAX_ZOOM).contains(&camera.zoom)
             || !(mln_math::rad2deg(constants::PITCH_MIN)..=mln_math::rad2deg(constants::PITCH_MAX))
                 .contains(&camera.pitch)
             || !(mln_math::rad2deg(limits.get_min_field_of_view())..=mln_math::rad2deg(limits.get_max_field_of_view()))

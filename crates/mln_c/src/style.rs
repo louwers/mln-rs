@@ -1763,25 +1763,46 @@ pub unsafe extern "C" fn mln_map_get_style_layer_property(
     })
 }
 
-// MARK: - Light
+// MARK: - Root properties and the light
 
-/// `mln_map_set_style_light_json()`.
+/// `mln_map_set_style_root_property()`.
 ///
 /// # Safety
 ///
 /// Each pointer is null or valid for the header's use of it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_set_style_light_json(
+pub unsafe extern "C" fn mln_map_set_style_root_property(
     map: mln_map,
-    light_json: mln_buffer_view,
+    property_name: mln_buffer_view,
+    value: mln_buffer_view,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract, for each view.
+        let (name, value) = unsafe { (required_text(property_name, "property_name")?, required_text(value, "value")?) };
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.set_style_root_property(name, value)) }
+    })
+}
+
+/// `mln_map_get_style_root_property()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_map_get_style_root_property(
+    map: mln_map,
+    property_name: mln_buffer_view,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
-        let json = unsafe { required_text(light_json, "light_json") }?;
+        let name = unsafe { required_text(property_name, "property_name") }?;
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.set_style_light_json(json)) }
+        unsafe { query(map, completion, |map| map.style_root_property(name), optional_text_value) }
     })
 }
 

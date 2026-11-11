@@ -255,6 +255,12 @@ const _: unsafe extern "C" fn(
     mln_buffer_view,
     *const mln_completion,
     *mut mln_diagnostic,
+) -> mln_status = crate::style::mln_map_get_style_root_property;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
+    *const mln_completion,
+    *mut mln_diagnostic,
 ) -> mln_status = crate::style::mln_map_get_style_source;
 const _: unsafe extern "C" fn(
     mln_map,
@@ -327,6 +333,12 @@ const _: unsafe extern "C" fn(
     *mut mln_map_projection_camera_result,
     *mut mln_diagnostic,
 ) -> mln_status = crate::projection::mln_map_projection_get_camera;
+const _: unsafe extern "C" fn(
+    mln_map_projection,
+    mln_lat_lng,
+    *mut bool,
+    *mut mln_diagnostic,
+) -> mln_status = crate::projection::mln_map_projection_is_location_occluded;
 const _: unsafe extern "C" fn(
     mln_map_projection,
     mln_screen_point,
@@ -517,6 +529,12 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::style::mln_map_set_global_state_property;
 const _: unsafe extern "C" fn(
     mln_map,
+    bool,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::camera::mln_map_set_globe_free_bearing_enabled;
+const _: unsafe extern "C" fn(
+    mln_map,
     mln_buffer_view,
     *const mln_lat_lng,
     usize,
@@ -574,16 +592,17 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,
+    mln_buffer_view,
     *const mln_completion,
     *mut mln_diagnostic,
-) -> mln_status = crate::style::mln_map_set_style_light_json;
+) -> mln_status = crate::style::mln_map_set_style_light_property;
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,
     mln_buffer_view,
     *const mln_completion,
     *mut mln_diagnostic,
-) -> mln_status = crate::style::mln_map_set_style_light_property;
+) -> mln_status = crate::style::mln_map_set_style_root_property;
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,

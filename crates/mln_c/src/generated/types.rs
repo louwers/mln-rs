@@ -928,6 +928,7 @@ pub const MLN_ANIMATION_OPTION_VELOCITY: mln_animation_option_field = 2;
 pub const MLN_ANIMATION_OPTION_MIN_ZOOM: mln_animation_option_field = 4;
 pub const MLN_ANIMATION_OPTION_EASING: mln_animation_option_field = 8;
 pub const MLN_ANIMATION_OPTION_TRANSITION_ID: mln_animation_option_field = 16;
+pub const MLN_ANIMATION_OPTION_MAX_DURATION: mln_animation_option_field = 32;
 /// The fields that mln_animation_options sets.
 pub type mln_animation_option_field = u32;
 /// A set of mln_animation_option_field bits.
@@ -1237,6 +1238,11 @@ pub struct mln_animation_options {
     pub velocity: f64,
     /// The zoom level at the peak of a fly animation.
     pub min_zoom: f64,
+    /** The longest a fly animation may take. A fly animation whose duration, set
+ or derived from `velocity`, is longer moves the camera at once instead,
+ and so does one too slow for the library to time, without this field.
+ Other animations ignore it.*/
+    pub max_duration_ms: f64,
     pub easing: mln_unit_bezier,
     /** An ID that mln_map_cancel_camera_transitions_with_id() cancels the change
  by. Several changes can share one.*/
@@ -1728,6 +1734,27 @@ pub struct mln_map_viewport {
     pub viewport_mode: mln_viewport_mode,
     pub frustum_offset: mln_edge_insets,
 }
+pub const MLN_PROJECTION_TYPE_MERCATOR: mln_projection_type = 0;
+/// Draws the map as a globe.
+pub const MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE: mln_projection_type = 1;
+/** Draws the map as a globe at low zooms, and hands over to Mercator between
+ zoom 11 and 12.*/
+pub const MLN_PROJECTION_TYPE_GLOBE: mln_projection_type = 2;
+/** A projection that a style's
+ [projection](https://maplibre.org/maplibre-style-spec/projection/) names.*/
+pub type mln_projection_type = u32;
+/** A style's projection at one zoom: `from` turning into `to`.
+
+ A zeroed definition is Mercator.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_projection_definition {
+    pub from: mln_projection_type,
+    pub to: mln_projection_type,
+    /** How far `from` has turned into `to`, from 0 to 1. Ignored when `from`
+ equals `to`. A value outside that range holds at the nearer end.*/
+    pub transition: f64,
+}
 /// One view of a map: its camera, size, and projection.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -1737,6 +1764,8 @@ pub struct mln_map_view {
     pub extent: mln_logical_extent,
     pub projection_mode: mln_projection_mode,
     pub viewport: mln_map_viewport,
+    /// The style's projection at the camera's zoom.
+    pub projection: mln_projection_definition,
 }
 /** How the map picks the tiles to load.
 
@@ -1795,6 +1824,10 @@ pub struct mln_map_snapshot {
     pub bounds: mln_camera_bounds,
     pub free_camera: mln_free_camera,
     pub view: mln_map_view,
+    /// Whether the map draws as a globe, alone or blending into Mercator.
+    pub globe_rendering: bool,
+    /// The setting from mln_map_set_globe_free_bearing_enabled().
+    pub globe_free_bearing_enabled: bool,
 }
 /// A map's camera, with the snapshot generation that it matches.
 #[repr(C)]
@@ -1810,9 +1843,8 @@ pub const MLN_STYLE_SOURCE_TYPE_RASTER_DEM: mln_style_source_type = 3;
 pub const MLN_STYLE_SOURCE_TYPE_GEO_JSON: mln_style_source_type = 4;
 pub const MLN_STYLE_SOURCE_TYPE_IMAGE: mln_style_source_type = 5;
 pub const MLN_STYLE_SOURCE_TYPE_VIDEO: mln_style_source_type = 6;
-pub const MLN_STYLE_SOURCE_TYPE_ANNOTATIONS: mln_style_source_type = 7;
-pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY: mln_style_source_type = 8;
-pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR: mln_style_source_type = 9;
+pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_GEOMETRY: mln_style_source_type = 7;
+pub const MLN_STYLE_SOURCE_TYPE_CUSTOM_VECTOR: mln_style_source_type = 8;
 /// The type of a style source.
 pub type mln_style_source_type = u32;
 pub const MLN_STYLE_SOURCE_INFO_TILE_JSON: mln_style_source_info_field = 1;

@@ -83,6 +83,38 @@ impl ProjectionDefinition {
         ProjectionDefinition::between(type_from_name_or_mercator(from), type_from_name_or_mercator(to), transition)
     }
 
+    /// The definition that draws this one at `zoom`, with `globe` resolved:
+    /// `globe` is the vertical perspective up to zoom 11 and Mercator from
+    /// zoom 12, blended in between, at either end of a definition, and each
+    /// end counts with its share of the globe at the zoom.
+    pub fn at_zoom(&self, zoom: f64) -> ProjectionDefinition {
+        if self.from != ProjectionType::Globe && self.to != ProjectionType::Globe {
+            return *self;
+        }
+        const GLOBE_TO_MERCATOR_START_ZOOM: f64 = 11.0;
+        const GLOBE_TO_MERCATOR_END_ZOOM: f64 = 12.0;
+        let globe_share = 1.0
+            - ((zoom - GLOBE_TO_MERCATOR_START_ZOOM) / (GLOBE_TO_MERCATOR_END_ZOOM - GLOBE_TO_MERCATOR_START_ZOOM))
+                .clamp(0.0, 1.0);
+        let share = |end: ProjectionType| match end {
+            ProjectionType::Globe => globe_share,
+            ProjectionType::Mercator => 0.0,
+            ProjectionType::VerticalPerspective => 1.0,
+        };
+        let globe = if self.from == self.to {
+            share(self.from)
+        } else {
+            interpolate(&share(self.from), &share(self.to), self.transition.clamp(0.0, 1.0))
+        };
+        if globe >= 1.0 {
+            return ProjectionDefinition::new(ProjectionType::VerticalPerspective);
+        }
+        if globe <= 0.0 {
+            return ProjectionDefinition::new(ProjectionType::Mercator);
+        }
+        ProjectionDefinition::between(ProjectionType::VerticalPerspective, ProjectionType::Mercator, 1.0 - globe)
+    }
+
     /// How far the definition is toward the globe: 0 is Mercator, 1 the globe
     /// (GL JS `GlobeProjection.transitionState`).
     pub fn transition_state(&self) -> f64 {

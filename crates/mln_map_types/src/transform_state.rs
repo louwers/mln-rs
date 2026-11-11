@@ -215,6 +215,8 @@ pub struct TransformState {
     frustum_offset: EdgeInsets,
 
     projection: Arc<dyn ProjectionBase>,
+    /// The style's projection that the state draws, as it was last set.
+    projection_definition: ProjectionDefinition,
     projection_transition: f64,
 
     constrain_mode: ConstrainMode,
@@ -284,6 +286,7 @@ impl TransformState {
             size: Size::default(),
             frustum_offset: EdgeInsets::default(),
             projection: Arc::new(MercatorProjection),
+            projection_definition: ProjectionDefinition::default(),
             projection_transition: 0.0,
             constrain_mode,
             viewport_mode,
@@ -375,6 +378,7 @@ impl TransformState {
     // MARK: - Projection
 
     pub fn set_projection_definition(&mut self, definition: &ProjectionDefinition) {
+        self.projection_definition = *definition;
         let transition = definition.transition_state();
         if transition == self.projection_transition {
             return;
@@ -399,6 +403,12 @@ impl TransformState {
             let zoom = self.get_zoom();
             self.set_lat_lng_zoom(&center, zoom);
         }
+    }
+
+    /// The definition that [`set_projection_definition`](Self::set_projection_definition)
+    /// last set.
+    pub fn get_projection_definition(&self) -> ProjectionDefinition {
+        self.projection_definition
     }
 
     /// 0 is Mercator, 1 is the globe, in between is the transition.

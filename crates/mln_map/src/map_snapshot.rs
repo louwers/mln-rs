@@ -26,6 +26,10 @@ pub struct MapSnapshot {
     pub bounds: CameraBounds,
     pub free_camera: FreeCamera,
     pub view: MapView,
+    /// Whether the map draws as a globe, alone or blending into Mercator.
+    pub globe_rendering: bool,
+    /// The setting of [`Map::set_globe_free_bearing`](crate::Map::set_globe_free_bearing).
+    pub globe_free_bearing: bool,
 }
 
 /// How a map picks the tiles to load.

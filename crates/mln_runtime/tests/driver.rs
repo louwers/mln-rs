@@ -1,7 +1,7 @@
 // Render sessions that the host's thread drives: the driver work, its wake,
 // and the session's lifecycle without a thread of its own. They follow
 // maplibre-native-ffi's ABI tests (tests/native/abi/render/driver.c at
-// b20632a) where those test the same rules for a caller driver.
+// eae96a42c) where those test the same rules for a caller driver.
 
 mod support;
 

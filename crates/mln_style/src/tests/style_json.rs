@@ -49,7 +49,7 @@ fn edits_fail_while_the_style_is_not_loaded() {
     assert_fails(style.add_source_json("points", EMPTY_GEOJSON_SOURCE), ErrorKind::InvalidState, not_loaded);
     assert_fails(style.add_layer_json(DOTS, None), ErrorKind::InvalidState, not_loaded);
     assert_fails(style.set_layer_property_json("dots", "circle-radius", "4"), ErrorKind::InvalidState, not_loaded);
-    assert_fails(style.set_light_json(r#"{"intensity":0.5}"#), ErrorKind::InvalidState, not_loaded);
+    assert_fails(style.set_root_property_json("light", r#"{"intensity":0.5}"#), ErrorKind::InvalidState, not_loaded);
     assert_fails(style.set_light_property_json("intensity", "0.5"), ErrorKind::InvalidState, not_loaded);
     assert!(style.get_sources().is_empty() && style.get_layers().is_empty());
 }
@@ -282,7 +282,7 @@ fn source_bindings_change_only_on_layers_that_take_a_source() {
 #[test]
 fn the_style_light_round_trips_through_json() {
     let mut style = loaded_style();
-    style.set_light_json(r#"{"anchor":"viewport","intensity":0.5}"#).unwrap();
+    style.set_root_property_json("light", r#"{"anchor":"viewport","intensity":0.5}"#).unwrap();
     assert_eq!(style.light_property_json("anchor").as_deref(), Some("\"viewport\""));
     assert_eq!(style.light_property_json("intensity").as_deref(), Some("0.5"));
 
@@ -299,7 +299,11 @@ fn the_style_light_round_trips_through_json() {
         ErrorKind::InvalidArgument,
         r#"style light property "intensity" is not valid JSON"#,
     );
-    assert_fails(style.set_light_json(r#"{"anchor":7}"#), ErrorKind::InvalidArgument, "style light");
+    assert_fails(
+        style.set_root_property_json("light", r#"{"anchor":7}"#),
+        ErrorKind::InvalidArgument,
+        r#"style root property "light""#,
+    );
     assert_eq!(style.light_property_json("intensity").as_deref(), Some("0.75"));
     assert_eq!(style.light_property_json("anchor").as_deref(), Some("\"viewport\""));
     assert_eq!(style.light_property_json("color"), None);
@@ -325,4 +329,113 @@ fn global_state_reads_back_defaults_and_set_properties() {
     assert_eq!(style.global_state_json(), r#"{"theme":["dark",{"enabled":true}]}"#);
     style.set_global_state_property_json("theme", "null").unwrap();
     assert_eq!(style.global_state_json(), r#"{"theme":"light"}"#);
+}
+
+fn root_property(style: &Style, name: &str) -> Option<String> {
+    style.root_property_json(name).unwrap()
+}
+
+#[test]
+fn the_light_and_the_transition_change_and_reset() {
+    let mut style = loaded_style();
+    assert_eq!(root_property(&style, "light"), None);
+    // A style without a transition gets the default duration.
+    assert_eq!(root_property(&style, "transition").as_deref(), Some(r#"{"duration":300}"#));
+
+    style.set_root_property_json("light", r#"{"intensity":0.5,"anchor":"viewport"}"#).unwrap();
+    assert_eq!(root_property(&style, "light").as_deref(), Some(r#"{"anchor":"viewport","intensity":0.5}"#));
+
+    let mut no_placement = style.get_transition_options();
+    no_placement.enable_placement_transitions = false;
+    style.set_transition_options(&no_placement);
+    style.set_root_property_json("transition", r#"{"delay":50,"duration":300}"#).unwrap();
+    assert_eq!(root_property(&style, "transition").as_deref(), Some(r#"{"duration":300,"delay":50}"#));
+    assert!(!style.get_transition_options().enable_placement_transitions);
+    assert_fails(style.set_root_property_json("transition", "{"), ErrorKind::InvalidArgument, "not valid JSON");
+
+    style.set_root_property_json("light", "null").unwrap();
+    style.set_root_property_json("transition", "null").unwrap();
+    assert_eq!(root_property(&style, "light"), None);
+    assert_eq!(root_property(&style, "transition").as_deref(), Some(r#"{"duration":300}"#));
+    assert!(!style.get_transition_options().enable_placement_transitions);
+}
+
+#[test]
+fn the_sky_and_the_projection_change_and_reset() {
+    let mut style = loaded_style();
+    assert_eq!(root_property(&style, "sky"), None);
+    assert_eq!(root_property(&style, "projection"), None);
+
+    style.set_root_property_json("sky", r##"{"sky-color":"#ff0000","atmosphere-blend":0.5}"##).unwrap();
+    assert_eq!(
+        root_property(&style, "sky").as_deref(),
+        Some(r#"{"sky-color":["rgba",255.0,0.0,0.0,1.0],"atmosphere-blend":0.5}"#)
+    );
+    style.set_root_property_json("projection", r#"{"type":"globe"}"#).unwrap();
+    assert_eq!(root_property(&style, "projection").as_deref(), Some(r#"{"type":"globe"}"#));
+    assert_eq!(
+        style.get_projection().impl_.evaluate(0.0),
+        mln_style_types::ProjectionDefinition::new(mln_style_types::ProjectionType::VerticalPerspective)
+    );
+
+    assert_fails(
+        style.set_root_property_json("projection", r#"{"type":"cylinder"}"#),
+        ErrorKind::InvalidArgument,
+        r#"style root property "projection""#,
+    );
+    assert_fails(
+        style.set_root_property_json("sky", r#"{"sky-color":7}"#),
+        ErrorKind::InvalidArgument,
+        r#"style root property "sky""#,
+    );
+    assert_eq!(root_property(&style, "projection").as_deref(), Some(r#"{"type":"globe"}"#));
+
+    style.set_root_property_json("sky", "null").unwrap();
+    style.set_root_property_json("projection", "null").unwrap();
+    assert!(style.get_sky().is_none());
+    assert_eq!(root_property(&style, "projection"), None);
+}
+
+#[test]
+fn a_new_state_resets_every_global_state_property() {
+    let mut style = Style::new(1.0);
+    style.load_json(r#"{"version":8,"sources":{},"layers":[],"state":{"theme":{"default":"light"}}}"#);
+    assert_eq!(root_property(&style, "state").as_deref(), Some(r#"{"theme":{"default":"light"}}"#));
+    style.set_global_state_property_json("theme", r#""dark""#).unwrap();
+
+    style.set_root_property_json("state", r#"{"theme":{"default":"sepia"},"scale":{"default":2}}"#).unwrap();
+    assert_eq!(style.global_state_json(), r#"{"scale":2,"theme":"sepia"}"#);
+    assert_eq!(
+        root_property(&style, "state").as_deref(),
+        Some(r#"{"scale":{"default":2},"theme":{"default":"sepia"}}"#)
+    );
+    assert_fails(
+        style.set_root_property_json("state", r#"{"theme":"sepia"}"#),
+        ErrorKind::InvalidArgument,
+        r#"state property "theme" must be an object"#,
+    );
+
+    style.set_root_property_json("state", "null").unwrap();
+    assert_eq!(root_property(&style, "state"), None);
+    assert_eq!(style.global_state_json(), "{}");
+}
+
+#[test]
+fn other_root_properties_read_as_loaded_and_reject_changes() {
+    let mut style = Style::new(1.0);
+    style.load_json(r#"{"version":8,"name":"plain","sources":{},"layers":[],"zoom":3}"#);
+    assert_eq!(root_property(&style, "version").as_deref(), Some("8"));
+    assert_eq!(root_property(&style, "name").as_deref(), Some(r#""plain""#));
+    assert_eq!(root_property(&style, "zoom").as_deref(), Some("3"));
+    assert_eq!(root_property(&style, "sprite"), None);
+
+    for (name, value) in [("zoom", "4"), ("sprite", r#""sprite""#), ("glyphs", r#""{fontstack}""#), ("terrain", "{}")] {
+        assert_fails(style.set_root_property_json(name, value), ErrorKind::Unsupported, &format!("\"{name}\""));
+    }
+    assert_eq!(root_property(&style, "zoom").as_deref(), Some("3"));
+
+    for name in ["layers", "sources", "Light", "fog"] {
+        assert_fails(style.set_root_property_json(name, "{}"), ErrorKind::InvalidArgument, "not a style root property");
+        assert_fails(style.root_property_json(name), ErrorKind::InvalidArgument, "not a style root property");
+    }
 }

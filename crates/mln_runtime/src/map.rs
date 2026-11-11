@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, Weak};
 use mln_actor::RunLoopHandle;
 use mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions,
-    MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, TransitionEnd, TransitionOutcome,
+    MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
@@ -753,7 +753,9 @@ impl Map {
 
     /// Loads the map's style from JSON text. Completes as
     /// [`set_style_url`](Self::set_style_url) does, once the style has
-    /// parsed. A style that fails to parse leaves the map's style as it was.
+    /// parsed, but with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
+    /// for JSON that isn't a valid style. A style that fails to parse leaves
+    /// the map's style as it was.
     pub fn set_style_json(&self, json: impl Into<String>) -> Result<Completion<Applied>, Error> {
         let json = json.into();
         if json.is_empty() {
@@ -878,10 +880,23 @@ impl Map {
         self.query(move |map| map.style().layer_property_json(&layer_id, &name))
     }
 
-    /// Replaces the style's light with one from JSON.
-    pub fn set_style_light_json(&self, json: impl Into<String>) -> Result<Completion<Applied>, Error> {
-        let json = json.into();
-        self.command(move |map| map.style_mut().set_light_json(&json))
+    /// Sets a root property of the style to a JSON value, without
+    /// reloading the style. See `Style::set_root_property_json` for the
+    /// properties that change and the errors.
+    pub fn set_style_root_property(
+        &self,
+        name: impl Into<String>,
+        json: impl Into<String>,
+    ) -> Result<Completion<Applied>, Error> {
+        let (name, json) = (name.into(), json.into());
+        self.command(move |map| map.style_mut().set_root_property_json(&name, &json))
+    }
+
+    /// A root property of the style as JSON, or `None` when neither the
+    /// style nor the map sets it. See `Style::root_property_json`.
+    pub fn style_root_property(&self, name: impl Into<String>) -> Result<Completion<Option<String>>, Error> {
+        let name = name.into();
+        self.query(move |map| map.style().root_property_json(&name))
     }
 
     /// Sets a property of the style's light to a JSON value.
@@ -1056,6 +1071,15 @@ impl Map {
         })
     }
 
+    /// Sets whether drags and zooms on a globe turn the bearing, as
+    /// `mln_map::Map::set_globe_free_bearing` describes.
+    pub fn set_globe_free_bearing_enabled(&self, enabled: bool) -> Result<Completion<Applied>, Error> {
+        self.command(move |map| {
+            map.set_globe_free_bearing(enabled);
+            Ok(())
+        })
+    }
+
     /// Logs the style's sources and their state.
     pub fn dump_debug_logs(&self) -> Result<Completion<Applied>, Error> {
         self.command(|map| {
@@ -1092,6 +1116,14 @@ impl Drop for CommandGroup {
 enum StyleLoad {
     Url(String),
     Json(String),
+}
+
+/// A style load that hasn't completed.
+struct PendingStyle {
+    resolver: Resolver<Applied>,
+    /// Whether the caller passed the style document, which then is the
+    /// argument that fails to parse.
+    from_json: bool,
 }
 
 /// The render session that a map is reserved for.
@@ -1131,8 +1163,8 @@ pub(crate) struct MapEntry {
     mask: EventMask,
     /// The sequence number of the last command that ran.
     applied: u64,
-    /// The completion of the style load in progress.
-    pending_style: Option<Resolver<Applied>>,
+    /// The style load in progress.
+    pending_style: Option<PendingStyle>,
     pending_still: Option<PendingStill>,
     /// The render session that draws the map.
     session: Option<SessionLink>,
@@ -1300,8 +1332,9 @@ fn load_style(
         sequence,
         outbox,
         move |entry, outbox| {
-            if let Some(previous) = entry.pending_style.replace(resolver) {
-                outbox.resolve(previous, Err(Error::cancelled("another style load started")));
+            let from_json = matches!(load, StyleLoad::Json(_));
+            if let Some(previous) = entry.pending_style.replace(PendingStyle { resolver, from_json }) {
+                outbox.resolve(previous.resolver, Err(Error::cancelled("another style load started")));
             }
             let style = entry.core.style_mut();
             match load {
@@ -1326,12 +1359,16 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     *entry.published.snapshot.lock_unpoisoned() = Some(entry.core.snapshot());
 
     let mut style_outcome = None;
+    let from_json = entry.pending_style.as_ref().is_some_and(|pending| pending.from_json);
     for event in &events {
         match event {
             MapEvent::StyleLoaded => {
                 // A new style's sources start without state.
                 entry.feature_state.clear();
                 style_outcome = Some(Ok(()));
+            }
+            MapEvent::LoadingFailed(StyleLoadError::Parse(message)) if from_json => {
+                style_outcome = Some(Err(Error::invalid_argument(message)));
             }
             MapEvent::LoadingFailed(error) => style_outcome = Some(Err(Error::native(error.message()))),
             _ => {}
@@ -1353,7 +1390,7 @@ pub(crate) fn flush(core: &mut RuntimeCore, id: MapId, outbox: &mut Outbox) {
     ends.deliver(generation, outbox);
 
     if let Some((outcome, Some(pending), applied)) = style_outcome {
-        outbox.resolve(pending, outcome.map(|()| applied));
+        outbox.resolve(pending.resolver, outcome.map(|()| applied));
     }
     if let Some((outcome, resolver)) = still {
         outbox.resolve(resolver, outcome);
@@ -1366,7 +1403,7 @@ fn remove(core: &mut RuntimeCore, id: MapId, done: Option<Resolver<()>>, outbox:
     if let Some(mut entry) = core.maps.remove(&id) {
         entry.core.set_waker(None);
         if let Some(pending) = entry.pending_style.take() {
-            outbox.resolve(pending, Err(Error::cancelled("the map was released")));
+            outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));
         }
         if let Some(pending) = entry.pending_still.take() {
             outbox.resolve(pending.resolver, Err(Error::cancelled("the map was released")));

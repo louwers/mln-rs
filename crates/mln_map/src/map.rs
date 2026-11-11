@@ -743,7 +743,10 @@ impl Map {
     /// enabled. Off, the default, they hold the bearing as GL JS does.
     pub fn set_globe_free_bearing(&mut self, free_bearing: bool) {
         self.process_events();
-        self.transform.set_globe_free_bearing(free_bearing);
+        if free_bearing != self.is_globe_free_bearing() {
+            self.transform.set_globe_free_bearing(free_bearing);
+            self.changed();
+        }
     }
 
     pub fn is_globe_free_bearing(&self) -> bool {
@@ -1424,6 +1427,8 @@ impl Map {
                 orientation: free_camera.orientation.unwrap_or_default(),
             },
             view: MapView::from_state(state, f64::from(self.pixel_ratio)),
+            globe_rendering: state.is_globe_rendering(),
+            globe_free_bearing: transform.is_globe_free_bearing(),
         }
     }
 

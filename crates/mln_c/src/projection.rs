@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use mln_map::MapProjection;
 use mln_map_types::{Camera, ConstrainMode, LogicalExtent, MapView, ProjectionMode, Viewport, ViewportMode};
+use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::{NorthOrientation, WrapMode};
 use mln_util::projection::{ProjectedMeters, Projection};
 use mln_util::size::Size;
@@ -13,10 +14,11 @@ use crate::error::Error;
 use crate::generated::types::{
     MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE, MLN_CONSTRAIN_MODE_SCREEN,
     MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_NORTH_ORIENTATION_DOWN, MLN_NORTH_ORIENTATION_LEFT,
-    MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y,
-    mln_camera, mln_camera_options, mln_diagnostic, mln_lat_lng, mln_logical_extent, mln_map_projection,
-    mln_map_projection_camera_result, mln_map_view, mln_map_viewport, mln_projected_meters, mln_projection_mode,
-    mln_screen_point, mln_status,
+    MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP, MLN_PROJECTION_TYPE_GLOBE, MLN_PROJECTION_TYPE_MERCATOR,
+    MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y, mln_camera,
+    mln_camera_options, mln_diagnostic, mln_lat_lng, mln_logical_extent, mln_map_projection,
+    mln_map_projection_camera_result, mln_map_view, mln_map_viewport, mln_projected_meters, mln_projection_definition,
+    mln_projection_mode, mln_screen_point, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{abi, camera, geo, lock};
@@ -92,7 +94,36 @@ fn map_view(view: &mln_map_view) -> Result<MapView, Error> {
             viewport_mode: viewport_mode(viewport.viewport_mode)?,
             frustum_offset: geo::edge_insets(viewport.frustum_offset, "view frustum offset")?,
         },
+        projection: projection_definition(&view.projection)?,
     })
+}
+
+fn projection_type(value: u32) -> Result<ProjectionType, Error> {
+    Ok(match value {
+        MLN_PROJECTION_TYPE_MERCATOR => ProjectionType::Mercator,
+        MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE => ProjectionType::VerticalPerspective,
+        MLN_PROJECTION_TYPE_GLOBE => ProjectionType::Globe,
+        _ => return Err(Error::invalid_argument("view projection types must be known")),
+    })
+}
+
+fn from_projection_type(value: ProjectionType) -> u32 {
+    match value {
+        ProjectionType::Mercator => MLN_PROJECTION_TYPE_MERCATOR,
+        ProjectionType::VerticalPerspective => MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE,
+        ProjectionType::Globe => MLN_PROJECTION_TYPE_GLOBE,
+    }
+}
+
+/// A caller's projection definition. A zeroed one is Mercator, whose
+/// transition then counts for nothing. [`MapView::to_state`] checks that
+/// the transition is finite.
+fn projection_definition(definition: &mln_projection_definition) -> Result<ProjectionDefinition, Error> {
+    Ok(ProjectionDefinition::between(
+        projection_type(definition.from)?,
+        projection_type(definition.to)?,
+        definition.transition,
+    ))
 }
 
 /// The `mln_map_view` of a map's view.
@@ -130,6 +161,11 @@ pub(crate) fn from_map_view(view: &MapView) -> mln_map_view {
                 ViewportMode::FlippedY => MLN_VIEWPORT_MODE_FLIPPED_Y,
             },
             frustum_offset: geo::from_edge_insets(viewport.frustum_offset),
+        },
+        projection: mln_projection_definition {
+            from: from_projection_type(view.projection.from),
+            to: from_projection_type(view.projection.to),
+            transition: view.projection.transition,
         },
     }
 }
@@ -222,6 +258,27 @@ pub unsafe extern "C" fn mln_map_projection_pixel_for_lat_lng(
         let point = with_projection(projection, |projection| projection.pixel_for_lat_lng(&coordinate))?;
         // SAFETY: non-null, and the caller's contract.
         unsafe { out_point.write(geo::from_screen_point(point)) };
+        Ok(())
+    })
+}
+
+/// `mln_map_projection_is_location_occluded()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_map_projection_is_location_occluded(
+    projection: mln_map_projection,
+    coordinate: mln_lat_lng,
+    out_occluded: *mut bool,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_occluded), {
+        let coordinate = geo::lat_lng(coordinate)?;
+        let occluded = with_projection(projection, |projection| projection.is_location_occluded(&coordinate))?;
+        // SAFETY: non-null, and the caller's contract.
+        unsafe { out_occluded.write(occluded) };
         Ok(())
     })
 }
@@ -498,6 +555,7 @@ mod tests {
                 viewport_mode: MLN_VIEWPORT_MODE_DEFAULT,
                 frustum_offset: NO_INSETS,
             },
+            projection: mln_projection_definition { from: 0, to: 0, transition: 0.0 },
         }
     }
 
@@ -627,7 +685,7 @@ mod tests {
 
     #[test]
     fn creation_rejects_invalid_views() {
-        let cases: [(&str, fn(&mut mln_map_view), &str); 10] = [
+        let cases: [(&str, fn(&mut mln_map_view), &str); 12] = [
             ("undersized", |view| view.size -= 1, "size"),
             ("past the pole", |view| view.camera.center.latitude = 90.5, "within [-90, 90]"),
             ("negative padding", |view| view.camera.padding.left = -1.0, "padding"),
@@ -638,6 +696,15 @@ mod tests {
             ("infinite skew", |view| view.projection_mode.x_skew = f64::INFINITY, "skews"),
             ("negative frustum offset", |view| view.viewport.frustum_offset.top = -1.0, "frustum offset"),
             ("unknown orientation", |view| view.viewport.north_orientation = 9, "north_orientation"),
+            ("unknown projection type", |view| view.projection.to = 9, "projection types"),
+            (
+                "NaN projection transition",
+                |view| {
+                    view.projection.to = MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE;
+                    view.projection.transition = f64::NAN;
+                },
+                "projection transition",
+            ),
         ];
         for (name, change, expected) in cases {
             let mut view = view();
@@ -657,6 +724,67 @@ mod tests {
             assert_eq!(occupied, 1);
             let status = mln_map_projection_create(core::ptr::null(), &mut 0, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+        }
+    }
+
+    fn occluded(projection: mln_map_projection, latitude: f64, longitude: f64) -> bool {
+        let mut occluded = false;
+        let coordinate = mln_lat_lng { latitude, longitude };
+        // SAFETY: a local output and a null diagnostic.
+        let status =
+            unsafe { mln_map_projection_is_location_occluded(projection, coordinate, &mut occluded, NULL_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+        occluded
+    }
+
+    #[test]
+    fn a_globe_view_hides_the_far_side() {
+        let mercator = create(&view());
+        let mut globe = view();
+        globe.projection = mln_projection_definition {
+            from: MLN_PROJECTION_TYPE_GLOBE,
+            to: MLN_PROJECTION_TYPE_GLOBE,
+            transition: 1.0,
+        };
+        let globe = create(&globe);
+        assert!(!occluded(mercator, 0.0, 180.0));
+        assert!(occluded(globe, 0.0, 180.0));
+        assert!(!occluded(globe, 10.0, 20.0));
+        // The globe curves away from the center, so a point off the center
+        // lands nearer to it than on Mercator.
+        let (flat, round) = (pixel(mercator, 0.0, 60.0), pixel(globe, 0.0, 60.0));
+        assert!(round.x < flat.x && (round.y - flat.y).abs() < 1e-6, "{flat:?} {round:?}");
+
+        // Halfway to the globe draws part of it, and a transition past either
+        // end holds there.
+        let mut halfway = view();
+        halfway.projection = mln_projection_definition {
+            from: MLN_PROJECTION_TYPE_MERCATOR,
+            to: MLN_PROJECTION_TYPE_VERTICAL_PERSPECTIVE,
+            transition: 0.5,
+        };
+        let halfway_projection = create(&halfway);
+        assert!(occluded(halfway_projection, 0.0, 180.0));
+        halfway.projection.transition = -2.0;
+        let held = create(&halfway);
+        assert!(!occluded(held, 0.0, 180.0));
+
+        let mut unchanged = true;
+        let past_the_pole = mln_lat_lng { latitude: 91.0, longitude: 0.0 };
+        // SAFETY: locals, nulls and null diagnostics.
+        unsafe {
+            let status = mln_map_projection_is_location_occluded(globe, past_the_pole, &mut unchanged, NULL_DIAGNOSTIC);
+            assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+            let origin = mln_lat_lng { latitude: 0.0, longitude: 0.0 };
+            let status = mln_map_projection_is_location_occluded(globe, origin, core::ptr::null_mut(), NULL_DIAGNOSTIC);
+            assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+            let status =
+                mln_map_projection_is_location_occluded(handles::NULL, origin, &mut unchanged, NULL_DIAGNOSTIC);
+            assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
+        }
+        assert!(unchanged);
+        for projection in [mercator, globe, halfway_projection, held] {
+            mln_map_projection_release(projection);
         }
     }
 

@@ -4,14 +4,20 @@
 
 use feature::Value;
 use mln_conversion::{Convertible, value_to_json};
+use mln_util::chrono::Duration;
+use mln_util::constants::DEFAULT_TRANSITION_DURATION;
 use mln_util::error::Error;
 
 use crate::conversion::{Converter, convert_layer, convert_source};
+use crate::expression::GlobalStateMap;
 use crate::filter::Filter;
 use crate::layer::layer_type_info;
 use crate::light::Light;
+use crate::projection::Projection;
+use crate::sky::Sky;
 use crate::style::Style;
-use crate::style_property::Kind;
+use crate::style_property::{Kind, StyleProperty};
+use crate::transition_options::TransitionOptions;
 
 impl Style {
     /// Adds the [source](https://maplibre.org/maplibre-style-spec/sources/)
@@ -196,21 +202,120 @@ impl Style {
         Ok(value.as_ref().map(json_text))
     }
 
-    /// Replaces the style's [light](https://maplibre.org/maplibre-style-spec/light/)
-    /// with the one `json` describes.
+    /// Sets the [root property](https://maplibre.org/maplibre-style-spec/root/)
+    /// `name` to the JSON value `json`, without reloading the style. A `null`
+    /// resets it to its default, as if the style didn't set it.
     ///
-    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) while the
-    /// style isn't loaded, and with `InvalidArgument` if `json` isn't a valid
-    /// light.
-    pub fn set_light_json(&mut self, json: &str) -> Result<(), Error> {
+    /// `light`, `sky`, `projection`, `state` and `transition` change. A
+    /// `state` sets every global state property to its new default. A
+    /// `transition` keeps whether placements fade, which the style spec's
+    /// transition doesn't hold.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
+    /// `name` isn't a root property, or is `sources` or `layers`, or if
+    /// `json` isn't a valid value for it; with `InvalidState` while the style
+    /// isn't loaded; and with `Unsupported` for the root properties that only
+    /// take effect as a style loads (the default camera, the sprite, the
+    /// glyphs and font faces, and the metadata) and for `terrain`, which the
+    /// map doesn't draw.
+    pub fn set_root_property_json(&mut self, name: &str, json: &str) -> Result<(), Error> {
+        require_root_property(name)?;
         self.require_loaded()?;
-        let value = parse(json, "style light")?;
+        let context = format!("style root property {}", quote(name));
+        let value = parse(json, &context)?;
+        let convertible = Convertible::from(&value);
         let mut error = mln_conversion::Error::default();
-        let Some(light) = Light::convert(&Convertible::from(&value), &mut error) else {
-            return Err(conversion_error("style light", error));
-        };
-        self.set_light(light);
+        match name {
+            "light" => {
+                let light = if value.is_null() {
+                    Light::default()
+                } else {
+                    Light::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, error))?
+                };
+                self.set_light(light);
+            }
+            "sky" => {
+                let sky = if value.is_null() {
+                    None
+                } else {
+                    Some(Sky::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, error))?)
+                };
+                self.set_sky(sky);
+            }
+            "projection" => {
+                let projection = if value.is_null() {
+                    Projection::default()
+                } else {
+                    Projection::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, error))?
+                };
+                self.set_projection(projection);
+            }
+            "state" => {
+                let defaults = if value.is_null() { GlobalStateMap::new() } else { state_defaults(&value, &context)? };
+                self.impl_.mutated = true;
+                self.impl_.set_global_state_defaults(defaults);
+            }
+            "transition" => {
+                let placement = self.get_transition_options().enable_placement_transitions;
+                let mut transition = if value.is_null() {
+                    TransitionOptions::with_duration(DEFAULT_TRANSITION_DURATION)
+                } else {
+                    TransitionOptions::convert(&convertible, &mut error)
+                        .ok_or_else(|| conversion_error(&context, error))?
+                };
+                transition.enable_placement_transitions = placement;
+                self.set_transition_options(&transition);
+            }
+            "terrain" => return Err(Error::unsupported(format!("{context}: the map doesn't draw terrain"))),
+            _ => return Err(Error::unsupported(format!("{context} can't change while the style is loaded"))),
+        }
         Ok(())
+    }
+
+    /// The JSON value of the [root property](https://maplibre.org/maplibre-style-spec/root/)
+    /// `name`, or `None` if neither the style nor the map sets it: the map
+    /// gives a style without a `transition` a default duration. The value can
+    /// differ in form from the value that was set, as with
+    /// [`layer_property_json`](Self::layer_property_json). The root
+    /// properties that [`set_root_property_json`](Self::set_root_property_json)
+    /// can't change read as the style loaded them.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) if
+    /// `name` isn't a root property, or is `sources` or `layers`.
+    pub fn root_property_json(&self, name: &str) -> Result<Option<String>, Error> {
+        require_root_property(name)?;
+        let value = match name {
+            "light" => {
+                let light = self.get_light();
+                properties_json(LIGHT_PROPERTIES, |name| light.get_property(name))
+            }
+            "sky" => self.get_sky().and_then(|sky| properties_json(SKY_PROPERTIES, |name| sky.get_property(name))),
+            "projection" => {
+                let projection = self.get_projection();
+                properties_json(&["type"], |name| projection.get_property(name))
+            }
+            "state" => {
+                let defaults = self.impl_.get_global_state_defaults();
+                (!defaults.is_empty()).then(|| {
+                    let definitions = defaults.iter().map(|(name, default)| {
+                        (name.clone(), serde_json::json!({ "default": value_to_json(default) }))
+                    });
+                    serde_json::Value::Object(definitions.collect())
+                })
+            }
+            "transition" => {
+                let transition = self.get_transition_options();
+                let members = [("duration", transition.duration), ("delay", transition.delay)]
+                    .into_iter()
+                    .filter_map(|(name, duration)| Some((name.to_owned(), milliseconds_json(duration?))))
+                    .collect::<serde_json::Map<_, _>>();
+                (!members.is_empty()).then_some(serde_json::Value::Object(members))
+            }
+            _ => serde_json::from_str::<serde_json::Value>(&self.get_json())
+                .ok()
+                .and_then(|mut document| document.get_mut(name).map(serde_json::Value::take)),
+        };
+        Ok(value.map(|value| value.to_string()))
     }
 
     /// Sets the property `name` of the style's light to the JSON value
@@ -263,6 +368,111 @@ impl Style {
     fn require_loaded(&self) -> Result<(), Error> {
         if self.is_loaded() { Ok(()) } else { Err(Error::invalid_state("style is not loaded")) }
     }
+}
+
+/// The style spec's root properties, other than `sources` and `layers`,
+/// which the source and layer calls change.
+const ROOT_PROPERTIES: &[&str] = &[
+    "version",
+    "name",
+    "metadata",
+    "center",
+    "centerAltitude",
+    "zoom",
+    "bearing",
+    "pitch",
+    "roll",
+    "state",
+    "light",
+    "sky",
+    "projection",
+    "terrain",
+    "sprite",
+    "glyphs",
+    "font-faces",
+    "transition",
+];
+
+/// The light's properties, in the style spec's order.
+const LIGHT_PROPERTIES: &[&str] = &[
+    "anchor",
+    "position",
+    "color",
+    "intensity",
+    "anchor-transition",
+    "position-transition",
+    "color-transition",
+    "intensity-transition",
+];
+
+/// The sky's properties, in the style spec's order.
+const SKY_PROPERTIES: &[&str] = &[
+    "sky-color",
+    "horizon-color",
+    "fog-color",
+    "fog-ground-blend",
+    "horizon-fog-blend",
+    "sky-horizon-blend",
+    "atmosphere-blend",
+    "sky-color-transition",
+    "horizon-color-transition",
+    "fog-color-transition",
+    "fog-ground-blend-transition",
+    "horizon-fog-blend-transition",
+    "sky-horizon-blend-transition",
+    "atmosphere-blend-transition",
+];
+
+fn require_root_property(name: &str) -> Result<(), Error> {
+    if ROOT_PROPERTIES.contains(&name) {
+        Ok(())
+    } else {
+        Err(Error::invalid_argument(format!("{} is not a style root property that this call takes", quote(name))))
+    }
+}
+
+/// An object of the properties that are set, or `None` when none is.
+fn properties_json<'a>(names: &[&'a str], property: impl Fn(&'a str) -> StyleProperty) -> Option<serde_json::Value> {
+    let members = names
+        .iter()
+        .filter_map(|&name| {
+            let property = property(name);
+            (property.get_kind() != Kind::Undefined).then(|| (name.to_owned(), value_to_json(property.get_value())))
+        })
+        .collect::<serde_json::Map<_, _>>();
+    (!members.is_empty()).then_some(serde_json::Value::Object(members))
+}
+
+/// Whole milliseconds as an integer, and finer durations with their
+/// fraction.
+fn milliseconds_json(duration: Duration) -> serde_json::Value {
+    let nanoseconds = duration.count();
+    if nanoseconds % 1_000_000 == 0 {
+        serde_json::Value::from(nanoseconds / 1_000_000)
+    } else {
+        serde_json::Value::from(nanoseconds as f64 / 1e6)
+    }
+}
+
+/// The defaults of a root `state` object: each member is an object, whose
+/// `default` is the property's default.
+fn state_defaults(value: &serde_json::Value, context: &str) -> Result<GlobalStateMap, Error> {
+    let Some(object) = value.as_object() else {
+        return Err(Error::invalid_argument(format!("{context}: state must be an object")));
+    };
+    let mut defaults = GlobalStateMap::new();
+    for (name, definition) in object {
+        let Some(definition) = definition.as_object() else {
+            return Err(Error::invalid_argument(format!(
+                "{context}: state property {} must be an object",
+                quote(name)
+            )));
+        };
+        if let Some(default) = definition.get("default") {
+            defaults.insert(name.clone(), mln_conversion::json_to_value(default));
+        }
+    }
+    Ok(defaults)
 }
 
 fn quote(id: &str) -> String {

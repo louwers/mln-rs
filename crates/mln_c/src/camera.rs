@@ -25,34 +25,34 @@ use crate::callback::Registration;
 use crate::completion::Plain;
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_ANIMATION_OPTION_DURATION, MLN_ANIMATION_OPTION_EASING, MLN_ANIMATION_OPTION_MIN_ZOOM,
-    MLN_ANIMATION_OPTION_TRANSITION_ID, MLN_ANIMATION_OPTION_VELOCITY, MLN_BOUND_OPTION_BOUNDS,
-    MLN_BOUND_OPTION_MAX_PITCH, MLN_BOUND_OPTION_MAX_ZOOM, MLN_BOUND_OPTION_MIN_PITCH, MLN_BOUND_OPTION_MIN_ZOOM,
-    MLN_BOUND_OPTION_UNBOUNDED, MLN_CAMERA_DELTA_ANCHOR, MLN_CAMERA_DELTA_BEARING, MLN_CAMERA_DELTA_MOMENTUM,
-    MLN_CAMERA_DELTA_OFFSET, MLN_CAMERA_DELTA_PITCH, MLN_CAMERA_DELTA_SCALE, MLN_CAMERA_FIT_OPTION_BEARING,
-    MLN_CAMERA_FIT_OPTION_PADDING, MLN_CAMERA_FIT_OPTION_PITCH, MLN_CAMERA_OPTION_ANCHOR, MLN_CAMERA_OPTION_BEARING,
-    MLN_CAMERA_OPTION_CENTER, MLN_CAMERA_OPTION_CENTER_ALTITUDE, MLN_CAMERA_OPTION_FOV, MLN_CAMERA_OPTION_PADDING,
-    MLN_CAMERA_OPTION_PITCH, MLN_CAMERA_OPTION_ROLL, MLN_CAMERA_OPTION_ZOOM, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED,
-    MLN_CAMERA_TRANSITION_OUTCOME_CLOSED, MLN_CAMERA_TRANSITION_OUTCOME_COMPLETED,
-    MLN_CAMERA_TRANSITION_OUTCOME_REPLACED, MLN_CAMERA_UPDATE_MODE_EASE, MLN_CAMERA_UPDATE_MODE_FLY,
-    MLN_CAMERA_UPDATE_MODE_JUMP, MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE, MLN_CONSTRAIN_MODE_SCREEN,
-    MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_FREE_CAMERA_OPTION_ORIENTATION, MLN_FREE_CAMERA_OPTION_POSITION,
-    MLN_GESTURE_PHASE_BEGIN, MLN_GESTURE_PHASE_CANCEL, MLN_GESTURE_PHASE_END, MLN_GESTURE_PHASE_NONE,
-    MLN_GESTURE_PHASE_UPDATE, MLN_MAP_DEBUG_COLLISION, MLN_MAP_DEBUG_DEPTH_BUFFER, MLN_MAP_DEBUG_OVERDRAW,
-    MLN_MAP_DEBUG_PARSE_STATUS, MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS, MLN_MAP_DEBUG_TIMESTAMPS,
-    MLN_MAP_TILE_OPTION_LOD_MIN_RADIUS, MLN_MAP_TILE_OPTION_LOD_MODE, MLN_MAP_TILE_OPTION_LOD_PITCH_THRESHOLD,
-    MLN_MAP_TILE_OPTION_LOD_SCALE, MLN_MAP_TILE_OPTION_LOD_ZOOM_SHIFT, MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA,
-    MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE, MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET,
-    MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION, MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE, MLN_NORTH_ORIENTATION_DOWN,
-    MLN_NORTH_ORIENTATION_LEFT, MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP,
-    MLN_PROJECTION_MODE_OPTION_AXONOMETRIC, MLN_PROJECTION_MODE_OPTION_X_SKEW, MLN_PROJECTION_MODE_OPTION_Y_SKEW,
-    MLN_TILE_LOD_MODE_DEFAULT, MLN_TILE_LOD_MODE_DISTANCE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y,
-    mln_animation_options, mln_bound_options, mln_buffer_view, mln_camera, mln_camera_delta, mln_camera_fit_options,
-    mln_camera_fit_update, mln_camera_options, mln_camera_query_result, mln_camera_transition_end,
-    mln_camera_transition_handler, mln_camera_update, mln_camera_velocity, mln_canonical_tile_id, mln_completion,
-    mln_diagnostic, mln_edge_insets, mln_free_camera_options, mln_lat_lng, mln_lat_lng_bounds, mln_logical_size,
-    mln_map, mln_map_debug_flags, mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options,
-    mln_screen_point, mln_status,
+    MLN_ANIMATION_OPTION_DURATION, MLN_ANIMATION_OPTION_EASING, MLN_ANIMATION_OPTION_MAX_DURATION,
+    MLN_ANIMATION_OPTION_MIN_ZOOM, MLN_ANIMATION_OPTION_TRANSITION_ID, MLN_ANIMATION_OPTION_VELOCITY,
+    MLN_BOUND_OPTION_BOUNDS, MLN_BOUND_OPTION_MAX_PITCH, MLN_BOUND_OPTION_MAX_ZOOM, MLN_BOUND_OPTION_MIN_PITCH,
+    MLN_BOUND_OPTION_MIN_ZOOM, MLN_BOUND_OPTION_UNBOUNDED, MLN_CAMERA_DELTA_ANCHOR, MLN_CAMERA_DELTA_BEARING,
+    MLN_CAMERA_DELTA_MOMENTUM, MLN_CAMERA_DELTA_OFFSET, MLN_CAMERA_DELTA_PITCH, MLN_CAMERA_DELTA_SCALE,
+    MLN_CAMERA_FIT_OPTION_BEARING, MLN_CAMERA_FIT_OPTION_PADDING, MLN_CAMERA_FIT_OPTION_PITCH,
+    MLN_CAMERA_OPTION_ANCHOR, MLN_CAMERA_OPTION_BEARING, MLN_CAMERA_OPTION_CENTER, MLN_CAMERA_OPTION_CENTER_ALTITUDE,
+    MLN_CAMERA_OPTION_FOV, MLN_CAMERA_OPTION_PADDING, MLN_CAMERA_OPTION_PITCH, MLN_CAMERA_OPTION_ROLL,
+    MLN_CAMERA_OPTION_ZOOM, MLN_CAMERA_TRANSITION_OUTCOME_CANCELLED, MLN_CAMERA_TRANSITION_OUTCOME_CLOSED,
+    MLN_CAMERA_TRANSITION_OUTCOME_COMPLETED, MLN_CAMERA_TRANSITION_OUTCOME_REPLACED, MLN_CAMERA_UPDATE_MODE_EASE,
+    MLN_CAMERA_UPDATE_MODE_FLY, MLN_CAMERA_UPDATE_MODE_JUMP, MLN_CONSTRAIN_MODE_HEIGHT_ONLY, MLN_CONSTRAIN_MODE_NONE,
+    MLN_CONSTRAIN_MODE_SCREEN, MLN_CONSTRAIN_MODE_WIDTH_AND_HEIGHT, MLN_FREE_CAMERA_OPTION_ORIENTATION,
+    MLN_FREE_CAMERA_OPTION_POSITION, MLN_GESTURE_PHASE_BEGIN, MLN_GESTURE_PHASE_CANCEL, MLN_GESTURE_PHASE_END,
+    MLN_GESTURE_PHASE_NONE, MLN_GESTURE_PHASE_UPDATE, MLN_MAP_DEBUG_COLLISION, MLN_MAP_DEBUG_DEPTH_BUFFER,
+    MLN_MAP_DEBUG_OVERDRAW, MLN_MAP_DEBUG_PARSE_STATUS, MLN_MAP_DEBUG_STENCIL_CLIP, MLN_MAP_DEBUG_TILE_BORDERS,
+    MLN_MAP_DEBUG_TIMESTAMPS, MLN_MAP_TILE_OPTION_LOD_MIN_RADIUS, MLN_MAP_TILE_OPTION_LOD_MODE,
+    MLN_MAP_TILE_OPTION_LOD_PITCH_THRESHOLD, MLN_MAP_TILE_OPTION_LOD_SCALE, MLN_MAP_TILE_OPTION_LOD_ZOOM_SHIFT,
+    MLN_MAP_TILE_OPTION_PREFETCH_ZOOM_DELTA, MLN_MAP_VIEWPORT_OPTION_CONSTRAIN_MODE,
+    MLN_MAP_VIEWPORT_OPTION_FRUSTUM_OFFSET, MLN_MAP_VIEWPORT_OPTION_NORTH_ORIENTATION,
+    MLN_MAP_VIEWPORT_OPTION_VIEWPORT_MODE, MLN_NORTH_ORIENTATION_DOWN, MLN_NORTH_ORIENTATION_LEFT,
+    MLN_NORTH_ORIENTATION_RIGHT, MLN_NORTH_ORIENTATION_UP, MLN_PROJECTION_MODE_OPTION_AXONOMETRIC,
+    MLN_PROJECTION_MODE_OPTION_X_SKEW, MLN_PROJECTION_MODE_OPTION_Y_SKEW, MLN_TILE_LOD_MODE_DEFAULT,
+    MLN_TILE_LOD_MODE_DISTANCE, MLN_VIEWPORT_MODE_DEFAULT, MLN_VIEWPORT_MODE_FLIPPED_Y, mln_animation_options,
+    mln_bound_options, mln_buffer_view, mln_camera, mln_camera_delta, mln_camera_fit_options, mln_camera_fit_update,
+    mln_camera_options, mln_camera_query_result, mln_camera_transition_end, mln_camera_transition_handler,
+    mln_camera_update, mln_camera_velocity, mln_canonical_tile_id, mln_completion, mln_diagnostic, mln_edge_insets,
+    mln_free_camera_options, mln_lat_lng, mln_lat_lng_bounds, mln_logical_size, mln_map, mln_map_debug_flags,
+    mln_map_tile_options, mln_map_viewport_options, mln_projection_mode_options, mln_screen_point, mln_status,
 };
 use crate::map::{command, query};
 use crate::{buffer, geo, handles, lock};
@@ -294,12 +294,17 @@ impl Animation {
                 | MLN_ANIMATION_OPTION_VELOCITY
                 | MLN_ANIMATION_OPTION_MIN_ZOOM
                 | MLN_ANIMATION_OPTION_EASING
-                | MLN_ANIMATION_OPTION_TRANSITION_ID,
+                | MLN_ANIMATION_OPTION_TRANSITION_ID
+                | MLN_ANIMATION_OPTION_MAX_DURATION,
             "mln_animation_options.fields",
         )?;
         let duration_ms = fields.get(MLN_ANIMATION_OPTION_DURATION, animation.duration_ms);
         if duration_ms.is_some_and(|duration_ms| !is_duration_ms(duration_ms)) {
             return Err(Error::invalid_argument("animation duration_ms must fit the native duration range"));
+        }
+        let max_duration_ms = fields.get(MLN_ANIMATION_OPTION_MAX_DURATION, animation.max_duration_ms);
+        if max_duration_ms.is_some_and(|max_duration_ms| !is_duration_ms(max_duration_ms)) {
+            return Err(Error::invalid_argument("animation max_duration_ms must fit the native duration range"));
         }
         let velocity = fields.get(MLN_ANIMATION_OPTION_VELOCITY, animation.velocity);
         if velocity.is_some_and(|velocity| !velocity.is_finite() || velocity <= 0.0) {
@@ -323,6 +328,7 @@ impl Animation {
         Ok(Self {
             options: AnimationOptions {
                 duration: duration_ms.map(duration),
+                max_duration: max_duration_ms.map(duration),
                 velocity,
                 min_zoom,
                 easing: easing.map(|easing| UnitBezier::new(easing.x1, easing.y1, easing.x2, easing.y2)),
@@ -420,6 +426,24 @@ pub unsafe extern "C" fn mln_map_set_rendering_stats_view_enabled(
     export!(out_diagnostic, {
         // SAFETY: the caller's contract.
         unsafe { command(map, completion, |map| map.set_rendering_stats_view_enabled(enabled)) }
+    })
+}
+
+/// `mln_map_set_globe_free_bearing_enabled()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_map_set_globe_free_bearing_enabled(
+    map: mln_map,
+    enabled: bool,
+    completion: *const mln_completion,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        // SAFETY: the caller's contract.
+        unsafe { command(map, completion, |map| map.set_globe_free_bearing_enabled(enabled)) }
     })
 }
 
@@ -1243,6 +1267,7 @@ mod tests {
                 (|a: &mut mln_animation_options| a.duration_ms = 1e300) as fn(&mut _),
                 "native duration range",
             ),
+            (MLN_ANIMATION_OPTION_MAX_DURATION, |a| a.max_duration_ms = -1.0, "native duration range"),
             (MLN_ANIMATION_OPTION_VELOCITY, |a| a.velocity = 0.0, "positive and finite"),
             (MLN_ANIMATION_OPTION_MIN_ZOOM, |a| a.min_zoom = f64::INFINITY, "min_zoom must be finite"),
             (MLN_ANIMATION_OPTION_EASING, |a| a.easing.x1 = 1.5, "within [0, 1]"),

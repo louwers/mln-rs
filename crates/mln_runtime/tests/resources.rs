@@ -1,7 +1,7 @@
 // Resource providers, URL and header transforms, the cache database and
 // offline regions. They follow maplibre-native-ffi's ABI tests
 // (tests/native/abi/resources/{provider,transforms,ambient_cache,offline}.c
-// at b20632a) where those test the same rules.
+// at eae96a42c) where those test the same rules.
 
 mod support;
 

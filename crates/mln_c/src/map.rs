@@ -316,6 +316,8 @@ fn from_snapshot(snapshot: &MapSnapshot, event_mask: mln_runtime_event_flags) ->
             orientation: mln_quaternion { x: qx, y: qy, z: qz, w: qw },
         },
         view: projection::from_map_view(&snapshot.view),
+        globe_rendering: snapshot.globe_rendering,
+        globe_free_bearing_enabled: snapshot.globe_free_bearing,
     }
 }
 

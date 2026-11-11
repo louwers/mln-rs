@@ -1,6 +1,6 @@
 // Events, snapshots and style loads. They follow maplibre-native-ffi's ABI
 // tests (tests/native/abi/runtime/events.c and event_generations.c at
-// b20632a) where those test the same rules.
+// eae96a42c) where those test the same rules.
 
 mod support;
 
@@ -117,7 +117,7 @@ fn a_style_that_fails_to_parse_fails_its_load_and_keeps_the_style() {
     let layer = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background"}]}"#;
     wait(map.set_style_json(layer));
     let error = wait_err(map.set_style_json("{"));
-    assert_eq!(ErrorKind::Native, error.kind);
+    assert_eq!(ErrorKind::InvalidArgument, error.kind);
     assert!(log.wait_for(|event| matches!(event.kind, RuntimeEventKind::Map(MapEvent::LoadingFailed(_)))).is_some());
     assert!(wait(map.style_layer_json("bg")).is_some());
     assert_eq!(layer, wait(map.loaded_style_json()));
@@ -131,6 +131,10 @@ fn a_style_url_loads_and_names_the_style() {
         when.method("GET").path("/style.json");
         then.status(200).body(EMPTY_STYLE);
     });
+    server.mock(|when, then| {
+        when.method("GET").path("/broken.json");
+        then.status(200).body("{");
+    });
     let runtime = runtime();
     let map = map(&runtime);
     let url = server.url("/style.json");
@@ -141,6 +145,9 @@ fn a_style_url_loads_and_names_the_style() {
     wait(map.set_style_json(EMPTY_STYLE));
     assert_eq!(None, wait(map.style_url()));
     assert_eq!(ErrorKind::Native, wait_err(map.set_style_url(server.url("/missing.json"))).kind);
+    // The URL is the argument, which a document that fails to parse doesn't
+    // make invalid.
+    assert_eq!(ErrorKind::Native, wait_err(map.set_style_url(server.url("/broken.json"))).kind);
 }
 
 #[test]

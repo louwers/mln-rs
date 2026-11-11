@@ -1,7 +1,7 @@
 // Offscreen render sessions: frame demands and their results, the session's
 // work, still images, queries and the session's lifecycle. They follow
 // maplibre-native-ffi's ABI tests (tests/native/abi/render/{demands,driver,
-// offscreen,queries}.c and map/still_image.c at b20632a) where those test
+// offscreen,queries}.c and map/still_image.c at eae96a42c) where those test
 // the same rules.
 
 mod support;

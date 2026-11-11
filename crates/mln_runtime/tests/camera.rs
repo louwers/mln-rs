@@ -1,7 +1,7 @@
 // Camera commands: when their ends report, fits, and the viewport and tile
 // settings. They follow maplibre-native-ffi's ABI tests
 // (tests/native/abi/map/camera.c, camera_transitions.c and options.c at
-// b20632a) where those test the same rules.
+// eae96a42c) where those test the same rules.
 
 mod support;
 

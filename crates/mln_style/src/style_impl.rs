@@ -541,6 +541,21 @@ impl Impl {
         self.observer().on_update();
     }
 
+    /// Replaces the defaults that the style's root `state` gives, and sets
+    /// every global state property to its new default, as a style that
+    /// loads with this `state` would.
+    pub fn set_global_state_defaults(&mut self, defaults: GlobalStateMap) {
+        self.global_state = Arc::new(defaults.clone());
+        self.global_state_defaults = defaults;
+        self.reevaluate_layer_visibilities();
+        self.observer().on_update();
+    }
+
+    /// The defaults that the style's root `state` gives.
+    pub fn get_global_state_defaults(&self) -> &GlobalStateMap {
+        &self.global_state_defaults
+    }
+
     /// Re-evaluate the visibility expressions of all layers against the
     /// current global state.
     pub fn reevaluate_layer_visibilities(&mut self) {

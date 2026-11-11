@@ -1,5 +1,5 @@
 // The feature state that a map keeps. They follow maplibre-native-ffi's ABI
-// tests (tests/native/abi/style/feature_state.c at b20632a) where those test
+// tests (tests/native/abi/style/feature_state.c at eae96a42c) where those test
 // the same rules.
 
 mod support;

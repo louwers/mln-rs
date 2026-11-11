@@ -11,6 +11,7 @@ use mln_map::{
     UpdateReader, ViewportMode,
 };
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
+use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::chrono::Duration;
 use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
@@ -294,4 +295,51 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
         let error = MapProjection::from_view(&changed).err();
         assert_eq!(error.map(|error| error.kind), Some(ErrorKind::InvalidArgument), "view {index}");
     }
+}
+
+#[test]
+fn projection_from_a_globe_view_matches_the_map() {
+    let _loop = RunLoop::new();
+    let mut map = map(MapOptions::new().with_size(Size::new(400, 300)));
+    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[],"projection":{"type":"globe"}}"#);
+    // The globe lets the zoom fall below 0 toward a pole, and the center past
+    // Mercator's latitudes.
+    map.jump_to(
+        &CameraOptions::default()
+            .with_center(Some(ll(87.0, 40.0)))
+            .with_zoom(Some(-0.5))
+            .with_bearing(Some(20.0))
+            .with_pitch(Some(10.0)),
+    );
+    map.set_globe_free_bearing(true);
+
+    let snapshot = map.snapshot();
+    assert!(snapshot.globe_rendering);
+    assert!(snapshot.globe_free_bearing);
+    let view = snapshot.view;
+    assert_eq!(view.projection, ProjectionDefinition::new(ProjectionType::VerticalPerspective));
+    assert!(view.camera.zoom < 0.0 && view.camera.center.latitude() > 85.0, "{:?}", view.camera);
+
+    let projection = MapProjection::from_view(&view).unwrap();
+    assert_eq!(projection.camera(), view.camera);
+    let far_side = ll(-60.0, -140.0);
+    assert!(map.is_location_occluded(&far_side));
+    for lat_lng in [ll(87.0, 40.0), ll(60.0, 100.0), far_side] {
+        let expected = map.pixel_for_lat_lng(&lat_lng);
+        let actual = projection.pixel_for_lat_lng(&lat_lng);
+        assert!((actual.x - expected.x).abs() < 1e-6 && (actual.y - expected.y).abs() < 1e-6, "{lat_lng:?}");
+        assert_eq!(projection.is_location_occluded(&lat_lng), map.is_location_occluded(&lat_lng), "{lat_lng:?}");
+    }
+
+    // A view can name `globe`, which draws as the map would at its zoom.
+    let named = MapView { projection: ProjectionDefinition::new(ProjectionType::Globe), ..view };
+    assert_eq!(
+        MapProjection::from_view(&named).unwrap().pixel_for_lat_lng(&far_side),
+        projection.pixel_for_lat_lng(&far_side)
+    );
+    let flat = MapView { projection: ProjectionDefinition::default(), ..view };
+    assert!(MapProjection::from_view(&flat).is_err(), "Mercator has no zoom below 0");
+    let mut nan = view;
+    nan.projection.transition = f64::NAN;
+    assert_eq!(MapProjection::from_view(&nan).err().map(|error| error.kind), Some(ErrorKind::InvalidArgument));
 }
