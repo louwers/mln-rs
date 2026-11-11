@@ -13,7 +13,7 @@ use crate::online_file_source::OnlineFileSource;
 use crate::resource::{Kind, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{FinishedCallback, ResourceTransform};
-use crate::response::{Error, Reason, Response};
+use crate::response::{Reason, ResourceError, Response};
 
 /// Registers a `Network` factory on `manager` that counts its calls.
 fn count_network_factory(manager: &FileSourceManager) -> Arc<AtomicUsize> {
@@ -93,7 +93,7 @@ fn unregistered_types_have_no_file_source() {
 
 fn failing_transform(message: &'static str) -> ResourceTransform {
     ResourceTransform::new(Some(Arc::new(move |_kind: Kind, _url: &str, finished: FinishedCallback| {
-        finished(Err(Error::new(Reason::Other, message)));
+        finished(Err(ResourceError::new(Reason::Other, message)));
     })))
 }
 

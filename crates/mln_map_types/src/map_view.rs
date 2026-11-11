@@ -2,6 +2,7 @@
 //! rendered frame shows.
 
 use mln_util::constants;
+use mln_util::error::Error;
 use mln_util::geo::{EdgeInsets, LatLng, NorthOrientation};
 use mln_util::size::Size;
 
@@ -109,7 +110,7 @@ impl MapView {
     /// finite, a zoom, pitch or field of view outside the limits of every map,
     /// a padding or frustum offset below zero, an empty size, a scale factor
     /// that isn't positive, or a skew that isn't finite.
-    pub fn to_state(&self) -> Result<TransformState, String> {
+    pub fn to_state(&self) -> Result<TransformState, Error> {
         self.validate()?;
         let camera = &self.camera;
         let viewport = &self.viewport;
@@ -141,11 +142,11 @@ impl MapView {
         Ok(state)
     }
 
-    fn validate(&self) -> Result<(), String> {
+    fn validate(&self) -> Result<(), Error> {
         let camera = &self.camera;
         let finite = [camera.center_altitude, camera.zoom, camera.bearing, camera.pitch, camera.roll, camera.fov];
         if !finite.iter().all(|value| value.is_finite()) {
-            return Err("view camera members must be finite".to_owned());
+            return Err(Error::invalid_argument("view camera members must be finite"));
         }
         let limits = TransformState::default();
         if !(constants::MIN_ZOOM..=constants::MAX_ZOOM).contains(&camera.zoom)
@@ -154,18 +155,20 @@ impl MapView {
             || !(mln_math::rad2deg(limits.get_min_field_of_view())..=mln_math::rad2deg(limits.get_max_field_of_view()))
                 .contains(&camera.fov)
         {
-            return Err("view camera zoom, pitch and field of view must be within the limits of a map".to_owned());
+            return Err(Error::invalid_argument(
+                "view camera zoom, pitch and field of view must be within the limits of a map",
+            ));
         }
         if !valid_insets(&camera.padding) || !valid_insets(&self.viewport.frustum_offset) {
-            return Err("view padding and frustum offset must be finite and at least 0".to_owned());
+            return Err(Error::invalid_argument("view padding and frustum offset must be finite and at least 0"));
         }
         let extent = &self.extent;
         if extent.size.is_empty() || !extent.scale_factor.is_finite() || extent.scale_factor <= 0.0 {
-            return Err("view extent dimensions and scale factor must be positive".to_owned());
+            return Err(Error::invalid_argument("view extent dimensions and scale factor must be positive"));
         }
         let mode = &self.projection_mode;
         if !mode.x_skew.is_none_or(f64::is_finite) || !mode.y_skew.is_none_or(f64::is_finite) {
-            return Err("view projection skews must be finite".to_owned());
+            return Err(Error::invalid_argument("view projection skews must be finite"));
         }
         Ok(())
     }

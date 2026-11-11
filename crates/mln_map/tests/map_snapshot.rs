@@ -14,6 +14,7 @@ use mln_map::{
 use mln_renderer::{RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_util::chrono::Duration;
+use mln_util::error::ErrorKind;
 use mln_util::geo::{EdgeInsets, LatLng, LatLngBounds, ScreenCoordinate, WrapMode};
 use mln_util::size::Size;
 
@@ -302,6 +303,7 @@ fn projection_from_a_view_rejects_views_no_map_shows() {
     for (index, change) in invalid.iter().enumerate() {
         let mut changed = view;
         change(&mut changed);
-        assert!(MapProjection::from_view(&changed).is_err(), "view {index}");
+        let error = MapProjection::from_view(&changed).err();
+        assert_eq!(error.map(|error| error.kind), Some(ErrorKind::InvalidArgument), "view {index}");
     }
 }

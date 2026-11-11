@@ -29,7 +29,7 @@ impl MapProjection {
     /// rendered frame. `Err`: as [`MapView::to_state`].
     ///
     /// [`MapSnapshot`]: crate::MapSnapshot
-    pub fn from_view(view: &MapView) -> Result<Self, String> {
+    pub fn from_view(view: &MapView) -> Result<Self, Error> {
         Ok(Self::from_state(view.to_state()?))
     }
 
