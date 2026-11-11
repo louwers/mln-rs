@@ -65,18 +65,22 @@ pub struct ShaderSource {
 
 // The `<layer>UBOCount` enumerators of include/mln/shaders/shader_defines.hpp
 // (packed, as on Metal) that shader_defines.rs doesn't name.
+const ATMOSPHERE_UBO_COUNT: usize = ATMOSPHERE_LAYER_UBO_COUNT;
 const CIRCLE_UBO_COUNT: usize = CIRCLE_LAYER_UBO_COUNT;
 const CLIPPING_MASK_UBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 const COLOR_RELIEF_UBO_COUNT: usize = COLOR_RELIEF_LAYER_UBO_COUNT;
 const DEBUG_UBO_COUNT: usize = ID_DEBUG_UBO + 1;
 const FILL_UBO_COUNT: usize = FILL_LAYER_UBO_COUNT;
 const FILL_EXTRUSION_UBO_COUNT: usize = FILL_EXTRUSION_LAYER_UBO_COUNT;
+/// `globeDepthUBOCount` (include/mln/shaders/mtl/globe_depth.hpp).
+const GLOBE_DEPTH_UBO_COUNT: usize = DRAWABLE_RESERVED_UBO_COUNT;
 const HEATMAP_UBO_COUNT: usize = HEATMAP_LAYER_UBO_COUNT;
 const HEATMAP_TEXTURE_UBO_COUNT: usize = ID_HEATMAP_TEXTURE_PROPS_UBO + 1;
 const HILLSHADE_PREPARE_UBO_COUNT: usize = ID_HILLSHADE_PREPARE_TILE_PROPS_UBO + 1;
 const HILLSHADE_UBO_COUNT: usize = HILLSHADE_LAYER_UBO_COUNT;
 const LINE_UBO_COUNT: usize = LINE_LAYER_UBO_COUNT;
 const RASTER_UBO_COUNT: usize = RASTER_LAYER_UBO_COUNT;
+const SKY_UBO_COUNT: usize = SKY_LAYER_UBO_COUNT;
 const SYMBOL_UBO_COUNT: usize = SYMBOL_LAYER_UBO_COUNT;
 
 const fn attr(index: usize, data_type: AttributeDataType, buffer_index: usize, id: usize) -> AttributeInfo {
@@ -232,6 +236,11 @@ shader_source!(
     &[tex(0, ID_FILL_EXTRUSION_IMAGE_TEXTURE)]
 );
 
+// src/mln/shaders/mtl/globe_depth.cpp
+const GLOBE_DEPTH_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, Short2, GLOBE_DEPTH_UBO_COUNT + 0, ID_GLOBE_DEPTH_POS_VERTEX_ATTRIBUTE)];
+shader_source!(GLOBE_DEPTH_SHADER, "GlobeDepthShader", GLOBE_DEPTH_ATTRIBUTES, &[]);
+
 // src/mln/shaders/mtl/heatmap.cpp
 const HEATMAP_ATTRIBUTES: &[AttributeInfo] = &[
     attr(0, Short2, HEATMAP_UBO_COUNT + 0, ID_HEATMAP_POS_VERTEX_ATTRIBUTE),
@@ -345,6 +354,13 @@ shader_source!(
     &[tex(0, ID_RASTER_IMAGE0_TEXTURE), tex(1, ID_RASTER_IMAGE1_TEXTURE)]
 );
 
+// src/mln/shaders/mtl/sky.cpp
+const SKY_ATTRIBUTES: &[AttributeInfo] = &[attr(0, Short2, SKY_UBO_COUNT + 0, ID_SKY_POS_VERTEX_ATTRIBUTE)];
+const ATMOSPHERE_ATTRIBUTES: &[AttributeInfo] =
+    &[attr(0, Short2, ATMOSPHERE_UBO_COUNT + 0, ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE)];
+shader_source!(SKY_SHADER, "SkyShader", SKY_ATTRIBUTES, &[]);
+shader_source!(ATMOSPHERE_SHADER, "AtmosphereShader", ATMOSPHERE_ATTRIBUTES, &[]);
+
 // src/mln/shaders/mtl/symbol.cpp before the symbol instancing
 // (`!MLN_USE_SYMBOL_INSTANCING`): the layout vertex (`SymbolLayoutVertex`,
 // with the port's `tex_origin`), the dynamic vertex (`projected_pos`), the
@@ -439,6 +455,9 @@ pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
         BuiltIn::SymbolIconShader => Some(&SYMBOL_ICON_SHADER),
         BuiltIn::SymbolSDFShader => Some(&SYMBOL_SDF_SHADER),
         BuiltIn::SymbolTextAndIconShader => Some(&SYMBOL_TEXT_AND_ICON_SHADER),
+        BuiltIn::SkyShader => Some(&SKY_SHADER),
+        BuiltIn::AtmosphereShader => Some(&ATMOSPHERE_SHADER),
+        BuiltIn::GlobeDepthShader => Some(&GLOBE_DEPTH_SHADER),
         _ => None,
     }
 }

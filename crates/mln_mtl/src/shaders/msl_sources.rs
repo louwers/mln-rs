@@ -8,6 +8,7 @@
 //   include/mln/shaders/mtl/debug.hpp
 //   include/mln/shaders/mtl/fill.hpp
 //   include/mln/shaders/mtl/fill_extrusion.hpp
+//   include/mln/shaders/mtl/globe_depth.hpp
 //   include/mln/shaders/mtl/heatmap.hpp
 //   include/mln/shaders/mtl/heatmap_texture.hpp
 //   include/mln/shaders/mtl/hillshade.hpp
@@ -18,6 +19,7 @@
 //   include/mln/shaders/mtl/shader_group.hpp
 //   include/mln/shaders/mtl/shader_program.hpp
 //   include/mln/shaders/mtl/shader_program_mtl.hpp
+//   include/mln/shaders/mtl/sky.hpp
 //   include/mln/shaders/mtl/symbol.hpp
 //   include/mln/shaders/mtl/widevector.hpp
 // The MSL is copied from the C++ raw string literals. The port changes some of it by
@@ -259,6 +261,166 @@ struct alignas(16) GlobalPaintParamsUBO {
 };
 static_assert(sizeof(GlobalPaintParamsUBO) == 3 * 16, "wrong size");
 
+struct alignas(16) ProjectionUBO {
+    /*   0 */ float4x4 matrix;
+    /*  64 */ float4x4 fallback_matrix;
+    /* 128 */ float4 tile_mercator_coords;
+    /* 144 */ float4 clipping_plane;
+    /* 160 */ float projection_transition;
+    /* 164 */ float depth_offset;
+    /* 168 */ float2 translate;
+    /* 176 */
+};
+static_assert(sizeof(ProjectionUBO) == 11 * 16, "wrong size");
+
+// Pole vertices carry these sentinel Y values in their raw position.
+#define GLOBE_POLE_NORTH_Y -32767.5
+#define GLOBE_POLE_SOUTH_Y 32766.5
+
+#if defined(PROJECTION_GLOBE)
+
+#define GLOBE_RADIUS 6371008.8
+
+// Tile position (0..EXTENT) to a point on the unit sphere; the pole sentinels in rawPos map to the poles.
+inline float3 projectToSphere(float2 translatedPos, float2 rawPos, device const ProjectionUBO& projection) {
+    const float2 mercator_pos = projection.tile_mercator_coords.xy + projection.tile_mercator_coords.zw * translatedPos;
+    const float spherical_x = mercator_pos.x * M_PI_F * 2.0 + M_PI_F;
+    // sin/cos of the latitude from the Mercator Y via the tangent half-angle identities: no atan, and float32 precision survives near the equator.
+    const float t = exp(M_PI_F - (mercator_pos.y * M_PI_F * 2.0));
+    const float t2 = t * t;
+    const float denom = t2 + 1.0;
+    const float sin_sy = (t2 - 1.0) / denom;
+    const float cos_sy = (2.0 * t) / denom;
+    float3 pos = float3(sin(spherical_x) * cos_sy, sin_sy, cos(spherical_x) * cos_sy);
+    if (rawPos.y < GLOBE_POLE_NORTH_Y) {
+        pos = float3(0.0, 1.0, 0.0);
+    }
+    if (rawPos.y > GLOBE_POLE_SOUTH_Y) {
+        pos = float3(0.0, -1.0, 0.0);
+    }
+    return pos;
+}
+
+inline float3 globeRotateVector(float3 vec, float2 angles) {
+    float3 axisRight = float3(vec.z, 0.0, -vec.x);
+    float3 axisUp = cross(axisRight, vec);
+    axisRight = normalize(axisRight);
+    axisUp = normalize(axisUp);
+    const float2 t = tan(angles);
+    return normalize(vec + axisRight * t.x + axisUp * t.y);
+}
+
+// cos(latitude) at a tile Y, from the same exp() form as projectToSphere.
+inline float circumferenceRatioAtTileY(float tileY, device const ProjectionUBO& projection) {
+    const float mercator_pos_y = projection.tile_mercator_coords.y + projection.tile_mercator_coords.w * tileY;
+    const float t = exp(M_PI_F - (mercator_pos_y * M_PI_F * 2.0));
+    return (2.0 * t) / (t * t + 1.0);
+}
+
+inline float projectLineThickness(float tileY, device const ProjectionUBO& projection) {
+    const float thickness = 1.0 / circumferenceRatioAtTileY(tileY, projection);
+    if (projection.projection_transition < 0.999) {
+        return mix(1.0, thickness, projection.projection_transition);
+    }
+    return thickness;
+}
+
+inline float globeComputeClippingZ(float3 spherePos, device const ProjectionUBO& projection) {
+    return 1.0 - (dot(spherePos, projection.clipping_plane.xyz) + projection.clipping_plane.w);
+}
+
+inline float4 interpolateProjection(float2 posInTile, float3 spherePos, float elevation, device const ProjectionUBO& projection) {
+    const float3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
+    float4 globePosition = projection.matrix * float4(elevatedPos, 1.0);
+    // Clip the far side of the globe through Z; the layer's depth shift keeps layer order.
+    // The layer offset is subtracted in clip space on purpose: the separation it buys grows as the camera nears the
+    // sphere, where the hemisphere's Z gradient is steepest; a constant NDC offset z-fights fill against outline.
+    globePosition.z = globeComputeClippingZ(elevatedPos, projection) * globePosition.w - projection.depth_offset;
+
+    if (projection.projection_transition > 0.999) {
+        return globePosition;
+    }
+
+    const float4 flatPosition = projection.fallback_matrix * float4(posInTile, elevation, 1.0);
+    const float z_globeness_threshold = 0.2;
+    float4 result = globePosition;
+    result.z = mix(0.0, globePosition.z, clamp((projection.projection_transition - z_globeness_threshold) / (1.0 - z_globeness_threshold), 0.0, 1.0));
+    result.xyw = mix(flatPosition.xyw, globePosition.xyw, projection.projection_transition);
+    if ((posInTile.y < GLOBE_POLE_NORTH_Y) || (posInTile.y > GLOBE_POLE_SOUTH_Y)) {
+        result = globePosition;
+        const float poles_hidden_anim_percentage = 0.02;
+        result.z = mix(globePosition.z, 100.0, pow(max((1.0 - projection.projection_transition) / poles_hidden_anim_percentage, 0.0), 8.0));
+    }
+    return result;
+}
+
+// Keeps the matrix Z, for geometry that needs the depth buffer.
+inline float4 interpolateProjectionFor3D(float2 posInTile, float3 spherePos, float elevation, device const ProjectionUBO& projection) {
+    const float3 elevatedPos = spherePos * (1.0 + elevation / GLOBE_RADIUS);
+    const float4 globePosition = projection.matrix * float4(elevatedPos, 1.0);
+    if (projection.projection_transition > 0.999) {
+        return globePosition;
+    }
+    const float4 fallbackPosition = projection.fallback_matrix * float4(posInTile, elevation, 1.0);
+    return mix(fallbackPosition, globePosition, projection.projection_transition);
+}
+
+inline float4 projectTile(float2 pos, device const ProjectionUBO& projection) {
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, float2(0.0, 0.0), projection), 0.0, projection);
+}
+
+// The zoom 0 tile's buffer wraps around the planet onto the tile itself, so the line shaders discard the fragments
+// beyond its X extent; every other tile (a mercator width below the whole world's) hands on a value inside it.
+inline float antimeridianClipX(float2 posInTile, device const ProjectionUBO& projection) {
+    return projection.tile_mercator_coords.z * 8192.0 >= 1.0 ? posInTile.x : 0.0;
+}
+
+inline bool clippedAtAntimeridian(float tileX) {
+    return tileX < 0.0 || tileX >= 8192.0;
+}
+
+// The variant for geometry that can carry pole vertices; rawPos is the untranslated position.
+inline float4 projectTile(float2 pos, float2 rawPos, device const ProjectionUBO& projection) {
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, rawPos, projection), 0.0, projection);
+}
+
+inline float4 projectTileWithElevation(float2 pos, float elevation, device const ProjectionUBO& projection) {
+    return interpolateProjection(pos, projectToSphere(pos + projection.translate, float2(0.0, 0.0), projection), elevation, projection);
+}
+
+inline float4 projectTileFor3D(float2 pos, float elevation, device const ProjectionUBO& projection) {
+    return interpolateProjectionFor3D(pos, projectToSphere(pos + projection.translate, pos, projection), elevation, projection);
+}
+
+#else
+
+inline float4 projectTile(float2 pos, device const ProjectionUBO& projection) {
+    return projection.matrix * float4(pos, 0.0, 1.0);
+}
+
+// Pole vertices only exist on the globe; put them behind the near plane so their triangles are clipped.
+inline float4 projectTile(float2 pos, float2 rawPos, device const ProjectionUBO& projection) {
+    float4 result = projection.matrix * float4(pos, 0.0, 1.0);
+    if (rawPos.y < GLOBE_POLE_NORTH_Y || rawPos.y > GLOBE_POLE_SOUTH_Y) {
+        result.z = -10000000.0;
+    }
+    return result;
+}
+
+inline float4 projectTileWithElevation(float2 pos, float elevation, device const ProjectionUBO& projection) {
+    return projection.matrix * float4(pos, elevation, 1.0);
+}
+
+inline float4 projectTileFor3D(float2 pos, float elevation, device const ProjectionUBO& projection) {
+    return projection.matrix * float4(pos, elevation, 1.0);
+}
+
+inline float projectLineThickness(float, device const ProjectionUBO&) {
+    return 1.0;
+}
+
+#endif
+
 enum {
     idGlobalPaintParamsUBO,
     idGlobalUBOIndex,
@@ -268,10 +430,170 @@ enum {
 enum {
     idDrawableReservedVertexOnlyUBO = globalUBOCount,
     idDrawableReservedFragmentOnlyUBO,
+    idProjectionUBO,
     drawableReservedUBOCount
 };
 
 "#;
+
+/// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::Metal>`
+pub const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
+    built_in: "AtmosphereShader",
+    name: r#"AtmosphereShader"#,
+    vertex_main_function: r#"vertexMain"#,
+    fragment_main_function: r#"fragmentMain"#,
+    prelude: r#"
+
+enum {
+    idSkyPropsUBO = drawableReservedUBOCount,
+    skyUBOCount
+};
+
+enum {
+    idAtmospherePropsUBO = drawableReservedUBOCount,
+    atmosphereUBOCount
+};
+
+struct alignas(16) SkyPropsUBO {
+    float4 sky_color;
+    float4 horizon_color;
+    float2 horizon;
+    float2 horizon_normal;
+    float2 viewport_size;
+    float sky_horizon_blend;
+    float sky_blend;
+};
+
+struct alignas(16) AtmospherePropsUBO {
+    float4x4 inv_view_projection;
+    float4 camera_position;
+    float4 sun_position;
+};
+
+"#,
+    source: r#"
+
+struct AtmosphereVertexStage {
+    short2 position [[attribute(0)]];
+};
+
+struct AtmosphereFragmentStage {
+    float4 position [[position, invariant]];
+    float3 view_direction;
+};
+
+AtmosphereFragmentStage vertex vertexMain(
+    AtmosphereVertexStage in [[stage_in]],
+    device const AtmospherePropsUBO& atmosphere [[buffer(idAtmospherePropsUBO)]]) {
+    const float2 pos = float2(in.position);
+    const float4 target = atmosphere.inv_view_projection * float4(pos, 0.0, 1.0);
+    return {
+        // Metal uses a zero-to-one NDC depth range, so 0.5 matches WebGL's
+        // framebuffer depth for clip-space z=0.
+        .position = float4(pos, 0.5, 1.0),
+        .view_direction = target.xyz / target.w - atmosphere.camera_position.xyz,
+    };
+}
+
+constant float AtmospherePI = 3.141592653589793;
+constant int AtmospherePrimarySteps = 5;
+constant int AtmosphereLightSteps = 3;
+constant float EarthRadius = 6371000.0;
+constant float AtmosphereRadius = 6471000.0;
+
+float2 atmosphereRaySphereIntersection(float3 origin, float3 direction, float radius) {
+    const float a = dot(direction, direction);
+    const float b = 2.0 * dot(direction, origin);
+    const float c = dot(origin, origin) - radius * radius;
+    const float discriminant = b * b - 4.0 * a * c;
+    if (discriminant < 0.0) {
+        return float2(1e5, -1e5);
+    }
+    const float root = sqrt(discriminant);
+    return float2((-b - root) / (2.0 * a), (-b + root) / (2.0 * a));
+}
+
+float4 atmosphereScatter(float3 direction, float3 origin, float3 sun) {
+    const float3 rayleighCoefficient = float3(5.5e-6, 13.0e-6, 22.4e-6);
+    const float mieCoefficient = 21e-6;
+    const float rayleighHeight = 8e3;
+    const float mieHeight = 1.2e3;
+    const float mieDirection = 0.758;
+
+    direction = normalize(direction);
+    sun = normalize(sun);
+
+    float2 bounds = atmosphereRaySphereIntersection(origin, direction, AtmosphereRadius);
+    if (bounds.x > bounds.y) {
+        return float4(0.0, 0.0, 0.0, 1.0);
+    }
+    bounds.x = max(bounds.x, 0.0);
+
+    const float2 ground = atmosphereRaySphereIntersection(origin, direction, EarthRadius);
+    if (ground.x <= ground.y && ground.x > 0.0) {
+        bounds.y = min(bounds.y, ground.x);
+    }
+
+    const float primaryStep = (bounds.y - bounds.x) / float(AtmospherePrimarySteps);
+    float primaryTime = bounds.x + primaryStep * 0.5;
+    float primaryRayleighDepth = 0.0;
+    float primaryMieDepth = 0.0;
+    float3 totalRayleigh = float3(0.0);
+    float3 totalMie = float3(0.0);
+
+    const float mu = dot(direction, sun);
+    const float muSquared = mu * mu;
+    const float gSquared = mieDirection * mieDirection;
+    const float rayleighPhase = 3.0 / (16.0 * AtmospherePI) * (1.0 + muSquared);
+    const float miePhase = 3.0 / (8.0 * AtmospherePI) * ((1.0 - gSquared) * (muSquared + 1.0)) /
+        (pow(1.0 + gSquared - 2.0 * mu * mieDirection, 1.5) * (2.0 + gSquared));
+
+    for (int i = 0; i < AtmospherePrimarySteps; ++i) {
+        const float3 samplePosition = origin + direction * primaryTime;
+        const float sampleHeight = length(samplePosition) - EarthRadius;
+        const float rayleighStep = exp(-sampleHeight / rayleighHeight) * primaryStep;
+        const float mieStep = exp(-sampleHeight / mieHeight) * primaryStep;
+        primaryRayleighDepth += rayleighStep;
+        primaryMieDepth += mieStep;
+
+        const float lightStep = atmosphereRaySphereIntersection(samplePosition, sun, AtmosphereRadius).y /
+            float(AtmosphereLightSteps);
+        float lightTime = lightStep * 0.5;
+        float lightRayleighDepth = 0.0;
+        float lightMieDepth = 0.0;
+        for (int j = 0; j < AtmosphereLightSteps; ++j) {
+            const float3 lightPosition = samplePosition + sun * lightTime;
+            const float lightHeight = length(lightPosition) - EarthRadius;
+            lightRayleighDepth += exp(-lightHeight / rayleighHeight) * lightStep;
+            lightMieDepth += exp(-lightHeight / mieHeight) * lightStep;
+            lightTime += lightStep;
+        }
+
+        const float3 attenuation = exp(-(mieCoefficient * (primaryMieDepth + lightMieDepth) +
+            rayleighCoefficient * (primaryRayleighDepth + lightRayleighDepth)));
+        totalRayleigh += rayleighStep * attenuation;
+        totalMie += mieStep * attenuation;
+        primaryTime += primaryStep;
+    }
+
+    const float opacity = exp(-(length(rayleighCoefficient) * length(totalRayleigh) +
+        mieCoefficient * length(totalMie)));
+    const float3 color = 22.0 * (rayleighPhase * rayleighCoefficient * totalRayleigh +
+        miePhase * mieCoefficient * totalMie);
+    return float4(color, opacity);
+}
+
+half4 fragment fragmentMain(
+    AtmosphereFragmentStage in [[stage_in]],
+    device const AtmospherePropsUBO& atmosphere [[buffer(idAtmospherePropsUBO)]]) {
+    const float3 camera = atmosphere.camera_position.xyz * EarthRadius;
+    float4 color = atmosphereScatter(in.view_direction, camera, atmosphere.sun_position.xyz);
+    color.rgb = 1.0 - exp(-color.rgb);
+    color = pow(color, float4(1.0 / 2.2));
+    return half4(float4(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w);
+}
+"#,
+};
 
 /// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::Metal>`
 pub const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
@@ -359,6 +681,7 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const BackgroundPatternPropsUBO& props [[buffer(idBackgroundPropsUBO)]]) {
 
     device const BackgroundPatternDrawableUBO& drawable = drawableVector[uboIndex].backgroundPatternDrawableUBO;
@@ -375,7 +698,7 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                          drawable.tile_units_to_pixels,
                                          pos);
     return {
-        .position = drawable.matrix * float4(float2(in.position.xy), 0, 1),
+        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex]),
         .pos_a = pos_a,
         .pos_b = pos_b,
     };
@@ -486,12 +809,13 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]]) {
+                                device const BackgroundDrawableUnionUBO* drawableVector [[buffer(idBackgroundDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const BackgroundDrawableUBO& drawable = drawableVector[uboIndex].backgroundDrawableUBO;
 
     return {
-        .position = drawable.matrix * float4(float2(in.position.xy), 0, 1)
+        .position = projectTile(float2(in.position.xy), float2(in.position.xy), projectionVector[uboIndex])
     };
 }
 
@@ -532,7 +856,7 @@ struct alignas(16) CircleDrawableUBO {
     /*  88 */ float stroke_color_t;
     /*  92 */ float stroke_width_t;
     /*  96 */ float stroke_opacity_t;
-    /* 100 */ float pad1;
+    /* 100 */ float globe_extrude_scale;
     /* 104 */ float pad2;
     /* 108 */ float pad3;
     /* 112 */
@@ -616,6 +940,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const CircleDrawableUBO* drawableVector [[buffer(idCircleDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const CircleEvaluatedPropsUBO& props [[buffer(idCircleEvaluatedPropsUBO)]]) {
 
     device const CircleDrawableUBO& drawable = drawableVector[uboIndex];
@@ -641,21 +966,45 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     float4 position;
     if (props.pitch_with_map) {
+#if defined(PROJECTION_GLOBE)
+        const float3 center_vector = projectToSphere(circle_center + projectionVector[uboIndex].translate, float2(0.0, 0.0), projectionVector[uboIndex]);
+        float angle_scale = drawable.globe_extrude_scale;
+#endif
         float2 corner_position = circle_center;
         if (props.scale_with_map) {
             corner_position += scaled_extrude * (radius + stroke_width);
+#if defined(PROJECTION_GLOBE)
+            angle_scale *= (radius + stroke_width);
+#endif
         } else {
             // Pitching the circle with the map effectively scales it with the map
             // To counteract the effect for pitch-scale: viewport, we rescale the
             // whole circle based on the pitch scaling effect at its central point
+#if defined(PROJECTION_GLOBE)
+            const float4 projected_center = interpolateProjection(circle_center, center_vector, 0.0, projectionVector[uboIndex]);
+            angle_scale *= (radius + stroke_width) * (projected_center.w / paintParams.camera_to_center_distance);
+#else
             const float4 projected_center = drawable.matrix * float4(circle_center, 0, 1);
+#endif
             corner_position += scaled_extrude * (radius + stroke_width) *
                                (projected_center.w / paintParams.camera_to_center_distance);
         }
 
+#if defined(PROJECTION_GLOBE)
+        const float3 corner_vector = globeRotateVector(center_vector, extrude * angle_scale);
+        position = interpolateProjection(corner_position, corner_vector, 0.0, projectionVector[uboIndex]);
+#else
         position = drawable.matrix * float4(corner_position, 0, 1);
+#endif
     } else {
+#if defined(PROJECTION_GLOBE)
+        position = projectTile(circle_center, projectionVector[uboIndex]);
+        if (position.z / position.w > 1.0) {
+            position.xy = float2(10000.0);
+        }
+#else
         position = drawable.matrix * float4(circle_center, 0, 1);
+#endif
 
         const float factor = props.scale_with_map ? paintParams.camera_to_center_distance : position.w;
         position.xy += scaled_extrude * (radius + stroke_width) * factor;
@@ -787,10 +1136,17 @@ struct FragmentResult {
     half4 color [[color(0)]];
 };
 
+#if defined(PROJECTION_GLOBE)
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
+                                device const ProjectionUBO& projection [[buffer(idClippingMaskUBO)]]) {
+    return { projectTile(float2(in.position.xy), float2(in.position.xy), projection) };
+}
+#else
 FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
                                 device const ClipUBO& clipUBO [[buffer(idClippingMaskUBO)]]) {
     return { clipUBO.matrix * float4(float2(in.position.xy), 0, 1) };
 }
+#endif
 
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
@@ -808,6 +1164,8 @@ pub const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
 
 enum {
     idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idCollisionProjectionUBO = idProjectionUBO,
+    // The highest id, so that the vertex buffers start after it.
     idCollisionTilePropsUBO = drawableReservedUBOCount,
     collisionUBOCount
 };
@@ -846,16 +1204,29 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
-                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]]) {
+                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
+                                device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
 
+#if defined(PROJECTION_GLOBE)
+    float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
+#else
     float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), 0, 1);
+#endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
         0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
         0.0, // Prevents oversized near-field boxes in pitched/overzoomed tiles
         4.0);
 
+#if defined(PROJECTION_GLOBE)
+    float4 position = projectTile(float2(vertx.pos), projection);
+    // Boxes just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
+    if (position.z / position.w < 1.1) {
+        position.z = 0.0;
+    }
+#else
     float4 position = drawable.matrix * float4(float2(vertx.pos), 0.0, 1.0);
+#endif
     position.xy += (float2(vertx.extrude) + vertx.shift) * tileProps.extrude_scale * position.w * collision_perspective_ratio;
 
     float placed = float(vertx.placed.x);
@@ -900,6 +1271,8 @@ pub const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
 
 enum {
     idCollisionDrawableUBO = idDrawableReservedVertexOnlyUBO,
+    idCollisionProjectionUBO = idProjectionUBO,
+    // The highest id, so that the vertex buffers start after it.
     idCollisionTilePropsUBO = drawableReservedUBOCount,
     collisionUBOCount
 };
@@ -940,16 +1313,29 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const CollisionDrawableUBO& drawable [[buffer(idCollisionDrawableUBO)]],
-                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]]) {
+                                device const CollisionTilePropsUBO& tileProps [[buffer(idCollisionTilePropsUBO)]],
+                                device const ProjectionUBO& projection [[buffer(idCollisionProjectionUBO)]]) {
 
+#if defined(PROJECTION_GLOBE)
+    float4 projectedPoint = projectTile(float2(vertx.anchor_pos), projection);
+#else
     float4 projectedPoint = drawable.matrix * float4(float2(vertx.anchor_pos), 0, 1);
+#endif
     float camera_to_anchor_distance = projectedPoint.w;
     float collision_perspective_ratio = clamp(
         0.5 + 0.5 * (paintParams.camera_to_center_distance / camera_to_anchor_distance),
         0.0, // Prevents oversized near-field circles in pitched/overzoomed tiles
         4.0);
 
+#if defined(PROJECTION_GLOBE)
+    float4 position = projectTile(float2(vertx.pos), projection);
+    // Circles just past the horizon stay visible, as in GL JS; ones far behind it are clipped.
+    if (position.z / position.w < 1.1) {
+        position.z = 0.0;
+    }
+#else
     float4 position = drawable.matrix * float4(float2(vertx.pos), 0.0, 1.0);
+#endif
 
     float padding_factor = 1.2; // Pad the vertices slightly to make room for anti-alias blur
     position.xy += float2(vertx.extrude) * tileProps.extrude_scale * padding_factor * position.w * collision_perspective_ratio;
@@ -1057,12 +1443,13 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const ColorReliefDrawableUBO* drawableVector [[buffer(idColorReliefDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const ColorReliefTilePropsUBO* tilePropsVector [[buffer(idColorReliefTilePropsUBO)]]) {
 
     device const ColorReliefDrawableUBO& drawable = drawableVector[uboIndex];
     device const ColorReliefTilePropsUBO& tileProps = tilePropsVector[uboIndex];
 
-    const float4 position = drawable.matrix * float4(float2(vertx.pos), 0, 1);
+    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
 
     // Calculate texture coordinate
     float2 epsilon = 1.0 / tileProps.dimension;
@@ -1192,9 +1579,11 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const DebugUBO& debug [[buffer(idDebugUBO)]]) {
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const DebugUBO& debug [[buffer(idDebugUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
-    const float4 position = debug.matrix * float4(float2(vertx.pos) * debug.overlay_scale, 0, 1);
+    const float4 position = projectTile(float2(vertx.pos) * debug.overlay_scale, projectionVector[uboIndex]);
 
     // This vertex shader expects a EXTENT x EXTENT quad,
     // The UV coordinates for the overlay texture can be calculated using that knowledge
@@ -1313,6 +1702,7 @@ struct FragmentOutput {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                 uint instanceID [[ instance_id ]],
                                 device const OutlineInstance* outline [[buffer(fillExtrusionUBOCount + 1)]]) {
@@ -1346,7 +1736,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
-    const float4 position = drawable.matrix * float4(vertx.pos.x == 0.0 ? p1 : p2, z, 1);
+    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -1516,6 +1906,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]],
                                 uint instanceID [[ instance_id ]],
@@ -1561,7 +1952,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = float(vertx.pos.y);
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
 
-    const float4 position = drawable.matrix * float4(vertx.pos.x == 0.0 ? p1 : p2, z, 1);
+    const float4 position = projectTileFor3D(vertx.pos.x == 0.0 ? p1 : p2, z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -1783,6 +2174,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionTilePropsUBO* tilePropsVector [[buffer(idFillExtrusionTilePropsUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
@@ -1807,7 +2199,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
     const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
 
-    const float4 position = drawable.matrix * float4(float2(vertx.pos) + decimals, z, 1);
+    const float4 position = projectTileFor3D(float2(vertx.pos) + decimals, z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2016,6 +2408,7 @@ struct FragmentOutput {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillExtrusionDrawableUBO* drawableVector [[buffer(idFillExtrusionDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillExtrusionPropsUBO& props [[buffer(idFillExtrusionPropsUBO)]]) {
 
     device const FillExtrusionDrawableUBO& drawable = drawableVector[uboIndex];
@@ -2038,7 +2431,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float z = (t != 0.0) ? height : base;     // TODO: This would come out wrong on GL for negative values, check it...
     const float2 decimals = unpack_float(float(vertx.decimals_ed.x / 2)) / 128.0;
 
-    const float4 position = drawable.matrix * float4(float2(vertx.pos) + decimals, z, 1);
+    const float4 position = projectTileFor3D(float2(vertx.pos) + decimals, z, projectionVector[uboIndex]);
 
 #if defined(OVERDRAW_INSPECTOR)
     return {
@@ -2289,6 +2682,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
@@ -2324,7 +2718,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 display_size_a = float2((pattern_br_a.x - pattern_tl_a.x) / pixelRatio, (pattern_br_a.y - pattern_tl_a.y) / pixelRatio);
     const float2 display_size_b = float2((pattern_br_b.x - pattern_tl_b.x) / pixelRatio, (pattern_br_b.y - pattern_tl_b.y) / pixelRatio);
     const float2 pos2 = float2(vertx.position);
-    const float4 position = drawable.matrix * float4(pos2, 0, 1);
+    const float4 position = projectTile(pos2, pos2, projectionVector[uboIndex]);
 
     return {
         .position       = position,
@@ -2584,11 +2978,12 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
+                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const FillOutlineDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineDrawableUBO;
 
-    const float4 position = drawable.matrix * float4(float2(vertx.position), 0.0f, 1.0f);
+    const float4 position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]);
     return {
         .position       = position,
         .pos            = (position.xy / position.w + 1.0) / 2.0 * paintParams.world_size,
@@ -2793,7 +3188,8 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
+                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const FillOutlineTriangulatedDrawableUBO& drawable = drawableVector[uboIndex].fillOutlineTriangulatedDrawableUBO;
 
@@ -2817,8 +3213,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     // Scale the extrusion vector down to a normal and then up by the line width of this vertex.
     const float2 dist = outset * a_extrude * LINE_NORMAL_SCALE;
 
-    const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
-    const float4 position = drawable.matrix * float4(pos, 0.0, 1.0) + projected_extrude;
+    const float4 projected_extrude = projectionVector[uboIndex].fallback_matrix * float4(dist / drawable.ratio, 0.0, 0.0);
+    const float4 position = projectTile(pos, pos, projectionVector[uboIndex]) + projected_extrude;
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
@@ -3036,6 +3432,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const FillTilePropsUnionUBO* tilePropsVector [[buffer(idFillTilePropsUBO)]],
                                 device const FillEvaluatedPropsUBO& props [[buffer(idFillEvaluatedPropsUBO)]]) {
 
@@ -3069,7 +3466,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float2 postion = float2(vertx.position);
 
     return {
-        .position       = drawable.matrix * float4(postion, 0, 1),
+        .position       = projectTile(postion, postion, projectionVector[uboIndex]),
         .v_pos_a        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, postion),
         .v_pos_b        = get_pattern_pos(drawable.pixel_coord_upper, drawable.pixel_coord_lower, toScale * display_size_b, tileZoomRatio, postion),
 #if !defined(HAS_UNIFORM_u_color)
@@ -3321,12 +3718,13 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]]) {
+                                device const FillDrawableUnionUBO* drawableVector [[buffer(idFillDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const FillDrawableUBO& drawable = drawableVector[uboIndex].fillDrawableUBO;
 
     return {
-        .position = drawable.matrix * float4(float2(vertx.position), 0.0f, 1.0f),
+        .position = projectTile(float2(vertx.position), float2(vertx.position), projectionVector[uboIndex]),
 #if !defined(HAS_UNIFORM_u_color)
         .color    = half4(unpack_mix_color(vertx.color, drawable.color_t)),
 #endif
@@ -3359,6 +3757,43 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 "#,
 };
 
+/// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::Metal>`
+pub const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
+    built_in: "GlobeDepthShader",
+    name: r#"GlobeDepthShader"#,
+    vertex_main_function: r#"vertexMain"#,
+    fragment_main_function: r#"fragmentMain"#,
+    prelude: r#"
+
+enum {
+    globeDepthUBOCount = drawableReservedUBOCount
+};
+
+"#,
+    source: r#"
+
+struct VertexStage {
+    short2 position [[attribute(0)]];
+};
+
+struct FragmentStage {
+    float4 position [[position, invariant]];
+};
+
+FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
+    return {
+        .position = projectTileFor3D(float2(in.position.xy), 0.0, projectionVector[uboIndex])
+    };
+}
+
+half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
+    return half4(0.0);
+}
+"#,
+};
+
 /// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::Metal>`
 pub const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HeatmapShader",
@@ -3380,7 +3815,7 @@ struct alignas(16) HeatmapDrawableUBO {
     // Interpolations
     /* 68 */ float weight_t;
     /* 72 */ float radius_t;
-    /* 76 */ float pad1;
+    /* 76 */ float globe_extrude_scale;
     /* 80 */
 };
 static_assert(sizeof(HeatmapDrawableUBO) == 5 * 16, "wrong size");
@@ -3426,6 +3861,7 @@ constant const float ZERO = 1.0 / 255.0 / 16.0;
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const HeatmapDrawableUBO* drawableVector [[buffer(idHeatmapDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const HeatmapEvaluatedPropsUBO& props [[buffer(idHeatmapEvaluatedPropsUBO)]]) {
 
     device const HeatmapDrawableUBO& drawable = drawableVector[uboIndex];
@@ -3466,10 +3902,18 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     // multiply a_pos by 0.5, since we had it * 2 in order to sneak
     // in extrusion data
+#if defined(PROJECTION_GLOBE)
+    const float2 circle_center = floor(float2(vertx.pos) * 0.5);
+    const float3 center_vector = projectToSphere(circle_center, float2(0.0, 0.0), projectionVector[uboIndex]);
+    const float3 corner_vector = globeRotateVector(center_vector, extrude * radius * drawable.globe_extrude_scale);
+    const float4 position = interpolateProjection(circle_center + scaled_extrude, corner_vector, 0.0, projectionVector[uboIndex]);
+#else
     const float4 pos = float4(floor(float2(vertx.pos) * 0.5) + scaled_extrude, 0, 1);
+    const float4 position = drawable.matrix * pos;
+#endif
 
     return {
-        .position    = drawable.matrix * pos,
+        .position    = position,
         .weight      = weight,
         .extrude     = extrude,
     };
@@ -3748,11 +4192,12 @@ struct FragmentStage {
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const HillshadeDrawableUBO* drawableVector [[buffer(idHillshadeDrawableUBO)]]) {
+                                device const HillshadeDrawableUBO* drawableVector [[buffer(idHillshadeDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const HillshadeDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float4 position = drawable.matrix * float4(float2(vertx.pos), 0, 1);
+    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
     float2 pos = float2(vertx.texture_pos) / 8192.0;
     // Metal's texture coordinate origin differs from some renderers;
     // restore Y-flip to match prepare pass and historical behavior.
@@ -4131,6 +4576,9 @@ struct VertexStage {
 
 struct FragmentStage {
     float4 position [[position, invariant]];
+#if defined(PROJECTION_GLOBE)
+    float tile_x;
+#endif
     float2 width2;
     float2 normal;
     float2 tex_a;
@@ -4153,6 +4601,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                                 device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
 
@@ -4218,8 +4667,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = 1.0 - abs(u);
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
+#if defined(PROJECTION_GLOBE)
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 projected_extrude = position - projected_no_extrude;
+#else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
     const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
@@ -4227,6 +4684,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position     = position,
+#if defined(PROJECTION_GLOBE)
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+#endif
         .width2       = float2(outset, inset),
         .normal       = v_normal,
         .tex_a        = float2(linesofar * drawable.patternscale_a.x / floorwidth, v_normal.y * drawable.patternscale_a.y + drawable.tex_y_a),
@@ -4256,6 +4716,11 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             texture2d<float, access::sample> dashTexture [[texture(1)]],
                             sampler gradientSampler [[sampler(0)]],
                             sampler dashSampler [[sampler(1)]]) {
+#if defined(PROJECTION_GLOBE)
+    if (clippedAtAntimeridian(in.tile_x)) {
+        discard_fragment();
+    }
+#endif
 
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
@@ -4503,6 +4968,9 @@ struct VertexStage {
 
 struct FragmentStage {
     float4 position [[position, invariant]];
+#if defined(PROJECTION_GLOBE)
+    float tile_x;
+#endif
     float2 width2;
     half2 normal;
     half gamma_scale;
@@ -4520,6 +4988,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]]) {
 
     device const LineGradientDrawableUBO& drawable = drawableVector[uboIndex].lineGradientDrawableUBO;
@@ -4576,8 +5045,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = 1.0 - abs(u);
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
+#if defined(PROJECTION_GLOBE)
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 projected_extrude = position - projected_no_extrude;
+#else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
     const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
@@ -4585,6 +5062,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position     = position,
+#if defined(PROJECTION_GLOBE)
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+#endif
         .width2       = float2(outset, inset),
         .normal       = half2(v_normal),
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
@@ -4602,6 +5082,12 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             texture2d<float, access::sample> gradientTexture [[texture(0)]]) {
+#if defined(PROJECTION_GLOBE)
+    if (clippedAtAntimeridian(in.tile_x)) {
+        discard_fragment();
+    }
+#endif
+
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -4840,6 +5326,9 @@ struct VertexStage {
 
 struct FragmentStage {
     float4 position [[position, invariant]];
+#if defined(PROJECTION_GLOBE)
+    float tile_x;
+#endif
     float2 width2;
     float linesofar;
     half2 normal;
@@ -4864,6 +5353,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                                 device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
 
@@ -4928,8 +5418,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = 1.0 - abs(u);
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
+#if defined(PROJECTION_GLOBE)
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 projected_extrude = position - projected_no_extrude;
+#else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
     const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
@@ -4937,6 +5435,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position     = position,
+#if defined(PROJECTION_GLOBE)
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+#endif
         .width2       = float2(outset, inset),
         .normal       = half2(v_normal),
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
@@ -4966,6 +5467,12 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
+
+#if defined(PROJECTION_GLOBE)
+    if (clippedAtAntimeridian(in.tile_x)) {
+        discard_fragment();
+    }
+#endif
 
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
@@ -5251,6 +5758,9 @@ struct VertexStage {
 
 struct FragmentStage {
     float4 position [[position, invariant]];
+#if defined(PROJECTION_GLOBE)
+    float tile_x;
+#endif
     float2 width2;
     float2 normal;
     float2 tex_a;
@@ -5275,6 +5785,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                                 device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
 
@@ -5339,8 +5850,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = 1.0 - abs(u);
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
+#if defined(PROJECTION_GLOBE)
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 projected_extrude = position - projected_no_extrude;
+#else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
     const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
@@ -5348,6 +5867,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position     = position,
+#if defined(PROJECTION_GLOBE)
+        .tile_x       = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+#endif
         .width2       = float2(outset, inset),
         .normal       = v_normal,
         .gamma_scale  = half(extrude_length_without_perspective / extrude_length_with_perspective),
@@ -5377,6 +5899,12 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]],
                             texture2d<float, access::sample> image0 [[texture(0)]],
                             sampler image0_sampler [[sampler(0)]]) {
+
+#if defined(PROJECTION_GLOBE)
+    if (clippedAtAntimeridian(in.tile_x)) {
+        discard_fragment();
+    }
+#endif
 
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
@@ -5632,6 +6160,9 @@ struct VertexStage {
 
 struct FragmentStage {
     float4 position [[position, invariant]];
+#if defined(PROJECTION_GLOBE)
+    float tile_x;
+#endif
     float2 width2;
     float2 normal;
     half gamma_scale;
@@ -5651,6 +6182,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const LineDrawableUnionUBO* drawableVector [[buffer(idLineDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                                 device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
 
@@ -5706,8 +6238,16 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float t = 1.0 - abs(u);
     const float2 offset2 = offset * a_extrude * LINE_NORMAL_SCALE * v_normal.y * float2x2(t, -u, u, t);
 
+#if defined(PROJECTION_GLOBE)
+    const float adjustedThickness = projectLineThickness(pos.y, projectionVector[uboIndex]);
+    const float4 projected_no_extrude = projectTile(pos + offset2 / drawable.ratio * adjustedThickness, projectionVector[uboIndex]);
+    const float2 extrudedPos = pos + (offset2 + dist) / drawable.ratio * adjustedThickness;
+    const float4 position = projectTile(extrudedPos, projectionVector[uboIndex]);
+    const float4 projected_extrude = position - projected_no_extrude;
+#else
     const float4 projected_extrude = drawable.matrix * float4(dist / drawable.ratio, 0.0, 0.0);
     const float4 position = drawable.matrix * float4(pos + offset2 / drawable.ratio, 0.0, 1.0) + projected_extrude;
+#endif
 
     // calculate how much the perspective view squishes or stretches the extrude
     const float extrude_length_without_perspective = length(dist);
@@ -5715,6 +6255,9 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 
     return {
         .position    = position,
+#if defined(PROJECTION_GLOBE)
+        .tile_x      = antimeridianClipX(extrudedPos, projectionVector[uboIndex]),
+#endif
         .width2      = float2(outset, inset),
         .normal      = v_normal,
         .gamma_scale = half(extrude_length_without_perspective / extrude_length_with_perspective),
@@ -5735,6 +6278,12 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                             device const LineEvaluatedPropsUBO& props [[buffer(idLineEvaluatedPropsUBO)]],
                             device const LineExpressionUBO& expr [[buffer(idLineExpressionUBO)]]) {
+#if defined(PROJECTION_GLOBE)
+    if (clippedAtAntimeridian(in.tile_x)) {
+        discard_fragment();
+    }
+#endif
+
 #if defined(OVERDRAW_INSPECTOR)
     return half4(1.0);
 #endif
@@ -5805,10 +6354,11 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const LocationIndicatorDrawableUBO& drawable [[buffer(idLocationIndicatorUBO)]]) {
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     return {
-        .position = drawable.matrix * float4(vertx.position, 1.0)
+        .position = projectTile(vertx.position, projectionVector[uboIndex])
     };
 }
 
@@ -5853,10 +6403,11 @@ struct FragmentStage {
 };
 
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const LocationIndicatorDrawableUBO& drawable [[buffer(idLocationIndicatorUBO)]]) {
+                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     return {
-        .position = drawable.matrix * float4(vertx.position, 1.0),
+        .position = projectTile(vertx.position, projectionVector[uboIndex]),
         .uv = vertx.uv
     };
 }
@@ -5928,11 +6479,12 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
                                 device const RasterDrawableUBO* drawableVector [[buffer(idRasterDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]],
                                 device const RasterEvaluatedPropsUBO& props [[buffer(idRasterEvaluatedPropsUBO)]]) {
 
     device const RasterDrawableUBO& drawable = drawableVector[uboIndex];
 
-    const float4 position = drawable.matrix * float4(float2(vertx.pos), 0, 1);
+    const float4 position = projectTile(float2(vertx.pos), float2(vertx.pos), projectionVector[uboIndex]);
 
     // We are using Int16 for texture position coordinates to give us enough precision for
     // fractional coordinates. We use 8192 to scale the texture coordinates in the buffer
@@ -5994,6 +6546,80 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 "#,
 };
 
+/// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::Metal>`
+pub const SKY_SHADER: MslShaderSource = MslShaderSource {
+    built_in: "SkyShader",
+    name: r#"SkyShader"#,
+    vertex_main_function: r#"vertexMain"#,
+    fragment_main_function: r#"fragmentMain"#,
+    prelude: r#"
+
+enum {
+    idSkyPropsUBO = drawableReservedUBOCount,
+    skyUBOCount
+};
+
+enum {
+    idAtmospherePropsUBO = drawableReservedUBOCount,
+    atmosphereUBOCount
+};
+
+struct alignas(16) SkyPropsUBO {
+    float4 sky_color;
+    float4 horizon_color;
+    float2 horizon;
+    float2 horizon_normal;
+    float2 viewport_size;
+    float sky_horizon_blend;
+    float sky_blend;
+};
+
+struct alignas(16) AtmospherePropsUBO {
+    float4x4 inv_view_projection;
+    float4 camera_position;
+    float4 sun_position;
+};
+
+"#,
+    source: r#"
+
+struct SkyVertexStage {
+    short2 position [[attribute(0)]];
+};
+
+struct SkyFragmentStage {
+    float4 position [[position, invariant]];
+    float2 pos;
+};
+
+SkyFragmentStage vertex vertexMain(SkyVertexStage in [[stage_in]]) {
+    const float2 pos = float2(in.position);
+    return {
+        .position = float4(pos, 1.0, 1.0),
+        .pos = pos,
+    };
+}
+
+half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
+                            device const SkyPropsUBO& sky [[buffer(idSkyPropsUBO)]]) {
+    const float2 pixel = (in.pos * 0.5 + 0.5) * sky.viewport_size;
+    const float distanceToHorizon = dot(pixel - sky.horizon, sky.horizon_normal);
+    float4 color = float4(0.0);
+
+    if (distanceToHorizon > 0.0) {
+        if (sky.sky_horizon_blend > 0.0 && distanceToHorizon < sky.sky_horizon_blend) {
+            const float blend = 1.0 - distanceToHorizon / sky.sky_horizon_blend;
+            color = mix(sky.sky_color, sky.horizon_color, blend * blend);
+        } else {
+            color = sky.sky_color;
+        }
+    }
+
+    return half4(color * (1.0 - sky.sky_blend));
+}
+"#,
+};
+
 /// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolIconShader",
@@ -6033,9 +6659,15 @@ struct alignas(16) SymbolDrawableUBO {
     /* 248 */ float opacity_t;
     /* 252 */ float halo_width_t;
     /* 256 */ float halo_blur_t;
-    /* 260 */
+    /* 260 */ /*bool*/ int is_along_line;
+    /* 264 */ /*bool*/ int is_variable_anchor;
+    /* 268 */ float pitched_scale;
+    /* 272 */ float2 translation;
+    /* 280 */ float pad1;
+    /* 284 */ float pad2;
+    /* 288 */
 };
-static_assert(sizeof(SymbolDrawableUBO) == 17 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
@@ -6103,9 +6735,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]]) {
+                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
 
     const float2 raw_fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = raw_fade_opacity[1] > 0.5 ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
@@ -6148,7 +6782,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         size = drawable.size;
     }
 
-    const float4 projectedPoint = drawable.matrix * float4(a_pos, 0, 1);
+    const float2 translated_a_pos = a_pos + drawable.translation;
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
     const float camera_to_anchor_distance = projectedPoint.w;
     // See comments in symbol_sdf.vertex
     const float distance_ratio = drawable.pitch_with_map ?
@@ -6168,7 +6803,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     float symbol_rotation = 0.0;
     if (drawable.rotate_symbol) {
         // See comments in symbol_sdf.vertex
-        const float4 offsetProjectedPoint = drawable.matrix * float4(a_pos + float2(1, 0), 0, 1);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6179,10 +6814,31 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float angle_cos = cos(segment_angle + symbol_rotation);
     const float2x2 rotation_matrix = float2x2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
-    const float4 projected_pos = drawable.label_plane_matrix * float4(vertx.projected_pos.xy, 0.0, 1.0);
-    const float2 pos0 = projected_pos.xy / projected_pos.w;
+    const float2 projected_pos_xy = vertx.projected_pos.xy;
+    float4 projected_pos;
+    if (drawable.is_along_line || drawable.is_variable_anchor) {
+        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+    } else if (drawable.pitch_with_map) {
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+    } else {
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+    }
+
+    const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
+
+    float projectionScaling = 1.0;
+#if defined(PROJECTION_GLOBE)
+    if (drawable.pitch_with_map) {
+        const float anchor_pos_tile_y = (drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+    }
+#endif
+
     const float2 posOffset = a_offset * max(a_minFontScale, fontScale) / 32.0 + a_pxoffset / 16.0;
-    const float4 position = drawable.coord_matrix * float4(pos0 + rotation_matrix * posOffset, 0.0, 1.0);
+    float4 position = drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w + rotation_matrix * posOffset * projectionScaling, z, 1.0);
+    if (drawable.pitch_with_map) {
+        position = projectTileWithElevation(position.xy, position.z, projection);
+    }
     const float2 tex_origin = float2(vertx.tex_origin);
 
     return {
@@ -6258,9 +6914,15 @@ struct alignas(16) SymbolDrawableUBO {
     /* 248 */ float opacity_t;
     /* 252 */ float halo_width_t;
     /* 256 */ float halo_blur_t;
-    /* 260 */
+    /* 260 */ /*bool*/ int is_along_line;
+    /* 264 */ /*bool*/ int is_variable_anchor;
+    /* 268 */ float pitched_scale;
+    /* 272 */ float2 translation;
+    /* 280 */ float pad1;
+    /* 284 */ float pad2;
+    /* 288 */
 };
-static_assert(sizeof(SymbolDrawableUBO) == 17 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
@@ -6353,9 +7015,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]]) {
+                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
 
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
@@ -6391,7 +7055,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         size = drawable.size;
     }
 
-    const float4 projectedPoint = drawable.matrix * float4(a_pos, 0, 1);
+    const float2 translated_a_pos = a_pos + drawable.translation;
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
     const float camera_to_anchor_distance = projectedPoint.w;
     // If the label is pitched with the map, layout is done in pitched space,
     // which makes labels in the distance smaller relative to viewport space.
@@ -6418,7 +7083,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = drawable.matrix * float4(a_pos + float2(1, 0), 0, 1);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6429,10 +7094,31 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float angle_sin = sin(segment_angle + symbol_rotation);
     const float angle_cos = cos(segment_angle + symbol_rotation);
     const auto rotation_matrix = float2x2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
-    const float4 projected_pos = drawable.label_plane_matrix * float4(vertx.projected_pos.xy, 0.0, 1.0);
+    const float2 projected_pos_xy = vertx.projected_pos.xy;
+    float4 projected_pos;
+    if (drawable.is_along_line || drawable.is_variable_anchor) {
+        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+    } else if (drawable.pitch_with_map) {
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+    } else {
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+    }
+
+    const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
+
+    float projectionScaling = 1.0;
+#if defined(PROJECTION_GLOBE)
+    if (drawable.pitch_with_map) {
+        const float anchor_pos_tile_y = (drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+    }
+#endif
+
     const float2 pos_rot = a_offset / 32.0 * fontScale + a_pxoffset;
-    const float2 pos0 = projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot;
-    const float4 position = drawable.coord_matrix * float4(pos0, 0.0, 1.0);
+    float4 position = drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
+    if (drawable.pitch_with_map) {
+        position = projectTileWithElevation(position.xy, position.z, projection);
+    }
     const float2 tex_origin = float2(vertx.tex_origin);
 
     return {
@@ -6561,9 +7247,15 @@ struct alignas(16) SymbolDrawableUBO {
     /* 248 */ float opacity_t;
     /* 252 */ float halo_width_t;
     /* 256 */ float halo_blur_t;
-    /* 260 */
+    /* 260 */ /*bool*/ int is_along_line;
+    /* 264 */ /*bool*/ int is_variable_anchor;
+    /* 268 */ float pitched_scale;
+    /* 272 */ float2 translation;
+    /* 280 */ float pad1;
+    /* 284 */ float pad2;
+    /* 288 */
 };
-static_assert(sizeof(SymbolDrawableUBO) == 17 * 16, "wrong size");
+static_assert(sizeof(SymbolDrawableUBO) == 18 * 16, "wrong size");
 
 struct alignas(16) SymbolTilePropsUBO {
     /*  0 */ /*bool*/ int is_text;
@@ -6660,9 +7352,11 @@ struct FragmentStage {
 FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
                                 device const GlobalPaintParamsUBO& paintParams [[buffer(idGlobalPaintParamsUBO)]],
                                 device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]]) {
+                                device const SymbolDrawableUBO* drawableVector [[buffer(idSymbolDrawableUBO)]],
+                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
 
     device const SymbolDrawableUBO& drawable = drawableVector[uboIndex];
+    device const ProjectionUBO& projection = projectionVector[uboIndex];
 
     const float2 fade_opacity = unpack_opacity(vertx.fade_opacity);
     const float fade_change = (fade_opacity[1] > 0.5) ? paintParams.symbol_fade_change : -paintParams.symbol_fade_change;
@@ -6698,7 +7392,8 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         size = drawable.size;
     }
 
-    const float4 projectedPoint = drawable.matrix * float4(a_pos, 0, 1);
+    const float2 translated_a_pos = a_pos + drawable.translation;
+    const float4 projectedPoint = projectTileWithElevation(translated_a_pos, 0.0, projection);
     const float camera_to_anchor_distance = projectedPoint.w;
     // If the label is pitched with the map, layout is done in pitched space,
     // which makes labels in the distance smaller relative to viewport space.
@@ -6725,7 +7420,7 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
         // Point labels with 'rotation-alignment: map' are horizontal with respect to tile units
         // To figure out that angle in projected space, we draw a short horizontal line in tile
         // space, project it, and measure its angle in projected space.
-        const float4 offsetProjectedPoint = drawable.matrix * float4(a_pos + float2(1, 0), 0, 1);
+        const float4 offsetProjectedPoint = projectTileWithElevation(translated_a_pos + float2(1, 0), 0.0, projection);
 
         const float2 a = projectedPoint.xy / projectedPoint.w;
         const float2 b = offsetProjectedPoint.xy / offsetProjectedPoint.w;
@@ -6737,10 +7432,31 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
     const float angle_cos = cos(segment_angle + symbol_rotation);
     const float2x2 rotation_matrix = float2x2(angle_cos, -1.0 * angle_sin, angle_sin, angle_cos);
 
-    const float4 projected_pos = drawable.label_plane_matrix * float4(vertx.projected_pos.xy, 0.0, 1.0);
+    const float2 projected_pos_xy = vertx.projected_pos.xy;
+    float4 projected_pos;
+    if (drawable.is_along_line || drawable.is_variable_anchor) {
+        projected_pos = float4(projected_pos_xy, 0.0, 1.0);
+    } else if (drawable.pitch_with_map) {
+        projected_pos = drawable.label_plane_matrix * float4(projected_pos_xy + drawable.translation, 0.0, 1.0);
+    } else {
+        projected_pos = drawable.label_plane_matrix * projectTileWithElevation(projected_pos_xy + drawable.translation, 0.0, projection);
+    }
+
+    const float z = float(drawable.pitch_with_map) * projected_pos.z / projected_pos.w;
+
+    float projectionScaling = 1.0;
+#if defined(PROJECTION_GLOBE)
+    if (drawable.pitch_with_map && !drawable.is_along_line) {
+        const float anchor_pos_tile_y = (drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w, z, 1.0)).y;
+        projectionScaling = mix(projectionScaling, 1.0 / circumferenceRatioAtTileY(anchor_pos_tile_y, projection) * drawable.pitched_scale, projection.projection_transition);
+    }
+#endif
+
     const float2 pos_rot = a_offset / 32.0 * fontScale;
-    const float2 pos0 = projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot;
-    const float4 position = drawable.coord_matrix * float4(pos0, 0.0, 1.0);
+    float4 position = drawable.coord_matrix * float4(projected_pos.xy / projected_pos.w + rotation_matrix * pos_rot * projectionScaling, z, 1.0);
+    if (drawable.pitch_with_map) {
+        position = projectTileWithElevation(position.xy, position.z, projection);
+    }
     const float gamma_scale = position.w;
     const bool is_icon = (is_sdf == ICON);
     const float2 texsize = is_icon ? drawable.texsize_icon : drawable.texsize;
@@ -7413,6 +8129,7 @@ fragment float4 fragmentTri_wideVecPerf(
 
 /// Every extracted specialisation, sorted by `BuiltIn` name.
 pub const ALL: &[&MslShaderSource] = &[
+    &ATMOSPHERE_SHADER,
     &BACKGROUND_PATTERN_SHADER,
     &BACKGROUND_SHADER,
     &CIRCLE_SHADER,
@@ -7430,6 +8147,7 @@ pub const ALL: &[&MslShaderSource] = &[
     &FILL_OUTLINE_TRIANGULATED_SHADER,
     &FILL_PATTERN_SHADER,
     &FILL_SHADER,
+    &GLOBE_DEPTH_SHADER,
     &HEATMAP_SHADER,
     &HEATMAP_TEXTURE_SHADER,
     &HILLSHADE_PREPARE_SHADER,
@@ -7442,6 +8160,7 @@ pub const ALL: &[&MslShaderSource] = &[
     &LOCATION_INDICATOR_SHADER,
     &LOCATION_INDICATOR_TEXTURED_SHADER,
     &RASTER_SHADER,
+    &SKY_SHADER,
     &SYMBOL_ICON_SHADER,
     &SYMBOL_SDF_SHADER,
     &SYMBOL_TEXT_AND_ICON_SHADER,

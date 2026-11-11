@@ -1,10 +1,12 @@
 #![cfg(target_vendor = "apple")]
 //! Compiles every MSL source `shader_source()` returns with the system's
 //! Metal compiler, the way mtl::ShaderGroup does: `PRELUDE + prelude +
-//! source`, MSL 2.4, fast math, the ProgramParameters defines and a
-//! `HAS_UNIFORM_u_<name>` define per property passed as a uniform. Also checks
-//! that the UBO ids and sizes the MSL declares are the renderer's, and that
-//! the shaders' pipelines build with the vertex layouts their tables describe.
+//! source`, MSL 2.4, fast math, the ProgramParameters defines, a
+//! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
+//! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
+//! sizes the MSL declares are the renderer's, and that the shaders' pipelines
+//! build with the vertex layouts their tables describe, in both projection
+//! variants.
 
 // Metal through objc2 is the FFI here.
 #![allow(unsafe_code)]
@@ -13,6 +15,7 @@ use std::collections::BTreeSet;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
+use mln_gfx::shader_group::GLOBE_DEFINE;
 use mln_gfx::shaders::shader_defines::*;
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::shaders::*;
@@ -30,6 +33,8 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::ClippingMaskProgram,
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
+    BuiltIn::SkyShader,
+    BuiltIn::AtmosphereShader,
     BuiltIn::CircleShader,
     BuiltIn::CollisionBoxShader,
     BuiltIn::CollisionCircleShader,
@@ -60,11 +65,16 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::SymbolSDFShader,
     BuiltIn::SymbolTextAndIconShader,
     BuiltIn::WideVectorShader,
+    BuiltIn::GlobeDepthShader,
 ];
 
 fn sources() -> impl Iterator<Item = &'static ShaderSource> {
     ALL_BUILT_INS.iter().filter_map(|&id| shader_source(id))
 }
+
+/// The projection variants a shader group builds: its name, and whether it
+/// defines `PROJECTION_GLOBE`.
+const PROJECTIONS: [(&str, bool); 2] = [("Mercator", false), ("globe", true)];
 
 fn device() -> Retained<ProtocolObject<dyn MTLDevice>> {
     MTLCreateSystemDefaultDevice().expect("no Metal device")
@@ -113,11 +123,15 @@ fn uniform_properties(text: &str) -> BTreeSet<String> {
     names
 }
 
-/// ProgramParameters(1.0, overdraw) plus a uniform define per name.
-fn defines<'a>(overdraw: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
+/// ProgramParameters(1.0, overdraw), the globe define if `globe`, and a
+/// uniform define per name.
+fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &'a String>) -> Vec<(String, String)> {
     let mut defines = vec![("DEVICE_PIXEL_RATIO".to_owned(), "1.0".to_owned())];
     if overdraw {
         defines.push(("OVERDRAW_INSPECTOR".to_owned(), String::new()));
+    }
+    if globe {
+        defines.push((GLOBE_DEFINE.to_owned(), String::new()));
     }
     defines.extend(uniforms.into_iter().map(|name| (format!("HAS_UNIFORM_u_{name}"), String::new())));
     defines
@@ -131,26 +145,29 @@ fn every_shader_source_compiles() {
     for source in sources() {
         let text = full_source(source);
         let properties = uniform_properties(&text);
-        // Every property per vertex, every property as a uniform, each one
-        // alone as a uniform, and the overdraw inspector.
-        let mut variants = vec![
-            ("no uniforms".to_owned(), defines(false, [])),
-            ("all uniforms".to_owned(), defines(false, &properties)),
-            ("overdraw inspector".to_owned(), defines(true, [])),
-            ("overdraw inspector, all uniforms".to_owned(), defines(true, &properties)),
-        ];
-        variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, [name]))));
-        for (variant, defines) in variants {
-            match compile(&device, &text, &defines) {
-                Ok(library) => {
-                    compiled += 1;
-                    for function in [source.msl.vertex_main_function, source.msl.fragment_main_function] {
-                        if library.newFunctionWithName(&NSString::from_str(function)).is_none() {
-                            failures.push(format!("{} ({variant}): no function {function}", source.name));
+        for (projection, globe) in PROJECTIONS {
+            // Every property per vertex, every property as a uniform, each one
+            // alone as a uniform, and the overdraw inspector.
+            let mut variants = vec![
+                ("no uniforms".to_owned(), defines(false, globe, [])),
+                ("all uniforms".to_owned(), defines(false, globe, &properties)),
+                ("overdraw inspector".to_owned(), defines(true, globe, [])),
+                ("overdraw inspector, all uniforms".to_owned(), defines(true, globe, &properties)),
+            ];
+            variants.extend(properties.iter().map(|name| (format!("uniform {name}"), defines(false, globe, [name]))));
+            for (variant, defines) in variants {
+                match compile(&device, &text, &defines) {
+                    Ok(library) => {
+                        compiled += 1;
+                        for function in [source.msl.vertex_main_function, source.msl.fragment_main_function] {
+                            if library.newFunctionWithName(&NSString::from_str(function)).is_none() {
+                                failures
+                                    .push(format!("{} ({projection}, {variant}): no function {function}", source.name));
+                            }
                         }
                     }
+                    Err(error) => failures.push(format!("{} ({projection}, {variant}):\n{error}", source.name)),
                 }
-                Err(error) => failures.push(format!("{} ({variant}):\n{error}", source.name)),
             }
         }
     }
@@ -164,9 +181,16 @@ fn every_shader_source_compiles() {
 /// start.
 fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
     let first_vertex_buffer = source.attributes.iter().map(|attr| attr.buffer_index).min().unwrap();
-    let mut ids =
-        vec![("idGlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO), ("idGlobalUBOIndex", ID_GLOBAL_UBO_INDEX)];
+    let mut ids = vec![
+        ("idGlobalPaintParamsUBO", ID_GLOBAL_PAINT_PARAMS_UBO),
+        ("idGlobalUBOIndex", ID_GLOBAL_UBO_INDEX),
+        ("idDrawableReservedVertexOnlyUBO", ID_DRAWABLE_RESERVED_VERTEX_ONLY_UBO),
+        ("idDrawableReservedFragmentOnlyUBO", ID_DRAWABLE_RESERVED_FRAGMENT_ONLY_UBO),
+        ("idProjectionUBO", ID_PROJECTION_UBO),
+        ("drawableReservedUBOCount", DRAWABLE_RESERVED_UBO_COUNT),
+    ];
     let (layer, count): (&[(&str, usize)], &str) = match source.name {
+        "AtmosphereShader" => (&[("idAtmospherePropsUBO", ID_ATMOSPHERE_PROPS_UBO)], "atmosphereUBOCount"),
         "BackgroundShader" | "BackgroundPatternShader" => (
             &[
                 ("idBackgroundDrawableUBO", ID_BACKGROUND_DRAWABLE_UBO),
@@ -186,6 +210,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             &[
                 ("idCollisionDrawableUBO", ID_COLLISION_DRAWABLE_UBO),
                 ("idCollisionTilePropsUBO", ID_COLLISION_TILE_PROPS_UBO),
+                ("idCollisionProjectionUBO", ID_COLLISION_PROJECTION_UBO),
             ],
             "collisionUBOCount",
         ),
@@ -218,6 +243,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             ],
             "fillExtrusionUBOCount",
         ),
+        "GlobeDepthShader" => (&[], "globeDepthUBOCount"),
         "HeatmapShader" => (
             &[
                 ("idHeatmapDrawableUBO", ID_HEATMAP_DRAWABLE_UBO),
@@ -259,6 +285,7 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
             ],
             "rasterUBOCount",
         ),
+        "SkyShader" => (&[("idSkyPropsUBO", ID_SKY_PROPS_UBO)], "skyUBOCount"),
         "SymbolIconShader" | "SymbolSDFShader" | "SymbolTextAndIconShader" => (
             &[
                 ("idSymbolDrawableUBO", ID_SYMBOL_DRAWABLE_UBO),
@@ -277,6 +304,9 @@ fn ubo_ids(source: &ShaderSource) -> Vec<(&'static str, usize)> {
 /// The renderer's UBO structs, by the name the MSL gives them.
 const UBO_SIZES: &[(&str, usize)] = &[
     ("GlobalPaintParamsUBO", size_of::<layer_ubo::GlobalPaintParamsUBO>()),
+    ("ProjectionUBO", size_of::<layer_ubo::ProjectionUBO>()),
+    ("SkyPropsUBO", size_of::<sky_ubo::SkyPropsUBO>()),
+    ("AtmospherePropsUBO", size_of::<sky_ubo::AtmospherePropsUBO>()),
     ("BackgroundDrawableUBO", size_of::<background_layer_ubo::BackgroundDrawableUBO>()),
     ("BackgroundPropsUBO", size_of::<background_layer_ubo::BackgroundPropsUBO>()),
     ("BackgroundPatternDrawableUBO", size_of::<background_layer_ubo::BackgroundPatternDrawableUBO>()),
@@ -350,8 +380,10 @@ fn ubo_ids_and_sizes_are_the_renderers() {
             }
         }
         text.push_str(&asserts);
-        if let Err(error) = compile(&device, &text, &defines(false, [])) {
-            failures.push(format!("{}:\n{error}", source.name));
+        for (projection, globe) in PROJECTIONS {
+            if let Err(error) = compile(&device, &text, &defines(false, globe, [])) {
+                failures.push(format!("{} ({projection}):\n{error}", source.name));
+            }
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n\n"));
@@ -421,8 +453,15 @@ fn pipelines_build_with_the_tables_vertex_layout() {
             ("table formats", vertex_descriptor(source, |data_type| data_type)),
             ("single-value formats", vertex_descriptor(source, narrow)),
         ];
-        for (variant, defines) in [("no uniforms", defines(false, [])), ("all uniforms", defines(false, &properties))] {
-            let library = compile(&device, &text, &defines).unwrap_or_else(|error| panic!("{}: {error}", source.name));
+        let variants = PROJECTIONS.iter().flat_map(|&(projection, globe)| {
+            [
+                (format!("{projection}, no uniforms"), defines(false, globe, [])),
+                (format!("{projection}, all uniforms"), defines(false, globe, &properties)),
+            ]
+        });
+        for (variant, defines) in variants {
+            let library = compile(&device, &text, &defines)
+                .unwrap_or_else(|error| panic!("{} ({variant}): {error}", source.name));
             let function = |name: &str| library.newFunctionWithName(&NSString::from_str(name)).unwrap();
             let vertex = function(source.msl.vertex_main_function);
             let fragment = function(source.msl.fragment_main_function);
