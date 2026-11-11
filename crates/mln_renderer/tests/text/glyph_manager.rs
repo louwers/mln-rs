@@ -5,7 +5,7 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use mln_actor::RunLoop;
+use mln_actor::{RunLoop, Timer};
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
 use mln_renderer::text::glyph_manager::{GlyphManager, GlyphManagerObserver, GlyphRequestor};
 use mln_storage::response::{Error, Reason};
@@ -20,6 +20,7 @@ use mln_text::glyph::{
 use mln_text::glyph_cache::GlyphCache;
 use mln_text::local_glyph_rasterizer::LocalGlyphRasterizer;
 use mln_text::tagged_string::font_stack_hash;
+use mln_util::chrono::{Duration, milliseconds};
 use mln_util::exception::ExceptionPtr;
 use mln_util::font_stack::FontStack;
 use mln_util::i18n;
@@ -79,12 +80,14 @@ impl LocalGlyphRasterizer for LatinALocalGlyphRasterizer {
 
 type LoadedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
 type ErrorFn = Box<dyn FnMut(&FontStack, &GlyphRange, ExceptionPtr)>;
+type RequestedFn = Box<dyn FnMut(&FontStack, &GlyphRange)>;
 
 /// `StubGlyphManagerObserver`.
 #[derive(Default)]
 struct StubGlyphManagerObserver {
     glyphs_loaded: RefCell<Option<LoadedFn>>,
     glyphs_error: RefCell<Option<ErrorFn>>,
+    glyphs_requested: RefCell<Option<RequestedFn>>,
 }
 
 impl GlyphManagerObserver for StubGlyphManagerObserver {
@@ -97,6 +100,12 @@ impl GlyphManagerObserver for StubGlyphManagerObserver {
     fn on_glyphs_error(&self, font_stack: &FontStack, range: &GlyphRange, error: ExceptionPtr) {
         if let Some(f) = self.glyphs_error.borrow_mut().as_mut() {
             f(font_stack, range, error);
+        }
+    }
+
+    fn on_glyphs_requested(&self, font_stack: &FontStack, range: &GlyphRange) {
+        if let Some(f) = self.glyphs_requested.borrow_mut().as_mut() {
+            f(font_stack, range);
         }
     }
 }
@@ -245,8 +254,20 @@ fn loading_success() {
     assert!(available.get());
 }
 
-/// The observer's `glyphsError` for LoadingFail / LoadingCorrupted.
+/// The requestor's `glyphsAvailable` and the observer's `glyphsError` for
+/// LoadingFail / LoadingCorrupted: the requestor gets the range's glyphs as
+/// missing before the error is reported.
 fn expect_error(test: &GlyphManagerTest, message: &'static str) -> Rc<Cell<bool>> {
+    let answered = Rc::new(Cell::new(false));
+    let a = answered.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        let test_positions = &glyphs[&font_stack_hash(&test_stack())];
+        assert_eq!(test_positions.len(), 2);
+        assert!(test_positions[&gid('a')].is_none());
+        assert!(test_positions[&gid('å')].is_none());
+        a.set(true);
+    }));
+
     let called = Rc::new(Cell::new(false));
     let (c, run_loop) = (called.clone(), test.run_loop.clone());
     *test.observer.glyphs_error.borrow_mut() = Some(Box::new(move |font_stack, glyph_range, error| {
@@ -255,11 +276,10 @@ fn expect_error(test: &GlyphManagerTest, message: &'static str) -> Rc<Cell<bool>
 
         assert_eq!(error.to_string(), message);
 
+        assert!(answered.get());
         c.set(true);
         run_loop.stop();
     }));
-
-    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(|_| panic!("glyphsAvailable")));
     called
 }
 
@@ -278,6 +298,105 @@ fn loading_fail() {
 
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a', 'å']));
     assert!(called.get());
+}
+
+/// A file source response that fails on the first request (`requests` is 1)
+/// and serves the glyphs.pbf fixture after that.
+fn fails_first_then_glyphs(requests: Rc<Cell<u32>>) -> impl Fn(&Resource) -> Option<Response> {
+    move |_: &Resource| {
+        let mut response = Response::new();
+        if requests.get() == 1 {
+            response.error = Some(Box::new(Error::new(Reason::NotFound, "Failed by the test case")));
+        } else {
+            response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
+        }
+        Some(response)
+    }
+}
+
+fn count_requests(test: &GlyphManagerTest) -> Rc<Cell<u32>> {
+    let requests = Rc::new(Cell::new(0));
+    let r = requests.clone();
+    *test.observer.glyphs_requested.borrow_mut() = Some(Box::new(move |_, _| r.set(r.get() + 1)));
+    requests
+}
+
+// gtest: GlyphManager.LoadingFailRequestsTheRangeAgain
+#[test]
+fn loading_fail_requests_the_range_again() {
+    let mut test = GlyphManagerTest::new();
+    let requests = count_requests(&test);
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(requests.clone()));
+
+    let answers = Rc::new(Cell::new(0));
+    let retry = Rc::new(Timer::new());
+    let (n, run_loop) = (answers.clone(), test.run_loop.clone());
+    let glyph_manager = Rc::downgrade(&test.glyph_manager);
+    let requestor = Rc::downgrade(&test.requestor);
+    let file_source = test.file_source();
+    let retry_timer = retry.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        let test_positions = &glyphs[&font_stack_hash(&test_stack())];
+        n.set(n.get() + 1);
+        if n.get() == 1 {
+            assert!(test_positions[&gid('a')].is_none());
+            // C++ asks again through `loop.invoke`, after this response is
+            // processed.
+            let (glyph_manager, requestor, file_source) =
+                (glyph_manager.clone(), requestor.clone(), file_source.clone());
+            retry_timer.start(Duration::zero(), Duration::zero(), move || {
+                let requestor: Rc<dyn GlyphRequestor> = requestor.upgrade().unwrap();
+                glyph_manager.upgrade().unwrap().get_glyphs(&requestor, dependencies(&['a']), Some(&file_source));
+            });
+        } else {
+            assert!(test_positions[&gid('a')].is_some());
+            run_loop.stop();
+        }
+    }));
+
+    let timeout = Timer::new();
+    let run_loop = test.run_loop.clone();
+    timeout.start(milliseconds(1000), Duration::zero(), move || run_loop.stop());
+
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
+
+    assert_eq!(requests.get(), 2);
+    assert_eq!(answers.get(), 2);
+}
+
+// gtest: GlyphManager.LoadingFailStillAnswersWithTheOtherRanges
+#[test]
+fn loading_fail_still_answers_with_the_other_ranges() {
+    let mut test = GlyphManagerTest::new();
+
+    test.file_source.set_response(Kind::Glyphs, |resource: &Resource| {
+        let mut response = Response::new();
+        if resource.url == "test/fixtures/resources/glyphs-0-255.pbf" {
+            response.data = Some(Arc::new(read_file("test/fixtures/resources/glyphs.pbf")));
+        } else {
+            response.error = Some(Box::new(Error::new(Reason::NotFound, "Failed by the test case")));
+        }
+        Some(response)
+    });
+
+    let answered = Rc::new(Cell::new(false));
+    let (a, run_loop) = (answered.clone(), test.run_loop.clone());
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        let test_positions = &glyphs[&font_stack_hash(&test_stack())];
+        assert_eq!(test_positions.len(), 2);
+        assert!(test_positions[&gid('a')].is_some());
+        assert!(test_positions[&gid('ở')].is_none());
+        a.set(true);
+        run_loop.stop();
+    }));
+
+    let timeout = Timer::new();
+    let run_loop = test.run_loop.clone();
+    timeout.start(milliseconds(1000), Duration::zero(), move || run_loop.stop());
+
+    test.run("test/fixtures/resources/glyphs-{range}.pbf", dependencies(&['a', 'ở']));
+
+    assert!(answered.get());
 }
 
 // gtest: GlyphManager.LoadingCorrupted
@@ -577,6 +696,30 @@ fn immediate_file_source() {
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a', 'å', ' ']));
     assert!(available.get());
     test.end();
+}
+
+// gtest: GlyphManager.ImmediateFileSourceFailureRequestsTheRangeAgain
+#[test]
+fn immediate_file_source_failure_requests_the_range_again() {
+    let test = GlyphManagerTest::with(Box::new(StubLocalGlyphRasterizer), ResponseType::Synchronous);
+    let _log = SquelchLog::new();
+    let requests = count_requests(&test);
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(requests.clone()));
+
+    let answers = Rc::new(RefCell::new(Vec::new()));
+    let a = answers.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |glyphs: GlyphMap| {
+        a.borrow_mut().push(glyphs[&font_stack_hash(&test_stack())][&gid('a')].is_some());
+    }));
+
+    test.glyph_manager.set_url("test/fixtures/resources/glyphs.pbf");
+    test.glyph_manager.set_observer(Some(test.observer.clone()));
+
+    test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
+    test.glyph_manager.get_glyphs(&test.requestor(), dependencies(&['a']), Some(&test.file_source()));
+
+    assert_eq!(requests.get(), 2);
+    assert_eq!(*answers.borrow(), vec![false, true]);
 }
 
 // Guards against silent drift between allowsFixedWidthGlyphGeneration's range
