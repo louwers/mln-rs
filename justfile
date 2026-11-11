@@ -47,7 +47,8 @@ bench-fixtures:
 
 # Configures and builds tools/c-abi-test in target/c-abi-test, against crates/mln_c's shared library, then runs it with
 # tools/c-abi-test/run.py, whose arguments follow: `--update` rewrites expected-failures.txt, `-v` prints each failure. Needs
-# CMake, a C23 and C++23 compiler, the Vulkan headers and loader, and a Vulkan driver such as lavapipe (VK_DRIVER_FILES).
+# CMake, a C23 and C++23 compiler, the Vulkan headers and loader, a Vulkan driver such as lavapipe (VK_DRIVER_FILES), and
+# libwayland-server and libwayland-client, which the Wayland cases load.
 [doc("Run maplibre-native-ffi's ABI suite against crates/mln_c, and compare its failures with tools/c-abi-test/expected-failures.txt")]
 [positional-arguments]
 c-abi-test *args:  _dev-shell

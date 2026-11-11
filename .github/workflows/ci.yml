@@ -95,7 +95,7 @@ jobs:
       - name: Install system packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends cmake libclang-dev libvulkan-dev
+          sudo apt-get install -y --no-install-recommends cmake libclang-dev libvulkan-dev libwayland-client0 libwayland-server0
 
       - name: Install lavapipe
         uses: ./.github/actions/lavapipe
