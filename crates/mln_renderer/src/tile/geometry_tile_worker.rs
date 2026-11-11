@@ -37,7 +37,7 @@ use mln_style_types::image::{ImageDependencies, ImageMap, ImagePositions, shared
 use mln_text::glyph::{GlyphDependencies, GlyphIDType, GlyphMap};
 use mln_text::tagged_string::font_stack_hash;
 use mln_tile_id::OverscaledTileID;
-use mln_tile_id::geometry_tile_data::GeometryTileData;
+use mln_tile_id::geometry_tile_data::{GeometryTileData, GeometryTileFeature};
 use mln_util::exception::ExceptionPtr;
 use mln_util::immutable::Immutable;
 use mln_vec_map::VecSet;
@@ -50,6 +50,7 @@ use crate::gfx::dynamic_texture_atlas::{DynamicTextureAtlasPtr, GlyphAtlas, Imag
 use crate::group_by_layout::group_layers;
 use crate::image_manager::ImageRequestPair;
 use crate::layermanager;
+use crate::layout::filter_groups::FilterGroups;
 use crate::layout::layout::{Layout, LayoutParameters, SourceLayer};
 use crate::layout::pattern_layout::PatternLayerMap;
 use crate::render_layer::LayerRenderData;
@@ -598,6 +599,7 @@ impl GeometryTileWorker {
 
         let mut glyph_dependencies = GlyphDependencies::default();
         let mut image_dependencies = ImageDependencies::new();
+        let mut filter_groups = FilterGroups::default();
 
         // Create render layers and group by layout
         let group_map = group_layers(&layers);
@@ -646,6 +648,7 @@ impl GeometryTileWorker {
                         glyph_dependencies: &mut glyph_dependencies,
                         image_dependencies: &mut image_dependencies,
                         available_images: &self.available_images,
+                        filter_groups: &mut filter_groups,
                     },
                     SourceLayer::new(data.clone(), leader_impl.source_layer.clone()),
                     group,
@@ -678,20 +681,30 @@ impl GeometryTileWorker {
                 bucket.set_retain_features_by_id(self.capture_rendered_features);
                 bucket.reserve_features(geometry_layer.feature_count());
 
-                let mut i = 0;
-                while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
-                    let feature = geometry_layer.get_feature(i)?;
-
-                    let effective_z = f32::from(self.id.overscaled_z);
-                    let passes = filter.evaluate(
-                        &EvaluationContext::with_zoom_feature(effective_z, Some(&*feature))
+                let effective_z = f32::from(self.id.overscaled_z);
+                let passes = |feature: &dyn GeometryTileFeature| {
+                    filter.evaluate(
+                        &EvaluationContext::with_zoom_feature(effective_z, Some(feature))
                             .with_canonical_tile_id(Some(&self.id.canonical))
                             .with_global_state(self.global_state.as_deref()),
-                    );
-                    feature.check()?;
-                    if !passes {
+                    )
+                };
+                let selected = filter_groups.select(source_layer_id, &*geometry_layer, filter, passes);
+
+                let mut i = 0;
+                while !self.obsolete.load(Ordering::SeqCst) && i < geometry_layer.feature_count() {
+                    if selected.as_ref().is_some_and(|selected| !selected[i]) {
                         i += 1;
                         continue;
+                    }
+                    let feature = geometry_layer.get_feature(i)?;
+                    if selected.is_none() {
+                        let passes = passes(&*feature);
+                        feature.check()?;
+                        if !passes {
+                            i += 1;
+                            continue;
+                        }
                     }
 
                     let geometries = feature.get_geometries();

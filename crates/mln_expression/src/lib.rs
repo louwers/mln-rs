@@ -57,7 +57,7 @@ pub use formatted::{Formatted, FormattedSection};
 pub use image::Image;
 pub use interpolate::{Interpolate, create_interpolate};
 pub use interpolator::Interpolator;
-pub use is_constant::{is_feature_constant, is_runtime_constant, is_zoom_constant};
+pub use is_constant::{feature_property_keys, is_feature_constant, is_runtime_constant, is_zoom_constant};
 pub use is_expression::is_expression;
 pub use literal::Literal;
 pub use parsing_context::{ParseResult, ParsingContext, ParsingError, TypeAnnotationOption};

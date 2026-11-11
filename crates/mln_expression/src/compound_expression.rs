@@ -613,6 +613,15 @@ impl CompoundExpression {
         }
     }
 
+    /// The signature the arguments matched.
+    pub fn signature(&self) -> &'static SignatureBase {
+        self.signature
+    }
+
+    pub fn args(&self) -> &[Box<dyn Expression>] {
+        &self.args
+    }
+
     pub fn exists(name: &str) -> bool {
         REGISTRY.iter().any(|s| s.name == name)
     }
