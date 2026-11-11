@@ -12,8 +12,47 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 
 pub const EMPTY_STYLE: &str = r#"{"version":8,"sources":{},"layers":[]}"#;
 
-pub fn runtime() -> Runtime {
-    Runtime::new(RuntimeOptions::default()).unwrap()
+pub fn runtime() -> TestRuntime {
+    TestRuntime(Runtime::new(RuntimeOptions::default()).unwrap())
+}
+
+/// A runtime that shuts down fully when the test ends: once every map, and
+/// every render session that holds one, has let go, which a dropped handle
+/// only starts. A session still freeing its GPU objects when the test binary
+/// exits can call into a Vulkan layer or driver that the exit unloaded.
+pub struct TestRuntime(Runtime);
+
+impl std::ops::Deref for TestRuntime {
+    type Target = Runtime;
+
+    fn deref(&self) -> &Runtime {
+        &self.0
+    }
+}
+
+impl Drop for TestRuntime {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            match self.0.release() {
+                Ok(released) => {
+                    released.wait().expect("the runtime shuts down");
+                    return;
+                }
+                // Refused while a map, or a session holding one, hasn't
+                // let go yet.
+                Err(error) if error.message.contains("maps first") && Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                // Released by the test already, or a map outlived the
+                // deadline, which the test that leaked it shows.
+                Err(_) => return,
+            }
+        }
+    }
 }
 
 pub fn map_options() -> MapOptions {

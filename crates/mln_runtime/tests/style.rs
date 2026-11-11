@@ -7,7 +7,7 @@ mod support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, Runtime, SourceKind};
+use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
 use mln_style::sources::custom_geometry_source::TileOptions;
@@ -15,7 +15,7 @@ use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use support::{EMPTY_STYLE, map, runtime, wait, wait_err};
+use support::{EMPTY_STYLE, TestRuntime, map, runtime, wait, wait_err};
 
 const EMPTY_GEOJSON_SOURCE: &str = r#"{"type":"geojson","data":{"type":"FeatureCollection","features":[]}}"#;
 
@@ -27,7 +27,7 @@ fn point_collection(name: &str) -> String {
 
 /// A runtime whose provider fails every request, so that URL sources never
 /// reach the network, and one of its maps with an empty style.
-fn styled_map() -> (Runtime, Map) {
+fn styled_map() -> (TestRuntime, Map) {
     let runtime = runtime();
     wait(runtime.set_resource_provider(|request: ResourceRequest| {
         let error = ResourceError::new(Reason::NotFound, "the style tests serve nothing");
