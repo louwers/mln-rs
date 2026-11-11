@@ -300,6 +300,7 @@ pub(crate) fn run(launch: Launch) {
         ui,
         controls: Controls::default(),
         ui_input: None,
+        ui_window: egui::RawInput::default(),
         ui_repaint_at: None,
         ui_shapes: Vec::new(),
         paint,
@@ -393,6 +394,11 @@ struct View {
     controls: Controls,
     /// The controls' input since their last frame.
     ui_input: Option<egui::RawInput>,
+    /// The window's state as the controls' last input had it, without its
+    /// events: a frame without input starts from it, since a default
+    /// `RawInput` has no viewport info, and egui would lay the controls out
+    /// at one pixel per point, and unfocused.
+    ui_window: egui::RawInput,
     /// When the controls asked for their next frame (a tooltip's delay).
     ui_repaint_at: Option<Instant>,
     /// The controls' last frame, to tell whether a frame changed them.
@@ -599,7 +605,17 @@ impl View {
     /// The controls' frame: lays them out with their input, carries out what
     /// they ask, and draws the map again under them when they changed.
     fn controls_frame(&mut self, now: Instant) {
-        let mut input = self.ui_input.take().unwrap_or_default();
+        let mut input = self.ui_window.clone();
+        if let Some(newer) = self.ui_input.take() {
+            input.append(newer);
+            self.ui_window = input.clone();
+            self.ui_window.events.clear();
+            self.ui_window.hovered_files.clear();
+            self.ui_window.dropped_files.clear();
+            for viewport in self.ui_window.viewports.values_mut() {
+                viewport.events.clear();
+            }
+        }
         input.time = Some(now.saturating_duration_since(self.start).as_secs_f64());
 
         let camera = self.map.get_camera_options(None);
