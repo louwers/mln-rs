@@ -39,6 +39,9 @@ pub struct UpdateParameters {
 
     /// For still image requests, render requested.
     pub still_image_request: bool,
+    /// Identifies the still image request: each new one retries the
+    /// resources that failed to load.
+    pub still_image_request_id: u64,
     pub cross_source_collisions: bool,
     pub fast_pfor_enabled: bool,
     pub capture_rendered_features: bool,

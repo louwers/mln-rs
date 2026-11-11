@@ -111,6 +111,7 @@ impl Map {
         }
 
         *impl_.still_image_request.borrow_mut() = Some(StillImageRequest { callback });
+        impl_.still_image_request_id.set(impl_.still_image_request_id.get() + 1);
 
         impl_.on_update();
     }

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use mln_actor::{RunLoop, Timer};
 use mln_renderer::text::font_face_engine::{FontFaceEngine, FontFaceShaper};
-use mln_renderer::text::glyph_manager::{GlyphManager, GlyphManagerObserver, GlyphRequestor};
+use mln_renderer::text::glyph_manager::{GlyphManager, GlyphManagerObserver, GlyphRequestor, glyph_requestor_key};
 use mln_storage::response::{Error, Reason};
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_storage::{FileSource, Kind, Resource, Response};
@@ -116,6 +116,7 @@ impl GlyphManagerObserver for StubGlyphManagerObserver {
 #[derive(Default)]
 struct StubGlyphRequestor {
     glyphs_available: RefCell<Option<Rc<dyn Fn(GlyphMap)>>>,
+    missing_glyph_retries: Cell<usize>,
 }
 
 impl GlyphRequestor for StubGlyphRequestor {
@@ -124,6 +125,10 @@ impl GlyphRequestor for StubGlyphRequestor {
         if let Some(f) = f {
             f(glyphs);
         }
+    }
+
+    fn retry_missing_glyphs(&self) {
+        self.missing_glyph_retries.set(self.missing_glyph_retries.get() + 1);
     }
 }
 
@@ -362,6 +367,51 @@ fn loading_fail_requests_the_range_again() {
 
     assert_eq!(requests.get(), 2);
     assert_eq!(answers.get(), 2);
+}
+
+// A still image asks the requestors answered without a failed range to
+// request their glyphs again, once, and requests nothing itself.
+#[test]
+fn retry_failed_requests_asks_the_requestors_missing_glyphs() {
+    let mut test = GlyphManagerTest::new();
+    let requests = count_requests(&test);
+    test.file_source.set_response(Kind::Glyphs, fails_first_then_glyphs(requests.clone()));
+    let run_loop = test.run_loop.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
+
+    test.glyph_manager.retry_failed_requests();
+    assert_eq!(test.requestor.missing_glyph_retries.get(), 0);
+
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
+    test.glyph_manager.retry_failed_requests();
+    assert_eq!(test.requestor.missing_glyph_retries.get(), 1);
+    assert_eq!(requests.get(), 1);
+
+    test.glyph_manager.retry_failed_requests();
+    assert_eq!(test.requestor.missing_glyph_retries.get(), 1);
+
+    // The requestor's own request requests the range again, which loads.
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
+    assert_eq!(requests.get(), 2);
+    test.glyph_manager.retry_failed_requests();
+    assert_eq!(test.requestor.missing_glyph_retries.get(), 1);
+}
+
+#[test]
+fn retry_failed_requests_skips_removed_requestors() {
+    let mut test = GlyphManagerTest::new();
+    test.file_source.set_response(Kind::Glyphs, |_: &Resource| {
+        let mut response = Response::new();
+        response.error = Some(Box::new(Error::new(Reason::Other, "Failed by the test case")));
+        Some(response)
+    });
+    let run_loop = test.run_loop.clone();
+    *test.requestor.glyphs_available.borrow_mut() = Some(Rc::new(move |_: GlyphMap| run_loop.stop()));
+
+    test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a']));
+    test.glyph_manager.remove_requestor_key(glyph_requestor_key(&test.requestor()));
+    test.glyph_manager.retry_failed_requests();
+    assert_eq!(test.requestor.missing_glyph_retries.get(), 0);
 }
 
 // gtest: GlyphManager.LoadingFailStillAnswersWithTheOtherRanges

@@ -205,6 +205,8 @@ pub struct RenderOrchestrator {
     source_observer: Rc<OrchestratorSourceObserver>,
 
     zoom_history: ZoomHistory,
+    /// The still image request the last update was for.
+    still_image_request_id: u64,
     transform_state: TransformState,
 
     // symbols: the glyph and image managers (shared with the tiles), and the
@@ -291,6 +293,7 @@ impl RenderOrchestrator {
             observer: observer.clone(),
             source_observer: Rc::new(OrchestratorSourceObserver { observer }),
             zoom_history: ZoomHistory::default(),
+            still_image_request_id: 0,
             transform_state: TransformState::default(),
             glyph_manager,
             image_manager,
@@ -606,6 +609,20 @@ impl RenderOrchestrator {
                 render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
                 // `emplace` keeps an existing entry.
                 self.render_sources.entry(id.clone()).or_insert(render_source);
+            }
+        }
+
+        // A still image fails at the first resource error, and nothing
+        // requests a failed resource again on its own: each new still image
+        // retries them instead of waiting on them or rendering without them.
+        if !is_map_mode_continuous
+            && update_parameters.still_image_request
+            && update_parameters.still_image_request_id != self.still_image_request_id
+        {
+            self.still_image_request_id = update_parameters.still_image_request_id;
+            self.glyph_manager.retry_failed_requests();
+            for render_source in self.render_sources.values_mut() {
+                render_source.retry_failed_tiles();
             }
         }
         self.transform_state = update_parameters.transform_state.clone();

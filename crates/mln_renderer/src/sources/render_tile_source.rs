@@ -627,6 +627,10 @@ impl RenderTileSource {
         self.tile_pyramid.reduce_memory_use();
     }
 
+    pub fn retry_failed_tiles(&self) {
+        self.tile_pyramid.retry_failed_tiles();
+    }
+
     pub fn dump_debug_logs(&self) {
         self.tile_pyramid.dump_debug_logs();
     }

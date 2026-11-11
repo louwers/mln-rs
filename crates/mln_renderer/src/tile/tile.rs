@@ -211,6 +211,9 @@ pub trait Tile {
 
     fn set_update_parameters(&self, _parameters: &TileUpdateParameters) {}
 
+    /// `retryFailedLoad()`: requests the tile again if its last load failed.
+    fn retry_failed_load(&self) {}
+
     /// Mark this tile as no longer needed and cancel any pending work.
     fn cancel(&self);
 

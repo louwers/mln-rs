@@ -615,6 +615,13 @@ impl TilePyramid {
         self.cache.clear();
     }
 
+    /// `retryFailedTiles()`.
+    pub fn retry_failed_tiles(&self) {
+        for tile in self.tiles.values() {
+            tile.retry_failed_load();
+        }
+    }
+
     /// `setObserver(TileObserver*)`.
     pub fn set_observer(&mut self, observer: Rc<dyn TileObserver>) {
         self.observer = observer;

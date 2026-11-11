@@ -420,6 +420,22 @@ impl GlyphRequestor for GeometryTileInner {
         }
         self.worker.send(WorkerMessage::GlyphsAvailable { glyph_map, results });
     }
+
+    /// Lays the tile out again with the glyphs it got as missing requested
+    /// again; the tile is pending until then.
+    fn retry_missing_glyphs(&self) {
+        if self.is_obsolete() {
+            return;
+        }
+        if !self.base.pending.get() {
+            self.base.on_tile_action(TileOperation::StartParse);
+        }
+        self.base.pending.set(true);
+
+        self.correlation_id.set(self.correlation_id.get() + 1);
+        let correlation_id = self.correlation_id.get();
+        self.worker.send(WorkerMessage::RetryMissingGlyphs { correlation_id });
+    }
 }
 
 impl ImageRequestor for GeometryTileInner {

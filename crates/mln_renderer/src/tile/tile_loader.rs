@@ -41,6 +41,8 @@ pub enum VectorTileEncoding {
 /// What a loader does with the tile it loads (`T` in C++).
 pub trait LoaderTile {
     fn set_error(&self, err: ExceptionPtr);
+    /// `setLoading()`: the tile waits for data again.
+    fn set_loading(&self);
     fn set_tried_cache(&self);
     fn on_tile_action(&self, op: TileOperation);
     fn set_metadata(&self, modified: Option<mln_util::chrono::Timestamp>, expires: Option<mln_util::chrono::Timestamp>);
@@ -52,6 +54,10 @@ pub trait LoaderTile {
 impl LoaderTile for GeometryTileInner {
     fn set_error(&self, err: ExceptionPtr) {
         GeometryTileInner::set_error(self, err);
+    }
+
+    fn set_loading(&self) {
+        self.base.loaded.set(false);
     }
 
     fn set_tried_cache(&self) {
@@ -93,6 +99,9 @@ struct State {
     resource: Resource,
     file_source: Option<Arc<dyn FileSource>>,
     request: Option<Box<dyn AsyncRequest>>,
+    /// The last response was an error: nothing requests the tile again until
+    /// `retry_failed_load`.
+    failed: bool,
     update_parameters: TileUpdateParameters,
 }
 
@@ -134,6 +143,7 @@ impl TileLoader {
             resource,
             file_source: if tileset.tiles.is_empty() { None } else { parameters.file_source.clone() },
             request: None,
+            failed: false,
             update_parameters: TileUpdateParameters { minimum_update_interval: Duration::zero(), is_volatile: false },
         }));
         let loader = TileLoader { state };
@@ -204,6 +214,22 @@ impl TileLoader {
         if reload {
             load_from_network(&self.state);
         }
+    }
+
+    /// `retryFailedLoad()`: requests a required tile whose last response was
+    /// an error again, and makes it wait for the answer.
+    pub fn retry_failed_load(&self) {
+        {
+            let mut state = self.state.borrow_mut();
+            if !state.failed || state.request.is_some() || state.necessity != TileNecessity::Required {
+                return;
+            }
+            state.failed = false;
+        }
+        if let Some(tile) = tile_of(&self.state) {
+            tile.set_loading();
+        }
+        load_from_network(&self.state);
     }
 }
 
@@ -297,6 +323,7 @@ fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMet
     let tile = tile_of(state_rc);
     if let Some(error) = &res.error {
         if error.reason != Reason::NotFound {
+            state_rc.borrow_mut().failed = true;
             if let Some(tile) = &tile {
                 tile.set_error(RuntimeError::ptr(error.message.clone()));
                 tile.on_tile_action(TileOperation::Error);
@@ -304,6 +331,7 @@ fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMet
             return;
         }
     }
+    state_rc.borrow_mut().failed = false;
 
     if let Some(tile) = &tile {
         if method == LoadingMethod::NetworkOnly {

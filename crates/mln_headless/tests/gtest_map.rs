@@ -2331,6 +2331,99 @@ fn resource_error() {
     }
 }
 
+/// Answers each request of `kind` once, as a file source that doesn't retry
+/// does: with an error while the returned flag is set, then with `response`.
+/// Also returns the request count.
+fn fail_requests(test: &MapTest, kind: Kind, response: Response) -> (Rc<Cell<bool>>, Rc<Cell<usize>>) {
+    let failing = Rc::new(Cell::new(true));
+    let count = Rc::new(Cell::new(0));
+    let (f, c) = (failing.clone(), count.clone());
+    test.file_source.set_response(kind, move |_| {
+        c.set(c.get() + 1);
+        if f.get() {
+            let mut failed = Response::new();
+            failed.error = Some(Box::new(ResponseError::new(Reason::Server, "failed")));
+            Some(failed)
+        } else {
+            Some(response.clone())
+        }
+    });
+    (failing, count)
+}
+
+fn assert_still_image_retries_failed_tile(source: &str, layer: &str) {
+    let test = MapTest::new();
+    let mut empty = Response::new();
+    empty.no_content = true;
+    let (failing, requests) = fail_requests(&test, Kind::Tile, empty);
+    test.load_json(&format!(r#"{{"version": 8, "sources": {{"tiles": {source}}}, "layers": [{layer}]}}"#));
+
+    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(requests.get(), 1);
+
+    failing.set(false);
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+
+    // Nothing failed, so nothing is requested again.
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+}
+
+// gtest: Map.StillImageRetriesFailedTile
+#[test]
+fn still_image_retries_failed_tile() {
+    assert_still_image_retries_failed_tile(
+        r#"{"type": "vector", "tiles": ["http://example.com/{z}/{x}/{y}.pbf"], "maxzoom": 0}"#,
+        r#"{"id": "fill", "type": "fill", "source": "tiles", "source-layer": "any"}"#,
+    );
+}
+
+#[test]
+fn still_image_retries_failed_raster_tile() {
+    assert_still_image_retries_failed_tile(
+        r#"{"type": "raster", "tiles": ["http://example.com/{z}/{x}/{y}.png"], "maxzoom": 0}"#,
+        r#"{"id": "raster", "type": "raster", "source": "tiles"}"#,
+    );
+}
+
+// gtest: Map.StillImageRetriesFailedGlyphRange
+#[test]
+fn still_image_retries_failed_glyph_range() {
+    let test = MapTest::new();
+    let (failing, requests) = fail_requests(&test, Kind::Glyphs, file_response("test/fixtures/resources/glyphs.pbf"));
+    test.load_json(
+        r#"{
+        "version": 8,
+        "glyphs": "http://example.com/{fontstack}/{range}.pbf",
+        "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [0, 0]}}},
+        "layers": [{"id": "label", "type": "symbol", "source": "point", "layout": {"text-field": "A"}}]
+    }"#,
+    );
+    let labels = |test: &MapTest| {
+        let size = test.frontend.get_size();
+        let center = ScreenCoordinate::new(f64::from(size.width) / 2.0, f64::from(size.height) / 2.0);
+        let options = mln_renderer::query::RenderedQueryOptions::default();
+        test.frontend
+            .with_renderer(|renderer| renderer.query_rendered_features_at_point(&center, &options))
+            .unwrap()
+            .len()
+    };
+
+    assert_eq!(test.try_render().err().as_deref(), Some("failed"));
+    assert_eq!(requests.get(), 1);
+    assert_eq!(labels(&test), 0);
+
+    // The tile laid out without the range lays out again with it.
+    failing.set(false);
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+    assert_eq!(labels(&test), 1);
+
+    assert!(test.try_render().is_ok());
+    assert_eq!(requests.get(), 2);
+}
+
 // gtest: Map.StencilOverflow
 #[test]
 fn stencil_overflow() {

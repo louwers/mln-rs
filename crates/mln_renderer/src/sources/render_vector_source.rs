@@ -241,6 +241,10 @@ impl RenderSource for RenderVectorSource {
         self.tile_source.reduce_memory_use();
     }
 
+    fn retry_failed_tiles(&mut self) {
+        self.tile_source.retry_failed_tiles();
+    }
+
     fn dump_debug_logs(&self) {
         self.tile_source.dump_debug_logs();
     }

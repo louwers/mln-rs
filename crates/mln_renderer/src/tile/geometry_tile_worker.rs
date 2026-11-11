@@ -99,6 +99,9 @@ pub enum WorkerMessage {
     Reset { correlation_id: u64 },
     /// `setShowCollisionBoxes(showCollisionBoxes, correlationID)`.
     SetShowCollisionBoxes { show_collision_boxes: bool, correlation_id: u64 },
+    /// Forget the glyphs that came back missing and lay out again, which
+    /// requests them again.
+    RetryMissingGlyphs { correlation_id: u64 },
     /// `onGlyphsAvailable(newGlyphMap, results)`.
     GlyphsAvailable { glyph_map: GlyphMap, results: HBShapeResults },
     /// `onImagesAvailable(iconMap, patternMap, versionMap, imageCorrelationID)`.
@@ -120,7 +123,8 @@ impl WorkerMessage {
             WorkerMessage::SetData { correlation_id, .. }
             | WorkerMessage::SetLayers { correlation_id, .. }
             | WorkerMessage::Reset { correlation_id }
-            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. } => *correlation_id,
+            | WorkerMessage::SetShowCollisionBoxes { correlation_id, .. }
+            | WorkerMessage::RetryMissingGlyphs { correlation_id } => *correlation_id,
             WorkerMessage::GlyphsAvailable { .. } | WorkerMessage::ImagesAvailable { .. } => 0,
         }
     }
@@ -261,6 +265,7 @@ impl GeometryTileWorker {
             WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
                 self.set_show_collision_boxes(show_collision_boxes, correlation_id)
             }
+            WorkerMessage::RetryMissingGlyphs { correlation_id } => self.retry_missing_glyphs(correlation_id),
             WorkerMessage::GlyphsAvailable { glyph_map, results } => self.on_glyphs_available(glyph_map, results),
             WorkerMessage::ImagesAvailable { icon_map, pattern_map, version_map, image_correlation_id } => {
                 self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id)
@@ -393,6 +398,29 @@ impl GeometryTileWorker {
                     this.state = State::NeedsSymbolLayout;
                 }
                 State::NeedsSymbolLayout | State::NeedsParse => {}
+            }
+            Ok(())
+        });
+    }
+
+    /// Forgets the glyphs that came back missing and parses again, so the
+    /// layout requests them again.
+    pub fn retry_missing_glyphs(&mut self, correlation_id: u64) {
+        self.guarded(|this| {
+            for glyphs in this.glyph_map.values_mut() {
+                glyphs.retain(|_, glyph| glyph.is_some());
+            }
+            this.correlation_id = correlation_id;
+
+            match this.state {
+                State::Idle => {
+                    this.parse()?;
+                    this.coalesce()?;
+                }
+                State::Coalescing | State::NeedsSymbolLayout => {
+                    this.state = State::NeedsParse;
+                }
+                State::NeedsParse => {}
             }
             Ok(())
         });

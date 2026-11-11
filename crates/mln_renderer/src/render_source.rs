@@ -272,6 +272,9 @@ pub trait RenderSource {
 
     fn reduce_memory_use(&mut self);
 
+    /// `retryFailedTiles()`: requests the tiles whose load failed again.
+    fn retry_failed_tiles(&mut self) {}
+
     fn dump_debug_logs(&self);
 
     fn get_max_zoom(&self) -> u8 {

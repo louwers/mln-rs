@@ -154,6 +154,8 @@ pub struct MapImpl {
     pub(crate) loading: Cell<bool>,
     pub(crate) renderer_fully_loaded: Cell<bool>,
     pub(crate) still_image_request: RefCell<Option<StillImageRequest>>,
+    /// Counts the still image requests, so the renderer can tell a new one.
+    pub(crate) still_image_request_id: Cell<u64>,
 
     pub(crate) tile_lod_min_radius: Cell<f64>,
     pub(crate) tile_lod_scale: Cell<f64>,
@@ -206,6 +208,7 @@ impl MapImpl {
             // frame or style load.
             renderer_fully_loaded: Cell::new(false),
             still_image_request: RefCell::new(None),
+            still_image_request_id: Cell::new(0),
             tile_lod_min_radius: Cell::new(3.0),
             tile_lod_scale: Cell::new(1.0),
             tile_lod_pitch_threshold: Cell::new((60.0 / 180.0) * std::f64::consts::PI),
@@ -313,6 +316,7 @@ impl MapImpl {
                 file_source: self.file_source.clone(),
                 prefetch_zoom_delta: self.prefetch_zoom_delta.get(),
                 still_image_request: self.still_image_request.borrow().is_some(),
+                still_image_request_id: self.still_image_request_id.get(),
                 cross_source_collisions: self.cross_source_collisions,
                 fast_pfor_enabled: self.fast_pfor_enabled,
                 capture_rendered_features: self.capture_rendered_features,
