@@ -42,12 +42,9 @@ jobs:
       - uses: actions/checkout@v7
 
       # Lavapipe for the GPU tests on Linux.
-      - name: Install system packages
+      - name: Install lavapipe
         if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
-          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+        uses: ./.github/actions/lavapipe
 
       - uses: taiki-e/install-action@v2
         with: { tool: 'just,cargo-llvm-cov' }
@@ -169,11 +166,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install system packages
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
-          echo "VK_DRIVER_FILES=/usr/share/vulkan/icd.d/lvp_icd.json" >> "$GITHUB_ENV"
+      # Lavapipe for the native runner's renders.
+      - name: Install lavapipe
+        uses: ./.github/actions/lavapipe
 
       - uses: actions/cache@v6
         with:
