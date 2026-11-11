@@ -115,8 +115,10 @@ image-webp = { version = "0.2.4" }
 # crates/mln_gl's headless backend: an EGL context. `dynamic` loads libEGL at
 # run time, so builds need no system development packages.
 khronos-egl = { version = "6.0.0", features = ["dynamic"] }
-# tools/bench: the process's CPU time (clock_gettime), which std lacks.
+# tools/bench: the process's CPU time, which std lacks: clock_gettime on Unix,
+# GetProcessTimes on Windows.
 libc = { version = "0.2.191" }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of

@@ -144,7 +144,8 @@ fn parses_the_cpp_linux_manifest() {
 fn manifest_errors() {
     let dir = tmp_dir("manifest_errors");
     let integration = std::fs::canonicalize(INTEGRATION).unwrap();
-    let integration = integration.to_str().unwrap();
+    // A JSON string, quotes included: Windows paths have backslashes to escape.
+    let integration = serde_json::to_string(integration.to_str().unwrap()).unwrap();
     let parse = |name: &str, contents: &str| {
         let path = dir.join(name);
         write(&path, contents);
@@ -157,21 +158,19 @@ fn manifest_errors() {
     assert!(
         parse(
             "bad-expectation.json",
-            &format!(r#"{{"base_test_path": "{integration}", "expectation_paths": ["nope"]}}"#)
+            &format!(r#"{{"base_test_path": {integration}, "expectation_paths": ["nope"]}}"#)
         )
         .is_none()
     );
     assert!(
-        parse("bad-ignores.json", &format!(r#"{{"base_test_path": "{integration}", "ignore_paths": "x"}}"#)).is_none()
+        parse("bad-ignores.json", &format!(r#"{{"base_test_path": {integration}, "ignore_paths": "x"}}"#)).is_none()
     );
-    assert!(parse("bad-probe.json", &format!(r#"{{"base_test_path": "{integration}", "probes": [1]}}"#)).is_none());
+    assert!(parse("bad-probe.json", &format!(r#"{{"base_test_path": {integration}, "probes": [1]}}"#)).is_none());
 
     // The manifest's own filter applies when none is given; a given one wins.
     let manifest = parse(
         "filter.json",
-        &format!(
-            r#"{{"base_test_path": "{integration}", "filter": "background-visibility/none/", "result_path": "."}}"#
-        ),
+        &format!(r#"{{"base_test_path": {integration}, "filter": "background-visibility/none/", "result_path": "."}}"#),
     )
     .unwrap();
     assert_eq!(manifest.get_test_paths().len(), 1);
@@ -444,12 +443,12 @@ impl Suite {
     fn run(&self, ignores: &str, filter: &str) -> RunResult {
         write(&self.dir.join("ignores.json"), ignores);
         let integration = self.dir.join("integration");
-        let manifest = format!(
-            r#"{{"base_test_path": "{}", "expectation_paths": ["{}"], "ignore_paths": ["{}"]}}"#,
-            integration.display(),
-            self.dir.join("platform").display(),
-            self.dir.join("ignores.json").display()
-        );
+        let manifest = serde_json::json!({
+            "base_test_path": integration,
+            "expectation_paths": [self.dir.join("platform")],
+            "ignore_paths": [self.dir.join("ignores.json")],
+        })
+        .to_string();
         std::fs::create_dir_all(self.dir.join("platform")).unwrap();
         let manifest_path = self.dir.join("suite.json");
         write(&manifest_path, manifest);

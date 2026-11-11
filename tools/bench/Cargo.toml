@@ -22,7 +22,6 @@ test = false
 
 [dependencies]
 feature.workspace = true
-libc.workspace = true
 mln_actor.workspace = true
 mln_gfx.workspace = true
 mln_headless.workspace = true
@@ -48,6 +47,12 @@ wgpu.workspace = true
 # frontend (scene.rs describes and waits for it).
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mln_mtl.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
 
 [lints]
 workspace = true

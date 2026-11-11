@@ -26,7 +26,7 @@ use crate::resource_transform::{FinishedCallback, ResourceTransform};
 use crate::response::{Reason, ResourceError, Response};
 
 /// Windows doesn't fail immediately like other OS (C++: 2.0 on WIN32).
-const CONNECTION_TIMEOUT: f64 = 0.0;
+const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 /// An online file source whose thread has set up its HTTP transport, so that
 /// the tests that time their requests don't count that setup.
