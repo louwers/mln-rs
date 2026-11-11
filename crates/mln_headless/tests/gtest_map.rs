@@ -4104,6 +4104,55 @@ fn render_center_pixel(test: &MapTest) -> [u8; 3] {
     [r, g, b]
 }
 
+// gtest: Map.GlobeHidesAScreenAlignedIconOnceItsAnchorIsBehindThePlanet
+#[test]
+fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
+    let mut test = MapTest::with_mode(1.0, MapMode::Continuous);
+    test.frontend.set_size(Size::new(256, 256));
+    test.map().set_size(Size::new(256, 256)).unwrap();
+    test.load_json(
+        r#"{"version": 8, "projection": {"type": "vertical-perspective"},
+                 "sources": {"point": {"type": "geojson", "data": {"type": "Point", "coordinates": [30, 0]}}},
+                 "layers": [{"id": "background", "type": "background", "paint": {"background-color": "white"}},
+                            {"id": "icon", "type": "symbol", "source": "point",
+                             "layout": {"icon-image": "square", "icon-allow-overlap": true}}]}"#,
+    );
+    const SIDE: u32 = 24;
+    test.map().get_style_mut().add_image(style_image("square", red_image(SIDE, SIDE), 1.0));
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(1.0)));
+
+    let red_pixels = |test: &MapTest| {
+        let image = {
+            let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
+            test.frontend.read_still_image()
+        };
+        image.data.chunks_exact(4).filter(|pixel| pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60).count()
+    };
+
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_become_idle_callback.set(move |_| run_loop.stop());
+    }
+    test.run_loop.run();
+    test.observer.did_become_idle_callback.clear();
+    assert!(red_pixels(&test) > (SIDE * SIDE / 2) as usize);
+
+    // Turn the planet so the icon's anchor is 130 degrees from the center. A
+    // long fade keeps placement showing it at full opacity on the next frame,
+    // so only the horizon test in the shader can hide it there.
+    test.map().get_style_mut().set_transition_options(&TransitionOptions {
+        duration: Some(Duration::from_secs(30)),
+        ..TransitionOptions::default()
+    });
+    {
+        let run_loop = test.run_loop.clone();
+        test.observer.did_finish_rendering_frame_callback.set(move |_| run_loop.stop());
+    }
+    test.map().jump_to(&cam().with_center(Some(ll(0.0, -100.0))));
+    test.run_loop.run();
+    assert_eq!(0, red_pixels(&test));
+}
+
 // gtest: Map.GlobalStateChangeTransitionsPaintProperty
 #[test]
 fn global_state_change_transitions_paint_property() {
