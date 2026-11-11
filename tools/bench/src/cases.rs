@@ -14,7 +14,7 @@ use mln_util::size::Size;
 use crate::meter::{Meter, ms};
 use crate::scene::{
     BASEMAP_SIZE, BASEMAP_ZOOM, CJK_SIZE, CJK_STYLE, CJK_ZOOM, Mode, REAL_WORLD, REAL_WORLD_SIZE, REFRESH, Scene,
-    basemap_center, basemap_north_west, basemap_south_east, basemap_style, cjk_center, write_frame,
+    basemap_center, basemap_north_west, basemap_point, basemap_south_east, basemap_style, cjk_center, write_frame,
 };
 use crate::stats::{median, percentile};
 use crate::{Context, Metrics};
@@ -105,6 +105,7 @@ pub fn all() -> Vec<Case> {
     cases.push(Case::new("Frame/Paced", frame_paced));
     cases.push(Case::new("Frame/Idle", frame_idle));
     cases.push(Case::new("Frame/SettleWithoutSymbols", frame_settle_without_symbols));
+    cases.push(Case::new("Frame/AddImages", frame_add_images));
     cases.push(Case::new("Frame/FeatureState", frame_feature_state));
     cases.push(Case::new("Frame/FeatureStateHover", frame_feature_state_hover));
     for view in views() {
@@ -549,6 +550,73 @@ fn frame_settle_without_symbols(cx: &Context) -> Metrics {
     }
     let mut metrics = meter.finish();
     metrics.lead("frames", median(&frames));
+    metrics
+}
+
+/// From adding the first of 50 icons to the basemap, five on each refresh
+/// over ten refreshes, as a host supplies marker icons when they load,
+/// until the map stops asking for frames. A symbol layer over 20 points
+/// draws five of the icons, which its tile asked for before they were
+/// added; nothing draws the other 45. Each iteration loads the style again
+/// first, untimed, without the icons.
+fn frame_add_images(cx: &Context) -> Metrics {
+    const ICONS: usize = 50;
+    const PER_REFRESH: usize = 5;
+    const DRAWN: usize = 5;
+    let mut style: serde_json::Value =
+        serde_json::from_str(&basemap_style(&cx.fixtures)).expect("the basemap style is JSON");
+    let features: Vec<serde_json::Value> = (0..20)
+        .map(|n| {
+            let point = basemap_point(2619.5 + 0.1 * (n % 5) as f64, 6331.8 + 0.3 * (n / 5) as f64);
+            serde_json::json!({
+                "type": "Feature",
+                "properties": {"icon": format!("marker-{}", n % DRAWN)},
+                "geometry": {"type": "Point", "coordinates": [point.longitude(), point.latitude()]},
+            })
+        })
+        .collect();
+    style["sources"]["markers"] =
+        serde_json::json!({"type": "geojson", "data": {"type": "FeatureCollection", "features": features}});
+    style["layers"].as_array_mut().expect("the style has layers").push(serde_json::json!({
+        "id": "markers",
+        "type": "symbol",
+        "source": "markers",
+        "layout": {"icon-image": ["get", "icon"], "icon-allow-overlap": true},
+    }));
+    let style = style.to_string();
+    let icon = |n: usize| {
+        let pixel = [(n * 5) as u8, 0, 255 - (n * 5) as u8, 255];
+        PremultipliedImage::from_vec(Size::new(24, 24), pixel.repeat(24 * 24))
+    };
+    let mut scene = Scene::new(BASEMAP_SIZE, Mode::OnDemand);
+    scene.jump(basemap_center(), BASEMAP_ZOOM);
+    let mut meter = Meter::new();
+    let mut frames = Vec::new();
+    for _ in 0..cx.iterations(5) {
+        scene.load_json(&style);
+        scene.settle();
+        meter.start();
+        let start = Instant::now();
+        for tick in 0..ICONS / PER_REFRESH {
+            std::thread::sleep((start + REFRESH * tick as u32).saturating_duration_since(Instant::now()));
+            for n in tick * PER_REFRESH..(tick + 1) * PER_REFRESH {
+                scene.add_image(&format!("marker-{n}"), icon(n));
+            }
+            let demanded = Instant::now();
+            scene.pump();
+            scene.render_frame();
+            frames.push(ms(demanded.elapsed()));
+        }
+        scene.settle();
+        meter.stop();
+    }
+    if let Some(dir) = &cx.frames {
+        write_frame(dir, "Frame/AddImages", &scene.read_frame());
+    }
+    let mut metrics = meter.finish();
+    metrics.lead("frame_p95_ms", percentile(&frames, 95.0));
+    metrics.lead("frame_p99_ms", percentile(&frames, 99.0));
+    metrics.other("frame_p50_ms", percentile(&frames, 50.0));
     metrics
 }
 
