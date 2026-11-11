@@ -6,7 +6,7 @@
 mod support;
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use httpmock::MockServer;
 use mln_runtime::{
@@ -50,6 +50,44 @@ fn a_provider_answers_later_from_another_thread() {
     }));
     let map = map(&runtime);
     wait(map.set_style_url("custom://late"));
+}
+
+/// Hands each request to the test, then stays in the call a while, as a
+/// provider thread that the system preempts there does.
+struct Lingering {
+    requests: std::sync::mpsc::Sender<ResourceRequest>,
+    dropped: Arc<AtomicBool>,
+}
+
+impl ResourceProvider for Lingering {
+    fn request(&self, request: ResourceRequest) {
+        self.requests.send(request).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+impl Drop for Lingering {
+    fn drop(&mut self) {
+        self.dropped.store(true, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_replacement_completes_after_the_call_to_the_provider_it_replaces() {
+    let runtime = runtime();
+    let (requests, received) = std::sync::mpsc::channel();
+    let dropped = Arc::new(AtomicBool::new(false));
+    wait(runtime.set_resource_provider(Lingering { requests, dropped: dropped.clone() }));
+    let map = map(&runtime);
+    let style = map.set_style_url("custom://lingering");
+    let request = received.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
+
+    // A host frees a provider's state on its release, so once the provider is
+    // replaced, nothing may still be calling it.
+    wait(runtime.clear_resource_provider());
+    assert!(dropped.load(Ordering::SeqCst));
+    request.respond(style_response()).unwrap();
+    wait(style);
 }
 
 /// Serves only the URLs under a prefix.

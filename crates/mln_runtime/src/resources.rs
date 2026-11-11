@@ -5,7 +5,7 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use mln_actor::{ActorRef, Mailbox, scheduler};
 use mln_storage::file_source::Callback;
@@ -15,7 +15,7 @@ use mln_storage::response::Reason;
 use mln_storage::{AsyncRequest, FileSource, OnlineFileSource, Resource, ResourceError, ResourceOptions, Response};
 use mln_util::error::Error;
 use mln_util::mapbox;
-use mln_util::sync::MutexExt;
+use mln_util::sync::{MutexExt, RwLockExt};
 
 /// Serves a runtime's network requests in place of the library.
 ///
@@ -34,7 +34,8 @@ pub trait ResourceProvider: Send + Sync + 'static {
     /// Serves `request`: answer it with [`ResourceRequest::respond`], or hand
     /// it back with [`ResourceRequest::pass_through`], now or later and on
     /// any thread. It runs on a thread of the library's, which waits for it,
-    /// so it should hand slow work elsewhere.
+    /// and so does a replacement of the provider, so it should hand slow
+    /// work elsewhere.
     fn request(&self, request: ResourceRequest);
 }
 
@@ -63,23 +64,23 @@ pub enum CacheDatabaseOperation {
 /// The runtime's hooks that its network file source reads on each request.
 #[derive(Default)]
 pub(crate) struct ResourceHooks {
-    provider: Mutex<Option<Arc<dyn ResourceProvider>>>,
+    /// A request reads the provider for as long as it routes to it and calls
+    /// it, so that a replacement, which writes it, comes after any call to
+    /// the provider it replaces, and drops that provider itself.
+    provider: RwLock<Option<Box<dyn ResourceProvider>>>,
     /// Whether a resource transform is set, which may rewrite a URL of any
     /// scheme into one that the library loads.
     transform_set: AtomicBool,
 }
 
 impl ResourceHooks {
-    /// Replaces the provider, and gives back the one before.
+    /// Replaces the provider, once no request is calling the one before,
+    /// and gives that one back.
     pub(crate) fn set_provider(
         &self,
-        provider: Option<Arc<dyn ResourceProvider>>,
-    ) -> Option<Arc<dyn ResourceProvider>> {
-        std::mem::replace(&mut *self.provider.lock_unpoisoned(), provider)
-    }
-
-    fn provider(&self) -> Option<Arc<dyn ResourceProvider>> {
-        self.provider.lock_unpoisoned().clone()
+        provider: Option<Box<dyn ResourceProvider>>,
+    ) -> Option<Box<dyn ResourceProvider>> {
+        std::mem::replace(&mut *self.provider.write_unpoisoned(), provider)
     }
 
     pub(crate) fn set_transform_set(&self, set: bool) {
@@ -95,9 +96,9 @@ pub(crate) struct ProviderFileSource {
 }
 
 /// Who loads a request.
-enum Route {
+enum Route<'a> {
     /// The provider, with the resolved URL.
-    Provider(Arc<dyn ResourceProvider>, String),
+    Provider(&'a dyn ResourceProvider, String),
     /// The library. `declined` says whether a provider is set, which the
     /// message of a request that the library can't load names.
     Native { declined: bool },
@@ -108,12 +109,12 @@ impl ProviderFileSource {
         ProviderFileSource { online: Arc::new(OnlineFileSource::new(options)), hooks }
     }
 
-    /// Who loads `resource`. No lock is held while the provider decides.
-    fn route(&self, resource: &Resource) -> Route {
+    /// Who loads `resource`, when `provider` is the runtime's provider.
+    fn route<'a>(&self, resource: &Resource, provider: Option<&'a dyn ResourceProvider>) -> Route<'a> {
         if !resource.has_loading_method(mln_storage::LoadingMethod::Network) {
             return Route::Native { declined: false };
         }
-        let Some(provider) = self.hooks.provider() else {
+        let Some(provider) = provider else {
             return Route::Native { declined: false };
         };
         let url = resolved_url(&self.online.get_resource_options(), resource);
@@ -242,9 +243,13 @@ fn resolved_url(options: &ResourceOptions, resource: &Resource) -> String {
 
 impl FileSource for ProviderFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let (provider, resolved_url) = match self.route(resource) {
+        let hooked = self.hooks.provider.read_unpoisoned();
+        let (provider, resolved_url) = match self.route(resource, hooked.as_deref()) {
             Route::Provider(provider, resolved_url) => (provider, resolved_url),
-            Route::Native { declined } => return self.native().request(resource, callback, declined),
+            Route::Native { declined } => {
+                drop(hooked);
+                return self.native().request(resource, callback, declined);
+            }
         };
         let target = Rc::new(ProviderTarget {
             callback: RefCell::new(Some(callback)),
@@ -257,6 +262,7 @@ impl FileSource for ProviderFileSource {
             Arc::new(RequestShared { state: Mutex::new(RequestState::default()), target: ActorRef::new(&mailbox) });
         let request = ResourceRequest { resource: resource.clone(), resolved_url, shared: Some(shared.clone()) };
         provider.request(request);
+        drop(hooked);
         Box::new(ProviderRequest { mailbox, shared })
     }
 
@@ -269,7 +275,8 @@ impl FileSource for ProviderFileSource {
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
-        matches!(self.route(resource), Route::Provider(..)) || self.online.can_request(resource)
+        let hooked = self.hooks.provider.read_unpoisoned();
+        matches!(self.route(resource, hooked.as_deref()), Route::Provider(..)) || self.online.can_request(resource)
     }
 
     fn pause(&self) {

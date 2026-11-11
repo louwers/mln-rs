@@ -431,8 +431,7 @@ impl Runtime {
     /// Serves the runtime's network requests that `provider` serves through
     /// it, and the rest as usual. It replaces the provider before.
     pub fn set_resource_provider(&self, provider: impl ResourceProvider) -> Result<Completion<()>, Error> {
-        let provider: Arc<dyn ResourceProvider> = Arc::new(provider);
-        self.replace_provider(Some(provider))
+        self.replace_provider(Some(Box::new(provider)))
     }
 
     /// Removes the resource provider, so the library loads every request
@@ -441,7 +440,7 @@ impl Runtime {
         self.replace_provider(None)
     }
 
-    fn replace_provider(&self, provider: Option<Arc<dyn ResourceProvider>>) -> Result<Completion<()>, Error> {
+    fn replace_provider(&self, provider: Option<Box<dyn ResourceProvider>>) -> Result<Completion<()>, Error> {
         self.command(move |core, outbox, resolver| {
             let previous = core.hooks.set_provider(provider);
             outbox.push(move || drop(previous));
