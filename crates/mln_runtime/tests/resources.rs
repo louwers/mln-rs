@@ -233,19 +233,53 @@ fn a_header_transform_adds_headers() {
 }
 
 #[test]
-fn cache_operations_run_on_the_cache_file() {
+fn cache_operations_change_what_the_ambient_cache_serves() {
+    let server = MockServer::start();
+    let fresh = server.mock(|when, then| {
+        when.method("GET").path("/style.json").header_missing("if-none-match");
+        then.status(200).header("Cache-Control", "max-age=3600").header("ETag", "\"v1\"").body(EMPTY_STYLE);
+    });
+    let revalidated = server.mock(|when, then| {
+        when.method("GET").path("/style.json").header("if-none-match", "\"v1\"");
+        then.status(304).header("Cache-Control", "max-age=3600").header("ETag", "\"v1\"");
+    });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
     let runtime = Runtime::new(options).unwrap();
-    for operation in [
-        CacheDatabaseOperation::Invalidate,
-        CacheDatabaseOperation::Clear,
-        CacheDatabaseOperation::Pack,
-        CacheDatabaseOperation::Reset,
-    ] {
-        wait(runtime.run_cache_database_operation(operation));
-    }
+    let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
+    let definition =
+        OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
+    wait(runtime.offline().create_region(definition, b"kept".to_vec()));
+    let regions = || wait(runtime.offline().regions()).len();
+    let map = map(&runtime);
+    let load = || wait(map.set_style_url(server.url("/style.json")));
+    let calls = || (fresh.calls(), revalidated.calls());
+
+    load();
+    assert_eq!((1, 0), calls());
+    // The cache serves a fresh style without the network.
+    load();
+    assert_eq!((1, 0), calls());
+    // An invalidated style revalidates.
+    wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Invalidate));
+    load();
+    assert_eq!((1, 1), calls());
+    // A cleared cache loads it again, and keeps the offline regions.
+    wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Clear));
+    load();
+    assert_eq!((2, 1), calls());
+    assert_eq!(1, regions());
+    wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Pack));
+    load();
+    assert_eq!((2, 1), calls());
+    // A reset database is empty.
+    wait(runtime.run_cache_database_operation(CacheDatabaseOperation::Reset));
+    assert_eq!(0, regions());
+    load();
+    assert_eq!((3, 1), calls());
+
     wait(runtime.set_maximum_ambient_cache_size(1 << 20));
+    wait(map.release());
     wait(runtime.release());
 }
 
