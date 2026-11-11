@@ -11,3 +11,10 @@ map rendering core.
 **[Open the demo](https://louwers.github.io/mln-rs/)** (in a browser with
 WebGPU), the browser build in [examples/web](examples/web/README.md). On the
 desktop, `just desktop` opens it in a window (examples/desktop).
+
+## License
+
+mln-rs is under the BSD 2-Clause License ([LICENSE.md](LICENSE.md)), as
+MapLibre Native is. The code it ports from other projects keeps their
+licenses: [THIRD_PARTY.md](THIRD_PARTY.md) lists it, and what an app that
+ships mln-rs needs to reproduce.

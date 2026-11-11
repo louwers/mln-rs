@@ -3,6 +3,7 @@
 // ports ../maplibre-native/vendor/freetype/src/sfnt/sfwoff.c
 // (`woff_open_font`); WOFF2 is the wuff crate's decoder. The C++ core builds
 // FreeType with zlib and without Brotli, so it opens WOFF but not WOFF2.
+// The WOFF port is under the FreeType License (LICENSE-FreeType).
 
 use std::fmt;
 
