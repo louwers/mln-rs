@@ -6,14 +6,18 @@
 //
 // From the page: first {preload: {style, ratio, zoom}} as soon as the page
 // starts, then {module, canvas, ports, width, height, ratio, style,
-// fallbackFontFaces, camera, localIdeographFontFamily, panic}, then {readPixels},
-// {resize: [width, height]} in CSS pixels, and {input, args}: a call of
-// WebMap's input methods (pointer_down, pointer_move, pointer_up,
-// pointer_cancel, wheel, key, blur) whose last argument is the event's time
-// as performance.timeOrigin + timeStamp. To the page: {status}, {loaded:
-// {loadedMs, replies}} once the map is fully loaded, {pixels: {width,
-// height, pixels}} for each readPixels, {box} when a Shift-drag's box
-// changes ([x0, y0, x1, y1], or null), and {fatal} once the map stops.
+// fallbackFontFaces, camera, localIdeographFontFamily, panic}, then
+// {readPixels}, {resize: [width, height]} in CSS pixels, {style: url},
+// {jumpTo: camera}, {resetNorth}, and {input, args}: a call of WebMap's
+// input methods (pointer_down, pointer_move, pointer_up, pointer_cancel,
+// wheel, key, blur) whose last argument is the event's time as
+// performance.timeOrigin + timeStamp. A camera is [lat, lon, zoom, bearing,
+// pitch]. To the page: {status}, {loaded: {loadedMs, replies}} once the map
+// is fully loaded, {pixels: {width, height, pixels}} for each readPixels,
+// {box} when a Shift-drag's box changes ([x0, y0, x1, y1], or null),
+// {camera} when the camera moves, {attribution: [html]} when the sources'
+// attributions change, {styleName} when the style's name does, and {fatal}
+// once the map stops.
 //
 // A panic aborts the instance it happens in (wasm32-unknown-unknown can't
 // unwind), and nothing may call into it after that. When this instance or a
@@ -199,11 +203,13 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
   if (fallbackFontFaces) map.set_fallback_font_faces(fallbackFontFaces);
   map.set_style_url(style);
   map.jump_to(...camera);
-  const started = performance.now();
 
+  let started = performance.now();
   let loaded = null;
   let readPixels = 0;
   let reported = 0;
+  let attribution = '';
+  let styleName = '';
   const report = (force) => {
     const now = performance.now();
     if (!force && now - reported < 250) return;
@@ -212,13 +218,30 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
       status: `${ports.length} tile workers, ${map.received()} replies` +
         (loaded === null ? '' : `, loaded in ${Math.round(loaded.loadedMs)} ms`),
     });
+    // A source's attribution can come later than its style, with its TileJSON.
+    const next = map.attributions();
+    if (next.join('\n') !== attribution) {
+      attribution = next.join('\n');
+      postMessage({ attribution: next });
+    }
+    const name = map.style_name();
+    if (name !== styleName) {
+      styleName = name;
+      postMessage({ styleName });
+    }
   };
   function frame() {
     guard(drawFrame);
     if (!stopped) requestAnimationFrame(frame);
   }
+  let shownCamera = '';
   function drawFrame() {
     map.frame(8, performance.now());
+    const next = map.camera();
+    if (next.join() !== shownCamera) {
+      shownCamera = next.join();
+      postMessage({ camera: Array.from(next) });
+    }
     if (loaded === null && map.is_fully_loaded()) {
       loaded = { loadedMs: performance.now() - started, replies: map.received() };
       postMessage({ loaded });
@@ -244,6 +267,14 @@ async function run({ module, canvas, ports, width, height, ratio, style, fallbac
       if (readPixels++ === 0) map.request_pixels();
     }
     if (data.resize) map.resize(...data.resize);
+    if (data.style) {
+      map.set_style_url(data.style);
+      started = performance.now();
+      loaded = null;
+      report(true);
+    }
+    if (data.jumpTo) map.jump_to(...data.jumpTo);
+    if (data.resetNorth) map.reset_north();
     if (INPUTS.has(data.input)) {
       const args = data.args.slice();
       args[args.length - 1] -= performance.timeOrigin;

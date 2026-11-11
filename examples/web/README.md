@@ -78,13 +78,19 @@ report each (`wheelDelta` in web/main.js: Firefox's lines, Safari's
 checked on real hardware yet. A ResizeObserver resizes the map with the
 canvas; the map keeps the pixel ratio it started with.
 
-Controls: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
+Gestures: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
 to zoom to a box (Escape cancels it); the wheel (a third of a level a
 notch, eased) or a trackpad to zoom, Ctrl or a trackpad pinch faster;
 double-click or double-tap to zoom in, Shift-double-click or a two-finger
 tap to zoom out, double-tap-and-drag to zoom; two fingers to pinch, twist
 and tilt; the arrow keys to pan (Shift: rotate and tilt) and `+`/`=` and
 `-` to zoom, once the map has focus.
+
+Over the map, the page draws its own controls (web/index.html, page.css):
+a style picker, zoom buttons, a compass that eases the bearing and pitch
+back to zero, the sources' attributions, and a panel that lists the
+gestures. The map's Web Worker reports the camera, the style's name and
+the sources' attributions back to the page as they change.
 
 ## Images decode in the browser
 
@@ -148,8 +154,11 @@ debugging and profiling.
 Then open <http://localhost:8000/> in a browser with WebGPU. URL parameters
 (web/main.js):
 
-- `style=<url>` (default: OpenFreeMap Liberty), `lat`, `lon`, `zoom`,
-  `bearing`, `pitch`;
+- `style=<key|url>`: a style of web/styles.js by its key, or any style's
+  URL (default: OpenFreeMap Liberty);
+- `lat`, `lon`, `zoom`, `bearing`, `pitch`: the camera, unless the hash
+  has one (`#zoom/lat/lon[/bearing/pitch]`, as GL JS writes it, which the
+  page keeps up to date);
 - `fallbackFontFaces=<json>`: font files that every font stack falls back
   to, in the format of a style's `font-faces` entry without a font name
   (`[{"url": "...", "unicode-range": ["U+1000-109F"]}]`);

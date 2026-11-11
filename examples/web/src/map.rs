@@ -10,12 +10,16 @@ use mln_actor::RunLoop;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_gestures::{Button, GestureRecognizer, Input, Key, Modifiers, PointerKind, WheelDelta};
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
-use mln_map::{CameraOptions, Map, MapLoadError, MapObserver, MapOptions};
+use mln_map::{
+    AnimationOptions, CameraOptions, CameraUpdate, CameraUpdateMode, GesturePhase, Map, MapLoadError, MapObserver,
+    MapOptions,
+};
 use mln_renderer::text::font_face_engine;
 use mln_renderer::tile::worker_codec::{Encoded, SerializingTransport, WorkerInstances};
 use mln_renderer::{Renderer, RendererFrontend, RendererObserver, UpdateParameters};
 use mln_storage::{ClientOptions, ResourceOptions};
 use mln_util::LatLng;
+use mln_util::chrono::Duration;
 use mln_util::geo::ScreenCoordinate;
 use mln_util::host_bytes::HostBytes;
 use mln_util::serialization::payload::Payload;
@@ -293,6 +297,44 @@ impl WebMap {
                 .with_bearing(Some(bearing))
                 .with_pitch(Some(pitch)),
         );
+    }
+
+    /// The camera as `[latitude, longitude, zoom, bearing, pitch]`, in
+    /// degrees but for the zoom.
+    pub fn camera(&self) -> Vec<f64> {
+        let camera = self.map.get_camera_options(None);
+        let center = camera.center.unwrap_or_default();
+        vec![
+            center.latitude(),
+            center.longitude(),
+            camera.zoom.unwrap_or_default(),
+            camera.bearing.unwrap_or_default(),
+            camera.pitch.unwrap_or_default(),
+        ]
+    }
+
+    /// Eases the bearing and pitch back to zero, as a step of the page's
+    /// input.
+    pub fn reset_north(&mut self) {
+        let update = CameraUpdate {
+            mode: CameraUpdateMode::Ease,
+            camera: CameraOptions::default().with_bearing(Some(0.0)).with_pitch(Some(0.0)),
+            animation: AnimationOptions::new(Duration::from_millis(500)),
+            phase: GesturePhase::None,
+        };
+        self.gestures.step_to(&mut self.map, update);
+    }
+
+    /// The attributions of the style's sources that have one, as HTML. A
+    /// source that links a TileJSON has one once the TileJSON loads.
+    pub fn attributions(&self) -> Vec<String> {
+        let style = self.map.get_style();
+        style.get_sources().iter().filter_map(|source| source.get_attribution()).filter(|a| !a.is_empty()).collect()
+    }
+
+    /// The style's `name`, or an empty string.
+    pub fn style_name(&self) -> String {
+        self.map.get_style().get_name()
     }
 
     /// Resizes the map and its surface to `width` x `height` CSS pixels.
