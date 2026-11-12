@@ -590,6 +590,24 @@ fn missing(error: &Error) -> bool {
 }
 
 impl Device {
+    /// Whether an abandon keeps a session's graphics objects on the device
+    /// until the process exits, which only a detach frees: OpenGL's and
+    /// WebGPU's, as the C API promises, since only the session's own thread
+    /// may destroy them, and the host's graphics objects behind them may be
+    /// going away.
+    pub(crate) fn abandon_keeps_graphics(&self) -> bool {
+        match *self {
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            Device::WebGpu(_) => true,
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(_) => false,
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(_) => false,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            Device::Gl(_) => true,
+        }
+    }
+
     /// The library's device, on the platform's native backend: Metal on
     /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
     /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't

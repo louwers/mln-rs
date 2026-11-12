@@ -11,8 +11,9 @@ use std::sync::{Arc, OnceLock};
 
 use mln_map::MapMode;
 use mln_runtime::{
-    AttachOptions, Completion, DemandMode, Driver, DriverWork, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
-    LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, Runtime, Wake,
+    AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, ErrorKind,
+    FrameDemand, FrameDisposition, FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState,
+    RenderTarget, Runtime, Wake,
 };
 use mln_util::size::Size;
 use support::{TIMEOUT, runtime, wait};
@@ -320,6 +321,43 @@ fn a_map_release_abandons_a_released_session_that_waits_for_a_service() {
     released.wait().unwrap();
     map_released.wait().unwrap();
     assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+}
+
+/// A library device of `backend`, or `None` where this build or machine has
+/// none.
+fn device_of(backend: BackendType) -> Option<Device> {
+    match Device::with_backend(backend, DeviceOptions::default()) {
+        Ok(device) => Some(device),
+        Err(error) if error.kind == ErrorKind::Unsupported => {
+            eprintln!("skipped: no {backend:?} device: {error}");
+            None
+        }
+        Err(error) => panic!("a {backend:?} device: {error}"),
+    }
+}
+
+#[test]
+fn an_abandon_on_the_drivers_thread_keeps_only_open_gl_objects() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    // What an abandon keeps before the first frame and after it: an OpenGL
+    // session's target, and its renderer's objects once it drew.
+    for (backend, kept) in [(BackendType::Vulkan, [0, 0]), (BackendType::OpenGL, [1, 2])] {
+        let Some(device) = device_of(backend) else { continue };
+        for (rendered, kept) in kept.into_iter().enumerate() {
+            let target = RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) };
+            let (session, attached) = map.attach(target, caller_options()).unwrap();
+            let driver = session.take_driver_work().unwrap();
+            serviced(&driver, attached).unwrap();
+            if rendered == 1 {
+                session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+                take_one(&driver, &session);
+            }
+            assert_eq!(kept, session.abandon().unwrap(), "{backend:?}");
+            assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+            wait(session.release());
+        }
+    }
 }
 
 #[test]

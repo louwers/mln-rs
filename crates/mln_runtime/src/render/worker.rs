@@ -154,7 +154,8 @@ struct Gfx {
 }
 
 impl Gfx {
-    /// How many graphics objects a `Gfx` holds: the renderer and its target.
+    /// How many graphics objects a `Gfx` holds: its target, and its
+    /// renderer's, which the renderer makes when it first draws.
     const OBJECTS: u32 = 2;
 
     fn new(init: Init) -> Result<Gfx, Error> {
@@ -360,7 +361,10 @@ impl Worker {
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
-                shared.state.lock_unpoisoned().graphics_objects = Gfx::OBJECTS;
+                let mut state = shared.state.lock_unpoisoned();
+                state.graphics_objects = Gfx::OBJECTS - 1;
+                state.abandon_keeps_graphics = gfx.target.device().abandon_keeps_graphics();
+                drop(state);
                 Some(gfx)
             }
             Some(Err(error)) => {
@@ -702,6 +706,10 @@ impl Worker {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
             gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
         };
+        {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
+        }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         self.sources = Some(update.parameters.sources.clone());

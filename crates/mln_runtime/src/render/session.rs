@@ -190,6 +190,9 @@ pub(crate) struct SessionState {
     /// Whether the session's thread keeps its graphics objects until the
     /// process exits, instead of freeing them, when the session ends.
     pub(crate) keep_graphics: bool,
+    /// Whether an abandon keeps the graphics objects on any thread, as
+    /// `Device::abandon_keeps_graphics` says of the session's device.
+    pub(crate) abandon_keeps_graphics: bool,
     /// The slots of a borrowed ring, and none for another target.
     pub(crate) ring: Vec<RingSlot>,
     /// How many of the ring's frames the host holds.
@@ -448,7 +451,7 @@ impl SessionShared {
                 return Err(Error::busy("a view is open on one of the render session's acquired frames"));
             }
             state.lifecycle = RenderSessionState::Abandoned;
-            state.keep_graphics |= keep_graphics || off_thread;
+            state.keep_graphics |= keep_graphics || off_thread || state.abandon_keeps_graphics;
             let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
             (state.take_waiters(), state.map.take(), kept)
         };
@@ -478,8 +481,10 @@ impl SessionShared {
         if kept != 0 {
             let reason = if keep_graphics {
                 "it was abandoned without graphics calls"
-            } else {
+            } else if off_thread {
                 "only the thread that services it may free them"
+            } else {
+                "only a detach frees OpenGL and WebGPU objects"
             };
             Log::warning(
                 Event::Render,
@@ -730,6 +735,7 @@ pub(crate) fn attach(
             resizes_sent: 0,
             graphics_objects: 0,
             keep_graphics: false,
+            abandon_keeps_graphics: false,
             ring: vec![RingSlot::default(); ring.map_or(0, |(depth, _, _)| depth)],
             acquired_frames: 0,
             pending_retargets: 0,

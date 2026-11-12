@@ -19,11 +19,8 @@ abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api
 abi/projection/projection.c:creation_rejects_invalid_views
 abi/render/demands.c:a_detach_ends_a_demand_waiting_for_commands  # a service of a detached caller-driven session fails instead of finding no work
 abi/render/demands.c:a_waiting_demand_ends_by_supersession_barrier_or_detach  # a service of a detached caller-driven session fails instead of finding no work
-abi/render/driver.c:a_released_caller_driven_session_is_abandoned_when_its_map_releases  # an abandon on the driver's thread frees OpenGL objects, so it warns of none kept
-abi/render/driver.c:abandon_completes_pending_work_and_invalidates_accessors  # an abandon on the driver's thread frees OpenGL objects instead of keeping them
 abi/render/driver.c:parent_first_disposal_retires_a_native_render_attachment  # a caller-driven session released after its map waits for a service to detach
 abi/render/driver.c:wakes_may_call_back_into_the_session  # each map command wakes a caller's driver, which takes the wake the demand's work needs
-abi/render/frames.c:an_acquired_frame_still_releases_after_abandon  # an abandon on the driver's thread frees OpenGL objects instead of keeping them
 abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features
 abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes
 abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host
