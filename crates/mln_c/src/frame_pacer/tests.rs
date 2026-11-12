@@ -99,6 +99,42 @@ fn an_idle_spell_or_a_clock_that_moves_backward_starts_the_grid_again() {
     assert!(throttle.admit(at(195)));
 }
 
+#[test]
+fn a_new_limit_counts_from_the_last_demand() {
+    let at = Duration::from_millis;
+    // A higher limit lets the next refresh come sooner.
+    let mut throttle = Throttle::new(Limit::new(10));
+    assert!(throttle.admit(at(1000)));
+    throttle.set_limit(Limit::new(60));
+    assert!(!throttle.admit(at(1008)));
+    assert!(throttle.admit(at(1016)));
+    assert!(!throttle.admit(at(1025)));
+    assert!(throttle.admit(at(1033)));
+
+    // A lower limit skips the refreshes that the old one took.
+    throttle.set_limit(Limit::new(10));
+    assert!(!throttle.admit(at(1050)));
+    assert!(!throttle.admit(at(1116)));
+    assert!(throttle.admit(at(1133)));
+
+    // Without a limit, every refresh demands, and a limit set after them
+    // counts from the last.
+    throttle.set_limit(None);
+    assert!(throttle.admit(at(1150)));
+    assert!(throttle.admit(at(1166)));
+    throttle.set_limit(Limit::new(30));
+    assert!(!throttle.admit(at(1183)));
+    assert!(throttle.admit(at(1200)));
+}
+
+#[test]
+fn a_limit_set_before_any_demand_takes_the_next_refresh() {
+    let mut throttle = Throttle::new(None);
+    throttle.set_limit(Limit::new(30));
+    assert!(throttle.admit(Duration::from_millis(1000)));
+    assert!(!throttle.admit(Duration::from_millis(1016)));
+}
+
 // MARK: - Options
 
 /// A source that the test refreshes.
@@ -110,6 +146,8 @@ pub(crate) struct FakeDisplay {
     changed: Condvar,
     /// Whether the pacer dropped its source.
     dropped: Mutex<bool>,
+    /// The limits that the pacer told the source of after it created it.
+    limits: Mutex<Vec<Option<Limit>>>,
 }
 
 struct FakeSource(Arc<FakeDisplay>);
@@ -118,6 +156,10 @@ impl VsyncSource for FakeSource {
     fn schedule(&self) {
         *lock(&self.0.scheduled) += 1;
         self.0.changed.notify_all();
+    }
+
+    fn set_limit(&self, limit: Option<Limit>) {
+        lock(&self.0.limits).push(limit);
     }
 }
 
@@ -144,14 +186,18 @@ impl FakeDisplay {
 
     /// Waits until the pacer schedules a refresh, then sends it now.
     fn refresh_when_scheduled(&self) {
+        self.wait_until_scheduled();
+        assert!(self.refresh(now()));
+    }
+
+    /// Waits until the pacer schedules a refresh.
+    fn wait_until_scheduled(&self) {
         let deadline = Instant::now() + TIMEOUT;
         let mut scheduled = lock(&self.scheduled);
         while *scheduled == 0 {
             let left = deadline.checked_duration_since(Instant::now()).expect("the pacer scheduled a refresh");
             scheduled = self.changed.wait_timeout(scheduled, left).unwrap().0;
         }
-        drop(scheduled);
-        assert!(self.refresh(now()));
     }
 
     fn scheduled(&self) -> u32 {
@@ -189,6 +235,15 @@ fn pacer_options(fields: u32, maximum_frames_per_second: u32) -> mln_frame_pacer
     mln_frame_pacer_options { fields, maximum_frames_per_second, ..sized() }
 }
 
+fn set_options(pacer: mln_frame_pacer, options: *const mln_frame_pacer_options) -> mln_status {
+    // SAFETY: the caller's options, and a null diagnostic.
+    unsafe { mln_frame_pacer_set_options(pacer, options, NO_DIAGNOSTIC) }
+}
+
+fn limit_of(pacer: mln_frame_pacer) -> Option<Limit> {
+    lock(&resolve(pacer).unwrap().state).throttle.limit
+}
+
 #[test]
 fn options_check_their_fields_and_limit() {
     let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
@@ -200,8 +255,19 @@ fn options_check_their_fields_and_limit() {
     assert_eq!(resolve(pacer).unwrap().state.lock().unwrap().throttle.limit, None);
     mln_frame_pacer_release(pacer);
 
+    // The removal of a limit is the default.
+    let (pacer, display) = create_fake(&pacer_options(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, 0)).unwrap();
+    assert_eq!(limit_of(pacer), None);
+    assert!(lock(&display.limits).is_empty());
+    mln_frame_pacer_release(pacer);
+
     let zero = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 0);
     assert_eq!(create_fake(&raw const zero).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
+    let both = pacer_options(
+        MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND | MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND,
+        30,
+    );
+    assert_eq!(create_fake(&raw const both).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
     assert_eq!(create_fake(&pacer_options(1 << 7, 30)).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
     let small = mln_frame_pacer_options { size: 4, ..limited };
     assert_eq!(create_fake(&raw const small).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
@@ -213,6 +279,47 @@ fn options_check_their_fields_and_limit() {
     // SAFETY: a null out-handle.
     let created = unsafe { create(core::ptr::null(), core::ptr::null_mut(), |_, _| Ok(FakeSource(Arc::default()))) };
     assert_eq!(created.unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
+}
+
+#[test]
+fn set_options_changes_only_what_it_sets() {
+    let (pacer, display) = fake_pacer();
+    let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
+    assert_eq!(set_options(pacer, &raw const limited), MLN_STATUS_OK);
+    assert_eq!(limit_of(pacer), Limit::new(30));
+    // Options that set neither a limit nor its removal keep the limit.
+    assert_eq!(set_options(pacer, &pacer_options(0, 0)), MLN_STATUS_OK);
+    assert_eq!(limit_of(pacer), Limit::new(30));
+    let unlimited = pacer_options(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, 0);
+    assert_eq!(set_options(pacer, &raw const unlimited), MLN_STATUS_OK);
+    assert_eq!(limit_of(pacer), None);
+    // The source hears each change, in order.
+    assert_eq!(*lock(&display.limits), [Limit::new(30), None]);
+    mln_frame_pacer_release(pacer);
+}
+
+#[test]
+fn set_options_checks_its_pacer_and_options_and_keeps_the_limit_it_refuses() {
+    let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
+    let (pacer, display) = create_fake(&raw const limited).unwrap();
+    let zero = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 0);
+    assert_eq!(set_options(pacer, &raw const zero), MLN_STATUS_INVALID_ARGUMENT);
+    let both = pacer_options(
+        MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND | MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND,
+        60,
+    );
+    assert_eq!(set_options(pacer, &raw const both), MLN_STATUS_INVALID_ARGUMENT);
+    assert_eq!(set_options(pacer, &pacer_options(1 << 7, 60)), MLN_STATUS_INVALID_ARGUMENT);
+    let small = mln_frame_pacer_options { size: 4, ..limited };
+    assert_eq!(set_options(pacer, &raw const small), MLN_STATUS_INVALID_ARGUMENT);
+    assert_eq!(set_options(pacer, core::ptr::null()), MLN_STATUS_INVALID_ARGUMENT);
+    assert_eq!(limit_of(pacer), Limit::new(30));
+    assert!(lock(&display.limits).is_empty());
+
+    let unlimited = pacer_options(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, 0);
+    assert_eq!(set_options(handles::NULL, &raw const unlimited), MLN_STATUS_INVALID_ARGUMENT);
+    mln_frame_pacer_release(pacer);
+    assert_eq!(set_options(pacer, &raw const unlimited), MLN_STATUS_INVALID_STATE);
 }
 
 #[cfg(not(any(
@@ -263,6 +370,36 @@ fn a_refresh_that_the_limit_skips_schedules_the_next() {
     assert!(display.refresh(at(1016)));
     assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (1, 1));
     assert!(display.refresh(at(1033)));
+    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (0, 0));
+    mln_frame_pacer_release(handle);
+}
+
+#[test]
+fn a_new_limit_applies_to_the_refresh_on_its_way() {
+    let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 10);
+    let (handle, display) = create_fake(&raw const limited).unwrap();
+    let pacer = resolve(handle).unwrap();
+    let at = Duration::from_millis;
+    pacer.request(1);
+    assert!(display.refresh(at(1000)));
+    pacer.request(1);
+    assert!(display.refresh(at(1016)));
+    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (1, 1));
+
+    // The higher limit takes the refresh that the old one would skip.
+    let faster = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
+    assert_eq!(set_options(handle, &raw const faster), MLN_STATUS_OK);
+    assert_eq!(display.scheduled(), 1, "the refresh on its way serves the new limit");
+    assert!(display.refresh(at(1033)));
+    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (0, 0));
+
+    // The lower limit skips the refresh that the old one would take.
+    pacer.request(1);
+    let slower = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 5);
+    assert_eq!(set_options(handle, &raw const slower), MLN_STATUS_OK);
+    assert!(display.refresh(at(1066)));
+    assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (1, 1));
+    assert!(display.refresh(at(1233)));
     assert_eq!((display.scheduled(), lock(&pacer.state).waiting.len()), (0, 0));
     mln_frame_pacer_release(handle);
 }
@@ -442,6 +579,33 @@ fn a_released_pacer_keeps_pacing_its_sessions_until_they_end() {
     wait_for_paced_frame(session, generation);
     end(runtime, map, session);
     assert!(*lock(&display.dropped));
+}
+
+#[test]
+fn a_paced_session_follows_a_new_limit_from_the_refresh_it_waits_for() {
+    let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 1);
+    let (pacer, display) = create_fake(&raw const limited).unwrap();
+    let (runtime, map, session) = settled_session();
+    assert_eq!(set_pacer(session, pacer), MLN_STATUS_OK);
+    let at = Duration::from_millis;
+    let generation = paint(map, "red");
+    display.wait_until_scheduled();
+    assert!(display.refresh(at(1000)));
+    wait_for_paced_frame(session, generation);
+
+    let generation = paint(map, "blue");
+    barrier(session);
+    display.wait_until_scheduled();
+    // The limit skips this refresh, and the session waits for the next.
+    assert!(display.refresh(at(1016)));
+    barrier(session);
+    assert!(drain(session).is_empty());
+    let unlimited = pacer_options(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, 0);
+    assert_eq!(set_options(pacer, &raw const unlimited), MLN_STATUS_OK);
+    assert!(display.refresh(at(1033)));
+    wait_for_paced_frame(session, generation);
+    end(runtime, map, session);
+    mln_frame_pacer_release(pacer);
 }
 
 #[test]

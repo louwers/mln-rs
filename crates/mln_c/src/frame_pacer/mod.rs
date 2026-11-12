@@ -1,5 +1,6 @@
-//! Frame pacers: `mln_frame_pacer_create()`, the part that every platform
-//! shares, and each platform's source of display refreshes.
+//! Frame pacers: `mln_frame_pacer_create()` and
+//! `mln_frame_pacer_set_options()`, the part that every platform shares, and
+//! each platform's source of display refreshes.
 //!
 //! A [`Pacer`] keeps the render sessions that have something new to draw, and
 //! at the next display refresh that its frame rate limit allows, demands a
@@ -15,7 +16,9 @@
 //!
 //! Locks: a session's pacing lock is never held while it calls into its
 //! pacer, and the pacer's lock is never held while it calls into a session
-//! or its source, so neither waits on the other.
+//! or its source, so neither waits on the other. A pacer's limit lock orders
+//! the changes of its limit, and is held while it tells its source, which
+//! never calls back into the pacer then.
 
 // Elsewhere no platform creates pacers, and only the tests' fake ones exist.
 #![cfg_attr(
@@ -33,8 +36,8 @@ use std::time::Duration;
 use crate::abi::{self, Fields};
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options,
-    mln_render_session, mln_status,
+    MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND,
+    mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options, mln_render_session, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{lock, render_session};
@@ -103,6 +106,29 @@ pub unsafe extern "C" fn mln_frame_pacer_create(
     })
 }
 
+/// `mln_frame_pacer_set_options()`: changes the limit of the pacer that
+/// `pacer` names, which its sessions follow from the next refresh.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_frame_pacer_set_options(
+    pacer: mln_frame_pacer,
+    options: *const mln_frame_pacer_options,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        let pacer = resolve(pacer)?;
+        // SAFETY: the caller's contract.
+        let options = unsafe { abi::read_sized(options) }?;
+        if let LimitChange::Set(limit) = limit_change(&options)? {
+            pacer.set_limit(limit);
+        }
+        Ok(())
+    })
+}
+
 /// What `mln_frame_pacer_create()` does on each platform with a source:
 /// checks `options` and `out_pacer`, builds the platform's source with the
 /// limit that `options` sets, and writes the new pacer's handle to
@@ -127,7 +153,8 @@ pub(crate) unsafe fn create<S: VsyncSource + 'static>(
     Ok(())
 }
 
-/// The frame rate limit that `options` sets, none for null options.
+/// The frame rate limit that a new pacer takes from `options`: none for
+/// null options, or options that don't set one.
 ///
 /// # Safety
 ///
@@ -138,19 +165,41 @@ unsafe fn limit(options: *const mln_frame_pacer_options) -> Result<Option<Limit>
     }
     // SAFETY: the caller's contract.
     let options = unsafe { abi::read_sized(options) }?;
+    Ok(match limit_change(&options)? {
+        LimitChange::Keep => None,
+        LimitChange::Set(limit) => limit,
+    })
+}
+
+/// What options do to a pacer's frame rate limit.
+enum LimitChange {
+    /// Keep it, as options that set neither a limit nor its removal do.
+    Keep,
+    /// Set it, or remove it with none.
+    Set(Option<Limit>),
+}
+
+/// What `options` does to a pacer's frame rate limit.
+fn limit_change(options: &mln_frame_pacer_options) -> Result<LimitChange, Error> {
     let fields = Fields::new(
         options.fields,
-        MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND,
+        MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND | MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND,
         "mln_frame_pacer_options.fields",
     )?;
-    let Some(frames_per_second) =
-        fields.get(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, options.maximum_frames_per_second)
-    else {
-        return Ok(None);
-    };
-    Limit::new(frames_per_second).map(Some).ok_or_else(|| {
-        Error::invalid_argument("mln_frame_pacer_options.maximum_frames_per_second must be greater than zero")
-    })
+    let limit = fields.get(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, options.maximum_frames_per_second);
+    match (limit, fields.get(MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND, ())) {
+        (Some(_), Some(())) => Err(Error::invalid_argument(
+            "MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND and MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND \
+             are mutually exclusive",
+        )),
+        (Some(frames_per_second), None) => {
+            Limit::new(frames_per_second).map(|limit| LimitChange::Set(Some(limit))).ok_or_else(|| {
+                Error::invalid_argument("mln_frame_pacer_options.maximum_frames_per_second must be greater than zero")
+            })
+        }
+        (None, Some(())) => Ok(LimitChange::Set(None)),
+        (None, None) => Ok(LimitChange::Keep),
+    }
 }
 
 // MARK: - Limit
@@ -189,13 +238,15 @@ impl Limit {
 /// it demands no more than the limit's rate, give or take one frame. A
 /// refresh within the slack before the grid's next point takes that point,
 /// and one that comes a whole period after it, as after an idle spell,
-/// starts the grid again.
+/// starts the grid again. A new limit's grid starts a period of it after the
+/// last demand.
 #[derive(Debug, Default)]
 struct Throttle {
     limit: Option<Limit>,
     /// The grid's next point.
     next: Option<Duration>,
-    /// The refresh that the pacer last demanded frames at.
+    /// The refresh that the pacer last demanded frames at, with or without
+    /// a limit.
     last: Option<Duration>,
 }
 
@@ -208,6 +259,7 @@ impl Throttle {
     /// then counts as a demand.
     fn admit(&mut self, time: Duration) -> bool {
         let Some(limit) = self.limit else {
+            self.last = Some(time);
             return true;
         };
         // A clock that moves backward starts the grid again.
@@ -224,6 +276,13 @@ impl Throttle {
         self.last = Some(time);
         true
     }
+
+    /// Takes `limit` from the next refresh on, counted from the last demand:
+    /// a refresh within the new limit's period after it waits for the next.
+    fn set_limit(&mut self, limit: Option<Limit>) {
+        self.limit = limit;
+        self.next = limit.zip(self.last).map(|(limit, last)| last + limit.period);
+    }
 }
 
 // MARK: - Pacer
@@ -234,6 +293,12 @@ pub(crate) trait VsyncSource: Send + Sync {
     /// It runs on any thread, holding none of the library's locks, and doesn't
     /// block.
     fn schedule(&self);
+
+    /// Follows a new frame rate limit, which the pacer's throttle applies to
+    /// the refreshes either way. It runs on any thread, holding the pacer's
+    /// limit lock and no other lock of the library's, and doesn't block. The
+    /// default ignores it, for a source whose refreshes don't depend on it.
+    fn set_limit(&self, _limit: Option<Limit>) {}
 }
 
 /// Where a [`VsyncSource`] reports refreshes: to its pacer, while it lives.
@@ -256,6 +321,9 @@ impl Vsyncs {
 /// platform's source of refreshes. Dropping it drops the source, which stops.
 pub(crate) struct Pacer {
     state: Mutex<PacerState>,
+    /// Held while the limit changes, so that the source ends with the
+    /// throttle's limit.
+    limit_lock: Mutex<()>,
     source: Box<dyn VsyncSource>,
 }
 
@@ -275,11 +343,20 @@ impl Pacer {
     pub(crate) fn new(limit: Option<Limit>, vsyncs: Vsyncs, source: Box<dyn VsyncSource>) -> Arc<Self> {
         let pacer = Arc::new(Self {
             state: Mutex::new(PacerState { waiting: Vec::new(), scheduled: false, throttle: Throttle::new(limit) }),
+            limit_lock: Mutex::new(()),
             source,
         });
         // A new `Vsyncs` is unset.
         let _ = vsyncs.0.set(Arc::downgrade(&pacer));
         pacer
+    }
+
+    /// Takes `limit` from the next refresh on, including one that is on its
+    /// way already.
+    pub(crate) fn set_limit(&self, limit: Option<Limit>) {
+        let _changing = lock(&self.limit_lock);
+        lock(&self.state).throttle.set_limit(limit);
+        self.source.set_limit(limit);
     }
 
     /// Asks for a frame demand for `session` at the next refresh that the

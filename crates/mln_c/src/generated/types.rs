@@ -3326,11 +3326,15 @@ pub struct mln_render_abandon_result {
     pub reserved: u32,
 }
 pub const MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 1;
+/** Removes the frame rate limit, so the pacer can demand frames at every
+ display refresh, as it does by default. It can't be combined with
+ MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND.*/
+pub const MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 2;
 /// The optional settings of a frame pacer.
 pub type mln_frame_pacer_option_field = u32;
 /// A set of mln_frame_pacer_option_field bits.
 pub type mln_frame_pacer_option_fields = u32;
-/// Options for creating a frame pacer.
+/// Options for creating a frame pacer, or for mln_frame_pacer_set_options().
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_frame_pacer_options {

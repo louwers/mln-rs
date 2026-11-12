@@ -109,6 +109,11 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::frame_pacer::mln_frame_pacer_create;
 const _: unsafe extern "C" fn(mln_frame_pacer) = crate::render_session::mln_frame_pacer_release;
 const _: unsafe extern "C" fn(
+    mln_frame_pacer,
+    *const mln_frame_pacer_options,
+    *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::mln_frame_pacer_set_options;
+const _: unsafe extern "C" fn(
     *const mln_gpu_device_options,
     *mut mln_gpu_device,
     *mut mln_diagnostic,

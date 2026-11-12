@@ -10,7 +10,9 @@
 /// request also arms a timerfd that the looper watches, which sends the frame
 /// when the vsync is late. Once the timer sent a frame, it sends one every
 /// [`TIMER_FRAME_INTERVAL`] that a frame is requested, until a vsync comes
-/// first again.
+/// first again. The pacer's throttle keeps the timer's frames within its
+/// limit, as it does the vsyncs, so the source follows no limit of its own,
+/// and a new one needs nothing from it.
 ///
 /// A posted frame callback can't be cancelled, and the looper keeps calling
 /// a watch's callback until the callback ends the watch, so each of them

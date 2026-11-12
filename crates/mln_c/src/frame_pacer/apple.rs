@@ -22,7 +22,7 @@ pub(super) mod display_link {
         CFRetained, CFRunLoop, CFRunLoopSource, CFRunLoopSourceContext, kCFRunLoopDefaultMode,
     };
     use objc2_foundation::{NSDefaultRunLoopMode, NSRunLoop};
-    use objc2_quartz_core::{CADisplayLink, CAFrameRateRange};
+    use objc2_quartz_core::{CADisplayLink, CAFrameRateRange, CAFrameRateRangeDefault};
 
     use crate::error::Error;
     use crate::frame_pacer::{Limit, VsyncSource, Vsyncs};
@@ -175,6 +175,21 @@ pub(super) mod display_link {
             self.0.setPaused(false);
         }
 
+        /// Lets a display with a variable refresh rate slow down to `limit`,
+        /// or, without one, run at its own rate again. Runs on the link
+        /// thread.
+        fn set_limit(&self, limit: Option<Limit>) {
+            let range = match limit {
+                Some(limit) => {
+                    let rate = limit.frames_per_second() as f32;
+                    CAFrameRateRange { minimum: rate, maximum: rate, preferred: rate }
+                }
+                // SAFETY: a constant of Core Animation's.
+                None => unsafe { CAFrameRateRangeDefault },
+            };
+            self.0.setPreferredFrameRateRange(range);
+        }
+
         /// Runs on the link thread.
         fn invalidate(&self) {
             self.0.invalidate();
@@ -254,17 +269,14 @@ pub(super) mod display_link {
             let thread = LinkThread::get()?;
             let link = thread.call(move || {
                 let target = Target::new(vsyncs);
-                let link = display_link(&target)?;
-                link.setPaused(true);
-                if let Some(limit) = limit {
-                    // Lets a display with a variable refresh rate slow down
-                    // to the limit.
-                    let rate = limit.frames_per_second() as f32;
-                    link.setPreferredFrameRateRange(CAFrameRateRange { minimum: rate, maximum: rate, preferred: rate });
+                let link = Link(display_link(&target)?);
+                link.0.setPaused(true);
+                if limit.is_some() {
+                    link.set_limit(limit);
                 }
                 // SAFETY: the link thread's own run loop.
-                unsafe { link.addToRunLoop_forMode(&NSRunLoop::currentRunLoop(), NSDefaultRunLoopMode) };
-                Some(Link(link))
+                unsafe { link.0.addToRunLoop_forMode(&NSRunLoop::currentRunLoop(), NSDefaultRunLoopMode) };
+                Some(link)
             });
             let link =
                 link.flatten().ok_or_else(|| Error::native("the system has no display for the pacer to follow"))?;
@@ -279,6 +291,13 @@ pub(super) mod display_link {
             }
             let link = self.link.clone();
             self.thread.send(move || link.resume());
+        }
+
+        /// Runs later even on the link thread, after the changes sent before
+        /// it, so that the link ends with the last limit.
+        fn set_limit(&self, limit: Option<Limit>) {
+            let link = self.link.clone();
+            self.thread.send(move || link.set_limit(limit));
         }
     }
 
