@@ -243,7 +243,9 @@ impl Resource {
                 "x" => Some(to_string_i32(x)),
                 "y" => Some(to_string_i32(y)),
                 "quadkey" => Some(get_quad_key(x, y, z)),
-                "bbox-epsg-3857" => Some(get_tile_bbox(x, y, z)),
+                // The spec defines `{bbox}` as `{bbox-epsg-3857}` under the mercator
+                // and globe projections, the only ones mln-rs has.
+                "bbox" | "bbox-epsg-3857" => Some(get_tile_bbox(x, y, z)),
                 // C++ indexes with `x % 16` (UB for negative x).
                 "prefix" => Some(
                     [hex[x.rem_euclid(16) as usize] as char, hex[y.rem_euclid(16) as usize] as char].iter().collect(),
@@ -341,6 +343,20 @@ mod tests {
 
         let t = "http://example.com/{z}/{x}/{y}{ratio}.png";
         check_tile(&tile(t, 1.0, 1, 2, 3, Scheme::TMS), "http://example.com/3/1/5.png", t, 1, 1, 5, 3);
+    }
+
+    #[test]
+    fn tile_bbox_matches_epsg_3857() {
+        let t = "http://example.com/?bbox={bbox}";
+        check_tile(
+            &tile(t, 1.0, 0, 0, 1, Scheme::XYZ),
+            "http://example.com/?bbox=-20037508.342789244,0,0,20037508.342789244",
+            t,
+            1,
+            0,
+            0,
+            1,
+        );
     }
 
     // gtest: Resource.Glyphs
