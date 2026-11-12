@@ -241,6 +241,72 @@ fn win32_window(size: Size, window: NonNull<c_void>) -> Target {
     Target::Surface { size, kind: SurfaceType::Win32, surface: Surface::window(window) }
 }
 
+/// An OpenHarmony window that the session holds a reference to, which it
+/// drops once it lets go of the window.
+#[cfg(target_env = "ohos")]
+struct OhosWindow(NonNull<c_void>);
+
+#[cfg(target_env = "ohos")]
+#[link(name = "native_window")]
+unsafe extern "C" {
+    fn OH_NativeWindow_NativeObjectReference(object: *mut c_void) -> i32;
+    fn OH_NativeWindow_NativeObjectUnreference(object: *mut c_void) -> i32;
+}
+
+// SAFETY: an `OHNativeWindow` is reference counted, and the backends use it
+// from the session's thread, as OpenHarmony allows.
+#[cfg(target_env = "ohos")]
+unsafe impl Send for OhosWindow {}
+// SAFETY: as for `Send`; nothing here changes the window.
+#[cfg(target_env = "ohos")]
+unsafe impl Sync for OhosWindow {}
+
+#[cfg(target_env = "ohos")]
+impl HasWindowHandle for OhosWindow {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        let handle = RawWindowHandle::OhosNdk(raw_window_handle::OhosNdkWindowHandle::new(self.0));
+        // SAFETY: the reference keeps the window alive.
+        Ok(unsafe { WindowHandle::borrow_raw(handle) })
+    }
+}
+
+#[cfg(target_env = "ohos")]
+impl HasDisplayHandle for OhosWindow {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        // SAFETY: OpenHarmony's display handle names nothing.
+        Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Ohos(raw_window_handle::OhosDisplayHandle::new())) })
+    }
+}
+
+#[cfg(target_env = "ohos")]
+impl Drop for OhosWindow {
+    fn drop(&mut self) {
+        // SAFETY: the reference that `ohos_window` took.
+        unsafe { OH_NativeWindow_NativeObjectUnreference(self.0.as_ptr()) };
+    }
+}
+
+/// An OpenHarmony window's target, which takes its own reference to the
+/// window, as the header says.
+///
+/// Fails with an invalid argument for a pointer that is no `OHNativeWindow`.
+#[cfg(target_env = "ohos")]
+fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
+    // SAFETY: the host's window, which OpenHarmony checks is a native object.
+    if unsafe { OH_NativeWindow_NativeObjectReference(window.as_ptr()) } != 0 {
+        return Err(Error::invalid_argument("mln_ohos_window_target.window is no OHNativeWindow"));
+    }
+    let window = OhosWindow(window);
+    Ok(Target::Surface { size, kind: SurfaceType::OhosNdk, surface: Surface::window(window) })
+}
+
+#[cfg(not(target_env = "ohos"))]
+#[allow(clippy::unnecessary_wraps, reason = "OpenHarmony's checks the window")]
+fn ohos_window(size: Size, window: NonNull<c_void>) -> Result<Target, Error> {
+    let _ = (size, window);
+    Ok(Target::Unsupported("this platform has no OpenHarmony windows"))
+}
+
 /// Checks a caller's target, whose size `scale_factor` scales, and makes the
 /// runtime's surface of a window that the library presents to.
 ///
@@ -345,12 +411,23 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 Target::Surface { size, kind: SurfaceType::Wayland, surface: Surface::window(window) }
             }
             MLN_RENDER_TARGET_KIND_ANDROID_WINDOW => {
-                required(target.data.android_window.window, &field("window"))?;
-                Target::Unsupported("this library presents to no Android window")
+                let window = required(target.data.android_window.window, &field("window"))?;
+                #[cfg(target_os = "android")]
+                {
+                    // SAFETY: the host's window, which the header's contract
+                    // keeps alive through the call; the session keeps its own
+                    // reference from here on.
+                    let window = crate::android::Window::acquire(window);
+                    Target::Surface { size, kind: SurfaceType::AndroidNdk, surface: Surface::window(window) }
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    let _ = window;
+                    Target::Unsupported("this platform has no Android windows")
+                }
             }
             MLN_RENDER_TARGET_KIND_OHOS_WINDOW => {
-                required(target.data.ohos_window.window, &field("window"))?;
-                Target::Unsupported("this library presents to no OpenHarmony window")
+                ohos_window(size, required(target.data.ohos_window.window, &field("window"))?)?
             }
             MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE => {
                 let surface = target.data.web_gpu_surface;
@@ -834,8 +911,228 @@ mod tests {
             let data = mln_render_target_data { android_window: mln_android_window_target { logical_size, window } };
             target(MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, data)
         };
+        #[cfg(not(target_os = "android"))]
         assert!(matches!(read(&android(fake), None), Ok(Target::Unsupported(_))));
         assert_eq!(read(&android(core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+
+        // OpenHarmony takes only its own windows: see the OpenHarmony test.
+        #[cfg(not(target_env = "ohos"))]
+        assert!(matches!(read(&ohos(8, 8, fake), None), Ok(Target::Unsupported(_))));
+        assert_eq!(read(&ohos(8, 8, core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+    }
+
+    /// An `OpenHarmony` target of `window`, `width` by `height` logical pixels.
+    fn ohos(width: u32, height: u32, window: *mut c_void) -> mln_render_target {
+        use crate::generated::types::{mln_ohos_window_target, mln_render_target_data};
+        let logical_size = mln_logical_size { width, height };
+        let data = mln_render_target_data { ohos_window: mln_ohos_window_target { logical_size, window } };
+        target(MLN_RENDER_TARGET_KIND_OHOS_WINDOW, data)
+    }
+
+    // An OpenHarmony window, of a consumer surface that nothing shows: the
+    // target takes a reference of its own, which outlives the host's, and
+    // presents on each backend that a device of the library's has, through
+    // the C API. The window has no buffer size of its own, so the session
+    // gives it the frames'. Once the consumer goes away, the session's
+    // frames find no window.
+    #[cfg(target_env = "ohos")]
+    #[test]
+    fn an_ohos_window_target_holds_its_window_and_presents_on_each_backend() {
+        use std::os::fd::FromRawFd as _;
+        use std::time::{Duration, Instant};
+
+        use crate::generated::types::{
+            MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_RENDER_RESULT_RENDERED,
+            MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION,
+            MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW, mln_gpu_device_capabilities, mln_gpu_device_options,
+            mln_render_session_capabilities,
+        };
+        use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities};
+        use crate::map::mln_map_set_style_json;
+        use crate::map::tests::{create_map, options, release_map, view};
+        use crate::render_session::mln_render_session_get_capabilities;
+        use crate::render_session::tests::{attach_options, demand, release_session, sized, wait_for_result};
+        use crate::runtime::tests::{Waiter, create, release};
+
+        /// `OH_NativeBuffer_Config`.
+        #[repr(C)]
+        #[derive(Default)]
+        struct BufferConfig {
+            width: i32,
+            height: i32,
+            format: i32,
+            usage: i32,
+            stride: i32,
+        }
+        #[repr(C)]
+        struct PollFd {
+            fd: i32,
+            events: i16,
+            revents: i16,
+        }
+        #[link(name = "native_image")]
+        unsafe extern "C" {
+            fn OH_ConsumerSurface_Create() -> *mut c_void;
+            fn OH_ConsumerSurface_SetDefaultUsage(image: *mut c_void, usage: u64) -> i32;
+            fn OH_NativeImage_AcquireNativeWindow(image: *mut c_void) -> *mut c_void;
+            fn OH_NativeImage_AcquireNativeWindowBuffer(
+                image: *mut c_void,
+                buffer: *mut *mut c_void,
+                fence: *mut i32,
+            ) -> i32;
+            fn OH_NativeImage_ReleaseNativeWindowBuffer(image: *mut c_void, buffer: *mut c_void, fence: i32) -> i32;
+            fn OH_NativeImage_Destroy(image: *mut *mut c_void);
+        }
+        #[link(name = "native_buffer")]
+        unsafe extern "C" {
+            fn OH_NativeBuffer_FromNativeWindowBuffer(buffer: *mut c_void, out: *mut *mut c_void) -> i32;
+            fn OH_NativeBuffer_GetConfig(buffer: *mut c_void, config: *mut BufferConfig);
+            fn OH_NativeBuffer_Map(buffer: *mut c_void, data: *mut *mut c_void) -> i32;
+            fn OH_NativeBuffer_Unmap(buffer: *mut c_void) -> i32;
+        }
+        unsafe extern "C" {
+            fn poll(fds: *mut PollFd, count: core::ffi::c_ulong, timeout: i32) -> i32;
+        }
+        const USAGE_CPU_READ: u64 = 1;
+        const USAGE_HW_RENDER: u64 = 1 << 8;
+        const POLLIN: i16 = 1;
+        // `OH_NativeBuffer_Format`'s 8-bit RGB orders, with or without alpha.
+        const RGBX_8888: i32 = 11;
+        const RGBA_8888: i32 = 12;
+        const BGRX_8888: i32 = 19;
+        const BGRA_8888: i32 = 20;
+
+        /// The size and the center pixel, as RGB, of the newest frame that
+        /// `image` has, which comes within a few seconds of its present.
+        ///
+        /// # Safety
+        ///
+        /// `image` is a live consumer surface.
+        unsafe fn newest_frame(image: *mut c_void) -> ((i32, i32), [u8; 3]) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut newest = None;
+            while newest.is_none() || Instant::now() < deadline {
+                let (mut buffer, mut fence) = (core::ptr::null_mut(), -1);
+                // SAFETY: the live image, and local outputs.
+                if unsafe { OH_NativeImage_AcquireNativeWindowBuffer(image, &mut buffer, &mut fence) } != 0 {
+                    if newest.is_some() {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "the consumer got no frame");
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                if fence >= 0 {
+                    let mut wait = PollFd { fd: fence, events: POLLIN, revents: 0 };
+                    // SAFETY: one local pollfd, then the fence that is the
+                    // test's to close.
+                    unsafe {
+                        poll(&mut wait, 1, -1);
+                        drop(std::os::fd::OwnedFd::from_raw_fd(fence));
+                    }
+                }
+                let (mut native, mut data, mut config) =
+                    (core::ptr::null_mut(), core::ptr::null_mut(), BufferConfig::default());
+                // SAFETY: the acquired buffer, until its release.
+                unsafe {
+                    assert_eq!(OH_NativeBuffer_FromNativeWindowBuffer(buffer, &mut native), 0);
+                    OH_NativeBuffer_GetConfig(native, &mut config);
+                    assert_eq!(OH_NativeBuffer_Map(native, &mut data), 0, "the frame maps for the CPU");
+                }
+                let center = (config.height / 2) as usize * config.stride as usize + (config.width / 2) as usize * 4;
+                // SAFETY: the mapped buffer holds `height` rows of `stride`
+                // bytes.
+                let [first, green, third, _] = unsafe { data.cast::<[u8; 4]>().byte_add(center).read() };
+                let rgb = match config.format {
+                    RGBA_8888 | RGBX_8888 => [first, green, third],
+                    BGRA_8888 | BGRX_8888 => [third, green, first],
+                    format => panic!("the frame has 8-bit RGB pixels, not format {format}"),
+                };
+                // SAFETY: the mapped, acquired buffer, which the consumer
+                // takes back.
+                unsafe {
+                    OH_NativeBuffer_Unmap(native);
+                    OH_NativeImage_ReleaseNativeWindowBuffer(image, buffer, -1);
+                }
+                newest = Some(((config.width, config.height), rgb));
+            }
+            newest.expect("a frame")
+        }
+
+        // Memory that is no native object, which the target turns down.
+        let mut not_a_window = [0u64; 8];
+        let not_a_window = not_a_window.as_mut_ptr().cast::<c_void>();
+        assert_eq!(read(&ohos(8, 8, not_a_window), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let styled = Waiter::new();
+        let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
+        // SAFETY: local arguments.
+        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, core::ptr::null_mut()) };
+        assert_eq!(styled.status(), MLN_STATUS_OK);
+
+        let mut presented = 0;
+        for (index, (backend, value, _)) in gpu_device::BACKENDS.iter().enumerate() {
+            let mut device_options = sized::<mln_gpu_device_options>();
+            device_options.fields = MLN_GPU_DEVICE_OPTION_BACKEND;
+            device_options.backend = *value;
+            let mut device = 0;
+            // SAFETY: local arguments.
+            if unsafe { mln_gpu_device_create(&device_options, &mut device, core::ptr::null_mut()) } != MLN_STATUS_OK {
+                continue;
+            }
+            let mut capabilities = sized::<mln_gpu_device_capabilities>();
+            // SAFETY: local arguments.
+            unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, core::ptr::null_mut()) };
+            if capabilities.target_kinds & MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW == 0 {
+                gpu_device::mln_gpu_device_release(device);
+                continue;
+            }
+            // SAFETY: OpenHarmony's calls, whose image the test destroys.
+            let mut image = unsafe { OH_ConsumerSurface_Create() };
+            assert!(!image.is_null(), "a consumer surface");
+            // SAFETY: as above, of the live image.
+            let window = unsafe {
+                assert_eq!(OH_ConsumerSurface_SetDefaultUsage(image, USAGE_CPU_READ | USAGE_HW_RENDER), 0);
+                OH_NativeImage_AcquireNativeWindow(image)
+            };
+            assert!(!window.is_null(), "the consumer surface's window");
+
+            let (target, attach) = (ohos(48, 40, window), attach_options());
+            let (mut session, attached) = (0, Waiter::new());
+            // SAFETY: local arguments.
+            let status = unsafe {
+                mln_map_attach(map, &target, device, &attach, &mut session, &attached.descriptor, core::ptr::null_mut())
+            };
+            gpu_device::mln_gpu_device_release(device);
+            assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK), "{backend:?}");
+            let mut session_capabilities = sized::<mln_render_session_capabilities>();
+            // SAFETY: local capabilities.
+            unsafe { mln_render_session_get_capabilities(session, &mut session_capabilities, core::ptr::null_mut()) };
+            assert_eq!(session_capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION);
+            let token = 10 * index as u64;
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 1), MLN_STATUS_OK);
+            assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED, "{backend:?}");
+            // SAFETY: the live image.
+            assert_eq!(unsafe { newest_frame(image) }, ((48, 40), [0xff, 0, 0]), "{backend:?}");
+
+            // A frame may still present to the window as its consumer goes,
+            // and the next finds no window.
+            // SAFETY: the image is the test's. The session holds the window.
+            unsafe { OH_NativeImage_Destroy(&mut image) };
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 2), MLN_STATUS_OK);
+            let first = wait_for_result(session).disposition;
+            assert!([MLN_RENDER_RESULT_RENDERED, MLN_RENDER_RESULT_TARGET_NOT_READY].contains(&first), "{backend:?}");
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 3), MLN_STATUS_OK);
+            assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_TARGET_NOT_READY, "{backend:?}");
+            release_session(session);
+            presented += 1;
+        }
+        assert!(presented > 0, "no backend presents to an OpenHarmony window");
+
+        release_map(map);
+        release(runtime);
     }
 
     /// An Xlib target of `window`, a winit window on X11, at `width` by

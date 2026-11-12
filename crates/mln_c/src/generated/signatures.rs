@@ -71,6 +71,11 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(*mut ::core::ffi::c_void) = crate::acquired_frame::mln_acquired_frame_view_end;
 const _: unsafe extern "C" fn(
     *mut ::core::ffi::c_void,
+    *mut ::core::ffi::c_void,
+    *mut mln_diagnostic,
+) -> mln_status = crate::android::mln_android_init;
+const _: unsafe extern "C" fn(
+    *mut ::core::ffi::c_void,
     i64,
     *mut mln_wake,
     *mut mln_diagnostic,

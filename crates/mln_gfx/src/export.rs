@@ -155,10 +155,16 @@ pub enum ExportedImage {
     IoSurface { surface: u64 },
     /// A dmabuf of `fourcc` with `modifier`, and its planes in order.
     DmaBuf { fourcc: u32, modifier: u64, planes: Vec<DmaBufPlane> },
+    /// An `AHardwareBuffer*` of the format
+    /// `AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM`.
+    AndroidHardwareBuffer { buffer: u64 },
     /// A Vulkan image's memory: `allocation_size` bytes, the image's own
     /// when `dedicated`, holding an image of the `VkFormat` `format` with
     /// optimal tiling.
     OpaqueFd { fd: i32, allocation_size: u64, dedicated: bool, format: u32 },
+    /// A D3D11 texture's NT `HANDLE`, as an integer, of the `DXGI_FORMAT`
+    /// `format`.
+    DxgiSharedTexture { handle: u64, format: u32 },
 }
 
 /// A target's generations of images: the ones it renders into now, and the

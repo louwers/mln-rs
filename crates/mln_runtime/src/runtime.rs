@@ -28,7 +28,8 @@ use crate::resources::{CacheDatabaseOperation, ProviderFileSource, ResourceHooks
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RuntimeOptions {
     /// The directory that `asset://` URLs load from. `None` uses the working
-    /// directory.
+    /// directory, or on Android the app's assets, which
+    /// `mln_storage::android::init` gives the library.
     pub asset_path: Option<PathBuf>,
     /// The cache database file, which holds the ambient cache and the offline
     /// regions. Its directory must be writable. `None` keeps the cache in
@@ -349,6 +350,10 @@ fn resource_options(options: &RuntimeOptions) -> Result<ResourceOptions, Error> 
         ResourceOptions::default().with_tile_server_options(TileServerOptions::default_configuration());
     if let Some(asset_path) = &options.asset_path {
         resource_options = resource_options.with_asset_path(utf8(asset_path, "asset path")?);
+    }
+    #[cfg(target_os = "android")]
+    if options.asset_path.is_none() {
+        resource_options = resource_options.with_asset_path(mln_storage::android::APP_ASSETS);
     }
     if let Some(cache_path) = &options.cache_path {
         let path = utf8(cache_path, "cache path")?;

@@ -622,8 +622,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
     })
 }
 
-/// `mln_acquired_frame_get_android_hardware_buffer()`: no ring of this
-/// library shares hardware buffers yet.
+/// `mln_acquired_frame_get_android_hardware_buffer()`.
 ///
 /// # Safety
 ///
@@ -637,13 +636,24 @@ pub unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
     export!(out_diagnostic, non_null(out_frame), {
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_frame) }?;
-        exported_image(frame)?;
-        Err(other_export())
+        let (texture, scale_factor, slot, _) = exported_image(frame)?;
+        let FrameTextureKind::Exported(ExportedImage::AndroidHardwareBuffer { buffer }) = texture.kind else {
+            return Err(other_export());
+        };
+        let record = mln_android_hardware_buffer_frame {
+            size: size_of::<mln_android_hardware_buffer_frame>() as u32,
+            width: texture.size.width,
+            height: texture.size.height,
+            scale_factor,
+            slot,
+            buffer: buffer as usize as *mut c_void,
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
     })
 }
 
-/// `mln_acquired_frame_get_dxgi_shared_texture()`: no ring of this library
-/// shares DXGI textures yet.
+/// `mln_acquired_frame_get_dxgi_shared_texture()`.
 ///
 /// # Safety
 ///
@@ -657,8 +667,21 @@ pub unsafe extern "C" fn mln_acquired_frame_get_dxgi_shared_texture(
     export!(out_diagnostic, non_null(out_frame), {
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_frame) }?;
-        exported_image(frame)?;
-        Err(other_export())
+        let (texture, scale_factor, slot, _) = exported_image(frame)?;
+        let FrameTextureKind::Exported(ExportedImage::DxgiSharedTexture { handle, format }) = texture.kind else {
+            return Err(other_export());
+        };
+        let record = mln_dxgi_shared_texture_frame {
+            size: size_of::<mln_dxgi_shared_texture_frame>() as u32,
+            width: texture.size.width,
+            height: texture.size.height,
+            scale_factor,
+            slot,
+            format,
+            handle: handle as usize as *mut c_void,
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
     })
 }
 
@@ -689,5 +712,106 @@ mod tests {
         // SAFETY: the descriptor is the test's to hand over.
         let consumer = unsafe { consumer_sync(sync) };
         assert_eq!(Some(fd), consumer.sync_file.as_ref().map(std::os::fd::AsRawFd::as_raw_fd));
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+    use crate::generated::types::{
+        MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE,
+        MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE, MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD, MLN_GPU_SYNC_CPU_COMPLETE,
+        MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_RESULT_RENDERED, MLN_RENDER_TARGET_KIND_EXPORTED_RING, MLN_STATUS_OK,
+        MLN_STATUS_UNSUPPORTED, mln_exported_ring_target, mln_gpu_device_capabilities, mln_gpu_device_options,
+        mln_logical_size, mln_render_session_capabilities, mln_render_target, mln_render_target_data,
+    };
+    use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities, mln_gpu_device_release};
+    use crate::map::mln_map_set_style_json;
+    use crate::map::tests::{create_map, options, release_map, view};
+    use crate::render_session::mln_render_session_get_capabilities;
+    use crate::render_session::tests::{attach_options, demand, release_session, sized, wait_for_result};
+    use crate::render_target::mln_map_attach;
+    use crate::runtime::tests::{Waiter, create, release};
+
+    const NO_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
+
+    // An exported ring on a Vulkan device that shares D3D11 textures hands
+    // each frame's texture over through the DXGI getter alone.
+    #[test]
+    fn a_dxgi_ring_frame_has_its_shared_texture() {
+        let mut device_options = sized::<mln_gpu_device_options>();
+        device_options.fields = MLN_GPU_DEVICE_OPTION_BACKEND;
+        device_options.backend = MLN_RENDER_BACKEND_VULKAN;
+        let mut device = 0;
+        // SAFETY: local arguments.
+        if unsafe { mln_gpu_device_create(&device_options, &mut device, NO_DIAGNOSTIC) } != MLN_STATUS_OK {
+            eprintln!("skipped: no Vulkan device");
+            return;
+        }
+        let mut capabilities = sized::<mln_gpu_device_capabilities>();
+        // SAFETY: local arguments.
+        unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, NO_DIAGNOSTIC) };
+        if capabilities.export_kinds & MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE == 0 {
+            mln_gpu_device_release(device);
+            eprintln!("skipped: the Vulkan device shares no D3D11 textures");
+            return;
+        }
+
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let styled = Waiter::new();
+        let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
+        // SAFETY: local arguments.
+        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, NO_DIAGNOSTIC) };
+        assert_eq!(styled.status(), MLN_STATUS_OK);
+        let ring = mln_exported_ring_target {
+            logical_size: mln_logical_size { width: 32, height: 16 },
+            texture_count: 3,
+            export_kinds: MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE | MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD,
+            dma_buf_formats: core::ptr::null(),
+            dma_buf_format_count: 0,
+            android_hardware_buffer_usage: 0,
+        };
+        let target = mln_render_target {
+            kind: MLN_RENDER_TARGET_KIND_EXPORTED_RING,
+            data: mln_render_target_data { exported_ring: ring },
+            ..sized()
+        };
+        let (mut session, attached, attach) = (0, Waiter::new(), attach_options());
+        // SAFETY: local arguments.
+        let status =
+            unsafe { mln_map_attach(map, &target, device, &attach, &mut session, &attached.descriptor, NO_DIAGNOSTIC) };
+        mln_gpu_device_release(device);
+        assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
+        let mut session_capabilities = sized::<mln_render_session_capabilities>();
+        // SAFETY: local arguments.
+        unsafe { mln_render_session_get_capabilities(session, &mut session_capabilities, NO_DIAGNOSTIC) };
+        assert_eq!(MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE, session_capabilities.export_kind);
+
+        for token in 1..=4 {
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token), MLN_STATUS_OK);
+            assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED);
+            let mut frame = 0;
+            // SAFETY: local outputs.
+            assert_eq!(unsafe { mln_render_session_acquire_frame(session, &mut frame, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+            let mut texture = sized::<mln_dxgi_shared_texture_frame>();
+            // SAFETY: local outputs.
+            let status = unsafe { mln_acquired_frame_get_dxgi_shared_texture(frame, &mut texture, NO_DIAGNOSTIC) };
+            assert_eq!(status, MLN_STATUS_OK);
+            // DXGI_FORMAT_B8G8R8A8_UNORM.
+            assert_eq!((texture.width, texture.height, texture.format), (32, 16, 87));
+            assert!(!texture.handle.is_null());
+            assert!(texture.slot < 3);
+            let mut opaque = sized::<mln_opaque_fd_frame>();
+            // SAFETY: local outputs.
+            let status = unsafe { mln_acquired_frame_get_opaque_fd(frame, &mut opaque, NO_DIAGNOSTIC) };
+            assert_eq!(status, MLN_STATUS_UNSUPPORTED);
+            let done = mln_gpu_sync { kind: MLN_GPU_SYNC_CPU_COMPLETE, ..sized() };
+            // SAFETY: the live frame, and a local sync.
+            assert_eq!(unsafe { mln_acquired_frame_release(frame, &done, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        }
+        release_session(session);
+        release_map(map);
+        release(runtime);
     }
 }

@@ -21,8 +21,8 @@
 //!
 //! A [`RendererBackend`] renders on a [`Device`], an EGL share group, into
 //! an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
-//! Wayland or X11 window through EGL from a context of the window's display,
-//! and a `CanvasTarget` draws into the canvas of a WebGL2 context.
+//! Wayland, X11 or Android window through EGL from a context of the window's
+//! display, and a `CanvasTarget` draws into the canvas of a WebGL2 context.
 
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
@@ -58,7 +58,7 @@ mod egl;
 pub mod exported_target;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod offscreen_target;
-#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,5 +73,5 @@ pub use exported_target::ExportedTarget;
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
-#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 pub use surface_target::SurfaceTarget;

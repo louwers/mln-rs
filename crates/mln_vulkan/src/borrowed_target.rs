@@ -193,6 +193,59 @@ enum ConsumerWait {
     /// the file again, which a release of the image polls.
     #[cfg(unix)]
     Imported { semaphore: vk::Semaphore, file: std::os::fd::OwnedFd },
+    /// The host's D3D12 fence, imported, until it reaches the value.
+    #[cfg(windows)]
+    Fence(Rc<ImportedFence>, u64),
+}
+
+/// A timeline semaphore of the target's own that shares a D3D12 fence of the
+/// host's, which dropping destroys.
+#[cfg(windows)]
+struct ImportedFence {
+    device: ash::Device,
+    semaphore: vk::Semaphore,
+}
+
+#[cfg(windows)]
+impl ImportedFence {
+    /// The fence whose NT handle is `handle`, imported into a new timeline.
+    /// The handle stays the host's.
+    ///
+    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan
+    /// can't import it.
+    fn import(backend: &BackendImpl, handle: u64) -> Result<ImportedFence, Error> {
+        let loader = backend
+            .device()
+            .shared
+            .semaphore_win32()
+            .ok_or_else(|| Error::native("the Vulkan device imports no D3D12 fences"))?;
+        let device = backend.get_device().clone();
+        let mut type_info = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+        let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
+        // SAFETY: the create info is valid for the device, which has
+        // timelines when it imports D3D12 fences.
+        let semaphore = unsafe { device.create_semaphore(&info, None) }
+            .map_err(|e| Error::native(format!("Failed to create a timeline semaphore: {e}")))?;
+        let fence = ImportedFence { device, semaphore };
+        let import = vk::ImportSemaphoreWin32HandleInfoKHR::default()
+            .semaphore(semaphore)
+            .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE)
+            .handle(handle as vk::HANDLE);
+        // SAFETY: the semaphore is new, and an import of an NT handle leaves
+        // the handle to its owner.
+        unsafe { loader.import_semaphore_win32_handle(&import) }
+            .map_err(|e| Error::native(format!("Failed to import the host's D3D12 fence: {e}")))?;
+        Ok(fence)
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ImportedFence {
+    fn drop(&mut self) {
+        // SAFETY: the last frame that waited on the semaphore is done: its
+        // target waited for the queue before it let go of its fences.
+        unsafe { self.device.destroy_semaphore(self.semaphore, None) };
+    }
 }
 
 /// What a slot of the ring waits for, and what it handed the host.
@@ -213,11 +266,19 @@ pub struct BorrowedTarget {
     target: RefCell<Rc<DrawTarget>>,
     producer: SyncKind,
     slots: RefCell<Vec<Slot>>,
-    /// The timeline that frames signal, for a timeline producer.
+    /// The timeline that frames signal, for a timeline or D3D12 fence
+    /// producer.
     timeline: vk::Semaphore,
     timeline_value: Cell<u64>,
     /// The binary semaphore that frames signal, for a sync file producer.
     export_semaphore: vk::Semaphore,
+    /// The NT handle that shares `timeline` as a D3D12 fence, for a D3D12
+    /// fence producer.
+    #[cfg(windows)]
+    shared_fence: Option<crate::win32::OwnedHandle>,
+    /// The host's D3D12 fences that releases named, by their handles.
+    #[cfg(windows)]
+    imported_fences: RefCell<Vec<(u64, Rc<ImportedFence>)>>,
 }
 
 impl BorrowedTarget {
@@ -248,12 +309,40 @@ impl BorrowedTarget {
             timeline: vk::Semaphore::null(),
             timeline_value: Cell::new(0),
             export_semaphore: vk::Semaphore::null(),
+            #[cfg(windows)]
+            shared_fence: None,
+            #[cfg(windows)]
+            imported_fences: RefCell::new(Vec::new()),
         };
         let vk_device = this.backend.backend_impl().get_device().clone();
         // SAFETY: the create infos are valid for the device, which has the
         // features of the producer kind (checked above).
         unsafe {
             match producer {
+                #[cfg(windows)]
+                SyncKind::D3d12Fence => {
+                    let mut export_info = vk::ExportSemaphoreCreateInfo::default()
+                        .handle_types(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE);
+                    let mut type_info = vk::SemaphoreTypeCreateInfo::default()
+                        .semaphore_type(vk::SemaphoreType::TIMELINE)
+                        .initial_value(0);
+                    let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info).push_next(&mut export_info);
+                    this.timeline = vk_device
+                        .create_semaphore(&info, None)
+                        .map_err(|e| Error::native(format!("Failed to create a shareable timeline: {e}")))?;
+                    let loader = device
+                        .shared
+                        .semaphore_win32()
+                        .ok_or_else(|| Error::unsupported("the Vulkan device exports no D3D12 fences"))?;
+                    let get = vk::SemaphoreGetWin32HandleInfoKHR::default()
+                        .semaphore(this.timeline)
+                        .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE);
+                    let handle = loader
+                        .get_semaphore_win32_handle(&get)
+                        .map_err(|e| Error::native(format!("Failed to share the timeline as a D3D12 fence: {e}")))?;
+                    // The export makes an NT handle, which is the target's.
+                    this.shared_fence = Some(crate::win32::OwnedHandle::from_raw(handle));
+                }
                 SyncKind::VulkanTimelineSemaphore => {
                     let mut type_info = vk::SemaphoreTypeCreateInfo::default()
                         .semaphore_type(vk::SemaphoreType::TIMELINE)
@@ -378,8 +467,26 @@ impl BorrowedTarget {
                     }
                 }
             }
+            #[cfg(windows)]
+            SyncKind::D3d12Fence => {
+                let fence = self.imported_fence(consumer.handle)?;
+                state.consumer_wait = Some(ConsumerWait::Fence(fence, consumer.value));
+                Ok(())
+            }
             kind => Err(Error::unsupported(format!("the Vulkan target waits for no {kind:?}"))),
         }
+    }
+
+    /// The host's D3D12 fence whose NT handle is `handle`, imported once.
+    #[cfg(windows)]
+    fn imported_fence(&self, handle: u64) -> Result<Rc<ImportedFence>, Error> {
+        let mut fences = self.imported_fences.borrow_mut();
+        if let Some((_, fence)) = fences.iter().find(|(known, _)| *known == handle) {
+            return Ok(fence.clone());
+        }
+        let fence = Rc::new(ImportedFence::import(self.backend.backend_impl(), handle)?);
+        fences.push((handle, fence.clone()));
+        Ok(fence)
     }
 
     /// The host gave up the image at `slot` without saying when its reads
@@ -548,6 +655,12 @@ impl BorrowedTarget {
                 }
                 Some(GpuSync { kind: SyncKind::SyncFd, handle: raw as u64, value: 0 })
             }
+            #[cfg(windows)]
+            SyncKind::D3d12Fence => self.shared_fence.as_ref().map(|handle| GpuSync {
+                kind: SyncKind::D3d12Fence,
+                handle: handle.as_raw() as u64,
+                value: self.timeline_value.get(),
+            }),
             _ => None,
         }
     }
@@ -577,10 +690,13 @@ impl FrameTarget for BorrowedTarget {
                     context.get_backend().get_device().destroy_semaphore(semaphore, None);
                 }));
             }
+            // The target keeps the fence until it waits for the queue.
+            #[cfg(windows)]
+            Some(ConsumerWait::Fence(fence, value)) => context.wait_in_frame(fence.semaphore, Some(value)),
             None => {}
         }
         match self.producer {
-            SyncKind::VulkanTimelineSemaphore => {
+            SyncKind::VulkanTimelineSemaphore | SyncKind::D3d12Fence => {
                 let value = self.timeline_value.get() + 1;
                 self.timeline_value.set(value);
                 context.signal_in_frame(self.timeline, Some(value));
@@ -614,6 +730,8 @@ impl Drop for BorrowedTarget {
                 device.destroy_semaphore(self.export_semaphore, None);
             }
         }
+        #[cfg(windows)]
+        self.imported_fences.get_mut().clear();
     }
 }
 
@@ -636,6 +754,8 @@ impl PendingReads {
                 ConsumerWait::Timeline(semaphore, value) => wait_timeline(backend, *semaphore, *value, now),
                 #[cfg(unix)]
                 ConsumerWait::Imported { file, .. } => poll_until(file, now),
+                #[cfg(windows)]
+                ConsumerWait::Fence(fence, value) => wait_timeline(backend, fence.semaphore, *value, now),
             });
         for wait in ended {
             drop_wait(backend, wait);
@@ -666,6 +786,9 @@ fn drop_wait(backend: &BackendImpl, wait: ConsumerWait) {
             // target made.
             unsafe { backend.get_device().destroy_semaphore(semaphore, None) };
         }
+        // The last reference destroys the fence's semaphore.
+        #[cfg(windows)]
+        ConsumerWait::Fence(..) => {}
     }
 }
 

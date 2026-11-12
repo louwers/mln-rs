@@ -57,6 +57,8 @@ pub(crate) const SURFACE_KINDS: &[(SurfaceType, mln_render_target_kind_flags)] =
     (SurfaceType::Win32, MLN_RENDER_TARGET_KIND_FLAG_WIN32_WINDOW),
     (SurfaceType::Xlib, MLN_RENDER_TARGET_KIND_FLAG_XLIB_WINDOW),
     (SurfaceType::Wayland, MLN_RENDER_TARGET_KIND_FLAG_WAYLAND_SURFACE),
+    (SurfaceType::AndroidNdk, types::MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW),
+    (SurfaceType::OhosNdk, types::MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW),
 ];
 
 /// `mln_supported_render_backend_mask()`'s value.

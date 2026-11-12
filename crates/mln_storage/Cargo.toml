@@ -52,6 +52,11 @@ ureq = { workspace = true, features = ["gzip", "native-tls-no-default"] }
 rustls.workspace = true
 ureq = { workspace = true, features = ["gzip", "platform-verifier", "rustls-no-provider"] }
 
+# Android's certificate verifier, which runs in the app's Java VM.
+[target.'cfg(target_os = "android")'.dependencies]
+jni.workspace = true
+rustls-platform-verifier.workspace = true
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys.workspace = true
 wasm-bindgen.workspace = true

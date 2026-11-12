@@ -25,6 +25,10 @@ mln_tile_id.workspace = true
 mln_util.workspace = true
 naga.workspace = true
 
+# The NT handles of D3D12 fences, and the D3D11 textures of exported rings.
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+
 # Polls the host's sync files.
 [target.'cfg(all(unix, not(any(target_vendor = "apple", target_family = "wasm"))))'.dependencies]
 libc.workspace = true

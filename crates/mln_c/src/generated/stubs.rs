@@ -3,14 +3,6 @@
 use super::types::*;
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_android_init(
-    jni_env: *mut ::core::ffi::c_void,
-    context: *mut ::core::ffi::c_void,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe { crate::diagnostic::unsupported(out_diagnostic, "mln_android_init") }
-}
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_plugin_get_register_function_v1() -> mln_plugin_register_function_v1 {
     None
 }

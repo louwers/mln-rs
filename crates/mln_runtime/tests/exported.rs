@@ -326,6 +326,40 @@ fn a_resize_that_makes_no_images_fails_the_session() {
     }
 }
 
+/// A wrap of the host's device offers sync files, D3D12 fences and exports
+/// only through the extensions that the host lists, since Vulkan can't say
+/// which it enabled.
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+#[test]
+fn a_wrapped_device_exports_through_the_extensions_that_the_host_lists() {
+    let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) else { return };
+    let wrap = |enabled_extensions: Vec<std::ffi::CString>| {
+        let raw = library.raw();
+        let host = mln_vulkan::HostDevice {
+            get_instance_proc_addr: Some(raw.get_instance_proc_addr),
+            get_device_proc_addr: Some(raw.get_device_proc_addr),
+            instance: raw.instance,
+            physical_device: raw.physical_device,
+            device: raw.device,
+            queue_family_index: raw.queue_family_index,
+            queue: raw.queue,
+            queue_lock: None,
+            enabled_extensions,
+        };
+        // SAFETY: the library device's live handles, which outlive the wrap.
+        unsafe { mln_vulkan::Device::from_raw(host) }.unwrap()
+    };
+    let unlisted = wrap(Vec::new());
+    assert_eq!(ExportKinds::NONE, unlisted.export_kinds());
+    let (producer, consumer) = unlisted.sync_kinds();
+    for kind in [SyncKind::SyncFd, SyncKind::D3d12Fence] {
+        assert!(!producer.contains(kind) && !consumer.contains(kind), "{kind:?}");
+    }
+    let listed = wrap(library.enabled_extensions().to_vec());
+    assert_eq!(library.export_kinds(), listed.export_kinds());
+    assert_eq!(library.sync_kinds(), listed.sync_kinds());
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::os::fd::{AsRawFd as _, BorrowedFd};
@@ -451,39 +485,6 @@ mod linux {
         created.wait().unwrap();
         wait(map.set_style_json(style.to_owned()));
         map
-    }
-
-    /// A wrap of the host's device offers sync files and exports only
-    /// through the extensions that the host lists, since Vulkan can't say
-    /// which it enabled.
-    #[cfg(feature = "vulkan")]
-    #[test]
-    fn a_wrapped_device_exports_through_the_extensions_that_the_host_lists() {
-        let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) else { return };
-        let wrap = |enabled_extensions: Vec<std::ffi::CString>| {
-            let raw = library.raw();
-            let host = mln_vulkan::HostDevice {
-                get_instance_proc_addr: Some(raw.get_instance_proc_addr),
-                get_device_proc_addr: Some(raw.get_device_proc_addr),
-                instance: raw.instance,
-                physical_device: raw.physical_device,
-                device: raw.device,
-                queue_family_index: raw.queue_family_index,
-                queue: raw.queue,
-                queue_lock: None,
-                enabled_extensions,
-            };
-            // SAFETY: the library device's live handles, which outlive the
-            // wrap.
-            unsafe { mln_vulkan::Device::from_raw(host) }.unwrap()
-        };
-        let unlisted = wrap(Vec::new());
-        assert_eq!(ExportKinds::NONE, unlisted.export_kinds());
-        let (producer, consumer) = unlisted.sync_kinds();
-        assert!(!producer.contains(SyncKind::SyncFd) && !consumer.contains(SyncKind::SyncFd));
-        let listed = wrap(library.enabled_extensions().to_vec());
-        assert_eq!(library.export_kinds(), listed.export_kinds());
-        assert_eq!(library.sync_kinds(), listed.sync_kinds());
     }
 
     #[cfg(feature = "vulkan")]
@@ -669,6 +670,191 @@ mod linux {
     }
 }
 
+#[cfg(all(feature = "vulkan", windows))]
+mod win32 {
+    use mln_vulkan::ash::{self, vk};
+    use windows::Win32::Foundation::{CloseHandle, GENERIC_ALL, HANDLE, HMODULE, LUID};
+    use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_UNKNOWN;
+    use windows::Win32::Graphics::Direct3D11::{
+        D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_FLAG, D3D11_FENCE_FLAG_SHARED, D3D11_MAP_READ,
+        D3D11_MAPPED_SUBRESOURCE, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING, D3D11CreateDevice,
+        ID3D11Device, ID3D11Device5, ID3D11DeviceContext, ID3D11DeviceContext4, ID3D11Fence, ID3D11Texture2D,
+    };
+    use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
+    use windows::Win32::Graphics::Dxgi::{CreateDXGIFactory1, IDXGIAdapter, IDXGIFactory4};
+    use windows::core::{Interface as _, PCWSTR};
+
+    use super::*;
+
+    /// Red, as a B8G8R8A8 texture holds it.
+    const BGRA_RED: [u8; 4] = [0, 0, 255, 255];
+
+    /// The Vulkan device of the library's, if it exports D3D11 textures.
+    fn dxgi_device() -> Option<mln_vulkan::Device> {
+        let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) else { return None };
+        if !library.export_kinds().contains(ExportKind::DxgiSharedHandle) {
+            eprintln!("skipped: the Vulkan device shares no D3D11 textures");
+            return None;
+        }
+        Some(library)
+    }
+
+    /// A D3D11 device on the adapter of `library`'s GPU, as a host makes one
+    /// to open the ring's textures.
+    fn host_device(library: &mln_vulkan::Device) -> (ID3D11Device5, ID3D11DeviceContext4) {
+        let raw = library.raw();
+        let mut ids = vk::PhysicalDeviceIDProperties::default();
+        // SAFETY: plain queries of the library device's live GPU, and D3D11
+        // calls whose out pointers they fill.
+        unsafe {
+            let entry =
+                ash::Entry::from_static_fn(ash::StaticFn { get_instance_proc_addr: raw.get_instance_proc_addr });
+            let instance = ash::Instance::load(entry.static_fn(), raw.instance);
+            let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut ids);
+            instance.get_physical_device_properties2(raw.physical_device, &mut properties);
+            assert_eq!(vk::TRUE, ids.device_luid_valid);
+            let [l0, l1, l2, l3, h0, h1, h2, h3] = ids.device_luid;
+            let luid =
+                LUID { LowPart: u32::from_ne_bytes([l0, l1, l2, l3]), HighPart: i32::from_ne_bytes([h0, h1, h2, h3]) };
+            let factory: IDXGIFactory4 = CreateDXGIFactory1().unwrap();
+            let adapter: IDXGIAdapter = factory.EnumAdapterByLuid(luid).unwrap();
+            let (mut device, mut context): (Option<ID3D11Device>, Option<ID3D11DeviceContext>) = (None, None);
+            D3D11CreateDevice(
+                &adapter,
+                D3D_DRIVER_TYPE_UNKNOWN,
+                HMODULE::default(),
+                D3D11_CREATE_DEVICE_FLAG(0),
+                None,
+                D3D11_SDK_VERSION,
+                Some(&mut device),
+                None,
+                Some(&mut context),
+            )
+            .unwrap();
+            (device.unwrap().cast().unwrap(), context.unwrap().cast().unwrap())
+        }
+    }
+
+    /// The center pixel of the frame's texture, which the host's device
+    /// opens and copies to a texture that the CPU maps.
+    fn texture_pixel(device: &ID3D11Device5, context: &ID3D11DeviceContext4, frame: &AcquiredFrame) -> [u8; 4] {
+        let (size, image) = exported_image(frame);
+        let ExportedImage::DxgiSharedTexture { handle, format } = image else {
+            panic!("the frame has no DXGI shared texture")
+        };
+        assert_eq!(DXGI_FORMAT_B8G8R8A8_UNORM.0 as u32, format);
+        // SAFETY: the frame's live NT handle, which the session keeps, and
+        // D3D11 calls of the host's live device.
+        unsafe {
+            let texture: ID3D11Texture2D = device.OpenSharedResource1(HANDLE(handle as usize as *mut _)).unwrap();
+            let mut description = D3D11_TEXTURE2D_DESC::default();
+            texture.GetDesc(&mut description);
+            assert_eq!((size.width, size.height), (description.Width, description.Height));
+            assert_eq!(DXGI_FORMAT_B8G8R8A8_UNORM, description.Format);
+            let staging_description = D3D11_TEXTURE2D_DESC {
+                Usage: D3D11_USAGE_STAGING,
+                BindFlags: 0,
+                CPUAccessFlags: D3D11_CPU_ACCESS_READ.0 as u32,
+                MiscFlags: 0,
+                ..description
+            };
+            let mut staging: Option<ID3D11Texture2D> = None;
+            device.CreateTexture2D(&staging_description, None, Some(&mut staging)).unwrap();
+            let staging = staging.unwrap();
+            context.CopyResource(&staging, &texture);
+            let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+            context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)).unwrap();
+            let (x, y) = (size.width as usize / 2, size.height as usize / 2);
+            let mut pixel = [0u8; 4];
+            std::ptr::copy_nonoverlapping(
+                mapped.pData.cast::<u8>().add(y * mapped.RowPitch as usize + x * 4),
+                pixel.as_mut_ptr(),
+                4,
+            );
+            context.Unmap(&staging, 0);
+            pixel
+        }
+    }
+
+    #[test]
+    fn a_dxgi_ring_renders_into_d3d11_textures_that_the_host_opens() {
+        let Some(library) = dxgi_device() else { return };
+        let (device, context) = host_device(&library);
+        let runtime = runtime();
+        let map = red_map(&runtime);
+        let session =
+            attach(&map, ring(&[ExportKind::DxgiSharedHandle]), Some(Device::Vulkan(library)), SyncKinds::NONE)
+                .unwrap();
+        let capabilities = session.capabilities().unwrap();
+        assert_eq!(Some(ExportKind::DxgiSharedHandle), capabilities.export_kind);
+        assert_eq!(Some(SyncKind::CpuComplete), capabilities.producer_sync_kind);
+        for token in 1..=2 * DEPTH as u64 {
+            let frame = render_and_acquire(&session, token);
+            assert_eq!(GpuSync::of(SyncKind::CpuComplete), frame.producer_sync());
+            assert_eq!(BGRA_RED, texture_pixel(&device, &context, &frame));
+            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        }
+    }
+
+    /// Each frame hands over with the session's D3D12 fence, which the host
+    /// waits for on its D3D11 device, and comes back with the host's, which
+    /// the next frame into the texture waits for.
+    #[test]
+    fn a_dxgi_ring_hands_frames_over_with_d3d12_fences() {
+        let Some(library) = dxgi_device() else { return };
+        let (producer, consumer) = mln_vulkan::exported_target::sync_kinds(&library);
+        if !producer.contains(SyncKind::D3d12Fence) || !consumer.contains(SyncKind::D3d12Fence) {
+            eprintln!("skipped: the Vulkan device shares no D3D12 fences");
+            return;
+        }
+        let (device, context) = host_device(&library);
+        let runtime = runtime();
+        let map = red_map(&runtime);
+        let fences = SyncKinds::of(&[SyncKind::D3d12Fence]);
+        let session =
+            attach(&map, ring(&[ExportKind::DxgiSharedHandle]), Some(Device::Vulkan(library)), fences).unwrap();
+        let capabilities = session.capabilities().unwrap();
+        assert_eq!(Some(SyncKind::D3d12Fence), capabilities.producer_sync_kind);
+        assert!(capabilities.consumer_sync_kinds.contains(SyncKind::D3d12Fence));
+        // SAFETY: D3D11 calls of the host's live device, whose fence handle
+        // the test closes once the session is gone.
+        let (reads, reads_handle): (ID3D11Fence, HANDLE) = unsafe {
+            let mut fence: Option<ID3D11Fence> = None;
+            device.CreateFence(0, D3D11_FENCE_FLAG_SHARED, &mut fence).unwrap();
+            let fence = fence.unwrap();
+            let handle = fence.CreateSharedHandle(None, GENERIC_ALL.0, PCWSTR::null()).unwrap();
+            (fence, handle)
+        };
+        let mut last_value = 0;
+        for token in 1..=2 * DEPTH as u64 {
+            let frame = render_and_acquire(&session, token);
+            let sync = frame.producer_sync();
+            assert_eq!(SyncKind::D3d12Fence, sync.kind);
+            assert_ne!(0, sync.handle);
+            assert!(sync.value > last_value, "the session's fence counts up");
+            last_value = sync.value;
+            // SAFETY: the session's live fence handle, and D3D11 calls of the
+            // host's live device.
+            unsafe {
+                let mut frames: Option<ID3D11Fence> = None;
+                device.OpenSharedFence(HANDLE(sync.handle as usize as *mut _), &mut frames).unwrap();
+                context.Wait(&frames.unwrap(), sync.value).unwrap();
+            }
+            assert_eq!(BGRA_RED, texture_pixel(&device, &context, &frame));
+            // SAFETY: as above.
+            unsafe {
+                context.Signal(&reads, token).unwrap();
+                context.Flush();
+            }
+            let done = GpuSync { kind: SyncKind::D3d12Fence, handle: reads_handle.0 as usize as u64, value: token };
+            frame.release(ConsumerSync::of(done)).unwrap();
+        }
+        detach(session);
+        // SAFETY: the test's handle, which the detached session let go of.
+        unsafe { CloseHandle(reads_handle).unwrap() };
+    }
+}
+
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
 mod apple {
     use std::ffi::c_void;
@@ -724,5 +910,137 @@ mod apple {
                 frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
             }
         }
+    }
+}
+
+#[cfg(all(feature = "vulkan", target_os = "android"))]
+mod android {
+    use std::ffi::{c_int, c_void};
+
+    use super::*;
+
+    /// `AHardwareBuffer_Desc`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct Desc {
+        width: u32,
+        height: u32,
+        layers: u32,
+        format: u32,
+        usage: u64,
+        stride: u32,
+        rfu0: u32,
+        rfu1: u64,
+    }
+
+    #[link(name = "nativewindow")]
+    unsafe extern "C" {
+        fn AHardwareBuffer_describe(buffer: *const c_void, desc: *mut Desc);
+        fn AHardwareBuffer_lock(
+            buffer: *mut c_void,
+            usage: u64,
+            fence: c_int,
+            rect: *const c_void,
+            address: *mut *mut c_void,
+        ) -> c_int;
+        fn AHardwareBuffer_unlock(buffer: *mut c_void, fence: *mut c_int) -> c_int;
+    }
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const FORMAT_R8G8B8A8_UNORM: u32 = 1;
+    const USAGE_CPU_READ_OFTEN: u64 = 3;
+    const USAGE_GPU_SAMPLED_IMAGE: u64 = 1 << 8;
+    const USAGE_GPU_COLOR_OUTPUT: u64 = 1 << 9;
+
+    /// A session of a map of `style` on the Vulkan device, whose ring of
+    /// hardware buffers the CPU reads, or `None` where the device exports
+    /// none.
+    fn session(runtime: &Runtime, style: &str, producer: SyncKinds) -> Option<RenderSession> {
+        let device = device_of(BackendType::Vulkan)?;
+        if !device.export_kinds().contains(ExportKind::AndroidHardwareBuffer) {
+            eprintln!("skipped: the Vulkan device exports no hardware buffers");
+            return None;
+        }
+        let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+        let (map, created) = runtime.create_map(options).unwrap();
+        created.wait().unwrap();
+        wait(map.set_style_json(style.to_owned()));
+        let ring = ExportedRing {
+            android_hardware_buffer_usage: USAGE_CPU_READ_OFTEN,
+            ..ring(&[ExportKind::AndroidHardwareBuffer])
+        };
+        Some(attach(&map, ring, Some(device), producer).unwrap())
+    }
+
+    /// Waits for a frame's producer sync file, if it has one.
+    fn wait_for_producer(frame: &AcquiredFrame) {
+        let sync = frame.producer_sync();
+        if sync.kind != SyncKind::SyncFd || (sync.handle as i64) < 0 {
+            return;
+        }
+        let mut waiting = libc::pollfd { fd: sync.handle as i32, events: libc::POLLIN, revents: 0 };
+        // SAFETY: a poll of the frame's live sync file.
+        assert_eq!(1, unsafe { libc::poll(&raw mut waiting, 1, 10_000) }, "the frame's sync file signals");
+    }
+
+    /// The pixel at `x`, `y` from the first row of a frame's hardware
+    /// buffer, which the CPU locks to read once the frame is done.
+    fn pixel(frame: &AcquiredFrame, x: u32, y: u32) -> [u8; 4] {
+        wait_for_producer(frame);
+        let (size, image) = exported_image(frame);
+        let ExportedImage::AndroidHardwareBuffer { buffer } = image else { panic!("the frame has no hardware buffer") };
+        let buffer = buffer as usize as *mut c_void;
+        let mut desc = Desc::default();
+        // SAFETY: the frame's live buffer, locked around the read.
+        unsafe {
+            AHardwareBuffer_describe(buffer, &raw mut desc);
+            assert_eq!((size.width, size.height, 1), (desc.width, desc.height, desc.layers));
+            assert_eq!(FORMAT_R8G8B8A8_UNORM, desc.format);
+            let usage = USAGE_GPU_COLOR_OUTPUT | USAGE_GPU_SAMPLED_IMAGE | USAGE_CPU_READ_OFTEN;
+            assert_eq!(usage, desc.usage & usage);
+            let mut data = std::ptr::null_mut();
+            assert_eq!(0, AHardwareBuffer_lock(buffer, USAGE_CPU_READ_OFTEN, -1, std::ptr::null(), &raw mut data));
+            let offset = (y as usize * desc.stride as usize + x as usize) * 4;
+            let mut pixel = [0u8; 4];
+            std::ptr::copy_nonoverlapping(data.cast::<u8>().add(offset), pixel.as_mut_ptr(), 4);
+            assert_eq!(0, AHardwareBuffer_unlock(buffer, std::ptr::null_mut()));
+            pixel
+        }
+    }
+
+    #[test]
+    fn a_hardware_buffer_ring_renders_into_buffers_that_the_cpu_reads() {
+        let runtime = runtime();
+        let producer = SyncKinds::of(&[SyncKind::SyncFd, SyncKind::CpuComplete]);
+        let Some(session) = session(&runtime, &style("#ff0000"), producer) else { return };
+        let capabilities = session.capabilities().unwrap();
+        assert_eq!(Some(ExportKind::AndroidHardwareBuffer), capabilities.export_kind);
+        for token in 1..=2 * DEPTH as u64 {
+            let frame = render_and_acquire(&session, token);
+            assert_eq!(capabilities.producer_sync_kind, Some(frame.producer_sync().kind));
+            assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height / 2));
+            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        }
+    }
+
+    /// A hardware buffer's readers, such as a texture or a `SurfaceFlinger`
+    /// layer, take its first row as the top of the image: the map's north.
+    #[test]
+    fn a_hardware_buffer_starts_at_the_top_of_the_map() {
+        let runtime = runtime();
+        let north = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{"north":{"type":"geojson","data":{"type":"Polygon","coordinates":[[[-180,0],[180,0],[180,85],[-180,85],[-180,0]]]}}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}},{"id":"north","type":"fill","source":"north","paint":{"fill-color":"#0000ff","fill-antialias":false}}]}"##;
+        let Some(session) = session(&runtime, north, SyncKinds::NONE) else { return };
+        let mut frame = render_and_acquire(&session, 1);
+        // The fill loads after the first frame.
+        for token in 2..50 {
+            if pixel(&frame, SIZE.width / 2, SIZE.height / 4) != RED {
+                break;
+            }
+            drop(frame);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            frame = render_and_acquire(&session, token);
+        }
+        assert_eq!([0, 0, 255, 255], pixel(&frame, SIZE.width / 2, SIZE.height / 4));
+        assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height * 3 / 4));
     }
 }

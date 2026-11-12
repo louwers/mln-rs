@@ -28,6 +28,9 @@ const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 /// storage buffers with, which Vulkan 1.0 doesn't have.
 const STORAGE_BUFFER_STORAGE_CLASS: &CStr = c"VK_KHR_storage_buffer_storage_class";
 
+/// `VK_OHOS_surface`, `OpenHarmony`'s surface extension, which ash lacks.
+pub const OHOS_SURFACE: &CStr = c"VK_OHOS_surface";
+
 /// The instance extensions of the platforms' surfaces, which the library's
 /// instance enables where the loader has them.
 const SURFACE_EXTENSIONS: &[&CStr] = &[
@@ -36,8 +39,18 @@ const SURFACE_EXTENSIONS: &[&CStr] = &[
     ash::khr::xcb_surface::NAME,
     ash::khr::win32_surface::NAME,
     ash::khr::android_surface::NAME,
+    OHOS_SURFACE,
     ash::ext::headless_surface::NAME,
 ];
+
+/// The system's Vulkan library. `OpenHarmony` names its loader `libvulkan.so`,
+/// which ash looks for only on Android.
+fn load_entry() -> Result<ash::Entry, Error> {
+    // SAFETY: the Vulkan library's initializers have no preconditions.
+    let entry =
+        unsafe { if cfg!(target_env = "ohos") { ash::Entry::load_from("libvulkan.so") } else { ash::Entry::load() } };
+    entry.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))
+}
 
 /// A host's lock on a queue that it submits to too. The device holds it
 /// around each submission and present to the queue, never across a wait.
@@ -207,6 +220,18 @@ pub struct Features {
     /// `VK_EXT_external_memory_dma_buf` and
     /// `VK_EXT_image_drm_format_modifier` with `VK_KHR_external_memory_fd`.
     pub dma_buf: bool,
+    /// Importing Android hardware buffers into images, of
+    /// `VK_ANDROID_external_memory_android_hardware_buffer` with
+    /// `VK_EXT_queue_family_foreign`, which it requires.
+    pub android_hardware_buffer: bool,
+    /// Importing D3D11 textures through their NT handles, of
+    /// `VK_KHR_external_memory_win32`.
+    pub external_memory_win32: bool,
+    /// Exporting a timeline semaphore as a D3D12 fence's NT handle, of
+    /// `VK_KHR_external_semaphore_win32`.
+    pub export_d3d12_fence: bool,
+    /// Importing a D3D12 fence's NT handle into a timeline semaphore.
+    pub import_d3d12_fence: bool,
 }
 
 pub(crate) struct Shared {
@@ -219,6 +244,17 @@ pub(crate) struct Shared {
     #[cfg_attr(not(unix), allow(dead_code))]
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
     drm_format_modifier: Option<ash::ext::image_drm_format_modifier::Device>,
+    /// Only Android has hardware buffers.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    android_hardware_buffer: Option<ash::android::external_memory_android_hardware_buffer::Device>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    memory_win32: Option<ash::khr::external_memory_win32::Device>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    semaphore_win32: Option<ash::khr::external_semaphore_win32::Device>,
+    /// The D3D11 device on the GPU's adapter that makes the textures of
+    /// exported rings, made once, when first asked.
+    #[cfg(windows)]
+    dxgi: OnceLock<Result<crate::win32::TextureDevice, Error>>,
     /// The kinds that the device has exported an image of, probed once.
     export_kinds: OnceLock<ExportKinds>,
     physical_device: vk::PhysicalDevice,
@@ -319,6 +355,24 @@ fn sync_fd_support(instance: &ash::Instance, physical_device: vk::PhysicalDevice
     )
 }
 
+/// Whether `physical_device` exports (`export`) or imports timeline
+/// semaphores as D3D12 fences.
+fn d3d12_fence_support(instance: &ash::Instance, physical_device: vk::PhysicalDevice) -> (bool, bool) {
+    let mut timeline = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+    let info = vk::PhysicalDeviceExternalSemaphoreInfo::default()
+        .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE)
+        .push_next(&mut timeline);
+    let mut properties = vk::ExternalSemaphoreProperties::default();
+    // SAFETY: a plain query of a physical device of the instance, which is
+    // of Vulkan 1.1.
+    unsafe { instance.get_physical_device_external_semaphore_properties(physical_device, &info, &mut properties) };
+    let features = properties.external_semaphore_features;
+    (
+        features.contains(vk::ExternalSemaphoreFeatureFlags::EXPORTABLE),
+        features.contains(vk::ExternalSemaphoreFeatureFlags::IMPORTABLE),
+    )
+}
+
 impl Device {
     /// The library's device: the GPU at `adapter_index` in
     /// `vkEnumeratePhysicalDevices` order, or the first that can render when
@@ -344,8 +398,7 @@ impl Device {
     }
 
     fn create(selector: Selector) -> Result<Device, Error> {
-        // SAFETY: the Vulkan library's initializers have no preconditions.
-        let entry = unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?;
+        let entry = load_entry()?;
 
         // SAFETY: plain queries of the loader.
         let (available_layers, available_extensions, loader_version) = unsafe {
@@ -473,6 +526,13 @@ impl Device {
             features.external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &device));
         let drm_format_modifier =
             features.dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &device));
+        let android_hardware_buffer = features
+            .android_hardware_buffer
+            .then(|| ash::android::external_memory_android_hardware_buffer::Device::new(&instance, &device));
+        let memory_win32 =
+            features.external_memory_win32.then(|| ash::khr::external_memory_win32::Device::new(&instance, &device));
+        let semaphore_win32 = (features.export_d3d12_fence || features.import_d3d12_fence)
+            .then(|| ash::khr::external_semaphore_win32::Device::new(&instance, &device));
         // SAFETY: the device was made with a queue of the family; plain
         // queries of the physical device.
         let (queue, properties) = unsafe {
@@ -490,6 +550,11 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                android_hardware_buffer,
+                memory_win32,
+                semaphore_win32,
+                #[cfg(windows)]
+                dxgi: OnceLock::new(),
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device,
@@ -574,8 +639,15 @@ impl Device {
             )
         };
         let available = extension_names(&available);
-        let optional: &[&'static CStr] =
-            &[ash::khr::swapchain::NAME, ash::khr::external_semaphore_fd::NAME, ash::ext::queue_family_foreign::NAME];
+        // Windows' drivers have the win32 extensions: D3D11 textures for
+        // exported rings, and D3D12 fences.
+        let optional: &[&'static CStr] = &[
+            ash::khr::swapchain::NAME,
+            ash::khr::external_semaphore_fd::NAME,
+            ash::ext::queue_family_foreign::NAME,
+            ash::khr::external_memory_win32::NAME,
+            ash::khr::external_semaphore_win32::NAME,
+        ];
         let mut extensions: Vec<&'static CStr> = vec![STORAGE_BUFFER_STORAGE_CLASS];
         extensions.extend(optional.iter().filter(|name| available.contains(name)));
         // Exported rings: opaque file descriptors, and dmabufs, whose
@@ -595,6 +667,16 @@ impl Device {
             if !core_format_list {
                 extensions.push(ash::khr::image_format_list::NAME);
             }
+        }
+
+        // Android hardware buffers, whose other required extensions are in
+        // Vulkan 1.1.
+        let android_hardware_buffer = available.contains(&ash::android::external_memory_android_hardware_buffer::NAME)
+            && extensions.contains(&ash::ext::queue_family_foreign::NAME)
+            && api_version >= vk::API_VERSION_1_1
+            && gpu_version >= vk::API_VERSION_1_1;
+        if android_hardware_buffer {
+            extensions.push(ash::android::external_memory_android_hardware_buffer::NAME);
         }
 
         let mut timeline_supported = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
@@ -646,6 +728,12 @@ impl Device {
         } else {
             (false, false)
         };
+        let (export_d3d12_fence, import_d3d12_fence) =
+            if timeline && extensions.contains(&ash::khr::external_semaphore_win32::NAME) {
+                d3d12_fence_support(instance, physical_device)
+            } else {
+                (false, false)
+            };
         let features = Features {
             timeline_semaphores: timeline,
             export_sync_fd,
@@ -653,6 +741,10 @@ impl Device {
             foreign_queue_family: extensions.contains(&ash::ext::queue_family_foreign::NAME),
             external_memory_fd,
             dma_buf,
+            android_hardware_buffer,
+            external_memory_win32: extensions.contains(&ash::khr::external_memory_win32::NAME),
+            export_d3d12_fence,
+            import_d3d12_fence,
         };
         Ok((physical_device, queue_family_index, device, enabled, features, extensions))
     }
@@ -662,9 +754,12 @@ impl Device {
     /// the extensions the host enabled on the device: `VK_KHR_swapchain` to
     /// present, and timeline semaphores, and those of `enabled_extensions`
     /// that it lists: `VK_KHR_external_semaphore_fd` for sync files,
-    /// `VK_KHR_external_memory_fd` for opaque file descriptors, and that with
+    /// `VK_KHR_external_memory_fd` for opaque file descriptors, that with
     /// `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier`
-    /// for dmabufs.
+    /// for dmabufs, `VK_KHR_external_memory_win32` for DXGI shared textures,
+    /// `VK_KHR_external_semaphore_win32` for D3D12 fences, and
+    /// `VK_ANDROID_external_memory_android_hardware_buffer` with
+    /// `VK_EXT_queue_family_foreign` for Android hardware buffers.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library to look the functions up in, with
@@ -699,9 +794,7 @@ impl Device {
             Some(get_instance_proc_addr) => unsafe {
                 ash::Entry::from_static_fn(ash::StaticFn { get_instance_proc_addr })
             },
-            // SAFETY: the Vulkan library's initializers have no
-            // preconditions.
-            None => unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?,
+            None => load_entry()?,
         };
         let get_instance_proc_addr = entry.static_fn().get_instance_proc_addr;
         let lookup = |name: &CStr| -> *const c_void {
@@ -781,6 +874,11 @@ impl Device {
             && enabled(ash::ext::image_drm_format_modifier::NAME)
             && (properties.api_version >= vk::API_VERSION_1_2 || enabled(ash::khr::image_format_list::NAME))
             && device_lookup(c"vkGetImageDrmFormatModifierPropertiesEXT");
+        let android_hardware_buffer = enabled(ash::android::external_memory_android_hardware_buffer::NAME)
+            && enabled(ash::ext::queue_family_foreign::NAME)
+            && device_lookup(c"vkGetAndroidHardwareBufferPropertiesANDROID");
+        let hardware_buffers = android_hardware_buffer
+            .then(|| ash::android::external_memory_android_hardware_buffer::Device::new(&instance, &ash_device));
         let memory_fd = external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &ash_device));
         let drm_format_modifier =
             dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &ash_device));
@@ -790,11 +888,28 @@ impl Device {
             } else {
                 (false, false)
             };
+        // Vulkan 1.2's, or VK_KHR_timeline_semaphore's: renderers only create
+        // timelines and submit with them, which both share.
+        let timeline_semaphores = timeline_supported.timeline_semaphore == vk::TRUE
+            && (device_lookup(c"vkGetSemaphoreCounterValue") || device_lookup(c"vkGetSemaphoreCounterValueKHR"));
+        let external_memory_win32 = enabled(ash::khr::external_memory_win32::NAME)
+            && device_lookup(c"vkGetMemoryWin32HandlePropertiesKHR")
+            && instance_has(c"vkGetPhysicalDeviceImageFormatProperties2");
+        // A D3D12 fence is a timeline.
+        let (export_d3d12_fence, import_d3d12_fence) = if timeline_semaphores
+            && enabled(ash::khr::external_semaphore_win32::NAME)
+            && instance_has(c"vkGetPhysicalDeviceExternalSemaphoreProperties")
+        {
+            let (export, import) = d3d12_fence_support(&instance, physical_device);
+            (
+                export && device_lookup(c"vkGetSemaphoreWin32HandleKHR"),
+                import && device_lookup(c"vkImportSemaphoreWin32HandleKHR"),
+            )
+        } else {
+            (false, false)
+        };
         let features = Features {
-            // Vulkan 1.2's, or VK_KHR_timeline_semaphore's: renderers only
-            // create timelines and submit with them, which both share.
-            timeline_semaphores: timeline_supported.timeline_semaphore == vk::TRUE
-                && (device_lookup(c"vkGetSemaphoreCounterValue") || device_lookup(c"vkGetSemaphoreCounterValueKHR")),
+            timeline_semaphores,
             export_sync_fd: export_sync_fd && device_lookup(c"vkGetSemaphoreFdKHR"),
             import_sync_fd: import_sync_fd && device_lookup(c"vkImportSemaphoreFdKHR"),
             // The host may not have enabled VK_EXT_queue_family_foreign, and
@@ -802,7 +917,15 @@ impl Device {
             foreign_queue_family: false,
             external_memory_fd,
             dma_buf,
+            android_hardware_buffer,
+            external_memory_win32,
+            export_d3d12_fence,
+            import_d3d12_fence,
         };
+        let memory_win32 =
+            external_memory_win32.then(|| ash::khr::external_memory_win32::Device::new(&instance, &ash_device));
+        let semaphore_win32 = (export_d3d12_fence || import_d3d12_fence)
+            .then(|| ash::khr::external_semaphore_win32::Device::new(&instance, &ash_device));
         // The features the library would enable, where the GPU has them. A
         // host that didn't enable one gets the validation layer's warning.
         let enabled_features = vk::PhysicalDeviceFeatures {
@@ -820,6 +943,11 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                android_hardware_buffer: hardware_buffers,
+                memory_win32,
+                semaphore_win32,
+                #[cfg(windows)]
+                dxgi: OnceLock::new(),
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device: ash_device,
@@ -879,6 +1007,15 @@ impl Device {
         self.shared.surface.is_some() && self.shared.swapchain.is_some()
     }
 
+    /// Whether renderers on the device present to the windows whose surfaces
+    /// the instance extension `name` makes, such as
+    /// `VK_KHR_wayland_surface` or [`OHOS_SURFACE`]: the device presents,
+    /// and its instance has the extension.
+    #[must_use]
+    pub fn presents_through(&self, name: &CStr) -> bool {
+        self.presents() && self.shared.has_instance_extension(name)
+    }
+
     /// What the device lets renderers do.
     #[must_use]
     pub fn features(&self) -> Features {
@@ -905,6 +1042,12 @@ impl Device {
         }
         if features.import_sync_fd && cfg!(unix) {
             consumer = consumer.with(SyncKind::SyncFd);
+        }
+        if features.export_d3d12_fence && cfg!(windows) {
+            producer = producer.with(SyncKind::D3d12Fence);
+        }
+        if features.import_d3d12_fence && cfg!(windows) {
+            consumer = consumer.with(SyncKind::D3d12Fence);
         }
         (producer, consumer)
     }
@@ -980,8 +1123,48 @@ impl Shared {
         self.drm_format_modifier.as_ref()
     }
 
+    #[cfg(target_os = "android")]
+    pub(crate) fn android_hardware_buffer(
+        &self,
+    ) -> Option<&ash::android::external_memory_android_hardware_buffer::Device> {
+        self.android_hardware_buffer.as_ref()
+    }
+
     pub(crate) fn semaphore_fd(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {
         self.semaphore_fd.as_ref()
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn memory_win32(&self) -> Option<&ash::khr::external_memory_win32::Device> {
+        self.memory_win32.as_ref()
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn semaphore_win32(&self) -> Option<&ash::khr::external_semaphore_win32::Device> {
+        self.semaphore_win32.as_ref()
+    }
+
+    /// The D3D11 device on the DXGI adapter of the GPU, made when first
+    /// asked.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a GPU
+    /// without a LUID, and as [`TextureDevice::new`](crate::win32::TextureDevice)
+    /// does.
+    #[cfg(windows)]
+    pub(crate) fn dxgi(&self) -> Result<&crate::win32::TextureDevice, Error> {
+        self.dxgi
+            .get_or_init(|| {
+                let mut ids = vk::PhysicalDeviceIDProperties::default();
+                let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut ids);
+                // SAFETY: a plain query of the GPU, of Vulkan 1.1.
+                unsafe { self.instance.get_physical_device_properties2(self.physical_device, &mut properties) };
+                if ids.device_luid_valid != vk::TRUE {
+                    return Err(Error::unsupported("The Vulkan GPU has no LUID to find its DXGI adapter by"));
+                }
+                crate::win32::TextureDevice::new(ids.device_luid)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     /// Whether the instance has the surface extension `name`. A host's
@@ -997,6 +1180,7 @@ impl Shared {
             (ash::khr::xcb_surface::NAME, c"vkCreateXcbSurfaceKHR"),
             (ash::khr::win32_surface::NAME, c"vkCreateWin32SurfaceKHR"),
             (ash::khr::android_surface::NAME, c"vkCreateAndroidSurfaceKHR"),
+            (OHOS_SURFACE, c"vkCreateSurfaceOHOS"),
             (ash::ext::headless_surface::NAME, c"vkCreateHeadlessSurfaceEXT"),
         ]
         .into_iter()

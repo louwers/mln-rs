@@ -26,12 +26,14 @@ mln_util.workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 khronos-egl.workspace = true
 
-# The window backend: the window's handles, and libwayland-egl, loaded at run
-# time, for a Wayland surface. The exported ring: libgbm, loaded at run time,
-# and the system calls that allocate dmabufs.
+# The window backend: libwayland-egl, loaded at run time, for a Wayland
+# surface. The exported ring: libgbm, loaded at run time, and the system calls
+# that allocate dmabufs.
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+libloading.workspace = true
+
 [target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))'.dependencies]
 libc.workspace = true
-libloading.workspace = true
 raw-window-handle.workspace = true
 
 # The canvas backend's context: the browser's WebGL2.
