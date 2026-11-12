@@ -165,7 +165,6 @@
 "vendor/rapidjson/src/internal/dtoa.rs" = 1
 "vendor/rapidjson/src/writer.rs" = 3
 "vendor/supercluster/src/lib.rs" = 1
-"vendor/vector-tile/src/vector_tile.rs" = 5
 "vendor/wagyu/src/build_result.rs" = 1
 "vendor/wagyu/src/topology_correction.rs" = 1
 

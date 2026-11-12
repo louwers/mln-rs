@@ -1,6 +1,5 @@
 // Port-only tests: a malformed vector tile reaches the tile as its error
-// (`onTileError`) with the C++ exception, only where C++ throws, and never
-// panics the tile worker.
+// (`onTileError`), only where C++ throws, and never panics the tile worker.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -311,7 +310,7 @@ fn valid_tile_loads() {
 fn truncated_tile_is_a_tile_error() {
     let tile = valid_tile();
     let outcome = load(tile[..tile.len() - 4].to_vec(), &[line_layer(None)]);
-    assert_eq!(outcome, Outcome::Error("end of buffer exception".to_owned()));
+    assert_eq!(outcome, Outcome::Error("protobuf decode error: unexpected end of buffer".to_owned()));
 }
 
 // C++ throws from getValue inside the filter evaluation.
@@ -320,7 +319,7 @@ fn bad_value_read_by_a_filter_is_a_tile_error() {
     let mut json = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
     json["filter"] = json!(["==", ["get", "k"], "v"]);
     let outcome = load(tile_with_bad_value(), &[layer(json)]);
-    assert_eq!(outcome, Outcome::Error("feature referenced out of range value".to_owned()));
+    assert_eq!(outcome, Outcome::Error("invalid value index 7".to_owned()));
 }
 
 // C++ reads the values lazily: the fill path reads none, so the tile loads.
@@ -372,8 +371,7 @@ proptest! {
 }
 
 // C++ throws out of querySourceFeatures for a value it can't read
-// (convertFeature reads the properties, where `values.at` throws
-// std::out_of_range); the port returns it.
+// (convertFeature reads the properties); the port returns the error.
 #[test]
 fn query_of_a_bad_value_is_an_error() {
     use mln_tile_id::GeometryTileData;
@@ -388,5 +386,5 @@ fn query_of_a_bad_value_is_an_error() {
         &OverscaledTileID::from_zxy(0, 0, 0),
     )
     .unwrap_err();
-    assert_eq!(error.to_string(), "vector::_M_range_check: __n (which is 7) >= this->size() (which is 2)");
+    assert_eq!(error.to_string(), "invalid value index 7");
 }

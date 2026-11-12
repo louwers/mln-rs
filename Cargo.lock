@@ -2071,7 +2071,6 @@ dependencies = [
  "mln-rs-nunicode",
  "mln-rs-pmtiles",
  "mln-rs-polylabel",
- "mln-rs-protozero",
  "mln-rs-rapidjson",
  "mln-rs-renderer",
  "mln-rs-runtime",
@@ -2087,7 +2086,6 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
- "mln-rs-vector-tile",
  "mln-rs-vulkan",
  "mln-rs-wagyu",
  "mln-rs-webgpu",
@@ -2462,10 +2460,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-protozero"
-version = "0.0.11"
-
-[[package]]
 name = "mln-rs-rapidjson"
 version = "0.0.11"
 
@@ -2702,11 +2696,11 @@ dependencies = [
 name = "mln-rs-text"
 version = "0.0.11"
 dependencies = [
+ "buffa",
  "flate2",
  "harfrust 0.15.0",
  "js-sys",
  "mln-rs-math",
- "mln-rs-protozero",
  "mln-rs-style-types",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -2722,17 +2716,16 @@ dependencies = [
 name = "mln-rs-tile"
 version = "0.0.11"
 dependencies = [
+ "fast-mvt",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
- "mln-rs-protozero",
  "mln-rs-tile-id",
  "mln-rs-util",
- "mln-rs-vec-map",
- "mln-rs-vector-tile",
  "mln-rs-wagyu",
  "mlt-core",
  "proptest",
+ "yoke",
 ]
 
 [[package]]
@@ -2775,15 +2768,6 @@ name = "mln-rs-vec-map"
 version = "0.0.11"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "mln-rs-vector-tile"
-version = "0.0.11"
-dependencies = [
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-protozero",
 ]
 
 [[package]]

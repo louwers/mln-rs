@@ -1514,7 +1514,7 @@ fn glyph_range_errors_reach_the_observer() {
     assert_eq!(
         errors,
         [
-            (stack("Corrupt"), first_range, "unknown pbf field type exception".to_owned()),
+            (stack("Corrupt"), first_range, "invalid wire type: 7".to_owned()),
             (stack("Missing"), first_range, "Not found by the test".to_owned()),
         ]
     );

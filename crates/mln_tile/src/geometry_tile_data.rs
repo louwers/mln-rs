@@ -13,8 +13,8 @@ use mln_tile_id::{CanonicalTileID, GeometryCollection, GeometryCoordinates, Geom
 use mln_util::constants::EXTENT;
 use mln_util::geometry::FeatureType;
 use mln_util::math::{angle_between, cross_product, dist_f64, normal, perp};
-use vector_tile::Error;
 
+use crate::Error;
 use crate::stl_algo::nth_element;
 
 /// `signedArea` (anonymous namespace). The products are C++ `int`

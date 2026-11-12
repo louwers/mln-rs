@@ -321,7 +321,7 @@ fn tile_corrupt(kind: Tiled) {
             assert_eq!("source", source_id);
             assert_eq!(OverscaledTileID::from_zxy(0, 0, 0), *tile_id);
             if kind == Tiled::Vector {
-                assert_eq!(error.to_string(), "unknown pbf field type exception");
+                assert_eq!(error.to_string(), "protobuf decode error: invalid wire type: 7");
             } else {
                 // Not asserting on platform-specific error text.
                 assert!(!error.to_string().is_empty());
