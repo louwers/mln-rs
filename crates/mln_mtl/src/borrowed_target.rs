@@ -16,7 +16,7 @@ use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
 use objc2_metal::{
     MTLCommandBuffer, MTLCommandQueue, MTLDevice, MTLEvent, MTLPixelFormat, MTLRenderPassDescriptor, MTLResource,
-    MTLSharedEvent, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureUsage,
+    MTLSharedEvent, MTLStorageMode, MTLTexture, MTLTextureDescriptor, MTLTextureType, MTLTextureUsage,
 };
 
 use crate::device::Device;
@@ -68,7 +68,8 @@ impl BorrowedTextures {
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// texture of another size than the ring's, of another device or pixel
-    /// format than the first, or without render-target usage.
+    /// format than the first, or that isn't 2D with one sample and
+    /// render-target usage.
     pub fn check(&self, device: &Device) -> Result<(), Error> {
         let Some(first) = self.textures.first() else {
             return Err(Error::invalid_argument("a ring needs at least one texture"));
@@ -87,6 +88,9 @@ impl BorrowedTextures {
             }
             if !texture.usage().contains(MTLTextureUsage::RenderTarget) {
                 return Err(Error::invalid_argument("each texture needs MTLTextureUsageRenderTarget"));
+            }
+            if texture.textureType() != MTLTextureType::Type2D || texture.sampleCount() != 1 {
+                return Err(Error::invalid_argument("each texture must be 2D with one sample"));
             }
         }
         Ok(())
