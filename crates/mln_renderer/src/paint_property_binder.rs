@@ -16,32 +16,23 @@
 // written with the C++ in-memory layout (native-endian floats/u16s), so the
 // buffer is the GPU vertex data as C++ uploads it.
 //
-// Buckets are shared between the worker and the render thread (`Arc`), but
-// the tweakers call `setPatternParameters` every frame: the state that call
-// writes (cross-faded binders) is behind a `Mutex`.
-//
-
-use std::sync::Mutex;
 
 use mln_expression::range::Range;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
-use mln_style::CrossfadeParameters;
 use mln_style::expression::{EvaluationContext, Image, Value, ValueConverter};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_style::renderer::possibly_evaluated_property_value::{
     PossiblyEvaluatedFadedPropertyValue, PossiblyEvaluatedPropertyValue,
 };
-use mln_style_types::image::{ImagePosition, ImagePositions};
+use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryTileFeature, GeometryTileLayer};
 use mln_util::Color;
 use mln_util::feature::feature_id_to_string;
-use mln_util::serialization::payload;
-use mln_util::sync::MutexExt;
 use mln_vec_map::VecMap;
 use serde::{Deserialize, Serialize};
 
@@ -482,15 +473,6 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
     }
 }
 
-/// The pattern-related state the tweakers update every frame.
-#[derive(Debug, Default)]
-pub struct CrossFadedState {
-    /// `constantPatternPositions` (Constant) as (`posB.tlbr()`, `posA.tlbr()`).
-    pub constant_pattern_positions: ([u16; 4], [u16; 4]),
-    /// `crossfade` (Composite).
-    pub crossfade: CrossfadeParameters,
-}
-
 /// The data of a cross-faded `PaintPropertyBinder` subclass.
 #[derive(Debug, Serialize, Deserialize)]
 pub enum CrossFadedPaintPropertyBinderKind<T> {
@@ -501,12 +483,11 @@ pub enum CrossFadedPaintPropertyBinderKind<T> {
         expression: PropertyExpression<T>,
         default_value: T,
         zoom_range: Range<f32>,
-        /// `gfx::VertexVector<Vertex2> zoomInVertexVector` (ushort4).
-        #[serde(with = "payload::pod")]
-        zoom_in_vertex_vector: Vec<[u16; 4]>,
-        /// `zoomOutVertexVector`.
-        #[serde(with = "payload::pod")]
-        zoom_out_vertex_vector: Vec<[u16; 4]>,
+        /// The number of vertices `populate_vertex_vector` has written. It
+        /// lags the buffer's count when a feature's patterns are missing,
+        /// so the next feature's pattern also covers those vertices.
+        #[serde(skip)]
+        populated_count: usize,
     },
 }
 
@@ -516,9 +497,6 @@ pub enum CrossFadedPaintPropertyBinderKind<T> {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CrossFadedPaintPropertyBinder<T> {
     pub kind: CrossFadedPaintPropertyBinderKind<T>,
-    /// `PaintPropertyStatistics<T>`: always empty for images.
-    #[serde(skip)]
-    pub state: Mutex<CrossFadedState>,
     pub has_interleaved_buffer: bool,
     pub vertex_offset: usize,
 }
@@ -539,17 +517,11 @@ impl CrossFadedPaintPropertyBinder<Image> {
                     expression: expression.clone(),
                     default_value,
                     zoom_range: Range::new(zoom, zoom + 1.0),
-                    zoom_in_vertex_vector: Vec::new(),
-                    zoom_out_vertex_vector: Vec::new(),
+                    populated_count: 0,
                 }
             }
         };
-        CrossFadedPaintPropertyBinder {
-            kind,
-            state: Mutex::new(CrossFadedState::default()),
-            has_interleaved_buffer: false,
-            vertex_offset: usize::MAX,
-        }
+        CrossFadedPaintPropertyBinder { kind, has_interleaved_buffer: false, vertex_offset: usize::MAX }
     }
 
     /// `setInterleavedBuffer`: only the composite binder has vertex data.
@@ -570,6 +542,7 @@ impl CrossFadedPaintPropertyBinder<Image> {
     }
 
     /// `isInterpolated()`: the base `false` for both.
+    #[must_use]
     pub fn is_interpolated(&self) -> bool {
         false
     }
@@ -583,15 +556,15 @@ impl CrossFadedPaintPropertyBinder<Image> {
         pattern_dependencies: Option<&PatternDependency>,
     ) {
         let vertex_offset = self.vertex_offset;
-        let CrossFadedPaintPropertyBinderKind::Composite { zoom_in_vertex_vector, zoom_out_vertex_vector, .. } =
-            &mut self.kind
-        else {
+        let CrossFadedPaintPropertyBinderKind::Composite { populated_count, .. } = &mut self.kind else {
             return;
         };
         match pattern_dependencies {
             Some(dependencies) if !dependencies.mid.is_empty() => {
                 if !pattern_positions.is_empty() {
-                    let (Some(image_min), Some(image_mid), Some(image_max)) = (
+                    // Only the middle pattern reaches the GPU, but a feature
+                    // needs all three.
+                    let (Some(_), Some(image_mid), Some(_)) = (
                         pattern_positions.get(&dependencies.min),
                         pattern_positions.get(&dependencies.mid),
                         pattern_positions.get(&dependencies.max),
@@ -599,12 +572,10 @@ impl CrossFadedPaintPropertyBinder<Image> {
                         return;
                     };
 
-                    for i in zoom_in_vertex_vector.len()..length {
-                        zoom_in_vertex_vector.push(image_min.tlbr());
-                        zoom_out_vertex_vector.push(image_max.tlbr());
-
+                    for i in *populated_count..length {
                         buffer.set(i, vertex_offset, bytemuck::cast_slice(&image_mid.tlbr()));
                     }
+                    *populated_count = (*populated_count).max(length);
                 }
             }
             _ => {
@@ -615,72 +586,18 @@ impl CrossFadedPaintPropertyBinder<Image> {
                 // buffers to avoid crashes when we try to draw the layer
                 // because we don't know at draw time if all features were
                 // evaluated to valid pattern dependencies.
-                for i in zoom_in_vertex_vector.len()..length {
+                for i in *populated_count..length {
                     buffer.set(i, vertex_offset, bytemuck::cast_slice(&[0u16; 4]));
-                    zoom_in_vertex_vector.push([0; 4]);
-                    zoom_out_vertex_vector.push([0; 4]);
                 }
-            }
-        }
-    }
-
-    /// `setPatternParameters(posA, posB, crossfade)`.
-    pub fn set_pattern_parameters(
-        &self,
-        pos_a: Option<&ImagePosition>,
-        pos_b: Option<&ImagePosition>,
-        crossfade: &CrossfadeParameters,
-    ) {
-        let mut state = self.state.lock_unpoisoned();
-        match &self.kind {
-            CrossFadedPaintPropertyBinderKind::Constant { .. } => {
-                let (Some(pos_a), Some(pos_b)) = (pos_a, pos_b) else {
-                    return;
-                };
-                state.constant_pattern_positions = (pos_b.tlbr(), pos_a.tlbr());
-            }
-            CrossFadedPaintPropertyBinderKind::Composite { .. } => {
-                state.crossfade = *crossfade;
+                *populated_count = (*populated_count).max(length);
             }
         }
     }
 
     /// `interpolationFactor(float)`: `{0, 0}` for both.
+    #[must_use]
     pub fn interpolation_factor(&self, _current_zoom: f32) -> (f32, f32) {
         (0.0, 0.0)
-    }
-
-    /// `uniformValue(...)`.
-    pub fn uniform_value(&self, _current_value: &PossiblyEvaluatedFadedPropertyValue<Image>) -> ([u16; 4], [u16; 4]) {
-        match &self.kind {
-            CrossFadedPaintPropertyBinderKind::Constant { .. } => {
-                self.state.lock_unpoisoned().constant_pattern_positions
-            }
-            // Uniform values for vertex attribute arrays are unused.
-            CrossFadedPaintPropertyBinderKind::Composite { .. } => ([0; 4], [0; 4]),
-        }
-    }
-
-    /// `getVertexValue(index)`: (A1 ushort8, A2 ushort8).
-    pub fn get_vertex_value(&self, buffer: &InterleavedVertexBuffer, index: usize) -> ([u16; 8], [u16; 8]) {
-        match &self.kind {
-            CrossFadedPaintPropertyBinderKind::Constant { .. } => ([0; 8], [0; 8]),
-            CrossFadedPaintPropertyBinderKind::Composite { zoom_in_vertex_vector, zoom_out_vertex_vector, .. } => {
-                let pattern: Vec<u16> = bytemuck::pod_collect_to_vec(&buffer.get(index, self.vertex_offset, 8));
-                let zoom_value = if self.state.lock_unpoisoned().crossfade.from_scale == 2.0 {
-                    zoom_in_vertex_vector[index]
-                } else {
-                    zoom_out_vertex_vector[index]
-                };
-                let mut a = [0u16; 8];
-                a[..4].copy_from_slice(&pattern);
-                a[4..].copy_from_slice(&pattern);
-                let mut b = [0u16; 8];
-                b[..4].copy_from_slice(&zoom_value);
-                b[4..].copy_from_slice(&zoom_value);
-                (a, b)
-            }
-        }
     }
 
     /// `applyPaintProperty<TAttribute>(attrIndex, attrib)`: both attributes
@@ -719,13 +636,6 @@ pub trait PaintPropertyBinderBase {
         pattern_dependencies: Option<&PatternDependency>,
         canonical: &CanonicalTileID,
         formatted_section: &Value,
-    );
-    /// `setPatternParameters(posA, posB, crossfade)`.
-    fn pattern_parameters(
-        &self,
-        pos_a: Option<&ImagePosition>,
-        pos_b: Option<&ImagePosition>,
-        crossfade: &CrossfadeParameters,
     );
     /// `updateVertexVectors(states, layer, imagePositions)` (the base no-op
     /// for the constant and cross-faded binders).
@@ -769,7 +679,6 @@ impl<T: BinderValue> PaintPropertyBinderBase for PaintPropertyBinder<T> {
     ) {
         self.populate_vertex_vector(buffer, feature, length, index, canonical, formatted_section);
     }
-    fn pattern_parameters(&self, _: Option<&ImagePosition>, _: Option<&ImagePosition>, _: &CrossfadeParameters) {}
     fn update_vectors(
         &mut self,
         buffer: &mut InterleavedVertexBuffer,
@@ -817,14 +726,6 @@ impl PaintPropertyBinderBase for CrossFadedPaintPropertyBinder<Image> {
         _formatted_section: &Value,
     ) {
         self.populate_vertex_vector(buffer, length, pattern_positions, pattern_dependencies);
-    }
-    fn pattern_parameters(
-        &self,
-        pos_a: Option<&ImagePosition>,
-        pos_b: Option<&ImagePosition>,
-        crossfade: &CrossfadeParameters,
-    ) {
-        self.set_pattern_parameters(pos_a, pos_b, crossfade);
     }
     fn binder_vertex_count(&self, buffer: &InterleavedVertexBuffer) -> usize {
         self.get_vertex_count(buffer)
@@ -962,17 +863,6 @@ macro_rules! paint_property_binders {
             pub fn depends_on_feature_state(&self) -> bool {
                 false $(|| $crate::paint_property_binder::PaintPropertyBinderBase::depends_on_feature_state(
                     &self.$field))+
-            }
-
-            /// `setPatternParameters(posA, posB, crossfade)`.
-            pub fn set_pattern_parameters(
-                &self,
-                pos_a: Option<&mln_style_types::image::ImagePosition>,
-                pos_b: Option<&mln_style_types::image::ImagePosition>,
-                crossfade: &mln_style::CrossfadeParameters,
-            ) {
-                $($crate::paint_property_binder::PaintPropertyBinderBase::pattern_parameters(
-                    &self.$field, pos_a, pos_b, crossfade);)+
             }
         }
     };

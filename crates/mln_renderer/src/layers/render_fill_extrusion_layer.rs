@@ -401,14 +401,13 @@ impl RenderLayer for RenderFillExtrusionLayer {
             let mut group = layer_group.borrow_mut();
             let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
             let base = &self.base;
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 // If the render pass has changed or the tile has dropped out
                 // of the cover set, remove it.
                 let tile_id = drawable.get_tile_id();
                 !drawable.has_render_pass(draw_pass)
                     || tile_id.is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
         }
 
         let layer_prefix = format!("{}/", self.get_id());
@@ -688,26 +687,23 @@ impl RenderLayer for RenderFillExtrusionLayer {
 
             let triangles = bucket_indexes(geometry, bucket, &bucket.triangles);
             let instance_segments = [RenderStaticData::fill_extrusion_segment(vertex_count.saturating_sub(1))];
-            let stats = &mut self.base.stats;
-            let mut finish =
-                |builder: &mut dyn DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
-                    builder.set_segments_shared(DrawMode::Triangles(), Some(indexes.clone()), segments);
+            let finish = |builder: &mut dyn DrawableBuilder, indexes: &IndexVectorBasePtr, segments: &[SegmentBase]| {
+                builder.set_segments_shared(DrawMode::Triangles(), Some(indexes.clone()), segments);
 
-                    builder.flush(context);
+                builder.flush(context);
 
-                    let mut group = layer_group.borrow_mut();
-                    let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
-                    for mut drawable in builder.clear_drawables() {
-                        drawable.set_tile_id(tile_id);
-                        drawable.set_type(usize::from(has_pattern));
-                        drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                        drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
-                        drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
+                let mut group = layer_group.borrow_mut();
+                let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+                for mut drawable in builder.clear_drawables() {
+                    drawable.set_tile_id(tile_id);
+                    drawable.set_type(usize::from(has_pattern));
+                    drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
+                    drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
+                    drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
 
-                        tile_layer_group.add_drawable(draw_pass, &tile_id, drawable);
-                        stats.drawables_added += 1;
-                    }
-                };
+                    tile_layer_group.add_drawable(draw_pass, &tile_id, drawable);
+                }
+            };
             let (depth, instanced_depth) =
                 if do_depth_pass { (depth_builder.as_mut(), instanced_depth_builder.as_mut()) } else { (None, None) };
             if !bucket.triangles.is_empty() {

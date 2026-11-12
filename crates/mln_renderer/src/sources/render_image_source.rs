@@ -8,7 +8,6 @@
 // TODO(port): queryRenderedFeatures / querySourceFeatures (both empty in
 // C++).
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -256,10 +255,6 @@ impl RenderSource for RenderImageSource {
 
     fn base_mut(&mut self) -> &mut RenderSourceBase {
         &mut self.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn is_loaded(&self) -> bool {

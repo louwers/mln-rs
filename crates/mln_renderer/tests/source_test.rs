@@ -70,7 +70,6 @@ fn tile_parameters<'a>(
         file_source,
         mode: map_mode,
         prefetch_zoom_delta: 0,
-        thread_pool: thread_pool.clone(),
         tile_lod_min_radius: 3.0,
         tile_lod_scale: 1.0,
         tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
@@ -234,7 +233,7 @@ fn run_tile_case(
     let source = kind.source(tiles_tileset());
     source.load_description(&*file_source);
 
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     render_source.set_observer(observer);
     let fs: Arc<dyn FileSource> = file_source;
     render_source.update(
@@ -415,7 +414,7 @@ fn tile_out_of_view_keeps_loading() {
     let layers = Tiled::Vector.layers();
     let source = Tiled::Vector.source(tiles_tileset());
     source.load_description(&*file_source);
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     let fs: Arc<dyn FileSource> = file_source;
     // Requests made so far, after an update with the camera at `bearing`.
     let mut turn = |test: &mut SourceTest, bearing: f64, needs_relayout: bool| {
@@ -546,7 +545,7 @@ fn tile_attribution(kind: Tiled, attribution: &'static str) {
     source.set_observer(Some(observer.clone()));
     source.load_description(&*file_source);
 
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     let fs: Arc<dyn FileSource> = file_source.clone();
     render_source.update(
         source.base_impl(),
@@ -592,7 +591,7 @@ fn custom_geometry_case(
         Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
     let layers = vec![layer_properties];
 
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     render_source.set_observer(observer);
     render_source.update(source.base_impl(), &layers, true, true, &test.tile_parameters(MapMode::Continuous));
     (source, render_source)
@@ -672,7 +671,7 @@ fn custom_vector_source_set_tile_data() {
     let layer_properties: Immutable<dyn LayerProperties> =
         Arc::new(LineLayerProperties::new(static_immutable_cast::<LineLayerImpl>(&layer.base_impl())));
 
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     render_source.set_observer(observer);
     render_source.update(
         source.base_impl(),
@@ -721,7 +720,7 @@ fn empty_tileset() {
     let source =
         VectorSource::new("source", UrlOrTileset::Tileset(Tileset::default()), None, None, VectorEncoding::Mapbox);
     source.load_description(&*file_source);
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     let errors = observe_tile_errors(&mut *render_source);
 
     let layers = Tiled::Vector.layers();
@@ -754,7 +753,7 @@ fn empty_raster_tilesets_make_no_tiles() {
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         let source = kind.source(UrlOrTileset::Tileset(Tileset::default()));
         source.load_description(&*file_source);
-        let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+        let mut render_source = render_source::create(&source.base_impl()).unwrap();
         let errors = observe_tile_errors(&mut *render_source);
 
         let fs: Arc<dyn FileSource> = file_source;
@@ -790,10 +789,8 @@ fn geojson_source_tiles_after_data_reset() {
     let geojson_data =
         create_geojson_data(&geojson, scheduler::get_sequenced(), &GeoJSONOptions::default_options()).unwrap();
     source.set_geojson_data(Some(geojson_data.clone()));
-    let mut render_source = RenderGeoJSONSource::new(
-        source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
-        &test.thread_pool,
-    );
+    let mut render_source =
+        RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
 
     let layer = CircleLayer::new("id", "source");
     let layer_properties: Immutable<dyn LayerProperties> =
@@ -842,14 +839,12 @@ struct SynchronousUpdateSource {
 }
 
 impl SynchronousUpdateSource {
-    fn new(test: &SourceTest, synchronous_update: bool) -> Self {
+    fn new(synchronous_update: bool) -> Self {
         let options: Immutable<GeoJSONOptions> =
             Arc::new(GeoJSONOptions { cluster: true, synchronous_update, ..Default::default() });
         let source = GeoJSONSource::new("source", options.clone());
-        let render_source = RenderGeoJSONSource::new(
-            source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
-            &test.thread_pool,
-        );
+        let render_source =
+            RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
         SynchronousUpdateSource { options, source, render_source, layers: circle_layers() }
     }
 
@@ -873,14 +868,14 @@ impl SynchronousUpdateSource {
 fn geojson_source_synchronous_update_override_applies_to_existing_tiles() {
     let test = SourceTest::new();
 
-    let mut synchronous = SynchronousUpdateSource::new(&test, true);
+    let mut synchronous = SynchronousUpdateSource::new(true);
     synchronous.update(&test);
     assert!(synchronous.render_source.is_loaded()); // The tiles complete within the update.
     synchronous.source.set_override_synchronous_update(false);
     synchronous.update(&test);
     assert!(!synchronous.render_source.is_loaded()); // The tiles now lay out in the background.
 
-    let mut asynchronous = SynchronousUpdateSource::new(&test, false);
+    let mut asynchronous = SynchronousUpdateSource::new(false);
     asynchronous.update(&test);
     assert!(!asynchronous.render_source.is_loaded());
     while !asynchronous.render_source.is_loaded() {
@@ -922,10 +917,8 @@ fn geojson_source_slices_inline_while_a_background_slice_runs() {
     source.set_geojson_data(Some(
         create_geojson_data(&geojson, slicer.clone(), &GeoJSONOptions::default_options()).unwrap(),
     ));
-    let mut render_source = RenderGeoJSONSource::new(
-        source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()),
-        &test.thread_pool,
-    );
+    let mut render_source =
+        RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(&source.base_impl()));
     let layers = circle_layers();
     let update = |render_source: &mut RenderGeoJSONSource| {
         let mut parameters = test.tile_parameters(MapMode::Continuous);
@@ -1038,7 +1031,7 @@ fn set_max_parent_overscale_factor() {
 
     let observer = Rc::new(StubRenderSourceObserver::default());
     let render_source: Rc<RefCell<Box<dyn RenderSource>>> =
-        Rc::new(RefCell::new(render_source::create(&base_impl, &test.thread_pool).unwrap()));
+        Rc::new(RefCell::new(render_source::create(&base_impl).unwrap()));
     render_source.borrow_mut().set_observer(observer.clone());
     let fs: Arc<dyn FileSource> = file_source.clone();
     render_source.borrow_mut().update(
@@ -1093,7 +1086,7 @@ fn raster_dem_tile_rounds_covering_zoom() {
     source.load_description(&*file_source);
 
     let observer = Rc::new(StubRenderSourceObserver::default());
-    let mut render_source = render_source::create(&source.base_impl(), &test.thread_pool).unwrap();
+    let mut render_source = render_source::create(&source.base_impl()).unwrap();
     render_source.set_observer(observer.clone());
     let fs: Arc<dyn FileSource> = file_source.clone();
     render_source.update(

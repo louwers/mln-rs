@@ -7,7 +7,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
@@ -164,13 +163,20 @@ where
     }
 }
 
+impl Default for TilePyramid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TilePyramid {
-    /// `TilePyramid(const TaggedScheduler&)`.
+    /// `TilePyramid(const TaggedScheduler&)`, without the thread pool (see
+    /// `TileCache::new`).
     #[must_use]
-    pub fn new(thread_pool: TaggedScheduler) -> Self {
+    pub fn new() -> Self {
         TilePyramid {
             tiles: BTreeMap::new(),
-            cache: TileCache::new(thread_pool, 0),
+            cache: TileCache::new(0),
             rendered_tiles: BTreeMap::new(),
             observer: Rc::new(NullTileObserver),
             prev_lng: 0.0,

@@ -120,7 +120,7 @@ fn load(tile: Vec<u8>, layers: &[Immutable<dyn LayerProperties>]) -> Outcome {
     let source = VectorSource::new("source", UrlOrTileset::Tileset(tileset), None, None, VectorEncoding::Mapbox);
     mln_style::source::Source::load_description(&source, &*file_source);
     let base_impl = mln_style::source::Source::base_impl(&source);
-    let mut render_source = render_source::create(&base_impl, &thread_pool).unwrap();
+    let mut render_source = render_source::create(&base_impl).unwrap();
     render_source.set_observer(observer.clone());
     let file_source: Arc<dyn FileSource> = file_source;
     // A loaded sprite with the icon "v" answers the symbol layer's request.
@@ -152,7 +152,6 @@ fn load(tile: Vec<u8>, layers: &[Immutable<dyn LayerProperties>]) -> Outcome {
             file_source: Some(file_source),
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
-            thread_pool: thread_pool.clone(),
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,
