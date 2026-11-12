@@ -156,6 +156,9 @@ pub enum ExportedImage {
     /// when `dedicated`, holding an image of the `VkFormat` `format` with
     /// optimal tiling.
     OpaqueFd { fd: i32, allocation_size: u64, dedicated: bool, format: u32 },
+    /// A D3D11 texture's NT `HANDLE`, as an integer, of the `DXGI_FORMAT`
+    /// `format`.
+    DxgiSharedTexture { handle: u64, format: u32 },
 }
 
 /// A target's generations of images: the ones it renders into now, and the

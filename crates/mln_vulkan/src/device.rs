@@ -220,6 +220,9 @@ pub struct Features {
     /// `VK_EXT_external_memory_dma_buf` and
     /// `VK_EXT_image_drm_format_modifier` with `VK_KHR_external_memory_fd`.
     pub dma_buf: bool,
+    /// Importing D3D11 textures through their NT handles, of
+    /// `VK_KHR_external_memory_win32`.
+    pub external_memory_win32: bool,
     /// Exporting a timeline semaphore as a D3D12 fence's NT handle, of
     /// `VK_KHR_external_semaphore_win32`.
     pub export_d3d12_fence: bool,
@@ -238,7 +241,13 @@ pub(crate) struct Shared {
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
     drm_format_modifier: Option<ash::ext::image_drm_format_modifier::Device>,
     #[cfg_attr(not(windows), allow(dead_code))]
+    memory_win32: Option<ash::khr::external_memory_win32::Device>,
+    #[cfg_attr(not(windows), allow(dead_code))]
     semaphore_win32: Option<ash::khr::external_semaphore_win32::Device>,
+    /// The D3D11 device on the GPU's adapter that makes the textures of
+    /// exported rings, made once, when first asked.
+    #[cfg(windows)]
+    dxgi: OnceLock<Result<crate::win32::TextureDevice, Error>>,
     /// The kinds that the device has exported an image of, probed once.
     export_kinds: OnceLock<ExportKinds>,
     physical_device: vk::PhysicalDevice,
@@ -502,6 +511,8 @@ impl Device {
             features.external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &device));
         let drm_format_modifier =
             features.dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &device));
+        let memory_win32 =
+            features.external_memory_win32.then(|| ash::khr::external_memory_win32::Device::new(&instance, &device));
         let semaphore_win32 = (features.export_d3d12_fence || features.import_d3d12_fence)
             .then(|| ash::khr::external_semaphore_win32::Device::new(&instance, &device));
         // SAFETY: the device was made with a queue of the family; plain
@@ -521,7 +532,10 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                memory_win32,
                 semaphore_win32,
+                #[cfg(windows)]
+                dxgi: OnceLock::new(),
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device,
@@ -606,11 +620,13 @@ impl Device {
             )
         };
         let available = extension_names(&available);
-        // Windows' drivers have the win32 extensions: D3D12 fences.
+        // Windows' drivers have the win32 extensions: D3D11 textures for
+        // exported rings, and D3D12 fences.
         let optional: &[&'static CStr] = &[
             ash::khr::swapchain::NAME,
             ash::khr::external_semaphore_fd::NAME,
             ash::ext::queue_family_foreign::NAME,
+            ash::khr::external_memory_win32::NAME,
             ash::khr::external_semaphore_win32::NAME,
         ];
         let mut extensions: Vec<&'static CStr> = vec![STORAGE_BUFFER_STORAGE_CLASS];
@@ -696,6 +712,7 @@ impl Device {
             foreign_queue_family: extensions.contains(&ash::ext::queue_family_foreign::NAME),
             external_memory_fd,
             dma_buf,
+            external_memory_win32: extensions.contains(&ash::khr::external_memory_win32::NAME),
             export_d3d12_fence,
             import_d3d12_fence,
         };
@@ -709,7 +726,8 @@ impl Device {
     /// that it lists: `VK_KHR_external_semaphore_fd` for sync files,
     /// `VK_KHR_external_memory_fd` for opaque file descriptors, and that with
     /// `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier`
-    /// for dmabufs, and `VK_KHR_external_semaphore_win32` for D3D12 fences.
+    /// for dmabufs, `VK_KHR_external_memory_win32` for DXGI shared textures,
+    /// and `VK_KHR_external_semaphore_win32` for D3D12 fences.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library to look the functions up in, with
@@ -837,6 +855,9 @@ impl Device {
         // timelines and submit with them, which both share.
         let timeline_semaphores = timeline_supported.timeline_semaphore == vk::TRUE
             && (device_lookup(c"vkGetSemaphoreCounterValue") || device_lookup(c"vkGetSemaphoreCounterValueKHR"));
+        let external_memory_win32 = enabled(ash::khr::external_memory_win32::NAME)
+            && device_lookup(c"vkGetMemoryWin32HandlePropertiesKHR")
+            && instance_has(c"vkGetPhysicalDeviceImageFormatProperties2");
         // A D3D12 fence is a timeline.
         let (export_d3d12_fence, import_d3d12_fence) = if timeline_semaphores
             && enabled(ash::khr::external_semaphore_win32::NAME)
@@ -859,9 +880,12 @@ impl Device {
             foreign_queue_family: false,
             external_memory_fd,
             dma_buf,
+            external_memory_win32,
             export_d3d12_fence,
             import_d3d12_fence,
         };
+        let memory_win32 =
+            external_memory_win32.then(|| ash::khr::external_memory_win32::Device::new(&instance, &ash_device));
         let semaphore_win32 = (export_d3d12_fence || import_d3d12_fence)
             .then(|| ash::khr::external_semaphore_win32::Device::new(&instance, &ash_device));
         // The features the library would enable, where the GPU has them. A
@@ -881,7 +905,10 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                memory_win32,
                 semaphore_win32,
+                #[cfg(windows)]
+                dxgi: OnceLock::new(),
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device: ash_device,
@@ -1045,8 +1072,36 @@ impl Shared {
     }
 
     #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn memory_win32(&self) -> Option<&ash::khr::external_memory_win32::Device> {
+        self.memory_win32.as_ref()
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub(crate) fn semaphore_win32(&self) -> Option<&ash::khr::external_semaphore_win32::Device> {
         self.semaphore_win32.as_ref()
+    }
+
+    /// The D3D11 device on the DXGI adapter of the GPU, made when first
+    /// asked.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a GPU
+    /// without a LUID, and as [`TextureDevice::new`](crate::win32::TextureDevice)
+    /// does.
+    #[cfg(windows)]
+    pub(crate) fn dxgi(&self) -> Result<&crate::win32::TextureDevice, Error> {
+        self.dxgi
+            .get_or_init(|| {
+                let mut ids = vk::PhysicalDeviceIDProperties::default();
+                let mut properties = vk::PhysicalDeviceProperties2::default().push_next(&mut ids);
+                // SAFETY: a plain query of the GPU, of Vulkan 1.1.
+                unsafe { self.instance.get_physical_device_properties2(self.physical_device, &mut properties) };
+                if ids.device_luid_valid != vk::TRUE {
+                    return Err(Error::unsupported("The Vulkan GPU has no LUID to find its DXGI adapter by"));
+                }
+                crate::win32::TextureDevice::new(ids.device_luid)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     /// Whether the instance has the surface extension `name`. A host's
