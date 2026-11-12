@@ -960,7 +960,7 @@ impl Worker {
                     // has its old image retired.
                     Ok(true) => {
                         let mut state = self.shared.state.lock_unpoisoned();
-                        for slot in state.ring.iter_mut() {
+                        for slot in &mut state.ring {
                             if slot.acquired {
                                 slot.retired = true;
                             } else {

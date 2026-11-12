@@ -575,6 +575,7 @@ impl LocalTarget {
     }
 
     /// Whether frames go to the host in images of the target's own.
+    #[must_use]
     pub fn is_exported(&self) -> bool {
         matches!(self.frames, Frames::Exported(_))
     }
@@ -631,6 +632,7 @@ impl LocalTarget {
 
     /// The size in pixels of an exported ring's images, or `None` for
     /// another target.
+    #[must_use]
     pub fn exported_size(&self) -> Option<Size> {
         match &self.frames {
             Frames::Exported(target) => Some(target.size()),
@@ -654,6 +656,7 @@ impl LocalTarget {
     }
 
     /// The exported image of the frame at `slot`, of the size it has.
+    #[must_use]
     pub fn exported_texture(&self, slot: usize) -> Option<FrameTexture> {
         match &self.frames {
             Frames::Exported(target) => {

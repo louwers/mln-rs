@@ -649,6 +649,7 @@ impl Device {
 
     /// The kinds of exported ring that sessions on the device share their
     /// images in: those that the device has exported an image of.
+    #[must_use]
     pub fn export_kinds(&self) -> ExportKinds {
         match self {
             #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -699,6 +700,7 @@ impl Device {
     /// The kinds of sync with which the host can wait for an exported
     /// ring's frame (the producer's) and a session for the host's reads (the
     /// consumer's), on a device that exports a ring.
+    #[must_use]
     pub fn export_sync_kinds(&self) -> (SyncKinds, SyncKinds) {
         if self.export_kinds().is_empty() {
             return (SyncKinds::NONE, SyncKinds::NONE);

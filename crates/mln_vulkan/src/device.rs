@@ -903,12 +903,14 @@ impl Device {
 
     /// The device extensions enabled on the device: the library's, or the
     /// ones the host listed.
+    #[must_use]
     pub fn enabled_extensions(&self) -> &[CString] {
         &self.shared.device_extensions
     }
 
     /// The kinds of exported ring that the device shares its images in: those
     /// it exported an image of, once, when first asked.
+    #[must_use]
     pub fn export_kinds(&self) -> ExportKinds {
         *self.shared.export_kinds.get_or_init(|| crate::exported_target::probe(self))
     }
