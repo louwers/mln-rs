@@ -819,7 +819,7 @@ pub unsafe extern "C" fn mln_logical_extent_physical_size(
 }
 
 /// `mln_open_gl_supported_context_provider_mask()`: EGL, where the library
-/// renders with OpenGL ES.
+/// renders with OpenGL.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
     if cfg!(all(unix, not(target_vendor = "apple"))) {

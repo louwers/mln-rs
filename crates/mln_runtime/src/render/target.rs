@@ -428,7 +428,8 @@ pub enum Device {
     /// A Vulkan GPU.
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(mln_vulkan::Device),
-    /// An OpenGL ES share group.
+    /// An OpenGL share group, or the one context that its sessions take
+    /// turns in.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     Gl(mln_gl::Device),
 }
@@ -438,6 +439,22 @@ pub enum Device {
 pub struct DeviceOptions {
     /// The GPU to use. `None` picks the default one.
     pub adapter: Option<Adapter>,
+    /// The API that an OpenGL device renders with. Only Linux's and
+    /// FreeBSD's EGL renders desktop OpenGL. Other backends ignore it.
+    pub gl_api: GlApi,
+    /// Whether the sessions of an OpenGL device take turns in one context
+    /// instead of having one each. Other backends ignore it.
+    pub gl_single_context: bool,
+}
+
+/// The OpenGL API that an OpenGL device renders with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum GlApi {
+    /// OpenGL ES 3.0 or later.
+    #[default]
+    Gles,
+    /// Desktop OpenGL 3.3 or later.
+    Gl,
 }
 
 /// A GPU, by what names it to a backend.
@@ -561,11 +578,11 @@ fn missing(error: &Error) -> bool {
 
 impl Device {
     /// The library's device, on the platform's native backend: Metal on
-    /// Apple's platforms, and Vulkan elsewhere, or OpenGL ES where there is
-    /// no Vulkan. WebGPU (wgpu) takes the place of a native backend that
-    /// isn't there. A backend that can't name the GPU that `options` names
-    /// is skipped: OpenGL ES names none, and only Vulkan names one by UUID or
-    /// LUID.
+    /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
+    /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't
+    /// there. A backend that can't name the GPU that `options` names is
+    /// skipped: OpenGL names none, and only Vulkan names one by UUID or LUID.
+    /// So is OpenGL where it can't render with `options.gl_api`.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
     /// the options name no GPU, with
@@ -599,7 +616,7 @@ impl Device {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a backend that
     /// isn't in this build or on this platform.
     pub fn with_backend(backend: BackendType, options: DeviceOptions) -> Result<Device, Error> {
-        let DeviceOptions { adapter } = options;
+        let DeviceOptions { adapter, gl_api, gl_single_context } = options;
         // Only Vulkan names its GPUs by ID here.
         let index = |adapter: Option<Adapter>| match adapter {
             None => Ok(None),
@@ -619,13 +636,20 @@ impl Device {
             }
             .map(Device::Vulkan),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            BackendType::OpenGL => match adapter {
-                Some(_) => Err(Error::unsupported("OpenGL ES picks no GPU")),
-                None => mln_gl::Device::new().map(Device::Gl),
-            },
+            BackendType::OpenGL => {
+                if adapter.is_some() {
+                    return Err(Error::unsupported("OpenGL picks no GPU"));
+                }
+                let api = match gl_api {
+                    GlApi::Gles => mln_gl::Api::Gles,
+                    GlApi::Gl => mln_gl::Api::Gl,
+                };
+                let options = mln_gl::DeviceOptions { api, single_context: gl_single_context };
+                mln_gl::Device::with_options(options).map(Device::Gl)
+            }
             #[allow(unreachable_patterns)]
             _ => {
-                let _ = (index, adapter);
+                let _ = (index, adapter, gl_api, gl_single_context);
                 Err(Error::unsupported(format!("this build has no {backend:?} backend")))
             }
         }

@@ -704,7 +704,11 @@ fn sessions_on_two_maps_share_one_device() {
 
 #[test]
 fn a_device_reports_a_missing_adapter() {
-    let error = Device::new(DeviceOptions { adapter: Some(mln_runtime::Adapter::Index(usize::MAX)) }).unwrap_err();
+    let error = Device::new(DeviceOptions {
+        adapter: Some(mln_runtime::Adapter::Index(usize::MAX)),
+        ..DeviceOptions::default()
+    })
+    .unwrap_err();
     assert_eq!(ErrorKind::NotFound, error.kind);
 }
 
