@@ -13,8 +13,9 @@ pub use frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 pub use local::LocalTarget;
 pub use query::RenderedQueryGeometry;
 pub(crate) use session::{Abandoner, SessionId, SessionShared, attach};
-pub use session::{RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState};
+pub use session::{AcquiredFrame, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState};
 pub use target::{
-    Adapter, AttachOptions, BackendType, Device, DeviceOptions, Driver, RenderTarget, Surface, SurfaceType, Wake,
+    Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, Device, DeviceOptions, Driver, FrameTexture,
+    FrameTextureKind, GpuSync, RenderTarget, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
 };
 pub(crate) use worker::{Worker, post as worker_post};

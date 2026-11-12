@@ -23,6 +23,7 @@
 mod export;
 
 mod abi;
+mod acquired_frame;
 mod base;
 mod binding_support;
 mod buffer;

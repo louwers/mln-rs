@@ -42,9 +42,10 @@ pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
-    Adapter, AttachOptions, BackendType, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand,
-    FrameDisposition, FrameResult, LocalTarget, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot,
-    RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface, SurfaceType, Wake,
+    AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions,
+    Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, FrameTexture, FrameTextureKind, GpuSync,
+    LocalTarget, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
+    RenderedQueryGeometry, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

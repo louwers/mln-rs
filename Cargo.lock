@@ -2137,6 +2137,7 @@ dependencies = [
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geojson",
+ "mln-rs-gl",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-mtl",
@@ -2149,6 +2150,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "mln-rs-vulkan",
  "raw-window-handle",
  "serde_json",
  "winit",
@@ -2537,7 +2539,9 @@ dependencies = [
 name = "mln-rs-runtime"
 version = "0.0.11"
 dependencies = [
+ "glow",
  "httpmock",
+ "khronos-egl",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-feature",

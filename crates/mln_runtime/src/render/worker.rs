@@ -1,6 +1,9 @@
 //! A render session's thread: its renderer, its frame demands, and the work
 //! that the handle sends it.
 
+// The browser build renders into no borrowed ring.
+#![cfg_attr(target_family = "wasm", allow(unreachable_code, unused_variables))]
+
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -8,7 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::RunLoopHandle;
-use mln_gfx::{BackendScope, RendererBackend, ScopeType};
+use mln_gfx::{BackendScope, ConsumerSync, Handoff, RendererBackend, ScopeType, SyncKind};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
 use mln_style::collection::ImmutableVector;
@@ -22,8 +25,8 @@ use mln_util::sync::MutexExt;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::LocalTarget;
-use super::session::{RenderSessionState, SessionShared, WorkId, physical_size};
-use super::target::{Device, Driver, Surface};
+use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
+use super::target::{BorrowedRing, Device, Driver, Surface};
 use crate::completion::Resolver;
 use crate::runtime::Outbox;
 
@@ -118,6 +121,7 @@ pub(crate) struct Init {
 pub(crate) enum TargetInit {
     Offscreen(Option<Device>),
     Surface { surface: Surface, device: Option<Device> },
+    Borrowed { ring: BorrowedRing, device: Device, producer: SyncKind },
 }
 
 /// Builds the session's renderer into `slot`, on the thread that runs the
@@ -154,6 +158,7 @@ impl Gfx {
         let target = match target {
             TargetInit::Offscreen(device) => LocalTarget::offscreen(device, size)?,
             TargetInit::Surface { surface, device } => LocalTarget::surface(surface, device, size)?,
+            TargetInit::Borrowed { ring, device, producer } => LocalTarget::borrowed(device, ring, producer)?,
         };
         let backend = target.backend();
         let mut renderer = Renderer::with_glyph_cache(backend.clone(), pixel_ratio, None, glyph_cache.clone());
@@ -191,6 +196,18 @@ struct PendingDemand {
     sequence: u64,
 }
 
+/// Whether a borrowed ring has a texture for the next frame.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RingStatus {
+    /// The target isn't a ring.
+    None,
+    Free,
+    /// The host holds a frame in every texture it may render into.
+    Full,
+    /// No texture may be rendered into again.
+    Quarantined,
+}
+
 /// What the renderer reported about the frame it drew.
 struct FrameReport {
     mode: RenderMode,
@@ -218,6 +235,11 @@ pub(crate) struct Worker {
     queue: VecDeque<PendingDemand>,
     /// The demands that wait for a newer update than the one they found.
     waiting: Vec<(PendingDemand, u64)>,
+    /// The demands that wait for a borrowed ring to free a texture, ahead of
+    /// the queue.
+    parked: VecDeque<PendingDemand>,
+    /// The textures of a borrowed ring.
+    ring: Option<BorrowedRing>,
     /// The update generation and session generation of the last render.
     rendered_update: u64,
     rendered_generation: u64,
@@ -261,6 +283,10 @@ impl Worker {
         // A session that a detach or abandon reached first needs no renderer.
         let attaching = shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Attaching;
         let scale_factor = init.scale_factor;
+        let ring = match &init.target {
+            TargetInit::Borrowed { ring, .. } => Some(ring.clone()),
+            _ => None,
+        };
         let built = attaching.then(|| Gfx::new(init));
         let gfx = match built {
             Some(Ok(mut gfx)) => {
@@ -295,6 +321,8 @@ impl Worker {
             map_applied: 0,
             queue: VecDeque::new(),
             waiting: Vec::new(),
+            parked: VecDeque::new(),
+            ring,
             rendered_update: 0,
             rendered_generation: 0,
             still_attempted: 0,
@@ -453,13 +481,24 @@ impl Worker {
             }
             return;
         }
-        while self.queue.front().is_some_and(|pending| pending.sequence <= self.map_applied) {
+        while let Some(pending) = self.parked.pop_front() {
+            if self.ring_status() == RingStatus::Full {
+                self.parked.push_front(pending);
+                return;
+            }
+            self.evaluate(pending, outbox);
+        }
+        while self.parked.is_empty() && self.queue.front().is_some_and(|pending| pending.sequence <= self.map_applied) {
             if let Some(pending) = self.queue.pop_front() {
                 self.evaluate(pending, outbox);
             }
         }
         let latest = self.latest_generation();
-        let (updated, waiting): (Vec<_>, Vec<_>) = self.waiting.drain(..).partition(|(_, seen)| latest > *seen);
+        // A ring replacement on its way gives the demands that wait a new
+        // target, which they render to once it lands.
+        let retargeting = self.shared.state.lock_unpoisoned().pending_retargets != 0;
+        let (updated, waiting): (Vec<_>, Vec<_>) =
+            self.waiting.drain(..).partition(|(_, seen)| !retargeting && latest > *seen);
         self.waiting = waiting;
         for (pending, _) in updated {
             self.evaluate(pending, outbox);
@@ -477,6 +516,17 @@ impl Worker {
             return self.publish(FrameResult::unrendered(token, disposition, latest_generation), outbox);
         }
         let changed = latest_generation != self.rendered_update || self.generation() != self.rendered_generation;
+        let renders = latest.is_some() && (pending.demand.mode == DemandMode::Force || changed);
+        if renders {
+            match self.ring_status() {
+                RingStatus::Full => return self.parked.push_back(pending),
+                RingStatus::Quarantined => {
+                    let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, latest_generation);
+                    return self.publish(result, outbox);
+                }
+                RingStatus::None | RingStatus::Free => {}
+            }
+        }
         match (latest, pending.demand.mode) {
             (Some(update), DemandMode::Force) => self.render(token, update, outbox),
             (Some(update), DemandMode::IfChanged | DemandMode::WaitForUpdate) if changed => {
@@ -492,7 +542,10 @@ impl Worker {
     fn render_still_image(&mut self, outbox: &mut Outbox) {
         let Some(update) = self.latest() else { return };
         let Some(gfx) = self.gfx.as_ref() else { return };
-        if !update.parameters.still_image_request || update.generation <= self.still_attempted || !gfx.ready_for_frame()
+        if !update.parameters.still_image_request
+            || update.generation <= self.still_attempted
+            || !gfx.ready_for_frame()
+            || matches!(self.ring_status(), RingStatus::Full | RingStatus::Quarantined)
         {
             return;
         }
@@ -513,12 +566,19 @@ impl Worker {
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return self.publish(result, outbox);
         }
+        let slot = self.take_slot();
+        let Some(gfx) = self.gfx.as_mut() else { return };
+        if let Some(slot) = slot
+            && gfx.target.select_slot(slot).is_err()
         {
-            let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
-            if let Some(frames) = gfx.target.frames() {
-                gfx.renderer.render(&update.parameters, frames);
-            }
+            self.end_slot(slot, None);
+            let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
+            return self.publish(result, outbox);
         }
+        let handoff = {
+            let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
+            gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
+        };
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         self.sources = Some(update.parameters.sources.clone());
@@ -554,6 +614,17 @@ impl Worker {
             }
             None => FrameResult::unrendered(token, FrameDisposition::NoUpdate, update.generation),
         };
+        if let Some(slot) = slot {
+            let published = match handoff {
+                Some(Handoff::GivenBack { slot: given, sync }) if given == slot && result.view.is_some() => {
+                    let device = self.gfx.as_ref().map(|gfx| gfx.target.device().clone());
+                    let texture = self.ring.as_ref().zip(device).and_then(|(ring, device)| ring.texture(slot, &device));
+                    Some(Published { result, sync, texture })
+                }
+                _ => None,
+            };
+            self.end_slot(slot, published);
+        }
         // The result goes out before the map hears of the frame, so a still
         // image completes with its frame's result queued.
         self.publish(result, outbox);
@@ -578,10 +649,153 @@ impl Worker {
     /// Ends every demand on its way with `disposition`.
     pub(crate) fn end_demands(&mut self, disposition: FrameDisposition, outbox: &mut Outbox) {
         let latest = self.latest_generation();
-        let pending: Vec<_> = self.queue.drain(..).chain(self.waiting.drain(..).map(|(pending, _)| pending)).collect();
+        let pending: Vec<_> = self
+            .parked
+            .drain(..)
+            .chain(self.queue.drain(..))
+            .chain(self.waiting.drain(..).map(|(pending, _)| pending))
+            .collect();
         for pending in pending {
             self.publish(FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
         }
+    }
+
+    // MARK: - Borrowed rings
+
+    /// Whether a borrowed ring has a texture for the next frame.
+    fn ring_status(&self) -> RingStatus {
+        let state = self.shared.state.lock_unpoisoned();
+        if state.ring.is_empty() {
+            RingStatus::None
+        } else if state.ring.iter().all(|slot| slot.quarantined) {
+            RingStatus::Quarantined
+        } else if state.ring.iter().all(|slot| slot.busy()) {
+            RingStatus::Full
+        } else {
+            RingStatus::Free
+        }
+    }
+
+    /// The ring's texture that the next frame renders into, which it marks
+    /// as rendering: one that holds no frame, or else the one with the
+    /// oldest frame that the host didn't acquire.
+    fn take_slot(&self) -> Option<usize> {
+        let mut state = self.shared.state.lock_unpoisoned();
+        let free = state.ring.iter().enumerate().filter(|(_, slot)| !slot.busy());
+        let index = free
+            .clone()
+            .find(|(_, slot)| slot.frame.is_none())
+            .or_else(|| {
+                free.min_by_key(|(_, slot)| slot.frame.as_ref().map_or(0, |frame| frame.result.frame_generation))
+            })
+            .map(|(index, _)| index)?;
+        let slot = &mut state.ring[index];
+        slot.rendering = true;
+        slot.frame = None;
+        Some(index)
+    }
+
+    /// Ends a frame rendered into the ring's `slot`, which then holds
+    /// `published` for the host to acquire.
+    fn end_slot(&self, slot: usize, published: Option<Published>) {
+        let mut state = self.shared.state.lock_unpoisoned();
+        if let Some(entry) = state.ring.get_mut(slot) {
+            entry.rendering = false;
+            entry.frame = published;
+        }
+    }
+
+    /// The host gave the ring's `slot` back with its `consumer` sync: the
+    /// next frame rendered into it waits for that. A sync the target can't
+    /// wait for fails the session, and the slot is never rendered into
+    /// again, since the host's GPU may still read it.
+    pub(crate) fn release_slot(&mut self, slot: usize, consumer: ConsumerSync, outbox: &mut Outbox) {
+        let kind = consumer.sync.kind;
+        let released = match self.gfx.as_ref() {
+            Some(gfx) => {
+                let _scope = gfx.scope();
+                gfx.target.release_slot(slot, consumer)
+            }
+            None => Err(Error::target_lost("the render session lost its renderer")),
+        };
+        let failure = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            if let Some(entry) = state.ring.get_mut(slot) {
+                entry.acquired = false;
+                entry.quarantined |= released.is_err() && kind != SyncKind::CpuComplete;
+            }
+            match &released {
+                Err(error) if self.gfx.is_some() && state.lifecycle == RenderSessionState::Attached => {
+                    state.lifecycle = RenderSessionState::Failed;
+                    state.failure = Some(error.clone());
+                    true
+                }
+                _ => false,
+            }
+        };
+        if failure {
+            self.end_demands(FrameDisposition::Failed, outbox);
+            self.drop_gfx();
+            return;
+        }
+        self.pump(outbox);
+    }
+
+    /// The host gave up the ring's `slot`, which the session quarantined.
+    pub(crate) fn discard_slot(&mut self, slot: usize, outbox: &mut Outbox) {
+        if let Some(gfx) = self.gfx.as_ref() {
+            let _scope = gfx.scope();
+            let _ = gfx.target.discard_slot(slot);
+        }
+        self.pump(outbox);
+    }
+
+    /// Renders into `ring` from now on, at `size` logical pixels, after the
+    /// map resized. The ring's slots then hold no frames, and none is
+    /// quarantined.
+    pub(crate) fn set_ring(
+        &mut self,
+        size: Size,
+        scale_factor: f64,
+        ring: BorrowedRing,
+        outbox: &mut Outbox,
+    ) -> Result<(), Error> {
+        self.set_scale_factor(scale_factor)?;
+        let same_size = self.size() == size;
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
+        // The ring it has already: nothing changes, and the frames it holds
+        // stay.
+        if self.ring.as_ref() == Some(&ring) && gfx.target.frames().is_some() && same_size {
+            // The demands that wait keep waiting for an update past the
+            // replacement's resize.
+            let latest = self.latest_generation();
+            for (_, seen) in &mut self.waiting {
+                *seen = latest;
+            }
+            return Ok(());
+        }
+        let backend = gfx.backend.clone();
+        let replaced = {
+            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
+            gfx.target.set_ring(ring.clone())
+        };
+        replaced?;
+        self.ring = Some(ring);
+        {
+            let mut state = self.shared.state.lock_unpoisoned();
+            for slot in &mut state.ring {
+                slot.frame = None;
+                slot.quarantined = false;
+            }
+        }
+        self.target_changed(size, Some(true));
+        self.wake_for_redraw(outbox);
+        // The demands that wait for an update find a new target, which they
+        // render to.
+        let waiting: Vec<_> = self.waiting.drain(..).map(|(pending, _)| pending).collect();
+        self.parked.extend(waiting);
+        self.pump(outbox);
+        Ok(())
     }
 
     // MARK: - Work
@@ -655,7 +869,13 @@ impl Worker {
         let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
         gfx.target.release_surface();
         self.has_frame = false;
-        self.shared.state.lock_unpoisoned().has_target = false;
+        {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.has_target = false;
+            for slot in &mut state.ring {
+                slot.frame = None;
+            }
+        }
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
         Ok(())
     }
@@ -670,8 +890,9 @@ impl Worker {
         surface: Surface,
         outbox: &mut Outbox,
     ) -> Result<(), Error> {
-        if self.gfx.as_ref().ok_or_else(target_lost)?.target.is_offscreen() {
-            return Err(Error::unsupported("an offscreen session keeps its target"));
+        let target = &self.gfx.as_ref().ok_or_else(target_lost)?.target;
+        if target.is_offscreen() || target.is_borrowed() {
+            return Err(Error::unsupported("only a surface session presents to another surface"));
         }
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;

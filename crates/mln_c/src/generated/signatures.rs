@@ -2,6 +2,48 @@
 
 use super::types::*;
 
+const _: unsafe extern "C" fn(mln_acquired_frame, *mut mln_diagnostic) -> mln_status = crate::acquired_frame::mln_acquired_frame_discard;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_metal_texture_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_metal_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_open_gl_texture_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_open_gl_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_gpu_sync,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_producer_sync;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_render_frame_result,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_result;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_vulkan_texture_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_vulkan_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_web_gpu_texture_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_web_gpu_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *const mln_gpu_sync,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_release;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut *mut ::core::ffi::c_void,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_view_begin;
+const _: unsafe extern "C" fn(*mut ::core::ffi::c_void) = crate::acquired_frame::mln_acquired_frame_view_end;
 const _: unsafe extern "C" fn(
     *mut ::core::ffi::c_void,
     i64,
@@ -46,6 +88,21 @@ const _: unsafe extern "C" fn(
     *mut mln_diagnostic,
 ) -> mln_status = crate::gpu_device::mln_gpu_device_get_vulkan_context;
 const _: unsafe extern "C" fn(mln_gpu_device) = crate::gpu_device::mln_gpu_device_release;
+const _: unsafe extern "C" fn(
+    *const mln_metal_device_descriptor,
+    *mut mln_gpu_device,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_wrap_metal;
+const _: unsafe extern "C" fn(
+    *const mln_open_gl_context_descriptor,
+    *mut mln_gpu_device,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_wrap_open_gl;
+const _: unsafe extern "C" fn(
+    *const mln_vulkan_device_descriptor,
+    *mut mln_gpu_device,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_wrap_vulkan;
 const _: unsafe extern "C" fn(
     *const mln_web_gpu_context_descriptor,
     *mut mln_gpu_device,
@@ -683,6 +740,11 @@ const _: unsafe extern "C" fn(
     *mut mln_render_abandon_result,
     *mut mln_diagnostic,
 ) -> mln_status = crate::render_session::mln_render_session_abandon;
+const _: unsafe extern "C" fn(
+    mln_render_session,
+    *mut mln_acquired_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_render_session_acquire_frame;
 const _: unsafe extern "C" fn(
     mln_render_session,
     *const mln_completion,

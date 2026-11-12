@@ -4,7 +4,7 @@
 use core::ffi::c_void;
 use core::ptr::NonNull;
 
-use ::mln_runtime::{RenderTarget, Surface, SurfaceType};
+use ::mln_runtime::{BorrowedRing, RenderTarget, Surface, SurfaceType};
 use mln_util::ErrorKind;
 use mln_util::size::Size;
 use raw_window_handle::{
@@ -14,8 +14,12 @@ use raw_window_handle::{
 use crate::completion::{self, Generations, PendingCompletion};
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_HTML_CANVAS, MLN_RENDER_TARGET_KIND_METAL_LAYER,
-    MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_RENDER_TARGET_KIND_OHOS_WINDOW, MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE,
+    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_HTML_CANVAS,
+    MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_METAL_LAYER,
+    MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_RENDER_TARGET_KIND_OHOS_WINDOW,
+    MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE,
+    MLN_RENDER_TARGET_KIND_VULKAN_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_VULKAN_SURFACE,
+    MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE, MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES,
     MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE, MLN_RENDER_TARGET_KIND_WIN32_WINDOW, MLN_RENDER_TARGET_KIND_XLIB_WINDOW,
     mln_completion, mln_diagnostic, mln_gpu_device, mln_logical_extent, mln_logical_size, mln_map,
     mln_open_gl_context_provider_flags, mln_render_session, mln_render_session_attach_options, mln_render_target,
@@ -55,16 +59,121 @@ enum Target {
         kind: SurfaceType,
         surface: Surface,
     },
-    /// A window or surface that this library doesn't present to.
+    /// The host's surface, which only a device of the host's instance or
+    /// share group presents to.
+    HostSurface {
+        size: Size,
+        surface: Surface,
+    },
+    /// A ring of the host's textures.
+    Borrowed {
+        size: Size,
+        ring: BorrowedRing,
+    },
+    /// A target that this library doesn't render to.
     Unsupported(&'static str),
 }
 
 impl Target {
     fn size(&self) -> Option<Size> {
         match self {
-            Target::Offscreen(size) | Target::Surface { size, .. } => Some(*size),
+            Target::Offscreen(size)
+            | Target::Surface { size, .. }
+            | Target::HostSurface { size, .. }
+            | Target::Borrowed { size, .. } => Some(*size),
             Target::Unsupported(_) => None,
         }
+    }
+}
+
+/// A borrowed ring's textures: `count` of them at `textures`, from one to
+/// MLN_TEXTURE_RING_MAX_DEPTH, distinct by `key`, of a positive size.
+///
+/// # Safety
+///
+/// `textures` is null or points to `count` readable entries.
+unsafe fn ring_textures<'a, T, K: PartialEq>(
+    textures: *const T,
+    count: usize,
+    width: u32,
+    height: u32,
+    name: &str,
+    key: impl Fn(&T) -> K,
+) -> Result<&'a [T], Error> {
+    if textures.is_null() || count == 0 {
+        return Err(Error::invalid_argument(format!("{name} needs at least one texture")));
+    }
+    if count > crate::generated::types::MLN_TEXTURE_RING_MAX_DEPTH as usize {
+        return Err(Error::invalid_argument(format!("{name} has more textures than MLN_TEXTURE_RING_MAX_DEPTH")));
+    }
+    if width == 0 || height == 0 {
+        return Err(Error::invalid_argument(format!("{name} physical texture dimensions must be positive")));
+    }
+    // SAFETY: the caller's contract.
+    let textures = unsafe { core::slice::from_raw_parts(textures, count) };
+    for (index, texture) in textures.iter().enumerate() {
+        if textures[..index].iter().any(|earlier| key(earlier) == key(texture)) {
+            return Err(Error::invalid_argument(format!("{name} must name distinct textures")));
+        }
+    }
+    Ok(textures)
+}
+
+/// The ring of a caller's Vulkan images.
+fn vulkan_ring(
+    target: &crate::generated::types::mln_vulkan_borrowed_textures_target,
+    name: &str,
+) -> Result<Target, Error> {
+    use crate::generated::types::{
+        MLN_VULKAN_IMAGE_OWNER_EXTERNAL, MLN_VULKAN_IMAGE_OWNER_FOREIGN, MLN_VULKAN_IMAGE_OWNER_GRAPHICS_QUEUE,
+    };
+    // SAFETY: the header's contract for the textures array.
+    let textures = unsafe {
+        ring_textures(target.textures, target.texture_count, target.physical_width, target.physical_height, name, |t| {
+            t.image
+        })
+    }?;
+    if textures.iter().any(|texture| texture.image == 0 || texture.image_view == 0) {
+        return Err(Error::invalid_argument(format!("{name} textures need an image and an image view")));
+    }
+    // VK_IMAGE_LAYOUT_UNDEFINED and VK_IMAGE_LAYOUT_PREINITIALIZED aren't
+    // layouts that a render pass leaves.
+    if target.format == 0 || target.final_layout == 0 || target.final_layout == 8 {
+        return Err(Error::invalid_argument(format!("{name} needs a format and final_layout")));
+    }
+    let owner = match target.owner {
+        MLN_VULKAN_IMAGE_OWNER_GRAPHICS_QUEUE | MLN_VULKAN_IMAGE_OWNER_EXTERNAL | MLN_VULKAN_IMAGE_OWNER_FOREIGN => {
+            target.owner
+        }
+        _ => return Err(Error::invalid_argument(format!("{name}.owner is invalid"))),
+    };
+    let size = Size::new(target.logical_size.width, target.logical_size.height);
+    #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+    {
+        use mln_vulkan::ash::vk::{self, Handle as _};
+        let images = mln_vulkan::BorrowedImages {
+            images: textures
+                .iter()
+                .map(|texture| mln_vulkan::BorrowedImage {
+                    image: vk::Image::from_raw(texture.image),
+                    view: vk::ImageView::from_raw(texture.image_view),
+                })
+                .collect(),
+            size: Size::new(target.physical_width, target.physical_height),
+            format: vk::Format::from_raw(target.format as i32),
+            final_layout: vk::ImageLayout::from_raw(target.final_layout as i32),
+            owner: match owner {
+                MLN_VULKAN_IMAGE_OWNER_EXTERNAL => mln_vulkan::ImageOwner::External,
+                MLN_VULKAN_IMAGE_OWNER_FOREIGN => mln_vulkan::ImageOwner::Foreign,
+                _ => mln_vulkan::ImageOwner::GraphicsQueue,
+            },
+        };
+        Ok(Target::Borrowed { size, ring: BorrowedRing::vulkan(images) })
+    }
+    #[cfg(any(target_vendor = "apple", target_family = "wasm"))]
+    {
+        let _ = (owner, size);
+        Ok(Target::Unsupported("Vulkan targets are not supported by this build"))
     }
 }
 
@@ -151,6 +260,24 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 (target.data.web_gpu_surface.logical_size, "mln_web_gpu_surface_target")
             }
             MLN_RENDER_TARGET_KIND_HTML_CANVAS => (target.data.html_canvas.logical_size, "mln_html_canvas_target"),
+            MLN_RENDER_TARGET_KIND_VULKAN_SURFACE => {
+                (target.data.vulkan_surface.logical_size, "mln_vulkan_surface_target")
+            }
+            MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE => {
+                (target.data.open_gl_surface.logical_size, "mln_open_gl_surface_target")
+            }
+            MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES => {
+                (target.data.metal_borrowed_textures.logical_size, "mln_metal_borrowed_textures_target")
+            }
+            MLN_RENDER_TARGET_KIND_VULKAN_BORROWED_TEXTURES => {
+                (target.data.vulkan_borrowed_textures.logical_size, "mln_vulkan_borrowed_textures_target")
+            }
+            MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES => {
+                (target.data.open_gl_borrowed_textures.logical_size, "mln_open_gl_borrowed_textures_target")
+            }
+            MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES => {
+                (target.data.web_gpu_borrowed_textures.logical_size, "mln_web_gpu_borrowed_textures_target")
+            }
             _ => return Err(Error::invalid_argument("mln_render_target.kind is invalid")),
         }
     };
@@ -221,6 +348,115 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 }
                 Target::Unsupported("this library wraps no WebGPU device to present to a WebGPU surface with")
             }
+            MLN_RENDER_TARGET_KIND_VULKAN_SURFACE => {
+                let surface = target.data.vulkan_surface.surface;
+                if surface == 0 {
+                    return Err(Error::invalid_argument(format!("{} must not be null", field("surface"))));
+                }
+                #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
+                {
+                    // SAFETY: the host's surface, which the header's contract
+                    // keeps alive; the attach checks that it is of the
+                    // device's instance as far as it can: the device must be
+                    // a Vulkan device.
+                    let surface = Surface::vulkan(mln_vulkan::HostSurface::from_raw(surface));
+                    Target::HostSurface { size, surface }
+                }
+                #[cfg(any(target_vendor = "apple", target_family = "wasm"))]
+                Target::Unsupported("Vulkan targets are not supported by this build")
+            }
+            MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE => {
+                let surface = required(target.data.open_gl_surface.surface, &field("surface"))?;
+                #[cfg(all(unix, not(target_vendor = "apple")))]
+                {
+                    // SAFETY: the host's surface, which the header's contract
+                    // keeps alive; the attach checks that the device wraps a
+                    // context of the host's.
+                    let surface = Surface::gl(mln_gl::HostSurface::from_raw(surface));
+                    Target::HostSurface { size, surface }
+                }
+                #[cfg(not(all(unix, not(target_vendor = "apple"))))]
+                {
+                    let _ = surface;
+                    Target::Unsupported("OpenGL surfaces of the host's are not supported by this build")
+                }
+            }
+            MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES => {
+                let ring = target.data.metal_borrowed_textures;
+                let textures = ring_textures(
+                    ring.textures,
+                    ring.texture_count,
+                    ring.physical_width,
+                    ring.physical_height,
+                    name,
+                    |t| t.texture,
+                )?;
+                if textures.iter().any(|texture| texture.texture.is_null()) {
+                    return Err(Error::invalid_argument(format!("{name} textures must not be null")));
+                }
+                #[cfg(target_vendor = "apple")]
+                {
+                    let pointers: Vec<*mut c_void> = textures.iter().map(|texture| texture.texture).collect();
+                    let physical = Size::new(ring.physical_width, ring.physical_height);
+                    // SAFETY: the host's textures, which the header's contract
+                    // makes `id<MTLTexture>`s.
+                    match mln_mtl::BorrowedTextures::from_raw(&pointers, physical) {
+                        Some(textures) => Target::Borrowed { size, ring: BorrowedRing::metal(textures) },
+                        None => return Err(Error::invalid_argument(format!("{name} textures must not be null"))),
+                    }
+                }
+                #[cfg(not(target_vendor = "apple"))]
+                Target::Unsupported("Metal textures are not supported by this build")
+            }
+            MLN_RENDER_TARGET_KIND_VULKAN_BORROWED_TEXTURES => {
+                vulkan_ring(&target.data.vulkan_borrowed_textures, name)?
+            }
+            MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES => {
+                let ring = target.data.open_gl_borrowed_textures;
+                let textures = ring_textures(
+                    ring.textures,
+                    ring.texture_count,
+                    ring.physical_width,
+                    ring.physical_height,
+                    name,
+                    |t| t.texture,
+                )?;
+                if textures.iter().any(|texture| texture.texture == 0) {
+                    return Err(Error::invalid_argument(format!("{name} textures must not be zero")));
+                }
+                // GL_TEXTURE_2D.
+                if ring.target != 0x0DE1 {
+                    return Err(Error::invalid_argument(format!("{} must be GL_TEXTURE_2D", field("target"))));
+                }
+                #[cfg(all(unix, not(target_vendor = "apple")))]
+                {
+                    let textures = mln_gl::BorrowedTextures {
+                        textures: textures.iter().map(|texture| texture.texture).collect(),
+                        size: Size::new(ring.physical_width, ring.physical_height),
+                    };
+                    Target::Borrowed { size, ring: BorrowedRing::gl(textures) }
+                }
+                #[cfg(not(all(unix, not(target_vendor = "apple"))))]
+                Target::Unsupported("OpenGL textures of the host's are not supported by this build")
+            }
+            MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES => {
+                let ring = target.data.web_gpu_borrowed_textures;
+                let textures = ring_textures(
+                    ring.textures,
+                    ring.texture_count,
+                    ring.physical_width,
+                    ring.physical_height,
+                    name,
+                    |t| t.texture,
+                )?;
+                if textures.iter().any(|texture| texture.texture.is_null() || texture.texture_view.is_null()) {
+                    return Err(Error::invalid_argument(format!("{name} textures need a texture and a view")));
+                }
+                if ring.format == 0 {
+                    return Err(Error::invalid_argument(format!("{} must not be zero", field("format"))));
+                }
+                Target::Unsupported("WebGPU textures are not supported by this build")
+            }
             _ => {
                 if target.data.html_canvas.selector.size == 0 {
                     return Err(Error::invalid_argument(format!("{} must not be empty", field("selector"))));
@@ -284,7 +520,6 @@ pub unsafe extern "C" fn mln_map_attach(
         let target = match target {
             Target::Offscreen(size) => {
                 options.require_core_worker("an offscreen session renders on a core worker")?;
-                options.refuse_queue_lock("an offscreen session takes no queue lock")?;
                 RenderTarget::Offscreen { size, device }
             }
             Target::Surface { size, kind, surface } => {
@@ -294,8 +529,23 @@ pub unsafe extern "C" fn mln_map_attach(
                     return Err(unsupported(format!("the device presents to no {kind:?} surface")));
                 }
                 options.require_core_worker("a window session renders on a core worker")?;
-                options.refuse_queue_lock("a window session takes no queue lock")?;
                 RenderTarget::Surface { size, surface, device }
+            }
+            Target::HostSurface { size, surface } => {
+                let Some(device) = device.filter(|device| {
+                    device.presents_to_host_surfaces() && surface.host_backend() == Some(device.backend())
+                }) else {
+                    return Err(unsupported("only a device of the surface's instance or share group presents to it"));
+                };
+                options.require_core_worker("this library drives a surface session on a core worker")?;
+                RenderTarget::Surface { size, surface, device: Some(device) }
+            }
+            Target::Borrowed { size, ring } => {
+                let Some(device) = device else {
+                    return Err(unsupported("a borrowed ring renders on the device of its textures"));
+                };
+                options.require_core_worker("this library drives a borrowed ring on a core worker")?;
+                RenderTarget::Borrowed { size, ring, device }
             }
             Target::Unsupported(message) => return Err(unsupported(message)),
         };
@@ -337,17 +587,18 @@ pub unsafe extern "C" fn mln_render_session_set_target(
         if let Some(size) = target.size() {
             physical_size(mln_logical_extent { width: size.width, height: size.height, scale_factor })?;
         }
-        let (size, surface) = match target {
+        let replaced = match target {
             Target::Surface { size, kind, surface } => {
                 if !kind.presents_with_any() {
                     return Err(unsupported(format!("this build presents to no {kind:?} surface")));
                 }
-                (size, surface)
+                object.session.set_surface(size, surface)?
             }
+            Target::HostSurface { size, surface } => object.session.set_surface(size, surface)?,
+            Target::Borrowed { size, ring } => object.session.set_ring(size, ring)?,
             Target::Unsupported(message) => return Err(unsupported(message)),
             Target::Offscreen(_) => return Err(unsupported("an offscreen target replaces no window")),
         };
-        let replaced = object.session.set_surface(size, surface)?;
         let map = object.map.clone();
         completion::forward(replaced, pending.map(PendingCompletion::accept), move |result| {
             let generations = map::generations(&map, &result);
@@ -380,11 +631,15 @@ pub unsafe extern "C" fn mln_logical_extent_physical_size(
     })
 }
 
-/// `mln_open_gl_supported_context_provider_mask()`: none, since the library
-/// doesn't render with OpenGL.
+/// `mln_open_gl_supported_context_provider_mask()`: EGL, where the library
+/// renders with OpenGL ES.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
-    0
+    if cfg!(all(unix, not(target_vendor = "apple"))) {
+        crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]
@@ -602,7 +857,9 @@ mod tests {
     }
 
     #[test]
-    fn no_open_gl_provider_is_built() {
-        assert_eq!(mln_open_gl_supported_context_provider_mask(), 0);
+    fn egl_is_the_one_open_gl_provider() {
+        let egl = crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL;
+        let expected = if cfg!(all(unix, not(target_vendor = "apple"))) { egl } else { 0 };
+        assert_eq!(mln_open_gl_supported_context_provider_mask(), expected);
     }
 }

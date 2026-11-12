@@ -15,6 +15,7 @@
 //! `shaders::wgsl_sources`.
 
 mod bind_groups;
+pub mod borrowed_target;
 pub mod buffer_resource;
 pub mod command_encoder;
 pub mod context;
@@ -36,6 +37,7 @@ pub mod upload_pass;
 pub mod vertex_buffer_resource;
 mod writes;
 
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures};
 pub use context::Context;
 pub use device::Device;
 pub use offscreen_target::OffscreenTarget;

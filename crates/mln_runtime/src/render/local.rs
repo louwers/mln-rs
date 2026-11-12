@@ -5,16 +5,16 @@
 //! [`RenderTarget`]: super::RenderTarget
 
 // The browser build has no backend for sessions.
-#![cfg_attr(target_family = "wasm", allow(unused_macros, unused_variables))]
+#![cfg_attr(target_family = "wasm", allow(unused_macros, unused_variables, unused_imports))]
 
 use std::rc::Rc;
 
-use mln_gfx::{FrameTarget, RendererBackend};
+use mln_gfx::{ConsumerSync, FrameTarget, RendererBackend, SyncKind};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::target::{Device, DeviceOptions, Surface, SurfaceKind};
+use super::target::{BorrowedRing, Device, DeviceOptions, RingKind, Surface, SurfaceKind};
 
 /// Frames read back: an offscreen target.
 trait Offscreen: FrameTarget {
@@ -25,6 +25,54 @@ trait Offscreen: FrameTarget {
 /// Frames presented: a surface target.
 trait Presenting: FrameTarget {
     fn resize(&self, size: Size);
+}
+
+#[cfg(all(feature = "metal", target_vendor = "apple"))]
+impl Borrowed for mln_mtl::BorrowedTarget {
+    fn select(&self, slot: usize) {
+        mln_mtl::BorrowedTarget::select(self, slot);
+    }
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_mtl::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&self, slot: usize) {
+        mln_mtl::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+        #[allow(irrefutable_let_patterns)]
+        let RingKind::Metal(textures) = ring.kind else {
+            return Err(Error::unsupported("a ring of Metal textures takes Metal textures only"));
+        };
+        mln_mtl::BorrowedTarget::replace(self, textures)
+    }
+}
+
+/// Frames given back to the host: a ring of its textures.
+trait Borrowed: FrameTarget {
+    fn select(&self, slot: usize);
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
+    fn discard(&self, slot: usize);
+    fn replace(&self, ring: BorrowedRing) -> Result<(), Error>;
+}
+
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+impl Borrowed for mln_vulkan::BorrowedTarget {
+    fn select(&self, slot: usize) {
+        mln_vulkan::BorrowedTarget::select(self, slot);
+    }
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_vulkan::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&self, slot: usize) {
+        mln_vulkan::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+        #[allow(irrefutable_let_patterns)]
+        let RingKind::Vulkan(images) = ring.kind else {
+            return Err(Error::unsupported("a ring of Vulkan images takes Vulkan images only"));
+        };
+        mln_vulkan::BorrowedTarget::replace(self, images)
+    }
 }
 
 macro_rules! offscreen {
@@ -66,6 +114,48 @@ presenting!(mln_vulkan::SurfaceTarget);
 offscreen!(mln_gl::OffscreenTarget);
 #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
 presenting!(mln_gl::SurfaceTarget);
+#[cfg(all(feature = "gl", not(target_family = "wasm")))]
+presenting!(mln_gl::HostSurfaceTarget);
+
+#[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+impl Borrowed for mln_webgpu::BorrowedTarget {
+    fn select(&self, slot: usize) {
+        mln_webgpu::BorrowedTarget::select(self, slot);
+    }
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_webgpu::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&self, slot: usize) {
+        mln_webgpu::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+        #[allow(irrefutable_let_patterns)]
+        let RingKind::WebGpu(textures) = ring.kind else {
+            return Err(Error::unsupported("a ring of WebGPU textures takes WebGPU textures only"));
+        };
+        mln_webgpu::BorrowedTarget::replace(self, textures)
+    }
+}
+
+#[cfg(all(feature = "gl", not(target_family = "wasm")))]
+impl Borrowed for mln_gl::BorrowedTarget {
+    fn select(&self, slot: usize) {
+        mln_gl::BorrowedTarget::select(self, slot);
+    }
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        mln_gl::BorrowedTarget::release(self, slot, consumer)
+    }
+    fn discard(&self, slot: usize) {
+        mln_gl::BorrowedTarget::discard(self, slot);
+    }
+    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+        #[allow(irrefutable_let_patterns)]
+        let RingKind::Gl(textures) = ring.kind else {
+            return Err(Error::unsupported("a ring of OpenGL textures takes OpenGL textures only"));
+        };
+        mln_gl::BorrowedTarget::replace(self, textures)
+    }
+}
 
 /// A backend, by its type.
 #[derive(Clone)]
@@ -109,6 +199,34 @@ impl Backend {
         }
     }
 
+    /// A target on the backend that renders into `ring`, handing frames over
+    /// with sync of the kind `producer`.
+    fn borrowed(&self, ring: BorrowedRing, producer: SyncKind) -> Result<Box<dyn Borrowed>, Error> {
+        #[allow(unreachable_patterns)]
+        match (self, ring.kind) {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            (Backend::Vulkan(backend), RingKind::Vulkan(images)) => {
+                Ok(Box::new(mln_vulkan::BorrowedTarget::new(backend.clone(), images, producer)?))
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            (Backend::Metal(backend), RingKind::Metal(textures)) => {
+                Ok(Box::new(mln_mtl::BorrowedTarget::new(backend.clone(), textures, producer)?))
+            }
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            (Backend::WebGpu(backend), RingKind::WebGpu(textures)) => {
+                Ok(Box::new(mln_webgpu::BorrowedTarget::new(backend.clone(), textures, producer)?))
+            }
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            (Backend::Gl(backend), RingKind::Gl(textures)) => {
+                Ok(Box::new(mln_gl::BorrowedTarget::new(backend.clone(), textures, producer)?))
+            }
+            _ => {
+                let _ = producer;
+                Err(Error::unsupported("the session's backend renders into no ring of this kind"))
+            }
+        }
+    }
+
     /// An offscreen target of `size` pixels on the backend.
     fn offscreen(&self, size: Size) -> Box<dyn Offscreen> {
         match *self {
@@ -143,6 +261,10 @@ impl Backend {
             (Backend::Vulkan(backend), SurfaceKind::Window(window)) => {
                 Ok(Box::new(mln_vulkan::SurfaceTarget::new(backend.clone(), window, size, true)?))
             }
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            (Backend::Vulkan(backend), SurfaceKind::Vulkan(surface)) => {
+                Ok(Box::new(mln_vulkan::SurfaceTarget::on_host_surface(backend.clone(), surface, size, true)?))
+            }
             _ => {
                 let _ = size;
                 Err(Error::unsupported("the session's backend presents to no surface of this kind"))
@@ -166,6 +288,10 @@ fn webgpu_surface(backend: &mln_webgpu::RendererBackend, kind: SurfaceKind) -> R
         SurfaceKind::Window(window) => instance()?.create_surface(window),
         #[cfg(all(feature = "metal", target_vendor = "apple"))]
         SurfaceKind::MetalLayer(_) => return Err(Error::unsupported("a Metal layer presents on a Metal device")),
+        #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+        SurfaceKind::Vulkan(_) => return Err(Error::unsupported("a Vulkan surface presents on a Vulkan device")),
+        #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+        SurfaceKind::Gl(_) => return Err(Error::unsupported("an EGL surface presents on an OpenGL device")),
     };
     made.map_err(|error| Error::native(format!("can't make a surface on the window: {error}")))
 }
@@ -181,6 +307,17 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
         (Device::Vulkan(device), SurfaceKind::Window(window)) => {
             let (backend, target) = mln_vulkan::SurfaceTarget::with_backend(device, window.clone(), size, true)?;
             Ok((Backend::Vulkan(backend), Box::new(target)))
+        }
+        #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+        (Device::Vulkan(device), SurfaceKind::Vulkan(_)) => {
+            let backend = Backend::Vulkan(Rc::new(mln_vulkan::RendererBackend::presenting(device)?));
+            let target = backend.surface(surface, size)?;
+            Ok((backend, target))
+        }
+        #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+        (Device::Gl(device), SurfaceKind::Gl(host)) => {
+            let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, *host, size)?;
+            Ok((Backend::Gl(backend), Box::new(target)))
         }
         #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
@@ -199,6 +336,11 @@ enum Frames {
     Offscreen(Box<dyn Offscreen>),
     /// `None` once the surface is released.
     Presenting(Option<Box<dyn Presenting>>),
+    /// `target` is `None` once the ring is released.
+    Borrowed {
+        target: Option<Box<dyn Borrowed>>,
+        producer: SyncKind,
+    },
 }
 
 /// A render target built on this thread: the backend that a renderer draws
@@ -243,6 +385,18 @@ impl LocalTarget {
         Ok(LocalTarget { device, backend, frames: Frames::Presenting(Some(target)) })
     }
 
+    /// A target of `size` pixels on `device` that renders into the host's
+    /// `ring`, and hands each frame over with sync of the kind `producer`.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device can't render into the ring with `producer`, and with the
+    /// backend's error.
+    pub fn borrowed(device: Device, ring: BorrowedRing, producer: SyncKind) -> Result<LocalTarget, Error> {
+        let backend = Backend::new(&device)?;
+        let frames = Frames::Borrowed { target: Some(backend.borrowed(ring, producer)?), producer };
+        Ok(LocalTarget { device, backend, frames })
+    }
+
     /// The device the target renders on.
     pub fn device(&self) -> &Device {
         &self.device
@@ -259,6 +413,55 @@ impl LocalTarget {
         match &self.frames {
             Frames::Offscreen(target) => Some(&**target),
             Frames::Presenting(target) => target.as_deref().map(|target| target as &dyn FrameTarget),
+            Frames::Borrowed { target, .. } => target.as_deref().map(|target| target as &dyn FrameTarget),
+        }
+    }
+
+    /// Whether frames go to the host's ring.
+    pub fn is_borrowed(&self) -> bool {
+        matches!(self.frames, Frames::Borrowed { .. })
+    }
+
+    fn ring(&self) -> Result<&dyn Borrowed, Error> {
+        match &self.frames {
+            Frames::Borrowed { target: Some(target), .. } => Ok(&**target),
+            Frames::Borrowed { target: None, .. } => Err(Error::invalid_state("the ring was released")),
+            _ => Err(Error::unsupported("the target has no ring")),
+        }
+    }
+
+    /// Has the next frame render into the ring's texture at `slot`.
+    pub fn select_slot(&self, slot: usize) -> Result<(), Error> {
+        self.ring()?.select(slot);
+        Ok(())
+    }
+
+    /// The host gave the ring's texture at `slot` back: the next frame
+    /// rendered into it waits for `consumer`.
+    pub fn release_slot(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        self.ring()?.release(slot, consumer)
+    }
+
+    /// The host gave up the ring's texture at `slot`, which the target
+    /// renders into no more.
+    pub fn discard_slot(&self, slot: usize) -> Result<(), Error> {
+        self.ring()?.discard(slot);
+        Ok(())
+    }
+
+    /// Renders into `ring` from now on, in place of the ring's textures.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// target that isn't a ring, or a ring of another format, and with the
+    /// backend's error.
+    pub fn set_ring(&mut self, ring: BorrowedRing) -> Result<(), Error> {
+        match &mut self.frames {
+            Frames::Borrowed { target: Some(target), .. } => target.replace(ring),
+            Frames::Borrowed { target, producer } => {
+                *target = Some(self.backend.borrowed(ring, *producer)?);
+                Ok(())
+            }
+            _ => Err(Error::unsupported("the target has no ring")),
         }
     }
 
@@ -272,7 +475,7 @@ impl LocalTarget {
         match &self.frames {
             Frames::Offscreen(target) => target.resize(size),
             Frames::Presenting(Some(target)) => target.resize(size),
-            Frames::Presenting(None) => {}
+            Frames::Presenting(None) | Frames::Borrowed { .. } => {}
         }
     }
 
@@ -287,13 +490,17 @@ impl LocalTarget {
                 .read_image()
                 .ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized")),
             Frames::Presenting(_) => Err(Error::unsupported("a surface session can't read its frames back")),
+            Frames::Borrowed { .. } => Err(Error::unsupported("a borrowed ring's frames are the host's to read")),
         }
     }
 
-    /// Lets go of a surface target's surface. The backend stays.
+    /// Lets go of a surface target's surface, or of a ring's textures. The
+    /// backend stays.
     pub fn release_surface(&mut self) {
-        if let Frames::Presenting(target) = &mut self.frames {
-            target.take();
+        match &mut self.frames {
+            Frames::Presenting(target) => drop(target.take()),
+            Frames::Borrowed { target, .. } => drop(target.take()),
+            Frames::Offscreen(_) => {}
         }
     }
 
@@ -308,8 +515,8 @@ impl LocalTarget {
     /// as [`surface`](Self::surface) does. The target then keeps what it
     /// had.
     pub fn set_surface(&mut self, surface: Surface, size: Size) -> Result<bool, Error> {
-        if self.is_offscreen() {
-            return Err(Error::unsupported("an offscreen target keeps its frames"));
+        if !matches!(self.frames, Frames::Presenting(_)) {
+            return Err(Error::unsupported("only a surface target presents to another surface"));
         }
         let retry = surface.clone_window();
         let (new_backend, target) = match self.backend.surface(surface, size) {
@@ -339,5 +546,9 @@ fn default_surface_device(surface: &Surface) -> Result<Device, Error> {
         SurfaceKind::MetalLayer(_) => Device::with_backend(super::target::BackendType::Metal, DeviceOptions::default()),
         #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
         SurfaceKind::Wgpu(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
+        #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+        SurfaceKind::Vulkan(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
+        #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+        SurfaceKind::Gl(_) => Err(Error::invalid_argument("a surface that the host made needs the host's device")),
     }
 }

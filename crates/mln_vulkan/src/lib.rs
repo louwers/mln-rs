@@ -13,8 +13,9 @@
 //! The GLSL comes from the C++ headers, with the port's changes
 //! (`shaders::glsl_sources`).
 //!
-//! A `RendererBackend` renders on a `Device`, into an `OffscreenTarget`
-//! or a `SurfaceTarget` built on it.
+//! A `RendererBackend` renders on a `Device`, which backends on any thread
+//! share, into an `OffscreenTarget`, a `SurfaceTarget` or a `BorrowedTarget`
+//! built on it.
 //!
 //! The crate is empty on Apple platforms and in the browser build.
 
@@ -22,6 +23,7 @@
 // Vulkan through ash is the FFI here.
 #![allow(unsafe_code)]
 
+pub mod borrowed_target;
 pub mod buffer_resource;
 pub mod command_encoder;
 pub mod context;
@@ -46,8 +48,10 @@ pub mod upload_pass;
 pub mod vertex_buffer_resource;
 mod window;
 
+pub use ash;
+pub use borrowed_target::{BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner};
 pub use context::Context;
-pub use device::{AdapterId, Device};
+pub use device::{AdapterId, Device, Features, HostDevice, QueueLock, RawDevice};
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
-pub use surface_target::SurfaceTarget;
+pub use surface_target::{HostSurface, SurfaceTarget};

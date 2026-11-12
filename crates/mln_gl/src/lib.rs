@@ -46,6 +46,8 @@ pub mod upload_pass;
 pub mod vertex_array;
 pub mod vertex_buffer_resource;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod borrowed_target;
 #[cfg(target_arch = "wasm32")]
 pub mod canvas_target;
 #[cfg(not(target_arch = "wasm32"))]
@@ -57,6 +59,8 @@ pub mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
 pub mod surface_target;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSurfaceTarget};
 #[cfg(target_arch = "wasm32")]
 pub use canvas_target::CanvasTarget;
 pub use context::Context;

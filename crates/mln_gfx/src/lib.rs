@@ -65,7 +65,7 @@ pub use draw_mode::DrawMode;
 pub use drawable::{Drawable, UniqueDrawable};
 pub use drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 pub use drawable_tweaker::{DrawableTweaker, DrawableTweakerPtr};
-pub use frame::{DrawTarget, FrameTarget, Handoff};
+pub use frame::{ConsumerSync, DrawTarget, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 pub use offscreen_texture::OffscreenTexture;
 pub use paint_parameters::PaintParameters;

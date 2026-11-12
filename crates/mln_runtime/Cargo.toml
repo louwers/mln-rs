@@ -58,8 +58,11 @@ mln_vulkan = { workspace = true, optional = true }
 httpmock.workspace = true
 pollster.workspace = true
 
-# The X11 windows of the surface tests.
+# The X11 windows of the surface tests, and the host's EGL contexts and
+# textures of the device tests.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
+glow.workspace = true
+khronos-egl.workspace = true
 winit.workspace = true
 
 [lints]
