@@ -177,14 +177,16 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
 
 /// `convertImageSource(id, value, error)` (conformance).
 fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
-    let Some(url_value) = value.object_member("url") else {
-        error.message = "Image source must have a url value".to_owned();
-        return None;
-    };
-
-    let Some(url_string) = url_value.to_string() else {
-        error.message = "Image url must be a URL string".to_owned();
-        return None;
+    // A source without a url starts empty, until it gets an image or a url.
+    let url_string = match value.object_member("url") {
+        Some(url_value) => {
+            let Some(url_string) = url_value.to_string() else {
+                error.message = "Image url must be a URL string".to_owned();
+                return None;
+            };
+            Some(url_string)
+        }
+        None => None,
     };
 
     let Some(coordinates_value) = value.object_member("coordinates") else {
@@ -203,7 +205,9 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
         *coordinate = lat_lng;
     }
     let result = crate::sources::image_source::ImageSource::new(id, coordinates);
-    result.set_url(&url_string);
+    if let Some(url_string) = url_string {
+        result.set_url(&url_string);
+    }
 
     Some(Box::new(result))
 }
