@@ -128,17 +128,6 @@ impl IndexBufferResource {
     pub fn get_buffer(&self) -> Option<BufferID> {
         self.buffer
     }
-
-    /// Replaces the start of the buffer with `data`, which fits in it.
-    pub fn update(&self, context: &Context, data: &[u8]) {
-        debug_assert!(data.len() <= self.byte_size);
-        if let Some(buffer) = self.buffer
-            && data.len() <= self.byte_size
-        {
-            context.update_buffer(glow::ELEMENT_ARRAY_BUFFER, buffer, data);
-            context.rendering_stats().index_update_bytes += data.len();
-        }
-    }
 }
 
 impl Drop for IndexBufferResource {

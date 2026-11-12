@@ -3,9 +3,8 @@
 # in the change that needs it.
 
 [panic]
-"crates/mln_actor/src/established_actor.rs" = 1
 "crates/mln_actor/src/scheduler.rs" = 2
-"crates/mln_actor/src/thread.rs" = 3
+"crates/mln_actor/src/thread.rs" = 2
 "crates/mln_actor/src/thread_pool.rs" = 1
 "crates/mln_conversion/src/get_json_type.rs" = 1
 "crates/mln_expression/src/assertion.rs" = 4
@@ -37,9 +36,7 @@
 "crates/mln_expression/src/step.rs" = 3
 "crates/mln_gfx/src/drawable_builder.rs" = 4
 "crates/mln_gfx/src/polyline_generator.rs" = 5
-"crates/mln_gfx/src/shaders/program_parameters.rs" = 2
 "crates/mln_gl/src/context.rs" = 1
-"crates/mln_headless/src/map_snapshotter.rs" = 1
 "crates/mln_image/src/png_writer.rs" = 1
 "crates/mln_map/src/transform.rs" = 1
 "crates/mln_map_types/src/transform_state.rs" = 3
@@ -144,7 +141,6 @@
 "crates/mln_text/src/tagged_string.rs" = 4
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
-"crates/mln_util/src/lru_cache.rs" = 1
 "crates/mln_util/src/projection.rs" = 2
 "crates/mln_util/src/token.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1
@@ -165,14 +161,12 @@
 "vendor/rapidjson/src/internal/dtoa.rs" = 1
 "vendor/rapidjson/src/writer.rs" = 3
 "vendor/supercluster/src/lib.rs" = 1
-"vendor/vector-tile/src/vector_tile.rs" = 5
 "vendor/wagyu/src/build_result.rs" = 1
 "vendor/wagyu/src/topology_correction.rs" = 1
 
 [todo-port]
 "crates/mln_actor/src/established_actor.rs" = 1
 "crates/mln_actor/src/mailbox.rs" = 1
-"crates/mln_actor/src/platform_settings.rs" = 1
 "crates/mln_actor/src/run_loop.rs" = 1
 "crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/thread.rs" = 1
@@ -197,7 +191,6 @@
 "crates/mln_gfx/src/drawable_builder.rs" = 4
 "crates/mln_gfx/src/renderer_backend.rs" = 1
 "crates/mln_gfx/src/rendering_stats.rs" = 1
-"crates/mln_gfx/src/shader_group.rs" = 1
 "crates/mln_gfx/src/shaders/program_parameters.rs" = 1
 "crates/mln_gfx/src/shaders/segment.rs" = 1
 "crates/mln_gfx/src/shaders/shader_defines.rs" = 1
@@ -206,17 +199,14 @@
 "crates/mln_gfx/tests/gtest_backend_scope.rs" = 1
 "crates/mln_gl/src/context.rs" = 1
 "crates/mln_headless/src/headless_frontend.rs" = 1
-"crates/mln_headless/src/map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_annotations.rs" = 28
 "crates/mln_headless/tests/gtest_api.rs" = 1
 "crates/mln_headless/tests/gtest_location_indicator.rs" = 10
 "crates/mln_headless/tests/gtest_map.rs" = 8
-"crates/mln_headless/tests/gtest_map_snapshotter.rs" = 1
 "crates/mln_headless/tests/gtest_query.rs" = 1
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
 "crates/mln_map/src/map.rs" = 4
-"crates/mln_map/tests/gtest_action_journal.rs" = 7
 "crates/mln_mtl/src/context.rs" = 1
 "crates/mln_renderer/src/algorithm/mod.rs" = 1
 "crates/mln_renderer/src/bucket.rs" = 1
@@ -229,7 +219,7 @@
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 1
 "crates/mln_renderer/src/render_layer.rs" = 2
 "crates/mln_renderer/src/render_orchestrator.rs" = 14
-"crates/mln_renderer/src/render_source.rs" = 2
+"crates/mln_renderer/src/render_source.rs" = 1
 "crates/mln_renderer/src/render_static_data.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
 "crates/mln_renderer/src/renderer.rs" = 1
@@ -257,17 +247,10 @@
 "crates/mln_storage/src/tests/offline_database.rs" = 3
 "crates/mln_storage_offline/src/tests/offline_download.rs" = 1
 "crates/mln_style/src/conversion/source.rs" = 1
-"crates/mln_style/src/layer_impl.rs" = 1
 "crates/mln_style/src/layermanager/layer_factory.rs" = 1
-"crates/mln_style/src/layers/circle_layer_impl.rs" = 1
-"crates/mln_style/src/layers/fill_extrusion_layer_impl.rs" = 1
-"crates/mln_style/src/layers/fill_layer_impl.rs" = 1
-"crates/mln_style/src/layers/line_layer_impl.rs" = 1
-"crates/mln_style/src/layers/location_indicator_layer_impl.rs" = 1
-"crates/mln_style/src/layers/symbol_layer_impl.rs" = 1
 "crates/mln_style/src/layout_property.rs" = 1
 "crates/mln_style/src/paint_property.rs" = 1
-"crates/mln_style/src/properties.rs" = 2
+"crates/mln_style/src/properties.rs" = 1
 "crates/mln_style/src/property_expression.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
 "crates/mln_style/src/sources/geojson_source_impl.rs" = 1

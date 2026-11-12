@@ -97,12 +97,6 @@ impl Mailbox {
         drop(object);
     }
 
-    /// `isOpen()`.
-    pub fn is_open(&self) -> bool {
-        let state = self.state.lock_unpoisoned();
-        !state.closed && state.scheduler.as_ref().is_some_and(|s| s.strong_count() > 0)
-    }
-
     /// `push(std::unique_ptr<Message>)`.
     pub fn push(&self, message: Message) {
         let mut state = self.state.lock_unpoisoned();

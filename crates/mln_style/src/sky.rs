@@ -11,7 +11,6 @@
 
 use crate::conversion::{Converter, convert_property_value};
 use crate::conversion_impl::{make_style_property, make_transition_style_property};
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::StyleProperty;
 use crate::transition_options::TransitionOptions;
@@ -228,11 +227,6 @@ impl Sky {
     }
 
     #[must_use]
-    pub fn get_default_atmosphere_blend() -> f32 {
-        SkyAtmosphereBlend::default_value()
-    }
-
-    #[must_use]
     pub fn get_atmosphere_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyAtmosphereBlend>().value.clone()
     }
@@ -252,11 +246,6 @@ impl Sky {
     #[must_use]
     pub fn get_atmosphere_blend_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyAtmosphereBlend>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fog_color() -> Color {
-        SkyFogColor::default_value()
     }
 
     #[must_use]
@@ -282,11 +271,6 @@ impl Sky {
     }
 
     #[must_use]
-    pub fn get_default_fog_ground_blend() -> f32 {
-        SkyFogGroundBlend::default_value()
-    }
-
-    #[must_use]
     pub fn get_fog_ground_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyFogGroundBlend>().value.clone()
     }
@@ -306,11 +290,6 @@ impl Sky {
     #[must_use]
     pub fn get_fog_ground_blend_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyFogGroundBlend>().options
-    }
-
-    #[must_use]
-    pub fn get_default_horizon_color() -> Color {
-        SkyHorizonColor::default_value()
     }
 
     #[must_use]
@@ -336,11 +315,6 @@ impl Sky {
     }
 
     #[must_use]
-    pub fn get_default_horizon_fog_blend() -> f32 {
-        SkyHorizonFogBlend::default_value()
-    }
-
-    #[must_use]
     pub fn get_horizon_fog_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyHorizonFogBlend>().value.clone()
     }
@@ -363,11 +337,6 @@ impl Sky {
     }
 
     #[must_use]
-    pub fn get_default_sky_color() -> Color {
-        SkyColor::default_value()
-    }
-
-    #[must_use]
     pub fn get_sky_color(&self) -> PropertyValue<Color> {
         self.impl_.properties.get::<SkyColor>().value.clone()
     }
@@ -387,11 +356,6 @@ impl Sky {
     #[must_use]
     pub fn get_sky_color_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_sky_horizon_blend() -> f32 {
-        SkyHorizonBlend::default_value()
     }
 
     #[must_use]

@@ -43,14 +43,8 @@ impl UploadPass {
         UploadPass { context: command_encoder.get_context().clone() }
     }
 
-    #[must_use]
-    pub fn webgpu_context(&self) -> &Rc<Context> {
-        &self.context
-    }
-
-    fn create_vertex_buffer(&self, data: &[u8], persistent: bool) -> Rc<VertexBufferResource> {
-        let buffer =
-            BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::VERTEX, persistent);
+    fn create_vertex_buffer(&self, data: &[u8]) -> Rc<VertexBufferResource> {
+        let buffer = BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::VERTEX);
         if buffer.get_buffer().is_none() {
             eprintln!("  Failed to create vertex buffer!");
         }
@@ -62,15 +56,10 @@ impl UploadPass {
     fn create_vertex_buffer_of(&self, vec: &VertexVectorBasePtr, raw_size: usize) -> Rc<VertexBufferResource> {
         #[cfg(target_family = "wasm")]
         if let Some(data) = vec.get_host_data() {
-            let buffer = BufferResource::new_from_host(
-                self.context.clone(),
-                &data,
-                wgpu::BufferUsages::VERTEX,
-                /*persistent=*/ false,
-            );
+            let buffer = BufferResource::new_from_host(self.context.clone(), &data, wgpu::BufferUsages::VERTEX);
             return Rc::new(VertexBufferResource::new(buffer));
         }
-        self.create_vertex_buffer(&vec.get_raw_data()[..raw_size], false)
+        self.create_vertex_buffer(&vec.get_raw_data()[..raw_size])
     }
 
     /// An index buffer of `indexes`, written from the JS array they're in,
@@ -83,12 +72,7 @@ impl UploadPass {
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         #[cfg(target_family = "wasm")]
         if let Some(data) = indexes.host_data() {
-            let buffer = BufferResource::new_from_host(
-                self.context.clone(),
-                data,
-                wgpu::BufferUsages::INDEX,
-                /*persistent=*/ false,
-            );
+            let buffer = BufferResource::new_from_host(self.context.clone(), data, wgpu::BufferUsages::INDEX);
             return Box::new(IndexBufferResource::new(buffer));
         }
         upload_pass::UploadPass::create_index_buffer_resource(
@@ -160,7 +144,7 @@ impl UploadPass {
                 v.copy_from_slice(&1.0f32.to_ne_bytes());
             }
         }
-        let buffer: UniqueVertexBufferResource = self.create_vertex_buffer(&data, false);
+        let buffer: UniqueVertexBufferResource = self.create_vertex_buffer(&data);
         cache.insert(data_type, (count, buffer.clone()));
         buffer
     }
@@ -176,7 +160,7 @@ impl UploadPass {
             if let Some(shared) = attrib.get_shared_raw_data().cloned() {
                 return self.get_buffer(Some(&shared), usage, force_update);
             } else if !attrib.get_raw_data().is_empty() {
-                let buffer: UniqueVertexBufferResource = self.create_vertex_buffer(attrib.get_raw_data(), false);
+                let buffer: UniqueVertexBufferResource = self.create_vertex_buffer(attrib.get_raw_data());
                 attrib.set_buffer(Some(buffer));
                 attrib.set_raw_data(Vec::new());
                 attrib.set_dirty(false);
@@ -210,7 +194,6 @@ impl upload_pass::UploadPass for UploadPass {
         overrides: &mut VertexAttributeArray,
         usage: BufferUsageType,
         last_update: Option<Instant>,
-        vertex_buffers: &mut Vec<UniqueVertexBufferResource>,
     ) -> AttributeBindingArray {
         let mut bindings: AttributeBindingArray = vec![None; defaults.allocated_size()];
 
@@ -229,12 +212,10 @@ impl upload_pass::UploadPass for UploadPass {
                 bindings[index] = Some(AttributeBinding {
                     attribute: AttributeDescriptor { data_type: default.get_data_type(), offset: 0 },
                     vertex_stride: stride as u32,
-                    vertex_buffer_resource: Some(dummy_buffer.clone()),
+                    vertex_buffer_resource: Some(dummy_buffer),
                     vertex_offset: 0,
                     buffer_index: 0,
                 });
-                // Store the buffer so it doesn't get destroyed
-                vertex_buffers.push(dummy_buffer);
                 return;
             };
 
@@ -288,36 +269,14 @@ impl upload_pass::UploadPass for UploadPass {
         bindings
     }
 
-    fn create_vertex_buffer_resource(
-        &self,
-        data: &[u8],
-        _usage: BufferUsageType,
-        persistent: bool,
-    ) -> UniqueVertexBufferResource {
-        self.create_vertex_buffer(data, persistent)
-    }
-
-    fn update_vertex_buffer_resource(&self, resource: &dyn vertex_buffer::VertexBufferResource, data: &[u8]) {
-        if let Some(buffer) = resource.as_any().downcast_ref::<VertexBufferResource>() {
-            buffer.update(data);
-        }
-    }
-
     fn create_index_buffer_resource(
         &self,
         data: &[u8],
         _usage: BufferUsageType,
-        persistent: bool,
+        _persistent: bool,
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
-        let buffer =
-            BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::INDEX, persistent);
+        let buffer = BufferResource::new(self.context.clone(), Some(data), data.len(), wgpu::BufferUsages::INDEX);
         Box::new(IndexBufferResource::new(buffer))
-    }
-
-    fn update_index_buffer_resource(&self, resource: &dyn vertex_buffer::IndexBufferResource, data: &[u8]) {
-        if let Some(buffer) = resource.as_any().downcast_ref::<IndexBufferResource>() {
-            buffer.update(data);
-        }
     }
 
     fn as_any(&self) -> &dyn Any {

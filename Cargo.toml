@@ -81,13 +81,11 @@ nunicode = { package = "mln-rs-nunicode", path = "vendor/nunicode", version = "=
 pixelmatch = { package = "mln-rs-pixelmatch", path = "vendor/pixelmatch", version = "=0.0.11" }
 pmtiles = { package = "mln-rs-pmtiles", path = "vendor/pmtiles", version = "=0.0.11" }
 polylabel = { package = "mln-rs-polylabel", path = "vendor/polylabel", version = "=0.0.11" }
-protozero = { package = "mln-rs-protozero", path = "vendor/protozero", version = "=0.0.11" }
 rapidjson = { package = "mln-rs-rapidjson", path = "vendor/rapidjson", version = "=0.0.11" }
 render_test = { package = "mln-rs-render-test", path = "tools/render-test", version = "=0.0.11" }
 shelf_pack = { package = "mln-rs-shelf-pack", path = "vendor/shelf-pack", version = "=0.0.11" }
 style_codegen = { package = "mln-rs-style-codegen", path = "tools/style-codegen", version = "=0.0.11" }
 supercluster = { package = "mln-rs-supercluster", path = "vendor/supercluster", version = "=0.0.11" }
-vector_tile = { package = "mln-rs-vector-tile", path = "vendor/vector-tile", version = "=0.0.11" }
 wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.11" }
 
 # Third-party crates, for both builds (Cargo.lock pins their versions). Only
@@ -95,11 +93,6 @@ wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.11" }
 #
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
-# Evaluated as a replacement for vendor/earcut and rejected: on polygons with
-# holes it differs from the C++ earcut.hpp (25% identical, 1.1% cover a
-# different area; see difftest/earcut_crate). Only that comparison uses it, so
-# a newer release can be re-checked.
-earcut_crate = { package = "earcut", version = "0.4.5" }
 # zlib-rs backend: pure Rust, so neither native nor wasm32 builds need a C
 # compiler or a system zlib.
 flate2 = { version = "1.1.11", default-features = false, features = ["zlib-rs"] }
@@ -127,6 +120,11 @@ libloading = { version = "0.8.9" }
 # (user decision, 2026-11-04); the differential test against the C++ decoder
 # (//difftest/mlt) was removed with that decision.
 mlt-core = { version = "0.22.1" }
+# MVT decoding, instead of porting the C++ reader (vendor/vector-tile).
+fast-mvt = { version = "0.7.3", default-features = false, features = ["reader"] }
+# Glyph PBFs: fast-mvt's protobuf runtime, whose wire format functions read
+# them instead of a port of protozero.
+buffa = { version = "0.9.2", default-features = false }
 png = { version = "0.18.1" }
 pollster = { version = "1.0.1" }
 # The messages between a tile and its worker in another wasm instance
@@ -372,11 +370,9 @@ mln_webgpu.workspace = true
 nunicode.workspace = true
 pmtiles.workspace = true
 polylabel.workspace = true
-protozero.workspace = true
 rapidjson.workspace = true
 shelf_pack.workspace = true
 supercluster.workspace = true
-vector_tile.workspace = true
 wagyu.workspace = true
 
 [lints]

@@ -25,7 +25,6 @@ macro_rules! paint_property {
             type PossiblyEvaluatedType = $t;
             type EvaluatorType<'a> = $crate::renderer::property_evaluator::PropertyEvaluator<'a, $t>;
             const IS_DATA_DRIVEN: bool = false;
-            const IS_OVERRIDABLE: bool = false;
 
             fn default_value() -> $t {
                 $default
@@ -58,7 +57,6 @@ macro_rules! cross_faded_paint_property {
             type EvaluatorType<'a> =
                 $crate::renderer::cross_faded_property_evaluator::CrossFadedPropertyEvaluator<'a, $t>;
             const IS_DATA_DRIVEN: bool = false;
-            const IS_OVERRIDABLE: bool = false;
 
             fn default_value() -> $t {
                 $default
@@ -79,14 +77,14 @@ macro_rules! cross_faded_paint_property {
     };
 }
 
-/// `DataDrivenPaintProperty<T, A, U, isOverridable>`. `use_integer_zoom =
+/// `DataDrivenPaintProperty<T, A, U>`. `use_integer_zoom =
 /// true` replaces the evaluator with `DataDrivenPropertyEvaluator<T, true>`
 /// (C++: `using EvaluatorType = DataDrivenPropertyEvaluator<float, true>;`
 /// in the struct body, for line-floor-width).
 #[macro_export]
 macro_rules! data_driven_paint_property {
     ($(#[$meta:meta])* $vis:vis struct $name:ident: $t:ty = $default:expr
-        $(, overridable = $overridable:literal)? $(, use_integer_zoom = $int_zoom:literal)?) => {
+        $(, use_integer_zoom = $int_zoom:literal)?) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
         $vis struct $name;
@@ -103,7 +101,6 @@ macro_rules! data_driven_paint_property {
                     { false $(|| $int_zoom)? },
                 >;
             const IS_DATA_DRIVEN: bool = true;
-            const IS_OVERRIDABLE: bool = false $(|| $overridable)?;
 
             fn default_value() -> $t {
                 $default
@@ -141,7 +138,6 @@ macro_rules! cross_faded_data_driven_paint_property {
             type EvaluatorType<'a> =
                 $crate::renderer::data_driven_property_evaluator::DataDrivenFadedPropertyEvaluator<'a, $t>;
             const IS_DATA_DRIVEN: bool = true;
-            const IS_OVERRIDABLE: bool = false;
 
             fn default_value() -> $t {
                 $default
@@ -178,7 +174,6 @@ macro_rules! color_ramp_property {
             type PossiblyEvaluatedType = mln_util::Color;
             type EvaluatorType<'a> = $crate::renderer::property_evaluator::PropertyEvaluator<'a, mln_util::Color>;
             const IS_DATA_DRIVEN: bool = false;
-            const IS_OVERRIDABLE: bool = false;
 
             /// `static Color defaultValue() { return {}; }`
             fn default_value() -> mln_util::Color {

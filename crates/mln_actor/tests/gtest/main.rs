@@ -1,13 +1,12 @@
 // Ported C++ gtests of the actor layer: test/actor/*.test.cpp and the
-// thread/loop parts of test/util (thread, run_loop, async_task, timer,
-// thread_local). Every test carries a `// gtest: Group.Name` marker
-// (tools/gtest-parity).
+// thread/loop parts of test/util (thread, run_loop, async_task, timer).
+// Every test carries a `// gtest: Group.Name` marker (tools/gtest-parity).
 //
 // C++ -> Rust in these tests:
 // - `Actor<O>` on `Scheduler::GetBackground()` is the pool `mln_actor::actor::
 //   Actor<O>` (objects are `Send`, messages are closures over `&mut O`);
-//   `util::Thread<O>` and `AspiringActor`/`EstablishedActor` are the
-//   thread-pinned actors (messages are closures over `&O`).
+//   `util::Thread<O>` is the thread-pinned actor (messages are closures over
+//   `&O`).
 // - `std::promise`/`std::future` are `mpsc` channels; a `future.get()` on the
 //   test thread is `get()` below, which fails the test after a generous
 //   timeout instead of hanging when a message never arrives.
@@ -19,9 +18,7 @@ mod actor;
 mod actor_ref;
 mod async_task;
 mod run_loop;
-mod settings;
 mod thread;
-mod thread_local;
 mod timer;
 
 use std::sync::{Arc, Mutex, mpsc};

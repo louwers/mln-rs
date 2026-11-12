@@ -57,11 +57,6 @@ impl LayerRenderItem {
     }
 
     #[must_use]
-    pub fn has_render_pass(&self, pass: RenderPass) -> bool {
-        self.layer.borrow().has_render_pass(pass)
-    }
-
-    #[must_use]
     pub fn get_name(&self) -> String {
         self.layer.borrow().get_id().to_owned()
     }
@@ -179,11 +174,6 @@ impl RenderTree {
     #[must_use]
     pub fn get_layer_render_item_map(&self) -> &VecMap<u32, LayerRenderItem> {
         &self.layer_render_items
-    }
-
-    #[must_use]
-    pub fn get_layer_render_items(&self) -> Vec<LayerRenderItem> {
-        self.layer_render_items.values().cloned().collect()
     }
 
     /// `getSourceRenderItems()`.

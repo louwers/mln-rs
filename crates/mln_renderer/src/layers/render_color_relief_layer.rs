@@ -405,10 +405,9 @@ impl RenderLayer for RenderColorReliefLayer {
             let tile_layer_group =
                 group.as_tile_layer_group_mut().expect("color-relief layer group is a TileLayerGroup");
             let base = &self.base;
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
         }
 
         if self.static_data_shared_vertices.is_none() {
@@ -621,7 +620,6 @@ impl RenderLayer for RenderColorReliefLayer {
                 drawable.set_data(Some(Box::new(ColorReliefDrawableData { tile_props: tile_props_ubo })));
 
                 tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
     }

@@ -3,7 +3,6 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_storage::FileSource;
 use mln_style::expression::GlobalStateMap;
@@ -23,7 +22,6 @@ pub struct TileParameters<'a> {
     pub file_source: Option<Arc<dyn FileSource>>,
     pub mode: MapMode,
     pub prefetch_zoom_delta: u8,
-    pub thread_pool: TaggedScheduler,
     pub tile_lod_min_radius: f64,
     pub tile_lod_scale: f64,
     pub tile_lod_pitch_threshold: f64,

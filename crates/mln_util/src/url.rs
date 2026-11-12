@@ -240,12 +240,6 @@ pub fn transform_url_with(tpl: &str, str_: &str, url: &URL) -> String {
     result
 }
 
-/// `util::transformURL(tpl, url)`.
-#[must_use]
-pub fn transform_url(tpl: &str, url: &str) -> String {
-    transform_url_with(tpl, url, &URL::new(url))
-}
-
 #[cfg(test)]
 mod tests {
     // Ports test/util/url.test.cpp.

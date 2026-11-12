@@ -308,7 +308,6 @@ impl RenderLayer for RenderBackgroundLayer {
                 drawable.set_tile_id(*tile_id);
                 drawable.set_layer_tweaker(layer_tweaker_slot(&layer_tweaker));
                 tile_layer_group.add_drawable(draw_passes, tile_id, drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
     }

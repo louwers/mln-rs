@@ -1,11 +1,9 @@
 // Ports src/mln/renderer/sources/render_geojson_source.hpp and
 // src/mln/renderer/sources/render_geojson_source.cpp.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::{Arc, Weak};
 
-use mln_actor::TaggedScheduler;
 use mln_map_types::MapMode;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source::{self, static_immutable_cast};
@@ -80,13 +78,9 @@ pub struct RenderGeoJSONSource {
 
 impl RenderGeoJSONSource {
     /// `RenderGeoJSONSource(Immutable<style::GeoJSONSource::Impl>, const TaggedScheduler&)`.
-    pub fn new(impl_: Arc<geojson_source_impl::Impl>, thread_pool: &TaggedScheduler) -> Self {
+    pub fn new(impl_: Arc<geojson_source_impl::Impl>) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
-        RenderGeoJSONSource {
-            tile_source: RenderTileSource::new(impl_, thread_pool),
-            data: None,
-            tiles_update_synchronously: false,
-        }
+        RenderGeoJSONSource { tile_source: RenderTileSource::new(impl_), data: None, tiles_update_synchronously: false }
     }
 
     /// `impl()`.
@@ -106,10 +100,6 @@ impl RenderSource for RenderGeoJSONSource {
 
     fn base_mut(&mut self) -> &mut RenderSourceBase {
         &mut self.tile_source.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn is_loaded(&self) -> bool {

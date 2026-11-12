@@ -50,18 +50,6 @@ impl UnitBezier {
         UnitBezier { cx, bx, ax, cy, by, ay }
     }
 
-    /// `getP1()`.
-    #[must_use]
-    pub fn get_p1(&self) -> (f64, f64) {
-        self.p1()
-    }
-
-    /// `getP2()`.
-    #[must_use]
-    pub fn get_p2(&self) -> (f64, f64) {
-        self.p2()
-    }
-
     #[must_use]
     pub fn p1(&self) -> (f64, f64) {
         (self.cx / 3.0, self.cy / 3.0)

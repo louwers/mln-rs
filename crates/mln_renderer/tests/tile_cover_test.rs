@@ -695,7 +695,6 @@ mod tile_cover {
         assert_eq!(4, covering_zoom_level(4.6, SourceType::GeoJSON, constants::TILE_SIZE_I));
         assert_eq!(5, covering_zoom_level(4.6, SourceType::Raster, constants::TILE_SIZE_I));
         assert_eq!(5, covering_zoom_level(4.6, SourceType::RasterDEM, constants::TILE_SIZE_I));
-        assert_eq!(5, covering_zoom_level(4.6, SourceType::Video, constants::TILE_SIZE_I));
         assert_eq!(4, covering_zoom_level(4.4, SourceType::RasterDEM, constants::TILE_SIZE_I));
         assert_eq!(6, covering_zoom_level(4.6, SourceType::RasterDEM, 256));
     }

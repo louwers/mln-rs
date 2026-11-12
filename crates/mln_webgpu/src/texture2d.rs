@@ -52,7 +52,6 @@ pub struct Texture2D {
     sampler_state: SamplerState,
     image: Option<Rc<PremultipliedImage>>,
     dirty: bool,
-    size_changed_callback: Option<Box<dyn Fn(Size)>>,
     /// The bytes of `texture` in the rendering stats' `mem_textures`.
     counted_bytes: usize,
 }
@@ -74,7 +73,6 @@ impl Texture2D {
             sampler_state: SamplerState::default(),
             image: None,
             dirty: false,
-            size_changed_callback: None,
             counted_bytes: 0,
         }
     }
@@ -91,10 +89,6 @@ impl Texture2D {
 
     pub fn set_usage(&mut self, usage_flags: wgpu::TextureUsages) {
         self.usage_flags = usage_flags;
-    }
-
-    pub fn set_size_changed_callback(&mut self, callback: Option<Box<dyn Fn(Size)>>) {
-        self.size_changed_callback = callback;
     }
 
     #[must_use]
@@ -201,9 +195,6 @@ impl texture2d::Texture2D for Texture2D {
         }
         self.size = size;
         self.dirty = true;
-        if let Some(callback) = &self.size_changed_callback {
-            callback(size);
-        }
     }
 
     fn set_image(&mut self, image: Option<Rc<PremultipliedImage>>) {

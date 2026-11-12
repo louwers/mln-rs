@@ -157,7 +157,6 @@ impl upload_pass::UploadPass for UploadPass {
         overrides: &mut VertexAttributeArray,
         usage: BufferUsageType,
         last_update: Option<Instant>,
-        _vertex_buffers: &mut Vec<UniqueVertexBufferResource>,
     ) -> AttributeBindingArray {
         let mut bindings: AttributeBindingArray = vec![None; defaults.allocated_size()];
 
@@ -235,21 +234,6 @@ impl upload_pass::UploadPass for UploadPass {
         bindings
     }
 
-    fn create_vertex_buffer_resource(
-        &self,
-        data: &[u8],
-        _usage: BufferUsageType,
-        persistent: bool,
-    ) -> UniqueVertexBufferResource {
-        self.create_vertex_buffer(data, persistent)
-    }
-
-    fn update_vertex_buffer_resource(&self, resource: &dyn vertex_buffer::VertexBufferResource, data: &[u8]) {
-        if let Some(buffer) = resource.as_any().downcast_ref::<VertexBufferResource>() {
-            buffer.get().update(data, 0);
-        }
-    }
-
     fn create_index_buffer_resource(
         &self,
         data: &[u8],
@@ -257,12 +241,6 @@ impl upload_pass::UploadPass for UploadPass {
         persistent: bool,
     ) -> Box<dyn vertex_buffer::IndexBufferResource> {
         Box::new(IndexBufferResource::new(self.context.create_buffer(Some(data), data.len(), true, persistent)))
-    }
-
-    fn update_index_buffer_resource(&self, resource: &dyn vertex_buffer::IndexBufferResource, data: &[u8]) {
-        if let Some(buffer) = resource.as_any().downcast_ref::<IndexBufferResource>() {
-            buffer.get().update(data, 0);
-        }
     }
 
     fn as_any(&self) -> &dyn Any {

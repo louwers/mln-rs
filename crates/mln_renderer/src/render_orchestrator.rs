@@ -211,7 +211,6 @@ pub struct RenderOrchestrator {
     // TODO(port):
     // layersNeedPlacement, filteredLayersForSource.
     background_layer_as_color: bool,
-    context_lost: bool,
     placed_symbol_data_collected: bool,
     tile_cache_enabled: bool,
 
@@ -299,7 +298,6 @@ impl RenderOrchestrator {
             render_light: crate::render_light::RenderLight::new(Arc::new(mln_style::light::Impl::default())),
             render_sky: None,
             background_layer_as_color,
-            context_lost: false,
             placed_symbol_data_collected: false,
             tile_cache_enabled: true,
             ordered_layers: Vec::new(),
@@ -318,10 +316,6 @@ impl RenderOrchestrator {
             pending_changes: Vec::new(),
             frame_rendered_features: FrameRenderedFeaturesMap::new(),
         }
-    }
-
-    pub fn mark_context_lost(&mut self) {
-        self.context_lost = true;
     }
 
     /// Port-only: the transport that creates the workers of the tiles
@@ -343,10 +337,6 @@ impl RenderOrchestrator {
     /// `getRenderSource(id)`.
     pub fn get_render_source(&self, id: &str) -> Option<&dyn RenderSource> {
         self.render_sources.get(id).map(AsRef::as_ref)
-    }
-
-    pub fn get_zoom_history(&self) -> &ZoomHistory {
-        &self.zoom_history
     }
 
     /// `RenderTree::getLineAtlas()` (the orchestrator's atlas).
@@ -428,7 +418,6 @@ impl RenderOrchestrator {
             file_source: update_parameters.file_source.clone(),
             mode: update_parameters.mode,
             prefetch_zoom_delta: update_parameters.prefetch_zoom_delta,
-            thread_pool: self.thread_pool.clone(),
             tile_lod_min_radius: update_parameters.tile_lod_min_radius,
             tile_lod_scale: update_parameters.tile_lod_scale,
             tile_lod_pitch_threshold: update_parameters.tile_lod_pitch_threshold,
@@ -646,7 +635,7 @@ impl RenderOrchestrator {
 
         // Create render sources for newly added sources.
         for (id, impl_) in &source_diff.added {
-            if let Some(mut render_source) = render_source::create(impl_, &self.thread_pool) {
+            if let Some(mut render_source) = render_source::create(impl_) {
                 render_source.set_observer(self.source_observer.clone());
                 render_source.set_cache_enabled(self.tile_cache_enabled);
                 render_source.set_fast_pfor_enabled(update_parameters.fast_pfor_enabled);
@@ -1072,14 +1061,6 @@ impl RenderOrchestrator {
     /// renderer and handed to createRenderTree).
     pub fn reset_dynamic_texture_atlas(&mut self) {
         self.dynamic_texture_atlas = Arc::new(DynamicTextureAtlas::new());
-    }
-
-    pub fn get_glyph_manager(&self) -> &Rc<GlyphManager> {
-        &self.glyph_manager
-    }
-
-    pub fn get_image_manager(&self) -> &Rc<ImageManager> {
-        &self.image_manager
     }
 
     fn add_changes(&mut self, changes: &mut UniqueChangeRequestVec) {
@@ -1611,13 +1592,6 @@ impl RenderOrchestrator {
 
 impl Drop for RenderOrchestrator {
     fn drop(&mut self) {
-        if self.context_lost {
-            // Signal all RenderLayers that the context was lost before
-            // cleaning up.
-            for layer in self.render_layers.values() {
-                layer.borrow_mut().mark_context_destroyed();
-            }
-        }
         // Destroy the render sources (and their tiles and workers) before
         // waiting for the thread pool, as the C++ members' destructors do.
         self.render_sources.clear();

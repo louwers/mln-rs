@@ -165,9 +165,9 @@ pub fn shared_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePtr 
     crate::bucket_geometry::released_vertices(vertices)
 }
 
-/// `checkTweakDrawable` for a tweaker whose `RefCell` is already borrowed
-/// mutably by the running `execute`: compares the drawable's tweaker with
-/// `self_ptr`.
+/// `checkTweakDrawable`: true if the drawable references the tweaker at
+/// `self_ptr`, or no tweaker at all. It takes a pointer because the running
+/// `execute` already borrows the tweaker's `RefCell` mutably.
 pub fn check_tweak_drawable_ptr<T: ?Sized>(drawable: &dyn Drawable, self_ptr: *const T) -> bool {
     match drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>()) {
         None => true,
@@ -197,23 +197,16 @@ pub fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
 /// (`updateTile`, `removeTile`), for every render layer.
 pub trait TileDrawables: crate::render_layer::RenderLayer {
     /// `removeTile(RenderPass, const OverscaledTileID&)`: remove all
-    /// drawables for the tile from the layer group; returns the number of
-    /// drawables actually removed.
-    fn remove_tile(
-        &mut self,
-        render_pass: crate::render_pass::RenderPass,
-        tile_id: &mln_tile_id::OverscaledTileID,
-    ) -> usize {
+    /// drawables for the tile from the layer group.
+    fn remove_tile(&mut self, render_pass: crate::render_pass::RenderPass, tile_id: &mln_tile_id::OverscaledTileID) {
         let Some(layer_group) = self.base().layer_group.clone() else {
-            return 0;
+            return;
         };
         let mut group = layer_group.borrow_mut();
         let Some(tile_group) = group.as_tile_layer_group_mut() else {
-            return 0;
+            return;
         };
-        let n = tile_group.remove_drawables(render_pass, tile_id).len();
-        self.base_mut().stats.drawables_removed += n;
-        n
+        tile_group.remove_drawables(render_pass, tile_id);
     }
 
     /// `updateTile(renderPass, tileID, update)`: update the drawables for a

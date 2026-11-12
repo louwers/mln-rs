@@ -88,14 +88,6 @@ impl FileSource for AssetFileSource {
         accepts_url(&resource.url)
     }
 
-    fn pause(&self) {
-        self.thread.pause();
-    }
-
-    fn resume(&self) {
-        self.thread.resume();
-    }
-
     fn set_resource_options(&self, options: ResourceOptions) {
         *self.resource_options.lock_unpoisoned() = options;
     }

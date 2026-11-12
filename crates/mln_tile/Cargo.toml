@@ -14,16 +14,14 @@ name = "mln_tile"
 doctest = false
 
 [dependencies]
+fast-mvt.workspace = true
 feature.workspace = true
 geometry.workspace = true
 mln_math.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
-mln_vec_map.workspace = true
 mlt-core.workspace = true
-protozero.workspace = true
 thiserror.workspace = true
-vector_tile.workspace = true
 wagyu.workspace = true
 
 [dev-dependencies]

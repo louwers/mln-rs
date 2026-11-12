@@ -12,7 +12,6 @@ use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serial
 use crate::layers::color_relief_layer_properties::{
     ColorReliefColor, ColorReliefOpacity, ColorReliefPaintProperties, Resampling,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -112,11 +111,6 @@ impl ColorReliefLayer {
     }
 
     #[must_use]
-    pub fn get_default_color_relief_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(ColorReliefOpacity::default_value())
-    }
-
-    #[must_use]
     pub fn get_color_relief_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<ColorReliefOpacity>().value
     }
@@ -139,11 +133,6 @@ impl ColorReliefLayer {
     #[must_use]
     pub fn get_color_relief_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<ColorReliefOpacity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
-        PropertyValue::Constant(Resampling::default_value())
     }
 
     #[must_use]

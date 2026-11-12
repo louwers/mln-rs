@@ -23,15 +23,13 @@ use mln_util::identity::SimpleIdentity;
 use mln_util::sync::MutexExt;
 use mln_util::time::Instant;
 
-use crate::scheduler::{ExceptionHandler, Scheduler, Task};
+use crate::scheduler::{Scheduler, Task};
 
 /// A scheduler whose tasks the host runs on its own thread.
 pub struct CooperativeScheduler {
     unique_id: SimpleIdentity,
     queues: Mutex<HashMap<SimpleIdentity, Arc<Mutex<VecDeque<Task>>>>>,
     task_count: AtomicUsize,
-    /// `Scheduler::handler` (gtests-core).
-    handler: Mutex<Option<Arc<ExceptionHandler>>>,
     waker: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
@@ -48,7 +46,6 @@ impl CooperativeScheduler {
             unique_id: SimpleIdentity::new(),
             queues: Mutex::new(HashMap::new()),
             task_count: AtomicUsize::new(0),
-            handler: Mutex::new(None),
             waker: Mutex::new(None),
         }
     }
@@ -98,14 +95,7 @@ impl CooperativeScheduler {
 
     fn run(&self, task: Task) {
         self.task_count.fetch_sub(1, Ordering::SeqCst);
-        // As ThreadedScheduler's workers (C++ `try { ... } catch (...)`).
-        if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(task)) {
-            let handler = self.handler.lock_unpoisoned().clone();
-            match handler {
-                Some(handler) => handler(payload),
-                None => std::panic::resume_unwind(payload),
-            }
-        }
+        task();
     }
 }
 
@@ -149,10 +139,6 @@ impl Scheduler for CooperativeScheduler {
         if queues.get(&tag_to_find).is_some_and(|q| Arc::ptr_eq(q, &queue)) {
             queues.remove(&tag_to_find);
         }
-    }
-
-    fn set_exception_handler(&self, handler: ExceptionHandler) {
-        *self.handler.lock_unpoisoned() = Some(Arc::new(handler));
     }
 }
 
@@ -268,21 +254,5 @@ mod tests {
         push(&scheduler, tag, &order, 2);
         assert!(!scheduler.run_until(None));
         assert_eq!(*order.lock().unwrap(), vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn a_panicking_task_goes_to_the_handler() {
-        let scheduler = CooperativeScheduler::new();
-        let caught = Arc::new(Mutex::new(None));
-        let c = caught.clone();
-        scheduler.set_exception_handler(Box::new(move |payload| {
-            *c.lock().unwrap() = payload.downcast_ref::<&str>().map(std::string::ToString::to_string);
-        }));
-        scheduler.schedule(Box::new(|| panic!("boom")));
-        let order = Arc::new(Mutex::new(Vec::new()));
-        push(&scheduler, SimpleIdentity::new(), &order, 1);
-        assert!(!scheduler.run_until(None));
-        assert_eq!(caught.lock().unwrap().as_deref(), Some("boom"));
-        assert_eq!(*order.lock().unwrap(), vec![1]);
     }
 }

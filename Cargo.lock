@@ -978,9 +978,9 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fast-mvt"
-version = "0.7.1"
+version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dd28eb5048f310a33f947a615fbbca7ea47fc92e3a0820fc2a5925b475a8531"
+checksum = "852aa4708f6b1b09274ac76f91faa312ce7ff736ac458f41cb9ac1f5329c2933"
 dependencies = [
  "buffa",
  "foldhash 0.2.0",
@@ -2071,7 +2071,6 @@ dependencies = [
  "mln-rs-nunicode",
  "mln-rs-pmtiles",
  "mln-rs-polylabel",
- "mln-rs-protozero",
  "mln-rs-rapidjson",
  "mln-rs-renderer",
  "mln-rs-runtime",
@@ -2087,7 +2086,6 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
- "mln-rs-vector-tile",
  "mln-rs-vulkan",
  "mln-rs-wagyu",
  "mln-rs-webgpu",
@@ -2097,7 +2095,6 @@ dependencies = [
 name = "mln-rs-actor"
 version = "0.0.11"
 dependencies = [
- "mln-rs-feature",
  "mln-rs-util",
 ]
 
@@ -2475,10 +2472,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mln-rs-protozero"
-version = "0.0.11"
-
-[[package]]
 name = "mln-rs-rapidjson"
 version = "0.0.11"
 
@@ -2723,11 +2716,11 @@ dependencies = [
 name = "mln-rs-text"
 version = "0.0.11"
 dependencies = [
+ "buffa",
  "flate2",
  "harfrust 0.15.0",
  "js-sys",
  "mln-rs-math",
- "mln-rs-protozero",
  "mln-rs-style-types",
  "mln-rs-util",
  "mln-rs-vec-map",
@@ -2744,14 +2737,12 @@ dependencies = [
 name = "mln-rs-tile"
 version = "0.0.11"
 dependencies = [
+ "fast-mvt",
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-math",
- "mln-rs-protozero",
  "mln-rs-tile-id",
  "mln-rs-util",
- "mln-rs-vec-map",
- "mln-rs-vector-tile",
  "mln-rs-wagyu",
  "mlt-core",
  "proptest",
@@ -2799,16 +2790,6 @@ name = "mln-rs-vec-map"
 version = "0.0.11"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "mln-rs-vector-tile"
-version = "0.0.11"
-dependencies = [
- "mln-rs-feature",
- "mln-rs-geometry",
- "mln-rs-protozero",
- "thiserror 2.0.21",
 ]
 
 [[package]]

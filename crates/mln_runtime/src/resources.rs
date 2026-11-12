@@ -279,14 +279,6 @@ impl FileSource for ProviderFileSource {
         matches!(self.route(resource, hooked.as_deref()), Route::Provider(..)) || self.online.can_request(resource)
     }
 
-    fn pause(&self) {
-        self.online.pause();
-    }
-
-    fn resume(&self) {
-        self.online.resume();
-    }
-
     fn set_resource_transform(&self, transform: mln_storage::resource_transform::ResourceTransform) {
         self.online.set_resource_transform(transform);
     }

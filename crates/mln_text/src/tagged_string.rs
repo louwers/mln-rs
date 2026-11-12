@@ -99,29 +99,6 @@ impl SectionOptions {
         }
     }
 
-    /// `SectionOptions(scale, fontStackHash, type, startIndex, textColor)`.
-    #[must_use]
-    pub fn with_hash(
-        scale: f64,
-        font_stack_hash: FontStackHash,
-        type_: GlyphIDType,
-        start_index: u32,
-        text_color: Option<Color>,
-    ) -> Self {
-        SectionOptions {
-            scale,
-            font_stack: FontStack::new(),
-            font_stack_hash,
-            type_,
-            adjusts: None,
-            start_index: start_index as i32,
-            key_section: true,
-            rtl: false,
-            image_id: None,
-            text_color,
-        }
-    }
-
     /// `SectionOptions(std::string imageID)`. (C++ leaves `fontStackHash`
     /// and `startIndex` uninitialized here; they are 0.)
     #[must_use]

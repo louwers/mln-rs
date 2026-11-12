@@ -1,7 +1,7 @@
 // Smoke tests for the HeadlessFrontend + Map still-image path (the C++
 // tree tests this through test/api/*.test.cpp and the render tests).
 
-use mln_map::{MapMode, MapOptions};
+use mln_map::{CameraOptions, MapMode, MapOptions};
 
 use super::*;
 
@@ -40,6 +40,13 @@ fn render_still_in_continuous_mode_is_an_error() {
     assert_eq!(error, mln_util::Error::invalid_state("Map is not in static or tile image render modes"));
 }
 
+/// A style of one background layer of `color`.
+fn background_style(color: &str) -> String {
+    format!(
+        r#"{{"version": 8, "sources": {{}}, "layers": [{{"id": "background", "type": "background", "paint": {{"background-color": "{color}"}}}}]}}"#
+    )
+}
+
 /// How many frames the map's renderer finished since the last call.
 fn frames(map: &mut Map) -> usize {
     map.drain_events().iter().filter(|event| matches!(event, mln_map::MapEvent::RenderFrameFinished(_))).count()
@@ -51,9 +58,7 @@ fn draws_each_update_of_the_attached_map_on_the_run_loop() {
     let size = Size::new(16, 16);
     let frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
     let mut map = Map::new(MapOptions::new().with_size(size)).unwrap();
-    map.style_mut().load_json(
-        r#"{"version": 8, "sources": {}, "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]}"#,
-    );
+    map.style_mut().load_json(&background_style("red"));
     map.drain_events();
     // The map published before the frontend attached: the frontend draws the
     // latest update at once.
@@ -61,10 +66,11 @@ fn draws_each_update_of_the_attached_map_on_the_run_loop() {
     run_loop.run_once();
     assert_eq!(frames(&mut map), 1);
 
+    assert_eq!(pixel(&frontend.read_still_image(), 0, 0), [255, 0, 0, 255]);
+
     map.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
     run_loop.run_once();
     assert_eq!(frames(&mut map), 1);
-    assert_eq!(frontend.get_camera_options().zoom, Some(2.0));
 }
 
 #[test]
@@ -74,21 +80,22 @@ fn attaching_another_map_renders_that_map() {
     let frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
     let mut first = Map::new(MapOptions::new().with_size(size)).unwrap();
     let mut second = Map::new(MapOptions::new().with_size(size)).unwrap();
-    first.jump_to(&CameraOptions::default().with_zoom(Some(1.0)));
-    second.jump_to(&CameraOptions::default().with_zoom(Some(3.0)));
+    first.style_mut().load_json(&background_style("red"));
+    second.style_mut().load_json(&background_style("blue"));
+    first.drain_events();
+    second.drain_events();
     frontend.attach(&first);
-    assert_eq!(frontend.get_camera_options().zoom, Some(1.0));
     frontend.attach(&second);
     run_loop.run_once();
     first.drain_events();
     assert_eq!(frames(&mut second), 1);
-    assert_eq!(frontend.get_camera_options().zoom, Some(3.0));
+    assert_eq!(pixel(&frontend.read_still_image(), 0, 0), [0, 0, 255, 255]);
 
     // The first map's updates no longer reach the frontend.
     first.jump_to(&CameraOptions::default().with_zoom(Some(2.0)));
     run_loop.run_once();
     assert_eq!(frames(&mut first), 0);
-    assert_eq!(frontend.get_camera_options().zoom, Some(3.0));
+    assert_eq!(pixel(&frontend.read_still_image(), 0, 0), [0, 0, 255, 255]);
 }
 
 #[test]

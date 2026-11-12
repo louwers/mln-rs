@@ -2761,8 +2761,7 @@ impl SymbolBucket {
 
         let dynamic_updated = placement.update_bucket_dynamic_attribute_data(self, state, data, None);
 
-        // `placementChangesUploaded = false; uploaded = false` /
-        // `dynamicUploaded = false; uploaded = false`, then the buffers'
+        // `uploaded = false` for either change, then the buffers'
         // `updateModified()` when not uploaded.
         self.mark_vertices_updated(update_opacities, dynamic_updated);
     }

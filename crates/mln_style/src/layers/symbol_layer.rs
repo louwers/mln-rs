@@ -20,7 +20,6 @@ use crate::layers::symbol_layer_properties::{
     TextRotationAlignment, TextSize, TextTransform, TextTranslate, TextTranslateAnchor, TextVariableAnchor,
     TextVariableAnchorOffset, TextWritingMode,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -94,11 +93,6 @@ impl SymbolLayer {
     // Layout properties
 
     #[must_use]
-    pub fn get_default_icon_allow_overlap() -> PropertyValue<bool> {
-        PropertyValue::Constant(IconAllowOverlap::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_allow_overlap(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<IconAllowOverlap>()
     }
@@ -110,11 +104,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconAllowOverlap>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_anchor() -> PropertyValue<SymbolAnchorType> {
-        PropertyValue::Constant(IconAnchor::default_value())
     }
 
     #[must_use]
@@ -132,11 +121,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_ignore_placement() -> PropertyValue<bool> {
-        PropertyValue::Constant(IconIgnorePlacement::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_ignore_placement(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<IconIgnorePlacement>()
     }
@@ -148,11 +132,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconIgnorePlacement>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_image() -> PropertyValue<Image> {
-        PropertyValue::Constant(IconImage::default_value())
     }
 
     #[must_use]
@@ -170,11 +149,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_keep_upright() -> PropertyValue<bool> {
-        PropertyValue::Constant(IconKeepUpright::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_keep_upright(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<IconKeepUpright>()
     }
@@ -186,11 +160,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconKeepUpright>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_offset() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(IconOffset::default_value())
     }
 
     #[must_use]
@@ -208,11 +177,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_optional() -> PropertyValue<bool> {
-        PropertyValue::Constant(IconOptional::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_optional(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<IconOptional>()
     }
@@ -224,11 +188,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconOptional>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_padding() -> PropertyValue<Padding> {
-        PropertyValue::Constant(IconPadding::default_value())
     }
 
     #[must_use]
@@ -246,11 +205,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_pitch_alignment() -> PropertyValue<AlignmentType> {
-        PropertyValue::Constant(IconPitchAlignment::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_pitch_alignment(&self) -> &PropertyValue<AlignmentType> {
         self.impl_().layout.get::<IconPitchAlignment>()
     }
@@ -262,11 +216,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconPitchAlignment>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_rotate() -> PropertyValue<f32> {
-        PropertyValue::Constant(IconRotate::default_value())
     }
 
     #[must_use]
@@ -284,11 +233,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_rotation_alignment() -> PropertyValue<AlignmentType> {
-        PropertyValue::Constant(IconRotationAlignment::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_rotation_alignment(&self) -> &PropertyValue<AlignmentType> {
         self.impl_().layout.get::<IconRotationAlignment>()
     }
@@ -300,11 +244,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconRotationAlignment>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_size() -> PropertyValue<f32> {
-        PropertyValue::Constant(IconSize::default_value())
     }
 
     #[must_use]
@@ -322,11 +261,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_text_fit() -> PropertyValue<IconTextFitType> {
-        PropertyValue::Constant(IconTextFit::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_text_fit(&self) -> &PropertyValue<IconTextFitType> {
         self.impl_().layout.get::<IconTextFit>()
     }
@@ -338,11 +272,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<IconTextFit>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_icon_text_fit_padding() -> PropertyValue<[f32; 4]> {
-        PropertyValue::Constant(IconTextFitPadding::default_value())
     }
 
     #[must_use]
@@ -360,11 +289,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_symbol_avoid_edges() -> PropertyValue<bool> {
-        PropertyValue::Constant(SymbolAvoidEdges::default_value())
-    }
-
-    #[must_use]
     pub fn get_symbol_avoid_edges(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<SymbolAvoidEdges>()
     }
@@ -376,11 +300,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<SymbolAvoidEdges>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_symbol_placement() -> PropertyValue<SymbolPlacementType> {
-        PropertyValue::Constant(SymbolPlacement::default_value())
     }
 
     #[must_use]
@@ -398,11 +317,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_symbol_screen_space() -> PropertyValue<bool> {
-        PropertyValue::Constant(SymbolScreenSpace::default_value())
-    }
-
-    #[must_use]
     pub fn get_symbol_screen_space(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<SymbolScreenSpace>()
     }
@@ -414,11 +328,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<SymbolScreenSpace>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_symbol_sort_key() -> PropertyValue<f32> {
-        PropertyValue::Constant(SymbolSortKey::default_value())
     }
 
     #[must_use]
@@ -436,11 +345,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_symbol_spacing() -> PropertyValue<f32> {
-        PropertyValue::Constant(SymbolSpacing::default_value())
-    }
-
-    #[must_use]
     pub fn get_symbol_spacing(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<SymbolSpacing>()
     }
@@ -452,11 +356,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<SymbolSpacing>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_symbol_z_order() -> PropertyValue<SymbolZOrderType> {
-        PropertyValue::Constant(SymbolZOrder::default_value())
     }
 
     #[must_use]
@@ -474,11 +373,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_allow_overlap() -> PropertyValue<bool> {
-        PropertyValue::Constant(TextAllowOverlap::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_allow_overlap(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<TextAllowOverlap>()
     }
@@ -490,11 +384,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextAllowOverlap>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_anchor() -> PropertyValue<SymbolAnchorType> {
-        PropertyValue::Constant(TextAnchor::default_value())
     }
 
     #[must_use]
@@ -512,11 +401,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_field() -> PropertyValue<Formatted> {
-        PropertyValue::Constant(TextField::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_field(&self) -> &PropertyValue<Formatted> {
         self.impl_().layout.get::<TextField>()
     }
@@ -528,11 +412,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextField>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_font() -> PropertyValue<Vec<String>> {
-        PropertyValue::Constant(TextFont::default_value())
     }
 
     #[must_use]
@@ -550,11 +429,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_ignore_placement() -> PropertyValue<bool> {
-        PropertyValue::Constant(TextIgnorePlacement::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_ignore_placement(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<TextIgnorePlacement>()
     }
@@ -566,11 +440,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextIgnorePlacement>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_justify() -> PropertyValue<TextJustifyType> {
-        PropertyValue::Constant(TextJustify::default_value())
     }
 
     #[must_use]
@@ -588,11 +457,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_keep_upright() -> PropertyValue<bool> {
-        PropertyValue::Constant(TextKeepUpright::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_keep_upright(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<TextKeepUpright>()
     }
@@ -604,11 +468,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextKeepUpright>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_letter_spacing() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextLetterSpacing::default_value())
     }
 
     #[must_use]
@@ -626,11 +485,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_line_height() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextLineHeight::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_line_height(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<TextLineHeight>()
     }
@@ -642,11 +496,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextLineHeight>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_max_angle() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextMaxAngle::default_value())
     }
 
     #[must_use]
@@ -664,11 +513,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_max_width() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextMaxWidth::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_max_width(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<TextMaxWidth>()
     }
@@ -680,11 +524,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextMaxWidth>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_offset() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(TextOffset::default_value())
     }
 
     #[must_use]
@@ -702,11 +541,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_optional() -> PropertyValue<bool> {
-        PropertyValue::Constant(TextOptional::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_optional(&self) -> &PropertyValue<bool> {
         self.impl_().layout.get::<TextOptional>()
     }
@@ -718,11 +552,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextOptional>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_padding() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextPadding::default_value())
     }
 
     #[must_use]
@@ -740,11 +569,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_pitch_alignment() -> PropertyValue<AlignmentType> {
-        PropertyValue::Constant(TextPitchAlignment::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_pitch_alignment(&self) -> &PropertyValue<AlignmentType> {
         self.impl_().layout.get::<TextPitchAlignment>()
     }
@@ -756,11 +580,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextPitchAlignment>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_radial_offset() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextRadialOffset::default_value())
     }
 
     #[must_use]
@@ -778,11 +597,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_rotate() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextRotate::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_rotate(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<TextRotate>()
     }
@@ -794,11 +608,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextRotate>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_rotation_alignment() -> PropertyValue<AlignmentType> {
-        PropertyValue::Constant(TextRotationAlignment::default_value())
     }
 
     #[must_use]
@@ -816,11 +625,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_size() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextSize::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_size(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<TextSize>()
     }
@@ -832,11 +636,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextSize>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_transform() -> PropertyValue<TextTransformType> {
-        PropertyValue::Constant(TextTransform::default_value())
     }
 
     #[must_use]
@@ -854,11 +653,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_variable_anchor() -> PropertyValue<Vec<TextVariableAnchorType>> {
-        PropertyValue::Constant(TextVariableAnchor::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_variable_anchor(&self) -> &PropertyValue<Vec<TextVariableAnchorType>> {
         self.impl_().layout.get::<TextVariableAnchor>()
     }
@@ -870,11 +664,6 @@ impl SymbolLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<TextVariableAnchor>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_text_variable_anchor_offset() -> PropertyValue<VariableAnchorOffsetCollection> {
-        PropertyValue::Constant(TextVariableAnchorOffset::default_value())
     }
 
     #[must_use]
@@ -892,11 +681,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_writing_mode() -> PropertyValue<Vec<TextWritingModeType>> {
-        PropertyValue::Constant(TextWritingMode::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_writing_mode(&self) -> &PropertyValue<Vec<TextWritingModeType>> {
         self.impl_().layout.get::<TextWritingMode>()
     }
@@ -911,11 +695,6 @@ impl SymbolLayer {
     }
 
     // Paint properties
-
-    #[must_use]
-    pub fn get_default_icon_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(IconColor::default_value())
-    }
 
     #[must_use]
     pub fn get_icon_color(&self) -> &PropertyValue<Color> {
@@ -940,11 +719,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_icon_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<IconColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_icon_halo_blur() -> PropertyValue<f32> {
-        PropertyValue::Constant(IconHaloBlur::default_value())
     }
 
     #[must_use]
@@ -973,11 +747,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_halo_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(IconHaloColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_halo_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<IconHaloColor>().value
     }
@@ -1000,11 +769,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_icon_halo_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<IconHaloColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_icon_halo_width() -> PropertyValue<f32> {
-        PropertyValue::Constant(IconHaloWidth::default_value())
     }
 
     #[must_use]
@@ -1033,11 +797,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(IconOpacity::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<IconOpacity>().value
     }
@@ -1060,11 +819,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_icon_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<IconOpacity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_icon_translate() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(IconTranslate::default_value())
     }
 
     #[must_use]
@@ -1093,11 +847,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_icon_translate_anchor() -> PropertyValue<TranslateAnchorType> {
-        PropertyValue::Constant(IconTranslateAnchor::default_value())
-    }
-
-    #[must_use]
     pub fn get_icon_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<IconTranslateAnchor>().value
     }
@@ -1120,11 +869,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_icon_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<IconTranslateAnchor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_text_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(TextColor::default_value())
     }
 
     #[must_use]
@@ -1153,11 +897,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_halo_blur() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextHaloBlur::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_halo_blur(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<TextHaloBlur>().value
     }
@@ -1180,11 +919,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_text_halo_blur_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<TextHaloBlur>().options
-    }
-
-    #[must_use]
-    pub fn get_default_text_halo_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(TextHaloColor::default_value())
     }
 
     #[must_use]
@@ -1213,11 +947,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_halo_width() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextHaloWidth::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_halo_width(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<TextHaloWidth>().value
     }
@@ -1240,11 +969,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_text_halo_width_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<TextHaloWidth>().options
-    }
-
-    #[must_use]
-    pub fn get_default_text_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(TextOpacity::default_value())
     }
 
     #[must_use]
@@ -1273,11 +997,6 @@ impl SymbolLayer {
     }
 
     #[must_use]
-    pub fn get_default_text_translate() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(TextTranslate::default_value())
-    }
-
-    #[must_use]
     pub fn get_text_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<TextTranslate>().value
     }
@@ -1300,11 +1019,6 @@ impl SymbolLayer {
     #[must_use]
     pub fn get_text_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<TextTranslate>().options
-    }
-
-    #[must_use]
-    pub fn get_default_text_translate_anchor() -> PropertyValue<TranslateAnchorType> {
-        PropertyValue::Constant(TextTranslateAnchor::default_value())
     }
 
     #[must_use]
