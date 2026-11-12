@@ -345,8 +345,20 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 Target::Surface { size, kind: SurfaceType::Wayland, surface: Surface::window(window) }
             }
             MLN_RENDER_TARGET_KIND_ANDROID_WINDOW => {
-                required(target.data.android_window.window, &field("window"))?;
-                Target::Unsupported("this library presents to no Android window")
+                let window = required(target.data.android_window.window, &field("window"))?;
+                #[cfg(target_os = "android")]
+                {
+                    // SAFETY: the host's window, which the header's contract
+                    // keeps alive through the call; the session keeps its own
+                    // reference from here on.
+                    let window = crate::android::Window::acquire(window);
+                    Target::Surface { size, kind: SurfaceType::AndroidNdk, surface: Surface::window(window) }
+                }
+                #[cfg(not(target_os = "android"))]
+                {
+                    let _ = window;
+                    Target::Unsupported("this platform has no Android windows")
+                }
             }
             MLN_RENDER_TARGET_KIND_OHOS_WINDOW => {
                 required(target.data.ohos_window.window, &field("window"))?;
@@ -829,6 +841,7 @@ mod tests {
             let data = mln_render_target_data { android_window: mln_android_window_target { logical_size, window } };
             target(MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, data)
         };
+        #[cfg(not(target_os = "android"))]
         assert!(matches!(read(&android(fake), None), Ok(Target::Unsupported(_))));
         assert_eq!(read(&android(core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
     }
