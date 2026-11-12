@@ -1025,21 +1025,21 @@ impl Worker {
         }
     }
 
-    /// Detaches the session: it lets go of its graphics objects now, and of
-    /// its map once the map has unbound it.
+    /// Detaches the session: it lets go of its graphics objects and its map,
+    /// and ends, without waiting for the map's thread, which a host's
+    /// completion may hold. The map unbinds the session before it binds
+    /// another.
     pub(crate) fn detach(&mut self, outbox: &mut Outbox) {
         self.tear_down(outbox);
         let map = self.shared.state.lock_unpoisoned().map.clone();
-        match map {
-            Some(map) => map.unbind_session(self.shared.id, self.shared.run_loop.clone(), |worker, outbox| {
-                worker.finish(outbox);
-            }),
-            None => post(&self.shared.run_loop, |worker, outbox| worker.finish(outbox)),
+        if let Some(map) = map {
+            map.unbind_session(self.shared.id);
         }
+        self.finish(outbox);
     }
 
-    /// Ends the session once the map unbound it: it completes the detach and
-    /// the releases, lets go of the map, and stops the session's thread.
+    /// Ends the session: it completes the detach and the releases, lets go
+    /// of the map, and stops the session's thread.
     pub(crate) fn finish(&mut self, outbox: &mut Outbox) {
         let (waiters, map) = {
             let mut state = self.shared.state.lock_unpoisoned();

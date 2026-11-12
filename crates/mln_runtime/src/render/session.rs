@@ -407,7 +407,7 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session(self.id, self.run_loop.clone(), |worker, outbox| worker.finish(outbox));
+                map.unbind_session_then(self.id, self.run_loop.clone(), |worker, outbox| worker.finish(outbox));
                 map.release_session_claim(self.id);
             }
             None => worker::post(&self.run_loop, |worker, outbox| worker.finish(outbox)),

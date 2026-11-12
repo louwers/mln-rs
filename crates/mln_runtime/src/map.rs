@@ -640,8 +640,16 @@ impl Map {
     }
 
     /// Unbinds the session `id` from the map on the runtime's thread, after
-    /// the commands sent before, then runs `then` on the session's thread.
-    pub(crate) fn unbind_session(
+    /// the commands sent before.
+    pub(crate) fn unbind_session(&self, id: SessionId) {
+        let map_id = self.shared.id;
+        // A runtime that shut down has no map to unbind from.
+        self.shared.runtime.post_or((), move |core, _, ()| unbind(core, map_id, id), |()| {});
+    }
+
+    /// Unbinds the session `id` as [`unbind_session`](Self::unbind_session)
+    /// does, then runs `then` on the session's thread.
+    pub(crate) fn unbind_session_then(
         &self,
         id: SessionId,
         run_loop: RunLoopHandle,
@@ -653,11 +661,7 @@ impl Map {
         self.shared.runtime.post_or(
             then,
             move |core, _, then| {
-                if let Some(entry) = core.maps.get_mut(&map_id)
-                    && entry.session.as_ref().is_some_and(|link| link.id == id)
-                {
-                    entry.session = None;
-                }
+                unbind(core, map_id, id);
                 worker_post(&run_loop, then);
             },
             |then| worker_post(&session_loop, then),
@@ -1155,6 +1159,16 @@ struct SessionClaim {
     session: Weak<SessionShared>,
     /// The completion of a dispose that waits for the session to end.
     removal: Option<Resolver<()>>,
+}
+
+/// Forgets the session `id` on the runtime's thread, unless the map has
+/// bound another since.
+fn unbind(core: &mut RuntimeCore, map_id: MapId, id: SessionId) {
+    if let Some(entry) = core.maps.get_mut(&map_id)
+        && entry.session.as_ref().is_some_and(|link| link.id == id)
+    {
+        entry.session = None;
+    }
 }
 
 /// The render session bound to a map, as the runtime's thread knows it.

@@ -305,10 +305,14 @@ fn a_detach_ends_a_demand_waiting_for_commands() {
     let moved = zoom(&map, 3.0);
     demand(&session, DemandMode::Force, 661);
     let detached = session.detach().unwrap();
-    drop(open);
+    // The detach completes while the map's thread stays held, before the
+    // command sent ahead of it runs.
+    assert!(eventually(|| detached.is_complete()));
+    assert!(!moved.is_complete());
     detached.wait().unwrap();
     let result = take_one(&session);
     assert_eq!((661, FrameDisposition::TargetNotReady), (result.token.unwrap(), result.disposition));
+    drop(open);
     moved.wait().unwrap();
 }
 
