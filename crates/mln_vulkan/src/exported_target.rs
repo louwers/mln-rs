@@ -1,12 +1,17 @@
 // A ring of the target's own images whose memory it exports to the host:
-// as dmabufs with a DRM format modifier, or as opaque file descriptors for
-// another API of the same driver. Frames draw into the images as into a
-// borrowed ring's, and are queued for the host to acquire.
+// as dmabufs with a DRM format modifier, as opaque file descriptors for
+// another API of the same driver, or as Android hardware buffers. Frames
+// draw into the images as into a borrowed ring's, and are queued for the
+// host to acquire.
 //
 // Each image has memory of its own (a dedicated allocation), which the
-// exported file descriptor names. A resize makes a new generation of images;
-// the frames that the host holds keep the old generation's images until
-// they are given back.
+// exported file descriptor names. A hardware buffer goes the other way: the
+// target allocates it, with the usage bits that the host's reads need, which
+// an export of Vulkan memory can't add, and imports it as the image's
+// memory.
+//
+// A resize makes a new generation of images; the frames that the host holds
+// keep the old generation's images until they are given back.
 
 use std::cell::RefCell;
 #[cfg(unix)]
@@ -41,6 +46,15 @@ const OPAQUE_FD_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::from_raw(
 );
 /// The format of an opaque file descriptor's image.
 const OPAQUE_FD_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
+/// The usage of a hardware buffer's image: what
+/// `AHARDWAREBUFFER_USAGE_GPU_COLOR_OUTPUT` and
+/// `AHARDWAREBUFFER_USAGE_GPU_SAMPLED_IMAGE` allow.
+#[cfg(target_os = "android")]
+const HARDWARE_BUFFER_USAGE: vk::ImageUsageFlags = DMA_BUF_USAGE;
+/// The format of a hardware buffer's image, which
+/// `AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM` is.
+#[cfg(target_os = "android")]
+const HARDWARE_BUFFER_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
 fn dma_buf_vk_format(fourcc: u32) -> vk::Format {
     if fourcc == DRM_FORMAT_ARGB8888 { vk::Format::B8G8R8A8_UNORM } else { vk::Format::R8G8B8A8_UNORM }
@@ -57,6 +71,12 @@ enum Layout {
         plane_counts: Vec<u32>,
     },
     OpaqueFd,
+    /// A hardware buffer with the extra `AHARDWAREBUFFER_USAGE_*` bits
+    /// `usage`.
+    #[cfg(target_os = "android")]
+    AndroidHardwareBuffer {
+        usage: u64,
+    },
 }
 
 impl Layout {
@@ -64,6 +84,8 @@ impl Layout {
         match self {
             Layout::DmaBuf { fourcc, .. } => dma_buf_vk_format(*fourcc),
             Layout::OpaqueFd => OPAQUE_FD_FORMAT,
+            #[cfg(target_os = "android")]
+            Layout::AndroidHardwareBuffer { .. } => HARDWARE_BUFFER_FORMAT,
         }
     }
 
@@ -71,6 +93,8 @@ impl Layout {
         match self {
             Layout::DmaBuf { .. } => vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT,
             Layout::OpaqueFd => vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD,
+            #[cfg(target_os = "android")]
+            Layout::AndroidHardwareBuffer { .. } => vk::ExternalMemoryHandleTypeFlags::ANDROID_HARDWARE_BUFFER_ANDROID,
         }
     }
 
@@ -78,6 +102,8 @@ impl Layout {
         match self {
             Layout::DmaBuf { .. } => DMA_BUF_USAGE,
             Layout::OpaqueFd => OPAQUE_FD_USAGE,
+            #[cfg(target_os = "android")]
+            Layout::AndroidHardwareBuffer { .. } => HARDWARE_BUFFER_USAGE,
         }
     }
 }
@@ -110,14 +136,28 @@ fn device_modifiers(device: &Device, format: vk::Format) -> Vec<vk::DrmFormatMod
     modifiers
 }
 
-/// Whether the device exports an image of `format`, `usage` and `tiling`
-/// in memory of `handle_type`, with `modifier` for a dmabuf.
+/// Whether the device exports an image of `format` and `usage` in memory
+/// of `handle_type`, with `modifier` for a dmabuf.
 fn exports(
     device: &Device,
     format: vk::Format,
     usage: vk::ImageUsageFlags,
     handle_type: vk::ExternalMemoryHandleTypeFlags,
     modifier: Option<u64>,
+) -> bool {
+    shares(device, format, usage, handle_type, modifier, vk::ExternalMemoryFeatureFlags::EXPORTABLE)
+}
+
+/// Whether the device has the external memory `feature` for an image of
+/// `format` and `usage` in memory of `handle_type`, with `modifier` for a
+/// dmabuf.
+fn shares(
+    device: &Device,
+    format: vk::Format,
+    usage: vk::ImageUsageFlags,
+    handle_type: vk::ExternalMemoryHandleTypeFlags,
+    modifier: Option<u64>,
+    feature: vk::ExternalMemoryFeatureFlags,
 ) -> bool {
     let mut modifier_info = vk::PhysicalDeviceImageDrmFormatModifierInfoEXT::default()
         .drm_format_modifier(modifier.unwrap_or(0))
@@ -142,11 +182,7 @@ fn exports(
             &mut properties,
         )
     };
-    supported.is_ok()
-        && external
-            .external_memory_properties
-            .external_memory_features
-            .contains(vk::ExternalMemoryFeatureFlags::EXPORTABLE)
+    supported.is_ok() && external.external_memory_properties.external_memory_features.contains(feature)
 }
 
 /// The layout of dmabufs of `choice`'s fourcc with its modifiers that the
@@ -211,7 +247,28 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
             Err(error) => Log::info(Event::Render, format!("The Vulkan device exports no dmabufs: {error}")),
         }
     }
+    #[cfg(target_os = "android")]
+    if imports_hardware_buffers(device) {
+        match ExportedMemory::new(device, extent, &Layout::AndroidHardwareBuffer { usage: 0 }) {
+            Ok(_) => kinds = kinds.with(ExportKind::AndroidHardwareBuffer),
+            Err(error) => Log::info(Event::Render, format!("The Vulkan device exports no hardware buffers: {error}")),
+        }
+    }
     kinds
+}
+
+/// Whether the device imports hardware buffers as the images of a ring.
+#[cfg(target_os = "android")]
+fn imports_hardware_buffers(device: &Device) -> bool {
+    device.features().android_hardware_buffer
+        && shares(
+            device,
+            HARDWARE_BUFFER_FORMAT,
+            HARDWARE_BUFFER_USAGE,
+            vk::ExternalMemoryHandleTypeFlags::ANDROID_HARDWARE_BUFFER_ANDROID,
+            None,
+            vk::ExternalMemoryFeatureFlags::IMPORTABLE,
+        )
 }
 
 /// An image with memory of its own, exported to the host, and a view of it.
@@ -223,6 +280,10 @@ struct ExportedMemory {
     /// The exported file descriptor, which `export` names.
     #[cfg(unix)]
     _fd: Option<OwnedFd>,
+    /// The imported hardware buffer, which `export` names. It goes after
+    /// the memory, which `drop` frees.
+    #[cfg(target_os = "android")]
+    _buffer: Option<crate::android_hardware_buffer::HardwareBuffer>,
     export: ExportedImage,
 }
 
@@ -239,13 +300,15 @@ impl ExportedMemory {
             memory: vk::DeviceMemory::null(),
             #[cfg(unix)]
             _fd: None,
+            #[cfg(target_os = "android")]
+            _buffer: None,
             export: ExportedImage::OpaqueFd { fd: -1, allocation_size: 0, dedicated: true, format: 0 },
         };
         let format = layout.format();
         let mut external = vk::ExternalMemoryImageCreateInfo::default().handle_types(layout.handle_type());
         let modifiers = match layout {
             Layout::DmaBuf { modifiers, .. } => modifiers.as_slice(),
-            Layout::OpaqueFd => &[],
+            _ => &[],
         };
         let mut modifier_list = vk::ImageDrmFormatModifierListCreateInfoEXT::default().drm_format_modifiers(modifiers);
         let mut info = vk::ImageCreateInfo::default()
@@ -257,7 +320,7 @@ impl ExportedMemory {
             .samples(vk::SampleCountFlags::TYPE_1)
             .tiling(match layout {
                 Layout::DmaBuf { .. } => vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT,
-                Layout::OpaqueFd => vk::ImageTiling::OPTIMAL,
+                _ => vk::ImageTiling::OPTIMAL,
             })
             .usage(layout.usage())
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
@@ -269,6 +332,12 @@ impl ExportedMemory {
         // SAFETY: the create info is valid for the device, which exports
         // images of the layout (the caller checked).
         this.image = unsafe { vk_device.create_image(&info, None) }.map_err(native("Creating an exported image"))?;
+        #[cfg(target_os = "android")]
+        if let Layout::AndroidHardwareBuffer { usage } = layout {
+            this.import_hardware_buffer(device, extent, *usage)?;
+            this.create_view(format)?;
+            return Ok(this);
+        }
 
         let mut planes = Vec::new();
         let mut modifier = 0;
@@ -328,8 +397,14 @@ impl ExportedMemory {
         unsafe { vk_device.bind_image_memory(this.image, this.memory, 0) }
             .map_err(native("Binding exported memory"))?;
         this.export_fd(device, layout, requirements.size, modifier, &planes)?;
+        this.create_view(format)?;
+        Ok(this)
+    }
+
+    /// Makes the view of the image, which is bound to its memory.
+    fn create_view(&mut self, format: vk::Format) -> Result<(), Error> {
         let view_info = vk::ImageViewCreateInfo::default()
-            .image(this.image)
+            .image(self.image)
             .view_type(vk::ImageViewType::TYPE_2D)
             .format(format)
             .subresource_range(vk::ImageSubresourceRange {
@@ -340,8 +415,49 @@ impl ExportedMemory {
                 layer_count: 1,
             });
         // SAFETY: the image is bound to its memory.
-        this.view = unsafe { vk_device.create_image_view(&view_info, None) }.map_err(native("Creating a view"))?;
-        Ok(this)
+        self.view = unsafe { self.device.create_image_view(&view_info, None) }
+            .map_err(|e| Error::native(format!("Creating a view failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Allocates a hardware buffer of `extent` with the extra `usage` bits,
+    /// and binds the image, made for one, to it.
+    #[cfg(target_os = "android")]
+    fn import_hardware_buffer(&mut self, device: &Device, extent: vk::Extent2D, usage: u64) -> Result<(), Error> {
+        use crate::android_hardware_buffer::HardwareBuffer;
+        let loader = device
+            .shared
+            .android_hardware_buffer()
+            .ok_or_else(|| Error::unsupported("the Vulkan device imports no hardware buffers"))?;
+        let buffer = HardwareBuffer::allocate(extent.width, extent.height, usage)?;
+        let mut properties = vk::AndroidHardwareBufferPropertiesANDROID::default();
+        // SAFETY: the buffer is live, and the device imports hardware
+        // buffers.
+        unsafe { loader.get_android_hardware_buffer_properties(buffer.as_ptr(), &mut properties) }
+            .map_err(|e| Error::native(format!("Reading the hardware buffer's properties failed: {e}")))?;
+        // SAFETY: a plain query of the GPU.
+        let types =
+            unsafe { device.shared.instance().get_physical_device_memory_properties(device.shared.physical_device()) };
+        let memory_type = memory_type(properties.memory_type_bits, &types, false)
+            .ok_or_else(|| Error::native("No memory type takes the hardware buffer"))?;
+        // A hardware buffer's image must have the buffer as its own memory.
+        let mut import = vk::ImportAndroidHardwareBufferInfoANDROID::default().buffer(buffer.as_ptr());
+        let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(self.image);
+        let allocate = vk::MemoryAllocateInfo::default()
+            .allocation_size(properties.allocation_size)
+            .memory_type_index(memory_type)
+            .push_next(&mut import)
+            .push_next(&mut dedicated);
+        // SAFETY: the allocate info is valid for the device, and the buffer
+        // live; the import takes a reference of its own.
+        self.memory = unsafe { self.device.allocate_memory(&allocate, None) }
+            .map_err(|e| Error::native(format!("Importing the hardware buffer failed: {e}")))?;
+        // SAFETY: the memory was imported for the image, which has none.
+        unsafe { self.device.bind_image_memory(self.image, self.memory, 0) }
+            .map_err(|e| Error::native(format!("Binding the hardware buffer failed: {e}")))?;
+        self.export = ExportedImage::AndroidHardwareBuffer { buffer: buffer.as_ptr() as u64 };
+        self._buffer = Some(buffer);
+        Ok(())
     }
 
     /// Exports the image's memory as a file descriptor, which the image
@@ -367,18 +483,19 @@ impl ExportedMemory {
         let fd = unsafe { OwnedFd::from_raw_fd(fd) };
         let raw = fd.as_raw_fd();
         self._fd = Some(fd);
-        self.export = match layout {
-            Layout::DmaBuf { fourcc, .. } => ExportedImage::DmaBuf {
+        self.export = if let Layout::DmaBuf { fourcc, .. } = layout {
+            ExportedImage::DmaBuf {
                 fourcc: *fourcc,
                 modifier,
                 planes: planes.iter().map(|&(offset, stride)| DmaBufPlane { fd: raw, offset, stride }).collect(),
-            },
-            Layout::OpaqueFd => ExportedImage::OpaqueFd {
+            }
+        } else {
+            ExportedImage::OpaqueFd {
                 fd: raw,
                 allocation_size,
                 dedicated: true,
                 format: layout.format().as_raw() as u32,
-            },
+            }
         };
         Ok(())
     }
@@ -426,7 +543,8 @@ fn memory_type(bits: u32, types: &vk::PhysicalDeviceMemoryProperties, linear: bo
 
 /// The kind of `ring` that `device` shares its images in: the first of the
 /// host's kinds, by [`ExportKind::BY_PREFERENCE`], that the device exports,
-/// for a dmabuf one of the host's formats.
+/// for a dmabuf one of the host's formats, and for a hardware buffer one
+/// that Android allocates with the host's usage bits.
 ///
 /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
 /// device exports none of them.
@@ -436,6 +554,12 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
         .iter()
         .find(|kind| match kind {
             ExportKind::DmaBuf => dma_buf_choice(device, &ring.dma_buf_formats).is_some(),
+            // Android may refuse the host's usage bits.
+            #[cfg(target_os = "android")]
+            ExportKind::AndroidHardwareBuffer => {
+                crate::android_hardware_buffer::HardwareBuffer::allocate(1, 1, ring.android_hardware_buffer_usage)
+                    .is_ok()
+            }
             _ => true,
         })
         .ok_or_else(|| Error::unsupported("the Vulkan device exports none of the ring's kinds of image"))
@@ -474,10 +598,14 @@ impl Generation {
         let device = backend.backend_impl().device();
         let extent = vk::Extent2D { width: size.width, height: size.height };
         let images = (0..depth).map(|_| ExportedMemory::new(device, extent, layout)).collect::<Result<Vec<_>, _>>()?;
-        // A dmabuf's readers are outside the device, for which the foreign
-        // queue family stands; another API of the driver is external.
+        // A dmabuf's or hardware buffer's readers are outside the device,
+        // for which the foreign queue family stands; another API of the
+        // driver is external. A device that imports hardware buffers has the
+        // foreign queue family.
         let owner = match layout {
             Layout::DmaBuf { .. } if device.features().foreign_queue_family => ImageOwner::Foreign,
+            #[cfg(target_os = "android")]
+            Layout::AndroidHardwareBuffer { .. } => ImageOwner::Foreign,
             _ => ImageOwner::External,
         };
         let borrowed = BorrowedImages {
@@ -533,6 +661,10 @@ impl ExportedTarget {
                     .ok_or_else(|| Error::unsupported("the Vulkan device exports a dmabuf of none of the formats"))?,
             ),
             ExportKind::OpaqueFd => Layout::OpaqueFd,
+            #[cfg(target_os = "android")]
+            ExportKind::AndroidHardwareBuffer => {
+                Layout::AndroidHardwareBuffer { usage: ring.android_hardware_buffer_usage }
+            }
             _ => return Err(Error::unsupported(format!("the Vulkan device exports no {kind:?}"))),
         };
         let current = Generation::new(&backend, &layout, ring.depth, size, producer)?;

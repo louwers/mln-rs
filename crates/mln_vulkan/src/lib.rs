@@ -23,6 +23,8 @@
 // Vulkan through ash is the FFI here.
 #![allow(unsafe_code)]
 
+#[cfg(target_os = "android")]
+mod android_hardware_buffer;
 pub mod borrowed_target;
 pub mod buffer_resource;
 pub mod command_encoder;

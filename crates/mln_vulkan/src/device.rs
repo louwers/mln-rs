@@ -207,6 +207,10 @@ pub struct Features {
     /// `VK_EXT_external_memory_dma_buf` and
     /// `VK_EXT_image_drm_format_modifier` with `VK_KHR_external_memory_fd`.
     pub dma_buf: bool,
+    /// Importing Android hardware buffers into images, of
+    /// `VK_ANDROID_external_memory_android_hardware_buffer` with
+    /// `VK_EXT_queue_family_foreign`, which it requires.
+    pub android_hardware_buffer: bool,
 }
 
 pub(crate) struct Shared {
@@ -219,6 +223,9 @@ pub(crate) struct Shared {
     #[cfg_attr(not(unix), allow(dead_code))]
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
     drm_format_modifier: Option<ash::ext::image_drm_format_modifier::Device>,
+    /// Only Android has hardware buffers.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    android_hardware_buffer: Option<ash::android::external_memory_android_hardware_buffer::Device>,
     /// The kinds that the device has exported an image of, probed once.
     export_kinds: OnceLock<ExportKinds>,
     physical_device: vk::PhysicalDevice,
@@ -465,6 +472,9 @@ impl Device {
             features.external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &device));
         let drm_format_modifier =
             features.dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &device));
+        let android_hardware_buffer = features
+            .android_hardware_buffer
+            .then(|| ash::android::external_memory_android_hardware_buffer::Device::new(&instance, &device));
         // SAFETY: the device was made with a queue of the family; plain
         // queries of the physical device.
         let (queue, properties) = unsafe {
@@ -482,6 +492,7 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                android_hardware_buffer,
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device,
@@ -589,6 +600,16 @@ impl Device {
             }
         }
 
+        // Android hardware buffers, whose other required extensions are in
+        // Vulkan 1.1.
+        let android_hardware_buffer = available.contains(&ash::android::external_memory_android_hardware_buffer::NAME)
+            && extensions.contains(&ash::ext::queue_family_foreign::NAME)
+            && api_version >= vk::API_VERSION_1_1
+            && gpu_version >= vk::API_VERSION_1_1;
+        if android_hardware_buffer {
+            extensions.push(ash::android::external_memory_android_hardware_buffer::NAME);
+        }
+
         let mut timeline_supported = vk::PhysicalDeviceTimelineSemaphoreFeatures::default();
         if api_version >= vk::API_VERSION_1_2 && gpu_version >= vk::API_VERSION_1_2 {
             let mut features = vk::PhysicalDeviceFeatures2::default().push_next(&mut timeline_supported);
@@ -645,6 +666,7 @@ impl Device {
             foreign_queue_family: extensions.contains(&ash::ext::queue_family_foreign::NAME),
             external_memory_fd,
             dma_buf,
+            android_hardware_buffer,
         };
         Ok((physical_device, queue_family_index, device, enabled, features, extensions))
     }
@@ -654,9 +676,10 @@ impl Device {
     /// the extensions the host enabled on the device: `VK_KHR_swapchain` to
     /// present, and timeline semaphores, and those of `enabled_extensions`
     /// that it lists: `VK_KHR_external_semaphore_fd` for sync files,
-    /// `VK_KHR_external_memory_fd` for opaque file descriptors, and that with
+    /// `VK_KHR_external_memory_fd` for opaque file descriptors, that with
     /// `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier`
-    /// for dmabufs.
+    /// for dmabufs, and `VK_ANDROID_external_memory_android_hardware_buffer`
+    /// with `VK_EXT_queue_family_foreign` for Android hardware buffers.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library to look the functions up in, with
@@ -773,6 +796,11 @@ impl Device {
             && enabled(ash::ext::image_drm_format_modifier::NAME)
             && (properties.api_version >= vk::API_VERSION_1_2 || enabled(ash::khr::image_format_list::NAME))
             && device_lookup(c"vkGetImageDrmFormatModifierPropertiesEXT");
+        let android_hardware_buffer = enabled(ash::android::external_memory_android_hardware_buffer::NAME)
+            && enabled(ash::ext::queue_family_foreign::NAME)
+            && device_lookup(c"vkGetAndroidHardwareBufferPropertiesANDROID");
+        let hardware_buffers = android_hardware_buffer
+            .then(|| ash::android::external_memory_android_hardware_buffer::Device::new(&instance, &ash_device));
         let memory_fd = external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &ash_device));
         let drm_format_modifier =
             dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &ash_device));
@@ -794,6 +822,7 @@ impl Device {
             foreign_queue_family: false,
             external_memory_fd,
             dma_buf,
+            android_hardware_buffer,
         };
         // The features the library would enable, where the GPU has them. A
         // host that didn't enable one gets the validation layer's warning.
@@ -812,6 +841,7 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                android_hardware_buffer: hardware_buffers,
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device: ash_device,
@@ -962,6 +992,13 @@ impl Shared {
 
     pub(crate) fn drm_format_modifier(&self) -> Option<&ash::ext::image_drm_format_modifier::Device> {
         self.drm_format_modifier.as_ref()
+    }
+
+    #[cfg(target_os = "android")]
+    pub(crate) fn android_hardware_buffer(
+        &self,
+    ) -> Option<&ash::android::external_memory_android_hardware_buffer::Device> {
+        self.android_hardware_buffer.as_ref()
     }
 
     pub(crate) fn semaphore_fd(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {

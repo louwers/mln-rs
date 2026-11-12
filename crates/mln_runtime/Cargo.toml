@@ -67,5 +67,10 @@ khronos-egl.workspace = true
 libc.workspace = true
 winit.workspace = true
 
+# The sync files of the exported ring tests, whose hardware buffers they
+# lock.
+[target.'cfg(target_os = "android")'.dev-dependencies]
+libc.workspace = true
+
 [lints]
 workspace = true

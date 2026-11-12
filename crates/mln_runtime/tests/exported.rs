@@ -728,3 +728,135 @@ mod apple {
         }
     }
 }
+
+#[cfg(all(feature = "vulkan", target_os = "android"))]
+mod android {
+    use std::ffi::{c_int, c_void};
+
+    use super::*;
+
+    /// `AHardwareBuffer_Desc`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct Desc {
+        width: u32,
+        height: u32,
+        layers: u32,
+        format: u32,
+        usage: u64,
+        stride: u32,
+        rfu0: u32,
+        rfu1: u64,
+    }
+
+    #[link(name = "nativewindow")]
+    unsafe extern "C" {
+        fn AHardwareBuffer_describe(buffer: *const c_void, desc: *mut Desc);
+        fn AHardwareBuffer_lock(
+            buffer: *mut c_void,
+            usage: u64,
+            fence: c_int,
+            rect: *const c_void,
+            address: *mut *mut c_void,
+        ) -> c_int;
+        fn AHardwareBuffer_unlock(buffer: *mut c_void, fence: *mut c_int) -> c_int;
+    }
+
+    const RED: [u8; 4] = [255, 0, 0, 255];
+    const FORMAT_R8G8B8A8_UNORM: u32 = 1;
+    const USAGE_CPU_READ_OFTEN: u64 = 3;
+    const USAGE_GPU_SAMPLED_IMAGE: u64 = 1 << 8;
+    const USAGE_GPU_COLOR_OUTPUT: u64 = 1 << 9;
+
+    /// A session of a map of `style` on the Vulkan device, whose ring of
+    /// hardware buffers the CPU reads, or `None` where the device exports
+    /// none.
+    fn session(runtime: &Runtime, style: &str, producer: SyncKinds) -> Option<RenderSession> {
+        let device = device_of(BackendType::Vulkan)?;
+        if !device.export_kinds().contains(ExportKind::AndroidHardwareBuffer) {
+            eprintln!("skipped: the Vulkan device exports no hardware buffers");
+            return None;
+        }
+        let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
+        let (map, created) = runtime.create_map(options).unwrap();
+        created.wait().unwrap();
+        wait(map.set_style_json(style.to_owned()));
+        let ring = ExportedRing {
+            android_hardware_buffer_usage: USAGE_CPU_READ_OFTEN,
+            ..ring(&[ExportKind::AndroidHardwareBuffer])
+        };
+        Some(attach(&map, ring, Some(device), producer).unwrap())
+    }
+
+    /// Waits for a frame's producer sync file, if it has one.
+    fn wait_for_producer(frame: &AcquiredFrame) {
+        let sync = frame.producer_sync();
+        if sync.kind != SyncKind::SyncFd || (sync.handle as i64) < 0 {
+            return;
+        }
+        let mut waiting = libc::pollfd { fd: sync.handle as i32, events: libc::POLLIN, revents: 0 };
+        // SAFETY: a poll of the frame's live sync file.
+        assert_eq!(1, unsafe { libc::poll(&mut waiting, 1, 10_000) }, "the frame's sync file signals");
+    }
+
+    /// The pixel at `x`, `y` from the first row of a frame's hardware
+    /// buffer, which the CPU locks to read once the frame is done.
+    fn pixel(frame: &AcquiredFrame, x: u32, y: u32) -> [u8; 4] {
+        wait_for_producer(frame);
+        let (size, image) = exported_image(frame);
+        let ExportedImage::AndroidHardwareBuffer { buffer } = image else { panic!("the frame has no hardware buffer") };
+        let buffer = buffer as usize as *mut c_void;
+        let mut desc = Desc::default();
+        // SAFETY: the frame's live buffer, locked around the read.
+        unsafe {
+            AHardwareBuffer_describe(buffer, &mut desc);
+            assert_eq!((size.width, size.height, 1), (desc.width, desc.height, desc.layers));
+            assert_eq!(FORMAT_R8G8B8A8_UNORM, desc.format);
+            let usage = USAGE_GPU_COLOR_OUTPUT | USAGE_GPU_SAMPLED_IMAGE | USAGE_CPU_READ_OFTEN;
+            assert_eq!(usage, desc.usage & usage);
+            let mut data = std::ptr::null_mut();
+            assert_eq!(0, AHardwareBuffer_lock(buffer, USAGE_CPU_READ_OFTEN, -1, std::ptr::null(), &mut data));
+            let offset = (y as usize * desc.stride as usize + x as usize) * 4;
+            let mut pixel = [0u8; 4];
+            std::ptr::copy_nonoverlapping(data.cast::<u8>().add(offset), pixel.as_mut_ptr(), 4);
+            assert_eq!(0, AHardwareBuffer_unlock(buffer, std::ptr::null_mut()));
+            pixel
+        }
+    }
+
+    #[test]
+    fn a_hardware_buffer_ring_renders_into_buffers_that_the_cpu_reads() {
+        let runtime = runtime();
+        let producer = SyncKinds::of(&[SyncKind::SyncFd, SyncKind::CpuComplete]);
+        let Some(session) = session(&runtime, &style("#ff0000"), producer) else { return };
+        let capabilities = session.capabilities().unwrap();
+        assert_eq!(Some(ExportKind::AndroidHardwareBuffer), capabilities.export_kind);
+        for token in 1..=2 * DEPTH as u64 {
+            let frame = render_and_acquire(&session, token);
+            assert_eq!(capabilities.producer_sync_kind, Some(frame.producer_sync().kind));
+            assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height / 2));
+            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        }
+    }
+
+    /// A hardware buffer's readers, such as a texture or a SurfaceFlinger
+    /// layer, take its first row as the top of the image: the map's north.
+    #[test]
+    fn a_hardware_buffer_starts_at_the_top_of_the_map() {
+        let runtime = runtime();
+        let north = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{"north":{"type":"geojson","data":{"type":"Polygon","coordinates":[[[-180,0],[180,0],[180,85],[-180,85],[-180,0]]]}}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}},{"id":"north","type":"fill","source":"north","paint":{"fill-color":"#0000ff","fill-antialias":false}}]}"##;
+        let Some(session) = session(&runtime, north, SyncKinds::NONE) else { return };
+        let mut frame = render_and_acquire(&session, 1);
+        // The fill loads after the first frame.
+        for token in 2..50 {
+            if pixel(&frame, SIZE.width / 2, SIZE.height / 4) != RED {
+                break;
+            }
+            drop(frame);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            frame = render_and_acquire(&session, token);
+        }
+        assert_eq!([0, 0, 255, 255], pixel(&frame, SIZE.width / 2, SIZE.height / 4));
+        assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height * 3 / 4));
+    }
+}
