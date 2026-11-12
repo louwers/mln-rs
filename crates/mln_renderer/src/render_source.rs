@@ -333,10 +333,6 @@ pub fn create(impl_: &Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler
         SourceType::Image => Some(Box::new(crate::sources::render_image_source::RenderImageSource::new(
             source::static_immutable_cast::<mln_style::sources::image_source::Impl>(impl_),
         ))),
-        SourceType::Video => {
-            debug_assert!(false);
-            None
-        }
         SourceType::CustomVector => {
             Some(Box::new(crate::sources::render_custom_geometry_source::RenderCustomGeometrySource::new(
                 source::static_immutable_cast::<mln_style::sources::custom_geometry_source::Impl>(impl_),
@@ -349,8 +345,5 @@ pub fn create(impl_: &Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler
                 thread_pool,
             )))
         }
-        // TODO(port): RenderAnnotationSource. The orchestrator skips the
-        // layers of a source without a render source.
-        SourceType::Annotations => None,
     }
 }

@@ -1,13 +1,13 @@
 // Ports src/mln/style/properties.hpp: `Transitioning<Value>`,
 // `Transitionable<Value>` and the `Properties<Ps...>` template.
 //
-// C++ `Properties<Ps...>` builds four tuples indexed by property tag types
+// C++ `Properties<Ps...>` builds tuples indexed by property tag types
 // (`Transitionable`, `Unevaluated`, `PossiblyEvaluated`, `Evaluated`).
 // Rust has no variadic generics, so a layer's property set is declared with
 // the [`paint_properties!`](crate::paint_properties) macro, which generates
-// the four structs (one named field per property, in C++ order) and their
-// methods. `get::<P>()` / `get_mut::<P>()` keep the C++ `get<P>()` access by
-// tag type. The per-property typedefs (`TransitionableType`,
+// the `Transitionable`, `Unevaluated` and `PossiblyEvaluated` structs (one
+// named field per property, in C++ order) and their methods. `get::<P>()` /
+// `get_mut::<P>()` keep the C++ `get<P>()` access by tag type. The per-property typedefs (`TransitionableType`,
 // `UnevaluatedType`, `EvaluatorType`, `PossiblyEvaluatedType`, `Type`,
 // `IsDataDriven`, ...) are the associated items of [`Property`]; the tag
 // "base classes" `PaintProperty<T>`, `CrossFadedPaintProperty<T>`,
@@ -243,7 +243,6 @@ pub trait Property: 'static {
     type EvaluatorType<'a>: Evaluator<Self::Type, ResultType = Self::PossiblyEvaluatedType>;
 
     const IS_DATA_DRIVEN: bool;
-    const IS_OVERRIDABLE: bool;
 
     /// `P::defaultValue()`.
     fn default_value() -> Self::Type;
@@ -374,8 +373,8 @@ where
 
 /// Declares a paint-style property set: `Properties<Ps...>` where every `P`
 /// is a paint (or light) property. Generates `mod $module` with the
-/// `Transitionable`, `Unevaluated`, `PossiblyEvaluated` and `Evaluated`
-/// structs and the C++ member functions.
+/// `Transitionable`, `Unevaluated` and `PossiblyEvaluated` structs and the
+/// C++ member functions.
 ///
 /// This is what a Rust port of scripts/generate-style-code.mjs will emit,
 /// one invocation per layer type.
@@ -404,15 +403,9 @@ macro_rules! paint_properties {
                 $(pub $field: <$prop as Property>::PossiblyEvaluatedType,)+
             }
 
-            #[derive(Clone, Debug, Default)]
-            pub struct Evaluated {
-                $(pub $field: <$prop as Property>::Type,)+
-            }
-
             $crate::__properties_field_impls!(Transitionable; $($field: $prop),+);
             $crate::__properties_field_impls!(Unevaluated; $($field: $prop),+);
             $crate::__properties_field_impls!(PossiblyEvaluated; $($field: $prop),+);
-            $crate::__properties_field_impls!(Evaluated; $($field: $prop),+);
 
             impl Transitionable {
                 pub fn transitioned(
@@ -523,9 +516,6 @@ macro_rules! paint_properties {
                 }
 
                 $crate::__possibly_evaluated_feature_methods!();
-
-                // TODO(port): `Evaluated evaluate(z, feature)` (all properties
-                // at once; no caller in the paths ported so far).
             }
         }
     };

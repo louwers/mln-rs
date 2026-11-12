@@ -229,7 +229,7 @@
 "crates/mln_renderer/src/layers/render_line_layer.rs" = 1
 "crates/mln_renderer/src/render_layer.rs" = 2
 "crates/mln_renderer/src/render_orchestrator.rs" = 14
-"crates/mln_renderer/src/render_source.rs" = 2
+"crates/mln_renderer/src/render_source.rs" = 1
 "crates/mln_renderer/src/render_static_data.rs" = 2
 "crates/mln_renderer/src/render_tile.rs" = 1
 "crates/mln_renderer/src/renderer.rs" = 1
@@ -257,17 +257,10 @@
 "crates/mln_storage/src/tests/offline_database.rs" = 3
 "crates/mln_storage_offline/src/tests/offline_download.rs" = 1
 "crates/mln_style/src/conversion/source.rs" = 1
-"crates/mln_style/src/layer_impl.rs" = 1
 "crates/mln_style/src/layermanager/layer_factory.rs" = 1
-"crates/mln_style/src/layers/circle_layer_impl.rs" = 1
-"crates/mln_style/src/layers/fill_extrusion_layer_impl.rs" = 1
-"crates/mln_style/src/layers/fill_layer_impl.rs" = 1
-"crates/mln_style/src/layers/line_layer_impl.rs" = 1
-"crates/mln_style/src/layers/location_indicator_layer_impl.rs" = 1
-"crates/mln_style/src/layers/symbol_layer_impl.rs" = 1
 "crates/mln_style/src/layout_property.rs" = 1
 "crates/mln_style/src/paint_property.rs" = 1
-"crates/mln_style/src/properties.rs" = 2
+"crates/mln_style/src/properties.rs" = 1
 "crates/mln_style/src/property_expression.rs" = 1
 "crates/mln_style/src/sources/geojson_source.rs" = 1
 "crates/mln_style/src/sources/geojson_source_impl.rs" = 1

@@ -266,7 +266,7 @@ impl TilePyramid {
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
             tile_lod_mode: parameters.tile_lod_mode,
             requested_zoom: Some(zoom + mln_math::log2(constants::TILE_SIZE_D / f64::from(tile_size))),
-            round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM || type_ == SourceType::Video,
+            round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM,
         };
 
         if overscaled_zoom >= i32::from(zoom_range.min) {
@@ -278,10 +278,7 @@ impl TilePyramid {
             }
 
             // Only attempt prefetching in continuous mode.
-            if parameters.mode == MapMode::Continuous
-                && type_ != SourceType::GeoJSON
-                && type_ != SourceType::Annotations
-            {
+            if parameters.mode == MapMode::Continuous && type_ != SourceType::GeoJSON {
                 // Request lower zoom level tiles (if configured to do so) in
                 // an attempt to show something on the screen faster at the
                 // cost of a little of bandwidth.
@@ -398,7 +395,7 @@ impl TilePyramid {
         }
         drop(ctx);
 
-        if type_ != SourceType::Annotations && self.cache_enabled {
+        if self.cache_enabled {
             let size = parameters.transform_state.get_size();
             let conservative_cache_size = (f64::max(f64::from(size.width) / f64::from(tile_size), 1.0)
                 * f64::max(f64::from(size.height) / f64::from(tile_size), 1.0)

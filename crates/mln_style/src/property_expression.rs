@@ -12,16 +12,10 @@ use mln_vec_map::VecSet;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::expression::{
-    Dependency, EvaluationContext, Expression, GlobalStateMap, Type, ValueConverter, ZoomCurvePtr,
-    collect_global_state_refs, find_zoom_curve_checked,
+    Dependency, EvaluationContext, Expression, GlobalStateMap, ValueConverter, ZoomCurvePtr, collect_global_state_refs,
+    find_zoom_curve_checked,
 };
 use crate::serialization::shared_expression;
-
-fn check_gpu_capable(expression: &dyn Expression, zoom_curve: &ZoomCurvePtr<'_>) -> bool {
-    expression.dependencies() == Dependency::ZOOM
-        && !zoom_curve.is_null()
-        && (*expression.get_type() == Type::Number || *expression.get_type() == Type::Color)
-}
 
 fn collect_global_state_refs_shared(expression: &dyn Expression) -> Option<Arc<VecSet<String>>> {
     if !expression.has(Dependency::GLOBAL_STATE) {
@@ -49,9 +43,6 @@ pub struct PropertyExpressionBase {
     is_zoom_constant: bool,
     is_feature_constant: bool,
     is_runtime_constant: bool,
-    // If the expression depends on zoom and nothing else, and produces
-    // a number or color, we can potentially evaluate it on the GPU
-    is_gpu_capable: bool,
 }
 
 // Not derived, so that it can be `#[inline(never)]`: see `PropertyValue`'s
@@ -68,7 +59,6 @@ impl Clone for PropertyExpressionBase {
             is_zoom_constant: self.is_zoom_constant,
             is_feature_constant: self.is_feature_constant,
             is_runtime_constant: self.is_runtime_constant,
-            is_gpu_capable: self.is_gpu_capable,
         }
     }
 }
@@ -79,14 +69,6 @@ impl PropertyExpressionBase {
         let is_zoom_constant = !expression.has(Dependency::ZOOM);
         let is_feature_constant = !expression.has(Dependency::FEATURE);
         let is_runtime_constant = !expression.has(Dependency::IMAGE | Dependency::GLOBAL_STATE);
-        let is_gpu_capable = {
-            let zoom_curve = if expression.has(Dependency::ZOOM) {
-                find_zoom_curve_checked(expression.as_ref())
-            } else {
-                ZoomCurvePtr::Null
-            };
-            check_gpu_capable(expression.as_ref(), &zoom_curve)
-        };
         debug_assert_eq!(is_zoom_constant, crate::expression::is_zoom_constant(expression.as_ref()));
         debug_assert_eq!(is_feature_constant, crate::expression::is_feature_constant(expression.as_ref()));
         debug_assert_eq!(is_runtime_constant, crate::expression::is_runtime_constant(expression.as_ref()));
@@ -99,7 +81,6 @@ impl PropertyExpressionBase {
             is_zoom_constant,
             is_feature_constant,
             is_runtime_constant,
-            is_gpu_capable,
         }
     }
 
@@ -151,11 +132,6 @@ impl PropertyExpressionBase {
     }
 
     #[must_use]
-    pub fn is_gpu_capable(&self) -> bool {
-        self.is_gpu_capable
-    }
-
-    #[must_use]
     pub fn get_use_integer_zoom(&self) -> bool {
         self.use_integer_zoom
     }
@@ -196,13 +172,6 @@ impl PropertyExpressionBase {
     #[must_use]
     pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
-    }
-
-    /// Can be used for aggregating property expressions from multiple
-    /// properties(layers) into single match / case expression.
-    #[must_use]
-    pub fn get_shared_expression(&self) -> Arc<dyn Expression> {
-        self.expression.clone()
     }
 
     // TODO(port): getGPUExpression (gfx::GPUExpression) with the renderer's

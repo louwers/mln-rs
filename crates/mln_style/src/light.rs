@@ -11,7 +11,6 @@
 
 use crate::conversion::{Converter, convert_property_value};
 use crate::conversion_impl::{make_style_property, make_transition_style_property};
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::StyleProperty;
 use crate::transition_options::TransitionOptions;
@@ -175,11 +174,6 @@ impl Light {
     }
 
     #[must_use]
-    pub fn get_default_anchor() -> LightAnchorType {
-        LightAnchor::default_value()
-    }
-
-    #[must_use]
     pub fn get_anchor(&self) -> PropertyValue<LightAnchorType> {
         self.impl_.properties.get::<LightAnchor>().value.clone()
     }
@@ -199,11 +193,6 @@ impl Light {
     #[must_use]
     pub fn get_anchor_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<LightAnchor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_color() -> Color {
-        LightColor::default_value()
     }
 
     #[must_use]
@@ -229,11 +218,6 @@ impl Light {
     }
 
     #[must_use]
-    pub fn get_default_intensity() -> f32 {
-        LightIntensity::default_value()
-    }
-
-    #[must_use]
     pub fn get_intensity(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<LightIntensity>().value.clone()
     }
@@ -253,11 +237,6 @@ impl Light {
     #[must_use]
     pub fn get_intensity_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<LightIntensity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_position() -> Position {
-        LightPosition::default_value()
     }
 
     #[must_use]

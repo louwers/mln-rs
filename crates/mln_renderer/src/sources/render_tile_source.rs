@@ -363,7 +363,6 @@ impl layer::Impl for PolylineLayerImpl {
     fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
         false
     }
-    fn stringify_layout(&self, _writer: &mut String) {}
     fn get_type_info(&self) -> &'static LayerTypeInfo {
         &POLYLINE_LAYER_TYPE_INFO
     }

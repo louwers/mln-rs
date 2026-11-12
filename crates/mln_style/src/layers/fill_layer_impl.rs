@@ -1,7 +1,6 @@
 // Ports src/mln/style/layers/fill_layer_impl.hpp +
-// src/mln/style/layers/fill_layer_impl.cpp. `staticTypeInfo()` and
-// `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
-// fill_layer.rs.
+// src/mln/style/layers/fill_layer_impl.cpp. `staticTypeInfo()` is generated
+// in C++ (layer.cpp.ejs); here it is in fill_layer.rs.
 
 use mln_vec_map::VecSet;
 use serde::{Deserialize, Serialize};
@@ -62,12 +61,6 @@ impl layer::Impl for Impl {
             || self.layout != impl_.layout
             || self.paint.get::<FillPattern>().value != impl_.paint.get::<FillPattern>().value
             || self.paint.has_data_driven_property_difference(&impl_.paint)
-    }
-
-    fn stringify_layout(&self, _writer: &mut String) {
-        // Generated in C++ (layer.cpp.ejs): `layout.stringify(writer)`.
-        // TODO(port): conversion/stringify.hpp; nothing in the C++ core
-        // calls stringifyLayout.
     }
 
     fn get_type_info(&self) -> &'static LayerTypeInfo {

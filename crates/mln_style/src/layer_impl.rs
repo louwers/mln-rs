@@ -82,11 +82,6 @@ pub trait Impl: AsAny {
     /// filter, visibility, layout properties, or data-driven paint properties.
     fn has_layout_difference(&self, other: &dyn Impl) -> bool;
 
-    /// Utility function for automatic layer grouping.
-    // TODO(port): C++ writes into a rapidjson Writer; the Rust writer comes
-    // with layer grouping (M3). Implementations append JSON text.
-    fn stringify_layout(&self, writer: &mut String);
-
     /// Returns the statically allocated layer type info structure.
     fn get_type_info(&self) -> &'static LayerTypeInfo;
 
