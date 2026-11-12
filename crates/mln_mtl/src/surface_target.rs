@@ -176,8 +176,8 @@ impl SurfaceState {
             command_buffer.waitUntilCompleted();
             let mut image = PremultipliedImage::new(size);
             let bgra = buffer_bytes(&buffer, image.data.len());
-            for (dst, src) in image.data.chunks_exact_mut(4).zip(bgra.chunks_exact(4)) {
-                dst.copy_from_slice(&[src[2], src[1], src[0], src[3]]);
+            for (dst, src) in image.data.as_chunks_mut::<4>().0.iter_mut().zip(bgra.as_chunks::<4>().0) {
+                *dst = [src[2], src[1], src[0], src[3]];
             }
             *self.readback.borrow_mut() = Some(image);
         }
@@ -237,6 +237,7 @@ pub struct Layer(Retained<CAMetalLayer>);
 unsafe impl Send for Layer {}
 
 impl Layer {
+    #[must_use]
     pub fn new(layer: Retained<CAMetalLayer>) -> Layer {
         Layer(layer)
     }
@@ -252,6 +253,7 @@ impl Layer {
     }
 
     /// The layer, as a pointer for other APIs.
+    #[must_use]
     pub fn as_ptr(&self) -> *mut std::ffi::c_void {
         Retained::as_ptr(&self.0).cast_mut().cast()
     }

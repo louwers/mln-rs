@@ -110,6 +110,7 @@ pub fn process_cpu() -> Duration {
 /// The instructions and cycles every thread of the process has retired so
 /// far, or `None` where the system doesn't count them.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn process_counters() -> Option<Counters> {
     // SAFETY: rusage_info_v4 is plain integers, for which zero is valid.
     let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };

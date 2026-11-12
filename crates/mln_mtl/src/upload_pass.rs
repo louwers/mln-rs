@@ -52,6 +52,7 @@ impl UploadPass {
         UploadPass { context: command_encoder.get_context().clone() }
     }
 
+    #[must_use]
     pub fn mtl_context(&self) -> &Rc<Context> {
         &self.context
     }
@@ -61,6 +62,7 @@ impl UploadPass {
     }
 
     /// An index buffer of `indexes`.
+    #[must_use]
     pub fn create_index_buffer_of(&self, indexes: &IndexVectorBase) -> Box<dyn vertex_buffer::IndexBufferResource> {
         upload_pass::UploadPass::create_index_buffer_resource(
             self,
@@ -71,6 +73,7 @@ impl UploadPass {
     }
 
     /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`
+    #[must_use]
     pub fn get_buffer(
         &self,
         vec: Option<&VertexVectorBasePtr>,

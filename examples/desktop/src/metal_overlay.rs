@@ -27,7 +27,7 @@ use objc2_metal::{
 
 use crate::overlay::Paint;
 
-const SHADER: &str = r#"
+const SHADER: &str = r"
 #include <metal_stdlib>
 using namespace metal;
 
@@ -57,7 +57,7 @@ fragment float4 fragmentMain(VertexOut in [[stage_in]],
                              sampler tex_sampler [[sampler(0)]]) {
     return in.color * tex.sample(tex_sampler, in.uv);
 }
-"#;
+";
 
 /// The vertex buffer's slot; the screen size takes the next.
 const VERTEX_BUFFER: usize = 0;
@@ -172,30 +172,29 @@ impl Painter {
         if width == 0 || height == 0 {
             return;
         }
-        let pixels: Vec<u8> = image.pixels.iter().flat_map(|color| color.to_array()).collect();
-        let origin = match delta.pos {
-            Some([x, y]) => MTLOrigin { x, y, z: 0 },
-            None => {
-                // SAFETY: the size is non-zero and the format a valid 2D one.
-                let descriptor = unsafe {
-                    MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                        MTLPixelFormat::RGBA8Unorm,
-                        width,
-                        height,
-                        false,
-                    )
-                };
-                descriptor.setUsage(MTLTextureUsage::ShaderRead);
-                // The CPU writes it (see mln_mtl's texture2d.rs).
-                descriptor.setAllowGPUOptimizedContents(false);
-                let (Some(texture), Some(sampler)) =
-                    (device.newTextureWithDescriptor(&descriptor), new_sampler(device, &delta.options))
-                else {
-                    return;
-                };
-                self.textures.insert(id, (texture, sampler));
-                MTLOrigin { x: 0, y: 0, z: 0 }
-            }
+        let pixels: Vec<u8> = image.pixels.iter().flat_map(egui::Color32::to_array).collect();
+        let origin = if let Some([x, y]) = delta.pos {
+            MTLOrigin { x, y, z: 0 }
+        } else {
+            // SAFETY: the size is non-zero and the format a valid 2D one.
+            let descriptor = unsafe {
+                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+                    MTLPixelFormat::RGBA8Unorm,
+                    width,
+                    height,
+                    false,
+                )
+            };
+            descriptor.setUsage(MTLTextureUsage::ShaderRead);
+            // The CPU writes it (see mln_mtl's texture2d.rs).
+            descriptor.setAllowGPUOptimizedContents(false);
+            let (Some(texture), Some(sampler)) =
+                (device.newTextureWithDescriptor(&descriptor), new_sampler(device, delta.options))
+            else {
+                return;
+            };
+            self.textures.insert(id, (texture, sampler));
+            MTLOrigin { x: 0, y: 0, z: 0 }
         };
         let Some((texture, _)) = self.textures.get(&id) else {
             return;
@@ -318,7 +317,7 @@ fn new_buffer(device: &ProtocolObject<dyn MTLDevice>, data: &[u8]) -> Option<Ret
     }
 }
 
-fn new_sampler(device: &ProtocolObject<dyn MTLDevice>, options: &egui::TextureOptions) -> Option<Sampler> {
+fn new_sampler(device: &ProtocolObject<dyn MTLDevice>, options: egui::TextureOptions) -> Option<Sampler> {
     let filter = |filter: egui::TextureFilter| match filter {
         egui::TextureFilter::Nearest => MTLSamplerMinMagFilter::Nearest,
         egui::TextureFilter::Linear => MTLSamplerMinMagFilter::Linear,

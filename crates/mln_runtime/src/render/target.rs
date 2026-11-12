@@ -98,6 +98,7 @@ impl Surface {
     /// A `CAMetalLayer`, which a session on Metal presents to. It must
     /// outlive the session's use of it, as a window must.
     #[cfg(all(feature = "metal", target_vendor = "apple"))]
+    #[must_use]
     pub fn metal_layer(layer: mln_mtl::Layer) -> Surface {
         Surface { kind: SurfaceKind::MetalLayer(layer) }
     }
