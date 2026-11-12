@@ -553,6 +553,21 @@ fn statuses_and_summary() {
     let html = std::fs::read_to_string(suite.dir.join("out/suite.html")).unwrap();
     assert!(html.contains("7 tests failed."));
     assert!(html.contains("1 ignored failed, 1 ignored passed, 6 errored, 1 failed, 3 passed."));
+    assert!(html.contains("Test sequence:</strong>") && html.contains("ignored-pass "));
+    // Entries for the failed and errored tests only, the failed one with its
+    // images and the errored ones with their errors.
+    let has_entry = |id: &str| html.contains(&format!("</span> {id}</h2>"));
+    for id in ["fail", "noexpected", "render-error", "op-layer-not-found", "op-todo", "tile", "bad-json"] {
+        assert!(has_entry(id), "{id}");
+    }
+    for id in ["pass", "alternate", "op-transition", "ignored-pass", "ignored-fail"] {
+        assert!(!has_entry(id), "{id}");
+    }
+    assert_eq!(html.matches("<div class=\"test ").count(), 7);
+    assert!(html.contains(" data-alt-src=\"data:image/png;base64,"));
+    assert!(html.contains("<strong>Error:</strong> Invalid size for actual image"));
+    // A passed test's images are written to disk, though the report leaves
+    // them out.
     assert!(suite.dir.join("out/pass/actual.png").exists());
 }
 

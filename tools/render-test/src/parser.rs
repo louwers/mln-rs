@@ -63,26 +63,14 @@ function handleHover(e) {
     }
 }
 
-document.getElementById('toggle-passed').addEventListener('click', function (e) {
-    for (const row of document.querySelectorAll('.test.passed')) {
-        row.classList.toggle('hide');
-    }
-});
-document.getElementById('toggle-ignored').addEventListener('click', function (e) {
-    for (const row of document.querySelectorAll('.test.ignored')) {
-        row.classList.toggle('hide');
-    }
-});
 document.getElementById('toggle-sequence').addEventListener('click', function (e) {
     document.getElementById('test-sequence').classList.toggle('hide');
 });
 </script>
 ";
 
-const RESULTS_HEADER_BUTTONS: &str = r"
+const RESULTS_HEADER_BUTTON: &str = r"
     <button id='toggle-sequence'>Toggle test sequence</button>
-    <button id='toggle-passed'>Toggle passed tests</button>
-    <button id='toggle-ignored'>Toggle ignored tests</button>
 </h1>
 ";
 
@@ -1112,13 +1100,12 @@ fn to_string_u32(v: u32) -> String {
     v.to_string()
 }
 
-/// `createResultItem(metadata, hasFailedTests)`.
+/// `createResultItem`: a test's entry in the report, with its images or its
+/// error message.
 #[must_use]
-pub fn create_result_item(metadata: &TestMetadata, has_failed_tests: bool) -> String {
-    let should_hide = (has_failed_tests && metadata.status == "passed") || metadata.status.contains("ignored");
-
+pub fn create_result_item(metadata: &TestMetadata) -> String {
     let mut html = String::new();
-    let _ = writeln!(html, "<div class=\"test {}{}\">", metadata.status, if should_hide { " hide" } else { "" });
+    let _ = writeln!(html, "<div class=\"test {}\">", metadata.status);
     let _ = write!(
         html,
         r#"<h2><span class="label" style="background: {}">{}</span> {}</h2>"#,
@@ -1180,9 +1167,11 @@ pub fn create_result_item(metadata: &TestMetadata, has_failed_tests: bool) -> St
     html
 }
 
-/// `createResultPage(stats, metadatas, shuffle, seed)`.
+/// `createResultPage(stats, metadatas, shuffle, seed)`, with entries for the
+/// failed and errored tests only.
 #[must_use]
 pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], shuffle: bool, seed: u32) -> String {
+    let failed_or_errored = |metadata: &&TestMetadata| metadata.status == "failed" || metadata.status == "errored";
     let unsuccessful = stats.errored_tests + stats.failed_tests;
     let mut results_page = String::new();
 
@@ -1197,7 +1186,7 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
         results_page.push_str(r#"<h1 style="color: green;">"#);
         results_page.push_str("All tests passed!");
     }
-    results_page.push_str(RESULTS_HEADER_BUTTONS);
+    results_page.push_str(RESULTS_HEADER_BUTTON);
 
     // stats
     results_page.push_str(r#"<p class="stats">"#);
@@ -1223,10 +1212,8 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
         // Failed tests
         if unsuccessful != 0 {
             results_page.push_str("<p><strong>Failed tests:</strong>");
-            for metadata in metadatas {
-                if metadata.status == "failed" || metadata.status == "errored" {
-                    let _ = write!(results_page, "{} ", metadata.id);
-                }
+            for metadata in metadatas.iter().filter(failed_or_errored) {
+                let _ = write!(results_page, "{} ", metadata.id);
             }
             results_page.push_str("</p>\n");
         }
@@ -1251,8 +1238,8 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
 
     // Tests
     results_page.push_str("<div class=\"tests\">\n");
-    for metadata in metadatas {
-        results_page.push_str(&create_result_item(metadata, unsuccessful != 0));
+    for metadata in metadatas.iter().filter(failed_or_errored) {
+        results_page.push_str(&create_result_item(metadata));
     }
     results_page.push_str("</div>\n");
 
