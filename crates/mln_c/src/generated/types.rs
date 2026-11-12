@@ -1060,7 +1060,8 @@ pub struct mln_map_options {
     pub size: u32,
     pub fields: mln_map_option_fields,
     /** The map's first size, and its scale factor. Render sessions of the map
- render at its scale factor, and mln_render_session_resize() changes it.*/
+ render at its scale factor. mln_map_resize() changes both, or
+ mln_render_session_resize() while a render session is attached.*/
     pub initial_extent: mln_logical_extent,
     pub map_mode: mln_map_mode,
     /** Whether the map decodes MapLibre Tiles (MLT) that use FastPFOR integer

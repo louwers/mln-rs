@@ -475,7 +475,7 @@ fn attaching_sizes_the_map_and_holds_it() {
     let second = map.attach(offscreen(SIZE), AttachOptions::default()).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, second.kind);
     assert_eq!(ErrorKind::InvalidState, map.release().unwrap_err().kind);
-    assert_eq!(ErrorKind::InvalidState, map.resize(Size::new(32, 48)).unwrap_err().kind);
+    assert_eq!(ErrorKind::InvalidState, map.resize(LogicalExtent::new(Size::new(32, 48), 1.0)).unwrap_err().kind);
     assert_eq!(SIZE, map.snapshot().unwrap().view.extent.size);
 
     wait(session.release());

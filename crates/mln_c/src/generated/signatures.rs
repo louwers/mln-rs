@@ -452,7 +452,7 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::map::mln_map_request_still_image;
 const _: unsafe extern "C" fn(
     mln_map,
-    mln_logical_size,
+    mln_logical_extent,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_resize;

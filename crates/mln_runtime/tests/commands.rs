@@ -10,9 +10,14 @@ use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 
 use mln_map::{CameraOptions, CameraUpdate};
-use mln_runtime::{ErrorKind, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
+use mln_runtime::{ErrorKind, LogicalExtent, MapOptions, ResourceRequest, Runtime, RuntimeOptions};
 use mln_util::size::Size;
 use support::{EMPTY_STYLE, TIMEOUT, TempDir, eventually, map, map_options, runtime, wait, wait_err};
+
+/// `width` by `height` logical pixels at a scale factor of 1.
+fn extent(width: u32, height: u32) -> LogicalExtent {
+    LogicalExtent::new(Size::new(width, height), 1.0)
+}
 
 #[test]
 fn commands_run_in_the_order_each_thread_sent_them() {
@@ -73,8 +78,8 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
     let (resized, resized_again) = (record("second"), record("first again"));
     first.request_repaint().unwrap().on_complete(move |result| repainted(result.is_ok()));
     runtime.clear_event_handler().unwrap().on_complete(move |result| cleared(result.is_ok()));
-    second.resize(Size::new(100, 100)).unwrap().on_complete(move |result| resized(result.is_ok()));
-    first.resize(Size::new(100, 100)).unwrap().on_complete(move |result| resized_again(result.is_ok()));
+    second.resize(extent(100, 100)).unwrap().on_complete(move |result| resized(result.is_ok()));
+    first.resize(extent(100, 100)).unwrap().on_complete(move |result| resized_again(result.is_ok()));
     wait(runtime.clear_resource_transform());
     assert_eq!(["first", "runtime", "second", "first again"], order.lock().unwrap().as_slice());
 }
@@ -83,7 +88,7 @@ fn completions_arrive_in_send_order_across_maps_and_the_runtime() {
 fn a_completion_is_a_future() {
     let runtime = runtime();
     let map = map(&runtime);
-    let applied = pollster::block_on(map.resize(Size::new(300, 200)).unwrap()).unwrap();
+    let applied = pollster::block_on(map.resize(extent(300, 200)).unwrap()).unwrap();
     assert_eq!(applied.sequence, map.applied_sequence());
     let snapshot = map.snapshot().unwrap();
     assert!(snapshot.generation >= applied.generation);
@@ -137,7 +142,7 @@ fn host_code_can_call_back_into_the_library() {
 fn commands_sent_before_the_map_is_built_wait_for_it() {
     let runtime = runtime();
     let (map, created) = runtime.create_map(map_options()).unwrap();
-    let resized = map.resize(Size::new(320, 240)).unwrap();
+    let resized = map.resize(extent(320, 240)).unwrap();
     assert_eq!(1, created.wait().unwrap().sequence);
     assert_eq!(2, resized.wait().unwrap().sequence);
     assert_eq!(Size::new(320, 240), map.snapshot().unwrap().view.extent.size);
@@ -199,7 +204,7 @@ fn a_runtime_and_map_outlive_the_thread_that_made_them() {
     })
     .join()
     .unwrap();
-    wait(map.resize(Size::new(320, 240)));
+    wait(map.resize(extent(320, 240)));
     assert_eq!(Size::new(320, 240), map.snapshot().unwrap().view.extent.size);
     wait(map.release());
     wait(runtime.release());
@@ -304,7 +309,7 @@ fn the_camera_query_sees_the_commands_before_it() {
 fn with_core_runs_on_the_map_in_its_place() {
     let runtime = runtime();
     let map = map(&runtime);
-    drop(map.resize(Size::new(128, 64)).unwrap());
+    drop(map.resize(extent(128, 64)).unwrap());
     let size = wait(map.with_core(|core| core.get_transform_state().get_size()));
     assert_eq!(Size::new(128, 64), size);
 }
@@ -313,11 +318,25 @@ fn with_core_runs_on_the_map_in_its_place() {
 fn a_resize_to_the_same_size_renders_nothing() {
     let runtime = runtime();
     let map = map(&runtime);
-    assert_eq!(ErrorKind::InvalidArgument, map.resize(Size::new(0, 64)).unwrap_err().kind);
-    let resized = wait(map.resize(Size::new(128, 64)));
-    let again = wait(map.resize(Size::new(128, 64)));
+    assert_eq!(ErrorKind::InvalidArgument, map.resize(extent(0, 64)).unwrap_err().kind);
+    let resized = wait(map.resize(extent(128, 64)));
+    let again = wait(map.resize(extent(128, 64)));
     assert_eq!(resized.render_update_generation, again.render_update_generation);
     assert_eq!(Size::new(128, 64), map.snapshot().unwrap().view.extent.size);
+}
+
+#[test]
+fn a_resize_sets_the_scale_factor_and_rejects_one_that_isnt_positive() {
+    let runtime = runtime();
+    let map = map(&runtime);
+    wait(map.resize(LogicalExtent::new(Size::new(128, 64), 2.0)));
+    assert_eq!(2.0, map.scale_factor());
+    assert_eq!(2.0, wait(map.with_core(|core| core.get_pixel_ratio())));
+    for scale_factor in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        let rejected = map.resize(LogicalExtent::new(Size::new(128, 64), scale_factor));
+        assert_eq!(ErrorKind::InvalidArgument, rejected.unwrap_err().kind);
+    }
+    assert_eq!(2.0, map.scale_factor());
 }
 
 #[test]

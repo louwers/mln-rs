@@ -17,7 +17,7 @@ use crate::generated::types::{
     MLN_FEATURE_STATE_SELECTOR_FEATURE_ID, MLN_MAP_MODE_CONTINUOUS, MLN_MAP_MODE_STATIC, MLN_MAP_MODE_TILE,
     MLN_MAP_OPTION_EVENT_MASK, MLN_MAP_OPTION_TILE_CACHE_ENABLED, MLN_TILE_LOD_MODE_DEFAULT,
     MLN_TILE_LOD_MODE_DISTANCE, mln_buffer_view, mln_camera_bounds, mln_completion, mln_diagnostic,
-    mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_size, mln_map, mln_map_options,
+    mln_feature_state_selector, mln_free_camera, mln_lat_lng_bounds, mln_logical_extent, mln_map, mln_map_options,
     mln_map_snapshot, mln_map_tile_settings, mln_quaternion, mln_runtime, mln_runtime_event_flags, mln_status,
     mln_vec3,
 };
@@ -357,13 +357,14 @@ pub unsafe extern "C" fn mln_map_get_snapshot(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_map_resize(
     map: mln_map,
-    logical_size: mln_logical_size,
+    extent: mln_logical_extent,
     completion: *const mln_completion,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
+        let extent = ::mln_runtime::LogicalExtent::new(Size::new(extent.width, extent.height), extent.scale_factor);
         // SAFETY: the caller's contract.
-        unsafe { command(map, completion, |map| map.resize(Size::new(logical_size.width, logical_size.height))) }
+        unsafe { command(map, completion, |map| map.resize(extent)) }
     })
 }
 
