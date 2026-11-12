@@ -307,10 +307,11 @@ udeps:  (cargo-install 'cargo-udeps')
 update:
     cargo update
 
-# The version is the @maplibre/maplibre-gl-style-spec npm release the copy is from. Run `just generate-style-code` after.
-[doc("Refresh tools/style-codegen/v8.json from a release of the MapLibre style spec")]
-update-style-spec version='26.6.0':  (assert-cmd 'curl')
-    curl -fsSL https://unpkg.com/@maplibre/maplibre-gl-style-spec@{{version}}/src/reference/v8.json -o tools/style-codegen/v8.json
+# The ref is the maplibre/maplibre-style-spec tag (such as `v26.6.0`) or commit the copy is from. The default is a
+# commit after v26.6.0 that replaces `emptyResponse` with vector sources' `sparse`. Run `just generate-style-code` after.
+[doc("Refresh tools/style-codegen/v8.json from a tag or commit of the MapLibre style spec")]
+update-style-spec ref='c2a460f6e55899e4b6e04b44f8e29e08fef3067b':  (assert-cmd 'curl')
+    curl -fsSL https://raw.githubusercontent.com/maplibre/maplibre-style-spec/{{ref}}/src/reference/v8.json -o tools/style-codegen/v8.json
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there, outside
 # tools/c-abi-test (update-ffi-abi), is copied again.

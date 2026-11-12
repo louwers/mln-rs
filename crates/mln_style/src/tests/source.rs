@@ -15,7 +15,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::tileset::{EmptyResponse, RasterEncoding, Tileset, VectorEncoding};
+use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
 use super::util::parse_json;
 use crate::conversion::Error;
@@ -540,29 +540,24 @@ fn converted_source(json: &str) -> Result<Box<dyn Source>, String> {
     convert_source(&Convertible::from(&parse_json(json)), &mut error, "source").ok_or(error.message)
 }
 
-// A tile source's tileset takes the style's emptyResponse, over a TileJSON or inline.
+// A vector source's tileset takes the style's sparse, over a TileJSON or inline.
 #[test]
-fn tile_sources_take_the_style_empty_response() {
-    for type_ in ["vector", "raster", "raster-dem"] {
-        let source = converted_source(&format!(r#"{{"type": "{type_}", "url": "url", "emptyResponse": "missing"}}"#))
-            .unwrap_or_else(|e| panic!("{e}"));
-        assert_eq!(EmptyResponse::Missing, tileset_loaded_from_tilejson(&*source).empty_response, "{type_}");
+fn vector_sources_take_the_style_sparse() {
+    let source =
+        converted_source(r#"{"type": "vector", "url": "url", "sparse": true}"#).unwrap_or_else(|e| panic!("{e}"));
+    assert!(tileset_loaded_from_tilejson(&*source).sparse);
 
-        let source = converted_source(&format!(r#"{{"type": "{type_}", "url": "url"}}"#)).unwrap();
-        assert_eq!(EmptyResponse::Blank, tileset_loaded_from_tilejson(&*source).empty_response, "{type_}");
+    let source = converted_source(r#"{"type": "vector", "url": "url"}"#).unwrap();
+    assert!(!tileset_loaded_from_tilejson(&*source).sparse);
 
-        let source =
-            converted_source(&format!(r#"{{"type": "{type_}", "tiles": ["tiles"], "emptyResponse": "missing"}}"#))
-                .unwrap();
-        source.load_description(&StubFileSource::new(ResponseType::Asynchronous));
-        let impl_ = source.base_impl();
-        let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
-        assert_eq!(EmptyResponse::Missing, impl_.tileset.as_ref().unwrap().empty_response, "{type_}");
+    let source = converted_source(r#"{"type": "vector", "tiles": ["tiles"], "sparse": true}"#).unwrap();
+    source.load_description(&StubFileSource::new(ResponseType::Asynchronous));
+    let impl_ = source.base_impl();
+    let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
+    assert!(impl_.tileset.as_ref().unwrap().sparse);
 
-        let Err(error) = converted_source(&format!(r#"{{"type": "{type_}", "url": "url", "emptyResponse": "none"}}"#))
-        else {
-            panic!("{type_}: an invalid emptyResponse converts");
-        };
-        assert!(error.contains("emptyResponse"), "{type_}: {error}");
-    }
+    let Err(error) = converted_source(r#"{"type": "vector", "url": "url", "sparse": "yes"}"#) else {
+        panic!("an invalid sparse converts");
+    };
+    assert!(error.contains("sparse"), "{error}");
 }
