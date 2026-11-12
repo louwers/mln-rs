@@ -601,12 +601,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn oklch_wraps_a_huge_hue_angle_before_converting_it() {
-        assert_eq!(Color::parse("oklch(0.6 0.1 1e306turn)"), Color::parse("oklch(0.6 0.1 0)"));
-        assert!(Color::parse("oklch(0.6 0.1 1e307rad)").is_some());
-    }
-
-    #[test]
     fn parse_named() {
         assert_eq!(Color::parse("red"), Some(Color::red()));
         assert_eq!(Color::parse("white"), Some(Color::white()));

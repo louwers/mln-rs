@@ -129,8 +129,17 @@ fn oklch_clamps_and_reads_none_as_zero() {
         zero_lightness.a,
     );
     expect_color(Color::parse("oklch(0.6 none 90)").unwrap(), 0.502_110_7, 0.502_110_7, 0.502_110_7, 1.0);
-    expect_color(Color::parse("oklch(0.6 0.1 none)").unwrap(), 0.692_324, 0.398_840_1, 0.492_791_3, 1.0);
+    let zero_hue = Color::parse("oklch(0.6 0.1 0)").unwrap();
+    expect_color(Color::parse("oklch(0.6 0.1 none)").unwrap(), zero_hue.r, zero_hue.g, zero_hue.b, zero_hue.a);
     expect_color(Color::parse("oklch(0.6 0.1 90 / none)").unwrap(), 0.0, 0.0, 0.0, 0.0);
+}
+
+// gtest: ColorParse.OklchWrapsAHugeHueAngleBeforeConvertingIt
+#[test]
+fn oklch_wraps_a_huge_hue_angle_before_converting_it() {
+    let zero_hue = Color::parse("oklch(0.6 0.1 0)").unwrap();
+    expect_color(Color::parse("oklch(0.6 0.1 1e306turn)").unwrap(), zero_hue.r, zero_hue.g, zero_hue.b, zero_hue.a);
+    assert!(Color::parse("oklch(0.6 0.1 1e307rad)").is_some());
 }
 
 // gtest: ColorParse.OklchOutsideSrgbIsClipped
