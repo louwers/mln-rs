@@ -9,19 +9,20 @@
 // they are given back.
 
 use std::cell::RefCell;
+#[cfg(unix)]
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
 use std::rc::Rc;
 
 use ash::vk;
+#[cfg(unix)]
+use mln_gfx::DmaBufPlane;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::export::{
     DMA_BUF_MAX_PLANES, DRM_FORMAT_ABGR8888, DRM_FORMAT_ARGB8888, DRM_FORMAT_MOD_LINEAR, DmaBufChoice, Generations,
     choose_dma_buf_format,
 };
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{
-    ConsumerSync, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedImage, ExportedRing, SyncKind, SyncKinds,
-};
+use mln_gfx::{ConsumerSync, DmaBufFormat, ExportKind, ExportKinds, ExportedImage, ExportedRing, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -220,6 +221,7 @@ struct ExportedMemory {
     view: vk::ImageView,
     memory: vk::DeviceMemory,
     /// The exported file descriptor, which `export` names.
+    #[cfg(unix)]
     _fd: Option<OwnedFd>,
     export: ExportedImage,
 }
@@ -235,6 +237,7 @@ impl ExportedMemory {
             image: vk::Image::null(),
             view: vk::ImageView::null(),
             memory: vk::DeviceMemory::null(),
+            #[cfg(unix)]
             _fd: None,
             export: ExportedImage::OpaqueFd { fd: -1, allocation_size: 0, dedicated: true, format: 0 },
         };
@@ -324,28 +327,7 @@ impl ExportedMemory {
         // SAFETY: the memory was made for the image, which has none.
         unsafe { vk_device.bind_image_memory(this.image, this.memory, 0) }
             .map_err(native("Binding exported memory"))?;
-        let loader =
-            device.shared.memory_fd().ok_or_else(|| Error::unsupported("the Vulkan device exports no memory"))?;
-        let get = vk::MemoryGetFdInfoKHR::default().memory(this.memory).handle_type(layout.handle_type());
-        // SAFETY: the memory was allocated for export as the handle type.
-        let fd = unsafe { loader.get_memory_fd(&get) }.map_err(native("Exporting the image's memory"))?;
-        // SAFETY: the export made the descriptor, which is the image's.
-        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-        let raw = fd.as_raw_fd();
-        this._fd = Some(fd);
-        this.export = match layout {
-            Layout::DmaBuf { fourcc, .. } => ExportedImage::DmaBuf {
-                fourcc: *fourcc,
-                modifier,
-                planes: planes.into_iter().map(|(offset, stride)| DmaBufPlane { fd: raw, offset, stride }).collect(),
-            },
-            Layout::OpaqueFd => ExportedImage::OpaqueFd {
-                fd: raw,
-                allocation_size: requirements.size,
-                dedicated: true,
-                format: format.as_raw() as u32,
-            },
-        };
+        this.export_fd(device, layout, requirements.size, modifier, &planes)?;
         let view_info = vk::ImageViewCreateInfo::default()
             .image(this.image)
             .view_type(vk::ImageViewType::TYPE_2D)
@@ -360,6 +342,50 @@ impl ExportedMemory {
         // SAFETY: the image is bound to its memory.
         this.view = unsafe { vk_device.create_image_view(&view_info, None) }.map_err(native("Creating a view"))?;
         Ok(this)
+    }
+
+    /// Exports the image's memory as a file descriptor, which the image
+    /// keeps, and names it in `export`: a dmabuf of `modifier`, whose planes
+    /// have the offsets and strides of `planes`, or opaque memory of
+    /// `allocation_size` bytes.
+    #[cfg(unix)]
+    fn export_fd(
+        &mut self,
+        device: &Device,
+        layout: &Layout,
+        allocation_size: u64,
+        modifier: u64,
+        planes: &[(u32, u32)],
+    ) -> Result<(), Error> {
+        let loader =
+            device.shared.memory_fd().ok_or_else(|| Error::unsupported("the Vulkan device exports no memory"))?;
+        let get = vk::MemoryGetFdInfoKHR::default().memory(self.memory).handle_type(layout.handle_type());
+        // SAFETY: the memory was allocated for export as the handle type.
+        let fd = unsafe { loader.get_memory_fd(&get) }
+            .map_err(|e| Error::native(format!("Exporting the image's memory failed: {e}")))?;
+        // SAFETY: the export made the descriptor, which is the image's.
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let raw = fd.as_raw_fd();
+        self._fd = Some(fd);
+        self.export = match layout {
+            Layout::DmaBuf { fourcc, .. } => ExportedImage::DmaBuf {
+                fourcc: *fourcc,
+                modifier,
+                planes: planes.iter().map(|&(offset, stride)| DmaBufPlane { fd: raw, offset, stride }).collect(),
+            },
+            Layout::OpaqueFd => ExportedImage::OpaqueFd {
+                fd: raw,
+                allocation_size,
+                dedicated: true,
+                format: layout.format().as_raw() as u32,
+            },
+        };
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn export_fd(&mut self, _: &Device, _: &Layout, _: u64, _: u64, _: &[(u32, u32)]) -> Result<(), Error> {
+        Err(Error::unsupported("this platform shares no memory as file descriptors"))
     }
 }
 

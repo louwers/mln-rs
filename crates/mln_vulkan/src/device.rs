@@ -216,6 +216,7 @@ pub(crate) struct Shared {
     surface: Option<ash::khr::surface::Instance>,
     swapchain: Option<ash::khr::swapchain::Device>,
     semaphore_fd: Option<ash::khr::external_semaphore_fd::Device>,
+    #[cfg_attr(not(unix), allow(dead_code))]
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
     drm_format_modifier: Option<ash::ext::image_drm_format_modifier::Device>,
     /// The kinds that the device has exported an image of, probed once.
@@ -954,6 +955,7 @@ impl Shared {
         self.swapchain.as_ref()
     }
 
+    #[cfg_attr(not(unix), allow(dead_code))]
     pub(crate) fn memory_fd(&self) -> Option<&ash::khr::external_memory_fd::Device> {
         self.memory_fd.as_ref()
     }

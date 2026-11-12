@@ -455,6 +455,7 @@ impl BorrowedTarget {
                 .position(|old| old.image == image.image)
                 .and_then(|index| previous.get_mut(index))
                 .and_then(|slot| slot.consumer_wait.take());
+            #[cfg_attr(not(unix), allow(clippy::needless_update))]
             slots.push(Slot { consumer_wait: carried, ..Slot::default() });
         }
         let waits = previous.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
@@ -653,6 +654,7 @@ impl Drop for PendingReads {
 
 /// Lets go of `wait`, destroying a semaphore of the target's that no frame
 /// waits on.
+#[cfg_attr(not(unix), allow(unused_variables))]
 fn drop_wait(backend: &BackendImpl, wait: ConsumerWait) {
     match wait {
         ConsumerWait::Timeline(..) => {}
