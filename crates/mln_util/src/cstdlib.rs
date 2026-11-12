@@ -1,5 +1,5 @@
-// The C library number parsers CSSColorParser (and util::stof) call, with
-// glibc's behaviour on Linux x86-64 in the "C" locale:
+// The C library number parsers util::stof and the test runners' std::stod
+// call, with glibc's behaviour on Linux x86-64 in the "C" locale:
 //
 // - `strtof`/`strtod` (glibc stdlib/strtod_l.c): leading `isspace`, optional
 //   sign, `inf`/`infinity`/`nan`/`nan(n-char-sequence)` (case-insensitive),
@@ -8,16 +8,15 @@
 //   ERANGE when a finite input overflows to infinity, or when the result is
 //   tiny (below the smallest normal, tininess detected after rounding, as on
 //   x86) and inexact.
-// - `strtoll` (glibc stdlib/strtol_l.c, the C23 `__isoc23_strtoll` that C++
-//   gets with _GNU_SOURCE, so base 0 and 2 accept a `0b` prefix):
-//   saturates to LLONG_MIN/LLONG_MAX with ERANGE.
 //
 // The input is a C string: parsing stops at the first NUL or at the end of
 // the slice. Every function returns the value, the number of bytes consumed
 // (`endptr - nptr`; 0 when no conversion was performed) and whether errno
 // would be ERANGE.
 
-use crate::bigint::Big;
+mod bigint;
+
+use bigint::Big;
 
 /// C-locale `isspace`.
 fn is_space(c: u8) -> bool {
@@ -352,82 +351,6 @@ pub fn strtod(s: &[u8]) -> (f64, usize, bool) {
     (v, p.consumed, p.erange)
 }
 
-/// glibc `strtoll(s, &end, base)`: `(value, consumed, erange)`. `base` is 0
-/// or 2..=36.
-#[must_use]
-pub fn strtoll(s: &[u8], base: u32) -> (i64, usize, bool) {
-    assert!(base == 0 || (2..=36).contains(&base), "invalid base");
-    let mut i = 0usize;
-    while is_space(at(s, i)) {
-        i += 1;
-    }
-    let mut negative = false;
-    if at(s, i) == b'-' {
-        negative = true;
-        i += 1;
-    } else if at(s, i) == b'+' {
-        i += 1;
-    }
-
-    // Recognize number prefix and if BASE is zero, figure it out ourselves.
-    let mut base = base;
-    if at(s, i) == b'0' {
-        if (base == 0 || base == 16) && at(s, i + 1).eq_ignore_ascii_case(&b'X') {
-            i += 2;
-            base = 16;
-        } else if (base == 0 || base == 2) && at(s, i + 1).eq_ignore_ascii_case(&b'B') {
-            i += 2;
-            base = 2;
-        } else if base == 0 {
-            base = 8;
-        }
-    } else if base == 0 {
-        base = 10;
-    }
-
-    let save = i;
-    let mut acc: u64 = 0;
-    let mut overflow = false;
-    loop {
-        let c = at(s, i);
-        let d = match c {
-            b'0'..=b'9' => u32::from(c - b'0'),
-            b'a'..=b'z' => u32::from(c - b'a' + 10),
-            b'A'..=b'Z' => u32::from(c - b'A' + 10),
-            _ => break,
-        };
-        if d >= base {
-            break;
-        }
-        if !overflow {
-            match acc.checked_mul(u64::from(base)).and_then(|v| v.checked_add(u64::from(d))) {
-                Some(v) => acc = v,
-                None => overflow = true,
-            }
-        }
-        i += 1;
-    }
-
-    if i == save {
-        // No conversion. A "0x" (or "0b") prefix without digits leaves the
-        // end pointer at the `x`.
-        let consumed =
-            if save >= 2 && matches!(at(s, save - 1).to_ascii_uppercase(), b'X' | b'B') && at(s, save - 2) == b'0' {
-                save - 1
-            } else {
-                0
-            };
-        return (0, consumed, false);
-    }
-
-    let limit = if negative { 1u64 << 63 } else { i64::MAX as u64 };
-    if overflow || acc > limit {
-        return (if negative { i64::MIN } else { i64::MAX }, i, true);
-    }
-    let v = if negative { acc.wrapping_neg() as i64 } else { acc as i64 };
-    (v, i, false)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,16 +384,5 @@ mod tests {
         for s in ["0.1", "1e308", "2.2250738585072014e-308", "4.9e-324", "123456789012345678901234567890"] {
             assert_eq!(strtod(s.as_bytes()).0, s.parse::<f64>().unwrap(), "{s}");
         }
-    }
-
-    #[test]
-    fn strtoll_basics() {
-        assert_eq!(strtoll(b" -12z", 10), (-12, 4, false));
-        assert_eq!(strtoll(b"0xff", 16), (255, 4, false));
-        assert_eq!(strtoll(b"0x", 16), (0, 1, false));
-        assert_eq!(strtoll(b"x", 16), (0, 0, false));
-        assert_eq!(strtoll(b"99999999999999999999", 10), (i64::MAX, 20, true));
-        assert_eq!(strtoll(b"-9223372036854775808", 10), (i64::MIN, 20, false));
-        assert_eq!(strtoll(b"-9223372036854775809", 10), (i64::MIN, 20, true));
     }
 }

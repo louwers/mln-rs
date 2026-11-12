@@ -39,7 +39,6 @@ include = ["/src", "/tests", "/LICENSE*"]
 [workspace.dependencies]
 # In-repo libraries. The exact version keeps a release's packages together.
 cheap_ruler = { package = "mln-rs-cheap-ruler", path = "vendor/cheap-ruler", version = "=0.0.11" }
-csscolorparser = { package = "mln-rs-csscolorparser", path = "vendor/csscolorparser", version = "=0.0.11" }
 earcut = { package = "mln-rs-earcut", path = "vendor/earcut", version = "=0.0.11" }
 earcut_test_fixtures = { package = "mln-rs-earcut-test-fixtures", path = "vendor/earcut/test_fixtures", version = "=0.0.11" }
 feature = { package = "mln-rs-feature", path = "vendor/feature", version = "=0.0.11" }
@@ -95,6 +94,10 @@ wagyu = { package = "mln-rs-wagyu", path = "vendor/wagyu", version = "=0.0.11" }
 #
 # min_const_generics: Pod for any array length (mln_gfx's UBOs).
 bytemuck = { version = "1.25.2", features = ["derive", "min_const_generics"] }
+# CSS colors other than oklch() (mln_util's Color::parse), in place of a port
+# of the C++ core's vendored csscolorparser: on every color string of the
+# expression and render tests, Color::parse gives the port's result exactly.
+csscolorparser = { version = "0.9.1" }
 # Evaluated as a replacement for vendor/earcut and rejected: on polygons with
 # holes it differs from the C++ earcut.hpp (25% identical, 1.1% cover a
 # different area; see difftest/earcut_crate). Only that comparison uses it, so
@@ -311,7 +314,6 @@ categories = ["graphics", "rendering::engine", "science::geo"]
 
 [dependencies]
 cheap_ruler.workspace = true
-csscolorparser.workspace = true
 earcut.workspace = true
 feature.workspace = true
 geojson.workspace = true

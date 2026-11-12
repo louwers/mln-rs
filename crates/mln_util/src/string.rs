@@ -83,7 +83,7 @@ impl StofError {
 
 /// `util::stof` = `std::stof` (libstdc++ `__stoa` over glibc `strtof`).
 pub fn stof(s: &str) -> Result<f32, StofError> {
-    let (value, consumed, erange) = csscolorparser::cstdlib::strtof(s.as_bytes());
+    let (value, consumed, erange) = crate::cstdlib::strtof(s.as_bytes());
     if consumed == 0 {
         Err(StofError::InvalidArgument)
     } else if erange {

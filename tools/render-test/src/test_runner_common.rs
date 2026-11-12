@@ -71,7 +71,7 @@ fn which(v: &Value) -> usize {
 /// `std::stod` (strtod over the whole string; throws if nothing parsed or
 /// out of range).
 fn stod(s: &str) -> Option<f64> {
-    let (value, consumed, erange) = csscolorparser::cstdlib::strtod(s.as_bytes());
+    let (value, consumed, erange) = mln_util::cstdlib::strtod(s.as_bytes());
     if consumed == 0 || erange { None } else { Some(value) }
 }
 

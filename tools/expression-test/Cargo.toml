@@ -19,7 +19,6 @@ name = "expression-test"
 path = "src/main.rs"
 
 [dependencies]
-csscolorparser.workspace = true
 feature.workspace = true
 geometry.workspace = true
 mln_conversion.workspace = true

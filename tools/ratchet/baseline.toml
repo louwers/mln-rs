@@ -142,6 +142,7 @@
 "crates/mln_text/src/icu/ushape.rs" = 1
 "crates/mln_text/src/shaping.rs" = 6
 "crates/mln_text/src/tagged_string.rs" = 4
+"crates/mln_util/src/cstdlib.rs" = 2
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_util/src/lru_cache.rs" = 1
@@ -157,8 +158,6 @@
 "crates/mln_webgpu/src/shaders/shader_group.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
 "crates/mln_webgpu/src/upload_pass.rs" = 1
-"vendor/csscolorparser/src/cstdlib.rs" = 2
-"vendor/csscolorparser/src/lib.rs" = 3
 "vendor/geojson-vt/src/lib.rs" = 2
 "vendor/geojson/src/geojson_impl.rs" = 5
 "vendor/pmtiles/src/lib.rs" = 2

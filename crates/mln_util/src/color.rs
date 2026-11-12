@@ -386,27 +386,38 @@ impl Color {
         Color::new_unchecked(0.0, 0.0, 1.0, 1.0)
     }
 
-    /// Parse a CSS color string (vendor/csscolorparser), returning a
-    /// premultiplied Color. Like the C++ constructor, this asserts (in debug
-    /// builds) that the alpha is in 0..1, which a NaN alpha (`rgba(0,0,0,nan)`)
-    /// is not.
+    /// Parse a CSS color string, returning a premultiplied Color: `oklch()`
+    /// here, every other form with the csscolorparser crate.
     #[must_use]
     pub fn parse(s: &str) -> Option<Color> {
-        if let Some(oklch) = parse_oklch(s) {
-            return Some(premultiplied(oklch_to_rgb(oklch)));
+        // oklch() is read here, in f64: the crate reads it in f32, and takes
+        // some that CSS doesn't, like "oklch(0.6, 0.1, 90)".
+        let text = s.trim();
+        if text.get(..5).is_some_and(|name| name.eq_ignore_ascii_case("oklch")) {
+            return parse_oklch(s).map(|oklch| premultiplied(oklch_to_rgb(oklch)));
         }
 
-        let css_color = csscolorparser::parse(s)?;
+        // Deviation: C++ parses with its vendored csscolorparser. The crate
+        // gives the same bytes on every color string of the expression and
+        // render tests, and also reads CSS Color 4's rgb() and hsl() forms, as
+        // GL JS does. It reads more than the style spec's colors, though: hex
+        // without its '#', and functions like hwb() and lab(), so those are
+        // turned away here.
+        if let Some(open) = text.find('(') {
+            let name = text[..open].trim_end();
+            if !["rgb", "rgba", "hsl", "hsla"].iter().any(|function| name.eq_ignore_ascii_case(function)) {
+                return None;
+            }
+        } else if text.bytes().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        let css_color = csscolorparser::parse(text).ok()?;
+        let [r, g, b, _] = css_color.to_rgba8();
 
         // Premultiply the color.
         // `css_color->a / 255` is float / int; `r * factor` is int * float.
         let factor: f32 = css_color.a / 255.0f32;
-        Some(Color::new(
-            f32::from(css_color.r) * factor,
-            f32::from(css_color.g) * factor,
-            f32::from(css_color.b) * factor,
-            css_color.a,
-        ))
+        Some(Color::new(f32::from(r) * factor, f32::from(g) * factor, f32::from(b) * factor, css_color.a))
     }
 
     #[must_use]

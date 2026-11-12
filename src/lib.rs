@@ -10,7 +10,6 @@
 //! the `mln-rs-*` packages, which only exist for this crate.
 
 pub use cheap_ruler;
-pub use csscolorparser;
 pub use earcut;
 pub use feature;
 pub use geojson;
