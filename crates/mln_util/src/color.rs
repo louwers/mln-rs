@@ -295,12 +295,6 @@ impl Color {
         [self.r, self.g, self.b, self.a]
     }
 
-    /// `Color(const float rgba[4])`.
-    #[must_use]
-    pub fn from_array(rgba: [f32; 4]) -> Self {
-        Color::new(rgba[0], rgba[1], rgba[2], rgba[3])
-    }
-
     #[must_use]
     pub fn stringify(&self) -> String {
         // Match GL JS's Color.toString: whole channels, alpha as is.

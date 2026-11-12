@@ -4,15 +4,12 @@
 
 mod color;
 mod geo;
-mod lru_cache;
 mod number_conversions;
 mod position;
 mod rotation;
 mod string;
-mod string_indexer;
 mod text_conversions;
 mod tile_server_options;
-mod tiny_map;
 
 /// The ULP distance gtest's `FloatingPoint<T>::AlmostEquals` uses.
 const MAX_ULPS: u64 = 4;

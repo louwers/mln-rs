@@ -19,7 +19,6 @@ pub mod harfbuzz_impl;
 pub mod hb_ft;
 pub mod hb_ucd;
 pub mod icu;
-pub mod language_tag;
 pub mod local_glyph_rasterizer;
 pub mod shaping;
 pub mod tagged_string;

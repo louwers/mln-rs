@@ -144,7 +144,6 @@
 "crates/mln_text/src/tagged_string.rs" = 4
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
-"crates/mln_util/src/lru_cache.rs" = 1
 "crates/mln_util/src/projection.rs" = 2
 "crates/mln_util/src/token.rs" = 1
 "crates/mln_vec_map/src/lib.rs" = 1

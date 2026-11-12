@@ -601,7 +601,6 @@ fn change_tile_server_options() {
     let tile_server_opts_changed = TileServerOptions::new()
         .with_api_key_parameter_name("apiKeyChanged")
         .with_base_url("baseURLChanged")
-        .with_default_style("defaultStyleChanged")
         .with_glyphs_template("defaultGlyphsTemplateChanged", "glyphsDomainChanged", None)
         .with_source_template("sourceTemplateChanged", "sourceDomainChanged", None)
         .with_sprites_template("spritesTemplateChanged", "spritesDomainChanged", None)
@@ -621,7 +620,6 @@ fn change_tile_server_options() {
     let a = res_opts.tile_server_options();
     let b = &tile_server_opts_changed;
     assert_eq!(res_opts.api_key(), actual_resource_opts.api_key());
-    assert_eq!(a.default_style(), b.default_style());
     assert_eq!(a.base_url(), b.base_url());
     assert_eq!(a.glyphs_template(), b.glyphs_template());
     assert_eq!(a.glyphs_domain_name(), b.glyphs_domain_name());

@@ -216,14 +216,6 @@ pub fn allows_letter_spacing(string: &[u16]) -> bool {
     string.iter().all(|&c| char_allows_letter_spacing(c))
 }
 
-/// Returns whether a line break can be inserted after any character in the
-/// given string. If false, line breaking should occur on word boundaries
-/// instead.
-#[must_use]
-pub fn allows_ideographic_breaking_str(string: &[u16]) -> bool {
-    string.iter().all(|&c| allows_ideographic_breaking(c))
-}
-
 /// Returns whether a line break can be inserted after the character
 /// indicated by the given Unicode codepoint due to ideographic breaking.
 #[must_use]
