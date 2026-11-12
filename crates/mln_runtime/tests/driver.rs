@@ -374,6 +374,22 @@ fn a_session_released_after_its_map_is_abandoned_without_a_service() {
 }
 
 #[test]
+fn a_map_command_that_no_work_waits_for_wakes_no_driver() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (wake, wakes) = counter();
+    let (session, driver) = attach(&map, AttachOptions { driver_work_wake: Some(wake), ..caller_options() });
+    settle(&driver, &wakes);
+    wait(map.style_url());
+    assert_eq!(0, wakes.load(Ordering::SeqCst));
+    // A demand waits for the commands sent before it, and wakes the driver.
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    assert_eq!(1, wakes.load(Ordering::SeqCst));
+    assert_eq!(FrameDisposition::Rendered, take_one(&driver, &session).disposition);
+    wait_release(&driver, &session);
+}
+
+#[test]
 fn dropping_the_driver_work_abandons_the_session() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");

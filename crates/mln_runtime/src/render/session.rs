@@ -291,6 +291,11 @@ pub(crate) struct SessionShared {
     /// Whether the driver-work wake may run: from the start of the last
     /// service until it runs.
     pub(crate) driver_armed: Arc<AtomicBool>,
+    /// The first of the map's commands that the session's work waits for,
+    /// or `u64::MAX` for none: the map tells the session's thread when it
+    /// ran a command only from that one on, so a command that no work waits
+    /// for wakes no caller's driver.
+    pub(crate) awaited_command: Arc<AtomicU64>,
 }
 
 impl SessionShared {
@@ -771,6 +776,7 @@ pub(crate) fn attach(
         },
         driver_work_taken: AtomicBool::new(false),
         driver_armed,
+        awaited_command: Arc::new(AtomicU64::new(u64::MAX)),
         in_call: AtomicBool::new(false),
     });
     let (completion, resolver) = shared.completion();
@@ -788,7 +794,7 @@ pub(crate) fn attach(
         }
     }
     let session = RenderSession { handle: Arc::new(SessionHandle { shared }) };
-    if let Err(error) = map.bind_session(id, run_loop, size) {
+    if let Err(error) = map.bind_session(id, run_loop, session.shared().awaited_command.clone(), size) {
         // The map was released meanwhile: the session lets go of it.
         drop(session);
         return Err(error);

@@ -32,6 +32,7 @@ use super::local::{LocalTarget, Pending, PendingReads};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
 use super::target::{BorrowedRing, Device, Driver, ExportKind, ExportedRing, Surface};
 use crate::completion::Resolver;
+use crate::map::Published as MapPublished;
 use crate::runtime::Outbox;
 
 /// Where a thread keeps the session whose work it runs.
@@ -253,6 +254,8 @@ pub(crate) struct Worker {
     update_scheduled: Arc<AtomicBool>,
     /// The sequence number of the map's last command that ran.
     map_applied: u64,
+    /// What the map publishes, from the bind on: the last command that ran.
+    map_published: Option<Arc<MapPublished>>,
     /// The demands in the order they came, each waiting until the map ran
     /// the commands sent before it.
     queue: VecDeque<PendingDemand>,
@@ -392,6 +395,7 @@ impl Worker {
             renderer_events,
             update_scheduled: Arc::new(AtomicBool::new(false)),
             map_applied: 0,
+            map_published: None,
             queue: VecDeque::new(),
             waiting: Vec::new(),
             parked: VecDeque::new(),
@@ -422,11 +426,19 @@ impl Worker {
 
     /// The map bound the session in its command `sequence`: from now on the
     /// session draws its updates and reports to it.
-    pub(crate) fn bound(&mut self, sequence: u64, reader: UpdateReader, events: RendererEvents, outbox: &mut Outbox) {
+    pub(crate) fn bound(
+        &mut self,
+        sequence: u64,
+        reader: UpdateReader,
+        events: RendererEvents,
+        published: Arc<MapPublished>,
+        outbox: &mut Outbox,
+    ) {
         if self.torn_down {
             return;
         }
         self.map_applied = self.map_applied.max(sequence);
+        self.map_published = Some(published);
         let scheduled = self.update_scheduled.clone();
         let run_loop = self.shared.run_loop.clone();
         reader.set_waker(Some(Arc::new(move || {
@@ -592,6 +604,29 @@ impl Worker {
     /// the map's commands. Work doesn't wait for a ring to free a texture,
     /// as a parked demand and those behind it do.
     fn run_queued(&mut self, outbox: &mut Outbox) {
+        loop {
+            self.run_ready(outbox);
+            // The map tells the session of the commands that the demands
+            // left wait for. One may have run before it could.
+            let awaited = self
+                .queue
+                .iter()
+                .map(|pending| pending.sequence)
+                .filter(|sequence| *sequence > self.map_applied)
+                .min()
+                .unwrap_or(u64::MAX);
+            self.shared.awaited_command.store(awaited, Ordering::SeqCst);
+            let applied = self.map_published.as_ref().map_or(0, |published| published.applied());
+            if awaited == u64::MAX || applied < awaited {
+                return;
+            }
+            self.map_applied = applied;
+        }
+    }
+
+    /// Runs what [`run_queued`](Self::run_queued) runs, with the map's
+    /// commands that the session knows ran.
+    fn run_ready(&mut self, outbox: &mut Outbox) {
         loop {
             let front = self.queue.front().map(|pending| (pending.serial, pending.sequence <= self.map_applied));
             let work_first =
