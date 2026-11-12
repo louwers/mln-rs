@@ -389,6 +389,43 @@ fn no_frame_renders_into_a_texture_that_the_host_holds() {
     wait(session.detach());
 }
 
+// A frame that the host acquires while a release of the ring's textures is
+// on its way would name a texture that the release lets go of: none is
+// acquired, and the session stays attached.
+#[cfg(feature = "webgpu")]
+#[test]
+fn no_frame_is_acquired_while_a_release_of_the_ring_is_on_its_way() {
+    use std::sync::{Arc, mpsc};
+
+    let Some((device, textures)) = webgpu_ring(2) else { return };
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    // The frame wake runs on the session's thread: blocking it holds the
+    // release back.
+    let (block, blocked) = mpsc::channel::<mpsc::Receiver<()>>();
+    let blocked = std::sync::Mutex::new(blocked);
+    let frame_wake: mln_runtime::Wake = Arc::new(move || {
+        if let Ok(unblock) = blocked.lock().unwrap().try_recv() {
+            let _ = unblock.recv();
+        }
+    });
+    let options = AttachOptions { frame_wake: Some(frame_wake), ..AttachOptions::default() };
+    let session = webgpu_session(&map, &device, &textures, options);
+    let (unblock, unblocked) = mpsc::channel();
+    block.send(unblocked).unwrap();
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    // The frame is in its texture once its result is, and the wake that
+    // follows holds the session's thread.
+    assert!(eventually(|| session.snapshot().unwrap().frame_generation == 1));
+    let released = session.release_target().unwrap();
+    assert!(session.acquire_frame().unwrap().is_none());
+    unblock.send(()).unwrap();
+    released.wait().unwrap();
+    assert!(session.acquire_frame().unwrap().is_none());
+    assert_eq!(mln_runtime::RenderSessionState::Attached, session.snapshot().unwrap().state);
+    wait(session.detach());
+}
+
 #[cfg(all(feature = "gl", target_os = "linux"))]
 mod gl {
     use std::ptr::NonNull;

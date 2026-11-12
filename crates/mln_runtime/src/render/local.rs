@@ -422,6 +422,11 @@ impl LocalTarget {
         matches!(self.frames, Frames::Borrowed { .. })
     }
 
+    /// Whether the target is a ring that let go of its textures.
+    pub fn ring_released(&self) -> bool {
+        matches!(self.frames, Frames::Borrowed { target: None, .. })
+    }
+
     fn ring(&self) -> Result<&dyn Borrowed, Error> {
         match &self.frames {
             Frames::Borrowed { target: Some(target), .. } => Ok(&**target),

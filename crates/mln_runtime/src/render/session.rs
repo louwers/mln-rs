@@ -185,9 +185,9 @@ pub(crate) struct SessionState {
     pub(crate) ring: Vec<RingSlot>,
     /// How many of the ring's frames the host holds.
     pub(crate) acquired_frames: u32,
-    /// The ring replacements on their way: no frame is acquired until they
-    /// ran, since the frames published before one name textures it
-    /// replaces.
+    /// The ring replacements and releases on their way: no frame is
+    /// acquired until they ran, since the frames published before one name
+    /// textures it replaces or lets go of.
     pub(crate) pending_retargets: u32,
 }
 
@@ -981,18 +981,29 @@ impl RenderSession {
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
     /// offscreen session, whose target is its own.
     pub fn release_target(&self) -> Result<Completion<()>, Error> {
-        {
-            let state = self.shared().state.lock_unpoisoned();
+        let shared = self.shared().clone();
+        let capabilities = shared.capabilities;
+        if !capabilities.presentation && !capabilities.frame_acquisition {
+            check_usable(&shared.state.lock_unpoisoned())?;
+            return Err(Error::unsupported("an offscreen session keeps its target"));
+        }
+        let guard = {
+            let mut state = shared.state.lock_unpoisoned();
             check_usable(&state)?;
             if state.acquired_frames != 0 {
                 return Err(Error::invalid_state("release every acquired frame before the target"));
             }
-        }
-        let capabilities = self.shared().capabilities;
-        if !capabilities.presentation && !capabilities.frame_acquisition {
-            return Err(Error::unsupported("an offscreen session keeps its target"));
-        }
-        self.operation(|worker, outbox| worker.release_target(outbox))
+            // No frame is acquired until the release runs: its textures go
+            // with it.
+            capabilities.frame_acquisition.then(|| {
+                state.pending_retargets += 1;
+                RetargetGuard(shared.clone())
+            })
+        };
+        self.operation(move |worker, outbox| {
+            let _guard = guard;
+            worker.release_target(outbox)
+        })
     }
 
     /// Gives a surface session a new surface of `size` logical pixels, after
@@ -1243,7 +1254,8 @@ impl RenderSession {
     }
 }
 
-/// Counts a ring replacement on its way until it runs, or never will.
+/// Counts a ring replacement or release on its way until it runs, or never
+/// will.
 struct RetargetGuard(Arc<SessionShared>);
 
 impl Drop for RetargetGuard {

@@ -715,10 +715,21 @@ impl Worker {
     /// The host gave the ring's `slot` back with its `consumer` sync: the
     /// next frame rendered into it waits for that. A sync the target can't
     /// wait for fails the session, and the slot is never rendered into
-    /// again, since the host's GPU may still read it.
+    /// again, since the host's GPU may still read it. A slot that comes back
+    /// after the ring let go of its textures has nothing to wait in, so it
+    /// is only quarantined, unless its reads are done.
     pub(crate) fn release_slot(&mut self, slot: usize, consumer: ConsumerSync, outbox: &mut Outbox) {
         let kind = consumer.sync.kind;
         let released = match self.gfx.as_ref() {
+            Some(gfx) if gfx.target.ring_released() => {
+                let mut state = self.shared.state.lock_unpoisoned();
+                if let Some(entry) = state.ring.get_mut(slot) {
+                    entry.acquired = false;
+                    entry.quarantined |= kind != SyncKind::CpuComplete;
+                }
+                drop(state);
+                return self.pump(outbox);
+            }
             Some(gfx) => {
                 let _scope = gfx.scope();
                 gfx.target.release_slot(slot, consumer)
