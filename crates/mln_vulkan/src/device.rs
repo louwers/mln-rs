@@ -803,7 +803,9 @@ impl Device {
     /// The kinds of sync with which a host can wait for a borrowed image's
     /// frame (the producer's), and with which a renderer can wait for the
     /// host's reads (the consumer's). Both sides share the queue, so queue
-    /// order needs nothing.
+    /// order needs no sync object: the host orders its reads after a frame
+    /// with a barrier, and the next frame begins with one after the host's
+    /// reads.
     pub fn sync_kinds(&self) -> (SyncKinds, SyncKinds) {
         let features = self.shared.features;
         let mut producer = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::QueueOrder]);
