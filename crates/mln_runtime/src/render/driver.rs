@@ -112,6 +112,7 @@ impl DriverWork {
         }
         drop(gate);
         self.shared.run_loop.set_waker(None);
+        self.shared.wait_for_senders();
         outbox.deliver();
     }
 }

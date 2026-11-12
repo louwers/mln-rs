@@ -82,6 +82,7 @@ fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
         }
         task(worker, &mut outbox);
     }
+    shared.wait_for_senders();
     outbox.deliver();
 }
 
@@ -142,6 +143,7 @@ pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
     let worker = Worker::new(shared.clone(), *init, &mut outbox);
     *slot.borrow_mut() = Some(worker);
     drop(gate);
+    shared.wait_for_senders();
     outbox.deliver();
 }
 

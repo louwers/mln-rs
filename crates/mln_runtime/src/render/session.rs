@@ -280,6 +280,10 @@ pub(crate) struct SessionShared {
     /// Held while the session's thread runs a task, so an abandon waits for
     /// the graphics work in progress.
     pub(crate) gate: Mutex<()>,
+    /// Held while [`RenderSession::send_then`] sends a command and attaches
+    /// its callback, which the session's thread waits for before it
+    /// delivers results.
+    sending: Mutex<()>,
     /// Whether the session's thread is inside a driver call: a core worker
     /// running a task and delivering what it sent the host, or a service of
     /// a caller-driven session.
@@ -425,6 +429,14 @@ impl SessionShared {
     /// abandon a released session too.
     pub(crate) fn abandon(&self, by: Abandoner) -> Result<u32, Error> {
         with_unlocked_wakes(|| self.abandon_locked(by, false))
+    }
+
+    /// Waits for a [`RenderSession::send_then`] in progress to attach its
+    /// callback. The session's thread calls it before it delivers what it
+    /// sent the host, so that a command's result reaches the callback there,
+    /// inside the driver call.
+    pub(crate) fn wait_for_senders(&self) {
+        drop(self.sending.lock_unpoisoned());
     }
 
     /// Marks the session's thread as inside a driver call until the guard
@@ -789,6 +801,7 @@ pub(crate) fn attach(
         driver_armed,
         awaited_command: Arc::new(AtomicU64::new(u64::MAX)),
         in_call: AtomicBool::new(false),
+        sending: Mutex::new(()),
     });
     let (completion, resolver) = shared.completion();
     shared.state.lock_unpoisoned().attach = Some(resolver);
@@ -845,6 +858,35 @@ fn start_thread(shared: Arc<SessionShared>) -> Result<ThreadId, Error> {
 impl RenderSession {
     fn shared(&self) -> &Arc<SessionShared> {
         &self.handle.shared
+    }
+
+    /// Sends a command with `send`, such as [`barrier`](Self::barrier), and
+    /// calls `callback` once with its result, where the session delivers
+    /// it: on the session's thread, inside its driver call, even when the
+    /// command runs before `send` returns. A [`Completion::on_complete`]
+    /// after the command returned would run at once on this thread instead.
+    /// The callback doesn't run when `send` fails.
+    ///
+    /// Fails as `send` does.
+    pub fn send_then<T: Send + 'static>(
+        &self,
+        send: impl FnOnce(&RenderSession) -> Result<Completion<T>, Error>,
+        callback: impl FnOnce(Result<T, Error>) + Send + 'static,
+    ) -> Result<(), Error> {
+        // The wakes that the command runs wait for the lock's release, so a
+        // host's wake that services the session can't wait for it.
+        with_unlocked_wakes(|| {
+            let ready = {
+                let _sending = self.shared().sending.lock_unpoisoned();
+                send(self)?.on_complete_unless_ready(callback)
+            };
+            // A result that came without the session's thread, such as a
+            // command dropped unrun, goes to the callback here.
+            if let Some((callback, result)) = ready {
+                callback(result);
+            }
+            Ok(())
+        })
     }
 
     /// Sends `task` to the session's thread, after the work sent before,

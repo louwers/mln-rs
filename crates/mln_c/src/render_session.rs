@@ -532,7 +532,9 @@ pub(crate) fn release_batch(batch: mln_render_frame_batch) -> Result<(), Error> 
 // MARK: - Work
 
 /// Sends a session operation, whose completion `value` gives the result of,
-/// with the generations of the map's latest snapshot.
+/// with the generations of the map's latest snapshot. The session's driver
+/// delivers the completion inside its driver call, even when the operation
+/// runs before this returns.
 ///
 /// # Safety
 ///
@@ -546,15 +548,16 @@ pub(crate) unsafe fn operation<T: Send + 'static, V: CompletionValue>(
     let object = resolve(session)?;
     // SAFETY: the caller's contract.
     let pending = unsafe { PendingCompletion::new(completion) }?;
-    let sent = send(&object.session)?;
     let map = object.map.clone();
-    completion::forward(sent, Some(pending.accept()), move |result| {
+    // The callback runs once when the send succeeds, and is dropped unrun,
+    // with the completion unaccepted, when it fails.
+    object.session.send_then(send, move |result| {
         let generations = map.snapshot().map_or(Generations::default(), |snapshot| Generations {
             snapshot: snapshot.generation,
             render_update: snapshot.update_generation,
         });
-        (result.map(value).map_err(Error::from), generations)
-    });
+        pending.accept().complete(result.map(value).map_err(Error::from), generations);
+    })?;
     Ok(())
 }
 

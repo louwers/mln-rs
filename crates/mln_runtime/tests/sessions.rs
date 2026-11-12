@@ -486,6 +486,30 @@ fn work_sent_after_a_resize_waits_for_it() {
     assert_eq!(before + 1, snapshot.generation);
 }
 
+/// A barrier on a core worker can finish before `barrier` returns, and a
+/// callback attached after it would then run on the sending thread: the
+/// callback of `send_then` runs on the session's thread every time.
+#[test]
+fn send_then_delivers_on_the_sessions_thread() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    let sender = std::thread::current().id();
+    for _ in 0..50 {
+        let (sent, received) = channel();
+        session
+            .send_then(RenderSession::barrier, move |result| sent.send((result, std::thread::current().id())).unwrap())
+            .unwrap();
+        let (result, thread) = received.recv_timeout(TIMEOUT).unwrap();
+        result.unwrap();
+        assert_ne!(sender, thread);
+    }
+    wait(session.detach());
+    // A failed send runs no callback.
+    let error = session.send_then(RenderSession::barrier, |_| panic!("the callback ran")).unwrap_err();
+    assert_eq!(ErrorKind::InvalidState, error.kind);
+}
+
 // MARK: - Lifecycle
 
 #[test]
