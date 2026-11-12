@@ -29,7 +29,7 @@ const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 const STORAGE_BUFFER_STORAGE_CLASS: &CStr = c"VK_KHR_storage_buffer_storage_class";
 
 /// `VK_OHOS_surface`, OpenHarmony's surface extension, which ash lacks.
-pub(crate) const OHOS_SURFACE: &CStr = c"VK_OHOS_surface";
+pub const OHOS_SURFACE: &CStr = c"VK_OHOS_surface";
 
 /// The instance extensions of the platforms' surfaces, which the library's
 /// instance enables where the loader has them.
@@ -971,6 +971,14 @@ impl Device {
     /// `VK_KHR_surface` and its device `VK_KHR_swapchain`.
     pub fn presents(&self) -> bool {
         self.shared.surface.is_some() && self.shared.swapchain.is_some()
+    }
+
+    /// Whether renderers on the device present to the windows whose surfaces
+    /// the instance extension `name` makes, such as
+    /// `VK_KHR_wayland_surface` or [`OHOS_SURFACE`]: the device presents,
+    /// and its instance has the extension.
+    pub fn presents_through(&self, name: &CStr) -> bool {
+        self.presents() && self.shared.has_instance_extension(name)
     }
 
     /// What the device lets renderers do.
