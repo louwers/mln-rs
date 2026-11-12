@@ -1,5 +1,5 @@
 {
-  description = "The environment that mln-rs builds, tests and runs in on NixOS";
+  description = "The C toolchain and the libraries that mln-rs builds, tests and runs with on Linux";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -13,10 +13,11 @@
     in
     {
       devShells = forAllSystems (pkgs: {
-        # The shell that the justfile's recipes run in. Rust and the other
-        # tools come from mise (mise.toml); this adds the C toolchain, for the
-        # crates that compile C, and the libraries that NixOS keeps out of
-        # the places a build or a dlopen() would search.
+        # `nix develop` enters it on any Linux with Nix, and the justfile's
+        # recipes run in it on NixOS, which has no system-wide libraries for
+        # a build or a dlopen() to find. Rust and the other tools come from
+        # mise (mise.toml); this adds the C toolchain, for the crates that
+        # compile C, and the libraries.
         default = pkgs.mkShell {
           # tools/c-abi-test builds maplibre-native-ffi's ABI suite with
           # CMake, against the Vulkan headers and loader.
