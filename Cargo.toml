@@ -112,7 +112,16 @@ khronos-egl = { version = "6.0.0", features = ["dynamic"] }
 # tools/bench: the process's CPU time, which std lacks: clock_gettime on Unix,
 # GetProcessTimes on Windows.
 libc = { version = "0.2.191" }
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+# tools/bench's GetProcessTimes, and crates/mln_gl's WGL contexts, their pixel
+# formats and the hidden windows they are current on.
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_OpenGL",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+] }
 # crates/mln_gl's window backend: loads libwayland-egl at run time.
 libloading = { version = "0.8.9" }
 # MLT decoding: the Rust implementation of the MapLibre Tile spec, instead of

@@ -27,10 +27,13 @@
 //! is EGL's, so a desktop context of another platform draws through it too.
 //!
 //! A [`RendererBackend`] renders on a [`Device`], an EGL share group or one
-//! context that its backends take turns in, into an `OffscreenTarget`'s
-//! framebuffer. A `SurfaceTarget` presents to a Wayland, X11 or Android
-//! window through EGL from a context of the window's display, and a
-//! `CanvasTarget` draws into the canvas of a WebGL2 context.
+//! context that its backends take turns in, or on Windows a WGL share group,
+//! into an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
+//! Wayland, X11 or Android window through EGL from a context of the window's
+//! display, or to a Win32 window through WGL from a context of its own, and a
+//! `CanvasTarget` draws into the canvas of a WebGL2 context. An
+//! `ExportedTarget` renders into dmabufs, or on Android into hardware
+//! buffers, that it allocates.
 
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
@@ -68,6 +71,10 @@ pub mod exported_target;
 pub mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub mod surface_target;
+#[cfg(windows)]
+mod wgl;
+#[cfg(windows)]
+pub mod wgl_surface_target;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSurfaceTarget};
@@ -83,3 +90,5 @@ pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
 #[cfg(all(unix, not(target_vendor = "apple")))]
 pub use surface_target::SurfaceTarget;
+#[cfg(windows)]
+pub use wgl_surface_target::SurfaceTarget;

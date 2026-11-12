@@ -464,7 +464,15 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let surface = Surface::gl(mln_gl::HostSurface::from_raw(surface));
                     Target::HostSurface { size, surface }
                 }
-                #[cfg(not(all(unix, not(target_vendor = "apple"))))]
+                #[cfg(windows)]
+                {
+                    // SAFETY: the host's `HDC`, which the header's contract
+                    // keeps alive; the attach checks that the device wraps a
+                    // WGL context of the host's.
+                    let surface = Surface::gl(mln_gl::HostSurface::from_hdc(surface));
+                    Target::HostSurface { size, surface }
+                }
+                #[cfg(not(any(windows, all(unix, not(target_vendor = "apple")))))]
                 {
                     let _ = surface;
                     Target::Unsupported("OpenGL surfaces of the host's are not supported by this build")
@@ -517,7 +525,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 if ring.target != 0x0DE1 {
                     return Err(Error::invalid_argument(format!("{} must be GL_TEXTURE_2D", field("target"))));
                 }
-                #[cfg(all(unix, not(target_vendor = "apple")))]
+                #[cfg(any(windows, all(unix, not(target_vendor = "apple"))))]
                 {
                     let textures = mln_gl::BorrowedTextures {
                         textures: textures.iter().map(|texture| texture.texture).collect(),
@@ -525,7 +533,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     };
                     Target::Borrowed { size, ring: BorrowedRing::gl(textures) }
                 }
-                #[cfg(not(all(unix, not(target_vendor = "apple"))))]
+                #[cfg(not(any(windows, all(unix, not(target_vendor = "apple")))))]
                 Target::Unsupported("OpenGL textures of the host's are not supported by this build")
             }
             MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES => {
@@ -818,11 +826,13 @@ pub unsafe extern "C" fn mln_logical_extent_physical_size(
     })
 }
 
-/// `mln_open_gl_supported_context_provider_mask()`: EGL, where the library
-/// renders with OpenGL.
+/// `mln_open_gl_supported_context_provider_mask()`: EGL on Linux, FreeBSD,
+/// Android and `OpenHarmony`, and WGL on Windows.
 #[unsafe(no_mangle)]
 pub extern "C" fn mln_open_gl_supported_context_provider_mask() -> mln_open_gl_context_provider_flags {
-    if cfg!(all(unix, not(target_vendor = "apple"))) {
+    if cfg!(windows) {
+        crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WGL
+    } else if cfg!(all(unix, not(target_vendor = "apple"))) {
         crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL
     } else {
         0
@@ -1273,9 +1283,16 @@ mod tests {
     }
 
     #[test]
-    fn egl_is_the_one_open_gl_provider() {
+    fn each_platform_has_one_open_gl_provider() {
         let egl = crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_EGL;
-        let expected = if cfg!(all(unix, not(target_vendor = "apple"))) { egl } else { 0 };
+        let wgl = crate::generated::types::MLN_OPEN_GL_CONTEXT_PROVIDER_FLAG_WGL;
+        let expected = if cfg!(windows) {
+            wgl
+        } else if cfg!(all(unix, not(target_vendor = "apple"))) {
+            egl
+        } else {
+            0
+        };
         assert_eq!(mln_open_gl_supported_context_provider_mask(), expected);
     }
 }

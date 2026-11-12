@@ -54,6 +54,8 @@ mod style_expression;
 mod texture;
 mod transforms;
 mod url_rules;
+#[cfg(all(test, windows))]
+mod wgl_tests;
 
 #[rustfmt::skip]
 #[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unused_variables, clippy::all, clippy::pedantic)]

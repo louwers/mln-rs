@@ -380,11 +380,21 @@ impl FrameTarget for HostSurfaceTarget {
 }
 
 /// The host's `EGLSurface`, on the display of a device that wraps the host's
-/// context, with that context's config.
+/// EGL context, with that context's config, or on Windows the host's `HDC`,
+/// of the pixel format of the WGL context that the device wraps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct HostSurface(khronos_egl::Surface);
+pub struct HostSurface(pub(crate) SurfaceHandle);
 
-// SAFETY: an EGL handle, which the target's context uses on one thread.
+/// What names a host's surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SurfaceHandle {
+    Egl(khronos_egl::Surface),
+    #[cfg(windows)]
+    Wgl(windows_sys::Win32::Graphics::Gdi::HDC),
+}
+
+// SAFETY: an EGL handle or a device context, which the target's context uses
+// on one thread.
 unsafe impl Send for HostSurface {}
 // SAFETY: as above.
 unsafe impl Sync for HostSurface {}
@@ -397,6 +407,16 @@ impl HostSurface {
     #[must_use]
     pub unsafe fn from_raw(surface: std::ptr::NonNull<std::ffi::c_void>) -> HostSurface {
         // SAFETY: the caller's contract.
-        HostSurface(unsafe { khronos_egl::Surface::from_ptr(surface.as_ptr()) })
+        HostSurface(SurfaceHandle::Egl(unsafe { khronos_egl::Surface::from_ptr(surface.as_ptr()) }))
+    }
+
+    /// # Safety
+    ///
+    /// `dc` is a live `HDC` with the pixel format of the WGL context that
+    /// the device whose targets present to it wraps, and it outlives them.
+    #[cfg(windows)]
+    #[must_use]
+    pub unsafe fn from_hdc(dc: std::ptr::NonNull<std::ffi::c_void>) -> HostSurface {
+        HostSurface(SurfaceHandle::Wgl(dc.as_ptr()))
     }
 }

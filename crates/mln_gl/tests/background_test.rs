@@ -76,9 +76,10 @@ impl std::ops::Deref for Headless {
 const EXTENT: i16 = 8192;
 
 /// The API that `MLN_RENDER_BACKEND` asks for: desktop OpenGL for
-/// `gl-desktop`, and OpenGL ES otherwise.
+/// `gl-desktop`, and otherwise the platform's: OpenGL ES, or WGL's desktop
+/// OpenGL on Windows.
 fn api() -> Api {
-    if knob().is_some_and(|backend| backend.eq_ignore_ascii_case("gl-desktop")) { Api::Gl } else { Api::Gles }
+    if knob().is_some_and(|backend| backend.eq_ignore_ascii_case("gl-desktop")) { Api::Gl } else { Api::default() }
 }
 
 fn knob() -> Option<String> {

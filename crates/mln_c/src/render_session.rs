@@ -805,7 +805,7 @@ pub(crate) mod tests {
         }
     }
 
-    type Pixel = (mln_status, Option<(u32, u32, [u8; 4])>);
+    pub(crate) type Pixel = (mln_status, Option<(u32, u32, [u8; 4])>);
 
     unsafe extern "C" fn send_pixel(user_data: *mut c_void, result: *const mln_completion_result) {
         // SAFETY: the sender that `channel_completion` boxed, and the
@@ -823,7 +823,7 @@ pub(crate) mod tests {
     }
 
     /// The status of a readback, and the size and first pixel that it read.
-    fn read_pixel(session: mln_render_session) -> Pixel {
+    pub(crate) fn read_pixel(session: mln_render_session) -> Pixel {
         let (completion, receiver) = channel_completion::<Pixel>(send_pixel);
         // SAFETY: local arguments, and a completion whose sender the library
         // releases after its call.

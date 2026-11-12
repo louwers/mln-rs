@@ -440,21 +440,28 @@ pub struct DeviceOptions {
     /// The GPU to use. `None` picks the default one.
     pub adapter: Option<Adapter>,
     /// The API that an OpenGL device renders with. Only Linux's and
-    /// FreeBSD's EGL renders desktop OpenGL. Other backends ignore it.
+    /// FreeBSD's EGL renders desktop OpenGL, and Windows' WGL renders it
+    /// only. Other backends ignore it.
     pub gl_api: GlApi,
     /// Whether the sessions of an OpenGL device take turns in one context
     /// instead of having one each. Other backends ignore it.
     pub gl_single_context: bool,
 }
 
-/// The OpenGL API that an OpenGL device renders with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// The OpenGL API that an OpenGL device renders with. By default the
+/// platform's: desktop OpenGL on Windows, and OpenGL ES elsewhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GlApi {
     /// OpenGL ES 3.0 or later.
-    #[default]
     Gles,
     /// Desktop OpenGL 3.3 or later.
     Gl,
+}
+
+impl Default for GlApi {
+    fn default() -> GlApi {
+        if cfg!(windows) { GlApi::Gl } else { GlApi::Gles }
+    }
 }
 
 /// A GPU, by what names it to a backend.
@@ -512,12 +519,18 @@ impl SurfaceType {
             BackendType::Vulkan => {
                 cfg!(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))) && windowing
             }
+            // EGL presents to these windows, and on Windows WGL to Win32
+            // windows.
             BackendType::OpenGL => {
-                cfg!(all(feature = "gl", unix, not(target_vendor = "apple")))
+                cfg!(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))
                     && windowing
                     && matches!(
                         self,
-                        SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk | SurfaceType::OhosNdk
+                        SurfaceType::Win32
+                            | SurfaceType::Xlib
+                            | SurfaceType::Wayland
+                            | SurfaceType::AndroidNdk
+                            | SurfaceType::OhosNdk
                     )
             }
             // wgpu's Vulkan backend makes no OpenHarmony surface, and this

@@ -23,6 +23,11 @@
 // EGL binds a client API to each thread, and makes and releases the current
 // context of the bound one, so a context binds its API around its use and
 // puts back the thread's API after.
+//
+// On Windows, the library's group is WGL's (wgl.rs), and EGL's only a host's.
+
+// Windows makes no library device on EGL.
+#![cfg_attr(windows, allow(dead_code))]
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -35,6 +40,7 @@ use khronos_egl as egl;
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 
+use crate::borrowed_target::SurfaceHandle;
 use crate::egl::{Egl, library};
 use crate::renderer_backend::PlatformContext;
 use crate::types::Gl;
@@ -42,15 +48,22 @@ use crate::types::Gl;
 /// `EGL_PLATFORM_SURFACELESS_MESA` (`EGL_MESA_platform_surfaceless`).
 const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
 
-/// The OpenGL API that a device's contexts render with.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+/// The OpenGL API that a device's contexts render with. By default the
+/// platform's: desktop OpenGL on Windows, whose WGL makes no OpenGL ES
+/// context, and OpenGL ES elsewhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Api {
     /// OpenGL ES 3.0 or later.
-    #[default]
     Gles,
     /// Desktop OpenGL 3.3 or later, of the core profile where the library
     /// makes the context.
     Gl,
+}
+
+impl Default for Api {
+    fn default() -> Api {
+        if cfg!(windows) { Api::Gl } else { Api::Gles }
+    }
 }
 
 impl Api {
@@ -410,6 +423,9 @@ enum Kind {
     Library(ShareGroup),
     Single(Arc<SingleContext>),
     Host(HostGroup),
+    /// A WGL share group, the library's or the host's.
+    #[cfg(windows)]
+    Wgl(crate::wgl::Group),
 }
 
 /// A GL share group that renderers on any thread render in: the library's,
@@ -439,14 +455,32 @@ impl Device {
     }
 
     /// The library's device on EGL's display: a share group of contexts of
-    /// `options.api`, or one such context.
+    /// `options.api`, or one such context. On Windows, a share group of WGL's
+    /// desktop OpenGL contexts.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there
-    /// is no EGL, or no display or config of the API for it, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes no
-    /// context.
+    /// is no EGL, or no display or config of the API for it, and on Windows
+    /// for OpenGL ES, a single context, or a driver without OpenGL 3.3 core
+    /// contexts. Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when
+    /// EGL makes no context.
     pub fn with_options(options: DeviceOptions) -> Result<Device, Error> {
         let DeviceOptions { api, single_context } = options;
+        #[cfg(windows)]
+        {
+            if api == Api::Gles {
+                return Err(Error::unsupported("a WGL device renders with desktop OpenGL, not OpenGL ES"));
+            }
+            if single_context {
+                return Err(Error::unsupported("the sessions of a WGL device have a context each"));
+            }
+            crate::wgl::Group::library().map(|group| Device::of(Kind::Wgl(group)))
+        }
+        #[cfg(not(windows))]
+        Self::egl_library(api, single_context)
+    }
+
+    #[cfg(not(windows))]
+    fn egl_library(api: Api, single_context: bool) -> Result<Device, Error> {
         let display = EglDisplay::get().map_err(Error::unsupported)?;
         let config = display.config(api).map_err(Error::unsupported)?;
         let EglDisplay { egl, display: egl_display, .. } = *display;
@@ -529,6 +563,29 @@ impl Device {
         Ok(Device::of(Kind::Host(HostGroup { egl, display, config, root, api, surfaceless })))
     }
 
+    /// The share group of the host's WGL context `context`, of the pixel
+    /// format of `dc`, whose functions `get_proc_address`, the host's
+    /// `wglGetProcAddress` or null, gives: each renderer's context shares
+    /// its objects with it.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
+    /// device context without a pixel format.
+    ///
+    /// # Safety
+    ///
+    /// `dc` is a live `HDC` with the pixel format of `context`, a live
+    /// `HGLRC`, and they outlive the device and its renderers.
+    #[cfg(windows)]
+    pub unsafe fn from_wgl(
+        dc: NonNull<c_void>,
+        context: NonNull<c_void>,
+        get_proc_address: *mut c_void,
+    ) -> Result<Device, Error> {
+        // SAFETY: the caller's contract.
+        let group = unsafe { crate::wgl::Group::host(dc.as_ptr(), context.as_ptr(), get_proc_address) }?;
+        Ok(Device::of(Kind::Wgl(group)))
+    }
+
     fn of(kind: Kind) -> Device {
         Device {
             kind: Arc::new(kind),
@@ -556,7 +613,12 @@ impl Device {
     /// Whether the group's root is the host's context.
     #[must_use]
     pub fn is_host(&self) -> bool {
-        matches!(*self.kind, Kind::Host(_))
+        match &*self.kind {
+            Kind::Library(_) | Kind::Single(_) => false,
+            Kind::Host(_) => true,
+            #[cfg(windows)]
+            Kind::Wgl(group) => group.is_host(),
+        }
     }
 
     /// The API that the device's contexts render with.
@@ -566,6 +628,8 @@ impl Device {
             Kind::Library(group) => group.api,
             Kind::Single(single) => single.api,
             Kind::Host(group) => group.api,
+            #[cfg(windows)]
+            Kind::Wgl(_) => Api::Gl,
         }
     }
 
@@ -593,6 +657,8 @@ impl Device {
                 let context = EglContext::in_host_group(self.clone(), group, None).map_err(Error::native)?;
                 Self::functions(Box::new(context))
             }
+            #[cfg(windows)]
+            Kind::Wgl(group) => group.create_context(None, Box::new(self.clone())),
         }
     }
 
@@ -600,15 +666,22 @@ impl Device {
     /// around a backend's frames, which it presents to.
     pub(crate) fn create_surface_context(
         &self,
-        surface: egl::Surface,
+        surface: SurfaceHandle,
     ) -> Result<(Gl, Box<dyn PlatformContext>, SurfaceSwap), Error> {
-        let Kind::Host(group) = &*self.kind else {
-            return Err(Error::unsupported("only a device of the host's EGL context presents to its surfaces"));
-        };
-        let context = EglContext::in_host_group(self.clone(), group, Some(surface)).map_err(Error::native)?;
-        let swap = SurfaceSwap { egl: group.egl, display: group.display, surface };
-        let (gl, platform) = Self::functions(Box::new(context))?;
-        Ok((gl, platform, swap))
+        match (&*self.kind, surface) {
+            (Kind::Host(group), SurfaceHandle::Egl(surface)) => {
+                let context = EglContext::in_host_group(self.clone(), group, Some(surface)).map_err(Error::native)?;
+                let swap = SurfaceSwap::Egl { egl: group.egl, display: group.display, surface };
+                let (gl, platform) = Self::functions(Box::new(context))?;
+                Ok((gl, platform, swap))
+            }
+            #[cfg(windows)]
+            (Kind::Wgl(group), SurfaceHandle::Wgl(dc)) if group.is_host() => {
+                let (gl, platform) = group.create_context(Some(dc), Box::new(self.clone()))?;
+                Ok((gl, platform, SurfaceSwap::Wgl(dc)))
+            }
+            _ => Err(Error::unsupported("only a device of the host's context presents to the host's surfaces")),
+        }
     }
 
     /// The GL functions of `context`, made current to look them up. Fails
@@ -637,16 +710,31 @@ impl Device {
 }
 
 /// Presents a frame to the host's surface that a context is current on.
-pub(crate) struct SurfaceSwap {
-    egl: &'static Egl,
-    display: egl::Display,
-    surface: egl::Surface,
+pub(crate) enum SurfaceSwap {
+    Egl {
+        egl: &'static Egl,
+        display: egl::Display,
+        surface: egl::Surface,
+    },
+    /// The host's device context.
+    #[cfg(windows)]
+    Wgl(windows_sys::Win32::Graphics::Gdi::HDC),
 }
 
 impl SurfaceSwap {
     pub(crate) fn swap(&self) {
-        if let Err(e) = self.egl.swap_buffers(self.display, self.surface) {
-            Log::error(Event::GraphicsBackend, format!("eglSwapBuffers() failed: {e}"));
+        match self {
+            SurfaceSwap::Egl { egl, display, surface } => {
+                if let Err(e) = egl.swap_buffers(*display, *surface) {
+                    Log::error(Event::GraphicsBackend, format!("eglSwapBuffers() failed: {e}"));
+                }
+            }
+            #[cfg(windows)]
+            SurfaceSwap::Wgl(dc) => {
+                if let Err(e) = crate::wgl::swap_buffers(*dc) {
+                    Log::error(Event::GraphicsBackend, e);
+                }
+            }
         }
     }
 }
