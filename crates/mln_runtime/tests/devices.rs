@@ -555,6 +555,88 @@ mod vulkan {
         wait(session.detach());
     }
 
+    /// Services `driver` until `done` holds.
+    fn service_until(driver: &mln_runtime::DriverWork, mut done: impl FnMut() -> bool) {
+        let deadline = std::time::Instant::now() + support::TIMEOUT;
+        while !done() {
+            assert!(std::time::Instant::now() < deadline, "the driver never got there");
+            driver.service().unwrap();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
+    // A caller-driven session's release waits for the host's reads on its
+    // later services, which return at once: the host can signal from work
+    // that it submits after a service.
+    #[test]
+    fn a_caller_driven_release_waits_for_the_hosts_reads_on_later_services() {
+        let Some((device, mut host)) = with_timelines() else { return };
+        let images = [host.image()];
+        let timeline = host.timeline();
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
+        let options = AttachOptions {
+            driver: mln_runtime::Driver::CallerThread,
+            producer_sync_kinds: SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]),
+            ..AttachOptions::default()
+        };
+        let (session, attached) = map.attach(target, options).unwrap();
+        let driver = session.take_driver_work().unwrap();
+        service_until(&driver, || attached.is_complete());
+        attached.wait().unwrap();
+        session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+        let mut results = Vec::new();
+        service_until(&driver, || {
+            results.extend(session.drain_frame_results().unwrap());
+            !results.is_empty()
+        });
+        assert_eq!(FrameDisposition::Rendered, results[0].disposition);
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (producer, value) = timeline_of(&frame);
+        assert!(eventually(|| host.counter(producer) >= value));
+        frame.release(timeline_sync(timeline, 1)).unwrap();
+
+        let released = session.release_target().unwrap();
+        let started = std::time::Instant::now();
+        driver.service().unwrap();
+        driver.service().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_millis(500), "a service waited for the host's reads");
+        assert!(!released.is_complete());
+        host.signal(timeline, 1);
+        service_until(&driver, || released.is_complete());
+        released.wait().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_millis(900), "the release waited out its timeout");
+        let detached = session.detach().unwrap();
+        service_until(&driver, || detached.is_complete());
+        detached.wait().unwrap();
+    }
+
+    // An abandon doesn't wait for a release that waits for the host's reads,
+    // which fails instead.
+    #[test]
+    fn an_abandon_ends_a_release_that_waits_for_the_hosts_reads() {
+        let Some((device, mut host)) = with_timelines() else { return };
+        let images = [host.image()];
+        let timeline = host.timeline();
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (producer, value) = timeline_of(&frame);
+        assert!(eventually(|| host.counter(producer) >= value));
+        frame.release(timeline_sync(timeline, 1)).unwrap();
+        let released = session.release_target().unwrap();
+        // The release runs on the session's thread before the abandon.
+        assert!(eventually(|| !session.snapshot().unwrap().has_target));
+        let started = std::time::Instant::now();
+        session.abandon().unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_millis(500), "the abandon waited for the host's reads");
+        assert_eq!(ErrorKind::TargetLost, released.wait().unwrap_err().kind);
+    }
+
     // The host reads each frame on the queue that it shares with the
     // session, and gives it back in queue order: the next frame waits for
     // those reads before it clears the image. The validation layer checks
@@ -869,6 +951,31 @@ fn a_texture_that_the_host_gave_up_stays_quarantined_in_a_new_ring() {
     // A new texture renders.
     let ring =
         BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: vec![webgpu_texture(&device)], size: SIZE });
+    wait(session.set_ring(SIZE, ring));
+    assert_eq!(FrameDisposition::Rendered, render(&session));
+    wait(session.detach());
+}
+
+// A ring's release forgets its textures: one that the host gave up starts
+// fresh in a later ring, since the host may have destroyed it and made
+// another with the same handle.
+#[cfg(feature = "webgpu")]
+#[test]
+fn a_released_ring_forgets_the_textures_that_the_host_gave_up() {
+    let Some((device, textures)) = webgpu_ring(1) else { return };
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let session = webgpu_session(&map, &device, &textures, AttachOptions::default());
+    assert_eq!(FrameDisposition::Rendered, render(&session));
+    session.acquire_frame().unwrap().expect("a frame").discard();
+    assert!(eventually(|| {
+        session
+            .demand_frame(FrameDemand::new(DemandMode::Force, 2))
+            .is_err_and(|error| error.kind == ErrorKind::InvalidState)
+    }));
+
+    wait(session.release_target());
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.clone(), size: SIZE });
     wait(session.set_ring(SIZE, ring));
     assert_eq!(FrameDisposition::Rendered, render(&session));
     wait(session.detach());

@@ -19,6 +19,7 @@ use mln_util::sync::MutexExt;
 
 use super::driver::DriverWork;
 use super::frame::{FrameDemand, FrameResult};
+use super::local::Pending;
 use super::query::RenderedQueryGeometry;
 use super::target::{
     AttachOptions, BorrowedRing, ConsumerSync, Driver, FrameTexture, GpuSync, RenderTarget, Surface, SyncKind,
@@ -104,7 +105,8 @@ pub(crate) struct RingSlot {
     pub(crate) acquired: bool,
     pub(crate) rendering: bool,
     /// The host's GPU may still read the texture, so the session renders
-    /// into it no more, even when a new ring has it again.
+    /// into it no more, even when a new ring has it again, until a release
+    /// of the ring.
     pub(crate) quarantined: bool,
 }
 
@@ -412,7 +414,6 @@ impl SessionShared {
             }
             state.lifecycle = RenderSessionState::Abandoned;
             state.keep_graphics |= keep_graphics;
-
             let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
             (state.take_waiters(), state.map.take(), kept)
         };
@@ -728,6 +729,15 @@ impl RenderSession {
         &self,
         task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<T, Error> + Send + 'static,
     ) -> Result<Completion<T>, Error> {
+        self.settled_operation(|worker, outbox| task(worker, outbox).map(|value| (value, None)))
+    }
+
+    /// Sends `task` as [`operation`](Self::operation) does, and completes
+    /// once the host's reads that it returns end, or a second passes.
+    fn settled_operation<T: Send + 'static>(
+        &self,
+        task: impl FnOnce(&mut Worker, &mut Outbox) -> Result<(T, Pending), Error> + Send + 'static,
+    ) -> Result<Completion<T>, Error> {
         let shared = self.shared();
         with_unlocked_wakes(|| {
             let mut state = shared.state.lock_unpoisoned();
@@ -738,8 +748,14 @@ impl RenderSession {
             worker::post(&shared.run_loop, move |worker, outbox| {
                 let task: worker::Task = Box::new(move |worker, outbox| {
                     let Some(resolver) = worker.take_work(work) else { return };
-                    let result = task(worker, outbox);
-                    outbox.resolve(resolver, result);
+                    match task(worker, outbox) {
+                        Ok((value, pending)) => worker.settle_then(
+                            pending,
+                            move |outbox, settled| outbox.resolve(resolver, settled.map(|()| value)),
+                            outbox,
+                        ),
+                        Err(error) => outbox.resolve(resolver, Err(error)),
+                    }
                 });
                 worker.after_resizes(resizes, task, outbox);
             });
@@ -843,8 +859,9 @@ impl RenderSession {
     /// as it has, of its format. Once the completion reports success, the
     /// session no longer uses the old textures, and no longer waits for the
     /// consumer sync that they were given back with: the host may reuse or
-    /// destroy them. The session waits a second at most for that sync, and
-    /// logs a wait that runs out.
+    /// destroy them. The session's thread polls that sync on its later turns,
+    /// for a second at most, and logs a wait that runs out. Frames wait for
+    /// it meanwhile.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
     /// session without a ring, with
@@ -940,7 +957,9 @@ impl RenderSession {
         if !scale_factor.is_finite() || scale_factor <= 0.0 {
             return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
         }
-        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, _| worker.resize(size, scale_factor))
+        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, _| {
+            worker.resize(size, scale_factor).map(|()| None)
+        })
     }
 
     /// Sends a map command that resizes the map to `size`, at
@@ -951,7 +970,7 @@ impl RenderSession {
         &self,
         size: Size,
         scale_factor: Option<f64>,
-        change: impl FnOnce(&mut Worker, Size, f64, &mut Outbox) -> Result<(), Error> + Send + 'static,
+        change: impl FnOnce(&mut Worker, Size, f64, &mut Outbox) -> Result<Pending, Error> + Send + 'static,
     ) -> Result<Completion<Applied>, Error> {
         if size.is_empty() {
             return Err(Error::invalid_argument("the target's size must not be empty"));
@@ -972,9 +991,16 @@ impl RenderSession {
             let sent =
                 map.resize_for_session(size, scale_factor, shared.run_loop.clone(), move |worker, result, outbox| {
                     if let Some(resolver) = worker.take_work::<Applied>(work) {
-                        let result =
-                            result.and_then(|applied| change(worker, size, scale_factor, outbox).map(|()| applied));
-                        outbox.resolve(resolver, result);
+                        match result.and_then(|applied| Ok((applied, change(worker, size, scale_factor, outbox)?))) {
+                            // A replacement of a ring's textures completes
+                            // once the host's reads of those it let go of end.
+                            Ok((applied, pending)) => worker.settle_then(
+                                pending,
+                                move |outbox, settled| outbox.resolve(resolver, settled.map(|()| applied)),
+                                outbox,
+                            ),
+                            Err(error) => outbox.resolve(resolver, Err(error)),
+                        }
                     }
                     landing.land(worker, outbox);
                 });
@@ -995,8 +1021,10 @@ impl RenderSession {
     /// Once the release completes, the session no longer uses the surface or
     /// the window it was made from, or a ring's textures, and no longer waits
     /// for the consumer sync that the textures were given back with: the host
-    /// may reuse or destroy them. The session waits a second at most for that
-    /// sync, and logs a wait that runs out.
+    /// may reuse or destroy them. The session's thread polls that sync on its
+    /// later turns, for a second at most, and logs a wait that runs out. The
+    /// session keeps nothing of the released textures: one that a later ring
+    /// has again starts fresh, even one that the host gave up.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
     /// offscreen session, whose target is its own.
@@ -1020,9 +1048,9 @@ impl RenderSession {
                 RetargetGuard(shared.clone())
             })
         };
-        self.operation(move |worker, outbox| {
+        self.settled_operation(move |worker, outbox| {
             let _guard = guard;
-            worker.release_target(outbox)
+            worker.release_target(outbox).map(|pending| ((), pending))
         })
     }
 
@@ -1053,7 +1081,7 @@ impl RenderSession {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
-            worker.set_surface(size, scale_factor, surface, outbox)
+            worker.set_surface(size, scale_factor, surface, outbox).map(|()| None)
         })
     }
 
@@ -1379,7 +1407,8 @@ impl AcquiredFrame {
     /// Gives the frame up without saying when the host's reads end: the
     /// session never renders into its texture again, even when
     /// [`set_ring`](RenderSession::set_ring) gives the ring the texture
-    /// again.
+    /// again, until a [`release_target`](RenderSession::release_target) of
+    /// the ring.
     pub fn discard(mut self) {
         self.done = true;
         give_back(&self.shared, self.slot, None);

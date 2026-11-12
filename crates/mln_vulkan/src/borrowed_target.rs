@@ -5,7 +5,7 @@
 use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use ash::vk;
 use gpu_allocator::MemoryLocation;
@@ -184,10 +184,6 @@ impl Drop for Resource {
     }
 }
 
-/// The longest that a release of the ring's images waits for the host's
-/// reads of them.
-const SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
-
 /// What the next frame drawn into a slot's image waits for.
 enum ConsumerWait {
     /// The host's timeline, until it reaches the value.
@@ -277,7 +273,7 @@ impl BorrowedTarget {
                 _ => {}
             }
         }
-        this.reset_slots(&[]);
+        drop(this.reset_slots(&[]));
         Ok(this)
     }
 
@@ -402,74 +398,15 @@ impl BorrowedTarget {
     /// that no frame waits on.
     fn forget_wait(&self, slot: &mut Slot) {
         if let Some(wait) = slot.consumer_wait.take() {
-            self.drop_wait(wait);
+            drop_wait(self.backend.backend_impl(), wait);
         }
     }
 
-    fn drop_wait(&self, wait: ConsumerWait) {
-        match wait {
-            ConsumerWait::Timeline(..) => {}
-            #[cfg(unix)]
-            ConsumerWait::Imported { semaphore, file } => {
-                drop(file);
-                // SAFETY: no submitted frame waits on the semaphore, which
-                // the target made.
-                unsafe { self.backend.backend_impl().get_device().destroy_semaphore(semaphore, None) };
-            }
-        }
-    }
-
-    /// Waits, for about a second at most, for the host's reads that the
-    /// ring's images still wait for, and lets go of them: the host may then
-    /// use or destroy the images. A wait that runs out is logged, and the
-    /// image's sync is let go of all the same.
-    pub fn settle(&self) {
-        let waits: Vec<_> = self.slots.borrow_mut().iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
-        self.settle_waits(waits);
-    }
-
-    fn settle_waits(&self, waits: Vec<ConsumerWait>) {
-        let deadline = Instant::now() + SETTLE_TIMEOUT;
-        let mut ended = true;
-        for wait in waits {
-            ended &= match &wait {
-                ConsumerWait::Timeline(semaphore, value) => self.wait_timeline(*semaphore, *value, deadline),
-                #[cfg(unix)]
-                ConsumerWait::Imported { file, .. } => poll_until(file, deadline),
-            };
-            self.drop_wait(wait);
-        }
-        if !ended {
-            Log::warning(
-                Event::Render,
-                "The host's reads of a borrowed image didn't end within a second of its release; the session no \
-                 longer waits for them",
-            );
-        }
-    }
-
-    /// Waits until `deadline` for the host's `semaphore` to reach `value`,
-    /// and returns whether it did.
-    fn wait_timeline(&self, semaphore: vk::Semaphore, value: u64, deadline: Instant) -> bool {
-        let raw = self.backend.backend_impl().device().raw();
-        // Vulkan 1.2's, or VK_KHR_timeline_semaphore's, which the device has
-        // when it takes timelines.
-        // SAFETY: the device is live, and the names are functions' names.
-        let Some(function) = [c"vkWaitSemaphores", c"vkWaitSemaphoresKHR"]
-            .into_iter()
-            .find_map(|name| unsafe { (raw.get_device_proc_addr)(raw.device, name.as_ptr()) })
-        else {
-            return false;
-        };
-        // SAFETY: both functions have vkWaitSemaphores's signature.
-        let wait = unsafe { std::mem::transmute::<unsafe extern "system" fn(), vk::PFN_vkWaitSemaphores>(function) };
-        let semaphores = [semaphore];
-        let values = [value];
-        let info = vk::SemaphoreWaitInfo::default().semaphores(&semaphores).values(&values);
-        let timeout = u64::try_from(deadline.saturating_duration_since(Instant::now()).as_nanos()).unwrap_or(u64::MAX);
-        // SAFETY: the host's timeline, of the device, which stays valid
-        // until the session ends.
-        unsafe { wait(raw.device, &info, timeout) == vk::Result::SUCCESS }
+    /// Takes what the ring's images still wait for, the host's reads of
+    /// them, for the ring to wait for before it lets go of the images.
+    pub fn take_pending(&self) -> PendingReads {
+        let waits = self.slots.borrow_mut().iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
+        PendingReads { backend: self.backend.clone(), waits }
     }
 
     /// Draws into `images` from now on, which must have as many images, and
@@ -480,8 +417,10 @@ impl BorrowedTarget {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another format,
     /// final layout or owner, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan call fails.
-    /// The target then keeps its images.
-    pub fn replace(&self, images: BorrowedImages) -> Result<(), Error> {
+    /// The target then keeps its images. Returns the host's reads of the
+    /// images that the ring let go of, which the ring waits for before the
+    /// host may use them.
+    pub fn replace(&self, images: BorrowedImages) -> Result<PendingReads, Error> {
         {
             let current = self.images.borrow();
             if images.images.len() != current.images.len() {
@@ -500,13 +439,13 @@ impl BorrowedTarget {
         *self.target.borrow_mut() = Rc::new(DrawTarget::new(images.size, resource.clone()));
         *self.resource.borrow_mut() = resource;
         let old = std::mem::replace(&mut *self.images.borrow_mut(), images);
-        self.reset_slots(&old.images);
-        Ok(())
+        Ok(self.reset_slots(&old.images))
     }
 
     /// Gives each image that the ring had in `old` what it waited for, at
-    /// its new slot, and forgets the rest and what the slots handed over.
-    fn reset_slots(&self, old: &[BorrowedImage]) {
+    /// its new slot, and forgets what the slots handed over. Returns what
+    /// the images that the ring let go of wait for.
+    fn reset_slots(&self, old: &[BorrowedImage]) -> PendingReads {
         let images = self.images.borrow();
         let mut slots = self.slots.borrow_mut();
         let mut previous = std::mem::take(&mut *slots);
@@ -518,10 +457,8 @@ impl BorrowedTarget {
                 .and_then(|slot| slot.consumer_wait.take());
             slots.push(Slot { consumer_wait: carried, ..Slot::default() });
         }
-        // The host may use or destroy an image that the ring let go of once
-        // the replacement completes.
-        drop(slots);
-        self.settle_waits(previous.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect());
+        let waits = previous.iter_mut().filter_map(|slot| slot.consumer_wait.take()).collect();
+        PendingReads { backend: self.backend.clone(), waits }
     }
 
     /// Releases the frame's image to the host's queue family, after the
@@ -676,6 +613,81 @@ impl Drop for BorrowedTarget {
             }
         }
     }
+}
+
+/// The host's reads of images that a ring let go of, which the ring waits
+/// for before the host may use or destroy the images. Dropping it stops
+/// waiting.
+pub struct PendingReads {
+    backend: Rc<RendererBackend>,
+    waits: Vec<ConsumerWait>,
+}
+
+impl PendingReads {
+    /// Whether every read ended, which it checks without blocking. It lets
+    /// go of the syncs of the reads that ended.
+    pub fn poll(&mut self) -> bool {
+        let backend = self.backend.backend_impl();
+        let now = Instant::now();
+        let (ended, waiting): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut self.waits).into_iter().partition(|wait| match wait {
+                ConsumerWait::Timeline(semaphore, value) => wait_timeline(backend, *semaphore, *value, now),
+                #[cfg(unix)]
+                ConsumerWait::Imported { file, .. } => poll_until(file, now),
+            });
+        for wait in ended {
+            drop_wait(backend, wait);
+        }
+        self.waits = waiting;
+        self.waits.is_empty()
+    }
+}
+
+impl Drop for PendingReads {
+    fn drop(&mut self) {
+        for wait in std::mem::take(&mut self.waits) {
+            drop_wait(self.backend.backend_impl(), wait);
+        }
+    }
+}
+
+/// Lets go of `wait`, destroying a semaphore of the target's that no frame
+/// waits on.
+fn drop_wait(backend: &BackendImpl, wait: ConsumerWait) {
+    match wait {
+        ConsumerWait::Timeline(..) => {}
+        #[cfg(unix)]
+        ConsumerWait::Imported { semaphore, file } => {
+            drop(file);
+            // SAFETY: no submitted frame waits on the semaphore, which the
+            // target made.
+            unsafe { backend.get_device().destroy_semaphore(semaphore, None) };
+        }
+    }
+}
+
+/// Waits until `deadline` for the host's `semaphore` to reach `value`, and
+/// returns whether it did.
+fn wait_timeline(backend: &BackendImpl, semaphore: vk::Semaphore, value: u64, deadline: Instant) -> bool {
+    let raw = backend.device().raw();
+    // Vulkan 1.2's, or VK_KHR_timeline_semaphore's, which the device has when
+    // it takes timelines.
+    // SAFETY: the device is live, and the names are functions' names.
+    let Some(function) = [c"vkWaitSemaphores", c"vkWaitSemaphoresKHR"]
+        .into_iter()
+        .find_map(|name| unsafe { (raw.get_device_proc_addr)(raw.device, name.as_ptr()) })
+    else {
+        return false;
+    };
+    // SAFETY: both functions have vkWaitSemaphores's signature.
+    let wait = unsafe { std::mem::transmute::<unsafe extern "system" fn(), vk::PFN_vkWaitSemaphores>(function) };
+    let semaphores = [semaphore];
+    let values = [value];
+    let info = vk::SemaphoreWaitInfo::default().semaphores(&semaphores).values(&values);
+    let timeout = u64::try_from(deadline.saturating_duration_since(Instant::now()).as_nanos()).unwrap_or(u64::MAX);
+    // SAFETY: the host's timeline, of the device, which stays valid until
+    // the session ends.
+    unsafe { wait(raw.device, &info, timeout) == vk::Result::SUCCESS }
 }
 
 /// Waits until `deadline` for `file`, a sync file, to signal, and returns

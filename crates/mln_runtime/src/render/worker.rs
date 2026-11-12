@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use mln_actor::RunLoopHandle;
 use mln_gfx::{BackendScope, ConsumerSync, Handoff, RendererBackend, ScopeType, SyncKind};
@@ -20,11 +21,13 @@ use mln_style::sources::{GeoJSONData, geojson_source_impl};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
+use mln_util::time::Instant;
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
-use super::local::LocalTarget;
+use super::local::{LocalTarget, Pending, PendingReads};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
 use super::target::{BorrowedRing, Device, Driver, Surface};
 use crate::completion::Resolver;
@@ -263,6 +266,45 @@ pub(crate) struct Worker {
     /// The target and backend that a teardown keeps while views name their
     /// sync objects, until the last view ends.
     viewed: Option<(LocalTarget, Rc<dyn RendererBackend>)>,
+    /// The releases and replacements that wait for the host's reads of the
+    /// textures that they let go of.
+    settling: Vec<Settling>,
+    /// Stops the thread that has the session's thread poll `settling`.
+    ticker: Option<Arc<AtomicBool>>,
+}
+
+/// The longest that a release or replacement waits for the host's reads of
+/// the textures that it lets go of.
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// How often the session's thread polls the host's reads.
+const SETTLE_POLL: Duration = Duration::from_millis(2);
+
+/// A release or replacement that waits for the host's reads.
+struct Settling {
+    reads: Box<dyn PendingReads>,
+    deadline: Instant,
+    done: Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>,
+}
+
+/// Starts a thread that has the session's thread poll the host's reads on
+/// its later turns, until the returned flag stops it. It posts to the
+/// session's loop, so a caller-driven session's host gets a wake for each
+/// poll.
+fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let stopped = stop.clone();
+    let deadline = Instant::now() + SETTLE_TIMEOUT * 2;
+    let spawned = mln_util::thread::builder("RenderSessionSettle").spawn(move || {
+        while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
+            std::thread::sleep(SETTLE_POLL);
+            post(&run_loop, |worker, outbox| worker.poll_settling(outbox));
+        }
+    });
+    if spawned.is_err() {
+        Log::error(Event::Render, "Can't start the thread that polls the host's reads of released textures");
+    }
+    stop
 }
 
 impl Drop for Worker {
@@ -338,6 +380,8 @@ impl Worker {
             resizes_landed: 0,
             behind_resizes: VecDeque::new(),
             viewed: None,
+            settling: Vec::new(),
+            ticker: None,
         }
     }
 
@@ -694,6 +738,11 @@ impl Worker {
         if state.ring.iter().all(|slot| slot.quarantined) {
             return RingPick::Quarantined;
         }
+        // A frame may draw into a texture whose host's reads a release
+        // waits for.
+        if !self.settling.is_empty() {
+            return RingPick::Full;
+        }
         let free = state.ring.iter().enumerate().filter(|(_, slot)| !slot.busy());
         let index = free
             .clone()
@@ -784,7 +833,7 @@ impl Worker {
         scale_factor: f64,
         ring: BorrowedRing,
         outbox: &mut Outbox,
-    ) -> Result<(), Error> {
+    ) -> Result<Pending, Error> {
         self.set_scale_factor(scale_factor)?;
         let same_size = self.size() == size;
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
@@ -797,14 +846,14 @@ impl Worker {
             for (_, seen) in &mut self.waiting {
                 *seen = latest;
             }
-            return Ok(());
+            return Ok(None);
         }
         let backend = gfx.backend.clone();
         let replaced = {
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             gfx.target.set_ring(ring.clone())
         };
-        replaced?;
+        let pending = replaced?;
         let old = self.ring.replace(ring.clone());
         {
             let mut state = self.shared.state.lock_unpoisoned();
@@ -833,7 +882,7 @@ impl Worker {
         let waiting: Vec<_> = self.waiting.drain(..).map(|(pending, _)| pending).collect();
         self.parked.extend(waiting);
         self.pump(outbox);
-        Ok(())
+        Ok(pending)
     }
 
     // MARK: - Work
@@ -899,23 +948,92 @@ impl Worker {
         }
     }
 
-    /// Lets go of a surface session's surface, and ends the demands on their
-    /// way.
-    pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
+    /// Lets go of a surface session's surface, or of a ring's textures, and
+    /// ends the demands on their way. Returns the host's reads of the
+    /// textures, which the release waits for. The host may destroy the
+    /// textures once it completes, so a new ring keeps nothing of the old
+    /// one: no texture of it stays quarantined.
+    pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<Pending, Error> {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         let backend = gfx.backend.clone();
-        let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
-        gfx.target.release_surface();
+        let pending = {
+            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
+            gfx.target.release_surface()
+        };
         self.has_frame = false;
+        self.ring = None;
         {
             let mut state = self.shared.state.lock_unpoisoned();
             state.has_target = false;
             for slot in &mut state.ring {
                 slot.frame = None;
+                slot.quarantined = false;
             }
         }
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
-        Ok(())
+        Ok(pending)
+    }
+
+    // MARK: - The host's reads of released textures
+
+    /// Runs `done` once the host's `pending` reads end, or a second passes:
+    /// at once when there are none, and else on a later turn of the
+    /// session's thread, which polls them without blocking. Frames wait for
+    /// them meanwhile.
+    pub(crate) fn settle_then(
+        &mut self,
+        pending: Pending,
+        done: impl FnOnce(&mut Outbox, Result<(), Error>) + 'static,
+        outbox: &mut Outbox,
+    ) {
+        let Some(reads) = pending else { return done(outbox, Ok(())) };
+        self.settling.push(Settling { reads, deadline: Instant::now() + SETTLE_TIMEOUT, done: Box::new(done) });
+        if self.ticker.is_none() {
+            self.ticker = Some(start_ticker(self.shared.run_loop.clone()));
+        }
+    }
+
+    /// Polls the host's reads that releases and replacements wait for, and
+    /// completes those whose reads ended or that waited long enough.
+    fn poll_settling(&mut self, outbox: &mut Outbox) {
+        let now = Instant::now();
+        let (settled, settling): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling)
+            .into_iter()
+            .map(|mut settling| (settling.reads.poll(), settling))
+            .partition(|(ended, settling)| *ended || now >= settling.deadline);
+        self.settling = settling.into_iter().map(|(_, settling)| settling).collect();
+        for (ended, settling) in settled {
+            if !ended {
+                Log::warning(
+                    Event::Render,
+                    "The host's reads of a borrowed texture didn't end within a second of its release; the session \
+                     no longer waits for them",
+                );
+            }
+            let Settling { reads, done, .. } = settling;
+            drop(reads);
+            done(outbox, Ok(()));
+        }
+        if self.settling.is_empty() {
+            self.stop_ticker();
+            self.pump(outbox);
+        }
+    }
+
+    fn stop_ticker(&mut self) {
+        if let Some(ticker) = self.ticker.take() {
+            ticker.store(true, Ordering::SeqCst);
+        }
+    }
+
+    /// Ends the releases and replacements that wait for the host's reads,
+    /// which the session no longer waits for, with `error`.
+    fn end_settling(&mut self, error: &Error, outbox: &mut Outbox) {
+        self.stop_ticker();
+        for Settling { reads, done, .. } in std::mem::take(&mut self.settling) {
+            drop(reads);
+            done(outbox, Err(error.clone()));
+        }
     }
 
     /// Presents to `surface` from now on, at `size` logical pixels, after
@@ -1024,6 +1142,7 @@ impl Worker {
     /// Lets go of the map's updates and the graphics objects, and ends the
     /// demands on their way.
     pub(crate) fn tear_down(&mut self, outbox: &mut Outbox) {
+        self.end_settling(&target_lost(), outbox);
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
         self.torn_down = true;
         if let Some(reader) = self.reader.take() {

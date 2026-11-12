@@ -6,13 +6,11 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -299,8 +297,9 @@ impl BorrowedTarget {
     /// another number of textures, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for another pixel
     /// format, and as [`BorrowedTextures::check`] does. The target then keeps
-    /// its textures.
-    pub fn replace(&self, textures: BorrowedTextures) -> Result<(), Error> {
+    /// its textures. Returns the host's reads of the textures that the ring
+    /// let go of, which the ring waits for before the host may use them.
+    pub fn replace(&self, textures: BorrowedTextures) -> Result<PendingReads, Error> {
         {
             let current = self.resource.textures.borrow();
             if textures.textures.len() != current.textures.len() {
@@ -332,20 +331,13 @@ impl BorrowedTarget {
             })
             .collect();
         *waits = kept;
-        drop(waits);
-        // The host may use or destroy a texture that the ring let go of once
-        // the replacement completes.
-        settle_waits(previous.into_iter().flatten().collect());
-        Ok(())
+        Ok(PendingReads { waits: previous.into_iter().flatten().collect() })
     }
 
-    /// Waits, for about a second at most, for the host's reads that the
-    /// ring's textures still wait for, and lets go of them: the host may then
-    /// use or destroy the textures. A wait that runs out is logged, and the
-    /// texture's sync is let go of all the same.
-    pub fn settle(&self) {
-        let waits = self.resource.waits.borrow_mut().iter_mut().filter_map(Option::take).collect();
-        settle_waits(waits);
+    /// Takes what the ring's textures still wait for, the host's reads of
+    /// them, for the ring to wait for before it lets go of the textures.
+    pub fn take_pending(&self) -> PendingReads {
+        PendingReads { waits: self.resource.waits.borrow_mut().iter_mut().filter_map(Option::take).collect() }
     }
 
     /// The sync the host waits for, once `command_buffer` was committed.
@@ -386,27 +378,19 @@ impl FrameTarget for BorrowedTarget {
     }
 }
 
-/// The longest that a release of the ring's textures waits for the host's
-/// reads of them.
-const SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
+/// The host's reads of textures that a ring let go of, which the ring
+/// waits for before the host may use or destroy the textures. Dropping it
+/// stops waiting.
+pub struct PendingReads {
+    waits: Vec<(SharedEventPtr, u64)>,
+}
 
-/// Waits, all within one timeout, for each shared event to reach its value.
-fn settle_waits(waits: Vec<(SharedEventPtr, u64)>) {
-    let deadline = Instant::now() + SETTLE_TIMEOUT;
-    let mut ended = true;
-    for (event, value) in waits {
-        // The event's signaled value, which any macOS that has shared events
-        // reports.
-        while event.signaledValue() < value && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(1));
-        }
-        ended &= event.signaledValue() >= value;
-    }
-    if !ended {
-        Log::warning(
-            Event::Render,
-            "The host's reads of a borrowed texture didn't end within a second of its release; the session no longer \
-             waits for them",
-        );
+impl PendingReads {
+    /// Whether every read ended, which it checks without blocking: each
+    /// shared event's signaled value, which any macOS with shared events
+    /// reports.
+    pub fn poll(&mut self) -> bool {
+        self.waits.retain(|(event, value)| event.signaledValue() < *value);
+        self.waits.is_empty()
     }
 }

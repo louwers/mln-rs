@@ -38,15 +38,22 @@ impl Borrowed for mln_mtl::BorrowedTarget {
     fn discard(&self, slot: usize) {
         mln_mtl::BorrowedTarget::discard(self, slot);
     }
-    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
         #[allow(irrefutable_let_patterns)]
         let RingKind::Metal(textures) = ring.kind else {
             return Err(Error::unsupported("a ring of Metal textures takes Metal textures only"));
         };
-        mln_mtl::BorrowedTarget::replace(self, textures)
+        mln_mtl::BorrowedTarget::replace(self, textures).map(pending)
     }
-    fn settle(&self) {
-        mln_mtl::BorrowedTarget::settle(self);
+    fn take_pending(&self) -> Pending {
+        pending(mln_mtl::BorrowedTarget::take_pending(self))
+    }
+}
+
+#[cfg(all(feature = "metal", target_vendor = "apple"))]
+impl PendingReads for mln_mtl::PendingReads {
+    fn poll(&mut self) -> bool {
+        mln_mtl::PendingReads::poll(self)
     }
 }
 
@@ -55,11 +62,35 @@ trait Borrowed: FrameTarget {
     fn select(&self, slot: usize);
     fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
     fn discard(&self, slot: usize);
-    fn replace(&self, ring: BorrowedRing) -> Result<(), Error>;
-    /// Waits, briefly, for the host's reads that the textures still wait
-    /// for, before the ring lets go of them. A target that waits for the
-    /// host's reads as it takes each texture back has none.
-    fn settle(&self) {}
+    /// Renders into `ring` from now on, and returns the host's reads of the
+    /// textures that it let go of.
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error>;
+    /// Takes the host's reads of the textures that they still wait for, for
+    /// the ring to wait for before it lets go of them. A target that waits
+    /// for the host's reads as it takes each texture back has none.
+    fn take_pending(&self) -> Pending {
+        None
+    }
+}
+
+/// The host's reads of textures that a ring let go of, which the session
+/// waits for before the release or replacement completes. Dropping it stops
+/// waiting.
+pub(crate) trait PendingReads {
+    /// Whether every read ended, which it checks without blocking.
+    fn poll(&mut self) -> bool;
+}
+
+/// The host's reads that a ring waits for, if any.
+pub(crate) type Pending = Option<Box<dyn PendingReads>>;
+
+/// `reads`, unless they ended already.
+#[cfg(any(
+    all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))),
+    all(feature = "metal", target_vendor = "apple")
+))]
+fn pending(mut reads: impl PendingReads + 'static) -> Pending {
+    (!reads.poll()).then(|| Box::new(reads) as Box<dyn PendingReads>)
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -73,15 +104,22 @@ impl Borrowed for mln_vulkan::BorrowedTarget {
     fn discard(&self, slot: usize) {
         mln_vulkan::BorrowedTarget::discard(self, slot);
     }
-    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
         #[allow(irrefutable_let_patterns)]
         let RingKind::Vulkan(images) = ring.kind else {
             return Err(Error::unsupported("a ring of Vulkan images takes Vulkan images only"));
         };
-        mln_vulkan::BorrowedTarget::replace(self, images)
+        mln_vulkan::BorrowedTarget::replace(self, images).map(pending)
     }
-    fn settle(&self) {
-        mln_vulkan::BorrowedTarget::settle(self);
+    fn take_pending(&self) -> Pending {
+        pending(mln_vulkan::BorrowedTarget::take_pending(self))
+    }
+}
+
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+impl PendingReads for mln_vulkan::PendingReads {
+    fn poll(&mut self) -> bool {
+        mln_vulkan::PendingReads::poll(self)
     }
 }
 
@@ -138,12 +176,12 @@ impl Borrowed for mln_webgpu::BorrowedTarget {
     fn discard(&self, slot: usize) {
         mln_webgpu::BorrowedTarget::discard(self, slot);
     }
-    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
         #[allow(irrefutable_let_patterns)]
         let RingKind::WebGpu(textures) = ring.kind else {
             return Err(Error::unsupported("a ring of WebGPU textures takes WebGPU textures only"));
         };
-        mln_webgpu::BorrowedTarget::replace(self, textures)
+        mln_webgpu::BorrowedTarget::replace(self, textures).map(|()| None)
     }
 }
 
@@ -158,12 +196,12 @@ impl Borrowed for mln_gl::BorrowedTarget {
     fn discard(&self, slot: usize) {
         mln_gl::BorrowedTarget::discard(self, slot);
     }
-    fn replace(&self, ring: BorrowedRing) -> Result<(), Error> {
+    fn replace(&self, ring: BorrowedRing) -> Result<Pending, Error> {
         #[allow(irrefutable_let_patterns)]
         let RingKind::Gl(textures) = ring.kind else {
             return Err(Error::unsupported("a ring of OpenGL textures takes OpenGL textures only"));
         };
-        mln_gl::BorrowedTarget::replace(self, textures)
+        mln_gl::BorrowedTarget::replace(self, textures).map(|()| None)
     }
 }
 
@@ -464,17 +502,19 @@ impl LocalTarget {
         Ok(())
     }
 
-    /// Renders into `ring` from now on, in place of the ring's textures.
+    /// Renders into `ring` from now on, in place of the ring's textures, and
+    /// returns the host's reads of the textures that it let go of, which the
+    /// host may use once they end.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
     /// target that isn't a ring, or a ring of another format, and with the
     /// backend's error.
-    pub fn set_ring(&mut self, ring: BorrowedRing) -> Result<(), Error> {
+    pub(crate) fn set_ring(&mut self, ring: BorrowedRing) -> Result<Pending, Error> {
         match &mut self.frames {
             Frames::Borrowed { target: Some(target), .. } => target.replace(ring),
             Frames::Borrowed { target, producer } => {
                 *target = Some(self.backend.borrowed(ring, *producer)?);
-                Ok(())
+                Ok(None)
             }
             _ => Err(Error::unsupported("the target has no ring")),
         }
@@ -509,18 +549,17 @@ impl LocalTarget {
         }
     }
 
-    /// Lets go of a surface target's surface, or of a ring's textures once
-    /// it waited, a second at most, for the host's reads of them. The
-    /// backend stays.
-    pub fn release_surface(&mut self) {
+    /// Lets go of a surface target's surface, or of a ring's textures, and
+    /// returns the host's reads of the textures, which the host may use once
+    /// they end. The backend stays.
+    pub(crate) fn release_surface(&mut self) -> Pending {
         match &mut self.frames {
-            Frames::Presenting(target) => drop(target.take()),
-            Frames::Borrowed { target, .. } => {
-                if let Some(target) = target.take() {
-                    target.settle();
-                }
+            Frames::Presenting(target) => {
+                drop(target.take());
+                None
             }
-            Frames::Offscreen(_) => {}
+            Frames::Borrowed { target, .. } => target.take().and_then(|target| target.take_pending()),
+            Frames::Offscreen(_) => None,
         }
     }
 

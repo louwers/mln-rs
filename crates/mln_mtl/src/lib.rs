@@ -40,7 +40,7 @@ pub mod uniform_buffer;
 pub mod upload_pass;
 pub mod vertex_buffer_resource;
 
-pub use borrowed_target::{BorrowedTarget, BorrowedTextures};
+pub use borrowed_target::{BorrowedTarget, BorrowedTextures, PendingReads};
 pub use context::Context;
 pub use device::Device;
 pub use objc2;
