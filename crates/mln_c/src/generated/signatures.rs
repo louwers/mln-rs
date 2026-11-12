@@ -70,6 +70,11 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::acquired_frame::mln_acquired_frame_view_begin;
 const _: unsafe extern "C" fn(*mut ::core::ffi::c_void) = crate::acquired_frame::mln_acquired_frame_view_end;
 const _: unsafe extern "C" fn(
+    *const mln_frame_pacer_options,
+    *mut mln_frame_pacer,
+    *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::apple::mln_apple_frame_pacer_create;
+const _: unsafe extern "C" fn(
     *mut ::core::ffi::c_void,
     i64,
     *mut mln_wake,

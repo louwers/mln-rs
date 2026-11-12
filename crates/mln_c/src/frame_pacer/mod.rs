@@ -23,6 +23,8 @@
     allow(dead_code)
 )]
 
+pub(crate) mod apple;
+
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;
 
