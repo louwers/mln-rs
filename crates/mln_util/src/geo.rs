@@ -124,16 +124,6 @@ impl LatLng {
     }
 }
 
-/// `std::min(a, b)` on doubles: `(b < a) ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)` on doubles: `(a < b) ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub struct LatLngBounds {
     sw: LatLng,
@@ -273,12 +263,12 @@ impl LatLngBounds {
 
     pub fn extend(&mut self, point: &LatLng) {
         self.sw = LatLng::new_unchecked(
-            std_min(point.latitude(), self.sw.latitude()),
-            std_min(point.longitude(), self.sw.longitude()),
+            f64::min(point.latitude(), self.sw.latitude()),
+            f64::min(point.longitude(), self.sw.longitude()),
         );
         self.ne = LatLng::new_unchecked(
-            std_max(point.latitude(), self.ne.latitude()),
-            std_max(point.longitude(), self.ne.longitude()),
+            f64::max(point.latitude(), self.ne.latitude()),
+            f64::max(point.longitude(), self.ne.longitude()),
         );
     }
 

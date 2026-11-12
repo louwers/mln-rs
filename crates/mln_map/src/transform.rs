@@ -43,16 +43,6 @@ use crate::map_event::{CameraChange, CameraChangeMode, CameraChangeSource};
 /// first.
 pub const STALE_FRAME_TIME: Duration = Duration::from_millis(100);
 
-/// `std::min`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// Converts the given angle (in radians) to be numerically close to the
 /// anchor angle, allowing it to be interpolated properly without sudden
 /// jumps.
@@ -270,7 +260,7 @@ impl Glide {
         if speed.is_nan() || speed <= 0.0 || speed < decay.min_speed {
             return None;
         }
-        let mut speed = std_min(speed, decay.max_speed);
+        let mut speed = f64::min(speed, decay.max_speed);
         let mut glide = Glide::default();
         let seconds;
         match decay.model {
@@ -280,7 +270,7 @@ impl Glide {
                     return None;
                 }
                 glide.rate = std::f64::consts::LN_2 / half_life;
-                speed = std_min(speed, decay.stop_speed + glide.rate * decay.max_distance);
+                speed = f64::min(speed, decay.stop_speed + glide.rate * decay.max_distance);
                 if speed <= decay.stop_speed {
                     return None;
                 }
@@ -288,7 +278,7 @@ impl Glide {
                 glide.distance = (speed - decay.stop_speed) / glide.rate;
             }
             MomentumDecayModel::Ease => {
-                glide.distance = std_min(decay.distance, decay.max_distance);
+                glide.distance = f64::min(decay.distance, decay.max_distance);
                 seconds = seconds_f64(decay.duration);
                 glide.easing = Some(decay.easing);
             }
@@ -333,7 +323,7 @@ impl Glide {
         if elapsed >= self.duration {
             return 0.0;
         }
-        let t = std_max(0.0, seconds_f64(elapsed));
+        let t = f64::max(0.0, seconds_f64(elapsed));
         let total = seconds_f64(self.duration);
         let Some(easing) = self.easing else {
             return self.rate * (-self.rate * t).exp() / -(-self.rate * total).exp_m1();
@@ -341,7 +331,7 @@ impl Glide {
         // The slope dy/dx of the curve, from its derivatives in its own
         // parameter, which starts just past 0 where both can be 0.
         let ease = bezier(&easing);
-        let p = std_max(ease.solve_curve_x(t / total, 1e-6), 1e-6);
+        let p = f64::max(ease.solve_curve_x(t / total, 1e-6), 1e-6);
         let cy = 3.0 * easing.y1;
         let by = 3.0 * (easing.y2 - easing.y1) - cy;
         let ay = 1.0 - cy - by;
@@ -461,7 +451,7 @@ fn snap_delta(value: f64, snap: &MomentumSnap, circular: bool) -> f64 {
     let delta = if circular {
         let turn = value - snap.offset - 360.0 * ((value - snap.offset) / 360.0).floor();
         let below = (turn / snap.spacing).floor() * snap.spacing;
-        let above = std_min(below + snap.spacing, 360.0);
+        let above = f64::min(below + snap.spacing, 360.0);
         if turn - below <= above - turn { below - turn } else { above - turn }
     } else {
         // `f64::round` rounds halfway away from zero, as std::round does.
@@ -769,8 +759,11 @@ impl Transform {
             zoom
         };
         let final_scale = self.state.zoom_scale(normalized_zoom - normalized_start_zoom);
-        let base =
-            if normalized_zoom > normalized_start_zoom { std_min(2.0, final_scale) } else { std_max(0.5, final_scale) };
+        let base = if normalized_zoom > normalized_start_zoom {
+            f64::min(2.0, final_scale)
+        } else {
+            f64::max(0.5, final_scale)
+        };
         let delta_latitude = if globe {
             VerticalPerspectiveProjection::difference_of_angles_degrees(
                 start_lat_lng.latitude(),
@@ -953,7 +946,7 @@ impl Transform {
         // w₀: Initial visible span, measured in pixels at the initial scale.
         // Known henceforth as a <i>screenful</i>.
         let size = self.state.get_size();
-        let w0 = std_max(
+        let w0 = f64::max(
             f64::from(size.width) - padding.left - padding.right,
             f64::from(size.height) - padding.top - padding.bottom,
         );
@@ -999,10 +992,9 @@ impl Transform {
             // GL JS: the arc may not dip below the map's or the flight's
             // minimum zoom, and that only ever lowers ρ.
             let floor_zoom =
-                std_max(animation.min_zoom.unwrap_or(self.state.get_min_zoom()), self.state.get_min_zoom());
-            // std::min({a, b, c}): the first of the smallest.
-            let normalized_floor_zoom = std_min(
-                std_min(
+                f64::max(animation.min_zoom.unwrap_or(self.state.get_min_zoom()), self.state.get_min_zoom());
+            let normalized_floor_zoom = f64::min(
+                f64::min(
                     floor_zoom + VerticalPerspectiveProjection::zoom_adjustment(lat_lng_end.latitude(), 0.0),
                     normalized_start_zoom,
                 ),
@@ -1019,7 +1011,7 @@ impl Transform {
                         - normalized_start_zoom,
                 );
             if u1 != 0.0 {
-                rho = std_min(rho, (w_max / u1 * 2.0).sqrt());
+                rho = f64::min(rho, (w_max / u1 * 2.0).sqrt());
             }
         } else if animation.min_zoom.is_some() || linear_zoom_interpolation {
             // util::min(a, b, c) = min(a, min(b, c)), fmin on doubles
@@ -1720,7 +1712,7 @@ impl Transform {
             Some(pitch) => mln_math::deg2rad(pitch),
             None => self.state.get_pitch(),
         };
-        self.state.set_pitch(std_min(get_max_pitch_for_edge_insets(&self.state, &padding), pitch));
+        self.state.set_pitch(f64::min(get_max_pitch_for_edge_insets(&self.state, &padding), pitch));
         let mut zoom = camera.zoom.unwrap_or_default();
         self.state.constrain_camera_and_zoom_to_bounds(&mut camera, &mut zoom);
         self.state.set_lat_lng_zoom(&camera.center.unwrap_or_default(), zoom);
@@ -2081,7 +2073,7 @@ impl Transform {
         }
         let before = self.get_lat_lng(WrapMode::Unwrapped);
         let altitude = self.state.get_center_altitude();
-        let steps = std_min((distance / MAX_STEP).ceil(), MAX_STEPS);
+        let steps = f64::min((distance / MAX_STEP).ceil(), MAX_STEPS);
         let step = ScreenCoordinate::new(offset.x / steps, offset.y / steps);
         let bounded = self.state.get_lat_lng_bounds() != LatLngBounds::default();
         for _ in 0..steps as u32 {
@@ -2522,7 +2514,7 @@ fn get_max_pitch_for_edge_insets(state: &TransformState, insets: &EdgeInsets) ->
     let tangent_of_fov_above_center_angle =
         (0.5 + center_offset_y / f64::from(height)) * 2.0 * (field_of_view / 2.0).tan();
     let fov_above_center = tangent_of_fov_above_center_angle.atan();
-    std_max(state.get_min_pitch(), state.get_max_pitch() + field_of_view / 2.0 - fov_above_center)
+    f64::max(state.get_min_pitch(), state.get_max_pitch() + field_of_view / 2.0 - fov_above_center)
 }
 
 #[cfg(test)]

@@ -1412,16 +1412,6 @@ fn camera_for_lat_lngs_on_screen(
         .with_zoom(Some(zoom)))
 }
 
-/// `std::min`: `b < a ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max`: `a < b ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// GL JS `solveVectorScale`: how much to scale the globe for a surface point
 /// to land on `target` along one clip axis, or nothing when the equation
 /// degenerates. Zooming out also moves the camera along `to_center`, so the
@@ -1553,7 +1543,7 @@ fn camera_for_lat_lngs_on_globe(
         );
         return Ok(fit);
     }
-    Ok(fit.with_zoom(Some(std_min(globe.get_zoom() + state.scale_zoom(smallest), state.get_max_zoom()))))
+    Ok(fit.with_zoom(Some(f64::min(globe.get_zoom() + state.scale_zoom(smallest), state.get_max_zoom()))))
 }
 
 /// GL JS's globe bounds: the farthest of eight edge points on each side of
@@ -1583,10 +1573,10 @@ fn globe_bounds(transform: &crate::transform::Transform) -> Result<LatLngBounds,
             VerticalPerspectiveProjection::difference_of_angles_degrees(center.longitude(), lat_lng.longitude());
         let latitude =
             VerticalPerspectiveProjection::difference_of_angles_degrees(center.latitude(), lat_lng.latitude());
-        west = std_min(west, longitude);
-        east = std_max(east, longitude);
-        south = std_min(south, latitude);
-        north = std_max(north, latitude);
+        west = f64::min(west, longitude);
+        east = f64::max(east, longitude);
+        south = f64::min(south, latitude);
+        north = f64::max(north, latitude);
     }
     west += center.longitude();
     east += center.longitude();

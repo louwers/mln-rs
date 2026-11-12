@@ -2395,7 +2395,7 @@ fn fly_stays_above_the_minimum_zoom() {
     let mut lowest = 20.0;
     for frame in 1..=10 {
         run_to(&mut transform, start, f64::from(frame) / 10.0);
-        lowest = std_min(lowest, transform.get_zoom());
+        lowest = f64::min(lowest, transform.get_zoom());
     }
     // GL JS bottoms out at 9.9999993 on the same frames.
     assert!(lowest >= 10.0 - 1e-5, "{lowest}");
@@ -2487,8 +2487,7 @@ fn camera_for_bounds_fits_the_padded_view() {
             );
             let x = clip[0] / clip[3];
             let y = clip[1] / clip[3];
-            // std::min({nearest, x - left, right - x, top - y, y - bottom})
-            nearest = [x - left, right - x, top - y, y - bottom].into_iter().fold(nearest, std_min);
+            nearest = [x - left, right - x, top - y, y - bottom].into_iter().fold(nearest, f64::min);
         }
         assert_near(0.0, nearest, 1e-3);
     }
@@ -3501,7 +3500,7 @@ fn free_bearing_drag_keeps_the_location_under_the_cursor() {
             cursor.y += 8.0;
             transform.move_by_with_anchor(&sc(0.0, 8.0), Some(cursor), &AnimationOptions::default()).unwrap();
             let point = transform.lat_lng_to_screen_coordinate(&grabbed);
-            max_slip = std_max(max_slip, (point.x - cursor.x).hypot(point.y - cursor.y));
+            max_slip = f64::max(max_slip, (point.x - cursor.x).hypot(point.y - cursor.y));
         }
         if free_bearing {
             assert!(max_slip < 1e-6, "{max_slip}");

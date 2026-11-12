@@ -41,16 +41,6 @@ fn clamp(value: f64, lo: f64, hi: f64) -> f64 {
     }
 }
 
-/// `std::min(a, b)`: `b < a ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `a < b ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// How far from the polar axis a unit-sphere point can be and still be on its
 /// pole, with no longitude of its own: GL JS
 /// `sphereSurfacePointToCoordinates` gives it longitude 0.
@@ -130,10 +120,10 @@ fn ray_sphere_intersection(origin: &Vec3, direction: &Vec3) -> Option<RaySphereI
     let t1 = q;
     // Both behind the ray's origin, as for a ray into the sky past a nearby
     // planet: no intersection.
-    if std_max(t0, t1) < 0.0 {
+    if f64::max(t0, t1) < 0.0 {
         return None;
     }
-    Some(RaySphereIntersection { t_min: std_min(t0, t1) })
+    Some(RaySphereIntersection { t_min: f64::min(t0, t1) })
 }
 
 fn point_plane_signed_distance(plane: &Vec4, point: &Vec3) -> f64 {
@@ -166,7 +156,7 @@ fn distance_of_angles_radians(a: f64, b: f64) -> f64 {
     let two_pi = 2.0 * PI;
     // `%` on floats is C fmod.
     let d = ((a - b) % two_pi + two_pi) % two_pi;
-    std_min(d, two_pi - d)
+    f64::min(d, two_pi - d)
 }
 
 /// The integral of 1 / cos(x): where the longitude gets to when the globe
@@ -233,7 +223,7 @@ impl VerticalPerspectiveProjection {
     /// past it the globe keeps its size there.
     #[must_use]
     pub fn planet_scale(center_latitude: f64) -> f64 {
-        mln_math::deg2rad(std_min(center_latitude.abs(), LATITUDE_MAX)).cos()
+        mln_math::deg2rad(f64::min(center_latitude.abs(), LATITUDE_MAX)).cos()
     }
 
     /// The unit-sphere position of a point in tile units.
@@ -380,7 +370,7 @@ impl VerticalPerspectiveProjection {
         };
 
         let horizon_center = scaled(&[plane[0], plane[1], plane[2]], -plane[3]);
-        let horizon_radius = std_max(0.0, 1.0 - plane[3] * plane[3]).sqrt();
+        let horizon_radius = f64::max(0.0, 1.0 - plane[3] * plane[3]).sqrt();
         let relative = add(&plane_intersection, &scaled(&horizon_center, -1.0));
         add(&horizon_center, &scaled(&relative, horizon_radius / length(&relative)))
     }
@@ -517,7 +507,7 @@ impl VerticalPerspectiveProjection {
         let closest_point = add(&ray_origin, &scaled(&ray_direction, -dot(&ray_origin, &ray_direction)));
         let ray_distance_from_globe_center = length(&closest_point);
         let distance_factor =
-            (-std_max(ray_distance_from_globe_center - 1.0 - RAY_SURFACE_DISTANCE_FOR_SLOWING_START, 0.0)
+            (-f64::max(ray_distance_from_globe_center - 1.0 - RAY_SURFACE_DISTANCE_FOR_SLOWING_START, 0.0)
                 * SLOWING_MULTIPLIER)
                 .exp();
         let interpolation_factor_horizon = remap_saturate(
@@ -535,7 +525,7 @@ impl VerticalPerspectiveProjection {
             / f64::from(size.width.min(size.height));
         let radius_factor =
             remap_saturate(radius, SLOWING_RADIUS_START, SLOWING_RADIUS_STOP, 1.0, SLOWING_RADIUS_SLOW_FACTOR);
-        let slowing_factor = std_min(distance_factor, 1.0 + (radius_factor - 1.0) * interpolation_factor_horizon);
+        let slowing_factor = f64::min(distance_factor, 1.0 + (radius_factor - 1.0) * interpolation_factor_horizon);
 
         let factor = (1.0 - 2.0f64.powf(-zoom_delta)) * slowing_factor;
         if free_bearing {
@@ -560,7 +550,7 @@ impl VerticalPerspectiveProjection {
             0.0,
             1.0,
         );
-        let heuristic_factor = std_max(interpolation_factor_longitude, interpolation_factor_horizon)
+        let heuristic_factor = f64::max(interpolation_factor_longitude, interpolation_factor_horizon)
             .powf(INTERPOLATE_TO_HEURISTIC_EXPONENT);
         let target = lat_lng(
             clamp(
@@ -597,7 +587,7 @@ impl VerticalPerspectiveProjection {
             Self::globe_radius_pixels(Projection::world_size(2.0f64.powf(zoom)), LATITUDE_MAX) * area_radians;
         let size = state.get_size();
         let reach_pixels = f64::from(size.width.min(size.height)) / 2.0;
-        let center_pixels = std_min(area_pixels, reach_pixels)
+        let center_pixels = f64::min(area_pixels, reach_pixels)
             * remap_saturate(area_pixels, reach_pixels, reach_pixels * POLE_AREA_FADE_SCALE, 1.0, 0.0);
         LATITUDE_MAX + mln_math::rad2deg(area_radians * center_pixels / area_pixels)
     }
@@ -621,7 +611,7 @@ impl VerticalPerspectiveProjection {
         // speeds up for is capped at 60°: GL JS's numbers.
         let zoomed_out = clamp((7.0 - (state.get_zoom() + Self::zoom_adjustment(latitude, 0.0))) / 4.0, 0.0, 1.0);
         let longitude_speed =
-            interpolate(&inverse_scale(latitude), &inverse_scale(std_min(latitude.abs(), 60.0)), zoomed_out);
+            interpolate(&inverse_scale(latitude), &inverse_scale(f64::min(latitude.abs(), 60.0)), zoomed_out);
         let degrees_per_pixel =
             360.0 / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(state.get_scale()), latitude));
         lat_lng(
@@ -674,7 +664,7 @@ impl VerticalPerspectiveProjection {
             / (2.0 * PI * Self::globe_radius_pixels(Projection::world_size(state.get_scale()), lat_lng.latitude()));
         center_and_bearing(
             &camera_orientation(state)
-                .multiply(&rotation(&axis, mln_math::deg2rad(std_min(pixels * degrees_per_pixel, 179.5)))),
+                .multiply(&rotation(&axis, mln_math::deg2rad(f64::min(pixels * degrees_per_pixel, 179.5)))),
             &lat_lng,
         )
     }
@@ -734,7 +724,7 @@ impl VerticalPerspectiveProjection {
         let d_lng_swing = mln_math::wrap(swung.longitude - center.longitude() + 180.0, 0.0, 360.0) - 180.0;
         let mut d_lng_dial = 0.0;
         if dial > 0.0 {
-            let radius_squared = std_max(rx * rx + ry * ry, DIAL_MIN_RADIUS_PIXELS * DIAL_MIN_RADIUS_PIXELS);
+            let radius_squared = f64::max(rx * rx + ry * ry, DIAL_MIN_RADIUS_PIXELS * DIAL_MIN_RADIUS_PIXELS);
             let d_theta = (rx * -pan_delta.y - ry * pan_delta.x) / radius_squared;
             d_lng_dial = (if pole_latitude > 0.0 { 1.0 } else { -1.0 }) * mln_math::rad2deg(d_theta);
         }
@@ -844,7 +834,7 @@ fn pan_surface_vector(state: &TransformState, point: &ScreenCoordinate) -> Vec3 
     let sin_handover = distance * handover_angle.sin();
     let target_at_handover = clamp(sin_handover, -1.0, 1.0).asin() - handover_angle;
     let slope_at_handover =
-        distance * handover_angle.cos() / std_max(1.0 - sin_handover * sin_handover, 1e-12).sqrt() - 1.0;
+        distance * handover_angle.cos() / f64::max(1.0 - sin_handover * sin_handover, 1e-12).sqrt() - 1.0;
     let room = PAN_MAX_ANGLE - target_at_handover;
     let excess = angle - handover_angle;
     let target = clamp(

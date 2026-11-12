@@ -216,18 +216,6 @@ impl BoxD {
     pub const INITIAL: BoxD = BoxD { min: Point::new(2.0, 1.0), max: Point::new(-1.0, 0.0) };
 }
 
-/// `std::min(a, b)`: `(b < a) ? b : a`.
-#[inline]
-pub(crate) fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)`: `(a < b) ? b : a`.
-#[inline]
-pub(crate) fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// `vt_feature`
 #[derive(Clone, Debug)]
 pub struct VtFeature {
@@ -258,10 +246,10 @@ impl VtFeature {
         let bbox = &mut self.bbox;
         let num_points = &mut self.num_points;
         self.geometry.for_each_point(&mut |p| {
-            bbox.min.x = std_min(p.x, bbox.min.x);
-            bbox.min.y = std_min(p.y, bbox.min.y);
-            bbox.max.x = std_max(p.x, bbox.max.x);
-            bbox.max.y = std_max(p.y, bbox.max.y);
+            bbox.min.x = f64::min(p.x, bbox.min.x);
+            bbox.min.y = f64::min(p.y, bbox.min.y);
+            bbox.max.x = f64::max(p.x, bbox.max.x);
+            bbox.max.y = f64::max(p.y, bbox.max.y);
             *num_points = num_points.wrapping_add(1);
         });
     }

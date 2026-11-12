@@ -68,16 +68,6 @@ fn round_for_accuracy(x: f64) -> f64 {
     if diff < K_EPSILON && diff > 0.0 { round_x } else { x }
 }
 
-/// `std::min` (returns `a` unless `b < a`).
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max` (returns `a` unless `a < b`).
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// `std::modf` fractional part (same sign as `x`).
 fn modf_fraction(x: f64) -> f64 {
     if x.is_infinite() {
@@ -642,7 +632,7 @@ impl TransformState {
 
         // Compute center point of the map
         let mercator_point = Point::new(position[0] + dx * travel, position[1] + dy * travel);
-        let zoom = std_min(zoom, self.scale_zoom(self.max_scale));
+        let zoom = f64::min(zoom, self.scale_zoom(self.max_scale));
         self.set_lat_lng_zoom(&lat_lng_from_mercator(mercator_point, WrapMode::Unwrapped), zoom);
 
         let mercator_z = position[2] + dz * travel;
@@ -1009,9 +999,9 @@ impl TransformState {
         )
     }
 
-    /// `static_cast<uint8_t>(std::max(0.0, getZoom()))`.
+    /// The zoom level, rounded down and clamped to the `u8` range.
     pub fn get_integer_zoom(&self) -> u8 {
-        std_max(0.0, self.get_zoom()) as u8
+        f64::max(0.0, self.get_zoom()) as u8
     }
 
     pub fn get_zoom_fraction(&self) -> f64 {
@@ -1452,12 +1442,12 @@ impl TransformState {
 
         // Constrain min/max pan to avoid showing off-world areas on the Y axis.
         let max_y = (*scale * TILE_SIZE_D - (if self.rotated_north() { width } else { height })) / 2.0;
-        *y = std_max(-max_y, std_min(*y, max_y));
+        *y = f64::max(-max_y, f64::min(*y, max_y));
 
         if self.constrain_mode == ConstrainMode::WidthAndHeight {
             // Constrain min/max pan to avoid showing off-world areas on the X axis.
             let max_x = (*scale * TILE_SIZE_D - (if self.rotated_north() { height } else { width })) / 2.0;
-            *x = std_max(-max_x, std_min(*x, max_x));
+            *x = f64::max(-max_x, f64::min(*x, max_x));
         }
     }
 
@@ -1611,7 +1601,7 @@ impl TransformState {
         let sw = Projection::project(&self.bounds.southwest(), 1.0);
         let scale_x = f64::from(self.size.width) / (ne.x - sw.x);
         let scale_y = f64::from(self.size.height) / (sw.y - ne.y);
-        Some(self.scale_zoom(std_max(scale_x, scale_y)))
+        Some(self.scale_zoom(f64::max(scale_x, scale_y)))
     }
 
     /// Viewport center offset, from [size.width / 2, size.height / 2],

@@ -541,16 +541,13 @@ impl TilePyramid {
         let screen_geometry: &[mln_util::geo::ScreenCoordinate] = if traced.is_empty() { geometry } else { &traced };
         let mut query_geometry: Vec<geometry::Point<f64>> = screen_geometry.iter().map(to_world).collect();
 
-        // `std::min(a, b)` and `std::max(a, b)`.
-        let std_min = |a: f64, b: f64| if b < a { b } else { a };
-        let std_max = |a: f64, b: f64| if a < b { b } else { a };
         // mapbox::geometry::envelope
         let envelope = |points: &mut dyn Iterator<Item = (f64, f64)>| {
             let (x, y) = points.next().expect("points");
             let (mut min, mut max) = ((x, y), (x, y));
             for (x, y) in points {
-                min = (std_min(min.0, x), std_min(min.1, y));
-                max = (std_max(max.0, x), std_max(max.1, y));
+                min = (f64::min(min.0, x), f64::min(min.1, y));
+                max = (f64::max(max.0, x), f64::max(max.1, y));
             }
             (min, max)
         };
@@ -561,7 +558,7 @@ impl TilePyramid {
             // shows when its slightly shrunken corners fall outside it. It
             // moves to the copy west of the main world.
             let (mut screen_min, mut screen_max) = envelope(&mut geometry.iter().map(|p| (p.x, p.y)));
-            let shrink = std_min(screen_max.0 - screen_min.0, screen_max.1 - screen_min.1) * 0.001;
+            let shrink = f64::min(screen_max.0 - screen_min.0, screen_max.1 - screen_min.1) * 0.001;
             screen_min.0 += shrink;
             screen_min.1 += shrink;
             screen_max.0 -= shrink;

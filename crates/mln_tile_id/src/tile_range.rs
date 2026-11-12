@@ -16,11 +16,6 @@ pub struct TileRange {
     pub zoom_range: Range<u8>,
 }
 
-/// `std::max(a, b)`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// `util::clamp(value, min, max)`: `std::max(min, std::min(max, value))`.
 fn clamp(value: f64, min: f64, max: f64) -> f64 {
     let lower = if value < max { value } else { max };
@@ -42,7 +37,7 @@ impl TileRange {
         // longitudes can overflow to infinity, which covers the world. An
         // inverted interval counts as its west edge.
         let west = wrap(bounds.west() % constants::DEGREES_MAX, -constants::LONGITUDE_MAX, constants::LONGITUDE_MAX);
-        let width = std_max(bounds.east() - bounds.west(), 0.0);
+        let width = f64::max(bounds.east() - bounds.west(), 0.0);
         let covers_world = width.is_nan() || width >= constants::DEGREES_MAX;
         let max_tile = 2.0f64.powf(f64::from(max_zoom));
         // C++ `LatLng(lat, lon)` throws for a NaN or infinite edge, which

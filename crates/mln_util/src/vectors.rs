@@ -107,15 +107,10 @@ pub fn vec2_gl_fmod(a: &Vec2, b: f64) -> Vec2 {
     [gl_fmod(a[0], b), gl_fmod(a[1], b)]
 }
 
-/// `std::max(a, b)`: `(a < b) ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
-/// `vector::max(vec2, double)` (`std::max`, not `fmax`).
+/// Each component of `a`, raised to at least `b`.
 #[must_use]
 pub fn vec2_max_scalar(a: &Vec2, b: f64) -> Vec2 {
-    [std_max(a[0], b), std_max(a[1], b)]
+    [f64::max(a[0], b), f64::max(a[1], b)]
 }
 
 #[cfg(test)]

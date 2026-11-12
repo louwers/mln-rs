@@ -32,16 +32,6 @@ use mln_util::vectors::Vec3;
 
 use crate::util::tile_cover_impl::Impl;
 
-/// `std::min(a, b)` on doubles: `(b < a) ? b : a`.
-fn std_min(a: f64, b: f64) -> f64 {
-    if b < a { b } else { a }
-}
-
-/// `std::max(a, b)` on doubles: `(a < b) ? b : a`.
-fn std_max(a: f64, b: f64) -> f64 {
-    if a < b { b } else { a }
-}
-
 /// `LatLng{lat, lon}` built from the coordinates of an existing
 /// `LatLngBounds` (with the latitude clamped to ±`LATITUDE_MAX`), so the
 /// constructor's checks cannot fail.
@@ -209,8 +199,8 @@ impl TileCover {
     #[must_use]
     pub fn new_from_bounds(bounds_: &LatLngBounds, z: u8) -> TileCover {
         let mut bounds = LatLngBounds::hull(
-            bounds_lat_lng(std_max(bounds_.south(), -constants::LATITUDE_MAX), bounds_.west()),
-            bounds_lat_lng(std_min(bounds_.north(), constants::LATITUDE_MAX), bounds_.east()),
+            bounds_lat_lng(f64::max(bounds_.south(), -constants::LATITUDE_MAX), bounds_.west()),
+            bounds_lat_lng(f64::min(bounds_.north(), constants::LATITUDE_MAX), bounds_.east()),
         );
 
         if bounds.is_empty() || bounds.south() > constants::LATITUDE_MAX || bounds.north() < -constants::LATITUDE_MAX {
@@ -318,7 +308,7 @@ mod globe {
     use mln_util::range::Range;
     use mln_util::vectors::{Vec3, Vec4};
 
-    use super::{TileCoverParameters, std_max, std_min};
+    use super::TileCoverParameters;
     use crate::util::tile_lod::{TileZoomFunction, elevation_for_tile_culling};
 
     /// `std::clamp(value, lo, hi)`: `value < lo ? lo : hi < value ? hi :
@@ -449,8 +439,8 @@ mod globe {
         let mut max = f64::NEG_INFINITY;
         for point in points {
             let dot = vec3_dot(axis, point);
-            min = std_min(min, dot);
-            max = std_max(max, dot);
+            min = f64::min(min, dot);
+            max = f64::max(max, dot);
         }
         (min, max)
     }
@@ -466,8 +456,8 @@ mod globe {
     fn tile_bounding_volume(tile: &CanonicalTileID, elevation: f64) -> ConvexVolume {
         // Distances from the planet's center in a world where the surface is
         // at 1.
-        let min_radius = std_min(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
-        let max_radius = std_max(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
+        let min_radius = f64::min(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
+        let max_radius = f64::max(0.0, elevation) / constants::EARTH_RADIUS_M + 1.0;
         if tile.z == 0 {
             return aabb_volume(&[-max_radius, -max_radius, -max_radius], &[max_radius, max_radius, max_radius]);
         }
@@ -570,19 +560,19 @@ mod globe {
     // Distances below are in a world of size 1, to the nearer tile edge.
     fn distance_to_tile_simple(point: f64, tile: f64, tile_size: f64) -> f64 {
         let delta = point - tile;
-        if delta < 0.0 { -delta } else { std_max(0.0, delta - tile_size) }
+        if delta < 0.0 { -delta } else { f64::max(0.0, delta - tile_size) }
     }
 
     fn distance_to_tile_wrap_x(point_x: f64, point_y: f64, corner_x: f64, corner_y: f64, tile_size: f64) -> f64 {
         let to_point_x = point_x - corner_x;
         let distance_x = if to_point_x < 0.0 {
-            std_min(-to_point_x, 1.0 + to_point_x - tile_size)
+            f64::min(-to_point_x, 1.0 + to_point_x - tile_size)
         } else if to_point_x > tile_size {
-            std_min(std_max(to_point_x - tile_size, 0.0), 1.0 - to_point_x)
+            f64::min(f64::max(to_point_x - tile_size, 0.0), 1.0 - to_point_x)
         } else {
             0.0
         };
-        std_max(distance_x, distance_to_tile_simple(point_y, corner_y, tile_size))
+        f64::max(distance_x, distance_to_tile_simple(point_y, corner_y, tile_size))
     }
 
     /// X wraps at the antimeridian; across a pole Y mirrors and X shifts by
@@ -593,12 +583,12 @@ mod globe {
         let corner_x = f64::from(tile.x) / scale;
         let corner_y = f64::from(tile.y) / scale;
         let mut smallest = 2.0;
-        smallest = std_min(smallest, distance_to_tile_wrap_x(point_x, point_y, corner_x, corner_y, tile_size));
-        smallest = std_min(
+        smallest = f64::min(smallest, distance_to_tile_wrap_x(point_x, point_y, corner_x, corner_y, tile_size));
+        smallest = f64::min(
             smallest,
             distance_to_tile_wrap_x(point_x, point_y, corner_x + 0.5, -corner_y - tile_size, tile_size),
         );
-        smallest = std_min(
+        smallest = f64::min(
             smallest,
             distance_to_tile_wrap_x(point_x, point_y, corner_x + 0.5, 2.0 - corner_y - tile_size, tile_size),
         );
@@ -614,8 +604,7 @@ mod globe {
         let current = distance_to_tile_simple(center_x, tile_x, tile_size);
         let left = distance_to_tile_simple(center_x, tile_x - 1.0, tile_size);
         let right = distance_to_tile_simple(center_x, tile_x + 1.0, tile_size);
-        // std::min({current, left, right}): the first of the smallest.
-        let smallest = std_min(std_min(current, left), right);
+        let smallest = f64::min(f64::min(current, left), right);
         if smallest == right {
             return 1;
         }
@@ -868,7 +857,7 @@ pub fn tile_cover(
     // There should always be a certain number of maximum zoom level tiles
     // surrounding the center location
     debug_assert!(state.tile_lod_min_radius >= 1.0);
-    let radius_of_max_lvl_lod_in_tiles = std_max(1.0, state.tile_lod_min_radius);
+    let radius_of_max_lvl_lod_in_tiles = f64::max(1.0, state.tile_lod_min_radius);
 
     let new_root_tile = |wrap: i16| -> Node {
         Node {
@@ -912,7 +901,7 @@ pub fn tile_cover(
         let should_split_tile = if state.tile_lod_mode == TileLodMode::Distance {
             let cam_to_tile_mercator = vec3_scale(&node.aabb.distance_xyz(&camera_coord), 1.0 / world_size);
             let distance_to_tile_mercator = vec3_length(&cam_to_tile_mercator);
-            let cos_pitch_to_tile = std_max(0.0, cam_to_tile_mercator[2] / distance_to_tile_mercator);
+            let cos_pitch_to_tile = f64::max(0.0, cam_to_tile_mercator[2] / distance_to_tile_mercator);
             let pitch_exponent = 0.5; // 0: constant screen width, 1/2: constant screen area, 1: constant screen height
             let tile_scale = 2.0f64.powf(f64::from(node.zoom));
             distance_to_tile_mercator * tile_scale
@@ -988,8 +977,8 @@ pub fn tile_cover_bounds(bounds_: &LatLngBounds, z: u8) -> Vec<UnwrappedTileID> 
     }
 
     let bounds = LatLngBounds::hull(
-        bounds_lat_lng(std_max(bounds_.south(), -constants::LATITUDE_MAX), bounds_.west()),
-        bounds_lat_lng(std_min(bounds_.north(), constants::LATITUDE_MAX), bounds_.east()),
+        bounds_lat_lng(f64::max(bounds_.south(), -constants::LATITUDE_MAX), bounds_.west()),
+        bounds_lat_lng(f64::min(bounds_.north(), constants::LATITUDE_MAX), bounds_.east()),
     );
 
     let zoom = i32::from(z);

@@ -6,7 +6,7 @@ use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, Mu
 
 use crate::types::{
     BoxD, VtFeatures, VtGeometry, VtLineString, VtLinearRing, VtMultiLineString, VtMultiPoint, VtMultiPolygon, VtPoint,
-    VtPolygon, std_max, std_min,
+    VtPolygon,
 };
 
 /// `Tile`
@@ -63,10 +63,10 @@ impl InternalTile {
 
             t.add_feature(geom, props, id);
 
-            t.bbox.min.x = std_min(feature.bbox.min.x, t.bbox.min.x);
-            t.bbox.min.y = std_min(feature.bbox.min.y, t.bbox.min.y);
-            t.bbox.max.x = std_max(feature.bbox.max.x, t.bbox.max.x);
-            t.bbox.max.y = std_max(feature.bbox.max.y, t.bbox.max.y);
+            t.bbox.min.x = f64::min(feature.bbox.min.x, t.bbox.min.x);
+            t.bbox.min.y = f64::min(feature.bbox.min.y, t.bbox.min.y);
+            t.bbox.max.x = f64::max(feature.bbox.max.x, t.bbox.max.x);
+            t.bbox.max.y = f64::max(feature.bbox.max.y, t.bbox.max.y);
         }
         t
     }
