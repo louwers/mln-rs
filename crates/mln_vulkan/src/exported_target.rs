@@ -8,7 +8,7 @@
 // the frames that the host holds keep the old generation's images until
 // they are given back.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::os::fd::{AsRawFd as _, FromRawFd as _, OwnedFd};
 use std::rc::Rc;
 
@@ -475,8 +475,6 @@ pub struct ExportedTarget {
     depth: usize,
     producer: SyncKind,
     generations: RefCell<Generations<Generation>>,
-    /// The size that the next generation takes, once a resize asks for it.
-    size: Cell<Size>,
 }
 
 impl ExportedTarget {
@@ -519,7 +517,6 @@ impl ExportedTarget {
             depth: ring.depth,
             producer,
             generations: RefCell::new(Generations::new(current)),
-            size: Cell::new(size),
         })
     }
 
@@ -556,23 +553,23 @@ impl ExportedTarget {
     }
 
     /// Draws into images of `size` pixels from now on. The frames that the
-    /// host holds, at `held` slots, keep their images.
+    /// host holds, at `held` slots, keep their images. Returns whether the
+    /// ring has new images, which it doesn't when they have `size` already.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when Vulkan
     /// can't make the images, and the target then keeps its own.
-    pub fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error> {
-        self.size.set(size);
-        if self.generations.borrow().current().size == size {
-            return Ok(());
+    pub fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
+        if self.size() == size {
+            return Ok(false);
         }
         let next = Generation::new(&self.backend, &self.layout, self.depth, size, self.producer)?;
         self.generations.borrow_mut().replace(next, held);
-        Ok(())
+        Ok(true)
     }
 
     /// The size of the images that frames draw into.
     pub fn size(&self) -> Size {
-        self.size.get()
+        self.generations.borrow().current().size
     }
 
     /// The image of the frame at `slot`, and its size: of the generation

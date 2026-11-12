@@ -4,7 +4,7 @@
 // the host holds keep the old generation's surfaces until they are given
 // back.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use mln_gfx::command_encoder::CommandEncoder;
@@ -12,6 +12,7 @@ use mln_gfx::export::Generations;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::{ConsumerSync, ExportKind, ExportKinds, ExportedImage, ExportedRing, SyncKind, SyncKinds};
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2_core_foundation::{CFDictionary, CFNumber, CFRetained, CFString};
 use objc2_io_surface::{
@@ -22,6 +23,7 @@ use objc2_metal::{MTLDevice, MTLPixelFormat, MTLTextureDescriptor, MTLTextureUsa
 
 use crate::borrowed_target::{BorrowedTarget, BorrowedTextures};
 use crate::device::Device;
+use crate::mtl_fwd::{MTLDevicePtr, MTLTexturePtr};
 use crate::renderer_backend::RendererBackend;
 
 /// `kCVPixelFormatType_32BGRA`, the four characters 'BGRA', which Metal
@@ -29,10 +31,22 @@ use crate::renderer_backend::RendererBackend;
 const PIXEL_FORMAT: i64 = 0x4247_5241;
 const BYTES_PER_ELEMENT: i64 = 4;
 
-/// The kinds of exported ring that sessions on a Metal device share their
-/// images in: IOSurfaces.
-pub fn export_kinds(_device: &Device) -> ExportKinds {
-    ExportKinds::of(&[ExportKind::IoSurface])
+/// The kinds of exported ring that sessions on `device` share their images
+/// in: IOSurfaces, once the device renders into one.
+pub fn export_kinds(device: &Device) -> ExportKinds {
+    device.export_kinds()
+}
+
+/// The kinds that `device` exports, found by making a texture over an
+/// IOSurface.
+pub(crate) fn probe(device: &Device) -> ExportKinds {
+    match surface_texture(device.device(), Size::new(1, 1)) {
+        Ok(_) => ExportKinds::of(&[ExportKind::IoSurface]),
+        Err(error) => {
+            Log::info(Event::Render, format!("The Metal device renders into no IOSurface: {}", error.message));
+            ExportKinds::NONE
+        }
+    }
 }
 
 /// The kind of `ring` that a session on `device` shares its images in.
@@ -44,7 +58,7 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
         .intersection(ring.kinds)
         .iter()
         .next()
-        .ok_or_else(|| Error::unsupported("a Metal device exports only IOSurfaces"))
+        .ok_or_else(|| Error::unsupported("the Metal device exports none of the ring's kinds of image"))
 }
 
 /// The kinds of sync with which the host waits for a frame (the
@@ -79,6 +93,27 @@ fn create_surface(size: Size) -> Result<CFRetained<IOSurfaceRef>, Error> {
     unsafe { IOSurfaceRef::new(properties.as_opaque()) }.ok_or_else(|| Error::native("IOSurface can't make a surface"))
 }
 
+/// A new IOSurface of `size` pixels, and a texture of `device` over it that
+/// frames render into.
+fn surface_texture(device: &MTLDevicePtr, size: Size) -> Result<(CFRetained<IOSurfaceRef>, MTLTexturePtr), Error> {
+    let surface = create_surface(size)?;
+    // SAFETY: a plain descriptor of the surface's size and format.
+    let descriptor = unsafe {
+        MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
+            MTLPixelFormat::BGRA8Unorm,
+            size.width as usize,
+            size.height as usize,
+            false,
+        )
+    };
+    // No shader writes, which would cost lossless compression on Apple GPUs.
+    descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget);
+    let texture = device
+        .newTextureWithDescriptor_iosurface_plane(&descriptor, &surface, 0)
+        .ok_or_else(|| Error::native("Metal can't make a texture of the IOSurface"))?;
+    Ok((surface, texture))
+}
+
 /// One generation of a ring's surfaces, of one size, and the borrowed ring
 /// target that draws into the textures over them.
 struct Generation {
@@ -93,22 +128,7 @@ impl Generation {
         let mut surfaces = Vec::with_capacity(depth);
         let mut textures = Vec::with_capacity(depth);
         for _ in 0..depth {
-            let surface = create_surface(size)?;
-            // SAFETY: a plain descriptor of the surface's size and format.
-            let descriptor = unsafe {
-                MTLTextureDescriptor::texture2DDescriptorWithPixelFormat_width_height_mipmapped(
-                    MTLPixelFormat::BGRA8Unorm,
-                    size.width as usize,
-                    size.height as usize,
-                    false,
-                )
-            };
-            // No shader writes, which would cost lossless compression on
-            // Apple GPUs.
-            descriptor.setUsage(MTLTextureUsage::ShaderRead | MTLTextureUsage::RenderTarget);
-            let texture = device
-                .newTextureWithDescriptor_iosurface_plane(&descriptor, &surface, 0)
-                .ok_or_else(|| Error::native("Metal can't make a texture of the IOSurface"))?;
+            let (surface, texture) = surface_texture(&device, size)?;
             surfaces.push(surface);
             textures.push(texture);
         }
@@ -124,7 +144,6 @@ pub struct ExportedTarget {
     depth: usize,
     producer: SyncKind,
     generations: RefCell<Generations<Generation>>,
-    size: Cell<Size>,
 }
 
 impl ExportedTarget {
@@ -143,8 +162,8 @@ impl ExportedTarget {
         size: Size,
         producer: SyncKind,
     ) -> Result<ExportedTarget, Error> {
-        if kind != ExportKind::IoSurface {
-            return Err(Error::unsupported(format!("a Metal device exports no {kind:?}")));
+        if !backend.device().export_kinds().contains(kind) {
+            return Err(Error::unsupported(format!("the Metal device exports no {kind:?}")));
         }
         if !sync_kinds(backend.device()).0.contains(producer) {
             return Err(Error::unsupported(format!("an exported IOSurface hands no frame over with {producer:?}")));
@@ -155,7 +174,6 @@ impl ExportedTarget {
             depth: ring.depth,
             producer,
             generations: RefCell::new(Generations::new(current)),
-            size: Cell::new(size),
         })
     }
 
@@ -185,18 +203,23 @@ impl ExportedTarget {
     }
 
     /// Draws into surfaces of `size` pixels from now on. The frames that the
-    /// host holds, at `held` slots, keep their surfaces.
+    /// host holds, at `held` slots, keep their surfaces. Returns whether the
+    /// ring has new surfaces, which it doesn't when they have `size` already.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a surface
     /// can't be made, and the target then keeps its own.
-    pub fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error> {
-        self.size.set(size);
-        if self.generations.borrow().current().size == size {
-            return Ok(());
+    pub fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
+        if self.size() == size {
+            return Ok(false);
         }
         let next = Generation::new(&self.backend, self.depth, size, self.producer)?;
         self.generations.borrow_mut().replace(next, held);
-        Ok(())
+        Ok(true)
+    }
+
+    /// The size of the surfaces that frames draw into.
+    pub fn size(&self) -> Size {
+        self.generations.borrow().current().size
     }
 
     /// The surface of the frame at `slot`, and its size.

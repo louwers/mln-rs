@@ -110,6 +110,10 @@ pub(crate) struct RingSlot {
     /// into it no more, even when a new ring has it again, until a release
     /// of the ring.
     pub(crate) quarantined: bool,
+    /// The host holds an exported ring's image from before a resize, which
+    /// gave the slot a new one that never reached the host: giving the old
+    /// one up quarantines nothing.
+    pub(crate) retired: bool,
 }
 
 impl RingSlot {
@@ -990,8 +994,8 @@ impl RenderSession {
         if !scale_factor.is_finite() || scale_factor <= 0.0 {
             return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
         }
-        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, _| {
-            worker.resize(size, scale_factor).map(|()| None)
+        self.resize_then(size, Some(scale_factor), |worker, size, scale_factor, outbox| {
+            worker.resize(size, scale_factor, outbox).map(|()| None)
         })
     }
 
@@ -1512,7 +1516,8 @@ fn give_back(shared: &Arc<SessionShared>, slot: usize, consumer: Option<Consumer
             None => {
                 if let Some(entry) = state.ring.get_mut(slot) {
                     entry.acquired = false;
-                    entry.quarantined = true;
+                    entry.quarantined = !entry.retired;
+                    entry.retired = false;
                 }
                 worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
             }

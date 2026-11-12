@@ -131,7 +131,8 @@ trait Exported: FrameTarget {
     fn select(&self, slot: usize);
     fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
     fn discard(&self, slot: usize);
-    fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error>;
+    fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error>;
+    fn size(&self) -> Size;
     fn image(&self, slot: usize) -> Option<(Size, ExportedImage)>;
 }
 
@@ -147,8 +148,11 @@ macro_rules! exported {
             fn discard(&self, slot: usize) {
                 <$type>::discard(self, slot);
             }
-            fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error> {
+            fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
                 <$type>::resize(self, size, held)
+            }
+            fn size(&self) -> Size {
+                <$type>::size(self)
             }
             fn image(&self, slot: usize) -> Option<(Size, ExportedImage)> {
                 <$type>::image(self, slot)
@@ -620,12 +624,24 @@ impl LocalTarget {
         Ok(())
     }
 
+    /// The size in pixels of an exported ring's images, or `None` for
+    /// another target.
+    pub fn exported_size(&self) -> Option<Size> {
+        match &self.frames {
+            Frames::Exported(target) => Some(target.size()),
+            _ => None,
+        }
+    }
+
     /// Renders an exported ring's next frames into images of `size` pixels.
     /// The frames that the host holds, at `held` slots, keep their images.
+    /// Returns whether the ring has new images, which it doesn't when they
+    /// have `size` already.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
-    /// target that isn't an exported ring, and with the backend's error.
-    pub fn resize_exported(&self, size: Size, held: &[usize]) -> Result<(), Error> {
+    /// target that isn't an exported ring, and with the backend's error, when
+    /// the ring keeps its images.
+    pub fn resize_exported(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
         match &self.frames {
             Frames::Exported(target) => target.resize(size, held),
             _ => Err(Error::unsupported("the target exports no ring")),

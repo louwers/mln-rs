@@ -259,6 +259,75 @@ fn dropped_and_released_frames_free_their_slots() {
     }
 }
 
+/// A resize to the size the ring has keeps its images, so a slot whose
+/// frame the host discarded stays out of use: the host may still read it.
+#[test]
+fn a_resize_to_the_same_size_keeps_a_discarded_slot_out_of_use() {
+    let runtime = runtime();
+    for kind in EVERY_KIND {
+        for (backend, session) in sessions_exporting(&runtime, kind, SyncKinds::NONE) {
+            let discarded = render_and_acquire(&session, 1);
+            let slot = discarded.slot();
+            discarded.discard();
+            resize(&session, SIZE);
+            for token in 2..2 + 2 * DEPTH as u64 {
+                let frame = render_and_acquire(&session, token);
+                assert_ne!(slot, frame.slot(), "{backend:?} {kind:?}: the discarded slot renders again");
+            }
+        }
+    }
+}
+
+/// Frames that the host held across a resize are of the old images: giving
+/// them up quarantines none of the new ones.
+#[test]
+fn discarding_frames_held_across_a_resize_frees_their_slots() {
+    let runtime = runtime();
+    let swapped = Size::new(SIZE.height, SIZE.width);
+    for kind in EVERY_KIND {
+        for (backend, session) in sessions_exporting(&runtime, kind, SyncKinds::NONE) {
+            let held: Vec<AcquiredFrame> =
+                (1..=DEPTH as u64).map(|token| render_and_acquire(&session, token)).collect();
+            resize(&session, swapped);
+            for frame in held {
+                frame.discard();
+            }
+            // The host keeps each new frame, so each renders into another
+            // slot.
+            let kept: Vec<AcquiredFrame> =
+                (10..10 + DEPTH as u64).map(|token| render_and_acquire(&session, token)).collect();
+            let mut slots: Vec<usize> = kept.iter().map(AcquiredFrame::slot).collect();
+            assert!(kept.iter().all(|frame| exported_image(frame).0 == swapped), "{backend:?} {kind:?}");
+            slots.sort_unstable();
+            assert_eq!((0..DEPTH).collect::<Vec<_>>(), slots, "{backend:?} {kind:?}: every slot renders again");
+        }
+    }
+}
+
+/// A ring that can't make images of a new size fails its session, rather
+/// than drawing the resized map into the images of the old size. Mesa's
+/// software drivers share dmabufs through udmabuf, which takes 64 MiB at
+/// most by default, so a large resize fails there; elsewhere it may not.
+#[test]
+fn a_resize_that_makes_no_images_fails_the_session() {
+    let runtime = runtime();
+    let huge = Size::new(6000, 6000);
+    for (backend, session) in sessions_exporting(&runtime, ExportKind::DmaBuf, SyncKinds::NONE) {
+        if backend != BackendType::OpenGL {
+            continue;
+        }
+        let scale_factor = session.snapshot().unwrap().extent.scale_factor;
+        let Err(error) = session.resize(LogicalExtent { size: huge, scale_factor }).unwrap().wait() else {
+            eprintln!("skipped: the {backend:?} ring makes buffers of {huge:?}");
+            continue;
+        };
+        eprintln!("the resize failed: {error}");
+        let snapshot = session.snapshot().unwrap();
+        assert_eq!(mln_runtime::RenderSessionState::Failed, snapshot.state, "{backend:?}");
+        assert!(snapshot.failure.is_some());
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod linux {
     use std::os::fd::{AsRawFd as _, BorrowedFd};

@@ -804,7 +804,8 @@ impl Worker {
             let mut state = self.shared.state.lock_unpoisoned();
             if let Some(entry) = state.ring.get_mut(slot) {
                 entry.acquired = false;
-                entry.quarantined |= released.is_err() && kind != SyncKind::CpuComplete;
+                entry.quarantined |= released.is_err() && kind != SyncKind::CpuComplete && !entry.retired;
+                entry.retired = false;
             }
             match &released {
                 Err(error) if self.gfx.is_some() && state.lifecycle == RenderSessionState::Attached => {
@@ -925,30 +926,75 @@ impl Worker {
 
     /// Resizes the target, and draws at `scale_factor`, after the map
     /// resized.
-    pub(crate) fn resize(&mut self, size: Size, scale_factor: f64) -> Result<(), Error> {
+    pub(crate) fn resize(&mut self, size: Size, scale_factor: f64, outbox: &mut Outbox) -> Result<(), Error> {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
         let physical = physical_size(size, scale_factor as f32);
-        if gfx.target.is_exported() {
-            // The frames that the host holds keep their images, and every
-            // slot gets a new one. The frames it didn't acquire go first, in
-            // the same step as the snapshot, so that none is acquired with
-            // an image that the resize lets go of.
-            let held: Vec<usize> = {
-                let mut state = self.shared.state.lock_unpoisoned();
-                for slot in state.ring.iter_mut().filter(|slot| !slot.acquired) {
-                    slot.frame = None;
-                    slot.quarantined = false;
+        match gfx.target.exported_size() {
+            // An exported ring whose images have the size already keeps
+            // them, with the frames they hold and the slots quarantined.
+            Some(current) if current == physical => {}
+            Some(_) => {
+                // The frames that the host holds keep their images, and every
+                // slot gets a new one. The frames it didn't acquire go first,
+                // in the same step as the snapshot, so that none is acquired
+                // with an image that the resize lets go of.
+                let held: Vec<usize> = {
+                    let mut state = self.shared.state.lock_unpoisoned();
+                    for slot in state.ring.iter_mut().filter(|slot| !slot.acquired) {
+                        slot.frame = None;
+                    }
+                    state.ring.iter().enumerate().filter(|(_, slot)| slot.acquired).map(|(index, _)| index).collect()
+                };
+                let resized = {
+                    let _scope = gfx.scope();
+                    gfx.target.resize_exported(physical, &held)
+                };
+                match resized {
+                    // Each slot has an image that never reached the host: a
+                    // slot that the host gave up is free, and one it holds
+                    // has its old image retired.
+                    Ok(true) => {
+                        let mut state = self.shared.state.lock_unpoisoned();
+                        for slot in state.ring.iter_mut() {
+                            if slot.acquired {
+                                slot.retired = true;
+                            } else {
+                                slot.quarantined = false;
+                            }
+                        }
+                    }
+                    Ok(false) => {}
+                    // The map has the new size already, which the old images
+                    // can't show.
+                    Err(error) => {
+                        self.fail(error.clone(), outbox);
+                        return Err(error);
+                    }
                 }
-                state.ring.iter().enumerate().filter(|(_, slot)| slot.acquired).map(|(index, _)| index).collect()
-            };
-            let _scope = gfx.scope();
-            gfx.target.resize_exported(physical, &held)?;
-        } else {
-            gfx.target.resize(physical);
+            }
+            None => gfx.target.resize(physical),
         }
         self.target_changed(size, None);
         Ok(())
+    }
+
+    /// Fails the attached session with `error`, ending the demands on their
+    /// way, and lets go of its renderer and target.
+    fn fail(&mut self, error: Error, outbox: &mut Outbox) {
+        let failed = {
+            let mut state = self.shared.state.lock_unpoisoned();
+            let attached = self.gfx.is_some() && state.lifecycle == RenderSessionState::Attached;
+            if attached {
+                state.lifecycle = RenderSessionState::Failed;
+                state.failure = Some(error);
+            }
+            attached
+        };
+        if failed {
+            self.end_demands(FrameDisposition::Failed, outbox);
+            self.drop_gfx();
+        }
     }
 
     /// Draws at `scale_factor` from the next frame on, which the map took

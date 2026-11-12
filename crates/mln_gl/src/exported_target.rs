@@ -181,6 +181,11 @@ impl Allocator {
                 let result = (|| {
                     // SAFETY: plain queries of the new buffer object.
                     let (modifier, count) = unsafe { ((gbm.modifier)(object), (gbm.plane_count)(object)) };
+                    if !choice.modifiers.contains(&modifier) {
+                        return Err(Error::native(format!(
+                            "GBM chose the modifier {modifier:#x}, which the host doesn't import"
+                        )));
+                    }
                     if !(1..=DMA_BUF_MAX_PLANES as i32).contains(&count) {
                         return Err(Error::native("GBM made a dmabuf of too many planes"));
                     }
@@ -683,7 +688,6 @@ pub struct ExportedTarget {
     depth: usize,
     producer: SyncKind,
     generations: RefCell<Generations<Generation>>,
-    size: Cell<Size>,
     /// The slot that the next frame goes to.
     selected: Cell<usize>,
 }
@@ -725,7 +729,6 @@ impl ExportedTarget {
             depth: ring.depth,
             producer,
             generations: RefCell::new(Generations::new(current)),
-            size: Cell::new(size),
             selected: Cell::new(0),
         })
     }
@@ -755,19 +758,24 @@ impl ExportedTarget {
     }
 
     /// Draws into buffers of `size` pixels from now on. The frames that the
-    /// host holds, at `held` slots, keep their buffers. Call it with the
-    /// backend's context current.
+    /// host holds, at `held` slots, keep their buffers. Returns whether the
+    /// ring has new buffers, which it doesn't when they have `size` already.
+    /// Call it with the backend's context current.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when a buffer
     /// can't be made, and the target then keeps its own.
-    pub fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error> {
-        self.size.set(size);
-        if self.generations.borrow().current().size == size {
-            return Ok(());
+    pub fn resize(&self, size: Size, held: &[usize]) -> Result<bool, Error> {
+        if self.size() == size {
+            return Ok(false);
         }
         let next = Generation::new(&self.backend, &self.exporter, &self.choice, self.depth, size, self.producer)?;
         self.generations.borrow_mut().replace(next, held);
-        Ok(())
+        Ok(true)
+    }
+
+    /// The size of the buffers that frames draw into.
+    pub fn size(&self) -> Size {
+        self.generations.borrow().current().size
     }
 
     /// The dmabuf of the frame at `slot`, and its size.

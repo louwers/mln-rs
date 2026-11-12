@@ -1,7 +1,9 @@
 // The GPU and command queue that Metal renderers share.
 
 use std::ffi::c_void;
+use std::sync::{Arc, OnceLock};
 
+use mln_gfx::ExportKinds;
 use mln_util::error::Error;
 use objc2::rc::Retained;
 use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice};
@@ -16,6 +18,8 @@ pub struct Device {
     queue: MTLCommandQueuePtr,
     /// Whether the queue is the host's, which the host submits to too.
     host_queue: bool,
+    /// The kinds that the device has exported an image of, probed once.
+    export_kinds: Arc<OnceLock<ExportKinds>>,
 }
 
 impl Device {
@@ -44,7 +48,7 @@ impl Device {
             }
         };
         let queue = device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
-        Ok(Device { device, queue, host_queue: false })
+        Ok(Device { device, queue, host_queue: false, export_kinds: Arc::default() })
     }
 
     /// The host's device and command queue, or a queue of the device's own
@@ -64,11 +68,11 @@ impl Device {
             .ok_or_else(|| Error::invalid_argument("the Metal device must not be null"))?;
         // SAFETY: as above.
         match unsafe { Retained::retain(queue.cast()) } {
-            Some(queue) => Ok(Device { device, queue, host_queue: true }),
+            Some(queue) => Ok(Device { device, queue, host_queue: true, export_kinds: Arc::default() }),
             None => {
                 let queue =
                     device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
-                Ok(Device { device, queue, host_queue: false })
+                Ok(Device { device, queue, host_queue: false, export_kinds: Arc::default() })
             }
         }
     }
@@ -91,6 +95,12 @@ impl Device {
 
     pub fn queue(&self) -> &MTLCommandQueuePtr {
         &self.queue
+    }
+
+    /// The kinds of exported ring that sessions on the device share their
+    /// images in: those it exported an image of, once, when first asked.
+    pub fn export_kinds(&self) -> ExportKinds {
+        *self.export_kinds.get_or_init(|| crate::exported_target::probe(self))
     }
 
     /// The name of the GPU.
