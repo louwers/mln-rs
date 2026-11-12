@@ -159,6 +159,296 @@ mod vulkan {
         assert_eq!(locks, lock.unlocks.load(Ordering::SeqCst));
     }
 
+    /// A host's lock on a queue that it shares with sessions.
+    #[derive(Default)]
+    struct HostQueueLock {
+        locked: std::sync::Mutex<bool>,
+        unlocked: std::sync::Condvar,
+    }
+
+    impl mln_vulkan::QueueLock for HostQueueLock {
+        fn lock(&self) {
+            let mut locked = self.locked.lock().unwrap();
+            while *locked {
+                locked = self.unlocked.wait(locked).unwrap();
+            }
+            *locked = true;
+        }
+        fn unlock(&self) {
+            *self.locked.lock().unwrap() = false;
+            self.unlocked.notify_one();
+        }
+    }
+
+    /// The host's side of a Vulkan device: the images and the timeline that
+    /// it makes, and the work it submits to the queue, under its lock.
+    struct Host {
+        instance: ash::Instance,
+        device: ash::Device,
+        raw: mln_vulkan::RawDevice,
+        lock: Arc<HostQueueLock>,
+        images: Vec<(vk::Image, vk::ImageView, vk::DeviceMemory)>,
+        semaphores: Vec<vk::Semaphore>,
+        buffers: Vec<(vk::Buffer, vk::DeviceMemory)>,
+        pool: vk::CommandPool,
+        fences: Vec<vk::Fence>,
+    }
+
+    impl Host {
+        /// The library's Vulkan device, with the host's lock on its queue,
+        /// and the host's side of it.
+        fn new() -> Option<(Device, Host)> {
+            let Some(Device::Vulkan(vulkan)) = device_of(BackendType::Vulkan) else { return None };
+            let lock = Arc::new(HostQueueLock::default());
+            let vulkan = vulkan.with_queue_lock(lock.clone()).unwrap();
+            let raw = vulkan.raw();
+            // SAFETY: the device's own loader function and handles.
+            let (instance, device) = unsafe {
+                let entry =
+                    ash::Entry::from_static_fn(ash::StaticFn { get_instance_proc_addr: raw.get_instance_proc_addr });
+                let instance = ash::Instance::load(entry.static_fn(), raw.instance);
+                let device = ash::Device::load(instance.fp_v1_0(), raw.device);
+                (instance, device)
+            };
+            let info = vk::CommandPoolCreateInfo::default().queue_family_index(raw.queue_family_index);
+            // SAFETY: a valid create info.
+            let pool = unsafe { device.create_command_pool(&info, None) }.unwrap();
+            let host = Host {
+                instance,
+                device,
+                raw,
+                lock,
+                images: Vec::new(),
+                semaphores: Vec::new(),
+                buffers: Vec::new(),
+                pool,
+                fences: Vec::new(),
+            };
+            Some((Device::Vulkan(vulkan), host))
+        }
+
+        fn memory(&self, requirements: vk::MemoryRequirements, flags: vk::MemoryPropertyFlags) -> vk::DeviceMemory {
+            // SAFETY: a plain query of the GPU.
+            let properties = unsafe { self.instance.get_physical_device_memory_properties(self.raw.physical_device) };
+            let index = (0..properties.memory_type_count)
+                .find(|&index| {
+                    requirements.memory_type_bits & (1 << index) != 0
+                        && properties.memory_types[index as usize].property_flags.contains(flags)
+                })
+                .unwrap();
+            let info = vk::MemoryAllocateInfo::default().allocation_size(requirements.size).memory_type_index(index);
+            // SAFETY: a valid allocate info.
+            unsafe { self.device.allocate_memory(&info, None) }.unwrap()
+        }
+
+        /// An RGBA8 image of the ring's size that sessions render into and
+        /// the host copies from.
+        fn image(&mut self) -> mln_vulkan::BorrowedImage {
+            let info = vk::ImageCreateInfo::default()
+                .image_type(vk::ImageType::TYPE_2D)
+                .format(vk::Format::R8G8B8A8_UNORM)
+                .extent(vk::Extent3D { width: SIZE.width, height: SIZE.height, depth: 1 })
+                .mip_levels(1)
+                .array_layers(1)
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .tiling(vk::ImageTiling::OPTIMAL)
+                .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_SRC)
+                .initial_layout(vk::ImageLayout::UNDEFINED);
+            // SAFETY: valid create infos, and memory of the image's
+            // requirements.
+            unsafe {
+                let image = self.device.create_image(&info, None).unwrap();
+                let memory =
+                    self.memory(self.device.get_image_memory_requirements(image), vk::MemoryPropertyFlags::empty());
+                self.device.bind_image_memory(image, memory, 0).unwrap();
+                let view_info = vk::ImageViewCreateInfo::default()
+                    .image(image)
+                    .view_type(vk::ImageViewType::TYPE_2D)
+                    .format(vk::Format::R8G8B8A8_UNORM)
+                    .subresource_range(vk::ImageSubresourceRange {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        base_mip_level: 0,
+                        level_count: 1,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    });
+                let view = self.device.create_image_view(&view_info, None).unwrap();
+                self.images.push((image, view, memory));
+                mln_vulkan::BorrowedImage { image, view }
+            }
+        }
+
+        fn ring(images: &[mln_vulkan::BorrowedImage]) -> BorrowedRing {
+            BorrowedRing::vulkan(mln_vulkan::BorrowedImages {
+                images: images.to_vec(),
+                size: SIZE,
+                format: vk::Format::R8G8B8A8_UNORM,
+                final_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                owner: mln_vulkan::ImageOwner::GraphicsQueue,
+            })
+        }
+
+        /// A timeline semaphore of the host's, at zero.
+        fn timeline(&mut self) -> vk::Semaphore {
+            let mut type_info =
+                vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE).initial_value(0);
+            let info = vk::SemaphoreCreateInfo::default().push_next(&mut type_info);
+            // SAFETY: a valid create info, on a device with timelines.
+            let semaphore = unsafe { self.device.create_semaphore(&info, None) }.unwrap();
+            self.semaphores.push(semaphore);
+            semaphore
+        }
+
+        /// Submits a copy of `image`, in its final layout, to a buffer, to
+        /// the queue that sessions share, without waiting for it.
+        fn read(&mut self, image: vk::Image) {
+            // SAFETY: valid create and allocate infos; the command buffer
+            // records one copy of the image, in the layout the ring leaves
+            // it in, and goes to the queue under the host's lock.
+            unsafe {
+                let size = u64::from(SIZE.width * SIZE.height * 4);
+                let info = vk::BufferCreateInfo::default().size(size).usage(vk::BufferUsageFlags::TRANSFER_DST);
+                let buffer = self.device.create_buffer(&info, None).unwrap();
+                let memory =
+                    self.memory(self.device.get_buffer_memory_requirements(buffer), vk::MemoryPropertyFlags::empty());
+                self.device.bind_buffer_memory(buffer, memory, 0).unwrap();
+                self.buffers.push((buffer, memory));
+                let info = vk::CommandBufferAllocateInfo::default()
+                    .command_pool(self.pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1);
+                let command_buffer = self.device.allocate_command_buffers(&info).unwrap()[0];
+                self.device.begin_command_buffer(command_buffer, &vk::CommandBufferBeginInfo::default()).unwrap();
+                // A frame in queue order is the host's to wait for.
+                let after_frame = vk::MemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::MEMORY_WRITE)
+                    .dst_access_mask(vk::AccessFlags::TRANSFER_READ);
+                self.device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[after_frame],
+                    &[],
+                    &[],
+                );
+                let region = vk::BufferImageCopy::default()
+                    .image_subresource(vk::ImageSubresourceLayers {
+                        aspect_mask: vk::ImageAspectFlags::COLOR,
+                        mip_level: 0,
+                        base_array_layer: 0,
+                        layer_count: 1,
+                    })
+                    .image_extent(vk::Extent3D { width: SIZE.width, height: SIZE.height, depth: 1 });
+                self.device.cmd_copy_image_to_buffer(
+                    command_buffer,
+                    image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    buffer,
+                    &[region],
+                );
+                self.device.end_command_buffer(command_buffer).unwrap();
+                let fence = self.device.create_fence(&vk::FenceCreateInfo::default(), None).unwrap();
+                self.fences.push(fence);
+                let command_buffers = [command_buffer];
+                let submit = vk::SubmitInfo::default().command_buffers(&command_buffers);
+                use mln_vulkan::QueueLock as _;
+                self.lock.lock();
+                let submitted = self.device.queue_submit(self.raw.queue, &[submit], fence);
+                self.lock.unlock();
+                submitted.unwrap();
+            }
+        }
+    }
+
+    impl Drop for Host {
+        fn drop(&mut self) {
+            // SAFETY: the host's objects, which no session uses any more,
+            // once the host's own work is done.
+            unsafe {
+                if !self.fences.is_empty() {
+                    let _ = self.device.wait_for_fences(&self.fences, true, u64::MAX);
+                }
+                for fence in self.fences.drain(..) {
+                    self.device.destroy_fence(fence, None);
+                }
+                self.device.destroy_command_pool(self.pool, None);
+                for (buffer, memory) in self.buffers.drain(..) {
+                    self.device.destroy_buffer(buffer, None);
+                    self.device.free_memory(memory, None);
+                }
+                for semaphore in self.semaphores.drain(..) {
+                    self.device.destroy_semaphore(semaphore, None);
+                }
+                for (image, view, memory) in self.images.drain(..) {
+                    self.device.destroy_image_view(view, None);
+                    self.device.destroy_image(image, None);
+                    self.device.free_memory(memory, None);
+                }
+            }
+        }
+    }
+
+    fn timeline_sync(semaphore: vk::Semaphore, value: u64) -> ConsumerSync {
+        use vk::Handle as _;
+        ConsumerSync::of(GpuSync { kind: SyncKind::VulkanTimelineSemaphore, handle: semaphore.as_raw(), value })
+    }
+
+    /// The host and the library's device, with timelines, or `None` where
+    /// there is none.
+    fn with_timelines() -> Option<(Device, Host)> {
+        let (device, host) = Host::new()?;
+        let Device::Vulkan(vulkan) = &device else { unreachable!() };
+        if !vulkan.sync_kinds().1.contains(SyncKind::VulkanTimelineSemaphore) {
+            eprintln!("skipped: the Vulkan device has no timelines");
+            return None;
+        }
+        Some((device, host))
+    }
+
+    // A frame waits for the host's timeline at zero, which it has reached
+    // already, though no other semaphore of its submission has a value. The
+    // validation layer checks the submission.
+    #[test]
+    fn a_ring_waits_for_the_hosts_timeline_at_zero() {
+        let Some((device, mut host)) = with_timelines() else { return };
+        let images = [host.image()];
+        let timeline = host.timeline();
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::CpuComplete]));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        assert_eq!(SyncKind::CpuComplete, frame.producer_sync().kind);
+        frame.release(timeline_sync(timeline, 0)).unwrap();
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        drop(session.acquire_frame().unwrap().expect("a frame"));
+        wait(session.detach());
+    }
+
+    // The host reads each frame on the queue that it shares with the
+    // session, and gives it back in queue order: the next frame waits for
+    // those reads before it clears the image. The validation layer checks
+    // the frames.
+    #[test]
+    fn a_ring_waits_for_the_hosts_reads_in_queue_order() {
+        let Some((device, mut host)) = Host::new() else { return };
+        let images = [host.image()];
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::QueueOrder]));
+        for _ in 0..3 {
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let frame = session.acquire_frame().unwrap().expect("a frame");
+            assert_eq!(SyncKind::QueueOrder, frame.producer_sync().kind);
+            host.read(images[0].image);
+            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::QueueOrder))).unwrap();
+        }
+        wait(session.detach());
+    }
+
     #[test]
     fn a_session_presents_to_the_hosts_surface() {
         let Some(device) = device_of(BackendType::Vulkan) else { return };

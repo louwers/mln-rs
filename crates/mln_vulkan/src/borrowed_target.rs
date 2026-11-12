@@ -325,7 +325,13 @@ impl BorrowedTarget {
         #[cfg(not(unix))]
         let ConsumerSync { sync: consumer } = consumer;
         match consumer.kind {
-            SyncKind::CpuComplete | SyncKind::QueueOrder => Ok(()),
+            SyncKind::CpuComplete => Ok(()),
+            SyncKind::QueueOrder => {
+                // The host's reads went to the queue before the next frame,
+                // which waits for them before it clears the image.
+                self.backend.vulkan_context().wait_for_queue_in_next_frame();
+                Ok(())
+            }
             SyncKind::VulkanTimelineSemaphore => {
                 state.consumer_wait =
                     Some(ConsumerWait::Timeline(vk::Semaphore::from_raw(consumer.handle), consumer.value));
@@ -545,9 +551,9 @@ impl FrameTarget for BorrowedTarget {
         let slot = self.resource.borrow().selected.get();
         self.record_release(context);
         match self.slots.borrow_mut().get_mut(slot).and_then(|s| s.consumer_wait.take()) {
-            Some(ConsumerWait::Timeline(semaphore, value)) => context.wait_in_frame(semaphore, value),
+            Some(ConsumerWait::Timeline(semaphore, value)) => context.wait_in_frame(semaphore, Some(value)),
             Some(ConsumerWait::Imported(semaphore)) => {
-                context.wait_in_frame(semaphore, 0);
+                context.wait_in_frame(semaphore, None);
                 // SAFETY: destroyed once the frame that waits on it is done.
                 context.enqueue_deletion(Box::new(move |context: &Context| unsafe {
                     context.get_backend().get_device().destroy_semaphore(semaphore, None);
@@ -559,9 +565,9 @@ impl FrameTarget for BorrowedTarget {
             SyncKind::VulkanTimelineSemaphore => {
                 let value = self.timeline_value.get() + 1;
                 self.timeline_value.set(value);
-                context.signal_in_frame(self.timeline, value);
+                context.signal_in_frame(self.timeline, Some(value));
             }
-            SyncKind::SyncFd => context.signal_in_frame(self.export_semaphore, 0),
+            SyncKind::SyncFd => context.signal_in_frame(self.export_semaphore, None),
             _ => {}
         }
         context.submit_frame();

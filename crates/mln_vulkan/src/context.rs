@@ -200,6 +200,9 @@ pub struct Context {
     /// What the next frame's submission waits on and signals, besides a
     /// swapchain's semaphores.
     frame_sync: RefCell<FrameSync>,
+    /// Whether the next frame waits for the work submitted to the queue
+    /// before it, at its start.
+    queue_wait: Cell<bool>,
 }
 
 /// Semaphores that a frame's submission waits on and signals, each with the
@@ -208,6 +211,8 @@ pub struct Context {
 struct FrameSync {
     waits: Vec<(vk::Semaphore, u64)>,
     signals: Vec<(vk::Semaphore, u64)>,
+    /// Whether one of them is a timeline.
+    timeline: bool,
 }
 
 /// `buildUniformDescriptorSetLayout` and `buildImageDescriptorSetLayout`
@@ -317,6 +322,7 @@ impl Context {
             globe_clipping: RefCell::new(GlobeClipping::default()),
             destroyed: Cell::new(false),
             frame_sync: RefCell::new(FrameSync::default()),
+            queue_wait: Cell::new(false),
         });
         // Dropping the context destroys what a failed step leaves.
         context.init_frame_resources()?;
@@ -602,16 +608,27 @@ impl Context {
 
     /// Has the frame being recorded wait for `semaphore` before its commands
     /// run: for a timeline, until it reaches `value`, and for a binary
-    /// semaphore, whose `value` is zero, until it is signaled.
-    pub fn wait_in_frame(&self, semaphore: vk::Semaphore, value: u64) {
-        self.frame_sync.borrow_mut().waits.push((semaphore, value));
+    /// semaphore, whose `value` is `None`, until it is signaled.
+    pub fn wait_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
+        let mut sync = self.frame_sync.borrow_mut();
+        sync.timeline |= value.is_some();
+        sync.waits.push((semaphore, value.unwrap_or(0)));
     }
 
     /// Has the frame being recorded signal `semaphore` once its commands
     /// finish: a timeline with `value`, or a binary semaphore, whose `value`
-    /// is zero.
-    pub fn signal_in_frame(&self, semaphore: vk::Semaphore, value: u64) {
-        self.frame_sync.borrow_mut().signals.push((semaphore, value));
+    /// is `None`.
+    pub fn signal_in_frame(&self, semaphore: vk::Semaphore, value: Option<u64>) {
+        let mut sync = self.frame_sync.borrow_mut();
+        sync.timeline |= value.is_some();
+        sync.signals.push((semaphore, value.unwrap_or(0)));
+    }
+
+    /// Has the next frame that begins wait, before its commands run, for
+    /// every command submitted to the queue before it, such as the host's
+    /// reads of an image that the frame draws into.
+    pub fn wait_for_queue_in_next_frame(&self) {
+        self.queue_wait.set(true);
     }
 
     /// `submitFrame()`: ends the frame's command buffer, submits it and,
@@ -668,8 +685,8 @@ impl Context {
             .wait_semaphores(&wait_semaphores)
             .wait_dst_stage_mask(&wait_stages)
             .signal_semaphores(&signal_semaphores);
-        // Only a timeline has a value.
-        if wait_values.iter().chain(&signal_values).any(|value| *value != 0) {
+        // A timeline semaphore needs its value, even zero.
+        if frame_sync.timeline {
             submit_info = submit_info.push_next(&mut timeline_info);
         }
         // SAFETY: the command buffer is recording and complete, the fence
@@ -1420,6 +1437,22 @@ impl GfxContext for Context {
             {
                 Log::error(Event::Render, "Beginning the frame's command buffer failed");
                 return;
+            }
+        }
+        if self.queue_wait.replace(false) {
+            // SAFETY: the command buffer is recording, outside a render
+            // pass. An execution dependency is enough: the earlier work only
+            // reads what this frame writes.
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::ALL_COMMANDS,
+                    vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[],
+                );
             }
         }
         self.frame_serial.set(self.frame_serial.get() + 1);
