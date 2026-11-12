@@ -784,8 +784,7 @@ impl drawable::Drawable for Drawable {
             }
         }
 
-        let mut encoder_guard = render_pass.get_encoder();
-        let Some(encoder) = encoder_guard.as_mut() else {
+        let Some(mut encoder) = render_pass.state_filter() else {
             eprintln!("renderPassEncoder is null!");
             return;
         };
@@ -834,7 +833,7 @@ impl drawable::Drawable for Drawable {
                 );
                 continue;
             }
-            encoder.set_vertex_buffer(buffer_slot, buffer.slice(binding.base_offset..buffer_size));
+            encoder.set_vertex_buffer(buffer_slot, buffer, binding.base_offset..buffer_size);
             buffer_slot += 1;
         }
 
@@ -850,7 +849,8 @@ impl drawable::Drawable for Drawable {
                 if let Some(buffer) = buffer_resource.get_buffer() {
                     // Always use Uint16 format for now
                     encoder.set_index_buffer(
-                        buffer.slice(0..buffer_resource.get_size_in_bytes() as u64),
+                        buffer,
+                        0..buffer_resource.get_size_in_bytes() as u64,
                         wgpu::IndexFormat::Uint16,
                     );
                 }
@@ -859,7 +859,7 @@ impl drawable::Drawable for Drawable {
 
         // Set bind groups
         for record in &self.impl_.bind_groups {
-            encoder.set_bind_group(record.slot, &record.handle, &[]);
+            encoder.set_bind_group(record.slot, &record.handle);
         }
 
         // Handle depth and stencil states (like Metal does). For 3D mode,
@@ -906,7 +906,7 @@ impl drawable::Drawable for Drawable {
                 draw_calls += 1;
             }
         }
-        drop(encoder_guard);
+        drop(encoder);
         if draw_calls > 0 {
             let mut stats = context.rendering_stats_mut();
             stats.num_draw_calls += draw_calls;
