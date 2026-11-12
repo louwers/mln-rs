@@ -62,9 +62,9 @@ pub enum RenderTarget {
     Offscreen { size: Size, device: Option<Device> },
     /// A surface of `size` logical pixels, rendered at the map's pixel ratio,
     /// that shows each frame that the session renders. Without a device, a
-    /// window renders on the device [`Device::new`] makes, and on WebGPU on
-    /// Apple's platforms, whose Metal takes a layer; a Metal layer renders
-    /// on Metal.
+    /// window renders on the platform's native backend where that takes
+    /// windows, and on WebGPU otherwise (on Apple's platforms, whose Metal
+    /// takes a layer); a Metal layer renders on Metal.
     ///
     /// [`release_target`](crate::RenderSession::release_target) lets go of
     /// the surface, and [`set_surface`](crate::RenderSession::set_surface)
@@ -173,10 +173,11 @@ fn missing(error: &Error) -> bool {
 }
 
 impl Device {
-    /// The library's device, on WebGPU (wgpu), or on the platform's native
-    /// backend where wgpu has no GPU: Metal on Apple's platforms, and Vulkan
-    /// elsewhere, or OpenGL ES where there is no Vulkan. OpenGL ES picks no
-    /// GPU, so with an `adapter_index` it is skipped.
+    /// The library's device, on the platform's native backend: Metal on
+    /// Apple's platforms, and Vulkan elsewhere, or OpenGL ES where there is
+    /// no Vulkan. WebGPU (wgpu) takes the place of a native backend that
+    /// isn't there. OpenGL ES picks no GPU, so with an `adapter_index` it is
+    /// skipped.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
     /// `adapter_index` names no GPU, with
@@ -235,9 +236,9 @@ impl Device {
     #[cfg(not(target_family = "wasm"))]
     fn native_order() -> &'static [BackendType] {
         if cfg!(target_vendor = "apple") {
-            &[BackendType::WebGPU, BackendType::Metal]
+            &[BackendType::Metal, BackendType::WebGPU]
         } else {
-            &[BackendType::WebGPU, BackendType::Vulkan, BackendType::OpenGL]
+            &[BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU]
         }
     }
 
