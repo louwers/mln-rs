@@ -94,6 +94,10 @@ path = "tests/pixel_ratio_test.rs"
 name = "empty_tile_test"
 path = "tests/empty_tile_test.rs"
 
+[[test]]
+name = "custom_layer_test"
+path = "tests/custom_layer_test.rs"
+
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }
@@ -108,6 +112,17 @@ mln_text = { package = "mln-rs-text", path = "../mln_text" }
 mln_tile_id.workspace = true
 pixelmatch = { package = "mln-rs-pixelmatch", path = "../../vendor/pixelmatch" }
 serde_json.workspace = true
+# The custom layer test's hosts, which draw with each backend's own API.
+mln_webgpu.workspace = true
+wgpu.workspace = true
+
+[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dev-dependencies]
+mln_vulkan.workspace = true
+naga.workspace = true
+
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dev-dependencies]
+glow.workspace = true
+mln_gl.workspace = true
 
 [lints]
 workspace = true

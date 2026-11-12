@@ -458,7 +458,9 @@ pub(crate) fn frame_result(result: &FrameResult, initial_scale_factor: f64) -> m
     }
 }
 
-fn frame_projection(projection: &FrameProjection) -> mln_frame_projection {
+/// The `mln_frame_projection` of where a frame drew the map, which frame
+/// results and custom layers report.
+pub(crate) fn frame_projection(projection: &FrameProjection) -> mln_frame_projection {
     let column = |index: usize| {
         let [x, y, z, w] = [0, 1, 2, 3].map(|row| projection.matrix[4 * index + row]);
         mln_vec4 { x, y, z, w }

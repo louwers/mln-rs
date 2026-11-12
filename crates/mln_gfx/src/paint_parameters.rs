@@ -31,6 +31,11 @@ pub trait PaintParameters {
     fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode;
     /// `depthModeFor3D(gfx::DepthMaskType = gfx::DepthMaskType::ReadWrite)`.
     fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode;
+    /// The depth that 2D layers write at the layer being drawn, as
+    /// `depth_mode_for_sublayer(0, ..)` gives it where 2D layers write depth.
+    fn layer_depth(&self) -> f32 {
+        1.0
+    }
 
     /// `renderTileClippingMasks(const RenderTiles&)`. C++ passes the render
     /// tiles; only their tile ids are used (`GetTileIDFunc`), so the port

@@ -222,6 +222,13 @@ impl Renderer {
         self.impl_ref().orchestrator.get_tile_cache_enabled()
     }
 
+    /// Tells the hosts of the custom layers that the renderer's graphics
+    /// objects are lost, so that they forget theirs, and lets go of them.
+    /// Call it before the renderer goes when its device or target went first.
+    pub fn lose_custom_layers(&mut self) {
+        self.impl_mut().lose_custom_layers();
+    }
+
     pub fn reduce_memory_use(&mut self) {
         let backend = self.impl_ref().backend.clone();
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);

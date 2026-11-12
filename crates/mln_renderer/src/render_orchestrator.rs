@@ -1187,6 +1187,13 @@ impl RenderOrchestrator {
         }
     }
 
+    /// Visits every render layer, in no order.
+    pub fn visit_render_layers(&self, mut f: impl FnMut(&mut dyn crate::render_layer::RenderLayer)) {
+        for layer in self.render_layers.values() {
+            f(&mut *layer.borrow_mut());
+        }
+    }
+
     pub fn update_layers(
         &mut self,
         shaders: &ShaderRegistry,

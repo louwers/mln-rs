@@ -9,81 +9,48 @@
 //! backend.
 
 use mln_gfx::backend::Type as BackendType;
+pub use mln_map_types::{ClipDepthRange, FrameProjection};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::projection::Projection;
 
 use crate::paint_parameters::TransformParameters;
 
-/// How a graphics API's clip space holds depth.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ClipDepthRange {
-    /// Clip z from 0 to w: Metal, Vulkan and WebGPU.
-    ZeroToOne,
-    /// Clip z from -w to w: OpenGL.
-    NegativeOneToOne,
+/// The clip depth convention of `backend`'s API.
+#[must_use]
+pub fn clip_depth_range(backend: BackendType) -> ClipDepthRange {
+    if backend == BackendType::OpenGL { ClipDepthRange::NegativeOneToOne } else { ClipDepthRange::ZeroToOne }
 }
 
-impl ClipDepthRange {
-    /// The convention of `backend`'s API.
-    #[must_use]
-    pub fn of(backend: BackendType) -> ClipDepthRange {
-        if backend == BackendType::OpenGL { ClipDepthRange::NegativeOneToOne } else { ClipDepthRange::ZeroToOne }
+/// The projection of a frame that drew with `transform`, its 3D layers into
+/// the depth range from 0 to `depth_range_size`, on `backend`.
+#[must_use]
+pub fn compute(transform: &TransformParameters, depth_range_size: f32, backend: BackendType) -> FrameProjection {
+    let state = &transform.state;
+    let world_size = Projection::world_size(state.get_scale());
+    let mut world_to_clip: Mat4 = [0.0; 16];
+    matrix::scale(&mut world_to_clip, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);
+    let far_depth = f64::from(depth_range_size);
+    let clip_depth_range = clip_depth_range(backend);
+    // Clip z over w from 0 to 1 is the 3D layers' depth over `far_depth`:
+    // scale it to the depth, and on OpenGL map it to -1 to 1 again.
+    for column in 0..4 {
+        let z = world_to_clip[column * 4 + 2];
+        let w = world_to_clip[column * 4 + 3];
+        world_to_clip[column * 4 + 2] = match clip_depth_range {
+            ClipDepthRange::ZeroToOne => far_depth * z,
+            ClipDepthRange::NegativeOneToOne => 2.0 * far_depth * z - w,
+        };
     }
-}
-
-/// Where a frame drew the map, and the depth its 3D layers wrote there.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct FrameProjection {
-    /// Takes Web Mercator points, x and y from 0 to 1 and z in meters, to
-    /// clip coordinates in `clip_depth_range`'s convention, whose depth
-    /// under the API's default depth range is the depth that the frame's 3D
-    /// layers wrote at the point. Column-major.
-    pub matrix: Mat4,
-    pub clip_depth_range: ClipDepthRange,
-    /// The distance from the camera to the plane where that depth is 0, in
-    /// pixels at the camera's zoom.
-    pub near_distance: f64,
-    /// The distance to the plane where the depth is `far_depth`.
-    pub far_distance: f64,
-    /// The depth at `far_distance`, below the 2D layers' depths.
-    pub far_depth: f64,
-    /// Whether the frame drew a globe, which `matrix` doesn't describe.
-    pub globe: bool,
-}
-
-impl FrameProjection {
-    /// The projection of a frame that drew with `transform`, its 3D layers
-    /// into the depth range from 0 to `depth_range_size`, on `backend`.
-    #[must_use]
-    pub fn new(transform: &TransformParameters, depth_range_size: f32, backend: BackendType) -> FrameProjection {
-        let state = &transform.state;
-        let world_size = Projection::world_size(state.get_scale());
-        let mut world_to_clip: Mat4 = [0.0; 16];
-        matrix::scale(&mut world_to_clip, &transform.near_clipped_proj_matrix, world_size, world_size, 1.0);
-        let far_depth = f64::from(depth_range_size);
-        let clip_depth_range = ClipDepthRange::of(backend);
-        // Clip z over w from 0 to 1 is the 3D layers' depth over
-        // `far_depth`: scale it to the depth, and on OpenGL map it to -1 to 1
-        // again.
-        for column in 0..4 {
-            let z = world_to_clip[column * 4 + 2];
-            let w = world_to_clip[column * 4 + 3];
-            world_to_clip[column * 4 + 2] = match clip_depth_range {
-                ClipDepthRange::ZeroToOne => far_depth * z,
-                ClipDepthRange::NegativeOneToOne => 2.0 * far_depth * z - w,
-            };
-        }
-        let near = transform.near_clipped_near_z;
-        let far = state.get_far_z();
-        FrameProjection {
-            matrix: world_to_clip,
-            clip_depth_range,
-            // Where OpenGL's clip z, from -w at `near` to w at `far`, is 0.
-            near_distance: 2.0 * near * far / (far + near),
-            far_distance: far,
-            far_depth,
-            globe: state.is_globe_rendering(),
-        }
+    let near = transform.near_clipped_near_z;
+    let far = state.get_far_z();
+    FrameProjection {
+        matrix: world_to_clip,
+        clip_depth_range,
+        // Where OpenGL's clip z, from -w at `near` to w at `far`, is 0.
+        near_distance: 2.0 * near * far / (far + near),
+        far_distance: far,
+        far_depth,
+        globe: state.is_globe_rendering(),
     }
 }
 
@@ -148,7 +115,7 @@ mod tests {
     #[test]
     fn the_matrix_puts_points_where_the_map_draws_them() {
         let transform = transform();
-        let projection = FrameProjection::new(&transform, 0.9, BackendType::Vulkan);
+        let projection = compute(&transform, 0.9, BackendType::Vulkan);
         for (lat, lng) in [(40.7, -74.0), (40.703, -73.996), (40.698, -74.004), (40.705, -74.001)] {
             let lat_lng = LatLng::new(lat, lng).unwrap();
             // The state counts its screen points from the bottom.
@@ -172,8 +139,8 @@ mod tests {
     fn both_conventions_give_the_depth_of_the_3d_layers() {
         let transform = transform();
         let far_depth = 0.99;
-        let zero_to_one = FrameProjection::new(&transform, far_depth as f32, BackendType::Vulkan);
-        let negative_one_to_one = FrameProjection::new(&transform, far_depth as f32, BackendType::OpenGL);
+        let zero_to_one = compute(&transform, far_depth as f32, BackendType::Vulkan);
+        let negative_one_to_one = compute(&transform, far_depth as f32, BackendType::OpenGL);
         assert_eq!(ClipDepthRange::ZeroToOne, zero_to_one.clip_depth_range);
         assert_eq!(ClipDepthRange::NegativeOneToOne, negative_one_to_one.clip_depth_range);
         let far_depth = zero_to_one.far_depth;

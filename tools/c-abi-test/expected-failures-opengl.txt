@@ -17,7 +17,6 @@ abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default  # like
 abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them  # likely: a still map loads the tiles that come back into view again
 abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api  # plugins are stubs: mln_plugin_get_register_function_v1 returns NULL
 abi/projection/projection.c:creation_rejects_invalid_views  # mln-rs projects globe views, which the suite expects to be UNSUPPORTED
-abi/render/frame_depth.c:a_frame_projection_places_points_where_the_frame_drew_them  # an offscreen target without a device renders on Vulkan, whose clip depth runs from 0 to 1, where the preset expects OpenGL's -1 to 1
 abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features  # feature state stays in mln_runtime's store and never reaches the renderer
 abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes  # a feature-state change publishes no render update
 abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host  # feature state stays in mln_runtime's store and never reaches the renderer

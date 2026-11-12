@@ -15,6 +15,7 @@ pub mod raster_layer_tweaker;
 pub mod render_background_layer;
 pub mod render_circle_layer;
 pub mod render_color_relief_layer; // dem-heatmap
+pub mod render_custom_layer;
 pub mod render_fill_extrusion_layer;
 pub mod render_fill_layer;
 pub mod render_heatmap_layer; // dem-heatmap

@@ -29,6 +29,7 @@ use objc2_metal::{
 use crate::buffer_resource::{BufferResource, VersionType};
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
+use crate::custom_layer::CustomLayerPass;
 use crate::draw_target::{DrawTarget, as_mtl};
 use crate::mtl_fwd::{
     MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLRenderCommandEncoderPtr, MTLRenderPipelineStatePtr,
@@ -99,6 +100,7 @@ pub struct RenderPass {
     formats: AttachmentFormats,
     width: usize,
     height: usize,
+    sample_count: usize,
     state: RefCell<State>,
     debug_groups: Cell<usize>,
 }
@@ -109,7 +111,7 @@ impl RenderPass {
         let mut command_buffer = None;
         let mut encoder = None;
         let mut formats = AttachmentFormats { color: MTLPixelFormat::BGRA8Unorm, depth: None, stencil: None };
-        let (mut width, mut height) = (0, 0);
+        let (mut width, mut height, mut sample_count) = (0, 0, 1);
 
         if let Some(resource) = as_mtl(descriptor.target).map(DrawTarget::resource) {
             resource.bind();
@@ -133,6 +135,7 @@ impl RenderPass {
                     formats.color = texture.pixelFormat();
                     width = texture.width();
                     height = texture.height();
+                    sample_count = texture.sampleCount();
                 }
                 let depth = rpd.depthAttachment();
                 if let Some(texture) = depth.texture() {
@@ -171,6 +174,7 @@ impl RenderPass {
             formats,
             width,
             height,
+            sample_count,
             state: RefCell::new(State::default()),
             debug_groups: Cell::new(0),
         };
@@ -214,9 +218,17 @@ impl RenderPass {
     }
 
     /// Resets the cached states and bindings, for when they were changed by
-    /// calling Metal directly (a custom layer).
+    /// calling Metal directly (a custom layer). The state that the cache
+    /// starts from is set on the encoder too, since a draw sets only what
+    /// differs from the cache.
     pub fn reset_state(&self) {
-        *self.state.borrow_mut() = State::default();
+        let state = State::default();
+        if let Some(encoder) = self.encoder.borrow().as_ref() {
+            encoder.setCullMode(state.current_cull_mode);
+            encoder.setFrontFacingWinding(state.current_winding);
+            encoder.setStencilReferenceValue(state.current_stencil_reference_value as u32);
+        }
+        *self.state.borrow_mut() = state;
     }
 
     /// Applies the given depth/stencil state, if different from the current
@@ -470,6 +482,21 @@ impl DebugGroupTarget for RenderPass {
 }
 
 impl render_pass::RenderPass for RenderPass {
+    /// Lends the pass's encoder, then resets the state that the pass knew and
+    /// binds the global uniform buffers again.
+    fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        let (Some(encoder), Some(command_buffer)) = (self.get_metal_encoder(), self.command_buffer.clone()) else {
+            return false;
+        };
+        let mut pass =
+            CustomLayerPass { encoder, command_buffer, formats: self.formats, sample_count: self.sample_count };
+        f(&mut pass);
+        drop(pass);
+        self.reset_state();
+        mln_gfx::context::Context::bind_global_uniform_buffers(&*self.context, self);
+        true
+    }
+
     fn add_debug_signpost(&self, name: &str) {
         if let Some(encoder) = self.encoder.borrow().as_ref() {
             encoder.insertDebugSignpost(&NSString::from_str(name));

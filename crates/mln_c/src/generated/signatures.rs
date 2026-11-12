@@ -185,6 +185,14 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(
     mln_map,
     mln_buffer_view,
+    mln_buffer_view,
+    *const mln_custom_layer_host,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::custom_layer::mln_map_add_custom_layer;
+const _: unsafe extern "C" fn(
+    mln_map,
+    mln_buffer_view,
     *const mln_custom_vector_source_options,
     *const mln_completion,
     *mut mln_diagnostic,

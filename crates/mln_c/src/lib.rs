@@ -33,6 +33,7 @@ mod buffer;
 mod callback;
 mod camera;
 mod completion;
+mod custom_layer;
 mod delivery;
 mod diagnostic;
 mod error;

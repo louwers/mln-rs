@@ -1351,14 +1351,19 @@ impl Worker {
     /// one of the ring's frames, the target and its backend stay until the
     /// last view ends.
     fn drop_gfx(&mut self) {
-        let Some(gfx) = self.gfx.take() else { return };
-        let (keep, viewed) = {
+        let Some(mut gfx) = self.gfx.take() else { return };
+        let (keep, viewed, abandoned) = {
             let mut state = self.shared.state.lock_unpoisoned();
             state.graphics_objects = 0;
             let viewed = state.views != 0 && !state.keep_graphics;
             state.viewed_teardown |= viewed;
-            (state.keep_graphics, viewed)
+            (state.keep_graphics, viewed, state.lifecycle == RenderSessionState::Abandoned)
         };
+        // The host's graphics objects may be gone, and the custom layers'
+        // hosts with them, so they forget theirs instead of destroying them.
+        if keep || abandoned {
+            gfx.renderer.lose_custom_layers();
+        }
         if keep {
             // The host's graphics objects behind them may be gone already.
             std::mem::forget(gfx);

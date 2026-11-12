@@ -72,7 +72,7 @@ abi::versioned!(
 /// # Safety
 ///
 /// As for [`buffer::text`].
-unsafe fn required_text(view: mln_buffer_view, name: &str) -> Result<String, Error> {
+pub(crate) unsafe fn required_text(view: mln_buffer_view, name: &str) -> Result<String, Error> {
     if view.size == 0 {
         return Err(Error::invalid_argument(format!("{name} must not be empty")));
     }
@@ -85,7 +85,7 @@ unsafe fn required_text(view: mln_buffer_view, name: &str) -> Result<String, Err
 /// # Safety
 ///
 /// As for [`buffer::text`].
-unsafe fn optional_text(view: mln_buffer_view, name: &str) -> Result<Option<String>, Error> {
+pub(crate) unsafe fn optional_text(view: mln_buffer_view, name: &str) -> Result<Option<String>, Error> {
     // SAFETY: the caller's contract.
     let text = unsafe { buffer::text(view, name) }?;
     Ok(Some(text).filter(|text| !text.is_empty()).map(str::to_owned))

@@ -2364,10 +2364,12 @@ dependencies = [
 name = "mln-rs-headless"
 version = "0.0.11"
 dependencies = [
+ "glow",
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
@@ -2382,7 +2384,11 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vulkan",
+ "mln-rs-webgpu",
+ "naga",
  "serde_json",
+ "wgpu",
 ]
 
 [[package]]

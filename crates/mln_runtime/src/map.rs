@@ -10,6 +10,7 @@ use mln_map::{
     AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
+use mln_style::layers::CustomLayerHost;
 use mln_text::GlyphCache;
 use mln_util::error::{Error, ErrorKind};
 use mln_util::geo::LatLngBounds;
@@ -898,6 +899,20 @@ impl Map {
     ) -> Result<Completion<Applied>, Error> {
         let json = json.into();
         self.command(move |map| map.style_mut().add_layer_json(&json, before_layer_id.as_deref()))
+    }
+
+    /// Adds a custom layer named `layer_id` that `host` draws, below
+    /// `before_layer_id` or above every layer. See `Style::add_custom_layer`
+    /// for the errors. The map lets go of `host` once the style no longer has
+    /// the layer, and no renderer draws it.
+    pub fn add_custom_layer(
+        &self,
+        layer_id: impl Into<String>,
+        host: Arc<dyn CustomLayerHost>,
+        before_layer_id: Option<String>,
+    ) -> Result<Completion<Applied>, Error> {
+        let layer_id = layer_id.into();
+        self.command(move |map| map.style_mut().add_custom_layer(&layer_id, host, before_layer_id.as_deref()))
     }
 
     /// Removes a layer from the style. Completes with

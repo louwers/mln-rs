@@ -121,6 +121,8 @@ pub struct Context {
     /// The uniform buffers of the layer group being drawn.
     layer_uniform_buffers: RefCell<UniformBufferArray>,
     abandoned: RefCell<Abandoned>,
+    /// The framebuffer being drawn into, none for the default one.
+    framebuffer: Cell<Option<FramebufferID>>,
     /// The size of the framebuffer being drawn into.
     framebuffer_size: Cell<Size>,
     /// Whether that framebuffer has a stencil buffer.
@@ -175,6 +177,7 @@ impl Context {
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             layer_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             abandoned: RefCell::new(Abandoned::default()),
+            framebuffer: Cell::new(None),
             framebuffer_size: Cell::new(Size::new(0, 0)),
             framebuffer_has_stencil: Cell::new(false),
             zero_uniform_buffer: RefCell::new(None),
@@ -516,8 +519,15 @@ impl Context {
         self.state.bind_framebuffer(gl, framebuffer);
         self.state.set_scissor(gl, None);
         self.state.set_viewport(gl, (0, 0, size.width as i32, size.height as i32));
+        self.framebuffer.set(framebuffer);
         self.framebuffer_size.set(size);
         self.framebuffer_has_stencil.set(has_stencil);
+    }
+
+    /// The framebuffer being drawn into, as `bind_framebuffer` bound it: none
+    /// for the default one, its size, and whether it has a stencil buffer.
+    pub fn bound_framebuffer(&self) -> (Option<FramebufferID>, Size, bool) {
+        (self.framebuffer.get(), self.framebuffer_size.get(), self.framebuffer_has_stencil.get())
     }
 
     /// `hasStencilBuffer()`, of the framebuffer being drawn into.
@@ -831,6 +841,11 @@ impl GfxContext for Context {
 
     fn end_frame(&self) {
         self.log_errors();
+    }
+
+    fn finish(&self) {
+        // SAFETY: glFinish takes no arguments.
+        unsafe { self.gl().finish() };
     }
 
     /// Called at the end of a frame, when its command encoder goes: deletes

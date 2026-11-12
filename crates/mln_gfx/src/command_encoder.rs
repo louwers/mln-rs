@@ -16,6 +16,13 @@ pub trait CommandEncoder: DebugGroupTarget + Any {
     /// An upload pass for a frame that draws into `target`.
     fn create_upload_pass(&self, name: &str, target: &dyn DrawTarget) -> Box<dyn UploadPass>;
     fn create_render_pass(&self, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Box<dyn RenderPass>;
+    /// Lends the commands of a frame that draws into `target`, outside any
+    /// pass, to a custom layer: `f` gets the backend's `CustomLayerEncoder`.
+    /// Returns false, without calling `f`, when the frame has nothing to
+    /// encode with.
+    fn lend_to_custom_layer(&self, _target: &dyn DrawTarget, _f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        false
+    }
     fn as_any(&self) -> &dyn Any;
 }
 

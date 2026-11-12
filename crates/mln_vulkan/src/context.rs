@@ -981,6 +981,16 @@ impl Context {
         }
     }
 
+    /// The color and depth-stencil formats of a render pass that
+    /// [`get_render_pass`](Self::get_render_pass) made.
+    pub fn render_pass_formats(&self, render_pass: vk::RenderPass) -> Option<(vk::Format, Option<vk::Format>)> {
+        self.render_passes
+            .borrow()
+            .iter()
+            .find(|(_, made)| **made == render_pass)
+            .map(|(key, _)| (key.color_format, key.depth_format))
+    }
+
     /// `getCurrentFrameResourceIndex()`
     pub fn get_current_frame_resource_index(&self) -> u8 {
         self.frame_resource_index.get()
@@ -1444,6 +1454,12 @@ impl GfxContext for Context {
     }
 
     fn end_frame(&self) {}
+
+    fn finish(&self) {
+        if !self.destroyed.get() {
+            self.backend.wait_idle("a custom layer's teardown");
+        }
+    }
 
     /// Called at the end of a frame.
     fn perform_cleanup(&self) {

@@ -23,6 +23,7 @@ pub mod color_relief_layer;
 pub mod color_relief_layer_impl;
 #[rustfmt::skip]
 pub mod color_relief_layer_properties;
+pub mod custom_layer;
 #[rustfmt::skip]
 pub mod fill_layer;
 pub mod fill_layer_impl;
@@ -67,6 +68,10 @@ pub use circle_layer::CircleLayer;
 pub use circle_layer_properties::{CircleLayerProperties, CircleLayoutProperties, CirclePaintProperties};
 pub use color_relief_layer::ColorReliefLayer;
 pub use color_relief_layer_properties::{ColorReliefLayerProperties, ColorReliefPaintProperties};
+pub use custom_layer::{
+    CustomLayer, CustomLayerFrame, CustomLayerHost, CustomLayerPrerenderParameters, CustomLayerProperties,
+    CustomLayerRenderParameters,
+};
 pub use fill_extrusion_layer::FillExtrusionLayer;
 pub use fill_extrusion_layer_properties::{
     FillExtrusionLayerProperties, FillExtrusionLayoutProperties, FillExtrusionPaintProperties,

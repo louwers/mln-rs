@@ -40,6 +40,7 @@
 
 pub mod command_encoder;
 pub mod context;
+pub mod custom_layer;
 pub mod draw_target;
 pub mod drawable;
 pub mod drawable_builder;
@@ -81,6 +82,7 @@ pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSur
 #[cfg(target_arch = "wasm32")]
 pub use canvas_target::CanvasTarget;
 pub use context::Context;
+pub use custom_layer::{CustomLayerEncoder, CustomLayerPass};
 #[cfg(not(target_arch = "wasm32"))]
 pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple")))]

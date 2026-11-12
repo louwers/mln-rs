@@ -17,6 +17,7 @@ use mln_gfx::render_pass::{self, RenderPassDescriptor};
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
+use crate::custom_layer::CustomLayerPass;
 use crate::draw_target::as_vulkan;
 
 pub struct RenderPass {
@@ -160,6 +161,30 @@ impl render_pass::RenderPass for RenderPass {
         unsafe {
             self.context.get_backend().get_device().cmd_clear_attachments(self.command_buffer, &[attachment], &[rect]);
         }
+    }
+
+    /// Lends the command buffer inside the pass, then binds the global
+    /// uniform buffers again over what the host bound. Each draw binds its
+    /// own pipeline, sets and buffers, and sets its dynamic state.
+    fn lend_to_custom_layer(&self, f: &mut dyn FnMut(&mut dyn Any)) -> bool {
+        if !self.encoding {
+            return false;
+        }
+        let (color_format, depth_format) =
+            self.context.render_pass_formats(self.render_pass).unwrap_or((vk::Format::UNDEFINED, None));
+        let mut pass = CustomLayerPass {
+            device: self.context.get_backend().device().raw(),
+            command_buffer: self.command_buffer,
+            render_pass: self.render_pass,
+            subpass: 0,
+            samples: vk::SampleCountFlags::TYPE_1,
+            color_format,
+            depth_stencil_format: depth_format.unwrap_or(vk::Format::UNDEFINED),
+            extent: self.extent,
+        };
+        f(&mut pass);
+        self.context.bind_global_uniform_buffers(self);
+        true
     }
 
     fn as_any(&self) -> &dyn Any {
