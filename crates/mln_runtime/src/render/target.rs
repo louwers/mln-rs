@@ -488,7 +488,11 @@ impl SurfaceType {
                     && windowing
                     && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::OhosNdk)
             }
-            BackendType::WebGPU => cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing,
+            // wgpu's Vulkan backend makes no OpenHarmony surface, and this
+            // build has no wgpu GLES backend.
+            BackendType::WebGPU => {
+                cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing && self != SurfaceType::OhosNdk
+            }
             #[allow(unreachable_patterns)]
             _ => false,
         }
