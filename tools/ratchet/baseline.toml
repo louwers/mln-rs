@@ -269,7 +269,6 @@
 "tools/render-test/src/parser.rs" = 5
 "tools/render-test/src/render_test.rs" = 2
 "tools/render-test/src/runner.rs" = 10
-"tools/render-test/src/std_random.rs" = 1
 "tools/render-test/src/tests.rs" = 1
 "vendor/geojson/src/geojson_impl.rs" = 5
 "vendor/geojson/src/lib.rs" = 1

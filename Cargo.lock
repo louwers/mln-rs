@@ -2491,6 +2491,7 @@ version = "0.0.11"
 name = "mln-rs-render-test"
 version = "0.0.11"
 dependencies = [
+ "fastrand",
  "mln-rs-actor",
  "mln-rs-conversion",
  "mln-rs-csscolorparser",
