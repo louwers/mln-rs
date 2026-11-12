@@ -33,7 +33,12 @@ pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
 /// header) is `None` too; C++ throws std::length_error or std::bad_alloc,
 /// uncaught.
 pub fn read_file(path: &std::path::Path, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
-    let mut file = std::fs::File::open(path).ok()?;
+    read_range(std::fs::File::open(path).ok()?, data_range)
+}
+
+/// [`read_file`]'s read of an open file, or of anything else that reads and
+/// seeks like one.
+pub(crate) fn read_range(mut file: impl Read + Seek, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
     match data_range {
         Some((first, second)) => {
             let size = second.wrapping_sub(first).wrapping_add(1);

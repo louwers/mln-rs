@@ -45,12 +45,20 @@ impl AssetFileSourceThread {
         // Cut off the protocol and prefix with path.
         let mut path = format!("{}/", self.root).into_bytes();
         path.extend_from_slice(&percent_decode(&resource.url[ASSET_PROTOCOL.len()..]));
+        #[cfg(target_os = "android")]
+        if let Some(name) = path.strip_prefix(format!("{}/", crate::android::APP_ASSETS).as_bytes()) {
+            // `asset:///style.json` names `style.json` too.
+            let name = &name[name.iter().position(|byte| *byte != b'/').unwrap_or(name.len())..];
+            crate::android::request_asset(name, req, resource.data_range);
+            return;
+        }
         request_local_file(&path, req, resource.data_range);
     }
 }
 
 /// `AssetFileSource`: the `Asset` file source (`asset://` URLs, relative to
-/// `ResourceOptions::assetPath()`).
+/// `ResourceOptions::assetPath()`). On Android, the files under
+/// `mln_storage::android::APP_ASSETS` are the app's assets.
 pub struct AssetFileSource {
     thread: Thread<AssetFileSourceThread>,
     resource_options: Mutex<ResourceOptions>,

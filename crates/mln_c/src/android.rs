@@ -11,7 +11,9 @@ use crate::generated::types::{mln_diagnostic, mln_status};
 
 /// `mln_android_init()`: what the library needs of the app is the Java VM
 /// that HTTPS verifies certificates in, with Android's own verifier
-/// (rustls-platform-verifier, whose Android component the app includes).
+/// (rustls-platform-verifier, whose Android component the app includes), and
+/// the context's assets, which `asset://` URLs load when the runtime has no
+/// asset path.
 ///
 /// # Safety
 ///
