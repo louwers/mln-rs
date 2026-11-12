@@ -44,7 +44,8 @@ impl Default for GeoJSON {
 }
 
 /// `mapbox::geojson::error` (`std::runtime_error`); `Display` is `what()`.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
 pub struct Error(pub String);
 
 impl Error {
@@ -57,11 +58,3 @@ impl Error {
         &self.0
     }
 }
-
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Error {}

@@ -1,19 +1,20 @@
 // The exceptions vector_tile.hpp lets escape, as one error type.
 
-use std::fmt;
-
 /// An exception thrown by the C++ reader. The variant is the C++ exception
 /// type, because callers catch by type: `VectorMVTTileFeature::getGeometries`
 /// catches `std::runtime_error` but not the protozero exceptions (which
 /// derive from `std::exception` directly) or `std::out_of_range` (a
 /// `std::logic_error`).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum Error {
     /// A `protozero::exception`.
-    Pbf(protozero::Exception),
+    #[error(transparent)]
+    Pbf(#[from] protozero::Exception),
     /// `std::runtime_error(msg)`.
+    #[error("{0}")]
     Runtime(String),
     /// `std::out_of_range` from `std::vector::at` (libstdc++ message).
+    #[error("{0}")]
     OutOfRange(String),
 }
 
@@ -39,20 +40,6 @@ impl Error {
         matches!(self, Error::Runtime(_))
     }
 }
-
-impl From<protozero::Exception> for Error {
-    fn from(e: protozero::Exception) -> Self {
-        Error::Pbf(e)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.what())
-    }
-}
-
-impl std::error::Error for Error {}
 
 /// `std::vector::at`.
 pub(crate) fn at<T>(v: &[T], n: usize) -> Result<&T, Error> {

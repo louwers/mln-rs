@@ -293,45 +293,30 @@ pub struct CameraUpdate {
 }
 
 /// Why a [`CameraDelta`] was rejected, as maplibre-native-ffi rejects it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CameraError {
     /// An offset, anchor, bearing or pitch isn't finite.
+    #[error("camera delta offset, anchor, bearing and pitch must be finite")]
     NotFinite,
     /// The scale isn't finite and positive.
+    #[error("camera delta scale must be finite and positive")]
     InvalidScale,
     /// An anchor needs an offset, scale, bearing or pitch to hold in place.
+    #[error("a camera delta anchor requires scale, bearing, or pitch, or an offset to hold")]
     AnchorWithoutChange,
     /// Only a delta in the end phase carries momentum.
+    #[error("only a camera delta in the end phase carries momentum")]
     MomentumOutsideEnd,
     /// A delta with momentum sets only its animation's transition id and end
     /// function: the momentum, not an animation, moves the camera.
+    #[error("a camera delta with momentum sets only the transition ID and end function of its animation")]
     MomentumWithAnimation,
     /// An anchor combines with an offset and a scale, bearing or pitch only
     /// in an immediate delta: an anchored ease couples the center with its
     /// fields, so it would replace an animated pan.
+    #[error("a camera delta anchor combines with offset only in an immediate delta")]
     AnimatedAnchoredOffset,
 }
-
-impl std::fmt::Display for CameraError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            CameraError::NotFinite => "camera delta offset, anchor, bearing and pitch must be finite",
-            CameraError::InvalidScale => "camera delta scale must be finite and positive",
-            CameraError::AnchorWithoutChange => {
-                "a camera delta anchor requires scale, bearing, or pitch, or an offset to hold"
-            }
-            CameraError::MomentumOutsideEnd => "only a camera delta in the end phase carries momentum",
-            CameraError::MomentumWithAnimation => {
-                "a camera delta with momentum sets only the transition ID and end function of its animation"
-            }
-            CameraError::AnimatedAnchoredOffset => {
-                "a camera delta anchor combines with offset only in an immediate delta"
-            }
-        })
-    }
-}
-
-impl std::error::Error for CameraError {}
 
 impl CameraDelta {
     /// Checks the delta as maplibre-native-ffi's `validate_camera_delta`

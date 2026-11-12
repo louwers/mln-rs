@@ -5,43 +5,32 @@
 // FreeType with zlib and without Brotli, so it opens WOFF but not WOFF2.
 // The WOFF port is under the FreeType License (LICENSE-FreeType).
 
-use std::fmt;
-
 use flate2::{Decompress, FlushDecompress, Status};
 
 use crate::glyph::FontData;
 
 /// Why a WOFF or WOFF2 file didn't decode.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum WoffError {
     /// The WOFF header doesn't match the file, or is inconsistent.
+    #[error("invalid WOFF header")]
     InvalidHeader,
     /// A WOFF table, or the metadata or private block, isn't where the
     /// header and table directory place it, or the tables aren't sorted by
     /// tag.
+    #[error("invalid WOFF table directory")]
     InvalidTableDirectory,
     /// A compressed WOFF table isn't a zlib stream of its original length.
+    #[error("invalid WOFF table data")]
     InvalidTableData,
     /// The decoded font doesn't fit in memory.
+    #[error("the decoded WOFF font doesn't fit in memory")]
     OutOfMemory,
     /// The WOFF2 file is malformed (its decoder gives no detail).
+    #[error("invalid WOFF2 file")]
     InvalidWoff2,
 }
-
-impl fmt::Display for WoffError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            WoffError::InvalidHeader => "invalid WOFF header",
-            WoffError::InvalidTableDirectory => "invalid WOFF table directory",
-            WoffError::InvalidTableData => "invalid WOFF table data",
-            WoffError::OutOfMemory => "the decoded WOFF font doesn't fit in memory",
-            WoffError::InvalidWoff2 => "invalid WOFF2 file",
-        })
-    }
-}
-
-impl std::error::Error for WoffError {}
 
 /// Whether `data` starts with the WOFF or WOFF2 signature.
 #[must_use]

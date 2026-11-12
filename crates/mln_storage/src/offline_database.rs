@@ -50,41 +50,31 @@ pub const MAX_PENDING_ACCESSED: usize = 4096;
 
 /// The offline regions would hold more tiles from MapLibre's demo tile server
 /// than the database's limit allows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("Mapbox tile limit exceeded")]
 pub struct TileCountLimitExceeded;
 
-impl std::fmt::Display for TileCountLimitExceeded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Mapbox tile limit exceeded")
-    }
-}
-
-impl std::error::Error for TileCountLimitExceeded {}
-
 /// Why a database operation failed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum DatabaseError {
-    Sqlite(SqliteError),
+    #[error(transparent)]
+    Sqlite(#[from] SqliteError),
     /// A file operation failed with the OS error `code`.
-    Io {
-        code: i32,
-        message: String,
-    },
+    #[error("{message}")]
+    Io { code: i32, message: String },
     /// See [`TileCountLimitExceeded`].
+    #[error("{}", TileCountLimitExceeded)]
     TileCountLimitExceeded,
     /// The operation failed, such as on a malformed region definition in the
     /// database.
+    #[error("{0}")]
     Runtime(String),
     /// An argument was invalid, such as a region definition's zoom range.
+    #[error("{0}")]
     Logic(String),
     /// The database has no offline region with this ID.
+    #[error("no offline region has ID {0}")]
     RegionNotFound(i64),
-}
-
-impl From<SqliteError> for DatabaseError {
-    fn from(e: SqliteError) -> Self {
-        DatabaseError::Sqlite(e)
-    }
 }
 
 impl From<rusqlite::Error> for DatabaseError {
@@ -98,19 +88,6 @@ impl From<Error> for DatabaseError {
         match e.kind {
             ErrorKind::InvalidArgument => DatabaseError::Logic(e.message),
             _ => DatabaseError::Runtime(e.message),
-        }
-    }
-}
-
-impl std::fmt::Display for DatabaseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DatabaseError::Sqlite(e) => f.write_str(&e.message),
-            DatabaseError::Io { message, .. } | DatabaseError::Runtime(message) | DatabaseError::Logic(message) => {
-                f.write_str(message)
-            }
-            DatabaseError::TileCountLimitExceeded => TileCountLimitExceeded.fmt(f),
-            DatabaseError::RegionNotFound(region_id) => write!(f, "no offline region has ID {region_id}"),
         }
     }
 }

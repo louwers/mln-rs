@@ -51,21 +51,12 @@ impl AlphaMode for Exclusive {
 
 /// The exceptions `Image` throws in C++ (`std::invalid_argument`,
 /// `std::out_of_range`), with the same messages.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{0}")]
 pub enum ImageError {
     InvalidArgument(&'static str),
     OutOfRange(&'static str),
 }
-
-impl fmt::Display for ImageError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ImageError::InvalidArgument(msg) | ImageError::OutOfRange(msg) => f.write_str(msg),
-        }
-    }
-}
-
-impl std::error::Error for ImageError {}
 
 /// `mln::Image<Mode>`: `size` plus `channels * width * height` bytes.
 ///

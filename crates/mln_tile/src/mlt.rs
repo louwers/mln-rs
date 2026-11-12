@@ -35,7 +35,6 @@
 // round), the tile fails here too.
 
 use std::collections::HashMap;
-use std::fmt;
 use std::ops::Range;
 use std::sync::{Arc, OnceLock};
 
@@ -45,7 +44,8 @@ use mlt_core::{GeometryType as WireGeometryType, GeometryValues, ParsedLayer01, 
 /// A C++ exception from the decoder or from reading a property (all are
 /// `std::runtime_error`s); `what()` is the message. Messages of tiles that
 /// mlt-core rejects are mlt-core's.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub struct Error {
     message: String,
 }
@@ -60,14 +60,6 @@ impl Error {
         &self.message
     }
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Error {}
 
 impl From<mlt_core::MltError> for Error {
     fn from(e: mlt_core::MltError) -> Self {
