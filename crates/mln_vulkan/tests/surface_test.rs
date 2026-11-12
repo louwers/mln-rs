@@ -13,8 +13,8 @@
 // frame's image, or reads another frame's uniforms, has the wrong colors.
 //
 // A backend made for a surface keeps two frames in flight, so a uniform buffer
-// has a copy for each: the frames that aren't read back aren't waited for,
-// and the ones after them read the copy the frame before didn't write.
+// has two copies: the frames that aren't read back aren't waited for, and
+// the ones after them write the copy the frame before doesn't read.
 //
 // Without VK_EXT_headless_surface the tests are skipped, and fail on CI.
 
@@ -303,9 +303,22 @@ impl Scene {
     /// Writes the half the background covers into the layer's storage
     /// buffers: the buffers the frames before used, once they exist.
     fn set_half(&self, context: &dyn Context, right: bool) {
-        let matrix = half_matrix(right);
-        let drawable = [BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix })];
-        let projection = [ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() }];
+        self.set_halves(context, &[right]);
+    }
+
+    /// Writes an entry for each of `halves` into the layer's storage
+    /// buffers, which the first call makes. The drawable draws with the
+    /// first entry.
+    fn set_halves(&self, context: &dyn Context, halves: &[bool]) {
+        let matrices: Vec<[f32; 16]> = halves.iter().map(|&right| half_matrix(right)).collect();
+        let drawable: Vec<BackgroundDrawableUnionUBO> = matrices
+            .iter()
+            .map(|&matrix| BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix }))
+            .collect();
+        let projection: Vec<ProjectionUBO> = matrices
+            .iter()
+            .map(|&matrix| ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() })
+            .collect();
         let mut group = self.layer_group.borrow_mut();
         let buffers = group.mutable_uniform_buffers();
         for (id, data) in [
@@ -338,6 +351,19 @@ fn render_frame(
     backend: &Window,
     scene: Option<&Scene>,
     change: Change,
+    clear: Color,
+    read: bool,
+) -> Option<PremultipliedImage> {
+    render_frame_changing_between_passes(backend, scene, change, Change::default(), clear, read)
+}
+
+/// `render_frame`, with `between` changed after the scene's opaque pass has
+/// drawn and before its translucent pass draws.
+fn render_frame_changing_between_passes(
+    backend: &Window,
+    scene: Option<&Scene>,
+    change: Change,
+    between: Change,
     clear: Color,
     read: bool,
 ) -> Option<PremultipliedImage> {
@@ -380,10 +406,16 @@ fn render_frame(
     ));
     context.bind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     if let Some(scene) = scene {
-        for pass in [RenderPass::Opaque, RenderPass::Translucent] {
-            parameters.pass = pass;
-            scene.layer_group.borrow_mut().render(&mut parameters);
+        parameters.pass = RenderPass::Opaque;
+        scene.layer_group.borrow_mut().render(&mut parameters);
+        if let Some(color) = between.color {
+            scene.set_color(context, color);
         }
+        if let Some(right) = between.right {
+            scene.set_half(context, right);
+        }
+        parameters.pass = RenderPass::Translucent;
+        scene.layer_group.borrow_mut().render(&mut parameters);
     }
     context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     parameters.render_pass = None;
@@ -498,11 +530,10 @@ fn uniforms_follow_each_frame_in_flight() {
     // still in flight when the next one is recorded.
     let frames = [
         (set(red, false), false, red, false),
-        // Nothing written: the other frame's copies of the buffers are
-        // brought up to date.
+        // Nothing written: the frames read what the first one wrote.
         (keep, true, red, false),
         (keep, true, red, false),
-        // Two writes in a row, one in each frame's copies, then none.
+        // Two writes in a row, one in each copy of the buffers, then none.
         (set(green, true), false, green, true),
         (set(blue, false), false, blue, false),
         (keep, true, blue, false),
@@ -522,6 +553,70 @@ fn uniforms_follow_each_frame_in_flight() {
         if let Some(image) = image {
             let (left_color, right_color) = if right { (clear, background) } else { (background, clear) };
             check_halves(&image, size, left_color, right_color, &format!("frame {index}"));
+        }
+    }
+}
+
+#[test]
+fn an_update_between_draws_leaves_the_earlier_draw() {
+    let size = Size::new(32, 16);
+    let Some(backend) = surface_backend(size, false) else {
+        return;
+    };
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
+    let scene = Scene::new(&backend);
+    let clear = color(0.0, 0.0, 0.0);
+
+    // Each frame draws the left half in one color, then writes the buffers
+    // it drew with and draws the right half in another. The frames that
+    // aren't read back are still in flight when the next one is recorded, so
+    // the second write finds every copy of a buffer in use.
+    for (frame, read) in [false, true, false, false, true, true].into_iter().enumerate() {
+        let (first, second) = (frame_color(frame as u32, 2), frame_color(frame as u32, 5));
+        let image = render_frame_changing_between_passes(
+            &backend,
+            Some(&scene),
+            Change { color: Some(first), right: Some(false) },
+            Change { color: Some(second), right: Some(true) },
+            clear,
+            read,
+        );
+        if let Some(image) = image {
+            check_halves(&image, size, first, second, &format!("frame {frame}"));
+        }
+    }
+
+    // And a frame that writes nothing reads the last write.
+    let last = frame_color(5, 5);
+    let image = render_frame(&backend, Some(&scene), Change::default(), clear, true).expect("an image");
+    check_halves(&image, size, clear, last, "a frame without a write");
+}
+
+#[test]
+fn a_shorter_update_is_read_from_the_start_of_the_buffer() {
+    let size = Size::new(32, 16);
+    let Some(backend) = surface_backend(size, false) else {
+        return;
+    };
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
+    let scene = Scene::new(&backend);
+    let clear = color(0.0, 0.0, 0.0);
+    let green = color(0.0, 1.0, 0.0);
+
+    // The storage buffers are made with two entries, and then written with
+    // one, in frames that aren't all waited for.
+    let context = backend.get_context();
+    scene.set_halves(context, &[false, true]);
+    let image = render_frame(&backend, Some(&scene), Change { color: Some(green), right: None }, clear, true)
+        .expect("an image");
+    check_halves(&image, size, green, clear, "two entries");
+    for (frame, (right, read)) in
+        [(true, false), (false, true), (true, true), (false, false), (true, true)].into_iter().enumerate()
+    {
+        let image = render_frame(&backend, Some(&scene), Change { color: None, right: Some(right) }, clear, read);
+        if let Some(image) = image {
+            let (left_color, right_color) = if right { (clear, green) } else { (green, clear) };
+            check_halves(&image, size, left_color, right_color, &format!("one entry, frame {frame}"));
         }
     }
 }

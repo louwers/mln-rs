@@ -309,9 +309,8 @@ impl UniformDescriptorSet {
     }
 
     /// `UniformBufferArray::bindDescriptorSets(encoder)`: points the frame's
-    /// set at the buffers of `uniforms`, each brought up to date with the
-    /// frame before, and binds it. A binding without a buffer gets the
-    /// context's placeholder.
+    /// set at the contents of the buffers of `uniforms`, and binds it. A
+    /// binding without a buffer gets the context's placeholder.
     pub fn bind(&mut self, context: &Context, command_buffer: vk::CommandBuffer, uniforms: &UniformBufferArray) {
         let type_ = self.set.type_;
         let shape = type_.buffer_shape();
@@ -319,7 +318,6 @@ impl UniformDescriptorSet {
         let dummy = BufferBinding { id: 0, buffer: context.get_dummy_buffer(), offset: 0, range: vk::WHOLE_SIZE };
         let mut bindings = [dummy; MAX_BUFFER_BINDINGS];
 
-        let current_index = context.get_current_frame_resource_index();
         let first_id = if type_ == DescriptorSetType::Global { 0 } else { LAYER_SSBO_START_ID };
         for id in first_id..uniforms.allocated_size() {
             let Some(uniform_buffer) = uniforms.get(id).and_then(|b| b.as_any().downcast_ref::<UniformBuffer>()) else {
@@ -333,7 +331,6 @@ impl UniformDescriptorSet {
             if !resource.is_valid() {
                 continue;
             }
-            resource.update_vulkan_buffer(current_index);
             bindings[binding as usize] = BufferBinding {
                 id: resource.allocation_id(),
                 buffer: resource.get_vulkan_buffer(),
@@ -342,7 +339,7 @@ impl UniformDescriptorSet {
             };
         }
 
-        let frame = usize::from(current_index);
+        let frame = usize::from(context.get_current_frame_resource_index());
         let changed = self.written.get(frame).is_none_or(|written| written[..count] != bindings[..count]);
         let Some((frame, set, replaced)) = self.set.writable(context, changed) else {
             return;

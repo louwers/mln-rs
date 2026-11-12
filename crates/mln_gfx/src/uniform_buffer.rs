@@ -10,6 +10,8 @@ use crate::shaders::shader_defines::MAX_UBO_COUNT_PER_SHADER;
 /// (`Context::create_uniform_buffer`). `update` takes `&self`: the buffer is
 /// shared (`UniformBufferPtr`) and GPU writes go through the queue.
 pub trait UniformBuffer: Any {
+    /// Replaces the buffer's contents with `data`, which may be shorter than
+    /// the buffer: the bytes past it are unspecified afterwards.
     fn update(&self, data: &[u8]);
     fn get_size(&self) -> usize;
     fn as_any(&self) -> &dyn Any;
