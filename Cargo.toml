@@ -370,8 +370,3 @@ codegen-units = 1
 # unoptimized.
 [profile.dev.package.zlib-rs]
 opt-level = 3
-
-# fast-mvt's lazy reader (MvtLazyReader), until a fast-mvt release has it:
-# https://github.com/nyurik/fast-mvt/pull/68.
-[patch.crates-io]
-fast-mvt = { git = "https://github.com/louwers-bot/fast-mvt", rev = "43f181d19d9d01ac27c5fa95a51c4bca12eb93f2" }
