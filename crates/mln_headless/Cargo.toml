@@ -23,7 +23,6 @@ mln_renderer.workspace = true
 # The devices and offscreen targets the frontend renders on, of every
 # backend.
 mln_runtime.workspace = true
-mln_storage.workspace = true
 mln_style.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true
@@ -49,7 +48,7 @@ path = "tests/map_snapshot_test.rs"
 name = "gtest_feature_tracking"
 path = "tests/gtest_feature_tracking.rs"
 
-# gtests-core: test/map/{map,prefetch,map_snapshotter}.test.cpp through Map
+# gtests-core: test/map/{map,prefetch}.test.cpp through Map
 # (over a StubFileSource/FakeFileSource) -> HeadlessFrontend. Shared fixture
 # in tests/support/mod.rs.
 [[test]]

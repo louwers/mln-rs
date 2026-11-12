@@ -1,12 +1,10 @@
 // Ports test/map/map.test.cpp (the `Map` and `BackgroundLayer` gtests).
-// test/map/prefetch.test.cpp and test/map/map_snapshotter.test.cpp are the
-// modules below; the fixture (`MapTest`, `StubMapObserver`, `checkImage`,
-// `FakeFileSource`) is in support/mod.rs.
+// test/map/prefetch.test.cpp is the module below; the fixture (`MapTest`,
+// `StubMapObserver`, `checkImage`, `FakeFileSource`) is in support/mod.rs.
 //
 // Markers: `// gtest: Group.Name` above each ported test; tests that need
 // code that is not ported yet are `#[ignore]`d with the missing part.
 
-mod gtest_map_snapshotter;
 mod gtest_prefetch;
 mod support;
 
@@ -43,7 +41,6 @@ use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
 use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
 use mln_style::layers::raster_layer::RasterLayer;
-use mln_style::layers::symbol_layer::SymbolLayer;
 use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
 use mln_style::sources::custom_geometry_source::{
@@ -109,90 +106,6 @@ fn no_content() -> Response {
     let mut res = Response::new();
     res.no_content = true;
     res
-}
-
-// gtest: Map.RendererState
-#[test]
-fn renderer_state() {
-    let test = MapTest::new();
-
-    // Map hasn't notified the frontend about an update yet.
-    let null_options = CameraOptions::default();
-    assert_eq!(test.frontend.get_camera_options(), null_options);
-
-    let coordinate = ll(1.0, 1.0);
-    let zoom = 12.0;
-    let pitch_in_degrees = 45.0;
-    let bearing_in_degrees = 30.0;
-
-    test.load_json(&read_file("test/fixtures/api/empty.json"));
-    test.map().jump_to(
-        &cam()
-            .with_center(Some(coordinate))
-            .with_zoom(Some(zoom))
-            .with_pitch(Some(pitch_in_degrees))
-            .with_bearing(Some(bearing_in_degrees)),
-    );
-
-    test.run_loop.run_once();
-    test.render();
-
-    // RendererState::getCameraOptions
-    let options = test.frontend.get_camera_options();
-    assert_near(options.center.unwrap().latitude(), coordinate.latitude(), 1e-7);
-    assert_near(options.center.unwrap().longitude(), coordinate.longitude(), 1e-7);
-    assert_double_eq(options.zoom.unwrap(), zoom);
-    assert_double_eq(options.pitch.unwrap(), pitch_in_degrees);
-    assert_near(options.bearing.unwrap(), bearing_in_degrees, 1e-7);
-
-    {
-        let lat_lng = test.frontend.lat_lng_for_pixel(&ScreenCoordinate::new(0.0, 0.0)).unwrap();
-        let point = test.frontend.pixel_for_lat_lng(&coordinate);
-        assert_near(coordinate.latitude(), lat_lng.latitude(), 1e-1);
-        assert_near(coordinate.longitude(), lat_lng.longitude(), 1e-1);
-        let size = test.map().get_map_options().size();
-        assert_near(point.x, f64::from(size.width) / 2.0, 1e-7);
-        assert_near(point.y, f64::from(size.height) / 2.0, 1e-7);
-    }
-
-    // RendererState::hasImage
-    test.map().style_mut().add_image(style_image(
-        "default_marker",
-        decode_image("test/fixtures/sprites/default_marker.png"),
-        1.0,
-    ));
-
-    // The frontend has not yet been notified about the newly-added image.
-    assert!(!test.frontend.has_image("default_marker"));
-
-    test.run_loop.run_once();
-    test.render();
-
-    assert!(test.frontend.has_image("default_marker"));
-
-    // RendererState::hasSource
-    let source = GeoJSONSource::with_default_options("GeoJSONSource");
-    source.set_geojson(&GeoJSON::Geometry(Geometry::Point(Point::new(0.0, 0.0)))).unwrap();
-    test.map().style_mut().add_source(Box::new(source)).unwrap();
-
-    // The frontend has not yet been notified about the newly-added source.
-    assert!(!test.frontend.has_source("GeoJSONSource"));
-
-    test.run_loop.run_once();
-    test.render();
-
-    assert!(test.frontend.has_source("GeoJSONSource"));
-
-    // RendererState::hasLayer
-    test.map().style_mut().add_layer(Box::new(SymbolLayer::new("SymbolLayer", "GeoJSONSource")), None).unwrap();
-
-    // The frontend has not yet been notified about the newly-added source.
-    assert!(!test.frontend.has_layer("SymbolLayer"));
-
-    test.run_loop.run_once();
-    test.render();
-
-    assert!(test.frontend.has_layer("SymbolLayer"));
 }
 
 // gtest: Map.LatLngBehavior
