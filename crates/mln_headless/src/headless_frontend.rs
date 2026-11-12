@@ -356,6 +356,14 @@ impl HeadlessFrontend {
         Shared::render(&self.shared, parameters);
     }
 
+    /// Port-only: the target the frontend draws into, so a host can reach
+    /// the frame's colour and depth-stencil textures through
+    /// [`LocalTarget::frames`] and draw into them alongside the map.
+    #[must_use]
+    pub fn target(&self) -> &LocalTarget {
+        &self.shared.target
+    }
+
     #[must_use]
     pub fn get_transform_state(&self) -> Option<TransformState> {
         self.shared.latest_parameters().map(|p| p.transform_state.clone())
