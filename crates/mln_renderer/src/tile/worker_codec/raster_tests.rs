@@ -175,7 +175,8 @@ fn parsed_dem(message: RasterDEMTileMessage) -> Option<Arc<HillshadeBucket>> {
 /// from its neighbours, and gives them its border, as a DEM made directly.
 #[test]
 fn raster_dem_tiles_cross() {
-    for encoding in [RasterEncoding::Mapbox, RasterEncoding::Terrarium] {
+    let custom = RasterEncoding::Custom { red_factor: 0.0, green_factor: 25.6, blue_factor: 0.1, base_shift: 3446.4 };
+    for encoding in [RasterEncoding::Mapbox, RasterEncoding::Terrarium, custom] {
         let direct = parsed_dem(raster_dem_direct(Some(png(16, 16)), encoding)).unwrap();
         let through = parsed_dem(raster_dem_through_codec(Some(png(16, 16)), encoding)).unwrap();
         {

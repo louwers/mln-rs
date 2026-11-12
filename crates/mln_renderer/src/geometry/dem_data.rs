@@ -14,9 +14,16 @@ const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
 /// https://aws.amazon.com/public-datasets/terrain/
 const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
 
-/// The DEM unpack vector for an encoding (`DEMData::getUnpackVector`).
-pub fn get_unpack_vector(encoding: RasterEncoding) -> &'static [f32; 4] {
-    if encoding == RasterEncoding::Terrarium { &UNPACK_TERRARIUM } else { &UNPACK_MAPBOX }
+/// The DEM unpack vector for an encoding (`DEMData::getUnpackVector`): the
+/// red, green and blue factors and the base shift.
+pub fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
+    match encoding {
+        RasterEncoding::Mapbox => UNPACK_MAPBOX,
+        RasterEncoding::Terrarium => UNPACK_TERRARIUM,
+        RasterEncoding::Custom { red_factor, green_factor, blue_factor, base_shift } => {
+            [red_factor, green_factor, blue_factor, base_shift]
+        }
+    }
 }
 
 /// Port-only: serde reads back only what `new` can make (`from_parts`).
@@ -197,7 +204,7 @@ impl DEMData {
     }
 
     /// `getUnpackVector()`.
-    pub fn get_unpack_vector(&self) -> &'static [f32; 4] {
+    pub fn get_unpack_vector(&self) -> [f32; 4] {
         get_unpack_vector(self.encoding)
     }
 
@@ -244,6 +251,19 @@ mod tests {
         assert_eq!(demdata.dim, 16);
         assert_eq!(demdata.stride, 18);
         assert_eq!(demdata.get_image().bytes(), 18 * 18 * 4);
+    }
+
+    #[test]
+    fn custom_encoding_decodes_with_its_factors() {
+        let mut image = PremultipliedImage::new(Size::new(1, 1));
+        image.data.copy_from_slice(&[10, 20, 30, 255]);
+        let encoding =
+            RasterEncoding::Custom { red_factor: 100.0, green_factor: 10.0, blue_factor: 0.5, base_shift: 1000.0 };
+        let demdata = DEMData::new(&image, encoding).unwrap();
+
+        // 10 * 100 + 20 * 10 + 30 * 0.5 - 1000
+        assert_eq!(demdata.get(0, 0), 215);
+        assert_eq!(demdata.get_unpack_vector(), [100.0, 10.0, 0.5, 1000.0]);
     }
 
     #[test]

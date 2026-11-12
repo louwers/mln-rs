@@ -32,6 +32,15 @@ fn zoom_member(value: &Convertible<'_>, name: &str, error: &mut Error) -> Result
     }
 }
 
+/// A `custom` raster-dem encoding's number `name`, or `default` without one.
+/// `Err(())` is an invalid one, as in `zoom_member`.
+fn factor_member(value: &Convertible<'_>, name: &str, default: f32, error: &mut Error) -> Result<f32, ()> {
+    let Some(member) = value.object_member(name) else {
+        return Ok(default);
+    };
+    member.to_number().ok_or_else(|| error.message = format!("invalid {name}"))
+}
+
 impl Converter for SourceOptions {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
         let mut options = SourceOptions::default();
@@ -41,11 +50,19 @@ impl Converter for SourceOptions {
             match encoding_value.to_string().as_deref() {
                 Some("terrarium") => options.raster_encoding = Some(RasterEncoding::Terrarium),
                 Some("mapbox") => options.raster_encoding = Some(RasterEncoding::Mapbox),
+                Some("custom") => {
+                    options.raster_encoding = Some(RasterEncoding::Custom {
+                        red_factor: factor_member(value, "redFactor", 1.0, error).ok()?,
+                        green_factor: factor_member(value, "greenFactor", 1.0, error).ok()?,
+                        blue_factor: factor_member(value, "blueFactor", 1.0, error).ok()?,
+                        base_shift: factor_member(value, "baseShift", 0.0, error).ok()?,
+                    });
+                }
                 Some("mvt") => options.vector_encoding = Some(VectorEncoding::Mapbox),
                 Some("mlt") => options.vector_encoding = Some(VectorEncoding::MLT),
                 _ => {
-                    error.message = "invalid encoding - valid types are 'mapbox' and 'terrarium' for raster \
-                                     sources, 'mvt' and 'mlt' for vector sources"
+                    error.message = "invalid encoding - valid types are 'mapbox', 'terrarium' and 'custom' for \
+                                     raster sources, 'mvt' and 'mlt' for vector sources"
                         .to_owned();
                     return None;
                 }

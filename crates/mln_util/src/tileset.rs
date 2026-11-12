@@ -15,12 +15,16 @@ pub enum Scheme {
 }
 
 /// `Tileset::RasterEncoding`. (Added by `sources` with the tile sources.)
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RasterEncoding {
     /// Mapbox DEM
     Mapbox,
     /// Terrarium DEM
     Terrarium,
+    /// The style spec's `custom` DEM: a pixel's elevation is
+    /// `r * red_factor + g * green_factor + b * blue_factor - base_shift`,
+    /// with each channel from 0 to 255.
+    Custom { red_factor: f32, green_factor: f32, blue_factor: f32, base_shift: f32 },
 }
 
 /// `Tileset::VectorEncoding`.

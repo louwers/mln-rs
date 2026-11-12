@@ -533,7 +533,7 @@ impl RenderLayer for RenderColorReliefLayer {
                 (
                     dem_data.get_image().clone(),
                     ColorReliefTilePropsUBO {
-                        unpack: *unpack_vector,
+                        unpack: unpack_vector,
                         // Use stride (dim + 2) for dimension, as the
                         // texture includes a 1-pixel border
                         dimension: [dem_data.stride as f32, dem_data.stride as f32],

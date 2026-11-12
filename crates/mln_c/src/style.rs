@@ -555,12 +555,15 @@ impl LentSource {
                     northeast: geo::from_lat_lng(bounds.northeast()),
                 };
             }
-            if let Some(encoding) = tiles.raster_encoding {
+            // The C API has no value for a custom encoding, so it reports none.
+            let c_encoding = match tiles.raster_encoding {
+                Some(RasterEncoding::Mapbox) => Some(MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX),
+                Some(RasterEncoding::Terrarium) => Some(MLN_STYLE_RASTER_DEM_ENCODING_TERRARIUM),
+                Some(RasterEncoding::Custom { .. }) | None => None,
+            };
+            if let Some(encoding) = c_encoding {
                 fields |= MLN_STYLE_SOURCE_INFO_RASTER_ENCODING;
-                raster_encoding = match encoding {
-                    RasterEncoding::Mapbox => MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX,
-                    RasterEncoding::Terrarium => MLN_STYLE_RASTER_DEM_ENCODING_TERRARIUM,
-                };
+                raster_encoding = encoding;
             }
         }
         if info.tile_size.is_some() {
