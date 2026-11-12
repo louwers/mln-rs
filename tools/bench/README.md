@@ -62,6 +62,12 @@ metrics only; `--verbose` also shows the others.
 - **`time_ms`**, **`cpu_ms`**: an iteration's wall time, and the CPU time of
   every thread of the process, so work moved to the tile workers or a busy
   wait still counts. The median of the case's iterations.
+- **`minstr`**, `mcycles`: the millions of instructions and of cycles every
+  thread of the process retires in an iteration, the median of the case's
+  iterations; macOS only. Other load on the machine hardly changes the
+  instructions, so they show a change of the work done where `time_ms` and
+  `cpu_ms` are noise; the cycles also count stalls, and vary with load and
+  the cores the threads ran on.
 - **`allocs`**, `alloc_kib`: heap allocations per iteration, of the whole
   process (the GPU driver's own allocations aren't Rust's and aren't
   counted).
@@ -106,9 +112,10 @@ differences to `target/bench-compare/frames/diff`, so a side that got faster
 by drawing less shows up.
 
 Compare on an idle machine with a GPU; the report shows the load average
-before and after, and a software rasterizer (lavapipe) is flagged. To see
-how much your machine's numbers vary, compare a commit with itself, which
-should give no verdicts.
+before and after, and a software rasterizer (lavapipe) is flagged. On a busy
+machine, trust `minstr` and `allocs` over the times. To see how much your
+machine's numbers vary, compare a commit with itself, which should give no
+verdicts.
 
 ## On an Android device
 
@@ -132,5 +139,6 @@ leaves the pushed files on the device.
 
 - GPU time apart from the frame (timestamp queries), and the frame's CPU
   time by stage: the port doesn't keep `RenderingStats` yet.
+- Instructions and cycles on Linux and Windows.
 - A synthetic clock for animations: in continuous mode the map reads the
   real clock, so fades and transitions in `Frame/Paced` follow wall time.
