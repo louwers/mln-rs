@@ -178,9 +178,13 @@ impl Gfx {
         BackendScope::new(&*self.backend, ScopeType::Explicit)
     }
 
-    /// Whether the target can take a frame now: it begins one, which a
-    /// surface needs a texture for.
+    /// Whether the target can take a frame now: its window, if any, has an
+    /// area to present to, and it begins a frame, which a surface needs a
+    /// texture for.
     fn ready_for_frame(&self) -> bool {
+        if !self.target.window_has_area() {
+            return false;
+        }
         let _scope = self.scope();
         self.target.frames().is_some_and(|frames| frames.begin_frame().is_some())
     }
@@ -631,7 +635,9 @@ impl Worker {
     /// [`pick_slot`](Self::pick_slot) marked, or into a target without a
     /// ring, and publishes its result. A still map draws no frame until
     /// everything that it shows has loaded, and a surface without a texture
-    /// to render into takes no frame.
+    /// to render into takes no frame. A frame that a surface drops, having
+    /// had no image for it after all, finishes as not ready, and the next
+    /// demand draws the map again.
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>, outbox: &mut Outbox) {
         let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
@@ -652,6 +658,12 @@ impl Worker {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
             gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
         };
+        if gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped)) {
+            let events = self.renderer_events.take();
+            let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
+            self.publish(&result, outbox);
+            return self.forward(events);
+        }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         self.sources = Some(update.parameters.sources.clone());

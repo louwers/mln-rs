@@ -75,6 +75,11 @@ pub enum RenderTarget {
     /// windows, and on WebGPU otherwise (on Apple's platforms, whose Metal
     /// takes a layer); a Metal layer renders on Metal.
     ///
+    /// A frame finishes as
+    /// [`TargetNotReady`](crate::FrameDisposition::TargetNotReady) while the
+    /// surface can't show it: while a window is minimized or has no client
+    /// area, or the surface has an empty extent or gives no image for it.
+    ///
     /// [`release_target`](crate::RenderSession::release_target) lets go of
     /// the surface, and [`set_surface`](crate::RenderSession::set_surface)
     /// gives the session another one.
@@ -385,6 +390,27 @@ impl Surface {
             SurfaceKind::Window(window) => Some(Surface { kind: SurfaceKind::Window(window.clone()) }),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
             SurfaceKind::Gl(surface) => Some(Surface { kind: SurfaceKind::Gl(*surface) }),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// window that has no area to present to: a minimized Win32 window, or
+    /// one whose client area is empty ([`mln_gfx::window::has_area`]).
+    pub(crate) fn check_area(&self) -> Result<(), Error> {
+        if let SurfaceKind::Window(window) = &self.kind
+            && !mln_gfx::window::has_area(&**window)
+        {
+            return Err(Error::invalid_state("the window is minimized or has no client area"));
+        }
+        Ok(())
+    }
+
+    /// The window, for a surface of one.
+    pub(crate) fn host_window(&self) -> Option<Arc<dyn Window>> {
+        match &self.kind {
+            SurfaceKind::Window(window) => Some(window.clone()),
             #[allow(unreachable_patterns)]
             _ => None,
         }
