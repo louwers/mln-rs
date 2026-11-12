@@ -16,6 +16,7 @@ pub mod detail {
     /// (`c - 255` is an `int`, promoted to `double`; the `double` result is
     /// truncated to `uint8_t`).
     #[inline]
+    #[must_use]
     pub fn blend(c: u8, a: f64) -> u8 {
         (255.0 + f64::from(i32::from(c) - 255) * a) as u8
     }
@@ -28,23 +29,27 @@ pub mod detail {
     }
 
     #[inline]
+    #[must_use]
     pub fn rgb2y(r: u8, g: u8, b: u8) -> f64 {
-        f64::from(r) * 0.29889531 + f64::from(g) * 0.58662247 + f64::from(b) * 0.11448223
+        f64::from(r) * 0.298_895_31 + f64::from(g) * 0.586_622_47 + f64::from(b) * 0.114_482_23
     }
 
     #[inline]
+    #[must_use]
     pub fn rgb2i(r: u8, g: u8, b: u8) -> f64 {
-        f64::from(r) * 0.59597799 - f64::from(g) * 0.27417610 - f64::from(b) * 0.32180189
+        f64::from(r) * 0.595_977_99 - f64::from(g) * 0.274_176_10 - f64::from(b) * 0.321_801_89
     }
 
     #[inline]
+    #[must_use]
     pub fn rgb2q(r: u8, g: u8, b: u8) -> f64 {
-        f64::from(r) * 0.21147017 - f64::from(g) * 0.52261711 + f64::from(b) * 0.31114694
+        f64::from(r) * 0.211_470_17 - f64::from(g) * 0.522_617_11 + f64::from(b) * 0.311_146_94
     }
 
     /// Calculate color difference according to the paper "Measuring perceived
     /// color difference using YIQ NTSC transmission color space in mobile
     /// applications" by Y. Kotsarenko and F. Ramos.
+    #[must_use]
     pub fn color_delta(img1: &[u8], img2: &[u8], k: usize, m: usize, y_only: bool) -> f64 {
         let a1 = f64::from(img1[k + 3]) / 255.0;
         let a2 = f64::from(img2[m + 3]) / 255.0;
@@ -77,6 +82,7 @@ pub mod detail {
         output[pos + 3] = 255;
     }
 
+    #[must_use]
     pub fn gray_pixel(img: &[u8], i: usize) -> f64 {
         let a = f64::from(img[i + 3]) / 255.0;
         let r = blend(img[i], a);
@@ -90,6 +96,7 @@ pub mod detail {
     /// V. Vysniauskas, 2009.
     ///
     /// `img2` is `nullptr` in the C++ recursive calls.
+    #[must_use]
     pub fn antialiased(img: &[u8], x1: usize, y1: usize, width: usize, height: usize, img2: Option<&[u8]>) -> bool {
         let x0 = if x1 > 0 { x1 - 1 } else { 0 };
         let y0 = if y1 > 0 { y1 - 1 } else { 0 };
@@ -170,6 +177,7 @@ pub mod detail {
 /// Returns the number of mismatched pixels. `img1`, `img2` (and `output`, if
 /// given) must hold at least `width * height * 4` bytes; shorter slices
 /// panic, where C++ reads out of bounds.
+#[must_use]
 pub fn pixelmatch(
     img1: &[u8],
     img2: &[u8],
@@ -179,7 +187,7 @@ pub fn pixelmatch(
     threshold: f64,
     include_aa: bool,
 ) -> u64 {
-    use detail::*;
+    use detail::{antialiased, blend_f64, color_delta, draw_pixel, gray_pixel};
 
     // maximum acceptable square distance between two colors;
     // 35215 is the maximum possible value for the YIQ difference metric

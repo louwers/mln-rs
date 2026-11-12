@@ -160,7 +160,7 @@ impl CustomGeometrySourceHandle {
     /// `setTileError(tileID, error)`: the host failed to load the tile.
     /// Invalidating the tile, or needing it again, asks for it again.
     pub fn set_tile_error(&self, tile_id: CanonicalTileID, error: Error) {
-        self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, error));
+        self.loader.invoke(move |loader| loader.set_tile_error(&tile_id, &error));
     }
 
     /// `invalidateTile(tileID)`: drops the tile's data, and asks the host for
@@ -213,21 +213,25 @@ impl Impl {
     }
 
     /// `operator!=`: whether tiles made for one impl don't suit the other.
+    #[must_use]
     pub fn differs(&self, other: &Impl) -> bool {
         !Arc::ptr_eq(&self.tile_options, &other.tile_options)
             || self.zoom_range != other.zoom_range
             || self.loader_ref.is_some() != other.loader_ref.is_some()
     }
 
+    #[must_use]
     pub fn get_tile_options(&self) -> &Immutable<TileOptions> {
         &self.tile_options
     }
 
+    #[must_use]
     pub fn get_zoom_range(&self) -> Range<u8> {
         self.zoom_range
     }
 
     /// `getTileLoader()`: `None` until the source is loaded.
+    #[must_use]
     pub fn get_tile_loader(&self) -> Option<&PoolActorRef<CustomGeometryTileLoader>> {
         self.loader_ref.as_ref()
     }
@@ -281,11 +285,13 @@ impl CustomGeometrySource {
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         static_immutable_cast::<Impl>(&self.inner.base.base_impl())
     }
 
     /// A handle to answer the tile functions with, from any thread.
+    #[must_use]
     pub fn handle(&self) -> CustomGeometrySourceHandle {
         CustomGeometrySourceHandle {
             loader: self.inner.loader.self_ref(),

@@ -89,7 +89,7 @@ impl Worker {
         self.cell = Some((ey_index as usize, i));
     }
 
-    /// `gray_render_line` (the FT_INT64 version).
+    /// `gray_render_line` (the `FT_INT64` version).
     fn render_line(&mut self, to_x: i64, to_y: i64) {
         let mut ey1 = trunc(self.y);
         let ey2 = trunc(to_y);
@@ -145,10 +145,10 @@ impl Worker {
             }
         } else {
             // any other line
-            let mut prod: i64 = dx * fy1 as i64 - dy * fx1 as i64;
+            let mut prod: i64 = dx * i64::from(fy1) - dy * i64::from(fx1);
             // FT_UDIVPREP: (FT_Int64)0xFFFFFFFF / divisor, if needed.
-            let dx_r: i64 = if ex1 != ex2 { 0xFFFF_FFFFi64 / dx } else { 0 };
-            let dy_r: i64 = if ey1 != ey2 { 0xFFFF_FFFFi64 / dy } else { 0 };
+            let dx_r: i64 = if ex1 == ex2 { 0 } else { 0xFFFF_FFFFi64 / dx };
+            let dy_r: i64 = if ey1 == ey2 { 0 } else { 0xFFFF_FFFFi64 / dy };
             // FT_UDIV(a, b): ((FT_UInt64)a * (FT_UInt64)b_r) >> 32
             let udiv = |a: i64, b_r: i64| -> i32 { ((a as u64).wrapping_mul(b_r as u64) >> 32) as i32 };
 
@@ -206,7 +206,7 @@ impl Worker {
         self.y = to_y;
     }
 
-    /// `gray_render_conic` (the FT_INT64 DDA version); 26.6 arguments.
+    /// `gray_render_conic` (the `FT_INT64` DDA version); 26.6 arguments.
     fn render_conic(&mut self, cx: i64, cy: i64, tx: i64, ty: i64) {
         let (p0x, p0y) = (self.x, self.y);
         let (p1x, p1y) = (upscale(cx), upscale(cy));
@@ -319,7 +319,7 @@ impl Worker {
         self.y = y;
     }
 
-    /// The rows (bottom to top) as (cells, min_ex) for the sweeps.
+    /// The rows (bottom to top) as (cells, `min_ex`) for the sweeps.
     fn decompose(&mut self, outline: &[Segment]) {
         // FT_Outline_Decompose closes every contour with a line to its
         // start; the segments here already contain those lines.
@@ -357,7 +357,7 @@ fn split_cubic(base: &mut [(i64, i64)]) {
 }
 
 /// `FT_FILL_RULE` with the non-zero rule (`fill = INT_MIN`; TrueType and
-/// CFF outlines never set FT_OUTLINE_EVEN_ODD_FILL).
+/// CFF outlines never set `FT_OUTLINE_EVEN_ODD_FILL`).
 #[inline]
 fn fill_rule(area: i32) -> i32 {
     let fill = i32::MIN;
@@ -410,27 +410,18 @@ fn sweep(w: &Worker, mut span: impl FnMut(i32, i32, i32, u8)) {
 /// `gray_raster_render` into a gray bitmap of `width` x `rows`, top row
 /// first (FreeType's positive pitch), for an outline already translated
 /// into the bitmap (26.6, y up).
+#[must_use]
 pub fn render(outline: &[Segment], width: u32, rows: u32, overlap: bool) -> Vec<u8> {
     let mut bitmap = vec![0u8; (width * rows) as usize];
     if outline.is_empty() || width == 0 || rows == 0 {
         return bitmap;
     }
     let pitch = width as i32;
-    if !overlap {
-        let mut w = new_worker(0, 0, width as i32, rows as i32);
-        w.decompose(outline);
-        // line = origin - pitch * y, origin at the bottom row.
-        sweep(&w, |y, x, len, coverage| {
-            let row = (rows as i32 - 1 - y) * pitch;
-            for i in 0..len {
-                bitmap[(row + x + i) as usize] = coverage;
-            }
-        });
-    } else {
+    if overlap {
         // ft_smooth_raster_overlap: render at SCALE = 4 in both directions
         // and average the spans (ft_smooth_overlap_spans).
         const SCALE: i64 = 1 << 2;
-        if width as i64 * SCALE > 0x7FFF {
+        if i64::from(width) * SCALE > 0x7FFF {
             return bitmap; // Raster_Overflow: the bitmap stays empty
         }
         let inflated: Vec<Segment> = outline
@@ -444,17 +435,27 @@ pub fn render(outline: &[Segment], width: u32, rows: u32, overlap: bool) -> Vec<
                 }
             })
             .collect();
-        let mut w = new_worker(0, 0, (width as i64 * SCALE) as i32, (rows as i64 * SCALE) as i32);
+        let mut w = new_worker(0, 0, (i64::from(width) * SCALE) as i32, (i64::from(rows) * SCALE) as i32);
         w.decompose(&inflated);
         sweep(&w, |y, x, len, coverage| {
             let row = (rows as i32 - 1 - y / SCALE as i32) * pitch;
-            let cover = (coverage as u32 + (SCALE * SCALE / 2) as u32) / (SCALE * SCALE) as u32;
+            let cover = (u32::from(coverage) + (SCALE * SCALE / 2) as u32) / (SCALE * SCALE) as u32;
             // FT_Span.x and len are 16-bit.
-            let (x, len) = (x as i16 as i32, len as u16 as i32);
+            let (x, len) = (i32::from(x as i16), i32::from(len as u16));
             for i in 0..len {
                 let idx = (row + (x + i) / SCALE as i32) as usize;
-                let sum = bitmap[idx] as u32 + cover;
+                let sum = u32::from(bitmap[idx]) + cover;
                 bitmap[idx] = (sum - (sum >> 8)) as u8;
+            }
+        });
+    } else {
+        let mut w = new_worker(0, 0, width as i32, rows as i32);
+        w.decompose(outline);
+        // line = origin - pitch * y, origin at the bottom row.
+        sweep(&w, |y, x, len, coverage| {
+            let row = (rows as i32 - 1 - y) * pitch;
+            for i in 0..len {
+                bitmap[(row + x + i) as usize] = coverage;
             }
         });
     }

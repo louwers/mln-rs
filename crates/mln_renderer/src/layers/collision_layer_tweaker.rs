@@ -52,6 +52,8 @@ impl LayerTweaker for CollisionLayerTweaker {
 
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
+            const NEAR_CLIPPED: bool = false;
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             let Some(overscaled_tile_id) = drawable.get_tile_id() else {
                 return;
             };
@@ -65,8 +67,6 @@ impl LayerTweaker for CollisionLayerTweaker {
             let tile_id = overscaled_tile_id.to_unwrapped();
 
             // matrix
-            const NEAR_CLIPPED: bool = false;
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,

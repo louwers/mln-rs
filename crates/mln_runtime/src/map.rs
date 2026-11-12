@@ -57,20 +57,24 @@ impl Default for MapOptions {
 }
 
 impl MapOptions {
+    #[must_use]
     pub fn new(map: mln_map::MapOptions) -> Self {
         MapOptions { map, ..Self::default() }
     }
 
+    #[must_use]
     pub fn with_event_mask(mut self, event_mask: EventMask) -> Self {
         self.event_mask = event_mask;
         self
     }
 
+    #[must_use]
     pub fn with_fallback_font_faces(mut self, json: impl Into<String>) -> Self {
         self.fallback_font_faces = Some(json.into());
         self
     }
 
+    #[must_use]
     pub fn with_tile_cache_enabled(mut self, enabled: bool) -> Self {
         self.tile_cache_enabled = enabled;
         self
@@ -259,26 +263,31 @@ impl Map {
         Map { shared: Arc::new(shared) }
     }
 
+    #[must_use]
     pub fn id(&self) -> MapId {
         self.shared.id
     }
 
     /// When the map renders, as its options set it.
+    #[must_use]
     pub fn mode(&self) -> MapMode {
         self.shared.mode
     }
 
     /// The runtime that the map lives on.
+    #[must_use]
     pub fn runtime(&self) -> Runtime {
         Runtime { shared: self.shared.runtime.clone() }
     }
 
     /// The sequence number of the last command sent to the map.
+    #[must_use]
     pub fn sent_sequence(&self) -> u64 {
         *self.shared.sent.lock_unpoisoned()
     }
 
     /// The sequence number of the last command that ran.
+    #[must_use]
     pub fn applied_sequence(&self) -> u64 {
         self.shared.published.applied.load(Ordering::SeqCst)
     }
@@ -298,6 +307,7 @@ impl Map {
     }
 
     /// The events that the map reports, as of the last command that ran.
+    #[must_use]
     pub fn event_mask(&self) -> EventMask {
         EventMask::from_bits(self.shared.published.event_mask.load(Ordering::SeqCst)).unwrap_or_default()
     }
@@ -460,7 +470,7 @@ impl Map {
     /// began. Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&self) -> Result<Completion<Applied>, Error> {
-        self.command(|map| map.end_command_group())
+        self.command(mln_map::Map::end_command_group)
     }
 
     /// Begins a command group that ends when the guard drops, or with
@@ -571,6 +581,7 @@ impl Map {
     /// pixel ratio of the map's options until a render session's
     /// [`resize`](crate::RenderSession::resize) sets another, and the map's
     /// next session renders at it.
+    #[must_use]
     pub fn scale_factor(&self) -> f64 {
         f64::from_bits(self.shared.scale_factor.load(Ordering::SeqCst))
     }
@@ -716,7 +727,7 @@ impl Map {
     /// selector without a feature, or an empty state.
     pub fn set_feature_state(
         &self,
-        selector: FeatureStateSelector,
+        selector: &FeatureStateSelector,
         state: FeatureState,
     ) -> Result<Completion<Applied>, Error> {
         let key = selector.key(true)?;
@@ -735,7 +746,7 @@ impl Map {
     /// The state of the feature that `selector` names, empty when it has
     /// none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
     /// for a selector without a feature.
-    pub fn feature_state(&self, selector: FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
+    pub fn feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
         let key = selector.key(true)?;
         self.send(move |entry, _| Ok(entry.feature_state.get(&key)), |state, _| state)
     }
@@ -744,7 +755,7 @@ impl Map {
     /// of a feature's state, or that of every feature in a source layer.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// state key without a feature.
-    pub fn remove_feature_state(&self, selector: FeatureStateSelector) -> Result<Completion<Applied>, Error> {
+    pub fn remove_feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<Applied>, Error> {
         let key = selector.key(false)?;
         self.send(
             move |entry, _| {
@@ -1242,7 +1253,7 @@ impl Ends {
 pub(crate) fn create(
     core: &mut RuntimeCore,
     id: MapId,
-    options: MapOptions,
+    options: &MapOptions,
     published: Arc<Published>,
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,

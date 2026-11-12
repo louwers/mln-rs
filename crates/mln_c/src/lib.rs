@@ -54,7 +54,7 @@ mod transforms;
 mod url_rules;
 
 #[rustfmt::skip]
-#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unused_variables, clippy::all)]
+#[allow(dead_code, non_camel_case_types, non_snake_case, non_upper_case_globals, unused_variables, clippy::all, clippy::pedantic)]
 mod generated {
     pub mod types;
     mod stubs;

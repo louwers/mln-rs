@@ -86,6 +86,7 @@ pub struct BucketPlacementData {
 
 impl BucketPlacementData {
     /// `tile`.
+    #[must_use]
     pub fn tile(&self) -> &RenderTile {
         &self.tile_owner[self.tile_index]
     }
@@ -123,6 +124,7 @@ impl Stats {
 
 /// `RenderLayer::unpack_mix_alpha`: the alpha of a packed pair of colors
 /// (as the paint property binders store them), interpolated by `t`.
+#[must_use]
 pub fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
     fn decode_alpha(encoded: f32) -> f32 {
         let packed_int_value = encoded as i32;
@@ -133,6 +135,7 @@ pub fn unpack_mix_alpha(packed: &[f32; 4], t: f32) -> f32 {
 
 /// The zoom-interpolated value of a data-driven opacity at a vertex (the
 /// first two floats of `PaintPropertyBinder::get_vertex_value`).
+#[must_use]
 pub fn vertex_opacity(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
     match vertex {
         [a, b, ..] => Some(a.interpolate(b, zoom_fraction)),
@@ -142,6 +145,7 @@ pub fn vertex_opacity(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
 
 /// The zoom-interpolated alpha of a data-driven color at a vertex (the four
 /// floats of `PaintPropertyBinder::get_vertex_value`).
+#[must_use]
 pub fn vertex_color_alpha(vertex: &[f32], zoom_fraction: f64) -> Option<f32> {
     let packed: &[f32; 4] = vertex.get(..4)?.try_into().ok()?;
     Some(unpack_mix_alpha(packed, zoom_fraction as f32))
@@ -230,7 +234,7 @@ pub fn capture_retained_features<'a>(
     stats.rendered_features.reserve(features.len());
 
     for feature in features {
-        debug_assert!(!feature.feature_id.is_empty());
+        debug_assert_ne!(feature.feature_id, "");
 
         // Consider only the value for the first vertex of this feature, for now.
         let vertex_offset = feature.vertex_offset;
@@ -392,7 +396,7 @@ pub fn compute_globe_feature_ndc_bound(
                 let (mut hidden, mut shown) =
                     if base.occluded { (range_z.0, range_z.1) } else { (range_z.1, range_z.0) };
                 for _ in 0..16 {
-                    let mid = (hidden + shown) / 2.0;
+                    let mid = f64::midpoint(hidden, shown);
                     if projector.project_as_drawn(&point, mid).occluded {
                         hidden = mid;
                     } else {
@@ -518,7 +522,7 @@ pub trait RenderLayer {
     fn has_crossfade(&self) -> bool;
 
     /// Returns true if layer writes to depth buffer by drawing using
-    /// PaintParameters::depthModeFor3D().
+    /// `PaintParameters::depthModeFor3D()`.
     fn is_3d(&self) -> bool {
         false
     }
@@ -651,10 +655,10 @@ pub trait RenderLayer {
     /// `getRenderDataForPass(tile, pass)`.
     fn get_render_data_for_pass<'t>(&self, tile: &'t RenderTile, pass: RenderPass) -> Option<&'t LayerRenderData> {
         let render_data = tile.get_layer_render_data(&*self.base().base_impl)?;
-        if (RenderPass(render_data.layer_properties.render_passes) & pass) != RenderPass::None {
-            Some(render_data)
-        } else {
+        if (RenderPass(render_data.layer_properties.render_passes) & pass) == RenderPass::None {
             None
+        } else {
+            Some(render_data)
         }
     }
 
@@ -878,9 +882,9 @@ pub fn activate_layer_group(
 
 /// `changeLayerIndex(const LayerGroupBasePtr&, int32_t, UniqueChangeRequestVec&)`.
 pub fn change_layer_index(group: &Option<LayerGroupBasePtr>, new_index: i32, changes: &mut UniqueChangeRequestVec) {
-    if let Some(group) = group {
-        if group.borrow().get_layer_index() != new_index {
-            changes.push(ChangeRequest::UpdateLayerGroupIndex(group.clone(), new_index));
-        }
+    if let Some(group) = group
+        && group.borrow().get_layer_index() != new_index
+    {
+        changes.push(ChangeRequest::UpdateLayerGroupIndex(group.clone(), new_index));
     }
 }

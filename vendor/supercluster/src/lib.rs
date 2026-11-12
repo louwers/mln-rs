@@ -33,12 +33,14 @@ pub struct Cluster {
 
 impl Cluster {
     /// `Cluster(pos, num_points, id)`
+    #[must_use]
     pub fn new(pos: Point<f64>, num_points: u32, id: u32) -> Self {
         Cluster { pos, num_points, id, parent_id: 0, visited: false, properties: None }
     }
 
     /// `Cluster(pos, num_points, id, properties)`: keeps the properties only
     /// if there are any.
+    #[must_use]
     pub fn with_properties(pos: Point<f64>, num_points: u32, id: u32, properties: &PropertyMap) -> Self {
         let mut c = Self::new(pos, num_points, id);
         if !properties.is_empty() {
@@ -48,6 +50,7 @@ impl Cluster {
     }
 
     /// `toGeoJSON()`
+    #[must_use]
     pub fn to_geojson(&self) -> Feature<f64> {
         let x = (self.pos.x - 0.5) * 360.0;
         let y = 360.0 * ((180.0 - self.pos.y * 360.0) * PI / 180.0).exp().atan() / PI - 90.0;
@@ -59,6 +62,7 @@ impl Cluster {
     }
 
     /// `getProperties()`
+    #[must_use]
     pub fn get_properties(&self) -> PropertyMap {
         let mut result = PropertyMap::new();
         result.insert("cluster".to_owned(), Value::Bool(true));
@@ -80,6 +84,7 @@ impl Cluster {
 /// `std::fixed` with `setprecision(1)` below 10000 and the default
 /// precision (6) above, then "k". (`%.1f`/`%.6f` of the exact double,
 /// glibc's round-half-even on exact ties, which Rust's formatting matches.)
+#[must_use]
 pub fn abbreviate(num_points: u32) -> String {
     if num_points >= 1000 {
         let k = f64::from(num_points) / 1000.0;
@@ -149,7 +154,7 @@ impl std::fmt::Debug for Options {
             .field("min_points", &self.min_points)
             .field("generate_id", &self.generate_id)
             .field("reduce", &self.reduce.is_some())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -187,14 +192,14 @@ impl Zoom {
     /// (higher) zoom.
     fn from_previous(previous: &mut Zoom, r: f64, zoom: u8, options: &Options) -> Self {
         // The zoom parameter is restricted to [minZoom, maxZoom] by caller
-        debug_assert!(((zoom as u32 + 1) & 0b11111) == (zoom as u32 + 1));
+        debug_assert_eq!(((u32::from(zoom) + 1) & 0b11111), (u32::from(zoom) + 1));
 
         let mut result = Zoom::default();
         let clusters = &mut result.clusters;
 
         // Since point index is encoded in the upper 27 bits, clamp the count
         // of clusters
-        let previous_clusters_size = previous.clusters.len().min(0x7ffffff);
+        let previous_clusters_size = previous.clusters.len().min(0x07ff_ffff);
 
         for i in 0..previous_clusters_size {
             if previous.clusters[i].visited {
@@ -313,6 +318,7 @@ impl Supercluster {
     }
 
     /// `getTile(z, x, y)`
+    #[must_use]
     pub fn get_tile(&self, z: u8, x_: u32, y: u32) -> TileFeatures {
         let mut result = TileFeatures::new();
 
@@ -359,7 +365,7 @@ impl Supercluster {
         let bottom = (f64::from(y.wrapping_add(1)) + r) / z2f;
 
         zoom.tree.range((f64::from(x) - r) / z2f, top, (f64::from(x.wrapping_add(1)) + r) / z2f, bottom, &mut |id| {
-            visitor(x, id)
+            visitor(x, id);
         });
 
         if x_ == 0 {
@@ -390,7 +396,7 @@ impl Supercluster {
         let mut skipped: u32 = 0;
         let mut limit_ = limit;
         self.each_leaf(cluster_id, &mut limit_, offset, &mut skipped, &mut |c| {
-            leaves.push(self.cluster_to_geojson(c))
+            leaves.push(self.cluster_to_geojson(c));
         })?;
         Ok(leaves)
     }
@@ -522,6 +528,7 @@ impl Supercluster {
 }
 
 /// `project(p)`
+#[must_use]
 pub fn project(p: &Point<f64>) -> Point<f64> {
     let lng_x = p.x / 360.0 + 0.5;
     let sine = (p.y * PI / 180.0).sin();

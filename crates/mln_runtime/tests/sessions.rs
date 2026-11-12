@@ -173,7 +173,7 @@ fn frame_results_wake_the_host_once_until_it_drains() {
     assert_eq!(1, wakes.load(Ordering::SeqCst));
     let tokens: Vec<u64> = session.drain_frame_results().unwrap().iter().map(|result| result.token.unwrap()).collect();
     assert_eq!([1, 2], tokens.as_slice());
-    assert!(session.drain_frame_results().unwrap().is_empty());
+    assert_eq!(session.drain_frame_results().unwrap(), [] as [mln_runtime::FrameResult; 0]);
     demand(&session, DemandMode::Force, 3);
     assert_eq!(3, take_one(&session).token.unwrap());
     assert!(eventually(|| wakes.load(Ordering::SeqCst) == 2));
@@ -206,7 +206,7 @@ fn a_demand_shows_the_commands_sent_before_it() {
     let moved = zoom(&map, 3.0);
     demand(&session, DemandMode::IfChanged, 631);
     std::thread::sleep(std::time::Duration::from_millis(50));
-    assert!(session.drain_frame_results().unwrap().is_empty());
+    assert_eq!(session.drain_frame_results().unwrap(), [] as [mln_runtime::FrameResult; 0]);
     drop(open);
 
     let applied = moved.wait().unwrap();
@@ -246,7 +246,7 @@ fn a_waiting_demand_renders_the_next_map_update() {
     // Work that the session runs after the demand, and that publishes no
     // update.
     wait(session.dump_debug_logs());
-    assert!(session.drain_frame_results().unwrap().is_empty());
+    assert_eq!(session.drain_frame_results().unwrap(), [] as [mln_runtime::FrameResult; 0]);
     zoom(&map, 2.0).wait().unwrap();
     let result = take_one(&session);
     assert_eq!(601, result.token.unwrap());
@@ -839,7 +839,7 @@ fn rendered_queries_select_by_geometry_and_layer() {
         RenderedQueryGeometry::LineString(vec![ScreenCoordinate::new(10.0, 32.0), ScreenCoordinate::new(26.0, 32.0)]);
     assert_eq!(1, wait(session.query_rendered_features(line, RenderedQueryOptions::default())).len());
     let none = RenderedQueryOptions::new(Some(vec!["missing".into()]), None);
-    assert!(wait(session.query_rendered_features(east, none)).is_empty());
+    assert_eq!(wait(session.query_rendered_features(east, none)), [] as [mln_util::feature::Feature; 0]);
 
     // A box past every edge covers the whole target, and one outside it
     // covers nothing.
@@ -851,7 +851,10 @@ fn rendered_queries_select_by_geometry_and_layer() {
     assert_eq!(2, wait(session.query_rendered_features(beyond, circles)).len());
     let outside =
         RenderedQueryGeometry::Box { min: ScreenCoordinate::new(100.0, 0.0), max: ScreenCoordinate::new(200.0, 64.0) };
-    assert!(wait(session.query_rendered_features(outside, RenderedQueryOptions::default())).is_empty());
+    assert_eq!(
+        wait(session.query_rendered_features(outside, RenderedQueryOptions::default())),
+        [] as [mln_util::feature::Feature; 0]
+    );
 
     let invalid =
         |geometry| session.query_rendered_features(geometry, RenderedQueryOptions::default()).unwrap_err().kind;
@@ -876,7 +879,7 @@ fn cluster_queries_read_a_clustered_source() {
         })
         .unwrap_or_else(|| panic!("no cluster in {clusters:?}"));
 
-    assert!(!wait(session.cluster_children("clustered", cluster_id)).is_empty());
+    assert_ne!(wait(session.cluster_children("clustered", cluster_id)), [] as [feature::Feature; 0]);
     assert_eq!(3, wait(session.cluster_leaves("clustered", cluster_id, 10, 0)).len());
     assert_eq!(1, wait(session.cluster_leaves("clustered", cluster_id, 1, 2)).len());
     assert!(wait(session.cluster_expansion_zoom("clustered", cluster_id)) > 0);

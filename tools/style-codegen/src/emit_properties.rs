@@ -10,6 +10,7 @@ use crate::types::{
 use crate::writer::{MAX_WIDTH, Writer, imports_for, layer_file_name};
 
 /// Layer types whose `LayerProperties` hold a `CrossfadeParameters`.
+#[must_use]
 pub fn has_crossfade(type_: &str) -> bool {
     matches!(type_, "background" | "fill" | "line" | "fill-extrusion")
 }
@@ -85,11 +86,13 @@ fn emit_tag(w: &mut Writer, property: &Property, layer_type: &str, layout: bool)
         w.blank();
         w.line(&format!("impl {name} {{"));
         w.line("    /// `static constexpr const char *name()`.");
+        w.line("    #[must_use]");
         w.line("    pub const fn name() -> &'static str {");
         w.line(&format!("        \"{}\"", property.name));
         w.line("    }");
         w.blank();
         w.line("    /// `static constexpr auto expressionType()`.");
+        w.line("    #[must_use]");
         w.line("    pub fn expression_type() -> Type {");
         w.line(&format!("        {}", expression_type_rust(property.type_(), property.value())));
         w.line("    }");
@@ -222,6 +225,7 @@ pub fn emit(layer: &LayerSpec) -> String {
         w.line("    }");
     }
     w.blank();
+    w.line("    #[must_use]");
     w.line(&format!("    pub fn layer_impl(&self) -> &{t}LayerImpl {{"));
     w.line("        self.base");
     w.line("            .base_impl");

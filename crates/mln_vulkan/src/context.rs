@@ -34,6 +34,7 @@
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
@@ -44,7 +45,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::globe_clip_mask::GlobeClipMask;
+use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -58,7 +59,6 @@ use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_tile_id::CanonicalTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -77,7 +77,7 @@ use crate::shaders::layout::{
     image_sampler_binding, image_texture_binding,
 };
 use crate::shaders::shader_program::{ShaderProgram, as_vulkan_shader};
-use crate::shaders::shader_source::shader_source;
+use crate::shaders::shader_source::{GlslShaderSource, shader_source};
 use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
@@ -85,7 +85,7 @@ use crate::uniform_buffer::UniformBuffer;
 
 /// Maximum number of vertex attributes, per vertex descriptor: 32 on most
 /// devices (~30% Android use 16), per
-/// https://vulkan.gpuinfo.org/displaydevicelimit.php?name=maxVertexInputBindings
+/// <https://vulkan.gpuinfo.org/displaydevicelimit.php?name=maxVertexInputBindings>
 /// this can be queried at runtime
 /// (VkPhysicalDeviceLimits.maxVertexInputBindings).
 const MAXIMUM_VERTEX_BINDING_COUNT: u32 = 16;
@@ -454,12 +454,11 @@ impl Context {
     pub fn enqueue_deletion(&self, function: DeletionTask) {
         let index = usize::from(self.frame_resource_index.get());
         let mut frames = self.frame_resources.borrow_mut();
-        match frames.get_mut(index) {
-            Some(frame) => frame.deletion_queue.push(function),
-            None => {
-                drop(frames);
-                function(self);
-            }
+        if let Some(frame) = frames.get_mut(index) {
+            frame.deletion_queue.push(function);
+        } else {
+            drop(frames);
+            function(self);
         }
     }
 
@@ -675,15 +674,13 @@ impl Context {
     }
 
     /// `createProgram(shaderID, name, vertex, fragment, programParameters,
-    /// additionalDefines)`: compiles the two stages with the program's
-    /// defines and `additional_defines`.
+    /// additionalDefines)`, with `source`'s stages and prelude: compiles the
+    /// two stages with the program's defines and `additional_defines`.
     pub fn create_program(
         &self,
         shader_id: BuiltIn,
         name: String,
-        shader_prelude: &str,
-        vertex: &str,
-        fragment: &str,
+        source: &GlslShaderSource,
         program_parameters: &ProgramParameters,
         additional_defines: &HashMap<String, String>,
     ) -> Option<ShaderProgram> {
@@ -691,15 +688,15 @@ impl Context {
         let mut additional: Vec<_> = additional_defines.iter().collect();
         additional.sort();
         for (key, value) in additional {
-            define_str.push_str(&format!("#define {key} {value}\n"));
+            let _ = writeln!(define_str, "#define {key} {value}");
         }
 
         let observer = self.get_observer();
         if let Some(observer) = &observer {
             observer.on_pre_compile_shader(shader_id, BackendType::Vulkan, &define_str);
         }
-        let compile = |stage: Stage, source: &str| {
-            let spirv = compiler::compile(stage, &compiler::compose(stage, &define_str, shader_prelude, source))
+        let compile = |stage: Stage, stage_source: &str| {
+            let spirv = compiler::compile(stage, &compiler::compose(stage, &define_str, source.prelude, stage_source))
                 .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
                 .ok()?;
             let create_info = vk::ShaderModuleCreateInfo::default().code(&spirv);
@@ -708,8 +705,8 @@ impl Context {
                 .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
                 .ok()
         };
-        let vertex_shader = compile(Stage::Vertex, vertex);
-        let fragment_shader = compile(Stage::Fragment, fragment);
+        let vertex_shader = compile(Stage::Vertex, source.vertex);
+        let fragment_shader = compile(Stage::Fragment, source.fragment);
         let (Some(vertex_shader), Some(fragment_shader)) = (vertex_shader, fragment_shader) else {
             // SAFETY: nothing uses the stage that did compile.
             unsafe {
@@ -756,16 +753,15 @@ impl Context {
     /// `getDummyTexture()`: bound where a shader's texture has no image.
     pub fn get_dummy_texture(&self) -> Option<ImageBinding> {
         let mut dummy = self.dummy_texture.borrow_mut();
-        let texture = match dummy.as_mut() {
-            Some(texture) => texture,
-            None => {
-                let size = Size::new(2, 2);
-                let data = vec![0xFFu8; 4 * size.width as usize * size.height as usize];
-                let mut texture = Texture2D::new(self);
-                texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-                texture.upload_data(Some(&data), size);
-                dummy.insert(texture)
-            }
+        let texture = if let Some(texture) = dummy.as_mut() {
+            texture
+        } else {
+            let size = Size::new(2, 2);
+            let data = vec![0xFFu8; 4 * size.width as usize * size.height as usize];
+            let mut texture = Texture2D::new(self);
+            texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
+            texture.upload_data(Some(&data), size);
+            dummy.insert(texture)
         };
         let image_view = texture.get_vulkan_image_view();
         let sampler = texture.get_vulkan_sampler();
@@ -1103,7 +1099,7 @@ impl Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         let mut globe_clipping = self.globe_clipping.borrow_mut();
         let globe_clipping = &mut *globe_clipping;
@@ -1460,15 +1456,12 @@ impl GfxContext for Context {
         data: &[u8],
         persistent: bool,
     ) -> bool {
-        match ptr {
-            Some(buffer) => {
-                buffer.update(data);
-                false
-            }
-            None => {
-                *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-                true
-            }
+        if let Some(buffer) = ptr {
+            buffer.update(data);
+            false
+        } else {
+            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
+            true
         }
     }
 
@@ -1510,7 +1503,7 @@ impl GfxContext for Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
     }

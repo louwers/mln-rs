@@ -258,14 +258,14 @@ impl SurfaceResource {
         }
 
         // pick surface size
-        let extent = if capabilities.current_extent.width != u32::MAX {
-            capabilities.current_extent
-        } else {
+        let extent = if capabilities.current_extent.width == u32::MAX {
             // update values based on surface limits
             vk::Extent2D {
                 width: w.max(capabilities.min_image_extent.width).min(capabilities.max_image_extent.width),
                 height: h.max(capabilities.min_image_extent.height).min(capabilities.max_image_extent.height),
             }
+        } else {
+            capabilities.current_extent
         };
         if extent.width == 0 || extent.height == 0 {
             return Err("The surface is empty".to_owned());
@@ -299,13 +299,13 @@ impl SurfaceResource {
             .composite_alpha(composite_alpha)
             // update this when recreating
             .old_swapchain(state.swapchain);
-        create_info = if graphics_queue_index != present_queue_index {
+        create_info = if graphics_queue_index == present_queue_index {
+            create_info.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
+        } else {
             // TODO if this scenario is widespread and performance is a
             // problem (shouldn't be the case on most hardware) rework to
             // vk::SharingMode::eExclusive + queue ownership
             create_info.image_sharing_mode(vk::SharingMode::CONCURRENT).queue_family_indices(&queue_indices)
-        } else {
-            create_info.image_sharing_mode(vk::SharingMode::EXCLUSIVE)
         };
 
         // SAFETY: the create info is valid for the surface, and the old
@@ -598,12 +598,11 @@ impl SurfaceResource {
                     .height(state.extent.height)
                     .layers(1);
                 // SAFETY: the view is live and of the render pass's format.
-                match unsafe { self.backend.get_device().create_framebuffer(&create_info, None) } {
-                    Ok(framebuffer) => state.overlay_framebuffers.push(framebuffer),
-                    Err(_) => {
-                        Log::error(Event::Render, "Vulkan framebuffer creation failed");
-                        break;
-                    }
+                if let Ok(framebuffer) = unsafe { self.backend.get_device().create_framebuffer(&create_info, None) } {
+                    state.overlay_framebuffers.push(framebuffer);
+                } else {
+                    Log::error(Event::Render, "Vulkan framebuffer creation failed");
+                    break;
                 }
             }
         }
@@ -732,7 +731,7 @@ impl SurfaceResource {
         let mut image = state.read_texture.as_mut()?.read_image()?;
         // swizzle pixels to RGBA
         if !use_blit && state.color_format == vk::Format::B8G8R8A8_UNORM {
-            for pixel in image.data.chunks_exact_mut(4) {
+            for pixel in image.data.as_chunks_mut::<4>().0 {
                 pixel.swap(0, 2);
             }
         }

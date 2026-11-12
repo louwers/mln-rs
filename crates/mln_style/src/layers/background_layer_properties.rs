@@ -73,6 +73,7 @@ impl BackgroundLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &BackgroundLayerImpl {
         self.base
             .base_impl

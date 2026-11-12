@@ -148,7 +148,7 @@ impl BackendImpl {
         let len = data.len() as u64;
         let aligned = len & !(wgpu::COPY_BUFFER_ALIGNMENT - 1);
         let mut writes = self.writes.borrow_mut();
-        writes.write_from_host(&device, &queue, buffer, offset, data, 0, aligned);
+        writes.write_from_host(&device, &queue, buffer, offset, data, aligned);
         if aligned < len
             && let Some(array) = data.array()
         {
@@ -221,6 +221,7 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 impl RendererBackend {
     /// A backend on `device`. Backends on one device render independently,
     /// each submitting to the device's queue.
+    #[must_use]
     pub fn new(device: &Device) -> Self {
         let impl_ = BackendImpl::default();
         impl_.set_instance(device.instance().cloned());

@@ -33,6 +33,7 @@ pub fn set_attribute(attrs: &mut VertexAttributeArray, id: usize, i: usize, valu
 }
 
 /// Pointer equality for shader handles (`shader == value` in C++).
+#[must_use]
 pub fn same_shader(a: &Option<ShaderProgramBasePtr>, b: &Option<ShaderProgramBasePtr>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b)),

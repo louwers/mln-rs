@@ -65,7 +65,7 @@ pub trait SurfaceProvider {
     fn create_surface(&self, entry: &ash::Entry, instance: &ash::Instance) -> Result<vk::SurfaceKHR, Error>;
 }
 
-/// What MLN_VULKAN_VALIDATION asks for.
+/// What `MLN_VULKAN_VALIDATION` asks for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Validation {
     Off,
@@ -290,6 +290,8 @@ impl BackendImpl {
         let mut messenger = None;
         let mut surface = None;
         let result = (|| {
+            const MB: u64 = 1024 * 1024;
+
             // initDebug
             if validation != Validation::Off {
                 let loader = ash::ext::debug_utils::Instance::new(&entry, &instance);
@@ -405,7 +407,6 @@ impl BackendImpl {
             };
 
             // initAllocator
-            const MB: u64 = 1024 * 1024;
             let allocator = Allocator::new(&AllocatorCreateDesc {
                 instance: instance.clone(),
                 device: device.clone(),
@@ -712,7 +713,7 @@ impl RendererBackend {
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library, a device that can render, or what
-    /// MLN_VULKAN_VALIDATION=abort needs of the instance, and on the host's
+    /// `MLN_VULKAN_VALIDATION=abort` needs of the instance, and on the host's
     /// device, with [`ErrorKind::NotFound`](mln_util::ErrorKind) when the
     /// device's adapter index names no GPU, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan call fails.
@@ -726,7 +727,7 @@ impl RendererBackend {
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library, a device that can render (and present to the
-    /// surface), or what the surface or MLN_VULKAN_VALIDATION=abort needs of
+    /// surface), or what the surface or `MLN_VULKAN_VALIDATION=abort` needs of
     /// the instance, and on the host's device, with
     /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the device's
     /// adapter index names no GPU, with

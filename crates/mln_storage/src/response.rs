@@ -76,11 +76,13 @@ pub struct Response {
 }
 
 impl Response {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// `isFresh()`.
+    #[must_use]
     pub fn is_fresh(&self) -> bool {
         match self.expires {
             Some(expires) => expires > now(),
@@ -90,6 +92,7 @@ impl Response {
 
     /// `isUsable()`: whether we are allowed to use this response according
     /// to HTTP caching rules. It may or may not be stale.
+    #[must_use]
     pub fn is_usable(&self) -> bool {
         !self.must_revalidate || self.expires.is_some_and(|expires| expires > now())
     }

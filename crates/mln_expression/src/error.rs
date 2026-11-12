@@ -14,6 +14,7 @@ pub struct Error {
 }
 
 impl Error {
+    #[must_use]
     pub fn new(message: String) -> Self {
         Error { base: ExpressionBase::new(Kind::Error, Type::Error, Dependency::NONE), message }
     }

@@ -39,6 +39,7 @@ impl Default for PbfWireType {
 
 /// Get the tag and wire type of the current field in one integer suitable
 /// for comparison with a switch statement.
+#[must_use]
 pub const fn tag_and_type(tag: PbfTagType, wire_type: PbfWireType) -> u32 {
     (tag << 3) | wire_type.0
 }

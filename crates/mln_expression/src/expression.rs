@@ -66,26 +66,31 @@ pub struct EvaluationContext<'a> {
 
 impl<'a> EvaluationContext<'a> {
     /// `EvaluationContext(float zoom)`.
+    #[must_use]
     pub fn new(zoom: f32) -> Self {
         EvaluationContext { zoom: Some(zoom), ..Default::default() }
     }
 
     /// `EvaluationContext(GeometryTileFeature const*)`.
+    #[must_use]
     pub fn from_feature(feature: Option<&'a dyn GeometryTileFeature>) -> Self {
         EvaluationContext { feature, ..Default::default() }
     }
 
     /// `EvaluationContext(float zoom, GeometryTileFeature const*)`.
+    #[must_use]
     pub fn with_zoom_feature(zoom: f32, feature: Option<&'a dyn GeometryTileFeature>) -> Self {
         EvaluationContext { zoom: Some(zoom), feature, ..Default::default() }
     }
 
     /// `EvaluationContext(std::optional<mln::Value> accumulated, GeometryTileFeature const*)`.
+    #[must_use]
     pub fn from_accumulated(accumulated: Option<&'a MbglValue>, feature: Option<&'a dyn GeometryTileFeature>) -> Self {
         EvaluationContext { accumulated, feature, ..Default::default() }
     }
 
     /// `EvaluationContext(float zoom, GeometryTileFeature const*, const FeatureState*)`.
+    #[must_use]
     pub fn with_zoom_feature_state(
         zoom: f32,
         feature: Option<&'a dyn GeometryTileFeature>,
@@ -96,6 +101,7 @@ impl<'a> EvaluationContext<'a> {
 
     /// `EvaluationContext(std::optional<float> zoom, GeometryTileFeature const*,
     /// std::optional<double> colorRampParameter)`.
+    #[must_use]
     pub fn with_color_ramp(
         zoom: Option<f32>,
         feature: Option<&'a dyn GeometryTileFeature>,
@@ -105,6 +111,7 @@ impl<'a> EvaluationContext<'a> {
     }
 
     /// The four-argument constructor with `elevation`.
+    #[must_use]
     pub fn with_color_ramp_elevation(
         zoom: Option<f32>,
         feature: Option<&'a dyn GeometryTileFeature>,
@@ -114,36 +121,43 @@ impl<'a> EvaluationContext<'a> {
         EvaluationContext { zoom, feature, color_ramp_parameter, elevation, ..Default::default() }
     }
 
+    #[must_use]
     pub fn with_formatted_section(mut self, formatted_section: Option<&'a Value>) -> Self {
         self.formatted_section = formatted_section;
         self
     }
 
+    #[must_use]
     pub fn with_feature_state(mut self, feature_state: Option<&'a FeatureState>) -> Self {
         self.feature_state = feature_state;
         self
     }
 
+    #[must_use]
     pub fn with_available_images(mut self, available_images: Option<&'a VecSet<String>>) -> Self {
         self.available_images = available_images;
         self
     }
 
+    #[must_use]
     pub fn with_canonical_tile_id(mut self, canonical: Option<&'a CanonicalTileID>) -> Self {
         self.canonical = canonical;
         self
     }
 
+    #[must_use]
     pub fn with_elevation(mut self, elevation: f32) -> Self {
         self.elevation = Some(elevation);
         self
     }
 
+    #[must_use]
     pub fn with_global_state(mut self, global_state: Option<&'a GlobalStateMap>) -> Self {
         self.global_state = global_state;
         self
     }
 
+    #[must_use]
     pub fn with_font_faces(mut self, font_faces: Option<&'a FontFaces>) -> Self {
         self.font_faces = font_faces;
         self
@@ -211,7 +225,8 @@ impl Dependency {
     pub const MASK_COUNT: u32 = 9;
     pub const ALL: Dependency = Dependency((1 << Self::MASK_COUNT) - 1);
 
-    /// `bool(a & b)` (util/bitmask_operations.hpp).
+    /// `bool(a & b)` (`util/bitmask_operations.hpp`).
+    #[must_use]
     pub fn intersects(self, other: Dependency) -> bool {
         (self.0 & other.0) != 0
     }
@@ -275,6 +290,7 @@ pub struct ExpressionBase {
 }
 
 impl ExpressionBase {
+    #[must_use]
     pub fn new(kind: Kind, type_: Type, dependencies: Dependency) -> Self {
         ExpressionBase { dependencies, kind, type_ }
     }
@@ -423,6 +439,7 @@ pub fn collect_global_state_refs(expression: &dyn Expression, refs: &mut VecSet<
 /// Whether any of the global-state keys referenced by an expression is among
 /// the changed keys. A null set on either side means "unknown" and is
 /// conservatively treated as a match.
+#[must_use]
 pub fn global_state_refs_intersect(refs: Option<&VecSet<String>>, changed_keys: Option<&VecSet<String>>) -> bool {
     match (refs, changed_keys) {
         (Some(refs), Some(changed_keys)) => refs.iter().any(|key| changed_keys.contains(key)),
@@ -431,6 +448,7 @@ pub fn global_state_refs_intersect(refs: Option<&VecSet<String>>, changed_keys: 
 }
 
 /// `util::toString(Dependency)`.
+#[must_use]
 pub fn dependency_to_string(deps: Dependency) -> String {
     deps.to_string()
 }

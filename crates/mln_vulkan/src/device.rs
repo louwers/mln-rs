@@ -79,9 +79,11 @@ pub enum AdapterId {
     Luid([u8; vk::LUID_SIZE]),
 }
 
-/// The UUID and LUID, where it has one, of each GPU, in
-/// `vkEnumeratePhysicalDevices` order.
-fn adapter_ids() -> Result<Vec<([u8; vk::UUID_SIZE], Option<[u8; vk::LUID_SIZE]>)>, Error> {
+/// A GPU's UUID, and its LUID where it has one.
+type GpuIds = ([u8; vk::UUID_SIZE], Option<[u8; vk::LUID_SIZE]>);
+
+/// The IDs of each GPU, in `vkEnumeratePhysicalDevices` order.
+fn adapter_ids() -> Result<Vec<GpuIds>, Error> {
     // SAFETY: the Vulkan library's initializers have no preconditions.
     let entry = unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?;
     // Vulkan 1.1 reports the IDs.

@@ -35,11 +35,13 @@ pub struct UnavailableImages {
 }
 
 impl UnavailableImages {
+    #[must_use]
     pub fn start() -> Self {
         UnavailableImages { outer: UNAVAILABLE.with(|record| record.replace(Some(VecSet::new()))) }
     }
 
     /// The images recorded since `start`.
+    #[must_use]
     pub fn finish(self) -> VecSet<String> {
         UNAVAILABLE.with(|record| record.borrow_mut().take()).unwrap_or_default()
     }
@@ -58,6 +60,7 @@ pub struct ImageExpression {
 }
 
 impl ImageExpression {
+    #[must_use]
     pub fn new(image_id: Box<dyn Expression>) -> Self {
         ImageExpression {
             base: ExpressionBase::new(Kind::ImageExpression, Type::Image, image_id.dependencies() | Dependency::IMAGE),

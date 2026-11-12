@@ -19,7 +19,7 @@ use crate::egl::{Egl, library};
 use crate::renderer_backend::PlatformContext;
 use crate::types::Gl;
 
-/// `EGL_PLATFORM_SURFACELESS_MESA` (EGL_MESA_platform_surfaceless).
+/// `EGL_PLATFORM_SURFACELESS_MESA` (`EGL_MESA_platform_surfaceless`).
 const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
 
 /// The EGL library and its display (`EGLDisplayConfig`), which every
@@ -169,6 +169,7 @@ impl Device {
     ///
     /// `display` is an initialized `EGLDisplay` and `context` an
     /// `EGLContext` of it, and both outlive the device.
+    #[must_use]
     pub unsafe fn from_raw(display: NonNull<c_void>, context: NonNull<c_void>) -> Device {
         Device { kind: Arc::new(Kind::Host(HostContext { display, context })) }
     }

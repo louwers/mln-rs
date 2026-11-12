@@ -13,11 +13,13 @@ use crate::hb_ucd_table;
 pub const NON_SPACING_MARK: u8 = 12;
 
 /// `hb_unicode_general_category` with the default (UCD) funcs.
+#[must_use]
 pub fn general_category(u: u32) -> u8 {
     hb_ucd_table::gc(u)
 }
 
 /// `hb_unicode_script` with the default (UCD) funcs, as an ISO 15924 tag.
+#[must_use]
 pub fn script(u: u32) -> [u8; 4] {
     hb_ucd_table::SC_MAP[hb_ucd_table::sc(u) as usize]
 }

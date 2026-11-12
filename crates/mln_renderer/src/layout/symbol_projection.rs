@@ -134,6 +134,7 @@ pub struct TileDistance {
 }
 
 impl TileDistance {
+    #[must_use]
     pub fn new(prev_tile_distance: f32, last_segment_viewport_distance: f32) -> Self {
         TileDistance { prev_tile_distance, last_segment_viewport_distance }
     }
@@ -148,6 +149,7 @@ pub struct PlacedGlyph {
 }
 
 impl PlacedGlyph {
+    #[must_use]
     pub fn new(point: Point<f32>, angle: f32, tile_distance: Option<TileDistance>) -> Self {
         PlacedGlyph { point, angle, tile_distance }
     }
@@ -198,19 +200,21 @@ fn dist_f32(a: Point<f32>, b: Point<f32>) -> f32 {
 }
 
 /// `convertPoint<float>(Point<int16_t>)`.
-fn convert_point(p: &Point<i16>) -> Point<f32> {
-    Point::new(p.x as f32, p.y as f32)
+fn convert_point(p: Point<i16>) -> Point<f32> {
+    Point::new(f32::from(p.x), f32::from(p.y))
 }
 
 /// `project(point, matrix)`.
+#[must_use]
 pub fn project(point: Point<f32>, matrix: &Mat4) -> PointAndCameraDistance {
-    let mut pos: Vec4 = [point.x as f64, point.y as f64, 0.0, 1.0];
+    let mut pos: Vec4 = [f64::from(point.x), f64::from(point.y), 0.0, 1.0];
     let a = pos;
     matrix::transform_mat4(&mut pos, &a, matrix);
     (Point::new((pos[0] / pos[3]) as f32, (pos[1] / pos[3]) as f32), pos[3] as f32)
 }
 
 /// `evaluateSizeForFeature(zoomEvaluatedSize, placedSymbol)`.
+#[must_use]
 pub fn evaluate_size_for_feature(zoom_evaluated_size: &ZoomEvaluatedSize, placed_symbol: &PlacedSymbol) -> f32 {
     if zoom_evaluated_size.is_feature_constant {
         zoom_evaluated_size.size
@@ -244,6 +248,7 @@ pub struct LabelPlaneProjector<'a> {
 
 impl<'a> LabelPlaneProjector<'a> {
     /// C++ defaults `translation` to (0, 0).
+    #[must_use]
     pub fn new(
         tile: &TileProjector<'a>,
         pitch_with_map: bool,
@@ -277,6 +282,7 @@ impl<'a> LabelPlaneProjector<'a> {
 
     /// Tile units to the label plane; distance and occlusion come from the
     /// projection.
+    #[must_use]
     pub fn project(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
         let translated = add(tile_point, self.translation);
         if self.pitch_with_map {
@@ -296,6 +302,7 @@ impl<'a> LabelPlaneProjector<'a> {
     }
 
     /// Label plane to clip space, for orientation checks.
+    #[must_use]
     pub fn to_clip_space(&self, label_plane_point: Point<f32>) -> Point<f32> {
         if self.pitch_with_map {
             let tile_point = project(label_plane_point, &self.pitched_label_plane_matrix_inverse).0;
@@ -306,6 +313,7 @@ impl<'a> LabelPlaneProjector<'a> {
     }
 
     /// Tile units straight to clip space.
+    #[must_use]
     pub fn to_clip_space_from_tile(&self, tile_point: Point<f32>) -> ProjectedTilePoint {
         self.tile.project(&Point::new(f64::from(tile_point.x), f64::from(tile_point.y)), 0.0)
     }
@@ -335,13 +343,14 @@ impl LineProjectionCache {
         if let Some(cached) = self.points[index] {
             return cached;
         }
-        let projected = label_plane.project(convert_point(&line[index]));
+        let projected = label_plane.project(convert_point(line[index]));
         self.occluded |= projected.occluded;
         self.points[index] = Some(projected);
         projected
     }
 
     /// Whether any vertex projected so far is behind the globe's horizon.
+    #[must_use]
     pub fn any_occluded(&self) -> bool {
         self.occluded
     }
@@ -432,7 +441,7 @@ fn place_glyph_along_line(
         angle += std::f32::consts::PI;
     }
 
-    let mut current_index: i32 = if dir > 0 { anchor_segment as i32 } else { anchor_segment as i32 + 1 };
+    let mut current_index: i32 = if dir > 0 { i32::from(anchor_segment) } else { i32::from(anchor_segment) + 1 };
 
     let initial_index = current_index;
     let mut current = projected_anchor_point;
@@ -442,7 +451,7 @@ fn place_glyph_along_line(
     let abs_offset_x = combined_offset_x.abs();
 
     while distance_to_prev + current_segment_distance <= abs_offset_x {
-        current_index += dir as i32;
+        current_index += i32::from(dir);
 
         // offset does not fit on the projected line
         if current_index < 0 || current_index >= line.len() as i32 {
@@ -459,9 +468,9 @@ fn place_glyph_along_line(
             let previous_tile_point = if distance_to_prev == 0.0 {
                 tile_anchor_point
             } else {
-                convert_point(&line[(current_index - dir as i32) as usize])
+                convert_point(line[(current_index - i32::from(dir)) as usize])
             };
-            let current_tile_point = convert_point(&line[current_index as usize]);
+            let current_tile_point = convert_point(line[current_index as usize]);
             current = project_truncated_line_segment(
                 previous_tile_point,
                 current_tile_point,
@@ -485,8 +494,8 @@ fn place_glyph_along_line(
 
     // offset the point from the line to text-offset and icon-offset
     // (`util::mag` defaults to a double result: the float sqrt promoted.)
-    let mag = mag_f32(prev_to_current) as f64;
-    p = add(p, mul(perp(prev_to_current), ((line_offset_y * dir as f32) as f64 / mag) as f32));
+    let mag = f64::from(mag_f32(prev_to_current));
+    p = add(p, mul(perp(prev_to_current), (f64::from(line_offset_y * f32::from(dir)) / mag) as f32));
 
     let segment_angle = angle + (current.y - prev.y).atan2(current.x - prev.x);
 
@@ -495,10 +504,10 @@ fn place_glyph_along_line(
         segment_angle,
         if return_tile_distance {
             Some(TileDistance::new(
-                if (current_index - dir as i32) == initial_index {
+                if (current_index - i32::from(dir)) == initial_index {
                     0.0
                 } else {
-                    tile_distances[(current_index - dir as i32) as usize]
+                    tile_distances[(current_index - i32::from(dir)) as usize]
                 },
                 abs_offset_x - distance_to_prev,
             ))
@@ -634,12 +643,12 @@ fn place_glyphs_along_line(
         let first_point = label_plane.to_clip_space(first_and_last_glyph.0.point);
         let last_point = label_plane.to_clip_space(first_and_last_glyph.1.point);
 
-        if keep_upright && !flip {
-            if let Some(orientation_change) =
+        if keep_upright
+            && !flip
+            && let Some(orientation_change) =
                 requires_orientation_change(symbol.writing_modes, first_point, last_point, aspect_ratio)
-            {
-                return orientation_change;
-            }
+        {
+            return orientation_change;
         }
 
         placed_glyphs.reserve(symbol.glyph_offsets.len());
@@ -665,7 +674,7 @@ fn place_glyphs_along_line(
             match placed_glyph {
                 Some(placed_glyph) => placed_glyphs.push(placed_glyph),
                 None => {
-                    placed_glyphs.push(PlacedGlyph::new(Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY), 0.0, None))
+                    placed_glyphs.push(PlacedGlyph::new(Point::new(f32::NEG_INFINITY, f32::NEG_INFINITY), 0.0, None));
                 }
             }
         }
@@ -679,7 +688,7 @@ fn place_glyphs_along_line(
                 Point::new(projected.point.x as f32, projected.point.y as f32)
             };
             let a = to_clip(symbol.anchor_point);
-            let tile_segment_end = convert_point(&symbol.line[symbol.segment + 1]);
+            let tile_segment_end = convert_point(symbol.line[symbol.segment + 1]);
             let projected_vertex = label_plane.to_clip_space_from_tile(tile_segment_end);
             // We know the anchor will be in the viewport, but the end of the
             // line segment may be behind the plane of the camera, in which case
@@ -749,7 +758,8 @@ pub fn reproject_line_labels(
     let partially_evaluated_size = size_binder.evaluate_for_zoom(state.get_zoom() as f32);
 
     let size = state.get_size();
-    let clipping_buffer: [f64; 2] = [256.0 / size.width as f64 * 2.0 + 1.0, 256.0 / size.height as f64 * 2.0 + 1.0];
+    let clipping_buffer: [f64; 2] =
+        [256.0 / f64::from(size.width) * 2.0 + 1.0, 256.0 / f64::from(size.height) * 2.0 + 1.0];
 
     let pixels_to_tile_units = tile.id.pixels_to_tile_units(1.0, state.get_zoom() as f32);
 

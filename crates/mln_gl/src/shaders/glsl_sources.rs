@@ -63,8 +63,8 @@ use super::shader_source::GlslShaderSource;
 /// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::OpenGL>`
 pub const ATMOSPHERE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "AtmosphereShader",
-    name: r#"AtmosphereShader"#,
-    vertex: r#"layout(location = 0) in vec2 a_pos;
+    name: r"AtmosphereShader",
+    vertex: r"layout(location = 0) in vec2 a_pos;
 
 layout(std140) uniform AtmospherePropsUBO {
     mat4 inv_view_projection;
@@ -81,8 +81,8 @@ void main() {
     // front of the planet while still participating in the read-only depth test.
     gl_Position = vec4(a_pos, 0.0, 1.0);
 }
-"#,
-    fragment: r#"#ifdef GL_ES
+",
+    fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -190,14 +190,14 @@ void main() {
     color = pow(color, vec4(1.0 / 2.2));
     fragColor = vec4(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::OpenGL>`
 pub const BACKGROUND_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundPatternShader",
-    name: r#"BackgroundPatternShader"#,
-    vertex: r#"layout (std140) uniform BackgroundPatternDrawableUBO {
+    name: r"BackgroundPatternShader",
+    vertex: r"layout (std140) uniform BackgroundPatternDrawableUBO {
     highp mat4 u_matrix;
     highp vec2 u_pixel_coord_upper;
     highp vec2 u_pixel_coord_lower;
@@ -230,8 +230,8 @@ void main() {
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_a * u_pattern_size_a, u_tile_units_to_pixels, a_pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, u_scale_b * u_pattern_size_b, u_tile_units_to_pixels, a_pos);
 }
-"#,
-    fragment: r#"layout (std140) uniform BackgroundPatternPropsUBO {
+",
+    fragment: r"layout (std140) uniform BackgroundPatternPropsUBO {
     highp vec2 u_pattern_tl_a;
     highp vec2 u_pattern_br_a;
     highp vec2 u_pattern_tl_b;
@@ -276,14 +276,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::OpenGL>`
 pub const BACKGROUND_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "BackgroundShader",
-    name: r#"BackgroundShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"BackgroundShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 layout (std140) uniform BackgroundDrawableUBO {
     highp mat4 u_matrix;
 };
@@ -291,8 +291,8 @@ layout (std140) uniform BackgroundDrawableUBO {
 void main() {
     gl_Position = projectTile(a_pos, a_pos);
 }
-"#,
-    fragment: r#"layout (std140) uniform BackgroundPropsUBO {
+",
+    fragment: r"layout (std140) uniform BackgroundPropsUBO {
     highp vec4 u_color;
     highp float u_opacity;
     lowp float props_pad1;
@@ -306,14 +306,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::OpenGL>`
 pub const CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CircleShader",
-    name: r#"CircleShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"CircleShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 out vec3 v_data;
 
 layout (std140) uniform GlobalPaintParamsUBO {
@@ -483,8 +483,8 @@ lowp float stroke_opacity = u_stroke_opacity;
 
     v_data = vec3(extrude.x, extrude.y, antialiasblur);
 }
-"#,
-    fragment: r#"in vec3 v_data;
+",
+    fragment: r"in vec3 v_data;
 
 layout (std140) uniform CircleEvaluatedPropsUBO {
     highp vec4 u_color;
@@ -564,14 +564,14 @@ lowp float stroke_opacity = u_stroke_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::OpenGL>`
 pub const CLIPPING_MASK_PROGRAM: GlslShaderSource = GlslShaderSource {
     built_in: "ClippingMaskProgram",
-    name: r#"ClippingMaskProgram"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"ClippingMaskProgram",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 
 #ifdef PROJECTION_GLOBE
 void main() {
@@ -584,18 +584,18 @@ void main() {
     gl_Position = u_matrix * vec4(a_pos, 0, 1);
 }
 #endif
-"#,
-    fragment: r#"void main() {
+",
+    fragment: r"void main() {
     fragColor = vec4(1.0);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::OpenGL>`
 pub const COLLISION_BOX_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionBoxShader",
-    name: r#"CollisionBoxShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"CollisionBoxShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
 layout (location = 3) in vec2 a_placed;
@@ -652,8 +652,8 @@ void main() {
     v_placed = a_placed.x;
     v_notUsed = a_placed.y;
 }
-"#,
-    fragment: r#"in float v_placed;
+",
+    fragment: r"in float v_placed;
 in float v_notUsed;
 
 void main() {
@@ -673,14 +673,14 @@ void main() {
         fragColor *= .1;
     }
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::OpenGL>`
 pub const COLLISION_CIRCLE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "CollisionCircleShader",
-    name: r#"CollisionCircleShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"CollisionCircleShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_anchor_pos;
 layout (location = 2) in vec2 a_extrude;
 layout (location = 3) in vec2 a_placed;
@@ -745,8 +745,8 @@ void main() {
     v_extrude = a_extrude * padding_factor;
     v_extrude_scale = u_extrude_scale * u_camera_to_center_distance * collision_perspective_ratio;
 }
-"#,
-    fragment: r#"layout (std140) uniform GlobalPaintParamsUBO {
+",
+    fragment: r"layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
@@ -796,14 +796,14 @@ void main() {
 
     fragColor = opacity_t * color;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::OpenGL>`
 pub const COLOR_RELIEF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "ColorReliefShader",
-    name: r#"ColorReliefShader"#,
-    vertex: r#"layout(std140) uniform ColorReliefDrawableUBO {
+    name: r"ColorReliefShader",
+    vertex: r"layout(std140) uniform ColorReliefDrawableUBO {
     highp mat4 u_matrix;
 };
 
@@ -829,8 +829,8 @@ void main() {
     if (a_pos.y < -32767.5) v_pos.y = 0.0;
     if (a_pos.y > 32766.5) v_pos.y = 1.0;
 }
-"#,
-    fragment: r#"layout(std140) uniform ColorReliefDrawableUBO {
+",
+    fragment: r"layout(std140) uniform ColorReliefDrawableUBO {
     highp mat4 u_matrix;
 };
 
@@ -907,14 +907,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::OpenGL>`
 pub const DEBUG_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "DebugShader",
-    name: r#"DebugShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"DebugShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 out vec2 v_uv;
 
 layout (std140) uniform DebugUBO {
@@ -932,8 +932,8 @@ void main() {
     v_uv = a_pos / 8192.0;
     gl_Position = projectTile(a_pos * u_overlay_scale);
 }
-"#,
-    fragment: r#"layout (std140) uniform DebugUBO {
+",
+    fragment: r"layout (std140) uniform DebugUBO {
     highp mat4 u_matrix;
     highp vec4 u_color;
     highp float u_overlay_scale;
@@ -950,14 +950,14 @@ void main() {
     vec4 overlay_color = texture(u_overlay, v_uv);
     fragColor = mix(u_color, overlay_color, overlay_color.a);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionInstancedShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionInstancedShader",
-    name: r#"FillExtrusionInstancedShader"#,
-    vertex: r#"invariant gl_Position;
+    name: r"FillExtrusionInstancedShader",
+    vertex: r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -1088,8 +1088,8 @@ highp vec4 color = u_color;
     v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= u_opacity;
 }
-"#,
-    fragment: r#"in vec4 v_color;
+",
+    fragment: r"in vec4 v_color;
 
 void main() {
     fragColor = v_color;
@@ -1098,14 +1098,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionPatternInstancedShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
-    name: r#"FillExtrusionPatternInstancedShader"#,
-    vertex: r#"invariant gl_Position;
+    name: r"FillExtrusionPatternInstancedShader",
+    vertex: r"invariant gl_Position;
 
 // The corner of the wall quad: x picks the instance's outline vertex (0) or
 // the next one (1), y the base (0) or the top (1).
@@ -1263,8 +1263,8 @@ mediump vec4 pattern_to = u_pattern_to;
     v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
     v_lighting *= u_opacity;
 }
-"#,
-    fragment: r#"in vec2 v_pos_a;
+",
+    fragment: r"in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
@@ -1342,14 +1342,14 @@ mediump vec4 pattern_to = u_pattern_to;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionPatternShader",
-    name: r#"FillExtrusionPatternShader"#,
-    vertex: r#"invariant gl_Position;
+    name: r"FillExtrusionPatternShader",
+    vertex: r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -1495,8 +1495,8 @@ mediump vec4 pattern_to = u_pattern_to;
     v_lighting.rgb += clamp(directional * u_lightcolor, mix(vec3(0.0), vec3(0.3), 1.0 - u_lightcolor), vec3(1.0));
     v_lighting *= u_opacity;
 }
-"#,
-    fragment: r#"in vec2 v_pos_a;
+",
+    fragment: r"in vec2 v_pos_a;
 in vec2 v_pos_b;
 in vec4 v_lighting;
 
@@ -1574,14 +1574,14 @@ mediump vec4 pattern_to = u_pattern_to;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_EXTRUSION_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillExtrusionShader",
-    name: r#"FillExtrusionShader"#,
-    vertex: r#"invariant gl_Position;
+    name: r"FillExtrusionShader",
+    vertex: r"invariant gl_Position;
 
 layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_decimals_ed;
@@ -1700,8 +1700,8 @@ highp vec4 color = u_color;
     v_color.b += clamp(color.b * directional * u_lightcolor.b, mix(0.0, 0.3, 1.0 - u_lightcolor.b), 1.0);
     v_color *= u_opacity;
 }
-"#,
-    fragment: r#"in vec4 v_color;
+",
+    fragment: r"in vec4 v_color;
 
 void main() {
     fragColor = v_color;
@@ -1710,14 +1710,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_OUTLINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlinePatternShader",
-    name: r#"FillOutlinePatternShader"#,
-    vertex: r#"layout (std140) uniform GlobalPaintParamsUBO {
+    name: r"FillOutlinePatternShader",
+    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
@@ -1826,8 +1826,8 @@ mediump vec4 pattern_to = u_pattern_to;
 
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
 }
-"#,
-    fragment: r#"layout (std140) uniform FillOutlinePatternTilePropsUBO {
+",
+    fragment: r"layout (std140) uniform FillOutlinePatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
@@ -1911,14 +1911,14 @@ mediump vec4 pattern_to = u_pattern_to;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_OUTLINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineShader",
-    name: r#"FillOutlineShader"#,
-    vertex: r#"layout (std140) uniform GlobalPaintParamsUBO {
+    name: r"FillOutlineShader",
+    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
@@ -1976,8 +1976,8 @@ lowp float opacity = u_opacity;
     gl_Position = projectTile(a_pos, a_pos);
     v_pos = (gl_Position.xy / gl_Position.w + 1.0) / 2.0 * u_world_size;
 }
-"#,
-    fragment: r#"layout (std140) uniform FillEvaluatedPropsUBO {
+",
+    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
     highp vec4 u_color;
     highp vec4 u_outline_color;
     highp float u_opacity;
@@ -2011,13 +2011,13 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
-    name: r#"FillOutlineTriangulatedShader"#,
+    name: r"FillOutlineTriangulatedShader",
     vertex: r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
@@ -2102,7 +2102,7 @@ void main() {
     v_width = outset;
 }
 "#,
-    fragment: r#"layout (std140) uniform FillEvaluatedPropsUBO {
+    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
     highp vec4 u_color;
     highp vec4 u_outline_color;
     highp float u_opacity;
@@ -2131,14 +2131,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillPatternShader",
-    name: r#"FillPatternShader"#,
-    vertex: r#"layout (std140) uniform GlobalPaintParamsUBO {
+    name: r"FillPatternShader",
+    vertex: r"layout (std140) uniform GlobalPaintParamsUBO {
     highp vec2 u_pattern_atlas_texsize;
     highp vec2 u_units_to_pixels;
     highp vec2 u_world_size;
@@ -2243,8 +2243,8 @@ mediump vec4 pattern_to = u_pattern_to;
     v_pos_a = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, fromScale * display_size_a, tileZoomRatio, a_pos);
     v_pos_b = get_pattern_pos(u_pixel_coord_upper, u_pixel_coord_lower, toScale * display_size_b, tileZoomRatio, a_pos);
 }
-"#,
-    fragment: r#"layout (std140) uniform FillPatternTilePropsUBO {
+",
+    fragment: r"layout (std140) uniform FillPatternTilePropsUBO {
     highp vec4 u_pattern_from;
     highp vec4 u_pattern_to;
     highp vec2 u_texsize;
@@ -2325,14 +2325,14 @@ mediump vec4 pattern_to = u_pattern_to;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::OpenGL>`
 pub const FILL_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "FillShader",
-    name: r#"FillShader"#,
-    vertex: r#"layout (std140) uniform FillDrawableUBO {
+    name: r"FillShader",
+    vertex: r"layout (std140) uniform FillDrawableUBO {
     highp mat4 u_matrix;
     // Interpolations
     highp float u_color_t;
@@ -2375,8 +2375,8 @@ lowp float opacity = u_opacity;
 
     gl_Position = projectTile(a_pos, a_pos);
 }
-"#,
-    fragment: r#"layout (std140) uniform FillEvaluatedPropsUBO {
+",
+    fragment: r"layout (std140) uniform FillEvaluatedPropsUBO {
     highp vec4 u_color;
     highp vec4 u_outline_color;
     highp float u_opacity;
@@ -2406,29 +2406,29 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::OpenGL>`
 pub const GLOBE_DEPTH_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "GlobeDepthShader",
-    name: r#"GlobeDepthShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"GlobeDepthShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 
 void main() {
     gl_Position = projectTileFor3D(a_pos, 0.0);
 }
-"#,
-    fragment: r#"void main() {
+",
+    fragment: r"void main() {
     fragColor = vec4(0.0);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::OpenGL>`
 pub const HEATMAP_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapShader",
-    name: r#"HeatmapShader"#,
+    name: r"HeatmapShader",
     vertex: r#"layout (location = 0) in vec2 a_pos;
 out vec2 v_extrude;
 
@@ -2513,7 +2513,7 @@ mediump float radius = u_radius;
 #endif
 }
 "#,
-    fragment: r#"in vec2 v_extrude;
+    fragment: r"in vec2 v_extrude;
 
 layout (std140) uniform HeatmapEvaluatedPropsUBO {
     highp float u_weight;
@@ -2544,14 +2544,14 @@ highp float weight = u_weight;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::OpenGL>`
 pub const HEATMAP_TEXTURE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HeatmapTextureShader",
-    name: r#"HeatmapTextureShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"HeatmapTextureShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 out vec2 v_pos;
 
 layout (std140) uniform GlobalPaintParamsUBO {
@@ -2580,8 +2580,8 @@ void main() {
     v_pos.x = a_pos.x;
     v_pos.y = 1.0 - a_pos.y;
 }
-"#,
-    fragment: r#"in vec2 v_pos;
+",
+    fragment: r"in vec2 v_pos;
 uniform sampler2D u_image;
 uniform sampler2D u_color_ramp;
 
@@ -2602,14 +2602,14 @@ void main() {
     fragColor = vec4(0.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::OpenGL>`
 pub const HILLSHADE_PREPARE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadePrepareShader",
-    name: r#"HillshadePrepareShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"HillshadePrepareShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 
 layout (std140) uniform HillshadePrepareDrawableUBO {
@@ -2632,8 +2632,8 @@ void main() {
     float scale = (u_dimension.x - 2.0) / u_dimension.x;
     v_pos = (a_texture_pos / 8192.0) * scale + epsilon;
 }
-"#,
-    fragment: r#"#ifdef GL_ES
+",
+    fragment: r"#ifdef GL_ES
 precision highp float;
 #endif
 
@@ -2708,14 +2708,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::OpenGL>`
 pub const HILLSHADE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "HillshadeShader",
-    name: r#"HillshadeShader"#,
-    vertex: r#"layout (location = 0) in vec2 a_pos;
+    name: r"HillshadeShader",
+    vertex: r"layout (location = 0) in vec2 a_pos;
 layout (location = 1) in vec2 a_texture_pos;
 
 layout (std140) uniform HillshadeDrawableUBO {
@@ -2728,7 +2728,7 @@ void main() {
     gl_Position = projectTile(a_pos, a_pos);
     v_pos = a_texture_pos / 8192.0;
 }
-"#,
+",
     fragment: r#"in vec2 v_pos;
 uniform sampler2D u_image;
 
@@ -2922,7 +2922,7 @@ void main() {
 /// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_GRADIENT_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientSDFShader",
-    name: r#"LineGradientSDFShader"#,
+    name: r"LineGradientSDFShader",
     vertex: r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
@@ -3112,7 +3112,7 @@ lowp float floorwidth = u_floorwidth;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LineEvaluatedPropsUBO {
+    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -3201,13 +3201,13 @@ lowp float floorwidth = u_floorwidth;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_GRADIENT_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineGradientShader",
-    name: r#"LineGradientShader"#,
+    name: r"LineGradientShader",
     vertex: r#"
 // the attribute conveying progress along a line is scaled to [0, 2^15)
 #define MAX_LINE_DISTANCE 32767.0
@@ -3373,7 +3373,7 @@ mediump float width = u_width;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LineEvaluatedPropsUBO {
+    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -3435,13 +3435,13 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_PATTERN_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LinePatternShader",
-    name: r#"LinePatternShader"#,
+    name: r"LinePatternShader",
     vertex: r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
@@ -3644,7 +3644,7 @@ mediump vec4 pattern_to = u_pattern_to;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LinePatternTilePropsUBO {
+    fragment: r"layout (std140) uniform LinePatternTilePropsUBO {
     lowp vec4 u_pattern_from;
     lowp vec4 u_pattern_to;
     mediump vec4 u_scale;
@@ -3758,13 +3758,13 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineSDFShader",
-    name: r#"LineSDFShader"#,
+    name: r"LineSDFShader",
     vertex: r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
@@ -3958,7 +3958,7 @@ lowp float floorwidth = u_floorwidth;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LineEvaluatedPropsUBO {
+    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -4047,13 +4047,13 @@ lowp float floorwidth = u_floorwidth;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::OpenGL>`
 pub const LINE_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LineShader",
-    name: r#"LineShader"#,
+    name: r"LineShader",
     vertex: r#"// floor(127 / 2) == 63.0
 // the maximum allowed miter limit is 2.0 at the moment. the extrude normal is
 // stored in a byte (-128..127). we scale regular normals up to length 63, but
@@ -4224,7 +4224,7 @@ mediump float width = u_width;
     v_width2 = vec2(outset, inset);
 }
 "#,
-    fragment: r#"layout (std140) uniform LineEvaluatedPropsUBO {
+    fragment: r"layout (std140) uniform LineEvaluatedPropsUBO {
     highp vec4 u_color;
     lowp float u_blur;
     lowp float u_opacity;
@@ -4285,14 +4285,14 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LocationIndicatorShader, gfx::Backend::Type::OpenGL>`
 pub const LOCATION_INDICATOR_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LocationIndicatorShader",
-    name: r#"LocationIndicatorShader"#,
-    vertex: r#"layout (std140) uniform LocationIndicatorDrawableUBO {
+    name: r"LocationIndicatorShader",
+    vertex: r"layout (std140) uniform LocationIndicatorDrawableUBO {
     mat4 u_matrix;
     vec4 u_color;
 };
@@ -4302,8 +4302,8 @@ layout(location = 0) in vec2 a_pos;
 void main() {
     gl_Position = projectTile(a_pos);
 }
-"#,
-    fragment: r#"layout (std140) uniform LocationIndicatorDrawableUBO {
+",
+    fragment: r"layout (std140) uniform LocationIndicatorDrawableUBO {
     mat4 u_matrix;
     vec4 u_color;
 };
@@ -4311,14 +4311,14 @@ void main() {
 void main() {
     fragColor = u_color;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LocationIndicatorTexturedShader, gfx::Backend::Type::OpenGL>`
 pub const LOCATION_INDICATOR_TEXTURED_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "LocationIndicatorTexturedShader",
-    name: r#"LocationIndicatorTexturedShader"#,
-    vertex: r#"layout (std140) uniform LocationIndicatorDrawableUBO {
+    name: r"LocationIndicatorTexturedShader",
+    vertex: r"layout (std140) uniform LocationIndicatorDrawableUBO {
     mat4 u_matrix;
     vec4 u_color;
 };
@@ -4332,8 +4332,8 @@ void main() {
     frag_uv = a_uv;
     gl_Position = projectTile(a_pos);
 }
-"#,
-    fragment: r#"layout (std140) uniform LocationIndicatorDrawableUBO {
+",
+    fragment: r"layout (std140) uniform LocationIndicatorDrawableUBO {
     mat4 u_matrix;
     vec4 u_color;
 };
@@ -4344,14 +4344,14 @@ uniform sampler2D u_image;
 void main() {
     fragColor = texture(u_image, frag_uv);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::OpenGL>`
 pub const PRELUDE: GlslShaderSource = GlslShaderSource {
     built_in: "Prelude",
-    name: r#"Prelude"#,
-    vertex: r#"#ifdef GL_ES
+    name: r"Prelude",
+    vertex: r"#ifdef GL_ES
 precision highp float;
 #else
 
@@ -4579,8 +4579,8 @@ float projectLineThickness(float tileY) {
 }
 
 #endif
-"#,
-    fragment: r#"#ifdef GL_ES
+",
+    fragment: r"#ifdef GL_ES
 precision mediump float;
 #else
 
@@ -4615,14 +4615,14 @@ bool clippedAtAntimeridian(highp float tileX) {
     return tileX < 0.0 || tileX >= 8192.0;
 }
 #endif
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::OpenGL>`
 pub const RASTER_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "RasterShader",
-    name: r#"RasterShader"#,
-    vertex: r#"layout (std140) uniform RasterDrawableUBO {
+    name: r"RasterShader",
+    vertex: r"layout (std140) uniform RasterDrawableUBO {
     highp mat4 u_matrix;
 };
 layout (std140) uniform RasterEvaluatedPropsUBO {
@@ -4656,8 +4656,8 @@ void main() {
     v_pos0 = (((a_texture_pos / 8192.0) - 0.5) / u_buffer_scale ) + 0.5;
     v_pos1 = (v_pos0 * u_scale_parent) + u_tl_parent;
 }
-"#,
-    fragment: r#"layout (std140) uniform RasterEvaluatedPropsUBO {
+",
+    fragment: r"layout (std140) uniform RasterEvaluatedPropsUBO {
     highp vec3 u_spin_weights;
     highp vec2 u_tl_parent;
     highp float u_scale_parent;
@@ -4715,14 +4715,14 @@ void main() {
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::OpenGL>`
 pub const SKY_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SkyShader",
-    name: r#"SkyShader"#,
-    vertex: r#"layout(location = 0) in vec2 a_pos;
+    name: r"SkyShader",
+    vertex: r"layout(location = 0) in vec2 a_pos;
 
 out vec2 v_pos;
 
@@ -4730,8 +4730,8 @@ void main() {
     v_pos = a_pos;
     gl_Position = vec4(a_pos, 1.0, 1.0);
 }
-"#,
-    fragment: r#"in vec2 v_pos;
+",
+    fragment: r"in vec2 v_pos;
 
 layout(std140) uniform SkyPropsUBO {
     vec4 sky_color;
@@ -4759,14 +4759,14 @@ void main() {
 
     fragColor = color * (1.0 - sky.sky_blend);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::OpenGL>`
 pub const SYMBOL_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolIconShader",
-    name: r#"SymbolIconShader"#,
-    vertex: r#"layout (location = 0) in vec4 a_pos_offset;
+    name: r"SymbolIconShader",
+    vertex: r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
@@ -4944,8 +4944,8 @@ lowp float opacity = u_opacity;
     float fade_change = fade_opacity[1] > 0.5 ? u_symbol_fade_change : -u_symbol_fade_change;
     v_fade_opacity = max(0.0, min(1.0, fade_opacity[0] + fade_change));
 }
-"#,
-    fragment: r#"uniform sampler2D u_texture;
+",
+    fragment: r"uniform sampler2D u_texture;
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp vec4 u_text_fill_color;
@@ -4991,14 +4991,14 @@ lowp float opacity = u_opacity;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::OpenGL>`
 pub const SYMBOL_SDF_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolSDFShader",
-    name: r#"SymbolSDFShader"#,
-    vertex: r#"layout (location = 0) in vec4 a_pos_offset;
+    name: r"SymbolSDFShader",
+    vertex: r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec4 a_pixeloffset;
 layout (location = 3) in vec3 a_projected_pos;
@@ -5233,8 +5233,8 @@ lowp float halo_blur = u_halo_blur;
     v_tex_origin = a_tex_origin / u_texsize;
     v_data1 = vec3(gamma_scale, size, interpolated_fade_opacity);
 }
-"#,
-    fragment: r#"#define SDF_PX 8.0
+",
+    fragment: r"#define SDF_PX 8.0
 
 layout (std140) uniform SymbolEvaluatedPropsUBO {
     highp vec4 u_text_fill_color;
@@ -5337,14 +5337,14 @@ lowp float halo_blur = u_halo_blur;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::OpenGL>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: GlslShaderSource = GlslShaderSource {
     built_in: "SymbolTextAndIconShader",
-    name: r#"SymbolTextAndIconShader"#,
-    vertex: r#"layout (location = 0) in vec4 a_pos_offset;
+    name: r"SymbolTextAndIconShader",
+    vertex: r"layout (location = 0) in vec4 a_pos_offset;
 layout (location = 1) in vec4 a_data;
 layout (location = 2) in vec3 a_projected_pos;
 layout (location = 3) in float a_fade_opacity;
@@ -5579,8 +5579,8 @@ lowp float halo_blur = u_halo_blur;
     v_tex_origin = vec4(a_tex_origin / u_texsize, a_tex_origin / u_texsize_icon);
     v_data1 = vec4(gamma_scale, size, interpolated_fade_opacity, is_sdf);
 }
-"#,
-    fragment: r#"#define SDF_PX 8.0
+",
+    fragment: r"#define SDF_PX 8.0
 
 #define SDF 1.0
 #define ICON 0.0
@@ -5700,12 +5700,12 @@ lowp float halo_blur = u_halo_blur;
     fragColor = vec4(1.0);
 #endif
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::WideVectorShader, gfx::Backend::Type::OpenGL>`
 pub const WIDE_VECTOR_SHADER: GlslShaderSource =
-    GlslShaderSource { built_in: "WideVectorShader", name: r#"WideVectorShader"#, vertex: r#""#, fragment: r#""# };
+    GlslShaderSource { built_in: "WideVectorShader", name: r"WideVectorShader", vertex: r"", fragment: r"" };
 
 /// Every extracted specialisation, sorted by `BuiltIn` name.
 pub const ALL: &[&GlslShaderSource] = &[

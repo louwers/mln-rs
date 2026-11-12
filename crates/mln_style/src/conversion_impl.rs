@@ -19,6 +19,7 @@ use crate::transition_options::TransitionOptions;
 pub trait ValueFactory {
     fn make_value(&self) -> Value;
 
+    #[must_use]
     fn constant_kind() -> Kind {
         Kind::Constant
     }
@@ -69,7 +70,7 @@ impl ValueFactory for VariableAnchorOffsetCollection {
 /// `ValueFactory<float>`: `Value(float)` holds a double.
 impl ValueFactory for f32 {
     fn make_value(&self) -> Value {
-        Value::Double(*self as f64)
+        Value::Double(f64::from(*self))
     }
 }
 
@@ -185,6 +186,7 @@ pub fn make_style_property<T: ValueFactory>(value: &PropertyValue<T>) -> StylePr
 }
 
 /// `makeStyleProperty(const TransitionOptions&)`.
+#[must_use]
 pub fn make_transition_style_property(value: &TransitionOptions) -> StyleProperty {
     if !value.is_defined() {
         return StyleProperty::default();
@@ -193,6 +195,7 @@ pub fn make_transition_style_property(value: &TransitionOptions) -> StylePropert
 }
 
 /// `makeStyleProperty(const ColorRampPropertyValue&)`.
+#[must_use]
 pub fn make_color_ramp_style_property(value: &ColorRampPropertyValue) -> StyleProperty {
     if value.is_undefined() {
         return StyleProperty::default();

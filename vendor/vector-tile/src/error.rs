@@ -19,6 +19,7 @@ pub enum Error {
 
 impl Error {
     /// The C++ `what()` text.
+    #[must_use]
     pub fn what(&self) -> &str {
         match self {
             Error::Pbf(e) => e.what(),
@@ -28,10 +29,12 @@ impl Error {
 
     /// `std::vector::at(n)` on a vector of `size` elements: libstdc++'s
     /// `_M_range_check` message.
+    #[must_use]
     pub fn vector_range_check(n: usize, size: usize) -> Error {
         Error::OutOfRange(format!("vector::_M_range_check: __n (which is {n}) >= this->size() (which is {size})"))
     }
 
+    #[must_use]
     pub fn is_runtime_error(&self) -> bool {
         matches!(self, Error::Runtime(_))
     }

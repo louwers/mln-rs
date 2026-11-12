@@ -15,7 +15,7 @@ pub trait SpriteLoaderObserver {
     fn on_sprite_requested(&self, _sprite: &Option<Sprite>) {}
 }
 
-/// The C++ `nullObserver` (a default-constructed SpriteLoaderObserver).
+/// The C++ `nullObserver` (a default-constructed `SpriteLoaderObserver`).
 pub struct NullSpriteLoaderObserver;
 
 impl SpriteLoaderObserver for NullSpriteLoaderObserver {}

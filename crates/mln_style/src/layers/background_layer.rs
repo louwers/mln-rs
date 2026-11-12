@@ -36,6 +36,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -43,12 +44,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct BackgroundLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl BackgroundLayer {
     /// `BackgroundLayer(const std::string& layerID)`.
+    #[must_use]
     pub fn new(layer_id: &str) -> Self {
         BackgroundLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), String::new())),
@@ -56,16 +58,19 @@ impl BackgroundLayer {
     }
 
     /// `BackgroundLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         BackgroundLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -76,10 +81,12 @@ impl BackgroundLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_background_color() -> PropertyValue<Color> {
         PropertyValue::Constant(BackgroundColor::default_value())
     }
 
+    #[must_use]
     pub fn get_background_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<BackgroundColor>().value
     }
@@ -99,14 +106,17 @@ impl BackgroundLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_background_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<BackgroundColor>().options
     }
 
+    #[must_use]
     pub fn get_default_background_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(BackgroundOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_background_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<BackgroundOpacity>().value
     }
@@ -126,14 +136,17 @@ impl BackgroundLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_background_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<BackgroundOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_background_pattern() -> PropertyValue<Image> {
         PropertyValue::Constant(BackgroundPattern::default_value())
     }
 
+    #[must_use]
     pub fn get_background_pattern(&self) -> &PropertyValue<Image> {
         &self.impl_().paint.get::<BackgroundPattern>().value
     }
@@ -153,6 +166,7 @@ impl BackgroundLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_background_pattern_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<BackgroundPattern>().options
     }
@@ -163,22 +177,22 @@ const K_PAINT_PROPERTY_COUNT: u8 = 6;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
-    BackgroundColor,
-    BackgroundOpacity,
-    BackgroundPattern,
-    BackgroundColorTransition,
-    BackgroundOpacityTransition,
-    BackgroundPatternTransition,
+    Color,
+    Opacity,
+    Pattern,
+    ColorTransition,
+    OpacityTransition,
+    PatternTransition,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
-    ("background-color", Property::BackgroundColor),
-    ("background-opacity", Property::BackgroundOpacity),
-    ("background-pattern", Property::BackgroundPattern),
-    ("background-color-transition", Property::BackgroundColorTransition),
-    ("background-opacity-transition", Property::BackgroundOpacityTransition),
-    ("background-pattern-transition", Property::BackgroundPatternTransition),
+    ("background-color", Property::Color),
+    ("background-opacity", Property::Opacity),
+    ("background-pattern", Property::Pattern),
+    ("background-color-transition", Property::ColorTransition),
+    ("background-opacity-transition", Property::OpacityTransition),
+    ("background-pattern-transition", Property::PatternTransition),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -187,16 +201,12 @@ fn find_property(name: &str) -> Option<Property> {
 
 fn get_layer_property(layer: &BackgroundLayer, property: Property) -> StyleProperty {
     match property {
-        Property::BackgroundColor => make_style_property(layer.get_background_color()),
-        Property::BackgroundOpacity => make_style_property(layer.get_background_opacity()),
-        Property::BackgroundPattern => make_style_property(layer.get_background_pattern()),
-        Property::BackgroundColorTransition => make_transition_style_property(&layer.get_background_color_transition()),
-        Property::BackgroundOpacityTransition => {
-            make_transition_style_property(&layer.get_background_opacity_transition())
-        }
-        Property::BackgroundPatternTransition => {
-            make_transition_style_property(&layer.get_background_pattern_transition())
-        }
+        Property::Color => make_style_property(layer.get_background_color()),
+        Property::Opacity => make_style_property(layer.get_background_opacity()),
+        Property::Pattern => make_style_property(layer.get_background_pattern()),
+        Property::ColorTransition => make_transition_style_property(&layer.get_background_color_transition()),
+        Property::OpacityTransition => make_transition_style_property(&layer.get_background_opacity_transition()),
+        Property::PatternTransition => make_transition_style_property(&layer.get_background_pattern_transition()),
     }
 }
 
@@ -248,7 +258,7 @@ impl Layer for BackgroundLayer {
             )));
         };
 
-        if property == Property::BackgroundColor {
+        if property == Property::Color {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Color>(value, &mut error, false, false) else {
                 return Some(error);
@@ -258,7 +268,7 @@ impl Layer for BackgroundLayer {
             return None;
         }
 
-        if property == Property::BackgroundOpacity {
+        if property == Property::Opacity {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, false, false) else {
                 return Some(error);
@@ -268,7 +278,7 @@ impl Layer for BackgroundLayer {
             return None;
         }
 
-        if property == Property::BackgroundPattern {
+        if property == Property::Pattern {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Image>(value, &mut error, false, false) else {
                 return Some(error);
@@ -283,17 +293,17 @@ impl Layer for BackgroundLayer {
             return Some(error);
         };
 
-        if property == Property::BackgroundColorTransition {
+        if property == Property::ColorTransition {
             self.set_background_color_transition(&transition);
             return None;
         }
 
-        if property == Property::BackgroundOpacityTransition {
+        if property == Property::OpacityTransition {
             self.set_background_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::BackgroundPatternTransition {
+        if property == Property::PatternTransition {
             self.set_background_pattern_transition(&transition);
             return None;
         }

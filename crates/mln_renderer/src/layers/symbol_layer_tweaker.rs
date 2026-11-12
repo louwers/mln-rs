@@ -3,12 +3,19 @@
 // branches: the port's backend is WebGPU).
 
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_SYMBOL_DRAWABLE_UBO, ID_SYMBOL_EVALUATED_PROPS_UBO, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
+    ID_SYMBOL_TILE_PROPS_UBO,
+};
 use mln_gfx::shaders::symbol_layer_ubo::{SymbolDrawableUBO, SymbolEvaluatedPropsUBO, SymbolTilePropsUBO};
 use mln_gfx::{Drawable, LayerGroupBase, UniformBufferPtr};
 use mln_map_types::{MercatorProjection, ProjectionBase, ProjectionData};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::symbol_layer_properties::*;
+use mln_style::layers::symbol_layer_properties::{
+    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconTranslate, IconTranslateAnchor,
+    SymbolLayerProperties, SymbolScreenSpace, TextColor, TextHaloBlur, TextHaloColor, TextHaloWidth, TextOpacity,
+    TextTranslate, TextTranslateAnchor,
+};
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType};
 use mln_util::immutable::Immutable;
@@ -162,7 +169,7 @@ impl LayerTweaker for SymbolLayerTweaker {
             let anchor =
                 if is_text { *evaluated.get::<TextTranslateAnchor>() } else { *evaluated.get::<IconTranslateAnchor>() };
             let mut projection: ProjectionData = if is_screen_space {
-                MercatorProjection.get_projection_data(state, &tile_id, &get_screen_matrix(translate))
+                MercatorProjection.get_projection_data(state, &tile_id, &get_screen_matrix(*translate))
             } else {
                 const NEAR_CLIPPED: bool = false;
                 const IN_VIEWPORT_PIXEL_UNITS: bool = false;
@@ -249,12 +256,12 @@ impl LayerTweaker for SymbolLayerTweaker {
                 coord_matrix: cast_matrix(&gl_coord_matrix),
                 texsize: get_tex_size(drawable, ID_SYMBOL_IMAGE_TEXTURE),
                 texsize_icon: get_tex_size(drawable, ID_SYMBOL_IMAGE_ICON_TEXTURE),
-                is_text_prop: is_text as i32,
-                rotate_symbol: rotate_in_shader as i32,
-                pitch_with_map: pitch_with_map as i32,
-                is_size_zoom_constant: size.is_zoom_constant as i32,
-                is_size_feature_constant: size.is_feature_constant as i32,
-                is_offset: symbol_data.is_offset as i32,
+                is_text_prop: i32::from(is_text),
+                rotate_symbol: i32::from(rotate_in_shader),
+                pitch_with_map: i32::from(pitch_with_map),
+                is_size_zoom_constant: i32::from(size.is_zoom_constant),
+                is_size_feature_constant: i32::from(size.is_feature_constant),
+                is_offset: i32::from(symbol_data.is_offset),
                 size_t: size.size_t,
                 size: size.size,
                 fill_color_t,
@@ -262,16 +269,16 @@ impl LayerTweaker for SymbolLayerTweaker {
                 opacity_t,
                 halo_width_t,
                 halo_blur_t,
-                is_along_line: along_line as i32,
-                is_variable_anchor: has_variable_placement as i32,
+                is_along_line: i32::from(along_line),
+                is_variable_anchor: i32::from(has_variable_placement),
                 pitched_scale,
                 translation: tile_translation,
                 pad1: 0.0,
                 pad2: 0.0,
             });
             tile_props_ubo_vector.push(SymbolTilePropsUBO {
-                is_text: is_text as i32,
-                is_halo: symbol_data.is_halo as i32,
+                is_text: i32::from(is_text),
+                is_halo: i32::from(symbol_data.is_halo),
                 gamma_scale,
                 pad1: 0.0,
             });

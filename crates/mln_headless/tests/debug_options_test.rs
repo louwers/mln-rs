@@ -22,15 +22,15 @@ const RASTER_STYLE: &str = r#"{
 
 /// Tile 1/1/1 filling the frontend's 256 px: 32 tile units to a pixel.
 fn tile_camera() -> CameraOptions {
-    CameraOptions::default().with_center(LatLng::new(-66.51326044311186, 90.0).ok()).with_zoom(Some(0.0))
+    CameraOptions::default().with_center(LatLng::new(-66.513_260_443_111_86, 90.0).ok()).with_zoom(Some(0.0))
 }
 
 fn raster_map() -> MapTest {
     let test = MapTest::new();
     test.file_source.set_response(Kind::Tile, |_: &Resource| {
         let mut response = file_response("test/fixtures/map/disabled_layers/tile.png");
-        response.modified = Some(Timestamp::from_secs(784111777));
-        response.expires = Some(Timestamp::from_secs(784115377));
+        response.modified = Some(Timestamp::from_secs(784_111_777));
+        response.expires = Some(Timestamp::from_secs(784_115_377));
         Some(response)
     });
     test.load_json(RASTER_STYLE);
@@ -39,7 +39,7 @@ fn raster_map() -> MapTest {
 }
 
 /// Renders a still image with `debug`, and writes it to
-/// target/tmp/debug_options/<name>.png.
+/// `target/tmp/debug_options`/<name>.png.
 fn render(test: &MapTest, debug: MapDebugOptions, name: &str) -> PremultipliedImage {
     test.map().set_debug(debug);
     let image = test.render().image;
@@ -195,5 +195,8 @@ fn rendering_stats_view_shows_the_stats_in_the_top_right() {
     test.map().enable_rendering_stats_view(false);
     assert!(!test.map().is_rendering_stats_view_enabled());
     assert_eq!(has_stats_view(&test), (false, false));
-    assert!(changed_pixels(&plain, &render(&test, MapDebugOptions::NO_DEBUG, "stats_disabled")).is_empty());
+    assert_eq!(
+        changed_pixels(&plain, &render(&test, MapDebugOptions::NO_DEBUG, "stats_disabled")),
+        [] as [(u32, u32); 0]
+    );
 }

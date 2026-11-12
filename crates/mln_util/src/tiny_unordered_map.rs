@@ -63,28 +63,30 @@ impl<K: Eq + Hash, V, const LINEAR_THRESHOLD: usize> TinyUnorderedMap<K, V, LINE
         self
     }
 
+    #[must_use]
     pub fn size(&self) -> usize {
         if self.linear.is_empty() { self.map.len() } else { self.linear.len() }
     }
 
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.size() == 0
     }
 
     /// `find(key)` (and the non-inserting `operator[]`).
     pub fn find(&self, key: &K) -> Option<&V> {
-        if !self.linear.is_empty() {
-            self.linear.iter().find(|(k, _)| k == key).map(|(_, v)| v)
-        } else {
+        if self.linear.is_empty() {
             self.map.get(key)
+        } else {
+            self.linear.iter().find(|(k, _)| k == key).map(|(_, v)| v)
         }
     }
 
     pub fn find_mut(&mut self, key: &K) -> Option<&mut V> {
-        if !self.linear.is_empty() {
-            self.linear.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v)
-        } else {
+        if self.linear.is_empty() {
             self.map.get_mut(key)
+        } else {
+            self.linear.iter_mut().find(|(k, _)| k == key).map(|(_, v)| v)
         }
     }
 

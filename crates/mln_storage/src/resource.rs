@@ -99,20 +99,20 @@ fn get_quad_key(x: i32, y: i32, z: i8) -> String {
     let mut i = z;
     while i > 0 {
         let mask: i32 = 1 << (i - 1);
-        quad_key.push((b'0' + (if x & mask != 0 { 1 } else { 0 }) + (if y & mask != 0 { 2 } else { 0 })) as char);
+        quad_key.push((b'0' + u8::from(x & mask != 0) + (if y & mask != 0 { 2 } else { 0 })) as char);
         i -= 1;
     }
     quad_key
 }
 
 fn get_merc_coord(x: i32, y: i32, z: i8) -> (f64, f64) {
-    let resolution = (M2PI * EARTH_RADIUS_M / 256.0) / 2f64.powi(z as i32);
-    (x as f64 * resolution - M2PI * EARTH_RADIUS_M / 2.0, y as f64 * resolution - M2PI * EARTH_RADIUS_M / 2.0)
+    let resolution = (M2PI * EARTH_RADIUS_M / 256.0) / 2f64.powi(i32::from(z));
+    (f64::from(x) * resolution - M2PI * EARTH_RADIUS_M / 2.0, f64::from(y) * resolution - M2PI * EARTH_RADIUS_M / 2.0)
 }
 
 fn get_tile_bbox(x: i32, y: i32, z: i8) -> String {
     // Alter the y for the Google/OSM tile scheme.
-    let y = (2f64.powi(z as i32) as i32).wrapping_sub(y).wrapping_sub(1);
+    let y = (2f64.powi(i32::from(z)) as i32).wrapping_sub(y).wrapping_sub(1);
 
     let min = get_merc_coord(x.wrapping_mul(256), y.wrapping_mul(256), z);
     let max = get_merc_coord(x.wrapping_add(1).wrapping_mul(256), y.wrapping_add(1).wrapping_mul(256), z);
@@ -164,22 +164,27 @@ impl Resource {
     }
 
     /// `hasLoadingMethod`.
+    #[must_use]
     pub fn has_loading_method(&self, method: LoadingMethod) -> bool {
         (self.loading_method.0 & method.0) != 0
     }
 
+    #[must_use]
     pub fn style(url: &str) -> Resource {
         Resource::new(Kind::Style, url)
     }
 
+    #[must_use]
     pub fn source(url: &str) -> Resource {
         Resource::new(Kind::Source, url)
     }
 
+    #[must_use]
     pub fn image(url: &str) -> Resource {
         Resource::new(Kind::Image, url)
     }
 
+    #[must_use]
     pub fn sprite_image(base: &str, pixel_ratio: f32) -> Resource {
         let url = URL::new(base);
         Resource::new(
@@ -191,6 +196,7 @@ impl Resource {
         )
     }
 
+    #[must_use]
     pub fn sprite_json(base: &str, pixel_ratio: f32) -> Resource {
         let url = URL::new(base);
         Resource::new(
@@ -202,6 +208,7 @@ impl Resource {
         )
     }
 
+    #[must_use]
     pub fn glyphs(url_template: &str, font_stack: &FontStack, glyph_range: (u16, u16)) -> Resource {
         Resource::new(
             Kind::Glyphs,
@@ -217,11 +224,13 @@ impl Resource {
         )
     }
 
+    #[must_use]
     pub fn font_face(url: &str) -> Resource {
         Resource::new(Kind::Glyphs, url)
     }
 
     /// `Resource::tile(urlTemplate, pixelRatio, x, y, z, scheme, loadingMethod = All)`.
+    #[must_use]
     pub fn tile(
         url_template: &str,
         pixel_ratio: f32,
@@ -239,7 +248,7 @@ impl Resource {
         let hex = b"0123456789abcdef";
         let url = replace_tokens(url_template, |token: &str| -> Option<String> {
             match token {
-                "z" => Some(to_string_i32(z as i32)),
+                "z" => Some(to_string_i32(i32::from(z))),
                 "x" => Some(to_string_i32(x)),
                 "y" => Some(to_string_i32(y)),
                 "quadkey" => Some(get_quad_key(x, y, z)),

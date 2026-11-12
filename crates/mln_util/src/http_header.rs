@@ -62,6 +62,7 @@ impl Cursor<'_> {
 
 impl CacheControl {
     /// `CacheControl::parse(const std::string&)`
+    #[must_use]
     pub fn parse(value: &str) -> CacheControl {
         let mut result = CacheControl::default();
         let mut c = Cursor { s: value.as_bytes(), pos: 0 };
@@ -73,11 +74,12 @@ impl CacheControl {
             } else {
                 c.pos = start;
                 let mut matched = false;
-                if c.lit("max-age") && c.lit("=") {
-                    if let Some(max_age) = c.ulong_long() {
-                        result.max_age = Some(max_age);
-                        matched = true;
-                    }
+                if c.lit("max-age")
+                    && c.lit("=")
+                    && let Some(max_age) = c.ulong_long()
+                {
+                    result.max_age = Some(max_age);
+                    matched = true;
                 }
                 if !matched {
                     c.pos = start;
@@ -119,6 +121,7 @@ impl CacheControl {
     }
 
     /// `toTimePoint()`
+    #[must_use]
     pub fn to_time_point(&self) -> Option<Timestamp> {
         self.max_age.map(|max_age| Timestamp::from_secs(now().secs_since_epoch().wrapping_add(max_age as i64)))
     }
@@ -164,18 +167,18 @@ mod tests {
     fn parsing() {
         // Ports test/storage/headers.test.cpp `HTTPHeader.Parsing`.
         let cases: &[(&str, Option<u64>, bool)] = &[
-            (r#""#, None, false),
-            (r#"max-age =34"#, Some(34), false),
-            (r#",max-age=1"#, Some(1), false),
-            (r#"max-age=-1"#, None, false),
-            (r#"max-age=foo"#, None, false),
+            (r"", None, false),
+            (r"max-age =34", Some(34), false),
+            (r",max-age=1", Some(1), false),
+            (r"max-age=-1", None, false),
+            (r"max-age=foo", None, false),
             (r#"max-age="34,max-age="22,max-age=28"#, Some(28), false),
             (r#"max-age=3,max-age="34"#, Some(3), false),
             (r#"max-age="\",max-age=4,""#, None, false),
-            (r#"private, max-age=0, no-cache"#, Some(0), false),
-            (r#"max-age=0, no-cache, no-store"#, Some(0), false),
+            (r"private, max-age=0, no-cache", Some(0), false),
+            (r"max-age=0, no-cache, no-store", Some(0), false),
             (r#",   private   , max-bar=3 , no-cache,  "\,",,foo=",",,max-age=32"#, Some(32), false),
-            (r#"max-age=3600, must-revalidate"#, Some(3600), true),
+            (r"max-age=3600, must-revalidate", Some(3600), true),
             (r#"no-cache="Expires,Via",max-age=3600, must-revalidate"#, Some(3600), true),
         ];
         for &(value, max_age, must_revalidate) in cases {

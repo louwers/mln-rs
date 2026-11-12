@@ -89,26 +89,32 @@ impl<'a> Convertible<'a> {
         }
     }
 
+    #[must_use]
     pub fn is_undefined(&self) -> bool {
         self.traits().is_undefined()
     }
 
+    #[must_use]
     pub fn is_array(&self) -> bool {
         self.traits().is_array()
     }
 
+    #[must_use]
     pub fn array_length(&self) -> usize {
         self.traits().array_length()
     }
 
+    #[must_use]
     pub fn array_member(&self, i: usize) -> Convertible<'_> {
         self.traits().array_member(i)
     }
 
+    #[must_use]
     pub fn is_object(&self) -> bool {
         self.traits().is_object()
     }
 
+    #[must_use]
     pub fn object_member(&self, name: &str) -> Option<Convertible<'_>> {
         self.traits().object_member(name)
     }
@@ -117,22 +123,27 @@ impl<'a> Convertible<'a> {
         self.traits().each_member(&mut f)
     }
 
+    #[must_use]
     pub fn to_bool(&self) -> Option<bool> {
         self.traits().to_bool()
     }
 
+    #[must_use]
     pub fn to_number(&self) -> Option<f32> {
         self.traits().to_number()
     }
 
+    #[must_use]
     pub fn to_double(&self) -> Option<f64> {
         self.traits().to_double()
     }
 
+    #[must_use]
     pub fn to_string(&self) -> Option<String> {
         self.traits().to_string()
     }
 
+    #[must_use]
     pub fn to_value(&self) -> Option<Value> {
         self.traits().to_value()
     }
@@ -157,26 +168,32 @@ impl<'a, T: ConversionTraits> From<&'a T> for Convertible<'a> {
 
 // The C++ free (friend) functions, for code ported call-for-call.
 
+#[must_use]
 pub fn is_undefined(v: &Convertible<'_>) -> bool {
     v.is_undefined()
 }
 
+#[must_use]
 pub fn is_array(v: &Convertible<'_>) -> bool {
     v.is_array()
 }
 
+#[must_use]
 pub fn array_length(v: &Convertible<'_>) -> usize {
     v.array_length()
 }
 
+#[must_use]
 pub fn array_member<'b>(v: &'b Convertible<'_>, i: usize) -> Convertible<'b> {
     v.array_member(i)
 }
 
+#[must_use]
 pub fn is_object(v: &Convertible<'_>) -> bool {
     v.is_object()
 }
 
+#[must_use]
 pub fn object_member<'b>(v: &'b Convertible<'_>, name: &str) -> Option<Convertible<'b>> {
     v.object_member(name)
 }
@@ -185,22 +202,27 @@ pub fn each_member(v: &Convertible<'_>, f: impl FnMut(&str, &Convertible<'_>) ->
     v.each_member(f)
 }
 
+#[must_use]
 pub fn to_bool(v: &Convertible<'_>) -> Option<bool> {
     v.to_bool()
 }
 
+#[must_use]
 pub fn to_number(v: &Convertible<'_>) -> Option<f32> {
     v.to_number()
 }
 
+#[must_use]
 pub fn to_double(v: &Convertible<'_>) -> Option<f64> {
     v.to_double()
 }
 
+#[must_use]
 pub fn to_string(v: &Convertible<'_>) -> Option<String> {
     v.to_string()
 }
 
+#[must_use]
 pub fn to_value(v: &Convertible<'_>) -> Option<Value> {
     v.to_value()
 }

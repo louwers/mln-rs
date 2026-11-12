@@ -93,7 +93,7 @@ pub(crate) enum UserEvent {
 }
 
 /// The messages the render thread hasn't taken yet. Sending one wakes the
-/// render thread's RunLoop.
+/// render thread's `RunLoop`.
 #[derive(Default)]
 pub(crate) struct Inbox {
     messages: Mutex<Vec<Message>>,

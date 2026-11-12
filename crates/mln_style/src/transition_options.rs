@@ -18,15 +18,18 @@ impl Default for TransitionOptions {
 }
 
 impl TransitionOptions {
+    #[must_use]
     pub fn new(duration: Option<Duration>, delay: Option<Duration>, enable_placement_transitions: bool) -> Self {
         TransitionOptions { duration, delay, enable_placement_transitions }
     }
 
     /// `TransitionOptions{{duration}}`.
+    #[must_use]
     pub fn with_duration(duration: Duration) -> Self {
         TransitionOptions::new(Some(duration), None, true)
     }
 
+    #[must_use]
     pub fn reverse_merge(&self, defaults: &TransitionOptions) -> TransitionOptions {
         TransitionOptions::new(
             if self.duration.is_some() { self.duration } else { defaults.duration },
@@ -35,10 +38,12 @@ impl TransitionOptions {
         )
     }
 
+    #[must_use]
     pub fn is_defined(&self) -> bool {
         self.duration.is_some() || self.delay.is_some()
     }
 
+    #[must_use]
     pub fn serialize(&self) -> Value {
         let mut result = ValueObject::new();
         if let Some(duration) = self.duration {

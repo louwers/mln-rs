@@ -30,26 +30,19 @@ fn canonical() {
     assert_eq!(0, id_0_0_0.x);
     assert_eq!(0, id_0_0_0.y);
 
-    assert!(c(4, 2, 3) == c(4, 2, 3));
-    assert!(!(c(4, 2, 3) != c(4, 2, 3)));
-    assert!(c(4, 2, 3) != c(5, 2, 3));
-    assert!(!(c(4, 2, 3) == c(5, 2, 3)));
-    assert!(c(4, 2, 3) != c(4, 3, 3));
-    assert!(!(c(4, 2, 3) == c(4, 3, 3)));
-    assert!(c(4, 2, 3) != c(4, 2, 4));
-    assert!(!(c(4, 2, 3) == c(4, 2, 4)));
-    assert!(c(5, 2, 3) != c(4, 2, 3));
-    assert!(!(c(5, 2, 3) == c(4, 2, 3)));
-    assert!(c(4, 3, 3) != c(4, 2, 3));
-    assert!(!(c(4, 3, 3) == c(4, 2, 3)));
-    assert!(c(4, 2, 4) != c(4, 2, 3));
-    assert!(!(c(4, 2, 4) == c(4, 2, 3)));
+    assert_eq!(c(4, 2, 3), c(4, 2, 3));
+    assert_ne!(c(4, 2, 3), c(5, 2, 3));
+    assert_ne!(c(4, 2, 3), c(4, 3, 3));
+    assert_ne!(c(4, 2, 3), c(4, 2, 4));
+    assert_ne!(c(5, 2, 3), c(4, 2, 3));
+    assert_ne!(c(4, 3, 3), c(4, 2, 3));
+    assert_ne!(c(4, 2, 4), c(4, 2, 3));
 
     assert!(c(0, 0, 0) < c(1, 0, 0));
-    assert!(!(c(1, 0, 0) < c(0, 0, 0)));
+    assert!(c(1, 0, 0) >= c(0, 0, 0));
     assert!(c(4, 2, 3) < c(4, 3, 2));
-    assert!(!(c(4, 3, 2) < c(4, 2, 3)));
-    assert!(!(c(5, 3, 6) < c(5, 3, 6)));
+    assert!(c(4, 3, 2) >= c(4, 2, 3));
+    assert!(c(5, 3, 6) >= c(5, 3, 6));
 
     let child = c(4, 2, 3);
     assert!(child.is_child_of(&c(3, 1, 1)));
@@ -62,11 +55,11 @@ fn canonical() {
     assert!(!child.is_child_of(&c(2, 1, 0)));
     assert!(!child.is_child_of(&c(1, 0, 1)));
 
-    assert_eq!(0, 4294967295u64 >> 32);
+    assert_eq!(0, 4_294_967_295_u64 >> 32);
 
-    let max_child = c(32, 4294967295, 4294967295);
-    assert!(!max_child.is_child_of(&c(32, 4294967295, 4294967295)));
-    let mut parent_xy: u32 = 2147483647;
+    let max_child = c(32, 4_294_967_295, 4_294_967_295);
+    assert!(!max_child.is_child_of(&c(32, 4_294_967_295, 4_294_967_295)));
+    let mut parent_xy: u32 = 2_147_483_647;
     for z in (1..=31u8).rev() {
         assert!(max_child.is_child_of(&c(z, parent_xy, parent_xy)), "z = {z}");
         parent_xy >>= 1;
@@ -91,22 +84,22 @@ fn canonical() {
     assert_eq!(c(14, 5120, 13312), scale_base.scaled_to(14));
     assert_eq!(c(15, 10240, 26624), scale_base.scaled_to(15));
     assert_eq!(c(16, 20480, 53248), scale_base.scaled_to(16));
-    assert_eq!(c(17, 40960, 106496), scale_base.scaled_to(17));
-    assert_eq!(c(18, 81920, 212992), scale_base.scaled_to(18));
-    assert_eq!(c(19, 163840, 425984), scale_base.scaled_to(19));
-    assert_eq!(c(20, 327680, 851968), scale_base.scaled_to(20));
-    assert_eq!(c(21, 655360, 1703936), scale_base.scaled_to(21));
-    assert_eq!(c(22, 1310720, 3407872), scale_base.scaled_to(22));
-    assert_eq!(c(23, 2621440, 6815744), scale_base.scaled_to(23));
-    assert_eq!(c(24, 5242880, 13631488), scale_base.scaled_to(24));
-    assert_eq!(c(25, 10485760, 27262976), scale_base.scaled_to(25));
-    assert_eq!(c(26, 20971520, 54525952), scale_base.scaled_to(26));
-    assert_eq!(c(27, 41943040, 109051904), scale_base.scaled_to(27));
-    assert_eq!(c(28, 83886080, 218103808), scale_base.scaled_to(28));
-    assert_eq!(c(29, 167772160, 436207616), scale_base.scaled_to(29));
-    assert_eq!(c(30, 335544320, 872415232), scale_base.scaled_to(30));
-    assert_eq!(c(31, 671088640, 1744830464), scale_base.scaled_to(31));
-    assert_eq!(c(32, 1342177280, 3489660928), scale_base.scaled_to(32));
+    assert_eq!(c(17, 40960, 106_496), scale_base.scaled_to(17));
+    assert_eq!(c(18, 81920, 212_992), scale_base.scaled_to(18));
+    assert_eq!(c(19, 163_840, 425_984), scale_base.scaled_to(19));
+    assert_eq!(c(20, 327_680, 851_968), scale_base.scaled_to(20));
+    assert_eq!(c(21, 655_360, 1_703_936), scale_base.scaled_to(21));
+    assert_eq!(c(22, 1_310_720, 3_407_872), scale_base.scaled_to(22));
+    assert_eq!(c(23, 2_621_440, 6_815_744), scale_base.scaled_to(23));
+    assert_eq!(c(24, 5_242_880, 13_631_488), scale_base.scaled_to(24));
+    assert_eq!(c(25, 10_485_760, 27_262_976), scale_base.scaled_to(25));
+    assert_eq!(c(26, 20_971_520, 54_525_952), scale_base.scaled_to(26));
+    assert_eq!(c(27, 41_943_040, 109_051_904), scale_base.scaled_to(27));
+    assert_eq!(c(28, 83_886_080, 218_103_808), scale_base.scaled_to(28));
+    assert_eq!(c(29, 167_772_160, 436_207_616), scale_base.scaled_to(29));
+    assert_eq!(c(30, 335_544_320, 872_415_232), scale_base.scaled_to(30));
+    assert_eq!(c(31, 671_088_640, 1_744_830_464), scale_base.scaled_to(31));
+    assert_eq!(c(32, 1_342_177_280, 3_489_660_928), scale_base.scaled_to(32));
 
     assert_eq!([c(5, 4, 6), c(5, 4, 7), c(5, 5, 6), c(5, 5, 7)], c(4, 2, 3).children());
     assert_eq!([c(1, 0, 0), c(1, 0, 1), c(1, 1, 0), c(1, 1, 1)], c(0, 0, 0).children());
@@ -115,43 +108,33 @@ fn canonical() {
 // gtest: TileID.Overscaled
 #[test]
 fn overscaled() {
-    assert!(o(4, 2, 3) == o(4, 2, 3));
-    assert!(!(o(4, 2, 3) != o(4, 2, 3)));
-    assert!(ow(4, 0, c(4, 2, 3)) == o(4, 2, 3));
-    assert!(!(ow(4, 0, c(4, 2, 3)) != o(4, 2, 3)));
-    assert!(o(4, 2, 3) == ow(4, 0, c(4, 2, 3)));
-    assert!(!(o(4, 2, 3) != ow(4, 0, c(4, 2, 3))));
+    assert_eq!(o(4, 2, 3), o(4, 2, 3));
+    assert_eq!(ow(4, 0, c(4, 2, 3)), o(4, 2, 3));
+    assert_eq!(o(4, 2, 3), ow(4, 0, c(4, 2, 3)));
 
-    assert!(o(4, 2, 3) != ow(5, 0, c(4, 2, 3)));
-    assert!(!(o(4, 2, 3) == ow(5, 0, c(4, 2, 3))));
-    assert!(o(4, 2, 3) != ow(6, 0, c(4, 2, 3)));
-    assert!(!(o(4, 2, 3) == ow(6, 0, c(4, 2, 3))));
-    assert!(o(4, 2, 3) != ow(7, 0, c(4, 2, 3)));
-    assert!(!(o(4, 2, 3) == ow(7, 0, c(4, 2, 3))));
+    assert_ne!(o(4, 2, 3), ow(5, 0, c(4, 2, 3)));
+    assert_ne!(o(4, 2, 3), ow(6, 0, c(4, 2, 3)));
+    assert_ne!(o(4, 2, 3), ow(7, 0, c(4, 2, 3)));
 
-    assert!(o(4, 2, 3) != o(4, 2, 4));
-    assert!(!(o(4, 2, 3) == o(4, 2, 4)));
-    assert!(o(4, 2, 3) != o(4, 3, 3));
-    assert!(!(o(4, 2, 3) == o(4, 3, 3)));
-    assert!(o(4, 2, 3) != o(5, 2, 3));
-    assert!(!(o(4, 2, 3) == o(5, 2, 3)));
+    assert_ne!(o(4, 2, 3), o(4, 2, 4));
+    assert_ne!(o(4, 2, 3), o(4, 3, 3));
+    assert_ne!(o(4, 2, 3), o(5, 2, 3));
 
-    assert!(ow(7, 0, c(4, 2, 3)) == ow(7, 0, c(4, 2, 3)));
-    assert!(!(ow(7, 0, c(4, 2, 3)) != ow(7, 0, c(4, 2, 3))));
+    assert_eq!(ow(7, 0, c(4, 2, 3)), ow(7, 0, c(4, 2, 3)));
 
-    assert!(!(o(4, 2, 3) < o(4, 2, 3)));
+    assert!(o(4, 2, 3) >= o(4, 2, 3));
     assert!(o(4, 2, 3) < ow(5, 0, c(4, 2, 3)));
-    assert!(!(ow(5, 0, c(4, 2, 3)) < o(4, 2, 3)));
+    assert!(ow(5, 0, c(4, 2, 3)) >= o(4, 2, 3));
     assert!(o(4, 2, 3) < ow(6, 0, c(4, 2, 3)));
-    assert!(!(ow(6, 0, c(4, 2, 3)) < o(4, 2, 3)));
+    assert!(ow(6, 0, c(4, 2, 3)) >= o(4, 2, 3));
     assert!(o(4, 2, 3) < ow(7, 0, c(4, 2, 3)));
-    assert!(!(ow(7, 0, c(4, 2, 3)) < o(4, 2, 3)));
+    assert!(ow(7, 0, c(4, 2, 3)) >= o(4, 2, 3));
 
     assert_eq!(8, ow(7, 0, c(4, 2, 3)).overscale_factor());
     assert_eq!(4, ow(6, 0, c(4, 2, 3)).overscale_factor());
     assert_eq!(2, ow(5, 0, c(4, 2, 3)).overscale_factor());
     assert_eq!(1, ow(4, 0, c(4, 2, 3)).overscale_factor());
-    assert_eq!(2147483648, ow(31, 0, c(0, 0, 0)).overscale_factor());
+    assert_eq!(2_147_483_648, ow(31, 0, c(0, 0, 0)).overscale_factor());
 
     assert_eq!(ow(0, 0, c(0, 0, 0)), o(4, 2, 3).scaled_to(0));
     assert_eq!(ow(1, 0, c(1, 0, 0)), o(4, 2, 3).scaled_to(1));
@@ -244,13 +227,13 @@ fn unwrapped() {
     assert_eq!(0, id_0_0_n1.canonical.y);
     assert_eq!(0, id_0_0_n1.wrap);
 
-    let id_18_262143_0 = u(18, 262143, 0);
+    let id_18_262143_0 = u(18, 262_143, 0);
     assert_eq!(18, id_18_262143_0.canonical.z);
-    assert_eq!(262143, id_18_262143_0.canonical.x);
+    assert_eq!(262_143, id_18_262143_0.canonical.x);
     assert_eq!(0, id_18_262143_0.canonical.y);
     assert_eq!(0, id_18_262143_0.wrap);
 
-    let id_18_262144_0 = u(18, 262144, 0);
+    let id_18_262144_0 = u(18, 262_144, 0);
     assert_eq!(18, id_18_262144_0.canonical.z);
     assert_eq!(0, id_18_262144_0.canonical.x);
     assert_eq!(0, id_18_262144_0.canonical.y);
@@ -265,8 +248,8 @@ fn unwrapped() {
 
     assert!(u(0, 0, 0) < u(1, 0, 0));
     assert!(u(1, 0, 0) < u(0, 1, 0));
-    assert!(!(u(0, 1, 0) < u(1, 0, 0)));
-    assert!(!(u(5, 3, 6) < u(5, 3, 6)));
+    assert!(u(0, 1, 0) >= u(1, 0, 0));
+    assert!(u(5, 3, 6) >= u(5, 3, 6));
 
     assert_eq!(ow(4, 0, c(4, 2, 3)), u(4, 2, 3).overscale_to(4));
     assert_eq!(ow(5, 0, c(4, 2, 3)), u(4, 2, 3).overscale_to(5));

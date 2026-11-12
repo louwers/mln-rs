@@ -4,7 +4,10 @@ use feature::{Feature, Identifier, PropertyMap, Value};
 use geojson::FeatureCollection;
 use geometry::{Geometry, LineString, LinearRing, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 
-use crate::types::*;
+use crate::types::{
+    BoxD, VtFeatures, VtGeometry, VtLineString, VtLinearRing, VtMultiLineString, VtMultiPoint, VtMultiPolygon, VtPoint,
+    VtPolygon, std_max, std_min,
+};
 
 /// `Tile`
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -34,6 +37,7 @@ pub struct InternalTile {
 }
 
 impl InternalTile {
+    #[must_use]
     pub fn new(source: &VtFeatures, z: u8, x: u32, y: u32, extent: u16, tolerance: f64, line_metrics: bool) -> Self {
         let mut t = InternalTile {
             extent,

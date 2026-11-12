@@ -28,10 +28,12 @@ impl SimpleIdentity {
         SimpleIdentity { unique_id: NEXT_ID.fetch_add(1, Ordering::Relaxed) }
     }
 
+    #[must_use]
     pub fn id(&self) -> i64 {
         self.unique_id
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.unique_id == Self::EMPTY_ID
     }

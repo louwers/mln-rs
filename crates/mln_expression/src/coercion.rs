@@ -22,15 +22,15 @@ use crate::value::{Value, stringify, to_string};
 
 type CoerceFunction = fn(&Value) -> EvaluationResult;
 
-fn to_boolean(v: &Value) -> EvaluationResult {
-    Ok(Value::Bool(match v {
+fn to_boolean(v: &Value) -> Value {
+    Value::Bool(match v {
         Value::Number(f) => *f != 0.0,
         Value::String(s) => !s.is_empty(),
         Value::Bool(b) => *b,
         Value::Null => false,
         Value::Image(i) => i.is_available(),
         _ => true,
-    }))
+    })
 }
 
 /// `util::stof` (`std::stof`): `strtof` on the whole string, throwing when
@@ -43,7 +43,7 @@ fn to_number(v: &Value) -> EvaluationResult {
     let result = match v {
         Value::Null => Some(0.0),
         Value::Number(f) => Some(*f),
-        Value::String(s) => stof(s).map(|f| f as f64),
+        Value::String(s) => stof(s).map(f64::from),
         _ => None,
     };
     match result {
@@ -98,10 +98,10 @@ fn to_projection_definition(value: &Value) -> EvaluationResult {
             None => error(),
         },
         Value::Array(components) => {
-            if let [Value::String(from), Value::String(to), Value::Number(transition)] = components.as_slice() {
-                if let (Some(from), Some(to)) = (projection_type_from_name(from), projection_type_from_name(to)) {
-                    return Ok(Value::ProjectionDefinition(ProjectionDefinition::between(from, to, *transition)));
-                }
+            if let [Value::String(from), Value::String(to), Value::Number(transition)] = components.as_slice()
+                && let (Some(from), Some(to)) = (projection_type_from_name(from), projection_type_from_name(to))
+            {
+                return Ok(Value::ProjectionDefinition(ProjectionDefinition::between(from, to, *transition)));
             }
             error()
         }
@@ -191,32 +191,32 @@ fn to_variable_anchor_offset(value: &Value) -> EvaluationResult {
     }
 }
 
-fn to_formatted(formatted_value: &Value) -> EvaluationResult {
-    Ok(Value::Formatted(Formatted::from_plain(&to_string(formatted_value))))
+fn to_formatted(formatted_value: &Value) -> Value {
+    Value::Formatted(Formatted::from_plain(&to_string(formatted_value)))
 }
 
-fn to_image(image_value: &Value) -> EvaluationResult {
-    Ok(Value::Image(Image::new(to_string(image_value))))
+fn to_image(image_value: &Value) -> Value {
+    Value::Image(Image::new(to_string(image_value)))
 }
 
-fn to_string_value(value: &Value) -> EvaluationResult {
-    Ok(Value::String(to_string(value)))
+fn to_string_value(value: &Value) -> Value {
+    Value::String(to_string(value))
 }
 
 fn get_coerce_function(t: &Type) -> CoerceFunction {
     match t {
-        Type::Boolean => to_boolean,
+        Type::Boolean => |v| Ok(to_boolean(v)),
         Type::Color => to_color,
         Type::Padding => to_padding,
         Type::ProjectionDefinition => to_projection_definition,
         Type::VariableAnchorOffsetCollection => to_variable_anchor_offset,
         Type::Number => to_number,
-        Type::String => to_string_value,
-        Type::Formatted => to_formatted,
-        Type::Image => to_image,
+        Type::String => |v| Ok(to_string_value(v)),
+        Type::Formatted => |v| Ok(to_formatted(v)),
+        Type::Image => |v| Ok(to_image(v)),
         _ => {
             debug_assert!(false, "no coercion to {t}");
-            to_string_value
+            |v| Ok(to_string_value(v))
         }
     }
 }
@@ -228,8 +228,9 @@ pub struct Coercion {
 }
 
 impl Coercion {
+    #[must_use]
     pub fn new(type_: Type, inputs: Vec<Box<dyn Expression>>) -> Self {
-        assert!(!inputs.is_empty());
+        assert_ne!(inputs, Vec::<Box<dyn Expression>>::new());
         // `isRuntimeConstant` does not consider values coerced to `Type`
         // image to be of `Kind` image, so we don't either (no extra
         // dependency).
@@ -310,10 +311,11 @@ impl Expression for Coercion {
         // legacy function's stop, say) makes `["to-string", "text"]`, which
         // the parser folds into the literal it coerces to itself. Writing the
         // literal makes the serialized form the one it parses back to.
-        if let [input] = self.inputs.as_slice() {
-            if input.get_kind() == Kind::Literal && input.get_type() == self.get_type() {
-                return input.serialize();
-            }
+        if let [input] = self.inputs.as_slice()
+            && input.get_kind() == Kind::Literal
+            && input.get_type() == self.get_type()
+        {
+            return input.serialize();
         }
         match self.get_type() {
             Type::Formatted => {

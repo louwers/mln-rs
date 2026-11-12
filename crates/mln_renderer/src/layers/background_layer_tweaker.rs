@@ -174,7 +174,7 @@ impl LayerTweaker for BackgroundLayerTweaker {
                         matrix: cast_matrix(&matrix),
                         pixel_coord_upper: [(pixel_x >> 16) as f32, (pixel_y >> 16) as f32],
                         pixel_coord_lower: [(pixel_x & 0xFFFF) as f32, (pixel_y & 0xFFFF) as f32],
-                        tile_units_to_pixels: if pix_to_tile != 0.0 { 1.0 / pix_to_tile } else { 0.0 },
+                        tile_units_to_pixels: if pix_to_tile == 0.0 { 0.0 } else { 1.0 / pix_to_tile },
                         pad1: 0.0,
                         pad2: 0.0,
                         pad3: 0.0,

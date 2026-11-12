@@ -67,6 +67,7 @@ impl ColorReliefLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &ColorReliefLayerImpl {
         self.base
             .base_impl

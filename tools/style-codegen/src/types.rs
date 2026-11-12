@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::spec::Property;
 
 /// `camelize`: `str.replace(/(?:^|-)(.)/g, (_, x) => x.toUpperCase())`.
+#[must_use]
 pub fn camelize(s: &str) -> String {
     let mut result = String::new();
     let mut upper_next = true;
@@ -25,6 +26,7 @@ pub fn camelize(s: &str) -> String {
 }
 
 /// `camelizeWithLeadingLowercase`: `str.replace(/-(.)/g, (_, x) => x.toUpperCase())`.
+#[must_use]
 pub fn camelize_with_leading_lowercase(s: &str) -> String {
     let mut result = String::new();
     let mut upper_next = false;
@@ -42,11 +44,13 @@ pub fn camelize_with_leading_lowercase(s: &str) -> String {
 }
 
 /// The Rust spelling of a property name (`line-gap-width` -> `line_gap_width`).
+#[must_use]
 pub fn snake(s: &str) -> String {
     s.replace('-', "_")
 }
 
 /// `isOverridable`.
+#[must_use]
 pub fn is_overridable(property: &Property) -> bool {
     ["text-color"].contains(&property.name.as_str())
 }
@@ -75,6 +79,7 @@ pub enum EvaluatedType {
 }
 
 impl EvaluatedType {
+    #[must_use]
     pub fn cpp(&self) -> String {
         match self {
             EvaluatedType::Bool => "bool".into(),
@@ -94,6 +99,7 @@ impl EvaluatedType {
         }
     }
 
+    #[must_use]
     pub fn rust(&self) -> String {
         match self {
             EvaluatedType::Bool => "bool".into(),
@@ -206,6 +212,7 @@ fn evaluated_type_of(q: &TypeQuery<'_>) -> EvaluatedType {
 }
 
 /// `evaluatedType(property)`.
+#[must_use]
 pub fn evaluated_type(property: &Property) -> EvaluatedType {
     evaluated_type_of(&TypeQuery {
         name: Some(&property.name),
@@ -220,6 +227,7 @@ pub fn evaluated_type(property: &Property) -> EvaluatedType {
 
 /// `evaluatedType({type, name: undefined})`, used by `formatNumber` /
 /// `defaultValue` for array elements.
+#[must_use]
 pub fn evaluated_type_unnamed(type_: &str) -> EvaluatedType {
     evaluated_type_of(&TypeQuery {
         name: None,
@@ -234,6 +242,7 @@ pub fn evaluated_type_unnamed(type_: &str) -> EvaluatedType {
 
 /// `expressionType(property)` (the `expression::type` of an overridable
 /// property), as the Rust `Type` expression.
+#[must_use]
 pub fn expression_type_rust(type_: &str, value: Option<&str>) -> String {
     match type_ {
         "boolean" => "Type::Boolean".into(),
@@ -271,7 +280,7 @@ pub fn attribute_uniform_type(property: &Property, layer_type: &str) -> String {
         ("fill-extrusion-pattern", &["pattern_to", "pattern_from"]),
     ];
     let names: Vec<String> = match exceptions.iter().find(|(n, _)| *n == property.name) {
-        Some((_, names)) => names.iter().map(|s| s.to_string()).collect(),
+        Some((_, names)) => names.iter().map(std::string::ToString::to_string).collect(),
         // `property.name.replace(type + '-', '').replace(/-/g, '_')`: the
         // first occurrence only.
         None => vec![property.name.replacen(&format!("{layer_type}-"), "", 1).replace('-', "_")],
@@ -281,15 +290,18 @@ pub fn attribute_uniform_type(property: &Property, layer_type: &str) -> String {
 
 /// `property['property-type']` is data-driven for `convert<>` and the layout
 /// property kind.
+#[must_use]
 pub fn is_data_driven(property: &Property) -> bool {
     matches!(property.property_type(), Some("data-driven" | "cross-faded-data-driven"))
 }
 
+#[must_use]
 pub fn is_color_ramp(property: &Property) -> bool {
     property.property_type() == Some("color-ramp")
 }
 
 /// `layoutPropertyType(property)` (C++ spelling, for comments).
+#[must_use]
 pub fn layout_property_type_cpp(property: &Property) -> String {
     if is_data_driven(property) {
         format!("DataDrivenLayoutProperty<{}>", evaluated_type(property).cpp())
@@ -300,6 +312,7 @@ pub fn layout_property_type_cpp(property: &Property) -> String {
 
 /// `paintPropertyType(property, type)` (C++ spelling, for comments). The
 /// color-ramp case is the template's `ColorRampProperty`.
+#[must_use]
 pub fn paint_property_type_cpp(property: &Property, layer_type: &str) -> String {
     let t = || evaluated_type(property).cpp();
     match property.property_type() {
@@ -320,6 +333,7 @@ pub fn paint_property_type_cpp(property: &Property, layer_type: &str) -> String 
 }
 
 /// `propertyValueType(property)` in Rust.
+#[must_use]
 pub fn property_value_type(property: &Property) -> String {
     if is_color_ramp(property) {
         "ColorRampPropertyValue".into()

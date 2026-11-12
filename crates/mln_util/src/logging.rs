@@ -9,6 +9,7 @@
 // `FixtureLog` pattern (a process-wide observer) needs per-thread capture.
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::sync::RwLock;
 
 use crate::sync::RwLockExt;
@@ -104,6 +105,7 @@ impl Log {
 
     /// Rust addition (see the file comment): an observer for the calling
     /// thread only. Returns the previous one.
+    #[must_use]
     pub fn set_thread_observer(observer: Option<Box<dyn Observer>>) -> Option<Box<dyn Observer>> {
         THREAD_OBSERVER.with(|o| std::mem::replace(&mut *o.borrow_mut(), observer))
     }
@@ -128,6 +130,7 @@ impl Log {
     /// (`disabledEventPermutations = {{Debug, Shader}}`; Debug is disabled in
     /// release builds).
     pub fn record(severity: EventSeverity, event: Event, code: i64, msg: &str) {
+        use crate::enum_::Enum;
         if !cfg!(debug_assertions) && severity == EventSeverity::Debug {
             return;
         }
@@ -151,7 +154,6 @@ impl Log {
             }
         }
 
-        use crate::enum_::Enum;
         let mut log_stream = String::new();
         log_stream.push('{');
         log_stream.push_str(std::thread::current().name().unwrap_or(""));
@@ -160,7 +162,7 @@ impl Log {
         log_stream.push_str(event.to_string());
         log_stream.push(']');
         if code >= 0 {
-            log_stream.push_str(&format!("({code})"));
+            let _ = write!(log_stream, "({code})");
         }
         if !msg.is_empty() {
             log_stream.push_str(": ");
@@ -169,7 +171,7 @@ impl Log {
         Self::platform_record(severity, &log_stream);
     }
 
-    /// platform/default/src/mln/util/logging_stderr.cpp.
+    /// `platform/default/src/mln/util/logging_stderr.cpp`.
     fn platform_record(severity: EventSeverity, msg: &str) {
         use crate::enum_::Enum;
         eprintln!("[{}] {}", severity.to_string(), msg);

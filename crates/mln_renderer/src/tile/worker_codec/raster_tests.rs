@@ -62,8 +62,8 @@ fn fixture(path: &str) -> Data {
 /// made from it has no two equal edges.
 fn png(width: u32, height: u32) -> Data {
     let mut image = PremultipliedImage::new(Size::new(width, height));
-    for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
-        pixel.copy_from_slice(&[(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255]);
+    for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+        *pixel = [(i % 251) as u8, (i / 7 % 253) as u8, (i * 3 % 255) as u8, 255];
     }
     Arc::new(mln_image::encode_png(&image))
 }
@@ -86,12 +86,12 @@ fn raster_through_codec(data: Option<Data>) -> RasterTileMessage {
     };
     let sink = Sink::new();
     let mut worker = RasterTileWorker::new(Box::new(sink.clone()));
-    let request = map.raster_message(TILE, RasterWorkerMessage::Parse { data, correlation_id: CORRELATION_ID });
+    let request = map.raster_message(TILE, &RasterWorkerMessage::Parse { data, correlation_id: CORRELATION_ID });
     let WorkerAction::Message { tile: TILE, message, .. } = worker_codec.decode(&request).unwrap() else {
         panic!("not a message");
     };
     worker.handle(worker_codec.decode_message(&message).unwrap());
-    let reply = worker_codec.encode_raster(TILE, sink.take());
+    let reply = worker_codec.encode_raster(TILE, &sink.take());
     let Some((TILE, Reply::Raster(message))) = map.decode(reply).unwrap() else {
         panic!("not a raster tile message");
     };
@@ -118,12 +118,12 @@ fn raster_dem_through_codec(data: Option<Data>, encoding: RasterEncoding) -> Ras
     let sink = Sink::new();
     let mut worker = RasterDEMTileWorker::new(Box::new(sink.clone()));
     let request =
-        map.raster_dem_message(TILE, RasterDEMWorkerMessage::Parse { data, correlation_id: CORRELATION_ID, encoding });
+        map.raster_dem_message(TILE, &RasterDEMWorkerMessage::Parse { data, correlation_id: CORRELATION_ID, encoding });
     let WorkerAction::Message { tile: TILE, message, .. } = worker_codec.decode(&request).unwrap() else {
         panic!("not a message");
     };
     worker.handle(worker_codec.decode_message(&message).unwrap());
-    let reply = worker_codec.encode_raster_dem(TILE, sink.take());
+    let reply = worker_codec.encode_raster_dem(TILE, &sink.take());
     let Some((TILE, Reply::RasterDEM(message))) = map.decode(reply).unwrap() else {
         panic!("not a raster-dem tile message");
     };
@@ -193,8 +193,8 @@ fn raster_dem_tiles_cross() {
         // backfilled from the other.
         let other = |pixels: &[u8]| -> Data {
             let mut image = PremultipliedImage::new(Size::new(16, 16));
-            for (i, pixel) in image.data.chunks_exact_mut(4).enumerate() {
-                pixel.copy_from_slice(&[pixels[0], (i % 256) as u8, pixels[1], 255]);
+            for (i, pixel) in image.data.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+                *pixel = [pixels[0], (i % 256) as u8, pixels[1], 255];
             }
             Arc::new(mln_image::encode_png(&image))
         };
@@ -318,7 +318,7 @@ fn large_arrays_travel_as_payloads() {
     let mut map = MapCodec::new();
     map.create_raster(TILE);
     let pixels = vec![7; 64 * 64 * 4];
-    let encoded = WorkerCodec::new().encode_raster(TILE, parsed(pixels.clone(), 64));
+    let encoded = WorkerCodec::new().encode_raster(TILE, &parsed(pixels.clone(), 64));
     assert_eq!(encoded.payloads, [pixels.clone().into()]);
     assert!(encoded.bytes.len() < 64);
     assert_eq!(decoded(&mut map, encoded.clone()), pixels);
@@ -327,7 +327,7 @@ fn large_arrays_travel_as_payloads() {
         panic!("not an error for the tile");
     };
 
-    let encoded = WorkerCodec::new().encode_raster(TILE, parsed(vec![1; 4], 1));
-    assert!(encoded.payloads.is_empty());
+    let encoded = WorkerCodec::new().encode_raster(TILE, &parsed(vec![1; 4], 1));
+    assert_eq!(encoded.payloads.as_slice(), []);
     assert_eq!(decoded(&mut map, encoded), vec![1; 4]);
 }

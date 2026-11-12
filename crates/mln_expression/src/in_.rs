@@ -34,6 +34,7 @@ pub struct In {
 }
 
 impl In {
+    #[must_use]
     pub fn new(needle: Box<dyn Expression>, haystack: Box<dyn Expression>) -> Self {
         debug_assert!(is_comparable_type(needle.get_type()));
         debug_assert!(is_searchable_type(haystack.get_type()));

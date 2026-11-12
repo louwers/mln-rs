@@ -38,12 +38,12 @@ pub fn req() -> Req {
     Rc::new(RefCell::new(None))
 }
 
-/// Serializes the tests that use process-wide state (NetworkStatus, the
+/// Serializes the tests that use process-wide state (`NetworkStatus`, the
 /// log observer): gtest runs one test at a time, the Rust harness runs them
 /// in parallel.
 pub fn serial() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
-    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A path of the C++ repository, in the copy of its files these tests read
@@ -121,7 +121,7 @@ impl Observer for Recorder {
     }
 }
 
-/// `FixtureLog` (test/src/mln/test/fixture_log_observer.cpp) for the
+/// `FixtureLog` (`test/src/mln/test/fixture_log_observer.cpp`) for the
 /// calling thread.
 pub struct FixtureLog {
     messages: Arc<Mutex<Vec<(Message, bool)>>>,
@@ -130,7 +130,7 @@ pub struct FixtureLog {
 impl FixtureLog {
     pub fn new() -> Self {
         let messages = Arc::new(Mutex::new(Vec::new()));
-        Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
@@ -163,12 +163,12 @@ impl FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        Log::set_thread_observer(None);
+        let _ = Log::set_thread_observer(None);
     }
 }
 
 pub fn error(code: i32, msg: &str) -> Message {
-    Message { severity: EventSeverity::Error, event: Event::Database, code: code as i64, msg: msg.to_owned() }
+    Message { severity: EventSeverity::Error, event: Event::Database, code: i64::from(code), msg: msg.to_owned() }
 }
 
 pub fn warning(code: i64, msg: &str) -> Message {
@@ -186,7 +186,7 @@ impl Mt19937 {
         let mut mt = [0u32; 624];
         mt[0] = seed;
         for i in 1..624 {
-            mt[i] = 1812433253u32.wrapping_mul(mt[i - 1] ^ (mt[i - 1] >> 30)).wrapping_add(i as u32);
+            mt[i] = 1_812_433_253_u32.wrapping_mul(mt[i - 1] ^ (mt[i - 1] >> 30)).wrapping_add(i as u32);
         }
         Mt19937 { mt, index: 624 }
     }
@@ -212,7 +212,7 @@ impl Mt19937 {
     }
 }
 
-/// `randomString(size)` (offline_database.test.cpp, offline_download.test.cpp):
+/// `randomString(size)` (`offline_database.test.cpp`, `offline_download.test.cpp)`:
 /// the low byte of each `std::mt19937` draw.
 pub fn random_string(size: usize) -> crate::response::Data {
     let mut random = Mt19937::new(5489);
@@ -246,7 +246,7 @@ fn mt19937_matches_the_standard() {
     for _ in 0..10000 {
         value = random.next_u32();
     }
-    assert_eq!(4123659995, value);
+    assert_eq!(4_123_659_995, value);
 }
 
 thread_local! {

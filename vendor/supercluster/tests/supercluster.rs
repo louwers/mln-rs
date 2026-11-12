@@ -151,7 +151,7 @@ fn test_3_map_reduce() {
     let index3 = Supercluster::new(&features, sum_options(None)).unwrap();
 
     let tile3 = index3.get_tile(0, 0, 0);
-    assert!(!tile3.is_empty());
+    assert_ne!(tile3, [] as [feature::Feature<i16>; 0]);
     assert!(tile3[0].properties.contains_key("sum"));
     assert_eq!(uint(&tile3[0].properties, "sum"), 69);
 }

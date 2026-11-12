@@ -1,4 +1,4 @@
-//! Test helpers: the C++ `FixtureLog` (per thread, see mln_util::logging)
+//! Test helpers: the C++ `FixtureLog` (per thread, see `mln_util::logging`)
 //! and `convertJSON`.
 
 use std::sync::{Arc, Mutex};
@@ -30,7 +30,7 @@ pub struct FixtureLog {
 impl FixtureLog {
     pub fn new() -> Self {
         let messages = Arc::new(Mutex::new(Vec::new()));
-        Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
@@ -65,7 +65,7 @@ impl FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        Log::set_thread_observer(None);
+        let _ = Log::set_thread_observer(None);
     }
 }
 
@@ -89,7 +89,7 @@ pub fn parse_json(json: &str) -> serde_json::Value {
 
 pub use mln_conversion::value_to_json;
 
-/// Ports test/include/mln/test/stub_geometry_tile_feature.hpp.
+/// Ports `test/include/mln/test/stub_geometry_tile_feature.hpp`.
 pub struct StubGeometryTileFeature {
     pub properties: feature::PropertyMap,
     pub id: feature::Identifier,
@@ -103,7 +103,7 @@ impl StubGeometryTileFeature {
             properties,
             id: feature::Identifier::Null,
             type_: mln_util::geometry::FeatureType::Point,
-            geometry: Default::default(),
+            geometry: mln_tile_id::geometry_tile_data::GeometryCollection::default(),
         }
     }
 
@@ -112,7 +112,12 @@ impl StubGeometryTileFeature {
         type_: mln_util::geometry::FeatureType,
         geometry: mln_tile_id::geometry_tile_data::GeometryCollection,
     ) -> Self {
-        StubGeometryTileFeature { properties: Default::default(), id: feature::Identifier::Null, type_, geometry }
+        StubGeometryTileFeature {
+            properties: feature::PropertyMap::default(),
+            id: feature::Identifier::Null,
+            type_,
+            geometry,
+        }
     }
 
     /// `StubGeometryTileFeature(id, type, geometry, properties)` (no geometry).
@@ -121,7 +126,12 @@ impl StubGeometryTileFeature {
         type_: mln_util::geometry::FeatureType,
         properties: feature::PropertyMap,
     ) -> Self {
-        StubGeometryTileFeature { properties, id, type_, geometry: Default::default() }
+        StubGeometryTileFeature {
+            properties,
+            id,
+            type_,
+            geometry: mln_tile_id::geometry_tile_data::GeometryCollection::default(),
+        }
     }
 }
 

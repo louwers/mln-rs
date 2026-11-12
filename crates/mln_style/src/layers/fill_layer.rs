@@ -38,6 +38,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -45,12 +46,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct FillLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl FillLayer {
     /// `FillLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         FillLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -58,16 +60,19 @@ impl FillLayer {
     }
 
     /// `FillLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         FillLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -78,10 +83,12 @@ impl FillLayer {
 
     // Layout properties
 
+    #[must_use]
     pub fn get_default_fill_sort_key() -> PropertyValue<f32> {
         PropertyValue::Constant(FillSortKey::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_sort_key(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<FillSortKey>()
     }
@@ -97,10 +104,12 @@ impl FillLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_fill_antialias() -> PropertyValue<bool> {
         PropertyValue::Constant(FillAntialias::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_antialias(&self) -> &PropertyValue<bool> {
         &self.impl_().paint.get::<FillAntialias>().value
     }
@@ -120,14 +129,17 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_antialias_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillAntialias>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_color() -> PropertyValue<Color> {
         PropertyValue::Constant(FillColor::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<FillColor>().value
     }
@@ -147,14 +159,17 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillColor>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(FillOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<FillOpacity>().value
     }
@@ -174,14 +189,17 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_outline_color() -> PropertyValue<Color> {
         PropertyValue::Constant(FillOutlineColor::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_outline_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<FillOutlineColor>().value
     }
@@ -201,14 +219,17 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_outline_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillOutlineColor>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_pattern() -> PropertyValue<Image> {
         PropertyValue::Constant(FillPattern::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_pattern(&self) -> &PropertyValue<Image> {
         &self.impl_().paint.get::<FillPattern>().value
     }
@@ -228,14 +249,17 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_pattern_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillPattern>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_translate() -> PropertyValue<[f32; 2]> {
         PropertyValue::Constant(FillTranslate::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<FillTranslate>().value
     }
@@ -255,14 +279,17 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillTranslate>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_translate_anchor() -> PropertyValue<TranslateAnchorType> {
         PropertyValue::Constant(FillTranslateAnchor::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<FillTranslateAnchor>().value
     }
@@ -282,6 +309,7 @@ impl FillLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillTranslateAnchor>().options
     }
@@ -292,40 +320,40 @@ const K_PAINT_PROPERTY_COUNT: u8 = 14;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
-    FillAntialias,
-    FillColor,
-    FillOpacity,
-    FillOutlineColor,
-    FillPattern,
-    FillTranslate,
-    FillTranslateAnchor,
-    FillAntialiasTransition,
-    FillColorTransition,
-    FillOpacityTransition,
-    FillOutlineColorTransition,
-    FillPatternTransition,
-    FillTranslateTransition,
-    FillTranslateAnchorTransition,
-    FillSortKey = K_PAINT_PROPERTY_COUNT,
+    Antialias,
+    Color,
+    Opacity,
+    OutlineColor,
+    Pattern,
+    Translate,
+    TranslateAnchor,
+    AntialiasTransition,
+    ColorTransition,
+    OpacityTransition,
+    OutlineColorTransition,
+    PatternTransition,
+    TranslateTransition,
+    TranslateAnchorTransition,
+    SortKey = K_PAINT_PROPERTY_COUNT,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
-    ("fill-antialias", Property::FillAntialias),
-    ("fill-color", Property::FillColor),
-    ("fill-opacity", Property::FillOpacity),
-    ("fill-outline-color", Property::FillOutlineColor),
-    ("fill-pattern", Property::FillPattern),
-    ("fill-translate", Property::FillTranslate),
-    ("fill-translate-anchor", Property::FillTranslateAnchor),
-    ("fill-antialias-transition", Property::FillAntialiasTransition),
-    ("fill-color-transition", Property::FillColorTransition),
-    ("fill-opacity-transition", Property::FillOpacityTransition),
-    ("fill-outline-color-transition", Property::FillOutlineColorTransition),
-    ("fill-pattern-transition", Property::FillPatternTransition),
-    ("fill-translate-transition", Property::FillTranslateTransition),
-    ("fill-translate-anchor-transition", Property::FillTranslateAnchorTransition),
-    ("fill-sort-key", Property::FillSortKey),
+    ("fill-antialias", Property::Antialias),
+    ("fill-color", Property::Color),
+    ("fill-opacity", Property::Opacity),
+    ("fill-outline-color", Property::OutlineColor),
+    ("fill-pattern", Property::Pattern),
+    ("fill-translate", Property::Translate),
+    ("fill-translate-anchor", Property::TranslateAnchor),
+    ("fill-antialias-transition", Property::AntialiasTransition),
+    ("fill-color-transition", Property::ColorTransition),
+    ("fill-opacity-transition", Property::OpacityTransition),
+    ("fill-outline-color-transition", Property::OutlineColorTransition),
+    ("fill-pattern-transition", Property::PatternTransition),
+    ("fill-translate-transition", Property::TranslateTransition),
+    ("fill-translate-anchor-transition", Property::TranslateAnchorTransition),
+    ("fill-sort-key", Property::SortKey),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -334,25 +362,23 @@ fn find_property(name: &str) -> Option<Property> {
 
 fn get_layer_property(layer: &FillLayer, property: Property) -> StyleProperty {
     match property {
-        Property::FillAntialias => make_style_property(layer.get_fill_antialias()),
-        Property::FillColor => make_style_property(layer.get_fill_color()),
-        Property::FillOpacity => make_style_property(layer.get_fill_opacity()),
-        Property::FillOutlineColor => make_style_property(layer.get_fill_outline_color()),
-        Property::FillPattern => make_style_property(layer.get_fill_pattern()),
-        Property::FillTranslate => make_style_property(layer.get_fill_translate()),
-        Property::FillTranslateAnchor => make_style_property(layer.get_fill_translate_anchor()),
-        Property::FillAntialiasTransition => make_transition_style_property(&layer.get_fill_antialias_transition()),
-        Property::FillColorTransition => make_transition_style_property(&layer.get_fill_color_transition()),
-        Property::FillOpacityTransition => make_transition_style_property(&layer.get_fill_opacity_transition()),
-        Property::FillOutlineColorTransition => {
-            make_transition_style_property(&layer.get_fill_outline_color_transition())
-        }
-        Property::FillPatternTransition => make_transition_style_property(&layer.get_fill_pattern_transition()),
-        Property::FillTranslateTransition => make_transition_style_property(&layer.get_fill_translate_transition()),
-        Property::FillTranslateAnchorTransition => {
+        Property::Antialias => make_style_property(layer.get_fill_antialias()),
+        Property::Color => make_style_property(layer.get_fill_color()),
+        Property::Opacity => make_style_property(layer.get_fill_opacity()),
+        Property::OutlineColor => make_style_property(layer.get_fill_outline_color()),
+        Property::Pattern => make_style_property(layer.get_fill_pattern()),
+        Property::Translate => make_style_property(layer.get_fill_translate()),
+        Property::TranslateAnchor => make_style_property(layer.get_fill_translate_anchor()),
+        Property::AntialiasTransition => make_transition_style_property(&layer.get_fill_antialias_transition()),
+        Property::ColorTransition => make_transition_style_property(&layer.get_fill_color_transition()),
+        Property::OpacityTransition => make_transition_style_property(&layer.get_fill_opacity_transition()),
+        Property::OutlineColorTransition => make_transition_style_property(&layer.get_fill_outline_color_transition()),
+        Property::PatternTransition => make_transition_style_property(&layer.get_fill_pattern_transition()),
+        Property::TranslateTransition => make_transition_style_property(&layer.get_fill_translate_transition()),
+        Property::TranslateAnchorTransition => {
             make_transition_style_property(&layer.get_fill_translate_anchor_transition())
         }
-        Property::FillSortKey => make_style_property(layer.get_fill_sort_key()),
+        Property::SortKey => make_style_property(layer.get_fill_sort_key()),
     }
 }
 
@@ -404,7 +430,7 @@ impl Layer for FillLayer {
             )));
         };
 
-        if property == Property::FillAntialias {
+        if property == Property::Antialias {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<bool>(value, &mut error, false, false) else {
                 return Some(error);
@@ -414,41 +440,41 @@ impl Layer for FillLayer {
             return None;
         }
 
-        if property == Property::FillColor || property == Property::FillOutlineColor {
+        if property == Property::Color || property == Property::OutlineColor {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Color>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::FillColor {
+            if property == Property::Color {
                 self.set_fill_color(&typed_value);
                 return None;
             }
 
-            if property == Property::FillOutlineColor {
+            if property == Property::OutlineColor {
                 self.set_fill_outline_color(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::FillOpacity || property == Property::FillSortKey {
+        if property == Property::Opacity || property == Property::SortKey {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::FillOpacity {
+            if property == Property::Opacity {
                 self.set_fill_opacity(&typed_value);
                 return None;
             }
 
-            if property == Property::FillSortKey {
+            if property == Property::SortKey {
                 self.set_fill_sort_key(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::FillPattern {
+        if property == Property::Pattern {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Image>(value, &mut error, true, false) else {
                 return Some(error);
@@ -458,7 +484,7 @@ impl Layer for FillLayer {
             return None;
         }
 
-        if property == Property::FillTranslate {
+        if property == Property::Translate {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<[f32; 2]>(value, &mut error, false, false) else {
                 return Some(error);
@@ -468,7 +494,7 @@ impl Layer for FillLayer {
             return None;
         }
 
-        if property == Property::FillTranslateAnchor {
+        if property == Property::TranslateAnchor {
             let mut error = Error::default();
             let Some(typed_value) =
                 convert_property_value::<TranslateAnchorType>(value, &mut error, false, false)
@@ -485,37 +511,37 @@ impl Layer for FillLayer {
             return Some(error);
         };
 
-        if property == Property::FillAntialiasTransition {
+        if property == Property::AntialiasTransition {
             self.set_fill_antialias_transition(&transition);
             return None;
         }
 
-        if property == Property::FillColorTransition {
+        if property == Property::ColorTransition {
             self.set_fill_color_transition(&transition);
             return None;
         }
 
-        if property == Property::FillOpacityTransition {
+        if property == Property::OpacityTransition {
             self.set_fill_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::FillOutlineColorTransition {
+        if property == Property::OutlineColorTransition {
             self.set_fill_outline_color_transition(&transition);
             return None;
         }
 
-        if property == Property::FillPatternTransition {
+        if property == Property::PatternTransition {
             self.set_fill_pattern_transition(&transition);
             return None;
         }
 
-        if property == Property::FillTranslateTransition {
+        if property == Property::TranslateTransition {
             self.set_fill_translate_transition(&transition);
             return None;
         }
 
-        if property == Property::FillTranslateAnchorTransition {
+        if property == Property::TranslateAnchorTransition {
             self.set_fill_translate_anchor_transition(&transition);
             return None;
         }

@@ -30,34 +30,38 @@ pub struct CanonicalTileID {
 }
 
 impl CanonicalTileID {
+    #[must_use]
     pub fn new(z: u8, x: u32, y: u32) -> Self {
         debug_assert!(z <= 32);
-        debug_assert!((x as u64) < (1u64 << z));
-        debug_assert!((y as u64) < (1u64 << z));
+        debug_assert!(u64::from(x) < (1u64 << z));
+        debug_assert!(u64::from(y) < (1u64 << z));
         CanonicalTileID { z, x, y }
     }
 
+    #[must_use]
     pub fn is_child_of(&self, parent: &CanonicalTileID) -> bool {
         // We're first testing for z == 0, to avoid a 32 bit shift, which is
         // undefined.
         parent.z == 0
             || (parent.z < self.z
-                && parent.x == self.x.wrapping_shr((self.z - parent.z) as u32)
-                && parent.y == self.y.wrapping_shr((self.z - parent.z) as u32))
+                && parent.x == self.x.wrapping_shr(u32::from(self.z - parent.z))
+                && parent.y == self.y.wrapping_shr(u32::from(self.z - parent.z)))
     }
 
+    #[must_use]
     pub fn scaled_to(&self, target_z: u8) -> CanonicalTileID {
         if target_z <= self.z {
             // parent or same
-            let shift = (self.z as i32 - target_z as i32) as u32;
+            let shift = (i32::from(self.z) - i32::from(target_z)) as u32;
             CanonicalTileID::new(target_z, self.x.wrapping_shr(shift), self.y.wrapping_shr(shift))
         } else {
             // child
-            let shift = (target_z as i32 - self.z as i32) as u32;
+            let shift = (i32::from(target_z) - i32::from(self.z)) as u32;
             CanonicalTileID::new(target_z, self.x.wrapping_shl(shift), self.y.wrapping_shl(shift))
         }
     }
 
+    #[must_use]
     pub fn children(&self) -> [CanonicalTileID; 4] {
         let child_z = self.z.wrapping_add(1);
         let child_x = self.x.wrapping_mul(2);
@@ -90,6 +94,7 @@ pub struct OverscaledTileID {
 
 impl OverscaledTileID {
     /// `OverscaledTileID(uint8_t overscaledZ, int16_t wrap, CanonicalTileID)`.
+    #[must_use]
     pub fn new(overscaled_z: u8, wrap: i16, canonical: CanonicalTileID) -> Self {
         debug_assert!(overscaled_z >= canonical.z);
         OverscaledTileID { overscaled_z, wrap, canonical }
@@ -97,25 +102,30 @@ impl OverscaledTileID {
 
     /// `OverscaledTileID(uint8_t overscaledZ, int16_t wrap, uint8_t z,
     /// uint32_t x, uint32_t y)`.
+    #[must_use]
     pub fn with_zxy(overscaled_z: u8, wrap: i16, z: u8, x: u32, y: u32) -> Self {
         Self::new(overscaled_z, wrap, CanonicalTileID::new(z, x, y))
     }
 
     /// `OverscaledTileID(uint8_t z, uint32_t x, uint32_t y)`.
+    #[must_use]
     pub fn from_zxy(z: u8, x: u32, y: u32) -> Self {
         OverscaledTileID { overscaled_z: z, wrap: 0, canonical: CanonicalTileID::new(z, x, y) }
     }
 
+    #[must_use]
     pub fn overscale_factor(&self) -> u32 {
-        1u32.wrapping_shl((self.overscaled_z as i32 - self.canonical.z as i32) as u32)
+        1u32.wrapping_shl((i32::from(self.overscaled_z) - i32::from(self.canonical.z)) as u32)
     }
 
+    #[must_use]
     pub fn is_child_of(&self, rhs: &OverscaledTileID) -> bool {
         self.wrap == rhs.wrap
             && self.overscaled_z > rhs.overscaled_z
             && (self.canonical == rhs.canonical || self.canonical.is_child_of(&rhs.canonical))
     }
 
+    #[must_use]
     pub fn scaled_to(&self, z: u8) -> OverscaledTileID {
         OverscaledTileID::new(
             z,
@@ -124,10 +134,12 @@ impl OverscaledTileID {
         )
     }
 
+    #[must_use]
     pub fn to_unwrapped(&self) -> UnwrappedTileID {
         UnwrappedTileID::with_wrap(self.wrap, self.canonical)
     }
 
+    #[must_use]
     pub fn unwrap_to(&self, new_wrap: i16) -> OverscaledTileID {
         OverscaledTileID::new(self.overscaled_z, new_wrap, self.canonical)
     }
@@ -159,14 +171,15 @@ pub struct UnwrappedTileID {
 
 impl UnwrappedTileID {
     /// `UnwrappedTileID(uint8_t z, int64_t x, int64_t y)`.
+    #[must_use]
     pub fn new(z: u8, x: i64, y: i64) -> Self {
-        let dim = 1i64.wrapping_shl(z as u32);
+        let dim = 1i64.wrapping_shl(u32::from(z));
         let wrap = ((if x < 0 { x - dim + 1 } else { x }) / dim) as i16;
-        let canonical_x = (x - (wrap as i64) * dim) as u32;
+        let canonical_x = (x - i64::from(wrap) * dim) as u32;
         let canonical_y = if y < 0 {
             0
         } else {
-            let max = (1u64.wrapping_shl(z as u32) as u32).wrapping_sub(1);
+            let max = (1u64.wrapping_shl(u32::from(z)) as u32).wrapping_sub(1);
             let y = y as u32;
             if max < y { max } else { y }
         };
@@ -174,14 +187,17 @@ impl UnwrappedTileID {
     }
 
     /// `UnwrappedTileID(int16_t wrap, CanonicalTileID)`.
+    #[must_use]
     pub const fn with_wrap(wrap: i16, canonical: CanonicalTileID) -> Self {
         UnwrappedTileID { wrap, canonical }
     }
 
+    #[must_use]
     pub fn is_child_of(&self, parent: &UnwrappedTileID) -> bool {
         self.wrap == parent.wrap && self.canonical.is_child_of(&parent.canonical)
     }
 
+    #[must_use]
     pub fn children(&self) -> [UnwrappedTileID; 4] {
         let child_z = self.canonical.z.wrapping_add(1);
         let child_x = self.canonical.x.wrapping_mul(2);
@@ -197,16 +213,20 @@ impl UnwrappedTileID {
         ]
     }
 
+    #[must_use]
     pub fn overscale_to(&self, overscaled_z: u8) -> OverscaledTileID {
         debug_assert!(overscaled_z >= self.canonical.z);
         OverscaledTileID::new(overscaled_z, self.wrap, self.canonical)
     }
 
+    #[must_use]
     pub fn pixels_to_tile_units(&self, pixel_value: f32, zoom: f32) -> f32 {
         pixel_value
-            * (constants::EXTENT as f32 / (constants::TILE_SIZE as f32 * 2.0f32.powf(zoom - self.canonical.z as f32)))
+            * (constants::EXTENT as f32
+                / (constants::TILE_SIZE as f32 * 2.0f32.powf(zoom - f32::from(self.canonical.z))))
     }
 
+    #[must_use]
     pub fn unwrap_to(&self, new_wrap: i16) -> UnwrappedTileID {
         UnwrappedTileID::with_wrap(new_wrap, self.canonical)
     }

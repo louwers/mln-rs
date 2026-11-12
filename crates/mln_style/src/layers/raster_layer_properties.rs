@@ -110,6 +110,7 @@ impl RasterLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &RasterLayerImpl {
         self.base
             .base_impl

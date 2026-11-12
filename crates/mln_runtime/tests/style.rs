@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use mln_runtime::{CustomSourceCallbacks, ErrorKind, GeoJsonSourceOptions, Map, ResourceRequest, SourceKind};
 use mln_storage::response::Reason;
 use mln_storage::{ResourceError, Response};
+use mln_style::sources::TileDataFormat;
 use mln_style::sources::custom_geometry_source::TileOptions;
 use mln_style_types::{ProjectionDefinition, ProjectionType};
 use mln_util::geo::LatLng;
@@ -88,7 +89,7 @@ fn a_geojson_source_reports_the_options_its_data_needs() {
     assert!(properties.contains("\"total\""), "{properties}");
 
     // The reported properties parse back into the same expressions.
-    let wrapper = format!(r#"{{"type":"geojson","data":"fixture://copy.geojson","clusterProperties":{}}}"#, properties);
+    let wrapper = format!(r#"{{"type":"geojson","data":"fixture://copy.geojson","clusterProperties":{properties}}}"#);
     wait(map.add_style_source_json("copy", wrapper));
     let copy = wait(map.style_source("copy")).unwrap().geojson.unwrap();
     assert_eq!(copy.cluster_properties, options.cluster_properties);
@@ -316,7 +317,7 @@ fn tile_commands_check_the_kind_of_their_source() {
     let tile = mln_tile_id::CanonicalTileID::new(0, 0, 0);
     wait(map.set_custom_geometry_source_tile_data("geometry", tile, r#"{"type":"Point","coordinates":[0,0]}"#));
     wait(map.invalidate_custom_geometry_source_tile("geometry", tile));
-    let wrong = wait_err(map.set_custom_vector_source_tile_data("geometry", tile, None, Default::default()));
+    let wrong = wait_err(map.set_custom_vector_source_tile_data("geometry", tile, None, TileDataFormat::default()));
     assert_eq!(wrong.message, "source \"geometry\" is not a custom vector source");
     let invalid = wait_err(map.set_custom_geometry_source_tile_data("geometry", tile, "{"));
     assert_eq!(invalid.kind, ErrorKind::InvalidArgument);

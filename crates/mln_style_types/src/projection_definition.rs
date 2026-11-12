@@ -22,6 +22,7 @@ const VERTICAL_PERSPECTIVE_NAME: &str = "vertical-perspective";
 const GLOBE_NAME: &str = "globe";
 
 /// `projectionTypeName`.
+#[must_use]
 pub fn projection_type_name(type_: ProjectionType) -> &'static str {
     match type_ {
         ProjectionType::Mercator => MERCATOR_NAME,
@@ -31,6 +32,7 @@ pub fn projection_type_name(type_: ProjectionType) -> &'static str {
 }
 
 /// `projectionTypeFromName`.
+#[must_use]
 pub fn projection_type_from_name(name: &str) -> Option<ProjectionType> {
     match name {
         MERCATOR_NAME => Some(ProjectionType::Mercator),
@@ -63,22 +65,26 @@ impl Default for ProjectionDefinition {
 
 impl ProjectionDefinition {
     /// `explicit ProjectionDefinition(ProjectionType)`.
+    #[must_use]
     pub fn new(type_: ProjectionType) -> Self {
         ProjectionDefinition { from: type_, to: type_, transition: 1.0 }
     }
 
     /// `ProjectionDefinition(ProjectionType from, ProjectionType to, double transition)`.
+    #[must_use]
     pub fn between(from: ProjectionType, to: ProjectionType, transition: f64) -> Self {
         ProjectionDefinition { from, to, transition }
     }
 
     /// `explicit ProjectionDefinition(std::string_view)`; asserts the name is
     /// one of `projection_type_name`'s.
+    #[must_use]
     pub fn from_name(name: &str) -> Self {
         ProjectionDefinition::new(type_from_name_or_mercator(name))
     }
 
     /// `ProjectionDefinition(std::string_view from, std::string_view to, double transition)`.
+    #[must_use]
     pub fn between_names(from: &str, to: &str, transition: f64) -> Self {
         ProjectionDefinition::between(type_from_name_or_mercator(from), type_from_name_or_mercator(to), transition)
     }
@@ -87,12 +93,13 @@ impl ProjectionDefinition {
     /// `globe` is the vertical perspective up to zoom 11 and Mercator from
     /// zoom 12, blended in between, at either end of a definition, and each
     /// end counts with its share of the globe at the zoom.
+    #[must_use]
     pub fn at_zoom(&self, zoom: f64) -> ProjectionDefinition {
+        const GLOBE_TO_MERCATOR_START_ZOOM: f64 = 11.0;
+        const GLOBE_TO_MERCATOR_END_ZOOM: f64 = 12.0;
         if self.from != ProjectionType::Globe && self.to != ProjectionType::Globe {
             return *self;
         }
-        const GLOBE_TO_MERCATOR_START_ZOOM: f64 = 11.0;
-        const GLOBE_TO_MERCATOR_END_ZOOM: f64 = 12.0;
         let globe_share = 1.0
             - ((zoom - GLOBE_TO_MERCATOR_START_ZOOM) / (GLOBE_TO_MERCATOR_END_ZOOM - GLOBE_TO_MERCATOR_START_ZOOM))
                 .clamp(0.0, 1.0);
@@ -117,6 +124,7 @@ impl ProjectionDefinition {
 
     /// How far the definition is toward the globe: 0 is Mercator, 1 the globe
     /// (GL JS `GlobeProjection.transitionState`).
+    #[must_use]
     pub fn transition_state(&self) -> f64 {
         let is_globe = |type_: ProjectionType| type_ != ProjectionType::Mercator;
         if self.from == self.to {
@@ -134,6 +142,7 @@ impl ProjectionDefinition {
         1.0
     }
 
+    #[must_use]
     pub fn serialize(&self) -> Value {
         if self.from == self.to && self.transition == 1.0 {
             return Value::String(projection_type_name(self.from).to_owned());

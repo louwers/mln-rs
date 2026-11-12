@@ -117,6 +117,7 @@ impl FillLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &FillLayerImpl {
         self.base
             .base_impl

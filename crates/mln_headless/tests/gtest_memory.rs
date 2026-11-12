@@ -131,12 +131,6 @@ fn get_current_rss() -> usize {
 // gtest: Memory.Footprint
 #[test]
 fn footprint() {
-    if !should_run_footprint() {
-        return;
-    }
-
-    let test = MemoryTest::new();
-
     struct FrontendAndMap {
         _map: Map,
         _frontend: HeadlessFrontend,
@@ -152,6 +146,12 @@ fn footprint() {
             FrontendAndMap { _map: map, _frontend: frontend }
         }
     }
+
+    if !should_run_footprint() {
+        return;
+    }
+
+    let test = MemoryTest::new();
 
     // Warm up buffers and cache.
     for _ in 0..10 {
@@ -171,20 +171,20 @@ fn footprint() {
         maps.push(FrontendAndMap::new(&test, "maptiler://maps/streets"));
     }
 
-    let vector_footprint = (get_current_rss() as f64 - vector_initial_rss as f64) / runs as f64;
+    let vector_footprint = (get_current_rss() as f64 - vector_initial_rss as f64) / f64::from(runs);
 
     let raster_initial_rss = get_current_rss();
     for _ in 0..runs {
         maps.push(FrontendAndMap::new(&test, "maptiler://maps/hybrid"));
     }
 
-    let raster_footprint = (get_current_rss() as f64 - raster_initial_rss as f64) / runs as f64;
+    let raster_footprint = (get_current_rss() as f64 - raster_initial_rss as f64) / f64::from(runs);
 
     // RecordProperty("vectorFootprint"/"rasterFootprint", ...)
     eprintln!("vectorFootprint={} rasterFootprint={}", vector_footprint as i64, raster_footprint as i64);
 
-    assert!(vector_footprint < (40 * 1024 * 1024) as f64, "mln::Map footprint over 65.2MB for vector styles.");
-    assert!(raster_footprint < (25 * 1024 * 1024) as f64, "mln::Map footprint over 25MB for raster styles.");
+    assert!(vector_footprint < f64::from(40 * 1024 * 1024), "mln::Map footprint over 65.2MB for vector styles.");
+    assert!(raster_footprint < f64::from(25 * 1024 * 1024), "mln::Map footprint over 25MB for raster styles.");
 }
 
 /// The live-resource counters of the frontend's context, by name.

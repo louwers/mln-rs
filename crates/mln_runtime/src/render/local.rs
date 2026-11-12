@@ -244,17 +244,20 @@ impl LocalTarget {
     }
 
     /// The device the target renders on.
+    #[must_use]
     pub fn device(&self) -> &Device {
         &self.device
     }
 
     /// The backend that renderers drawing into the target draw with.
+    #[must_use]
     pub fn backend(&self) -> Rc<dyn RendererBackend> {
         self.backend.as_dyn()
     }
 
     /// The frames to draw into, or `None` while a surface target has no
     /// surface.
+    #[must_use]
     pub fn frames(&self) -> Option<&dyn FrameTarget> {
         match &self.frames {
             Frames::Offscreen(target) => Some(&**target),
@@ -263,6 +266,7 @@ impl LocalTarget {
     }
 
     /// Whether frames are read back rather than presented.
+    #[must_use]
     pub fn is_offscreen(&self) -> bool {
         matches!(self.frames, Frames::Offscreen(_))
     }

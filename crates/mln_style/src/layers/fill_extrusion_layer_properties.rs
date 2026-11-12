@@ -124,6 +124,7 @@ impl FillExtrusionLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &FillExtrusionLayerImpl {
         self.base
             .base_impl

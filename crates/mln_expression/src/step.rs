@@ -5,7 +5,7 @@ use feature::Value as MbglValue;
 use mln_conversion::Convertible;
 
 use crate::expression::{
-    EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
+    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
 };
 use crate::interpolate::parse_stop_label;
 use crate::parsing_context::{ParseResult, ParsingContext};
@@ -21,12 +21,14 @@ pub struct Step {
 }
 
 impl Step {
+    #[must_use]
     pub fn new(type_: Type, input: Box<dyn Expression>, stops: Stops) -> Self {
-        assert!(*input.get_type() == Type::Number);
-        let deps = input.dependencies() | stops.values().fold(Default::default(), |a, e| a | e.dependencies());
+        assert_eq!(*input.get_type(), Type::Number);
+        let deps = input.dependencies() | stops.values().fold(Dependency::NONE, |a, e| a | e.dependencies());
         Step { base: ExpressionBase::new(Kind::Step, type_, deps), input, stops }
     }
 
+    #[must_use]
     pub fn get_stop_count(&self) -> usize {
         self.stops.len()
     }
@@ -37,10 +39,12 @@ impl Step {
         }
     }
 
+    #[must_use]
     pub fn get_input(&self) -> &dyn Expression {
         &*self.input
     }
 
+    #[must_use]
     pub fn get_covering_stops(&self, lower: f64, upper: f64) -> Range<f32> {
         get_covering_stops(&self.stops, lower, upper)
     }
@@ -56,7 +60,7 @@ impl Step {
         }
 
         // [step, input, firstOutput_value, 2 * (n pairs)...]
-        if (length - 1) % 2 != 0 {
+        if !(length - 1).is_multiple_of(2) {
             ctx.error("Expected an even number of arguments.".to_owned());
             return None;
         }
@@ -65,10 +69,10 @@ impl Step {
 
         let mut stops = Stops::new();
         let mut output_type: Option<Type> = None;
-        if let Some(expected) = ctx.get_expected() {
-            if expected != Type::Value {
-                output_type = Some(expected);
-            }
+        if let Some(expected) = ctx.get_expected()
+            && expected != Type::Value
+        {
+            output_type = Some(expected);
         }
 
         let mut previous = f64::NEG_INFINITY;
@@ -134,7 +138,7 @@ impl Expression for Step {
             return Err(EvaluationError::new("No stops in step curve."));
         }
 
-        let it = self.stops.upper_bound(x as f64);
+        let it = self.stops.upper_bound(f64::from(x));
         if it == self.stops.len() {
             self.stops.get(self.stops.len() - 1).1.evaluate(params)
         } else if it == 0 {

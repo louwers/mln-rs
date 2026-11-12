@@ -12,7 +12,7 @@ use crate::file_source_request::FileSourceRequestState;
 use crate::response::{Reason, ResourceError, Response};
 
 /// `util::pathFromUTF8`: the path bytes as they are (POSIX paths are bytes;
-/// on other platforms invalid UTF-8 is an error, as std::filesystem's UTF-8
+/// on other platforms invalid UTF-8 is an error, as `std::filesystem`'s UTF-8
 /// conversion throws there).
 pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
     #[cfg(unix)]
@@ -30,29 +30,27 @@ pub fn path_from_utf8(path: &[u8]) -> Result<PathBuf, String> {
 /// bytes (`second - first + 1` of them, zero-padded past the end as the C++
 /// `std::string data(size, '\0')` is), or `None` when the file can't be
 /// opened. A range too large to allocate (e.g. from a corrupt PMTiles
-/// header) is `None` too; C++ throws std::length_error or std::bad_alloc,
+/// header) is `None` too; C++ throws `std::length_error` or `std::bad_alloc`,
 /// uncaught.
+#[must_use]
 pub fn read_file(path: &std::path::Path, data_range: Option<(u64, u64)>) -> Option<Vec<u8>> {
     let mut file = std::fs::File::open(path).ok()?;
-    match data_range {
-        Some((first, second)) => {
-            let size = second.wrapping_sub(first).wrapping_add(1);
-            let mut data = Vec::new();
-            data.try_reserve_exact(usize::try_from(size).ok()?).ok()?;
-            if file.seek(SeekFrom::Start(first)).is_ok() {
-                // A read error stops the read, as in C++.
-                let _ = (&mut file).take(size).read_to_end(&mut data);
-            }
-            data.resize(size as usize, 0);
-            Some(data)
+    if let Some((first, second)) = data_range {
+        let size = second.wrapping_sub(first).wrapping_add(1);
+        let mut data = Vec::new();
+        data.try_reserve_exact(usize::try_from(size).ok()?).ok()?;
+        if file.seek(SeekFrom::Start(first)).is_ok() {
+            // A read error stops the read, as in C++.
+            let _ = (&mut file).take(size).read_to_end(&mut data);
         }
-        None => {
-            let mut data = Vec::new();
-            // `data << file.rdbuf()`: a read error (e.g. a directory) stops
-            // the copy.
-            let _ = file.read_to_end(&mut data);
-            Some(data)
-        }
+        data.resize(size as usize, 0);
+        Some(data)
+    } else {
+        let mut data = Vec::new();
+        // `data << file.rdbuf()`: a read error (e.g. a directory) stops
+        // the copy.
+        let _ = file.read_to_end(&mut data);
+        Some(data)
     }
 }
 

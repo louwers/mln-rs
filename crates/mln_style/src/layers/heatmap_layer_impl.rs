@@ -17,6 +17,7 @@ pub struct Impl {
 
 impl Impl {
     /// `using Layer::Impl::Impl;` (`Impl(std::string layerID, std::string sourceID)`).
+    #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         Impl { base: ImplBase::new(layer_id, source_id), paint: HeatmapPaintProperties::Transitionable::default() }
     }

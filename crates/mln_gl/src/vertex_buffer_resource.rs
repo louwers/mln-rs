@@ -124,6 +124,7 @@ impl IndexBufferResource {
     }
 
     /// `getBuffer()`
+    #[must_use]
     pub fn get_buffer(&self) -> Option<BufferID> {
         self.buffer
     }

@@ -42,15 +42,18 @@ pub struct Impl {
 
 impl Impl {
     /// `Impl(SourceType, std::string id, uint16_t tileSize)`.
+    #[must_use]
     pub fn new(source_type: SourceType, id: String, tile_size: u16) -> Self {
         Impl { base: ImplBase::new(source_type, id), tileset: None, tile_size }
     }
 
     /// `Impl(const Impl&, Tileset)`.
+    #[must_use]
     pub fn with_tileset(other: &Impl, tileset: Tileset) -> Self {
         Impl { base: other.base.clone(), tileset: Some(tileset), tile_size: other.tile_size }
     }
 
+    #[must_use]
     pub fn get_tile_size(&self) -> u16 {
         self.tile_size
     }
@@ -77,7 +80,7 @@ pub enum UrlOrTileset {
     Tileset(Tileset),
 }
 
-/// The C++ subclass a TileSource is (observers get the most derived type).
+/// The C++ subclass a `TileSource` is (observers get the most derived type).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Subclass {
     Vector(VectorEncoding),
@@ -92,7 +95,7 @@ struct Overrides {
     subclass: Subclass,
     /// `supportsLayerType`: the tile kind of the layers the source serves.
     tile_kind: TileKind,
-    /// VectorSource's `maxZoom` / `minZoom`, or RasterSource's `maxzoomOverride` /
+    /// `VectorSource`'s `maxZoom` / `minZoom`, or `RasterSource`'s `maxzoomOverride` /
     /// `minzoomOverride` (`setTilesetOverrides`).
     max_zoom: Option<f32>,
     min_zoom: Option<f32>,
@@ -146,14 +149,17 @@ impl TileSource {
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         static_immutable_cast::<Impl>(&self.inner.base.base_impl())
     }
 
+    #[must_use]
     pub fn get_url_or_tileset(&self) -> &UrlOrTileset {
         &self.inner.url_or_tileset
     }
 
+    #[must_use]
     pub fn get_url(&self) -> Option<String> {
         match &self.inner.url_or_tileset {
             UrlOrTileset::Url(url) => Some(url.clone()),
@@ -161,6 +167,7 @@ impl TileSource {
         }
     }
 
+    #[must_use]
     pub fn get_tile_size(&self) -> u16 {
         self.impl_().get_tile_size()
     }
@@ -171,7 +178,7 @@ impl TileSource {
         self.inner.empty_response.set(empty_response);
     }
 
-    /// `setTilesetOverrides(Tileset&)`: VectorSource's and RasterSource's zoom
+    /// `setTilesetOverrides(Tileset&)`: `VectorSource`'s and `RasterSource`'s zoom
     /// overrides; the base class has none.
     fn set_tileset_overrides(&self, tileset: &mut Tileset) {
         let overrides = &self.inner.overrides;
@@ -190,7 +197,7 @@ impl TileSource {
 }
 
 /// Calls `f` with the source as its most derived type (C++ `*this` in a
-/// VectorSource / RasterSource member).
+/// `VectorSource` / `RasterSource` member).
 fn with_derived(this: &TileSource, f: impl FnOnce(&dyn Source)) {
     match this.inner.overrides.subclass {
         Subclass::Vector(encoding) => f(&VectorSource { tile_source: this.clone(), encoding }),
@@ -201,7 +208,7 @@ fn with_derived(this: &TileSource, f: impl FnOnce(&dyn Source)) {
 }
 
 /// `loadDescription`'s response handler.
-fn on_description_response(weak: &Weak<Inner>, res: Response) {
+fn on_description_response(weak: &Weak<Inner>, res: &Response) {
     let Some(inner) = weak.upgrade() else {
         return;
     };
@@ -209,7 +216,7 @@ fn on_description_response(weak: &Weak<Inner>, res: Response) {
     with_derived(&this, |derived| on_description_response_for(&this, derived, res));
 }
 
-fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: Response) {
+fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: &Response) {
     let observer = this.inner.base.observer();
     let this_source = derived;
     if let Some(error) = &res.error {
@@ -277,7 +284,7 @@ impl Source for TileSource {
 
         let weak = Rc::downgrade(&self.inner);
         let req = file_source
-            .request(&Resource::source(&url), Box::new(move |res: Response| on_description_response(&weak, res)));
+            .request(&Resource::source(&url), Box::new(move |res: Response| on_description_response(&weak, &res)));
         *self.inner.req.borrow_mut() = Some(req);
     }
 
@@ -324,11 +331,13 @@ impl VectorSource {
         }
     }
 
+    #[must_use]
     pub fn tile_source(&self) -> &TileSource {
         &self.tile_source
     }
 
     /// Gets the tile urls for this vector source.
+    #[must_use]
     pub fn get_tiles(&self) -> Vec<String> {
         match &self.tile_source.impl_().tileset {
             Some(tileset) => tileset.tiles.clone(),
@@ -352,6 +361,7 @@ impl VectorSource {
         self.tile_source.inner.base.observer().on_source_changed(self);
     }
 
+    #[must_use]
     pub fn get_encoding(&self) -> VectorEncoding {
         self.encoding
     }
@@ -414,6 +424,7 @@ impl RasterSource {
         }
     }
 
+    #[must_use]
     pub fn tile_source(&self) -> &TileSource {
         &self.tile_source
     }
@@ -443,7 +454,7 @@ impl Source for RasterSource {
 
 // dem-heatmap: ports include/mln/style/sources/raster_dem_source.hpp and
 // src/mln/style/sources/raster_dem_source.cpp.
-/// `style::RasterDEMSource` (a RasterSource serving `TileKind::RasterDEM`).
+/// `style::RasterDEMSource` (a `RasterSource` serving `TileKind::RasterDEM`).
 #[derive(Clone, Debug)]
 pub struct RasterDEMSource {
     tile_source: TileSource,
@@ -474,6 +485,7 @@ impl RasterDEMSource {
         }
     }
 
+    #[must_use]
     pub fn tile_source(&self) -> &TileSource {
         &self.tile_source
     }

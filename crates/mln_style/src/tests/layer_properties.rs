@@ -1,4 +1,4 @@
-//! `getEvaluated` / `getCrossfade` (include/mln/style/layer_properties.hpp)
+//! `getEvaluated` / `getCrossfade` (`include/mln/style/layer_properties.hpp`)
 //! on a real `BackgroundLayerProperties` behind `Immutable<LayerProperties>`.
 //! No C++ gtest; the renderer reads evaluated properties this way.
 
@@ -13,9 +13,11 @@ use crate::layers::{BackgroundLayerProperties, BackgroundPaintProperties};
 use crate::renderer::property_evaluation_parameters::CrossfadeParameters;
 
 fn background_properties() -> Immutable<dyn LayerProperties> {
-    let mut evaluated = BackgroundPaintProperties::PossiblyEvaluated::default();
-    evaluated.background_color = Color::new(0.25, 0.5, 0.75, 1.0);
-    evaluated.background_opacity = 0.5;
+    let evaluated = BackgroundPaintProperties::PossiblyEvaluated {
+        background_color: Color::new(0.25, 0.5, 0.75, 1.0),
+        background_opacity: 0.5,
+        ..BackgroundPaintProperties::PossiblyEvaluated::default()
+    };
     let crossfade = CrossfadeParameters { from_scale: 2.0, to_scale: 1.0, t: 0.25 };
     let impl_ = Arc::new(BackgroundLayerImpl::new("background".to_owned(), String::new()));
     Arc::new(BackgroundLayerProperties::with_evaluated(impl_, crossfade, evaluated))

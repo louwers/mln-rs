@@ -25,6 +25,7 @@ pub struct TileCache {
 
 impl TileCache {
     /// `TileCache(const TaggedScheduler&, size_t size = 0)`.
+    #[must_use]
     pub fn new(thread_pool: TaggedScheduler, size: usize) -> Self {
         TileCache {
             tiles: BTreeMap::new(),
@@ -57,6 +58,7 @@ impl TileCache {
     }
 
     /// Get the maximum size
+    #[must_use]
     pub fn get_max_size(&self) -> usize {
         self.size
     }
@@ -123,10 +125,12 @@ impl TileCache {
         Some(tile)
     }
 
+    #[must_use]
     pub fn get(&self, key: &OverscaledTileID) -> Option<&dyn Tile> {
-        self.tiles.get(key).map(|t| t.as_ref())
+        self.tiles.get(key).map(AsRef::as_ref)
     }
 
+    #[must_use]
     pub fn has(&self, key: &OverscaledTileID) -> bool {
         self.tiles.contains_key(key)
     }
@@ -162,6 +166,7 @@ impl TileCache {
     }
 
     /// The cached tile ids (oldest first), for tests.
+    #[must_use]
     pub fn ordered_keys(&self) -> &[OverscaledTileID] {
         &self.ordered_keys
     }
@@ -198,10 +203,10 @@ mod tests {
     }
 
     impl VectorTileMock {
-        fn new(id: OverscaledTileID) -> Box<VectorTileMock> {
+        fn new(id: OverscaledTileID) -> VectorTileMock {
             let base = TileBase::new(Kind::Geometry, id, "source".to_owned(), None);
             base.renderable.set(true);
-            Box::new(VectorTileMock { base, unique_id: SimpleIdentity::new(), necessity: Rc::default() })
+            VectorTileMock { base, unique_id: SimpleIdentity::new(), necessity: Rc::default() }
         }
     }
 
@@ -237,7 +242,7 @@ mod tests {
         let id = OverscaledTileID::with_zxy(2, 0, 2, 1, 1);
         let tile = VectorTileMock::new(id);
         tile.base.renderable.set(false);
-        cache.add(id, tile);
+        cache.add(id, Box::new(tile));
 
         let other_wrap = OverscaledTileID::with_zxy(2, 1, 2, 1, 1);
         let tile = cache.pop_any_wrap(&other_wrap).expect("the tile, under another wrap");
@@ -253,7 +258,7 @@ mod tests {
         let id = OverscaledTileID::from_zxy(0, 0, 0);
         let tile = VectorTileMock::new(id);
 
-        cache.add(id, tile);
+        cache.add(id, Box::new(tile));
         assert!(cache.has(&id));
         cache.clear();
         assert!(!cache.has(&id));
@@ -272,23 +277,23 @@ mod tests {
         let tile1_id = tile1.unique_id;
 
         // add
-        cache.add(id0, tile1);
+        cache.add(id0, Box::new(tile1));
         assert!(cache.has(&id0));
 
         // adding a key already present doesn't replace the existing item
-        cache.add(id0, tile2);
+        cache.add(id0, Box::new(tile2));
         let cached = cache.get(&id0).unwrap().as_any().downcast_ref::<VectorTileMock>().unwrap();
         assert_eq!(tile1_id, cached.unique_id);
 
         // Evict on add
         cache.set_size(1);
-        cache.add(id1, tile3);
+        cache.add(id1, Box::new(tile3));
         assert!(!cache.has(&id0));
         assert!(cache.has(&id1));
 
         // Evict due to size limit change
         cache.set_size(2);
-        cache.add(id0, tile4);
+        cache.add(id0, Box::new(tile4));
         assert!(cache.has(&id0));
         assert!(cache.has(&id1));
         cache.set_size(1);
@@ -310,8 +315,8 @@ mod tests {
         let loaded_tile = VectorTileMock::new(loaded);
         let loaded_necessity = loaded_tile.necessity.clone();
 
-        cache.add(loading, loading_tile);
-        cache.add(loaded, loaded_tile);
+        cache.add(loading, Box::new(loading_tile));
+        cache.add(loaded, Box::new(loaded_tile));
         assert!(cache.has(&loading));
         assert_eq!(None, loading_necessity.get());
 

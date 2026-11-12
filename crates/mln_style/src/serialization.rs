@@ -159,7 +159,7 @@ impl Kind for SharedLayerProperties {
 
 /// `#[serde(with)]` for an `Immutable<dyn Layer::Impl>`.
 pub mod shared_layer {
-    use super::*;
+    use super::{Arc, Deserializer, Impl, Serializer, SharedLayer, shared};
 
     pub fn serialize<S: Serializer>(impl_: &Arc<dyn Impl>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize::<SharedLayer, S>(impl_, serializer)
@@ -172,7 +172,7 @@ pub mod shared_layer {
 
 /// `#[serde(with)]` for an `Immutable<dyn LayerProperties>`.
 pub mod shared_layer_properties {
-    use super::*;
+    use super::{Arc, Deserializer, LayerProperties, Serializer, SharedLayerProperties, shared};
 
     pub fn serialize<S: Serializer>(properties: &Arc<dyn LayerProperties>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize::<SharedLayerProperties, S>(properties, serializer)
@@ -235,7 +235,7 @@ pub fn parse(json: &Value, type_: Type) -> Result<Box<dyn Expression>, String> {
 
 /// `#[serde(with)]` for an `Arc<dyn Expression>`.
 pub mod shared_expression {
-    use super::*;
+    use super::{Arc, Deserializer, Expression, Serializer, SharedExpression, shared};
 
     pub fn serialize<S: Serializer>(expression: &Arc<dyn Expression>, serializer: S) -> Result<S::Ok, S::Error> {
         shared::serialize::<SharedExpression, S>(expression, serializer)
@@ -247,7 +247,7 @@ pub mod shared_expression {
 
     /// `#[serde(with)]` for an `Option<Arc<dyn Expression>>`.
     pub mod option {
-        use super::*;
+        use super::{Arc, Deserializer, Expression, Serializer, SharedExpression, shared};
 
         pub fn serialize<S: Serializer>(
             expression: &Option<Arc<dyn Expression>>,

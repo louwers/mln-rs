@@ -126,16 +126,15 @@ fn process_hot_pixel_edges_at_top_of_scanbeam(
 /// `insert_local_minima_into_ABL_hot_pixel`.
 fn insert_local_minima_into_abl_hot_pixel(
     top_y: i32,
-    minima: &[LocalMinimum],
-    minima_sorted: &[usize],
+    minima_sorted: &[&LocalMinimum],
     lm: &mut usize,
     active_bounds: &mut Vec<BoundPtr>,
     b: &mut [Bound],
     manager: &mut RingManager,
     scanbeam: &mut Vec<i32>,
 ) {
-    while *lm != minima_sorted.len() && minima[minima_sorted[*lm]].y == top_y {
-        let m = &minima[minima_sorted[*lm]];
+    while *lm != minima_sorted.len() && minima_sorted[*lm].y == top_y {
+        let m = minima_sorted[*lm];
         add_to_hot_pixels(b[m.left_bound].edges[0].bot, manager);
         for bound in [m.left_bound, m.right_bound] {
             let bnd = &mut b[bound];
@@ -162,8 +161,8 @@ pub(crate) fn build_hot_pixels(minima: &[LocalMinimum], b: &mut [Bound], manager
     let mut scanbeam: Vec<i32> = Vec::new();
     let mut scanline_y = i32::MAX;
 
-    let mut minima_sorted: Vec<usize> = (0..minima.len()).collect();
-    minima_sorted.sort_by(|&a, &c| local_minimum_sorter(&minima[a], &minima[c]));
+    let mut minima_sorted: Vec<&LocalMinimum> = minima.iter().collect();
+    minima_sorted.sort_by(|a, c| local_minimum_sorter(a, c));
     let mut current_lm = 0;
 
     setup_scanbeam(minima, &mut scanbeam);
@@ -185,7 +184,6 @@ pub(crate) fn build_hot_pixels(minima: &[LocalMinimum], b: &mut [Bound], manager
 
         insert_local_minima_into_abl_hot_pixel(
             scanline_y,
-            minima,
             &minima_sorted,
             &mut current_lm,
             &mut active_bounds,

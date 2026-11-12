@@ -25,13 +25,13 @@ fn mbtiles_file_source() -> MBTilesFileSource {
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
-fn request(fs: &MBTilesFileSource, resource: Resource) -> Response {
+fn request(fs: &MBTilesFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &resource,
+        resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
             *out.borrow_mut() = Some(res);
@@ -58,7 +58,7 @@ fn accepts_url() {
 #[test]
 fn absolute_path() {
     let mbtiles = mbtiles_file_source();
-    let res = request(&mbtiles, Resource::new(Kind::Unknown, "mbtiles://not_absolute"));
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, "mbtiles://not_absolute"));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(error.message.contains("absolute"));
@@ -70,7 +70,7 @@ fn absolute_path() {
 #[test]
 fn empty_path() {
     let mbtiles = mbtiles_file_source();
-    let res = request(&mbtiles, Resource::new(Kind::Unknown, "mbtiles://"));
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, "mbtiles://"));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(error.message.contains("absolute"));
@@ -81,7 +81,7 @@ fn empty_path() {
 #[test]
 fn non_existent_file() {
     let mbtiles = mbtiles_file_source();
-    let res = request(&mbtiles, Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(error.message.contains("path not found"));
@@ -94,7 +94,7 @@ fn non_existent_file() {
 fn not_a_database() {
     let mbtiles = mbtiles_file_source();
     let path = cpp_path("test/fixtures/storage/pmtiles/geography-class-png.pmtiles");
-    let res = request(&mbtiles, Resource::new(Kind::Unknown, format!("mbtiles://{}", path.display())));
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, format!("mbtiles://{}", path.display())));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(res.data.is_none());
@@ -115,7 +115,7 @@ fn bad_metadata() {
         .expect("create the database");
 
     let mbtiles = mbtiles_file_source();
-    let res = request(&mbtiles, Resource::new(Kind::Unknown, format!("mbtiles://{path}")));
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, format!("mbtiles://{path}")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(res.data.is_none());
@@ -126,7 +126,7 @@ fn bad_metadata() {
 #[test]
 fn tile_json() {
     let mbtiles = mbtiles_file_source();
-    let res = request(&mbtiles, Resource::new(Kind::Unknown, to_absolute_url("geography-class-png.mbtiles")));
+    let res = request(&mbtiles, &Resource::new(Kind::Unknown, to_absolute_url("geography-class-png.mbtiles")));
     assert_eq!(None, res.error);
     let data = res.data.expect("data");
     // basic test that TileJSON included a tile URL
@@ -140,7 +140,7 @@ fn tile() {
     let mbtiles = mbtiles_file_source();
     let res = request(
         &mbtiles,
-        Resource::tile(
+        &Resource::tile(
             &to_absolute_url("geography-class-png.mbtiles?file={z}/{x}/{y}.png"),
             1.0,
             0,
@@ -162,7 +162,7 @@ fn non_existent_tile() {
     let mbtiles = mbtiles_file_source();
     let res = request(
         &mbtiles,
-        Resource::tile(
+        &Resource::tile(
             &to_absolute_url("geography-class-png.mbtiles?file={z}/{x}/{y}.png"),
             1.0,
             0,
@@ -184,7 +184,7 @@ fn non_existent_file_tile() {
     let mbtiles = mbtiles_file_source();
     let res = request(
         &mbtiles,
-        Resource::tile(
+        &Resource::tile(
             &to_absolute_url("does_not_exist?file={z}/{x}/{y}.png"),
             1.0,
             0,

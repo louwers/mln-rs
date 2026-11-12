@@ -34,10 +34,12 @@ impl Property {
     }
 
     /// `property.default` (None when the key is absent, i.e. `undefined`).
+    #[must_use]
     pub fn default(&self) -> Option<&Value> {
         self.spec.get("default")
     }
 
+    #[must_use]
     pub fn period(&self) -> Option<&Value> {
         self.spec.get("period")
     }

@@ -1,6 +1,8 @@
 // Ports expression-test/expression_test_runner.hpp and
 // expression-test/expression_test_runner.cpp (minus UPDATE mode).
 
+use std::fmt::Write;
+
 use feature::{Value, ValueObject};
 use mln_expression::Expression;
 use mln_expression::expression::{evaluate_feature_with_canonical, evaluate_feature_with_images};
@@ -30,6 +32,7 @@ pub struct TestStats {
 }
 
 impl TestStats {
+    #[must_use]
     pub fn test_count(&self) -> usize {
         self.passed.len() + self.failed.len() + self.errored.len() + self.ignore_passed.len() + self.ignore_failed.len()
     }
@@ -59,10 +62,10 @@ fn simple_diff(result: &Value, expected: &Value) -> String {
             break;
         }
 
-        if result_tokens[i] != expected_tokens[i] {
-            diff += &format!("-{}\n+{}\n", expected_tokens[i], result_tokens[i]);
+        if result_tokens[i] == expected_tokens[i] {
+            let _ = writeln!(diff, "{}", result_tokens[i]);
         } else {
-            diff += &format!("{}\n", result_tokens[i]);
+            let _ = writeln!(diff, "-{}\n+{}", expected_tokens[i], result_tokens[i]);
         }
     }
     diff
@@ -153,15 +156,17 @@ pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
 
     let null = Value::Null;
     if !compile_ok {
-        output.text += &format!(
-            "Compiled expression difference:\n{}\n",
+        let _ = writeln!(
+            output.text,
+            "Compiled expression difference:\n{}",
             simple_diff(&compiled_to_value(&data.result.compiled), &compiled_to_value(&data.expected.compiled))
         );
     }
 
     if compile_ok && !serialization_ok {
-        output.text += &format!(
-            "Serialized expression difference:\n{}\n",
+        let _ = writeln!(
+            output.text,
+            "Serialized expression difference:\n{}",
             simple_diff(
                 data.expected.serialized.as_ref().unwrap_or(&null),
                 data.result.serialized.as_ref().unwrap_or(&null)
@@ -170,22 +175,25 @@ pub fn run_expression_test(data: &mut TestData, id: &str) -> TestRunOutput {
     }
 
     if compile_ok && !recompile_ok {
-        output.text += &format!(
-            "Recompiled expression difference:\n{}\n",
+        let _ = writeln!(
+            output.text,
+            "Recompiled expression difference:\n{}",
             simple_diff(&compiled_to_value(&data.recompiled.compiled), &compiled_to_value(&data.expected.compiled))
         );
     }
 
     if compile_ok && !eval_ok {
-        output.text += &format!(
-            "Expression outputs difference:\n{}\n",
+        let _ = writeln!(
+            output.text,
+            "Expression outputs difference:\n{}",
             simple_diff(data.expected.outputs.as_ref().unwrap_or(&null), data.result.outputs.as_ref().unwrap_or(&null))
         );
     }
 
     if recompile_ok && !round_trip_ok {
-        output.text += &format!(
-            "Roundtripped through serialize expression outputs difference:\n{}\n",
+        let _ = writeln!(
+            output.text,
+            "Roundtripped through serialize expression outputs difference:\n{}",
             simple_diff(
                 data.expected.outputs.as_ref().unwrap_or(&null),
                 data.recompiled.outputs.as_ref().unwrap_or(&null)

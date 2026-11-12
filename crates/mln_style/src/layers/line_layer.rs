@@ -40,6 +40,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -47,12 +48,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct LineLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl LineLayer {
     /// `LineLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         LineLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -60,16 +62,19 @@ impl LineLayer {
     }
 
     /// `LineLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         LineLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -80,10 +85,12 @@ impl LineLayer {
 
     // Layout properties
 
+    #[must_use]
     pub fn get_default_line_cap() -> PropertyValue<LineCapType> {
         PropertyValue::Constant(LineCap::default_value())
     }
 
+    #[must_use]
     pub fn get_line_cap(&self) -> &PropertyValue<LineCapType> {
         self.impl_().layout.get::<LineCap>()
     }
@@ -97,10 +104,12 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_default_line_join() -> PropertyValue<LineJoinType> {
         PropertyValue::Constant(LineJoin::default_value())
     }
 
+    #[must_use]
     pub fn get_line_join(&self) -> &PropertyValue<LineJoinType> {
         self.impl_().layout.get::<LineJoin>()
     }
@@ -114,10 +123,12 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_default_line_miter_limit() -> PropertyValue<f32> {
         PropertyValue::Constant(LineMiterLimit::default_value())
     }
 
+    #[must_use]
     pub fn get_line_miter_limit(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<LineMiterLimit>()
     }
@@ -131,10 +142,12 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_default_line_round_limit() -> PropertyValue<f32> {
         PropertyValue::Constant(LineRoundLimit::default_value())
     }
 
+    #[must_use]
     pub fn get_line_round_limit(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<LineRoundLimit>()
     }
@@ -148,10 +161,12 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_default_line_sort_key() -> PropertyValue<f32> {
         PropertyValue::Constant(LineSortKey::default_value())
     }
 
+    #[must_use]
     pub fn get_line_sort_key(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<LineSortKey>()
     }
@@ -167,10 +182,12 @@ impl LineLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_line_blur() -> PropertyValue<f32> {
         PropertyValue::Constant(LineBlur::default_value())
     }
 
+    #[must_use]
     pub fn get_line_blur(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<LineBlur>().value
     }
@@ -190,14 +207,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_blur_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineBlur>().options
     }
 
+    #[must_use]
     pub fn get_default_line_color() -> PropertyValue<Color> {
         PropertyValue::Constant(LineColor::default_value())
     }
 
+    #[must_use]
     pub fn get_line_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<LineColor>().value
     }
@@ -217,14 +237,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineColor>().options
     }
 
+    #[must_use]
     pub fn get_default_line_dasharray() -> PropertyValue<Vec<f32>> {
         PropertyValue::Constant(LineDasharray::default_value())
     }
 
+    #[must_use]
     pub fn get_line_dasharray(&self) -> &PropertyValue<Vec<f32>> {
         &self.impl_().paint.get::<LineDasharray>().value
     }
@@ -244,14 +267,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_dasharray_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineDasharray>().options
     }
 
+    #[must_use]
     pub fn get_default_line_gap_width() -> PropertyValue<f32> {
         PropertyValue::Constant(LineGapWidth::default_value())
     }
 
+    #[must_use]
     pub fn get_line_gap_width(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<LineGapWidth>().value
     }
@@ -271,14 +297,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_gap_width_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineGapWidth>().options
     }
 
+    #[must_use]
     pub fn get_default_line_gradient() -> ColorRampPropertyValue {
         ColorRampPropertyValue::default()
     }
 
+    #[must_use]
     pub fn get_line_gradient(&self) -> &ColorRampPropertyValue {
         &self.impl_().paint.get::<LineGradient>().value
     }
@@ -298,14 +327,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_gradient_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineGradient>().options
     }
 
+    #[must_use]
     pub fn get_default_line_offset() -> PropertyValue<f32> {
         PropertyValue::Constant(LineOffset::default_value())
     }
 
+    #[must_use]
     pub fn get_line_offset(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<LineOffset>().value
     }
@@ -325,14 +357,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_offset_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineOffset>().options
     }
 
+    #[must_use]
     pub fn get_default_line_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(LineOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_line_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<LineOpacity>().value
     }
@@ -352,14 +387,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_line_pattern() -> PropertyValue<Image> {
         PropertyValue::Constant(LinePattern::default_value())
     }
 
+    #[must_use]
     pub fn get_line_pattern(&self) -> &PropertyValue<Image> {
         &self.impl_().paint.get::<LinePattern>().value
     }
@@ -379,14 +417,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_pattern_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LinePattern>().options
     }
 
+    #[must_use]
     pub fn get_default_line_translate() -> PropertyValue<[f32; 2]> {
         PropertyValue::Constant(LineTranslate::default_value())
     }
 
+    #[must_use]
     pub fn get_line_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<LineTranslate>().value
     }
@@ -406,14 +447,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineTranslate>().options
     }
 
+    #[must_use]
     pub fn get_default_line_translate_anchor() -> PropertyValue<TranslateAnchorType> {
         PropertyValue::Constant(LineTranslateAnchor::default_value())
     }
 
+    #[must_use]
     pub fn get_line_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<LineTranslateAnchor>().value
     }
@@ -433,14 +477,17 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineTranslateAnchor>().options
     }
 
+    #[must_use]
     pub fn get_default_line_width() -> PropertyValue<f32> {
         PropertyValue::Constant(LineWidth::default_value())
     }
 
+    #[must_use]
     pub fn get_line_width(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<LineWidth>().value
     }
@@ -461,6 +508,7 @@ impl LineLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_line_width_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineWidth>().options
     }
@@ -471,64 +519,64 @@ const K_PAINT_PROPERTY_COUNT: u8 = 22;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
-    LineBlur,
-    LineColor,
-    LineDasharray,
-    LineGapWidth,
-    LineGradient,
-    LineOffset,
-    LineOpacity,
-    LinePattern,
-    LineTranslate,
-    LineTranslateAnchor,
-    LineWidth,
-    LineBlurTransition,
-    LineColorTransition,
-    LineDasharrayTransition,
-    LineGapWidthTransition,
-    LineGradientTransition,
-    LineOffsetTransition,
-    LineOpacityTransition,
-    LinePatternTransition,
-    LineTranslateTransition,
-    LineTranslateAnchorTransition,
-    LineWidthTransition,
-    LineCap = K_PAINT_PROPERTY_COUNT,
-    LineJoin,
-    LineMiterLimit,
-    LineRoundLimit,
-    LineSortKey,
+    Blur,
+    Color,
+    Dasharray,
+    GapWidth,
+    Gradient,
+    Offset,
+    Opacity,
+    Pattern,
+    Translate,
+    TranslateAnchor,
+    Width,
+    BlurTransition,
+    ColorTransition,
+    DasharrayTransition,
+    GapWidthTransition,
+    GradientTransition,
+    OffsetTransition,
+    OpacityTransition,
+    PatternTransition,
+    TranslateTransition,
+    TranslateAnchorTransition,
+    WidthTransition,
+    Cap = K_PAINT_PROPERTY_COUNT,
+    Join,
+    MiterLimit,
+    RoundLimit,
+    SortKey,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
-    ("line-blur", Property::LineBlur),
-    ("line-color", Property::LineColor),
-    ("line-dasharray", Property::LineDasharray),
-    ("line-gap-width", Property::LineGapWidth),
-    ("line-gradient", Property::LineGradient),
-    ("line-offset", Property::LineOffset),
-    ("line-opacity", Property::LineOpacity),
-    ("line-pattern", Property::LinePattern),
-    ("line-translate", Property::LineTranslate),
-    ("line-translate-anchor", Property::LineTranslateAnchor),
-    ("line-width", Property::LineWidth),
-    ("line-blur-transition", Property::LineBlurTransition),
-    ("line-color-transition", Property::LineColorTransition),
-    ("line-dasharray-transition", Property::LineDasharrayTransition),
-    ("line-gap-width-transition", Property::LineGapWidthTransition),
-    ("line-gradient-transition", Property::LineGradientTransition),
-    ("line-offset-transition", Property::LineOffsetTransition),
-    ("line-opacity-transition", Property::LineOpacityTransition),
-    ("line-pattern-transition", Property::LinePatternTransition),
-    ("line-translate-transition", Property::LineTranslateTransition),
-    ("line-translate-anchor-transition", Property::LineTranslateAnchorTransition),
-    ("line-width-transition", Property::LineWidthTransition),
-    ("line-cap", Property::LineCap),
-    ("line-join", Property::LineJoin),
-    ("line-miter-limit", Property::LineMiterLimit),
-    ("line-round-limit", Property::LineRoundLimit),
-    ("line-sort-key", Property::LineSortKey),
+    ("line-blur", Property::Blur),
+    ("line-color", Property::Color),
+    ("line-dasharray", Property::Dasharray),
+    ("line-gap-width", Property::GapWidth),
+    ("line-gradient", Property::Gradient),
+    ("line-offset", Property::Offset),
+    ("line-opacity", Property::Opacity),
+    ("line-pattern", Property::Pattern),
+    ("line-translate", Property::Translate),
+    ("line-translate-anchor", Property::TranslateAnchor),
+    ("line-width", Property::Width),
+    ("line-blur-transition", Property::BlurTransition),
+    ("line-color-transition", Property::ColorTransition),
+    ("line-dasharray-transition", Property::DasharrayTransition),
+    ("line-gap-width-transition", Property::GapWidthTransition),
+    ("line-gradient-transition", Property::GradientTransition),
+    ("line-offset-transition", Property::OffsetTransition),
+    ("line-opacity-transition", Property::OpacityTransition),
+    ("line-pattern-transition", Property::PatternTransition),
+    ("line-translate-transition", Property::TranslateTransition),
+    ("line-translate-anchor-transition", Property::TranslateAnchorTransition),
+    ("line-width-transition", Property::WidthTransition),
+    ("line-cap", Property::Cap),
+    ("line-join", Property::Join),
+    ("line-miter-limit", Property::MiterLimit),
+    ("line-round-limit", Property::RoundLimit),
+    ("line-sort-key", Property::SortKey),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -537,35 +585,35 @@ fn find_property(name: &str) -> Option<Property> {
 
 fn get_layer_property(layer: &LineLayer, property: Property) -> StyleProperty {
     match property {
-        Property::LineBlur => make_style_property(layer.get_line_blur()),
-        Property::LineColor => make_style_property(layer.get_line_color()),
-        Property::LineDasharray => make_style_property(layer.get_line_dasharray()),
-        Property::LineGapWidth => make_style_property(layer.get_line_gap_width()),
-        Property::LineGradient => make_color_ramp_style_property(layer.get_line_gradient()),
-        Property::LineOffset => make_style_property(layer.get_line_offset()),
-        Property::LineOpacity => make_style_property(layer.get_line_opacity()),
-        Property::LinePattern => make_style_property(layer.get_line_pattern()),
-        Property::LineTranslate => make_style_property(layer.get_line_translate()),
-        Property::LineTranslateAnchor => make_style_property(layer.get_line_translate_anchor()),
-        Property::LineWidth => make_style_property(layer.get_line_width()),
-        Property::LineBlurTransition => make_transition_style_property(&layer.get_line_blur_transition()),
-        Property::LineColorTransition => make_transition_style_property(&layer.get_line_color_transition()),
-        Property::LineDasharrayTransition => make_transition_style_property(&layer.get_line_dasharray_transition()),
-        Property::LineGapWidthTransition => make_transition_style_property(&layer.get_line_gap_width_transition()),
-        Property::LineGradientTransition => make_transition_style_property(&layer.get_line_gradient_transition()),
-        Property::LineOffsetTransition => make_transition_style_property(&layer.get_line_offset_transition()),
-        Property::LineOpacityTransition => make_transition_style_property(&layer.get_line_opacity_transition()),
-        Property::LinePatternTransition => make_transition_style_property(&layer.get_line_pattern_transition()),
-        Property::LineTranslateTransition => make_transition_style_property(&layer.get_line_translate_transition()),
-        Property::LineTranslateAnchorTransition => {
+        Property::Blur => make_style_property(layer.get_line_blur()),
+        Property::Color => make_style_property(layer.get_line_color()),
+        Property::Dasharray => make_style_property(layer.get_line_dasharray()),
+        Property::GapWidth => make_style_property(layer.get_line_gap_width()),
+        Property::Gradient => make_color_ramp_style_property(layer.get_line_gradient()),
+        Property::Offset => make_style_property(layer.get_line_offset()),
+        Property::Opacity => make_style_property(layer.get_line_opacity()),
+        Property::Pattern => make_style_property(layer.get_line_pattern()),
+        Property::Translate => make_style_property(layer.get_line_translate()),
+        Property::TranslateAnchor => make_style_property(layer.get_line_translate_anchor()),
+        Property::Width => make_style_property(layer.get_line_width()),
+        Property::BlurTransition => make_transition_style_property(&layer.get_line_blur_transition()),
+        Property::ColorTransition => make_transition_style_property(&layer.get_line_color_transition()),
+        Property::DasharrayTransition => make_transition_style_property(&layer.get_line_dasharray_transition()),
+        Property::GapWidthTransition => make_transition_style_property(&layer.get_line_gap_width_transition()),
+        Property::GradientTransition => make_transition_style_property(&layer.get_line_gradient_transition()),
+        Property::OffsetTransition => make_transition_style_property(&layer.get_line_offset_transition()),
+        Property::OpacityTransition => make_transition_style_property(&layer.get_line_opacity_transition()),
+        Property::PatternTransition => make_transition_style_property(&layer.get_line_pattern_transition()),
+        Property::TranslateTransition => make_transition_style_property(&layer.get_line_translate_transition()),
+        Property::TranslateAnchorTransition => {
             make_transition_style_property(&layer.get_line_translate_anchor_transition())
         }
-        Property::LineWidthTransition => make_transition_style_property(&layer.get_line_width_transition()),
-        Property::LineCap => make_style_property(layer.get_line_cap()),
-        Property::LineJoin => make_style_property(layer.get_line_join()),
-        Property::LineMiterLimit => make_style_property(layer.get_line_miter_limit()),
-        Property::LineRoundLimit => make_style_property(layer.get_line_round_limit()),
-        Property::LineSortKey => make_style_property(layer.get_line_sort_key()),
+        Property::WidthTransition => make_transition_style_property(&layer.get_line_width_transition()),
+        Property::Cap => make_style_property(layer.get_line_cap()),
+        Property::Join => make_style_property(layer.get_line_join()),
+        Property::MiterLimit => make_style_property(layer.get_line_miter_limit()),
+        Property::RoundLimit => make_style_property(layer.get_line_round_limit()),
+        Property::SortKey => make_style_property(layer.get_line_sort_key()),
     }
 }
 
@@ -617,45 +665,45 @@ impl Layer for LineLayer {
             )));
         };
 
-        if property == Property::LineBlur || property == Property::LineGapWidth || property == Property::LineOffset ||
-            property == Property::LineOpacity || property == Property::LineWidth || property == Property::LineSortKey {
+        if property == Property::Blur || property == Property::GapWidth || property == Property::Offset ||
+            property == Property::Opacity || property == Property::Width || property == Property::SortKey {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::LineBlur {
+            if property == Property::Blur {
                 self.set_line_blur(&typed_value);
                 return None;
             }
 
-            if property == Property::LineGapWidth {
+            if property == Property::GapWidth {
                 self.set_line_gap_width(&typed_value);
                 return None;
             }
 
-            if property == Property::LineOffset {
+            if property == Property::Offset {
                 self.set_line_offset(&typed_value);
                 return None;
             }
 
-            if property == Property::LineOpacity {
+            if property == Property::Opacity {
                 self.set_line_opacity(&typed_value);
                 return None;
             }
 
-            if property == Property::LineWidth {
+            if property == Property::Width {
                 self.set_line_width(&typed_value);
                 return None;
             }
 
-            if property == Property::LineSortKey {
+            if property == Property::SortKey {
                 self.set_line_sort_key(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::LineColor {
+        if property == Property::Color {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Color>(value, &mut error, true, false) else {
                 return Some(error);
@@ -665,7 +713,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineDasharray {
+        if property == Property::Dasharray {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Vec<f32>>(value, &mut error, false, false) else {
                 return Some(error);
@@ -675,7 +723,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineGradient {
+        if property == Property::Gradient {
             let mut error = Error::default();
             let Some(typed_value) = convert_color_ramp_property_value(value, &mut error, false, false) else {
                 return Some(error);
@@ -685,7 +733,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LinePattern {
+        if property == Property::Pattern {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Image>(value, &mut error, true, false) else {
                 return Some(error);
@@ -695,7 +743,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineTranslate {
+        if property == Property::Translate {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<[f32; 2]>(value, &mut error, false, false) else {
                 return Some(error);
@@ -705,7 +753,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineTranslateAnchor {
+        if property == Property::TranslateAnchor {
             let mut error = Error::default();
             let Some(typed_value) =
                 convert_property_value::<TranslateAnchorType>(value, &mut error, false, false)
@@ -717,7 +765,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineCap {
+        if property == Property::Cap {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<LineCapType>(value, &mut error, false, false) else {
                 return Some(error);
@@ -727,7 +775,7 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineJoin {
+        if property == Property::Join {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<LineJoinType>(value, &mut error, true, false) else {
                 return Some(error);
@@ -737,18 +785,18 @@ impl Layer for LineLayer {
             return None;
         }
 
-        if property == Property::LineMiterLimit || property == Property::LineRoundLimit {
+        if property == Property::MiterLimit || property == Property::RoundLimit {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, false, false) else {
                 return Some(error);
             };
 
-            if property == Property::LineMiterLimit {
+            if property == Property::MiterLimit {
                 self.set_line_miter_limit(&typed_value);
                 return None;
             }
 
-            if property == Property::LineRoundLimit {
+            if property == Property::RoundLimit {
                 self.set_line_round_limit(&typed_value);
                 return None;
             }
@@ -759,57 +807,57 @@ impl Layer for LineLayer {
             return Some(error);
         };
 
-        if property == Property::LineBlurTransition {
+        if property == Property::BlurTransition {
             self.set_line_blur_transition(&transition);
             return None;
         }
 
-        if property == Property::LineColorTransition {
+        if property == Property::ColorTransition {
             self.set_line_color_transition(&transition);
             return None;
         }
 
-        if property == Property::LineDasharrayTransition {
+        if property == Property::DasharrayTransition {
             self.set_line_dasharray_transition(&transition);
             return None;
         }
 
-        if property == Property::LineGapWidthTransition {
+        if property == Property::GapWidthTransition {
             self.set_line_gap_width_transition(&transition);
             return None;
         }
 
-        if property == Property::LineGradientTransition {
+        if property == Property::GradientTransition {
             self.set_line_gradient_transition(&transition);
             return None;
         }
 
-        if property == Property::LineOffsetTransition {
+        if property == Property::OffsetTransition {
             self.set_line_offset_transition(&transition);
             return None;
         }
 
-        if property == Property::LineOpacityTransition {
+        if property == Property::OpacityTransition {
             self.set_line_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::LinePatternTransition {
+        if property == Property::PatternTransition {
             self.set_line_pattern_transition(&transition);
             return None;
         }
 
-        if property == Property::LineTranslateTransition {
+        if property == Property::TranslateTransition {
             self.set_line_translate_transition(&transition);
             return None;
         }
 
-        if property == Property::LineTranslateAnchorTransition {
+        if property == Property::TranslateAnchorTransition {
             self.set_line_translate_anchor_transition(&transition);
             return None;
         }
 
-        if property == Property::LineWidthTransition {
+        if property == Property::WidthTransition {
             self.set_line_width_transition(&transition);
             return None;
         }

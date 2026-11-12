@@ -36,6 +36,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -43,12 +44,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct ColorReliefLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl ColorReliefLayer {
     /// `ColorReliefLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         ColorReliefLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -56,16 +58,19 @@ impl ColorReliefLayer {
     }
 
     /// `ColorReliefLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         ColorReliefLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -76,10 +81,12 @@ impl ColorReliefLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_color_relief_color() -> ColorRampPropertyValue {
         ColorRampPropertyValue::default()
     }
 
+    #[must_use]
     pub fn get_color_relief_color(&self) -> &ColorRampPropertyValue {
         &self.impl_().paint.get::<ColorReliefColor>().value
     }
@@ -99,14 +106,17 @@ impl ColorReliefLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_color_relief_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<ColorReliefColor>().options
     }
 
+    #[must_use]
     pub fn get_default_color_relief_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(ColorReliefOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_color_relief_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<ColorReliefOpacity>().value
     }
@@ -126,14 +136,17 @@ impl ColorReliefLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_color_relief_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<ColorReliefOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
         PropertyValue::Constant(Resampling::default_value())
     }
 
+    #[must_use]
     pub fn get_resampling(&self) -> &PropertyValue<ResamplingType> {
         &self.impl_().paint.get::<Resampling>().value
     }
@@ -153,6 +166,7 @@ impl ColorReliefLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_resampling_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<Resampling>().options
     }

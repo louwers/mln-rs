@@ -10,7 +10,7 @@ use mln_style_types::VariableAnchorOffsetCollection;
 use mln_util::{Color, ColorSpace, Padding};
 
 use crate::expression::{
-    EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
+    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
 };
 use crate::interpolator::{CubicBezierInterpolator, ExponentialInterpolator, Interpolator};
 use crate::parsing_context::{ParseResult, ParsingContext};
@@ -58,7 +58,7 @@ impl InterpolateOutput {
 
 /// `Interpolator<float>::operator()(a, b, double t)`.
 fn interpolate_float(a: f32, b: f32, t: f64) -> f32 {
-    (a as f64 * (1.0 - t) + b as f64 * t) as f32
+    (f64::from(a) * (1.0 - t) + f64::from(b) * t) as f32
 }
 
 /// The generic `Interpolator<double>`.
@@ -84,8 +84,8 @@ impl Interpolate {
         stops: Stops,
         output: InterpolateOutput,
     ) -> Self {
-        assert!(*input.get_type() == Type::Number);
-        let deps = input.dependencies() | stops.values().fold(Default::default(), |a, e| a | e.dependencies());
+        assert_eq!(*input.get_type(), Type::Number);
+        let deps = input.dependencies() | stops.values().fold(Dependency::NONE, |a, e| a | e.dependencies());
         Interpolate {
             base: ExpressionBase::new(Kind::Interpolate, type_, deps),
             interpolator,
@@ -96,18 +96,22 @@ impl Interpolate {
         }
     }
 
+    #[must_use]
     pub fn get_input(&self) -> &dyn Expression {
         &*self.input
     }
 
+    #[must_use]
     pub fn get_interpolator(&self) -> &Interpolator {
         &self.interpolator
     }
 
+    #[must_use]
     pub fn get_color_space(&self) -> ColorSpace {
         self.color_space
     }
 
+    #[must_use]
     pub fn get_stop_count(&self) -> usize {
         self.stops.len()
     }
@@ -120,10 +124,12 @@ impl Interpolate {
 
     /// Return the smallest range of stops that covers the interval
     /// [lower, upper].
+    #[must_use]
     pub fn get_covering_stops(&self, lower: f64, upper: f64) -> Range<f32> {
         get_covering_stops(&self.stops, lower, upper)
     }
 
+    #[must_use]
     pub fn interpolation_factor(&self, input_levels: Range<f64>, input_value: f64) -> f64 {
         self.interpolator.interpolation_factor(input_levels, input_value)
     }
@@ -187,7 +193,7 @@ impl Expression for Interpolate {
             return Err(EvaluationError::new("No stops in exponential curve."));
         }
 
-        let it = self.stops.upper_bound(x as f64);
+        let it = self.stops.upper_bound(f64::from(x));
         if it == self.stops.len() {
             self.stops.get(self.stops.len() - 1).1.evaluate(params)
         } else if it == 0 {
@@ -195,7 +201,7 @@ impl Expression for Interpolate {
         } else {
             let (lower_key, lower_expr) = self.stops.get(it - 1);
             let (upper_key, upper_expr) = self.stops.get(it);
-            let t = self.interpolation_factor(Range::new(lower_key, upper_key), x as f64);
+            let t = self.interpolation_factor(Range::new(lower_key, upper_key), f64::from(x));
 
             if t == 0.0 {
                 return lower_expr.evaluate(params);
@@ -386,7 +392,7 @@ pub fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContext) -> P
     }
 
     // [interpolation, interp_type, input, 2 * (n pairs)...]
-    if (length - 1) % 2 != 0 {
+    if !(length - 1).is_multiple_of(2) {
         ctx.error("Expected an even number of arguments.".to_owned());
         return None;
     }
@@ -397,10 +403,10 @@ pub fn parse_interpolate(value: &Convertible<'_>, ctx: &mut ParsingContext) -> P
     let mut output_type: Option<Type> = None;
     if color_space != ColorSpace::Rgb {
         output_type = Some(Type::Color);
-    } else if let Some(expected) = ctx.get_expected() {
-        if expected != Type::Value {
-            output_type = Some(expected);
-        }
+    } else if let Some(expected) = ctx.get_expected()
+        && expected != Type::Value
+    {
+        output_type = Some(expected);
     }
 
     let mut previous = f64::NEG_INFINITY;

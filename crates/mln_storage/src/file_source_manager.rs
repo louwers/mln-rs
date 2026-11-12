@@ -59,6 +59,7 @@ impl Default for FileSourceManager {
 
 impl FileSourceManager {
     /// A manager with the factory of every built-in file source type.
+    #[must_use]
     pub fn new() -> Self {
         let manager = Self::empty();
         manager.register_file_source_factory(
@@ -109,12 +110,14 @@ impl FileSourceManager {
     }
 
     /// A manager without factories.
+    #[must_use]
     pub fn empty() -> Self {
         FileSourceManager { registry: Arc::new(Mutex::new(Registry::default())) }
     }
 
     /// The live file source of this type for these options, or a new one
     /// from the type's factory. `None` when the type has no factory.
+    #[must_use]
     pub fn get_file_source(&self, type_: FileSourceType, options: &ResourceOptions) -> Option<Arc<dyn FileSource>> {
         let find = |registry: &Registry| {
             registry
@@ -159,6 +162,7 @@ impl FileSourceManager {
     }
 
     /// Removes the factory of a file source type and returns it.
+    #[must_use]
     pub fn unregister_file_source_factory(&self, type_: FileSourceType) -> Option<FileSourceFactory> {
         self.registry.lock_unpoisoned().factories.remove(&type_)
     }

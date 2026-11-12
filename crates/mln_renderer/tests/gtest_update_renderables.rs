@@ -84,7 +84,7 @@ impl MockSource {
         }
     }
 
-    /// `createTileData`: replaces the existing MockTileData object, if any.
+    /// `createTileData`: replaces the existing `MockTileData` object, if any.
     fn create_tile_data(&mut self, tile_id: OverscaledTileID) -> TileRef {
         let tile = MockTileData::new(tile_id, &mut self.next_serial);
         let serial = tile.serial;

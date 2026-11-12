@@ -50,11 +50,13 @@ impl RenderTarget {
     }
 
     /// Get the render target texture
+    #[must_use]
     pub fn get_texture(&self) -> Texture2DPtr {
         self.offscreen_texture.get_texture()
     }
 
     /// The size the render target was created with (the texture's size).
+    #[must_use]
     pub fn get_size(&self) -> Size {
         self.size
     }
@@ -87,16 +89,19 @@ impl RenderTarget {
     }
 
     /// Get the layer group count
+    #[must_use]
     pub fn num_layer_groups(&self) -> usize {
         self.layer_groups_by_layer_index.len()
     }
 
     /// Get a specific layer group by index, if existent.
+    #[must_use]
     pub fn get_layer_group(&self, layer_index: i32) -> Option<&LayerGroupBasePtr> {
         self.layer_groups_by_layer_index.get(&layer_index)
     }
 
     /// The contained layer groups, in layer index order.
+    #[must_use]
     pub fn layer_groups(&self) -> Vec<LayerGroupBasePtr> {
         self.layer_groups_by_layer_index.values().cloned().collect()
     }

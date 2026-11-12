@@ -12,3 +12,7 @@ pub struct GlobeClipMask {
     pub stencil_ref: u32,
     pub tile: CanonicalTileID,
 }
+
+/// Makes the pole-capped mesh of a globe tile, with or without its borders:
+/// returns the mesh's raw `Short2` vertices and its indices.
+pub type GlobeClipMeshFn<'a> = dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>) + 'a;

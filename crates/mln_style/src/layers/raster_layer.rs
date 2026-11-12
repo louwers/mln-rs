@@ -36,6 +36,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -43,12 +44,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct RasterLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl RasterLayer {
     /// `RasterLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         RasterLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -56,16 +58,19 @@ impl RasterLayer {
     }
 
     /// `RasterLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         RasterLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -76,10 +81,12 @@ impl RasterLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_raster_brightness_max() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterBrightnessMax::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_brightness_max(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterBrightnessMax>().value
     }
@@ -99,14 +106,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_brightness_max_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterBrightnessMax>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_brightness_min() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterBrightnessMin::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_brightness_min(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterBrightnessMin>().value
     }
@@ -126,14 +136,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_brightness_min_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterBrightnessMin>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_contrast() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterContrast::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_contrast(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterContrast>().value
     }
@@ -153,14 +166,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_contrast_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterContrast>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_fade_duration() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterFadeDuration::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_fade_duration(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterFadeDuration>().value
     }
@@ -180,14 +196,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_fade_duration_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterFadeDuration>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_hue_rotate() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterHueRotate::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_hue_rotate(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterHueRotate>().value
     }
@@ -207,14 +226,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_hue_rotate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterHueRotate>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterOpacity>().value
     }
@@ -234,14 +256,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_resampling() -> PropertyValue<RasterResamplingType> {
         PropertyValue::Constant(RasterResampling::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_resampling(&self) -> &PropertyValue<RasterResamplingType> {
         &self.impl_().paint.get::<RasterResampling>().value
     }
@@ -261,14 +286,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_resampling_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterResampling>().options
     }
 
+    #[must_use]
     pub fn get_default_raster_saturation() -> PropertyValue<f32> {
         PropertyValue::Constant(RasterSaturation::default_value())
     }
 
+    #[must_use]
     pub fn get_raster_saturation(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterSaturation>().value
     }
@@ -288,14 +316,17 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_raster_saturation_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterSaturation>().options
     }
 
+    #[must_use]
     pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
         PropertyValue::Constant(Resampling::default_value())
     }
 
+    #[must_use]
     pub fn get_resampling(&self) -> &PropertyValue<ResamplingType> {
         &self.impl_().paint.get::<Resampling>().value
     }
@@ -315,6 +346,7 @@ impl RasterLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_resampling_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<Resampling>().options
     }

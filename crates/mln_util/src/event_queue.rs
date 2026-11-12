@@ -36,6 +36,7 @@ impl<T> Default for EventQueue<T> {
 }
 
 impl<T> EventQueue<T> {
+    #[must_use]
     pub fn new() -> Self {
         EventQueue { shared: Arc::new(Shared { events: Mutex::new(Vec::new()), waker: Mutex::new(None) }) }
     }
@@ -57,10 +58,12 @@ impl<T> EventQueue<T> {
     }
 
     /// Takes every event in the queue, oldest first.
+    #[must_use]
     pub fn take(&self) -> Vec<T> {
         std::mem::take(&mut *self.shared.events.lock_unpoisoned())
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.shared.events.lock_unpoisoned().is_empty()
     }
@@ -103,7 +106,7 @@ mod tests {
         queue.push(1);
         queue.push(2);
         assert_eq!(wakes.load(Ordering::SeqCst), 1);
-        queue.take();
+        let _ = queue.take();
         queue.push(3);
         assert_eq!(wakes.load(Ordering::SeqCst), 2);
     }

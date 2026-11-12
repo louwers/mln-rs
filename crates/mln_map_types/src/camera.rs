@@ -42,38 +42,47 @@ pub struct CameraOptions {
 }
 
 impl CameraOptions {
+    #[must_use]
     pub fn with_center(mut self, o: Option<LatLng>) -> Self {
         self.center = o;
         self
     }
+    #[must_use]
     pub fn with_center_altitude(mut self, o: Option<f64>) -> Self {
         self.center_altitude = o;
         self
     }
+    #[must_use]
     pub fn with_padding(mut self, p: Option<EdgeInsets>) -> Self {
         self.padding = p;
         self
     }
+    #[must_use]
     pub fn with_anchor(mut self, o: Option<ScreenCoordinate>) -> Self {
         self.anchor = o;
         self
     }
+    #[must_use]
     pub fn with_zoom(mut self, o: Option<f64>) -> Self {
         self.zoom = o;
         self
     }
+    #[must_use]
     pub fn with_bearing(mut self, o: Option<f64>) -> Self {
         self.bearing = o;
         self
     }
+    #[must_use]
     pub fn with_pitch(mut self, o: Option<f64>) -> Self {
         self.pitch = o;
         self
     }
+    #[must_use]
     pub fn with_roll(mut self, o: Option<f64>) -> Self {
         self.roll = o;
         self
     }
+    #[must_use]
     pub fn with_fov(mut self, o: Option<f64>) -> Self {
         self.fov = o;
         self
@@ -98,13 +107,13 @@ pub type TransitionEndFn = std::sync::Arc<dyn Fn(&TransitionEnd) + Send + Sync>;
 pub struct AnimationOptions {
     /// Time to animate to the viewpoint defined herein.
     pub duration: Option<Duration>,
-    /// Average velocity of a flyTo() transition, measured in screenfuls per
+    /// Average velocity of a `flyTo()` transition, measured in screenfuls per
     /// second, assuming a linear timing curve.
     pub velocity: Option<f64>,
-    /// Zero-based zoom level at the peak of the flyTo() transition's flight
+    /// Zero-based zoom level at the peak of the `flyTo()` transition's flight
     /// path.
     pub min_zoom: Option<f64>,
-    /// The longest a flyTo() transition may take, as GL JS's `maxDuration`:
+    /// The longest a `flyTo()` transition may take, as GL JS's `maxDuration`:
     /// a flight whose duration, set or derived from the velocity, exceeds it
     /// jumps instead. `None` caps nothing beyond what [`Duration`] holds: a
     /// derived duration it can't hold jumps too. Other camera commands
@@ -182,6 +191,7 @@ pub struct TransitionEnd {
 
 impl AnimationOptions {
     /// `AnimationOptions(Duration d)`.
+    #[must_use]
     pub fn new(d: Duration) -> Self {
         AnimationOptions { duration: Some(d), ..Default::default() }
     }
@@ -190,7 +200,7 @@ impl AnimationOptions {
 /// Various options for accessing physical properties of the underlying camera
 /// entity. A direct access to these properties allows more flexible and
 /// precise controlling of the camera while also being fully compatible and
-/// interchangeable with CameraOptions. All fields are optional.
+/// interchangeable with `CameraOptions`. All fields are optional.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FreeCameraOptions {
     /// Position of the camera in slightly modified web mercator coordinates.

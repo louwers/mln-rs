@@ -455,6 +455,7 @@ impl Default for GestureRecognizer {
 }
 
 impl GestureRecognizer {
+    #[must_use]
     pub fn new(options: GestureOptions) -> Self {
         GestureRecognizer {
             options,
@@ -470,6 +471,7 @@ impl GestureRecognizer {
         }
     }
 
+    #[must_use]
     pub fn options(&self) -> &GestureOptions {
         &self.options
     }
@@ -480,12 +482,14 @@ impl GestureRecognizer {
     }
 
     /// A gesture is under way: hosts keep pointer capture and scrolling off.
+    #[must_use]
     pub fn is_active(&self) -> bool {
         !matches!(self.mode, Mode::Idle) || self.scroll.is_some()
     }
 
     /// The box a Shift-drag zooms to, corner to corner in logical pixels,
     /// while it is drawn: hosts show it.
+    #[must_use]
     pub fn box_zoom(&self) -> Option<[ScreenCoordinate; 2]> {
         match self.mode {
             Mode::BoxZoom { origin } => Some([origin.into(), self.pointers.first()?.position.into()]),
@@ -556,7 +560,9 @@ impl GestureRecognizer {
     pub fn handle(&mut self, camera: &mut dyn GestureCamera, input: Input, now: f64) -> bool {
         match input {
             Input::PointerDown { id, kind, button, position, modifiers } => {
-                self.down(camera, id, kind, button, position.into(), modifiers, now)
+                let position = position.into();
+                let pointer = Pointer { id, kind, position, down: position, down_at: now };
+                self.down(camera, pointer, button, modifiers)
             }
             Input::PointerMove { id, position } => self.moved(camera, id, position.into(), now),
             Input::PointerUp { id, position } => self.up(camera, id, Some(position.into()), now),
@@ -619,7 +625,7 @@ impl GestureRecognizer {
 
     /// Ends the gesture, with the momentum it continues with: the gesture
     /// stays in progress until the momentum ends.
-    fn end_phase(&mut self, camera: &mut dyn GestureCamera, momentum: Option<CameraMomentum>) {
+    fn end_phase(&mut self, camera: &mut dyn GestureCamera, momentum: Option<&CameraMomentum>) {
         if !std::mem::replace(&mut self.begun, false) {
             return;
         }
@@ -634,6 +640,7 @@ impl GestureRecognizer {
             ..AnimationOptions::default()
         };
         let phase = GesturePhase::End;
+        let momentum = momentum.copied();
         camera.apply_camera_delta(&CameraDelta { momentum, animation, phase, ..CameraDelta::default() });
     }
 
@@ -682,16 +689,9 @@ impl GestureRecognizer {
         if self.begun { GesturePhase::Update } else { GesturePhase::End }
     }
 
-    fn down(
-        &mut self,
-        camera: &mut dyn GestureCamera,
-        id: u32,
-        kind: PointerKind,
-        button: Button,
-        position: V2,
-        modifiers: Modifiers,
-        now: f64,
-    ) -> bool {
+    /// A press of `pointer`, at its position and at its `down_at` time.
+    fn down(&mut self, camera: &mut dyn GestureCamera, pointer: Pointer, button: Button, modifiers: Modifiers) -> bool {
+        let Pointer { id, kind, position, down_at: now, .. } = pointer;
         if self.pointers.iter().any(|p| p.id == id) {
             return false;
         }
@@ -703,7 +703,7 @@ impl GestureRecognizer {
             // A press during a platform pinch takes over from it.
             self.finish(camera, now, Finish::Cancel);
         }
-        self.pointers.push(Pointer { id, kind, position, down: position, down_at: now });
+        self.pointers.push(pointer);
         // A press takes over from a scroll, and stops its easing.
         self.scroll = None;
         self.begin(camera);
@@ -768,7 +768,6 @@ impl GestureRecognizer {
                 }
             }
             Mode::Pan | Mode::Rotate => self.drag_step(camera, last, position, now),
-            Mode::BoxZoom { .. } => {}
             Mode::TapDrag { origin, moved } => {
                 let (origin, dy) = (*origin, position.y - last.y);
                 *moved = *moved || position.distance(origin) > self.options.click_tolerance;
@@ -795,7 +794,7 @@ impl GestureRecognizer {
                 self.pinch_step(camera, &mut pinch, points, now);
                 self.mode = Mode::Pinch(pinch);
             }
-            Mode::Idle | Mode::Ignored | Mode::Platform => {}
+            Mode::BoxZoom { .. } | Mode::Idle | Mode::Ignored | Mode::Platform => {}
         }
         true
     }
@@ -852,7 +851,7 @@ impl GestureRecognizer {
             }
         }
         if pinch.pitch == Some(true) {
-            let pitch = (va.y + vb.y) / 2.0 * -self.options.drag_pitch;
+            let pitch = f64::midpoint(va.y, vb.y) * -self.options.drag_pitch;
             self.update(camera, CameraDelta { pitch: Some(pitch), ..CameraDelta::default() });
             pinch.last = points;
             pinch.tap = false;
@@ -998,7 +997,7 @@ impl GestureRecognizer {
             Finish::Settle | Finish::Glide => {
                 let release = if finish == Finish::Glide { self.tracking.release(now) } else { Release::default() };
                 let momentum = release.into_momentum(caught_glide, &self.options);
-                self.end_phase(camera, Some(momentum));
+                self.end_phase(camera, Some(&momentum));
             }
         }
     }
@@ -1088,7 +1087,7 @@ impl GestureRecognizer {
                         // times distance / duration is the current speed;
                         // its first control point stays NOTCH_EASE_HANDLE
                         // from the origin, as GL JS's does.
-                        let slope = if distance != 0.0 { ease.speed(now, duration) * duration / distance } else { 0.0 };
+                        let slope = if distance == 0.0 { 0.0 } else { ease.speed(now, duration) * duration / distance };
                         let x1 = NOTCH_EASE_HANDLE / (1.0 + slope * slope).sqrt();
                         (distance, (x1, slope * x1))
                     }

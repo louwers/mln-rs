@@ -20,6 +20,7 @@ impl Impl {
     /// the style: anything that can render a globe at some zoom gets the
     /// globe granularity, so the Mercator hand-off at high zoom reuses the
     /// same tiles.
+    #[must_use]
     pub fn get_subdivision_granularity(&self) -> SubdivisionGranularitySetting {
         if self.type_.is_undefined()
             || (self.type_.is_constant()
@@ -32,6 +33,7 @@ impl Impl {
 
     /// The definition at a zoom level, with `globe` resolved; `mercator`
     /// when the style does not set one.
+    #[must_use]
     pub fn evaluate(&self, zoom: f32) -> ProjectionDefinition {
         let parameters = PropertyEvaluationParameters::new(zoom);
         let definition = self.type_.evaluate(&PropertyEvaluator::new(&parameters, Projection::get_default_type()));

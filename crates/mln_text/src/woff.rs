@@ -44,6 +44,7 @@ impl fmt::Display for WoffError {
 impl std::error::Error for WoffError {}
 
 /// Whether `data` starts with the WOFF or WOFF2 signature.
+#[must_use]
 pub fn is_woff(data: &[u8]) -> bool {
     matches!(data.get(..4), Some(b"wOFF" | b"wOF2"))
 }

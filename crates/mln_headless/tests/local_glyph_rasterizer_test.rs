@@ -31,7 +31,7 @@ fn read_file(relative: &str) -> Vec<u8> {
 
 /// `test::getImageDiff` (test/src/mln/test/util.cpp). The C++ writes
 /// `<base>/actual.png` next to the fixture; the port writes it to
-/// target/tmp/local_glyph_rasterizer_test instead.
+/// `target/tmp/local_glyph_rasterizer_test` instead.
 fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64) -> f64 {
     let expected = decode_image(&read_file(&format!("{base}/expected.png"))).expect("decode expected.png");
 
@@ -54,7 +54,7 @@ fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64)
         pixel_threshold,
         false,
     );
-    pixels as f64 / (expected.size.width as f64 * expected.size.height as f64)
+    pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }
 
 /// `test::checkImage(base, actual, imageThreshold, pixelThreshold)`.

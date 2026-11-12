@@ -8,7 +8,10 @@ use mln_gfx::shaders::raster_layer_ubo::{RasterDrawableUBO, RasterEvaluatedProps
 use mln_gfx::shaders::shader_defines::{ID_RASTER_DRAWABLE_UBO, ID_RASTER_EVALUATED_PROPS_UBO};
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::raster_layer_properties::*;
+use mln_style::layers::raster_layer_properties::{
+    RasterBrightnessMax, RasterBrightnessMin, RasterContrast, RasterHueRotate, RasterLayerProperties, RasterOpacity,
+    RasterSaturation,
+};
 use mln_style_types::TranslateAnchorType;
 use mln_util::immutable::Immutable;
 

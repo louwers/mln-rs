@@ -61,7 +61,7 @@ use crate::transition_options::TransitionOptions;
 
 pub type ImageImpls = Vec<Immutable<image::Impl>>;
 
-/// The members of `Style::Impl` that its SpriteLoaderObserver half changes.
+/// The members of `Style::Impl` that its `SpriteLoaderObserver` half changes.
 struct SpriteShared {
     images: Immutable<ImageImpls>,
     sprites_loading_status: HashMap<String, bool>,
@@ -131,7 +131,7 @@ fn on_sprite_requested(shared: &RefCell<SpriteShared>, sprite: Option<&Sprite>) 
     shared_observer(shared).on_sprite_requested(sprite);
 }
 
-/// The SpriteLoaderObserver half of `Style::Impl`.
+/// The `SpriteLoaderObserver` half of `Style::Impl`.
 struct StyleSpriteObserver {
     shared: std::rc::Weak<RefCell<SpriteShared>>,
 }
@@ -156,7 +156,7 @@ impl SpriteLoaderObserver for StyleSpriteObserver {
     }
 }
 
-/// The SourceObserver half of `Style::Impl`.
+/// The `SourceObserver` half of `Style::Impl`.
 struct StyleSourceObserver {
     shared: std::rc::Weak<RefCell<SpriteShared>>,
     file_source: Option<Arc<dyn FileSource>>,
@@ -205,13 +205,17 @@ impl SourceObserver for StyleSourceObserver {
         if let Some(observer) = self.observer() {
             observer.on_source_description_changed(source);
         }
-        if !source.loaded() {
-            if let Some(file_source) = &self.file_source {
-                source.load_description(&**file_source);
-            }
+        if !source.loaded()
+            && let Some(file_source) = &self.file_source
+        {
+            source.load_description(&**file_source);
         }
     }
 }
+
+/// The collection's source impls, and the source impls that refresh them
+/// with the changes made through the sources.
+type SourceImplsCache = (ImmutableVector<dyn source::Impl>, ImmutableVector<dyn source::Impl>);
 
 /// `Style::Impl`.
 pub struct Impl {
@@ -235,9 +239,9 @@ pub struct Impl {
     fallback_font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
     sources: CollectionWithPersistentOrder<dyn Source>,
     /// The source impls with the changes made through the sources since the
-    /// collection's last update (see get_source_impls), keyed by the
+    /// collection's last update (see `get_source_impls`), keyed by the
     /// collection's impls they refresh.
-    source_impls_cache: RefCell<Option<(ImmutableVector<dyn source::Impl>, ImmutableVector<dyn source::Impl>)>>,
+    source_impls_cache: RefCell<Option<SourceImplsCache>>,
     source_observer: Rc<dyn SourceObserver>,
     layers: Collection<dyn Layer>,
     transition_options: TransitionOptions,
@@ -277,6 +281,7 @@ impl std::fmt::Debug for Impl {
 impl Impl {
     /// A style without a file source (`Impl(nullptr, pixelRatio,
     /// threadPool)`) on the background thread pool.
+    #[must_use]
     pub fn new(pixel_ratio: f32) -> Self {
         Self::with_file_source(
             None,
@@ -286,6 +291,7 @@ impl Impl {
     }
 
     /// `Impl(std::shared_ptr<FileSource>, float pixelRatio, const TaggedScheduler&)`.
+    #[must_use]
     pub fn with_file_source(
         file_source: Option<Arc<dyn FileSource>>,
         pixel_ratio: f32,
@@ -397,9 +403,10 @@ impl Impl {
                 let observer = self.observer();
                 observer.on_style_error(StyleLoadError::Load(message));
                 observer.on_resource_error(Error::native(error.message.clone()));
-            } else if res.not_modified || res.no_content {
-                continue;
-            } else if let Some(data) = &res.data {
+            } else if !res.not_modified
+                && !res.no_content
+                && let Some(data) = &res.data
+            {
                 let json = String::from_utf8_lossy(data).into_owned();
                 self.parse(&json);
             }
@@ -524,10 +531,10 @@ impl Impl {
     /// default defined in the style's root "state" property (or null).
     pub fn set_global_state_property(&mut self, property: &str, value: &Value) {
         let mut new_value = value;
-        if matches!(value, Value::Null) {
-            if let Some(default) = self.global_state_defaults.get(property) {
-                new_value = default;
-            }
+        if matches!(value, Value::Null)
+            && let Some(default) = self.global_state_defaults.get(property)
+        {
+            new_value = default;
         }
 
         let unchanged = match self.global_state.get(property) {
@@ -651,12 +658,12 @@ impl Impl {
     /// [`Style::add_layer`](crate::Style::add_layer).
     pub fn add_layer(&mut self, layer: Box<dyn Layer>, before: Option<&str>) -> Result<&mut dyn Layer, Error> {
         // TODO: verify source
-        if let Some(source) = self.sources.get(&layer.get_source_id()) {
-            if !source.supports_layer_type(layer.base_impl().get_type_info()) {
-                let message =
-                    format!("Layer '{}' is not compatible with source '{}'", layer.get_id(), layer.get_source_id());
-                return Err(Error::invalid_argument(message));
-            }
+        if let Some(source) = self.sources.get(&layer.get_source_id())
+            && !source.supports_layer_type(layer.base_impl().get_type_info())
+        {
+            let message =
+                format!("Layer '{}' is not compatible with source '{}'", layer.get_id(), layer.get_source_id());
+            return Err(Error::invalid_argument(message));
         }
 
         if self.layers.get(&layer.get_id()).is_some() {
@@ -813,7 +820,7 @@ impl Impl {
     }
 
     /// `getSourceImpls()`. Applies the C++ `sources.update(source)` of the
-    /// SourceObserver callbacks: a source whose impl changed since the
+    /// `SourceObserver` callbacks: a source whose impl changed since the
     /// collection last stored it gets its current impl (one new vector per
     /// change, as C++ makes one per update).
     pub fn get_source_impls(&self) -> ImmutableVector<dyn source::Impl> {
@@ -828,10 +835,11 @@ impl Impl {
             return impls;
         }
         let mut cache = self.source_impls_cache.borrow_mut();
-        if let Some((base, refreshed)) = &*cache {
-            if Arc::ptr_eq(base, &impls) && refreshed.iter().all(|impl_| Arc::ptr_eq(impl_, &current(impl_))) {
-                return refreshed.clone();
-            }
+        if let Some((base, refreshed)) = &*cache
+            && Arc::ptr_eq(base, &impls)
+            && refreshed.iter().all(|impl_| Arc::ptr_eq(impl_, &current(impl_)))
+        {
+            return refreshed.clone();
         }
         let refreshed: ImmutableVector<dyn source::Impl> = Arc::new(impls.iter().map(current).collect());
         *cache = Some((impls, refreshed.clone()));
@@ -877,7 +885,7 @@ impl Impl {
             return false;
         }
 
-        self.sources.iter().all(|source| source.loaded())
+        self.sources.iter().all(super::source::Source::loaded)
     }
 
     pub fn pixel_ratio(&self) -> f32 {

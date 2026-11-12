@@ -173,8 +173,8 @@ fn expect_tile_0_0_0(template: &'static str) -> impl Fn(&Resource) {
 }
 
 /// The responders of the tests that download style.json and all its
-/// resources (Activate, ExcludeIdeographs, InterruptAndResume,
-/// NoFreezingOnNotFoundError but its sprite JSON).
+/// resources (Activate, `ExcludeIdeographs`, `InterruptAndResume`,
+/// `NoFreezingOnNotFoundError` but its sprite JSON).
 fn respond_to_full_style(test: &OfflineTest, sprite_json: bool) {
     test.respond_with(Kind::Style, "style.json", expect_style_url);
     test.respond_with(Kind::SpriteImage, "sprite.png", |resource| {
@@ -218,18 +218,18 @@ fn no_subresources() {
     let observer = MockObserver {
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
             if status.complete() {
-                if !expects_inactive_status.get() {
-                    expects_inactive_status.set(true);
-                    assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
-                    assert_eq!(1, status.completed_resource_count);
-                    assert_eq!(size.get(), status.completed_resource_size);
-                    assert!(status.required_resource_count_is_precise);
-                } else {
+                if expects_inactive_status.get() {
                     assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
                     assert_eq!(1, status.completed_resource_count);
                     assert_eq!(size.get(), status.completed_resource_size);
                     assert!(status.required_resource_count_is_precise);
                     stop.stop();
+                } else {
+                    expects_inactive_status.set(true);
+                    assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
+                    assert_eq!(1, status.completed_resource_count);
+                    assert_eq!(size.get(), status.completed_resource_size);
+                    assert!(status.required_resource_count_is_precise);
                 }
             }
         })),
@@ -307,7 +307,7 @@ fn geojson_source() {
     test.run_loop.run();
 }
 
-/// The completion check of Activate and ExcludeIdeographs: deactivate, then
+/// The completion check of Activate and `ExcludeIdeographs`: deactivate, then
 /// compare the computed status with the reported one.
 fn check_completed_and_computed(
     download: &WeakOfflineDownload,
@@ -412,7 +412,7 @@ impl Drop for FakeFileRequest {
     }
 }
 
-/// `FakeOnlineFileSource` (test/src/mln/test/fake_file_source.hpp): records
+/// `FakeOnlineFileSource` (`test/src/mln/test/fake_file_source.hpp)`: records
 /// the requests; `respond` answers the first of a kind. Requests come from
 /// the thread that created it.
 struct FakeOnlineFileSource {
@@ -704,12 +704,12 @@ fn tile_count_limit_exceeded_no_tile_response() {
             called.set(true);
         })),
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if !called2.get() {
-                assert!(!status.complete());
-                assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
-            } else {
+            if called2.get() {
                 assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
                 stop.stop();
+            } else {
+                assert!(!status.complete());
+                assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
             }
         })),
         ..Default::default()
@@ -749,11 +749,11 @@ fn tile_count_limit_exceeded_with_tile_response() {
             called.set(true);
         })),
         status_changed_fn: Some(Box::new(move |status: OfflineRegionStatus| {
-            if !called2.get() {
-                assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
-            } else {
+            if called2.get() {
                 assert_eq!(OfflineRegionDownloadState::Inactive, status.download_state);
                 stop.stop();
+            } else {
+                assert_eq!(OfflineRegionDownloadState::Active, status.download_state);
             }
             if status.completed_resource_count > tile_limit {
                 stop.stop();
@@ -907,8 +907,8 @@ fn all_offline_requests_have_low_priority_and_offline_usage() {
     let download = test.download(region.get_id(), STYLE_URL, true);
 
     let low_offline = |resource: &Resource| {
-        assert!(resource.priority == Priority::Low);
-        assert!(resource.usage == Usage::Offline);
+        assert_eq!(resource.priority, Priority::Low);
+        assert_eq!(resource.usage, Usage::Offline);
     };
     test.respond_with(Kind::Style, "style.json", low_offline);
     test.respond_with(Kind::SpriteImage, "sprite.png", low_offline);

@@ -172,8 +172,8 @@ const DEPTH_EPSILON: f32 = 1.0 / (1 << 16) as f32;
 /// `1 - (numLayerGroups() + 2) * numSublayers * depthEpsilon` for one layer group.
 const DEPTH_RANGE_SIZE: f32 = 1.0 - ((1 + 2) * NUM_SUBLAYERS) as f32 * DEPTH_EPSILON;
 
-/// The gfx-facing part of the renderer's PaintParameters, as in
-/// background_test.rs.
+/// The gfx-facing part of the renderer's `PaintParameters`, as in
+/// `background_test.rs`.
 struct TestPaintParameters<'a> {
     context: &'a dyn Context,
     encoder: Box<dyn CommandEncoder>,

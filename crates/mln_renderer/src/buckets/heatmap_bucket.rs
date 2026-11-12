@@ -12,7 +12,9 @@ use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::expression::Value;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::heatmap_layer_properties::*;
+use mln_style::layers::heatmap_layer_properties::{
+    HeatmapLayerProperties, HeatmapPaintProperties, HeatmapRadius, HeatmapWeight,
+};
 use mln_style_types::image::ImagePositions;
 use mln_tile_id::CanonicalTileID;
 use mln_tile_id::geometry_tile_data::{GeometryCollection, GeometryCoordinate, GeometryTileFeature};
@@ -88,16 +90,18 @@ impl HeatmapBucket {
 
     /// `vertex(Point<int16_t> p, float ex, float ey)`: `p.x * 2` is an
     /// `int`, plus a `float`, converted to `int16_t` (truncation).
+    #[must_use]
     pub fn vertex(p: GeometryCoordinate, ex: f32, ey: f32) -> HeatmapLayoutVertex {
         HeatmapLayoutVertex {
             a1: [
-                ((p.x as i32 * 2) as f32 + ((ex + 1.0) / 2.0)) as i32 as i16,
-                ((p.y as i32 * 2) as f32 + ((ey + 1.0) / 2.0)) as i32 as i16,
+                ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,
+                ((i32::from(p.y) * 2) as f32 + f32::midpoint(ey, 1.0)) as i32 as i16,
             ],
         }
     }
 
     /// `textureVertex(Point<int16_t> p)`.
+    #[must_use]
     pub fn texture_vertex(p: GeometryCoordinate) -> HeatmapTextureLayoutVertex {
         HeatmapLayoutVertex { a1: [p.x, p.y] }
     }
@@ -158,7 +162,7 @@ impl Bucket for HeatmapBucket {
                 self.vertices.get_mut().push(HeatmapBucket::vertex(point, -1.0, 1.0)); // 4
 
                 let segment = self.segments.last_mut().expect("segment");
-                debug_assert!(segment.vertex_length <= usize::from(u16::MAX));
+                debug_assert!(u16::try_from(segment.vertex_length).is_ok());
                 let index = segment.vertex_length as u16;
 
                 // 1, 2, 3
@@ -177,7 +181,7 @@ impl Bucket for HeatmapBucket {
                 feature,
                 length,
                 feature_index,
-                &Default::default(),
+                &ImagePositions::default(),
                 None,
                 canonical,
                 &EMPTY_FORMATTED_SECTION,

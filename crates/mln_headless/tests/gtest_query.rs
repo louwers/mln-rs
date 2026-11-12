@@ -27,7 +27,7 @@ use crate::style_image;
 use crate::support::*;
 
 /// The `QueryTest` fixture: a static 256x256 map with
-/// test/fixtures/api/query_style.json and the "test-icon" image, rendered
+/// `test/fixtures/api/query_style.json` and the "test-icon" image, rendered
 /// once.
 struct QueryTest(MapTest);
 
@@ -87,8 +87,8 @@ fn filter(expression: Box<dyn mln_style::expression::Expression>) -> Filter {
     Filter::new(Some(Arc::from(expression)), None)
 }
 
-fn layers(ids: &[&str]) -> Option<Vec<String>> {
-    Some(ids.iter().map(|id| id.to_string()).collect())
+fn layers(ids: &[&str]) -> Vec<String> {
+    ids.iter().map(std::string::ToString::to_string).collect()
 }
 
 fn rendered(ids: Option<Vec<String>>, filter: Option<Filter>) -> RenderedQueryOptions {
@@ -126,16 +126,16 @@ fn query_rendered_features_filter_layer() {
 
     let zz = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
 
-    let features1 = test.query_rendered_features(&zz, &rendered(layers(&["layer1"]), None));
+    let features1 = test.query_rendered_features(&zz, &rendered(Some(layers(&["layer1"])), None));
     assert_eq!(features1.len(), 1);
 
-    let features2 = test.query_rendered_features(&zz, &rendered(layers(&["layer1", "layer2"]), None));
+    let features2 = test.query_rendered_features(&zz, &rendered(Some(layers(&["layer1", "layer2"])), None));
     assert_eq!(features2.len(), 2);
 
-    let features3 = test.query_rendered_features(&zz, &rendered(layers(&["foobar"]), None));
+    let features3 = test.query_rendered_features(&zz, &rendered(Some(layers(&["foobar"])), None));
     assert_eq!(features3.len(), 0);
 
-    let features4 = test.query_rendered_features(&zz, &rendered(layers(&["foobar", "layer3"]), None));
+    let features4 = test.query_rendered_features(&zz, &rendered(Some(layers(&["foobar", "layer3"])), None));
     assert_eq!(features4.len(), 1);
 }
 
@@ -152,7 +152,7 @@ fn query_rendered_features_layer() {
     assert_eq!(layers, ["layer1", "layer2", "layer3", "layer4"]);
 
     let source_features = test.query_source_features("source3", &SourceQueryOptions::default());
-    assert!(!source_features.is_empty());
+    assert_ne!(source_features, [] as [mln_util::feature::Feature; 0]);
     assert_eq!(source_features[0].layer, "");
 }
 
@@ -167,7 +167,7 @@ fn query_rendered_features_filter() {
     assert_eq!(features1.len(), 1);
 
     let id_not_eq_filter = filter(ne(id(), literal_str("feature1")));
-    let features2 = test.query_rendered_features(&zz, &rendered(layers(&["layer4"]), Some(id_not_eq_filter)));
+    let features2 = test.query_rendered_features(&zz, &rendered(Some(layers(&["layer4"])), Some(id_not_eq_filter)));
     assert_eq!(features2.len(), 0);
 
     let gt_filter = filter(gt(number(get_str("key2"), None), literal(ExpressionValue::Number(1.0))));
@@ -187,7 +187,7 @@ fn global_state_change_relayouts_source_filter() {
     }
 
     let point = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
-    let options = rendered(layers(&["layer4"]), None);
+    let options = rendered(Some(layers(&["layer4"])), None);
 
     test.set_global_state_property("filterValue", "value1");
     test.render();
@@ -195,7 +195,7 @@ fn global_state_change_relayouts_source_filter() {
 
     test.set_global_state_property("filterValue", "other");
     test.render();
-    assert!(test.query_rendered_features(&point, &options).is_empty());
+    assert_eq!(test.query_rendered_features(&point, &options), [] as [mln_util::feature::Feature; 0]);
 
     test.set_global_state_property("filterValue", "value1");
     test.render();
@@ -208,7 +208,7 @@ fn query_filters_use_global_state() {
     let test = QueryTest::new();
     let filter = parse_filter(r#"["==", ["get", "key1"], ["global-state", "queryValue"]]"#);
     let point = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
-    let rendered_options = rendered(layers(&["layer4"]), Some(filter.clone()));
+    let rendered_options = rendered(Some(layers(&["layer4"])), Some(filter.clone()));
     let source_options = SourceQueryOptions::new(None, Some(filter));
 
     test.set_global_state_property("queryValue", "value1");
@@ -218,8 +218,8 @@ fn query_filters_use_global_state() {
 
     test.set_global_state_property("queryValue", "other");
     test.render();
-    assert!(test.query_rendered_features(&point, &rendered_options).is_empty());
-    assert!(test.query_source_features("source4", &source_options).is_empty());
+    assert_eq!(test.query_rendered_features(&point, &rendered_options), [] as [mln_util::feature::Feature; 0]);
+    assert_eq!(test.query_source_features("source4", &source_options), [] as [mln_util::feature::Feature; 0]);
 }
 
 // gtest: Query.QueryRenderedFeaturesLineOffsetEndpoint
@@ -247,12 +247,12 @@ fn query_rendered_features_line_offset_endpoint() {
         assert!(alpha_at(&inside) > 0, "offset {offset}");
         assert_eq!(alpha_at(&outside), 0, "offset {offset}");
         assert_eq!(
-            test.query_rendered_features(&inside, &rendered(layers(&["layer"]), None)).len(),
+            test.query_rendered_features(&inside, &rendered(Some(layers(&["layer"])), None)).len(),
             1,
             "offset {offset}"
         );
         assert!(
-            test.query_rendered_features(&outside, &rendered(layers(&["layer"]), None)).is_empty(),
+            test.query_rendered_features(&outside, &rendered(Some(layers(&["layer"])), None)).is_empty(),
             "offset {offset}"
         );
     }
@@ -312,8 +312,15 @@ fn query_rendered_features_composite_paint_zoom() {
             };
             assert!(alpha_at(&inside) > 0, "{trace}");
             assert_eq!(alpha_at(&outside), 0, "{trace}");
-            assert_eq!(test.query_rendered_features(&inside, &rendered(layers(&["layer"]), None)).len(), 1, "{trace}");
-            assert!(test.query_rendered_features(&outside, &rendered(layers(&["layer"]), None)).is_empty(), "{trace}");
+            assert_eq!(
+                test.query_rendered_features(&inside, &rendered(Some(layers(&["layer"])), None)).len(),
+                1,
+                "{trace}"
+            );
+            assert!(
+                test.query_rendered_features(&outside, &rendered(Some(layers(&["layer"])), None)).is_empty(),
+                "{trace}"
+            );
         }
     }
 }
@@ -350,20 +357,25 @@ fn query_rendered_features_filter_uses_overscaled_zoom() {
         let point = test.map().pixel_for_lat_lng(&ll(1.003, 1.003));
         for layer_id in ["layer1", "circle_layer"] {
             let trace = format!("{layer_id} at zoom {camera_zoom}");
-            assert_eq!(test.query_rendered_features(&point, &rendered(layers(&[layer_id]), None)).len(), 1, "{trace}");
             assert_eq!(
-                test.query_rendered_features(&point, &rendered(layers(&[layer_id]), Some(equal_zoom.clone()))).len(),
+                test.query_rendered_features(&point, &rendered(Some(layers(&[layer_id])), None)).len(),
+                1,
+                "{trace}"
+            );
+            assert_eq!(
+                test.query_rendered_features(&point, &rendered(Some(layers(&[layer_id])), Some(equal_zoom.clone())))
+                    .len(),
                 1,
                 "{trace}"
             );
             // Reject canonical zoom when overzoomed, and fractional camera zoom at either zoom.
             assert!(
-                test.query_rendered_features(&point, &rendered(layers(&[layer_id]), Some(lower_zoom.clone())))
+                test.query_rendered_features(&point, &rendered(Some(layers(&[layer_id])), Some(lower_zoom.clone())))
                     .is_empty(),
                 "{trace}"
             );
             assert!(
-                test.query_rendered_features(&point, &rendered(layers(&[layer_id]), Some(higher_zoom.clone())))
+                test.query_rendered_features(&point, &rendered(Some(layers(&[layer_id])), Some(higher_zoom.clone())))
                     .is_empty(),
                 "{trace}"
             );
@@ -490,7 +502,7 @@ fn query_source_features_source_layer() {
     test.render();
 
     let query = |source_layers: &[&str], filter: Option<Filter>| -> Vec<(u64, String)> {
-        let options = SourceQueryOptions::new(layers(source_layers), filter);
+        let options = SourceQueryOptions::new(Some(layers(source_layers)), filter);
         let features =
             test.frontend.with_renderer(|renderer| renderer.query_source_features("tiles", &options)).unwrap();
         let mut hits: Vec<(u64, String)> = features
@@ -549,7 +561,7 @@ fn query_feature_extensions(
 fn feature_collection(value: FeatureExtensionValue) -> Vec<feature::Feature<f64>> {
     match value {
         FeatureExtensionValue::FeatureCollection(features) => features,
-        other => panic!("not a FeatureCollection: {other:?}"),
+        other @ FeatureExtensionValue::Value(_) => panic!("not a FeatureCollection: {other:?}"),
     }
 }
 

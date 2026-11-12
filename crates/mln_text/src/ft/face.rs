@@ -17,8 +17,8 @@
 use super::calc::{div_fix, mul_div};
 use super::cmap::{self, Bytes, CharMap, Encoding, LookupContext};
 
-const fn tag(t: &[u8; 4]) -> u32 {
-    u32::from_be_bytes(*t)
+const fn tag(t: [u8; 4]) -> u32 {
+    u32::from_be_bytes(t)
 }
 
 /// A table directory entry (`TT_TableRec`).
@@ -78,19 +78,19 @@ impl Face {
         if data.len() < 4 {
             return Err(OpenError("Unknown_File_Format"));
         }
-        if format_tag == tag(b"ttcf") {
+        if format_tag == tag(*b"ttcf") {
             if data.len() < 16 || b.u32(8) == 0 {
                 return Err(OpenError("Unknown_File_Format"));
             }
             sfnt_offset = b.u32(12) as usize;
             format_tag = b.u32(sfnt_offset);
-        } else if format_tag == tag(b"wOFF") || format_tag == tag(b"wOF2") {
+        } else if format_tag == tag(*b"wOFF") || format_tag == tag(*b"wOF2") {
             // FreeType decodes these here (woff_open_font, woff2_open_font);
             // the port's callers decode them first, with crate::woff.
             return Err(OpenError("Unknown_File_Format (WOFF: decode it with crate::woff first)"));
         }
         // sfnt_open_font accepts these tags (plus Mac resource forks).
-        let known = [tag(b"\0\x01\0\0"), tag(b"OTTO"), tag(b"true"), tag(b"\0\x02\0\0"), tag(b"typ1")];
+        let known = [tag(*b"\0\x01\0\0"), tag(*b"OTTO"), tag(*b"true"), tag(*b"\0\x02\0\0"), tag(*b"typ1")];
         if !known.contains(&format_tag) {
             return Err(OpenError("Unknown_File_Format"));
         }
@@ -113,13 +113,13 @@ impl Face {
                 continue;
             }
             if t.length > size - t.offset {
-                if t.tag == tag(b"hmtx") || t.tag == tag(b"vmtx") {
+                if t.tag == tag(*b"hmtx") || t.tag == tag(*b"vmtx") {
                     // tt_face_load_font_dir clips them to a multiple of 4.
                     tables.push(TableRec { length: (size - t.offset) & !3, ..t });
                 }
                 continue;
             }
-            if (t.tag == tag(b"head") || t.tag == tag(b"bhed")) && t.length < 0x36 {
+            if (t.tag == tag(*b"head") || t.tag == tag(*b"bhed")) && t.length < 0x36 {
                 return Err(OpenError("Table_Missing (head too small)"));
             }
             tables.push(t);
@@ -131,7 +131,7 @@ impl Face {
         // Driver selection (FT_Open_Face tries the TrueType driver first;
         // tt_face_init rejects other SFNT flavours, which the CFF driver
         // takes if they have CFF data).
-        let is_tt = [tag(b"\0\x01\0\0"), tag(b"\0\x02\0\0"), tag(b"true")].contains(&format_tag);
+        let is_tt = [tag(*b"\0\x01\0\0"), tag(*b"\0\x02\0\0"), tag(*b"true")].contains(&format_tag);
         let mut face = Face {
             format_tag,
             tables,
@@ -152,7 +152,7 @@ impl Face {
             sfnt_offset,
             needs_synthesized_charmap: false,
         };
-        if !is_tt && face.lookup(tag(b"CFF ")).is_none() && face.lookup(tag(b"CFF2")).is_none() {
+        if !is_tt && face.lookup(tag(*b"CFF ")).is_none() && face.lookup(tag(*b"CFF2")).is_none() {
             // TODO(port): Type 1 in SFNT ('typ1'), pure CFF/CID fonts.
             return Err(OpenError("Unknown_File_Format (no TrueType or CFF data)"));
         }
@@ -167,20 +167,22 @@ impl Face {
     }
 
     /// The `(offset, length)` of a table, as `FT_Load_Sfnt_Table` returns it.
+    #[must_use]
     pub fn table(&self, t: &[u8; 4]) -> Option<(usize, usize)> {
-        self.lookup(tag(t)).map(|e| (e.offset, e.length))
+        self.lookup(tag(*t)).map(|e| (e.offset, e.length))
     }
 
     /// Every tag of the table directory with what `tt_face_lookup_table`
     /// finds for it.
+    #[must_use]
     pub fn table_entries(&self) -> Vec<([u8; 4], (usize, usize))> {
         let mut out: Vec<([u8; 4], (usize, usize))> = Vec::new();
         for e in &self.tables {
             let t = e.tag.to_be_bytes();
-            if out.iter().all(|(o, _)| *o != t) {
-                if let Some(found) = self.lookup(e.tag) {
-                    out.push((t, (found.offset, found.length)));
-                }
+            if out.iter().all(|(o, _)| *o != t)
+                && let Some(found) = self.lookup(e.tag)
+            {
+                out.push((t, (found.offset, found.length)));
             }
         }
         out
@@ -189,18 +191,18 @@ impl Face {
     /// `sfnt_load_face` (the parts with an effect here).
     fn load(&mut self, data: &[u8]) -> Result<(), OpenError> {
         let b = Bytes(data);
-        let has_outline_tables = self.lookup(tag(b"glyf")).is_some()
-            || self.lookup(tag(b"CFF ")).is_some()
-            || self.lookup(tag(b"CFF2")).is_some();
-        let has_cblc = self.lookup(tag(b"CBLC")).is_some();
-        let has_cbdt = self.lookup(tag(b"CBDT")).is_some();
-        let has_eblc = self.lookup(tag(b"EBLC")).is_some();
-        let has_bloc = self.lookup(tag(b"bloc")).is_some();
-        let has_sbix = self.lookup(tag(b"sbix")).is_some();
+        let has_outline_tables = self.lookup(tag(*b"glyf")).is_some()
+            || self.lookup(tag(*b"CFF ")).is_some()
+            || self.lookup(tag(*b"CFF2")).is_some();
+        let has_cblc = self.lookup(tag(*b"CBLC")).is_some();
+        let has_cbdt = self.lookup(tag(*b"CBDT")).is_some();
+        let has_eblc = self.lookup(tag(*b"EBLC")).is_some();
+        let has_bloc = self.lookup(tag(*b"bloc")).is_some();
+        let has_sbix = self.lookup(tag(*b"sbix")).is_some();
         let mut has_outline = has_outline_tables;
 
         // TODO(port): Apple `bhed' bitmap-only fonts.
-        let head = self.lookup(tag(b"head")).ok_or(OpenError("Table_Missing (head)"))?;
+        let head = self.lookup(tag(*b"head")).ok_or(OpenError("Table_Missing (head)"))?;
         // Ignore outlines for CBLC/CBDT fonts.
         if has_cblc || has_cbdt {
             has_outline = false;
@@ -214,26 +216,26 @@ impl Face {
         // TODO(port): the CFF driver takes the glyph count from the CFF
         // CharStrings INDEX (CID fonts: max CID + 1), not from maxp; the two
         // agree in every font of //difftest/text.
-        if let Some(maxp) = self.lookup(tag(b"maxp")) {
-            if maxp.length >= 6 {
-                self.num_glyphs = b.u16(maxp.offset + 4);
-            }
+        if let Some(maxp) = self.lookup(tag(*b"maxp"))
+            && maxp.length >= 6
+        {
+            self.num_glyphs = b.u16(maxp.offset + 4);
         }
         // cmap (tt_face_load_cmap: the whole table is extracted).
-        self.cmap = self.lookup(tag(b"cmap")).map(|t| (t.offset, t.length));
+        self.cmap = self.lookup(tag(*b"cmap")).map(|t| (t.offset, t.length));
 
         // hhea + hmtx (not optional, except for Mac `true' fonts).
-        match self.lookup(tag(b"hhea")) {
+        match self.lookup(tag(*b"hhea")) {
             Some(hhea) => {
                 if hhea.length < 36 {
                     return Err(OpenError("Invalid_Table (hhea)"));
                 }
                 self.number_of_hmetrics = b.u16(hhea.offset + 34) as u16;
-                let hmtx = self.lookup(tag(b"hmtx")).ok_or(OpenError("Hmtx_Table_Missing"))?;
+                let hmtx = self.lookup(tag(*b"hmtx")).ok_or(OpenError("Hmtx_Table_Missing"))?;
                 self.hmtx = Some((hmtx.offset, hmtx.length));
             }
             None => {
-                if self.format_tag == tag(b"true") {
+                if self.format_tag == tag(*b"true") {
                     has_outline = false;
                 } else {
                     return Err(OpenError("Horiz_Header_Missing"));
@@ -242,7 +244,7 @@ impl Face {
         }
 
         // OS/2 (treated as missing on any error).
-        if let Some(os2) = self.lookup(tag(b"OS/2")) {
+        if let Some(os2) = self.lookup(tag(*b"OS/2")) {
             // tt_face_load_os2 needs the 78-byte version 0 table at least.
             if os2.length >= 78 {
                 self.os2_version = b.u16(os2.offset) as u16;
@@ -303,11 +305,11 @@ impl Face {
         let b = Bytes(data);
         // tt_face_load_sbit prefers EBLC, then CBLC, then bloc, then sbix.
         let bitmap_location = if eblc {
-            self.lookup(tag(b"EBLC"))
+            self.lookup(tag(*b"EBLC"))
         } else if cblc {
-            self.lookup(tag(b"CBLC"))
+            self.lookup(tag(*b"CBLC"))
         } else if bloc {
-            self.lookup(tag(b"bloc"))
+            self.lookup(tag(*b"bloc"))
         } else {
             None
         };
@@ -330,7 +332,7 @@ impl Face {
             });
         }
         if sbix {
-            let Some(t) = self.lookup(tag(b"sbix")) else { return false };
+            let Some(t) = self.lookup(tag(*b"sbix")) else { return false };
             if t.length < 8 {
                 return false;
             }
@@ -344,17 +346,18 @@ impl Face {
     }
 
     /// The lookup context of `FT_Get_Char_Index` on this face.
+    #[must_use]
     pub fn lookup_context<'a>(&self, data: &'a [u8]) -> LookupContext<'a> {
         LookupContext { data, cmap_limit: self.cmap.map_or(0, |(o, s)| o + s), num_glyphs: self.num_glyphs }
     }
 
     /// `FT_Set_Charmap`.
     pub fn set_charmap(&mut self, index: usize) -> Result<(), &'static str> {
-        if self.charmaps[index].format != 14 {
+        if self.charmaps[index].format == 14 {
+            Err("Invalid_Argument")
+        } else {
             self.charmap = Some(index);
             Ok(())
-        } else {
-            Err("Invalid_Argument")
         }
     }
 
@@ -374,7 +377,7 @@ impl Face {
             // FT_Request_Metrics, FT_SIZE_REQUEST_TYPE_NOMINAL. (tt_size_reset
             // rounds the ppem only in `hinted_metrics`; FT_Get_Advance and
             // hb-ft read the unrounded `size->metrics`.)
-            let w = self.units_per_em as i64;
+            let w = i64::from(self.units_per_em);
             let h = w;
             let scaled_w = (char_width * resolution + 36) / 72; // FT_REQUEST_WIDTH
             let scaled_h = (char_height * resolution + 36) / 72;
@@ -388,6 +391,7 @@ impl Face {
 
     /// `FT_Get_Advance(face, gindex, FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING)`:
     /// the 16.16 advance, or an error (the caller keeps 0).
+    #[must_use]
     pub fn get_advance(&self, data: &[u8], gindex: u32) -> Option<i64> {
         if gindex >= self.num_glyphs {
             return None; // Invalid_Glyph_Index
@@ -401,7 +405,7 @@ impl Face {
         }
         let aw = self.get_hmetrics_advance(data, gindex);
         // ft_face_scale_advances_
-        Some(mul_div(aw as i64, self.x_scale, 64))
+        Some(mul_div(i64::from(aw), self.x_scale, 64))
     }
 
     /// `tt_face_get_metrics(face, 0, gindex, &lsb, &aw)`'s advance.
@@ -411,7 +415,7 @@ impl Face {
             return 0;
         };
         let table_end = table_pos + table_size;
-        let k = self.number_of_hmetrics as u32;
+        let k = u32::from(self.number_of_hmetrics);
         if k == 0 {
             return 0;
         }

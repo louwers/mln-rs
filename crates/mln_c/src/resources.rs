@@ -197,7 +197,7 @@ impl ResourceProvider for HostProvider {
             let info = info.view();
             // SAFETY: the host's provider callback, with its user data, a
             // request view that outlives the call, and the handle it owns.
-            unsafe { callback(user_data.get(), &info, handle) };
+            unsafe { callback(user_data.get(), &raw const info, handle) };
         });
     }
 }
@@ -535,7 +535,7 @@ mod tests {
             mln_resource_request_release(0);
             assert_eq!(mln_resource_request_pass_through(0, core::ptr::null_mut()), MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(
-                mln_resource_request_is_cancelled(0, &mut cancelled, core::ptr::null_mut()),
+                mln_resource_request_is_cancelled(0, &raw mut cancelled, core::ptr::null_mut()),
                 MLN_STATUS_INVALID_ARGUMENT
             );
         }
@@ -561,7 +561,7 @@ mod tests {
             ..response()
         };
         // SAFETY: a local response.
-        let native = unsafe { host_response(&answer) }.unwrap();
+        let native = unsafe { host_response(&raw const answer) }.unwrap();
         assert_eq!(native.data.as_deref().map(Vec::as_slice), Some(&body[..]));
         assert_eq!(native.modified, Some(Timestamp::from_secs(1_700_000_000)));
         assert_eq!(native.expires, None);
@@ -575,7 +575,7 @@ mod tests {
             ..response()
         };
         // SAFETY: a local response.
-        let failure = unsafe { host_response(&error) }.unwrap().error.unwrap();
+        let failure = unsafe { host_response(&raw const error) }.unwrap().error.unwrap();
         assert_eq!(
             *failure,
             ResourceError::with_retry_after(
@@ -595,16 +595,16 @@ mod tests {
         };
         // SAFETY: local responses.
         unsafe {
-            assert_eq!(host_response(&refused).unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(host_response(&raw const refused).unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(host_response(core::ptr::null()).unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
             let small = mln_resource_response { size: 4, ..response() };
-            assert_eq!(host_response(&small).unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(host_response(&raw const small).unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
             let unknown = mln_resource_response { status: 9, ..response() };
-            let error = host_response(&unknown).unwrap().error.unwrap();
+            let error = host_response(&raw const unknown).unwrap().error.unwrap();
             assert_eq!(error.message, "resource provider returned an unknown response status");
             let null = mln_resource_response { byte_count: 3, ..response() };
             assert_eq!(
-                host_response(&null).unwrap().error.unwrap().message,
+                host_response(&raw const null).unwrap().error.unwrap().message,
                 "resource provider returned a null byte buffer"
             );
         }

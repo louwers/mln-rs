@@ -35,6 +35,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -42,12 +43,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct HeatmapLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl HeatmapLayer {
     /// `HeatmapLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         HeatmapLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -55,16 +57,19 @@ impl HeatmapLayer {
     }
 
     /// `HeatmapLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         HeatmapLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -75,6 +80,7 @@ impl HeatmapLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_heatmap_color() -> ColorRampPropertyValue {
         let mut error = Error::default();
         let raw_value: serde_json::Value = serde_json::from_str(
@@ -86,6 +92,7 @@ impl HeatmapLayer {
             .expect("the heatmap-color default converts")
     }
 
+    #[must_use]
     pub fn get_heatmap_color(&self) -> &ColorRampPropertyValue {
         &self.impl_().paint.get::<HeatmapColor>().value
     }
@@ -105,14 +112,17 @@ impl HeatmapLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_heatmap_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapColor>().options
     }
 
+    #[must_use]
     pub fn get_default_heatmap_intensity() -> PropertyValue<f32> {
         PropertyValue::Constant(HeatmapIntensity::default_value())
     }
 
+    #[must_use]
     pub fn get_heatmap_intensity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HeatmapIntensity>().value
     }
@@ -132,14 +142,17 @@ impl HeatmapLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_heatmap_intensity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapIntensity>().options
     }
 
+    #[must_use]
     pub fn get_default_heatmap_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(HeatmapOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_heatmap_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HeatmapOpacity>().value
     }
@@ -159,14 +172,17 @@ impl HeatmapLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_heatmap_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_heatmap_radius() -> PropertyValue<f32> {
         PropertyValue::Constant(HeatmapRadius::default_value())
     }
 
+    #[must_use]
     pub fn get_heatmap_radius(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HeatmapRadius>().value
     }
@@ -186,14 +202,17 @@ impl HeatmapLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_heatmap_radius_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapRadius>().options
     }
 
+    #[must_use]
     pub fn get_default_heatmap_weight() -> PropertyValue<f32> {
         PropertyValue::Constant(HeatmapWeight::default_value())
     }
 
+    #[must_use]
     pub fn get_heatmap_weight(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HeatmapWeight>().value
     }
@@ -213,6 +232,7 @@ impl HeatmapLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_heatmap_weight_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapWeight>().options
     }
@@ -223,30 +243,30 @@ const K_PAINT_PROPERTY_COUNT: u8 = 10;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
-    HeatmapColor,
-    HeatmapIntensity,
-    HeatmapOpacity,
-    HeatmapRadius,
-    HeatmapWeight,
-    HeatmapColorTransition,
-    HeatmapIntensityTransition,
-    HeatmapOpacityTransition,
-    HeatmapRadiusTransition,
-    HeatmapWeightTransition,
+    Color,
+    Intensity,
+    Opacity,
+    Radius,
+    Weight,
+    ColorTransition,
+    IntensityTransition,
+    OpacityTransition,
+    RadiusTransition,
+    WeightTransition,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
-    ("heatmap-color", Property::HeatmapColor),
-    ("heatmap-intensity", Property::HeatmapIntensity),
-    ("heatmap-opacity", Property::HeatmapOpacity),
-    ("heatmap-radius", Property::HeatmapRadius),
-    ("heatmap-weight", Property::HeatmapWeight),
-    ("heatmap-color-transition", Property::HeatmapColorTransition),
-    ("heatmap-intensity-transition", Property::HeatmapIntensityTransition),
-    ("heatmap-opacity-transition", Property::HeatmapOpacityTransition),
-    ("heatmap-radius-transition", Property::HeatmapRadiusTransition),
-    ("heatmap-weight-transition", Property::HeatmapWeightTransition),
+    ("heatmap-color", Property::Color),
+    ("heatmap-intensity", Property::Intensity),
+    ("heatmap-opacity", Property::Opacity),
+    ("heatmap-radius", Property::Radius),
+    ("heatmap-weight", Property::Weight),
+    ("heatmap-color-transition", Property::ColorTransition),
+    ("heatmap-intensity-transition", Property::IntensityTransition),
+    ("heatmap-opacity-transition", Property::OpacityTransition),
+    ("heatmap-radius-transition", Property::RadiusTransition),
+    ("heatmap-weight-transition", Property::WeightTransition),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -255,18 +275,16 @@ fn find_property(name: &str) -> Option<Property> {
 
 fn get_layer_property(layer: &HeatmapLayer, property: Property) -> StyleProperty {
     match property {
-        Property::HeatmapColor => make_color_ramp_style_property(layer.get_heatmap_color()),
-        Property::HeatmapIntensity => make_style_property(layer.get_heatmap_intensity()),
-        Property::HeatmapOpacity => make_style_property(layer.get_heatmap_opacity()),
-        Property::HeatmapRadius => make_style_property(layer.get_heatmap_radius()),
-        Property::HeatmapWeight => make_style_property(layer.get_heatmap_weight()),
-        Property::HeatmapColorTransition => make_transition_style_property(&layer.get_heatmap_color_transition()),
-        Property::HeatmapIntensityTransition => {
-            make_transition_style_property(&layer.get_heatmap_intensity_transition())
-        }
-        Property::HeatmapOpacityTransition => make_transition_style_property(&layer.get_heatmap_opacity_transition()),
-        Property::HeatmapRadiusTransition => make_transition_style_property(&layer.get_heatmap_radius_transition()),
-        Property::HeatmapWeightTransition => make_transition_style_property(&layer.get_heatmap_weight_transition()),
+        Property::Color => make_color_ramp_style_property(layer.get_heatmap_color()),
+        Property::Intensity => make_style_property(layer.get_heatmap_intensity()),
+        Property::Opacity => make_style_property(layer.get_heatmap_opacity()),
+        Property::Radius => make_style_property(layer.get_heatmap_radius()),
+        Property::Weight => make_style_property(layer.get_heatmap_weight()),
+        Property::ColorTransition => make_transition_style_property(&layer.get_heatmap_color_transition()),
+        Property::IntensityTransition => make_transition_style_property(&layer.get_heatmap_intensity_transition()),
+        Property::OpacityTransition => make_transition_style_property(&layer.get_heatmap_opacity_transition()),
+        Property::RadiusTransition => make_transition_style_property(&layer.get_heatmap_radius_transition()),
+        Property::WeightTransition => make_transition_style_property(&layer.get_heatmap_weight_transition()),
     }
 }
 
@@ -318,7 +336,7 @@ impl Layer for HeatmapLayer {
             )));
         };
 
-        if property == Property::HeatmapColor {
+        if property == Property::Color {
             let mut error = Error::default();
             let Some(typed_value) = convert_color_ramp_property_value(value, &mut error, false, false) else {
                 return Some(error);
@@ -328,35 +346,35 @@ impl Layer for HeatmapLayer {
             return None;
         }
 
-        if property == Property::HeatmapIntensity || property == Property::HeatmapOpacity {
+        if property == Property::Intensity || property == Property::Opacity {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, false, false) else {
                 return Some(error);
             };
 
-            if property == Property::HeatmapIntensity {
+            if property == Property::Intensity {
                 self.set_heatmap_intensity(&typed_value);
                 return None;
             }
 
-            if property == Property::HeatmapOpacity {
+            if property == Property::Opacity {
                 self.set_heatmap_opacity(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::HeatmapRadius || property == Property::HeatmapWeight {
+        if property == Property::Radius || property == Property::Weight {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::HeatmapRadius {
+            if property == Property::Radius {
                 self.set_heatmap_radius(&typed_value);
                 return None;
             }
 
-            if property == Property::HeatmapWeight {
+            if property == Property::Weight {
                 self.set_heatmap_weight(&typed_value);
                 return None;
             }
@@ -367,27 +385,27 @@ impl Layer for HeatmapLayer {
             return Some(error);
         };
 
-        if property == Property::HeatmapColorTransition {
+        if property == Property::ColorTransition {
             self.set_heatmap_color_transition(&transition);
             return None;
         }
 
-        if property == Property::HeatmapIntensityTransition {
+        if property == Property::IntensityTransition {
             self.set_heatmap_intensity_transition(&transition);
             return None;
         }
 
-        if property == Property::HeatmapOpacityTransition {
+        if property == Property::OpacityTransition {
             self.set_heatmap_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::HeatmapRadiusTransition {
+        if property == Property::RadiusTransition {
             self.set_heatmap_radius_transition(&transition);
             return None;
         }
 
-        if property == Property::HeatmapWeightTransition {
+        if property == Property::WeightTransition {
             self.set_heatmap_weight_transition(&transition);
             return None;
         }

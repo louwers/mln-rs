@@ -27,6 +27,7 @@ pub enum EventSource {
 
 impl EventSource {
     /// The map that raised the event.
+    #[must_use]
     pub fn map_id(&self) -> Option<MapId> {
         match self {
             EventSource::Runtime => None,
@@ -57,6 +58,7 @@ pub enum RuntimeEventKind {
 }
 
 impl RuntimeEventKind {
+    #[must_use]
     pub fn event_type(&self) -> EventType {
         match self {
             RuntimeEventKind::Map(event) => map_event_type(event),
@@ -173,24 +175,29 @@ impl EventMask {
     pub const ALL: EventMask = EventMask(Self::ALL_MAP_EVENTS.0 | Self::ALL_RUNTIME_EVENTS.0);
 
     /// The mask with these bits, or `None` when a bit names no event type.
+    #[must_use]
     pub const fn from_bits(bits: u64) -> Option<EventMask> {
         if bits & !Self::ALL.0 == 0 { Some(EventMask(bits)) } else { None }
     }
 
+    #[must_use]
     pub const fn bits(self) -> u64 {
         self.0
     }
 
+    #[must_use]
     pub const fn contains(self, event_type: EventType) -> bool {
         self.0 & bit(event_type) != 0
     }
 
     /// The mask with `event_type` added.
+    #[must_use]
     pub const fn with(self, event_type: EventType) -> EventMask {
         EventMask(self.0 | bit(event_type))
     }
 
     /// The mask with `event_type` removed.
+    #[must_use]
     pub const fn without(self, event_type: EventType) -> EventMask {
         EventMask(self.0 & !bit(event_type))
     }

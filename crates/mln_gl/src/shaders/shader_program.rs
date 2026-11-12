@@ -61,8 +61,7 @@ fn map_type(attribute_type: u32) -> AttributeDataType {
         glow::FLOAT => T::Float,
         glow::FLOAT_VEC2 => T::Float2,
         glow::FLOAT_VEC3 => T::Float3,
-        glow::FLOAT_VEC4 => T::Float4,
-        glow::FLOAT_MAT2 | glow::FLOAT_MAT3 | glow::FLOAT_MAT4 => T::Float4,
+        glow::FLOAT_VEC4 | glow::FLOAT_MAT2 | glow::FLOAT_MAT3 | glow::FLOAT_MAT4 => T::Float4,
         glow::INT => T::Int,
         glow::INT_VEC2 => T::Int2,
         glow::INT_VEC3 => T::Int3,
@@ -92,6 +91,8 @@ impl ShaderProgram {
         source: &ShaderSource,
         additional_defines: &str,
     ) -> Option<ShaderProgram> {
+        const VERSION: &str = "#version 300 es\n";
+
         let observer = context.get_observer();
         if let Some(observer) = &observer {
             observer.on_pre_compile_shader(shader_id, BackendType::OpenGL, additional_defines);
@@ -104,7 +105,6 @@ impl ShaderProgram {
             None
         };
 
-        const VERSION: &str = "#version 300 es\n";
         let defines = program_parameters.get_defines_string();
         let vertex_shader = match context.create_shader(
             glow::VERTEX_SHADER,
@@ -211,11 +211,13 @@ impl ShaderProgram {
     }
 
     /// `getGLProgramID()`
+    #[must_use]
     pub fn get_gl_program_id(&self) -> ProgramID {
         self.program
     }
 
     /// The uniform blocks this variant of the program reads.
+    #[must_use]
     pub fn uniform_blocks(&self) -> &[UniformBlock] {
         &self.uniform_blocks
     }

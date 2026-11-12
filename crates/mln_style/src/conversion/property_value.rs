@@ -123,21 +123,19 @@ where
         return Some(PropertyValue::Undefined);
     }
 
-    let expression: Option<PropertyExpression<T>>;
-
-    if is_expression(value) {
+    let expression: Option<PropertyExpression<T>> = if is_expression(value) {
         let mut ctx = ParsingContext::with_expected(T::expression_type());
         let Some(parsed) = ctx.parse_layer_property_expression(value) else {
             error.message = ctx.get_combined_errors();
             return None;
         };
-        expression = Some(PropertyExpression::from_box(parsed, None));
+        Some(PropertyExpression::from_box(parsed, None))
     } else if value.is_object() {
-        expression = convert_function_to_expression::<T>(value, error, convert_tokens);
+        convert_function_to_expression::<T>(value, error, convert_tokens)
     } else {
         let constant = convert::<T>(value, error)?;
         return Some(if convert_tokens { constant.maybe_convert_tokens() } else { PropertyValue::Constant(constant) });
-    }
+    };
 
     let expression = expression?;
     if !allow_data_expressions && !expression.is_feature_constant() {

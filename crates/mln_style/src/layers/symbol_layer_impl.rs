@@ -85,7 +85,6 @@ impl SymbolLayerPaintPropertyOverrides {
         match formatted.as_formatted_value() {
             FormattedValue::Constant(literal) => check_literal(literal),
             FormattedValue::Expression(property) => {
-                let mut expression_has_overrides = false;
                 fn check_expression<'a>(
                     e: &'a dyn Expression,
                     found: &mut bool,
@@ -99,10 +98,10 @@ impl SymbolLayerPaintPropertyOverrides {
                     if e.get_kind() == Kind::Literal && *e.get_type() == Type::Formatted {
                         let literal_expr = downcast::<Literal>(e).expect("Kind::Literal is a Literal");
                         let formatted_value = from_expression_value::<Formatted>(literal_expr.get_value());
-                        if let Some(formatted_value) = formatted_value {
-                            if check_literal(&formatted_value) {
-                                *found = true;
-                            }
+                        if let Some(formatted_value) = formatted_value
+                            && check_literal(&formatted_value)
+                        {
+                            *found = true;
                         }
                     } else if e.get_kind() == Kind::FormatExpression {
                         let format_expr =
@@ -115,11 +114,12 @@ impl SymbolLayerPaintPropertyOverrides {
                         }
                     } else {
                         e.each_child(&mut |child| {
-                            check_expression(child, found, check_literal, expression_section_has_override)
+                            check_expression(child, found, check_literal, expression_section_has_override);
                         });
                     }
                 }
 
+                let mut expression_has_overrides = false;
                 check_expression(
                     property.get_expression(),
                     &mut expression_has_overrides,
@@ -166,6 +166,7 @@ impl SymbolLayerPaintPropertyOverrides {
 
     /// `hasPaintPropertyDifference(lhs, rhs)`: a constant overridable
     /// property differs.
+    #[must_use]
     pub fn has_paint_property_difference(
         lhs: &SymbolPaintProperties::Transitionable,
         rhs: &SymbolPaintProperties::Transitionable,
@@ -190,6 +191,7 @@ pub struct Impl {
 
 impl Impl {
     /// `using Layer::Impl::Impl;` (`Impl(std::string layerID, std::string sourceID)`).
+    #[must_use]
     pub fn new(layer_id: String, source_id: String) -> Self {
         Impl {
             base: ImplBase::new(layer_id, source_id),

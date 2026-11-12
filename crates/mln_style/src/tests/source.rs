@@ -27,13 +27,19 @@ use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::image_source::ImageSource;
 use crate::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 
-/// `StubStyleObserver` (test/src/mln/test/stub_style_observer.hpp), the
-/// SourceObserver half.
+/// A test's handler for a source event.
+type SourceHandler = Box<dyn Fn(&dyn Source)>;
+
+/// A test's handler for a source error.
+type SourceErrorHandler = Box<dyn Fn(&dyn Source, mln_util::Error)>;
+
+/// `StubStyleObserver` (`test/src/mln/test/stub_style_observer.hpp`), the
+/// `SourceObserver` half.
 #[derive(Default)]
 struct StubStyleObserver {
-    source_loaded: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
-    source_changed: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
-    source_error: RefCell<Option<Box<dyn Fn(&dyn Source, mln_util::Error)>>>,
+    source_loaded: RefCell<Option<SourceHandler>>,
+    source_changed: RefCell<Option<SourceHandler>>,
+    source_error: RefCell<Option<SourceErrorHandler>>,
 }
 
 impl SourceObserver for StubStyleObserver {
@@ -229,7 +235,7 @@ fn geojson_source_keeps_the_style_attribution() {
     assert!(*loaded.borrow());
 }
 
-/// A FeatureCollection of `count` points at 0, 0.
+/// A `FeatureCollection` of `count` points at 0, 0.
 fn geojson_points(count: usize) -> Arc<Vec<u8>> {
     let feature = r#"{"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [0, 0]}}"#;
     let features = vec![feature; count].join(",");

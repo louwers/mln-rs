@@ -20,7 +20,10 @@ use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::color_relief_layer_ubo::ColorReliefTilePropsUBO;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_COLOR_RELIEF_COLOR_STOPS_TEXTURE, ID_COLOR_RELIEF_ELEVATION_STOPS_TEXTURE, ID_COLOR_RELIEF_IMAGE_TEXTURE,
+    ID_COLOR_RELIEF_POS_VERTEX_ATTRIBUTE, ID_COLOR_RELIEF_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
@@ -35,7 +38,9 @@ use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::ColorReliefLayer;
 use mln_style::layers::color_relief_layer_impl::Impl as ColorReliefLayerImpl;
-use mln_style::layers::color_relief_layer_properties::*;
+use mln_style::layers::color_relief_layer_properties::{
+    ColorReliefColor, ColorReliefLayerProperties, ColorReliefOpacity, ColorReliefPaintProperties, Resampling,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::ResamplingType;
 use mln_util::Color;

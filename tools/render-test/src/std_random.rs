@@ -21,6 +21,7 @@ pub struct SeedSeq {
 }
 
 impl SeedSeq {
+    #[must_use]
     pub fn new(seeds: &[u32]) -> Self {
         SeedSeq { v: seeds.to_vec() }
     }
@@ -31,7 +32,7 @@ impl SeedSeq {
         if n == 0 {
             return;
         }
-        out.fill(0x8b8b8b8b);
+        out.fill(0x8b8b_8b8b);
         let s = self.v.len();
         let t = if n >= 623 {
             11
@@ -50,7 +51,7 @@ impl SeedSeq {
         let tt = |x: u32| x ^ (x >> 27);
 
         for k in 0..m {
-            let r1 = 1664525u32.wrapping_mul(tt(out[k % n] ^ out[(k + p) % n] ^ out[(k + n - 1) % n]));
+            let r1 = 1_664_525_u32.wrapping_mul(tt(out[k % n] ^ out[(k + p) % n] ^ out[(k + n - 1) % n]));
             let r2 = if k == 0 {
                 r1.wrapping_add(s as u32)
             } else if k <= s {
@@ -63,7 +64,7 @@ impl SeedSeq {
             out[k % n] = r2;
         }
         for k in m..m + n {
-            let r3 = 1566083941u32
+            let r3 = 1_566_083_941_u32
                 .wrapping_mul(tt(out[k % n].wrapping_add(out[(k + p) % n]).wrapping_add(out[(k + n - 1) % n])));
             let r4 = r3.wrapping_sub((k % n) as u32);
             out[(k + p) % n] ^= r3;
@@ -82,24 +83,26 @@ pub struct Mt19937 {
 impl Mt19937 {
     const N: usize = 624;
     const M: usize = 397;
-    const MATRIX_A: u32 = 0x9908b0df;
-    const UPPER_MASK: u32 = 0x80000000;
-    const LOWER_MASK: u32 = 0x7fffffff;
+    const MATRIX_A: u32 = 0x9908_b0df;
+    const UPPER_MASK: u32 = 0x8000_0000;
+    const LOWER_MASK: u32 = 0x7fff_ffff;
 
     pub const MIN: u32 = 0;
     pub const MAX: u32 = u32::MAX;
 
     /// `mersenne_twister_engine(result_type value)`.
+    #[must_use]
     pub fn new(value: u32) -> Self {
         let mut state = [0u32; Self::N];
         state[0] = value;
         for i in 1..Self::N {
-            state[i] = 1812433253u32.wrapping_mul(state[i - 1] ^ (state[i - 1] >> 30)).wrapping_add(i as u32);
+            state[i] = 1_812_433_253_u32.wrapping_mul(state[i - 1] ^ (state[i - 1] >> 30)).wrapping_add(i as u32);
         }
         Mt19937 { state, index: Self::N }
     }
 
     /// `mersenne_twister_engine(Sseq& q)`.
+    #[must_use]
     pub fn from_seed_seq(q: &SeedSeq) -> Self {
         let mut state = [0u32; Self::N];
         q.generate(&mut state);
@@ -131,8 +134,8 @@ impl Mt19937 {
         let mut z = self.state[self.index];
         self.index += 1;
         z ^= z >> 11;
-        z ^= (z << 7) & 0x9d2c5680;
-        z ^= (z << 15) & 0xefc60000;
+        z ^= (z << 7) & 0x9d2c_5680;
+        z ^= (z << 15) & 0xefc6_0000;
         z ^= z >> 18;
         z
     }
@@ -175,7 +178,7 @@ pub fn shuffle<T>(v: &mut [T], g: &mut Mt19937) {
         // Since we know the range isn't empty, an even number of elements
         // means an uneven number of elements /to swap/, in which case we do
         // the first one up front:
-        if urange % 2 == 0 {
+        if urange.is_multiple_of(2) {
             let j = uniform_int(g, 0, 1) as usize;
             v.swap(i, j);
             i += 1;
@@ -217,7 +220,7 @@ mod tests {
         for _ in 0..10000 {
             x = g.next_u32();
         }
-        assert_eq!(x, 4123659995);
+        assert_eq!(x, 4_123_659_995);
     }
 
     #[test]
@@ -226,7 +229,7 @@ mod tests {
             let mut v: Vec<usize> = (0..n).collect();
             shuffle(&mut v, &mut Mt19937::from_seed_seq(&SeedSeq::new(&[1])));
             let mut sorted = v.clone();
-            sorted.sort();
+            sorted.sort_unstable();
             assert_eq!(sorted, (0..n).collect::<Vec<_>>());
         }
     }

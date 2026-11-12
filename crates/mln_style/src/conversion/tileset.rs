@@ -127,10 +127,10 @@ impl Converter for Tileset {
             result.tiles.push(url_template);
         }
 
-        if let Some(scheme_value) = value.object_member("scheme") {
-            if scheme_value.to_string().as_deref() == Some("tms") {
-                result.scheme = Scheme::TMS;
-            }
+        if let Some(scheme_value) = value.object_member("scheme")
+            && scheme_value.to_string().as_deref() == Some("tms")
+        {
+            result.scheme = Scheme::TMS;
         }
 
         if let Some(options) = SourceOptions::convert(value, error) {

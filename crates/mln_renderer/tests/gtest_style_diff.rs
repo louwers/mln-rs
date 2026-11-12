@@ -12,7 +12,7 @@ struct TestLayerImpl {
 }
 
 impl TestLayerImpl {
-    fn new(layer_id: &str, source_id: &str) -> Immutable<dyn Impl> {
+    fn create(layer_id: &str, source_id: &str) -> Immutable<dyn Impl> {
         Arc::new(TestLayerImpl { base: ImplBase::new(layer_id.to_owned(), source_id.to_owned()) })
     }
 }
@@ -63,8 +63,8 @@ fn empty() {
 // gtest: StyleDiff.Add
 #[test]
 fn add() {
-    let l1 = TestLayerImpl::new("id-1", "src-1");
-    let l2 = TestLayerImpl::new("id-2", "src-2");
+    let l1 = TestLayerImpl::create("id-1", "src-1");
+    let l2 = TestLayerImpl::create("id-2", "src-2");
 
     let a: Vec<ImmutableLayer> = vec![l1.clone()];
     let b: Vec<ImmutableLayer> = vec![l1.clone(), l2.clone()];
@@ -79,8 +79,8 @@ fn add() {
 // gtest: StyleDiff.Remove
 #[test]
 fn remove() {
-    let l1 = TestLayerImpl::new("id-1", "src-1");
-    let l2 = TestLayerImpl::new("id-2", "src-2");
+    let l1 = TestLayerImpl::create("id-1", "src-1");
+    let l2 = TestLayerImpl::create("id-2", "src-2");
 
     let a: Vec<ImmutableLayer> = vec![l1.clone(), l2.clone()];
     let b: Vec<ImmutableLayer> = vec![l1.clone()];
@@ -96,8 +96,8 @@ fn remove() {
 // gtest: StyleDiff.Compare
 #[test]
 fn compare() {
-    let a: Vec<ImmutableLayer> = vec![TestLayerImpl::new("id-1", "src-1"), TestLayerImpl::new("id-2", "src-2")];
-    let b: Vec<ImmutableLayer> = vec![TestLayerImpl::new("id-1", "src-1"), TestLayerImpl::new("id-2", "src-2")];
+    let a: Vec<ImmutableLayer> = vec![TestLayerImpl::create("id-1", "src-1"), TestLayerImpl::create("id-2", "src-2")];
+    let b: Vec<ImmutableLayer> = vec![TestLayerImpl::create("id-1", "src-1"), TestLayerImpl::create("id-2", "src-2")];
 
     let diff = diff_layers(&Arc::new(a), &Arc::new(b));
 
@@ -110,8 +110,8 @@ fn compare() {
 // gtest: StyleDiff.Order
 #[test]
 fn order() {
-    let l1 = TestLayerImpl::new("id-1", "src-1");
-    let l2 = TestLayerImpl::new("id-2", "src-2");
+    let l1 = TestLayerImpl::create("id-1", "src-1");
+    let l2 = TestLayerImpl::create("id-2", "src-2");
 
     let a: Vec<ImmutableLayer> = vec![l1.clone(), l2.clone()];
     let b: Vec<ImmutableLayer> = vec![l2.clone(), l1.clone()];

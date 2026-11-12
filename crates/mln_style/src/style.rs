@@ -26,6 +26,7 @@ pub enum StyleLoadError {
 
 impl StyleLoadError {
     /// What failed, for people.
+    #[must_use]
     pub fn message(&self) -> &str {
         match self {
             StyleLoadError::Parse(message) | StyleLoadError::Load(message) => message,
@@ -49,11 +50,13 @@ pub struct Style {
 
 impl Style {
     /// A style without a file source (see `Impl::new`).
+    #[must_use]
     pub fn new(pixel_ratio: f32) -> Self {
         Style { impl_: Box::new(Impl::new(pixel_ratio)) }
     }
 
     /// `Style(std::shared_ptr<FileSource>, float pixelRatio, const TaggedScheduler&)`.
+    #[must_use]
     pub fn with_file_source(
         file_source: Option<std::sync::Arc<dyn mln_storage::FileSource>>,
         pixel_ratio: f32,
@@ -70,29 +73,35 @@ impl Style {
         self.impl_.load_url(url);
     }
 
+    #[must_use]
     pub fn get_json(&self) -> String {
         self.impl_.get_json()
     }
 
+    #[must_use]
     pub fn get_url(&self) -> String {
         self.impl_.get_url()
     }
 
-    /// False while a style passed to load_json/load_url is still being fetched or parsed.
+    /// False while a style passed to `load_json/load_url` is still being fetched or parsed.
+    #[must_use]
     pub fn is_loaded(&self) -> bool {
         self.impl_.loaded
     }
 
     // Defaults
+    #[must_use]
     pub fn get_name(&self) -> String {
         self.impl_.get_name()
     }
 
+    #[must_use]
     pub fn get_default_camera(&self) -> CameraOptions {
         self.impl_.get_default_camera()
     }
 
     // TransitionOptions
+    #[must_use]
     pub fn get_transition_options(&self) -> TransitionOptions {
         self.impl_.get_transition_options()
     }
@@ -129,6 +138,7 @@ impl Style {
         self.impl_.get_light_mut()
     }
 
+    #[must_use]
     pub fn get_light(&self) -> &Light {
         self.impl_.get_light()
     }
@@ -149,6 +159,7 @@ impl Style {
         self.impl_.get_sky_mut()
     }
 
+    #[must_use]
     pub fn get_sky(&self) -> Option<&Sky> {
         self.impl_.get_sky()
     }
@@ -159,6 +170,7 @@ impl Style {
         self.impl_.get_projection_mut()
     }
 
+    #[must_use]
     pub fn get_projection(&self) -> &Projection {
         self.impl_.get_projection()
     }
@@ -169,6 +181,7 @@ impl Style {
     }
 
     // Global state, used by the "global-state" expression.
+    #[must_use]
     pub fn get_global_state(&self) -> GlobalStateMap {
         self.impl_.get_global_state()
     }
@@ -186,6 +199,7 @@ impl Style {
     }
 
     // Images
+    #[must_use]
     pub fn get_image(&self, name: &str) -> Option<Immutable<image::Impl>> {
         self.impl_.get_image(name)
     }
@@ -201,10 +215,12 @@ impl Style {
     }
 
     // Sources
+    #[must_use]
     pub fn get_sources(&self) -> Vec<&dyn Source> {
         self.impl_.get_sources()
     }
 
+    #[must_use]
     pub fn get_source(&self, id: &str) -> Option<&dyn Source> {
         self.impl_.get_source(id)
     }
@@ -222,10 +238,12 @@ impl Style {
     }
 
     // Layers
+    #[must_use]
     pub fn get_layers(&self) -> Vec<&dyn Layer> {
         self.impl_.get_layers()
     }
 
+    #[must_use]
     pub fn get_layer(&self, layer_id: &str) -> Option<&dyn Layer> {
         self.impl_.get_layer(layer_id)
     }

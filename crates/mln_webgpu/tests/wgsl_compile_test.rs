@@ -89,7 +89,7 @@ fn conditional_symbols(source: &str) -> Vec<String> {
     symbols
 }
 
-/// The variant with every conditional defined (e.g. all HAS_UNIFORM_u_*, as
+/// The variant with every conditional defined (e.g. all `HAS_UNIFORM_u`_*, as
 /// when all data-driven properties are constant). Reported, not asserted.
 #[test]
 fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {

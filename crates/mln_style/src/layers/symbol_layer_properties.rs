@@ -371,11 +371,13 @@ crate::data_driven_paint_property!(
 
 impl TextColor {
     /// `static constexpr const char *name()`.
+    #[must_use]
     pub const fn name() -> &'static str {
         "text-color"
     }
 
     /// `static constexpr auto expressionType()`.
+    #[must_use]
     pub fn expression_type() -> Type {
         Type::Color
     }
@@ -521,6 +523,7 @@ impl SymbolLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &SymbolLayerImpl {
         self.base
             .base_impl

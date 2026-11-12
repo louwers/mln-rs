@@ -169,7 +169,7 @@ impl<V: PropertyValueLike> Transitioning<V> {
             };
             // util::interpolate(prior, final, static_cast<float>(ease.solve(t, 0.001))):
             // the float-t overload.
-            prior_value.interpolate_f32(&final_value, DEFAULT_TRANSITION_EASE.solve(t as f64, 0.001) as f32)
+            prior_value.interpolate_f32(&final_value, DEFAULT_TRANSITION_EASE.solve(f64::from(t), 0.001) as f32)
         }
     }
 
@@ -331,6 +331,7 @@ pub fn evaluate_possibly_evaluated_property_value<T: Clone + ValueConverter>(
 /// and the default's `T` differ), so `evaluate<P>` does not compile for
 /// them; the renderer evaluates them on the value
 /// (`PossiblyEvaluatedFadedPropertyValue::evaluate`).
+#[must_use]
 pub fn evaluate_cross_faded<T>() -> T {
     unreachable!("C++ PossiblyEvaluated::evaluate<P> does not compile for a cross-faded property")
 }

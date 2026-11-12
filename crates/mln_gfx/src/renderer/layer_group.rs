@@ -48,6 +48,7 @@ pub struct LayerGroupBaseData {
 }
 
 impl LayerGroupBaseData {
+    #[must_use]
     pub fn new(layer_index: i32, name: String, type_: Type) -> Self {
         LayerGroupBaseData { unique_id: SimpleIdentity::new(), type_, enabled: true, layer_index, name, observer: None }
     }
@@ -166,6 +167,7 @@ pub struct TileLayerGroup {
 }
 
 impl TileLayerGroup {
+    #[must_use]
     pub fn new(layer_index: i32, _initial_capacity: usize, name: String) -> Self {
         TileLayerGroup {
             base: LayerGroupBaseData::new(layer_index, name, Type::TileLayerGroup),
@@ -174,10 +176,12 @@ impl TileLayerGroup {
         }
     }
 
+    #[must_use]
     pub fn get_drawable_count(&self) -> usize {
         self.drawables.len()
     }
 
+    #[must_use]
     pub fn get_drawable_count_for(&self, pass: RenderPass, id: &OverscaledTileID) -> usize {
         let key = TileLayerGroupTileKey { render_pass: pass, tile_id: *id };
         self.drawables.values().filter(|(k, _)| *k == key).count()
@@ -255,15 +259,18 @@ pub struct LayerGroup {
 }
 
 impl LayerGroup {
+    #[must_use]
     pub fn new(layer_index: i32, _initial_capacity: usize, name: String) -> Self {
         LayerGroup { base: LayerGroupBaseData::new(layer_index, name, Type::LayerGroup), drawables: BTreeMap::new() }
     }
 
+    #[must_use]
     pub fn get_drawable_count(&self) -> usize {
         self.drawables.len()
     }
 
     /// Declared but not defined in C++ (no callers); implemented by pass bit.
+    #[must_use]
     pub fn get_drawable_count_for(&self, pass: RenderPass) -> usize {
         self.drawables.values().filter(|d| d.has_render_pass(pass)).count()
     }

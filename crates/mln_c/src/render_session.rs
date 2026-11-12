@@ -157,7 +157,7 @@ fn runtime_wake(wake: &Arc<Wake>) -> ::mln_runtime::Wake {
 pub(crate) fn attach(
     map: &MapObject,
     target: RenderTarget,
-    request: AttachRequest,
+    request: &AttachRequest,
 ) -> Result<(mln_render_session, ::mln_runtime::Completion<()>), Error> {
     let options = AttachOptions {
         driver: request.driver,
@@ -172,7 +172,7 @@ pub(crate) fn attach(
     let (session, attached) = match map.map.attach(target, options) {
         Ok(attached) => attached,
         Err(error) => {
-            revoke(&request);
+            revoke(request);
             return Err(error.into());
         }
     };
@@ -186,7 +186,7 @@ pub(crate) fn attach(
     match SESSIONS.insert(Arc::new(object)) {
         Ok(handle) => Ok((handle, attached)),
         Err(error) => {
-            revoke(&request);
+            revoke(request);
             let _ = session.dispose();
             Err(error)
         }
@@ -774,7 +774,7 @@ pub(crate) mod tests {
     pub(crate) fn snapshot(session: mln_render_session) -> Result<mln_render_session_snapshot, mln_status> {
         let mut snapshot = sized::<mln_render_session_snapshot>();
         // SAFETY: a local snapshot.
-        match unsafe { mln_render_session_get_snapshot(session, &mut snapshot, NO_DIAGNOSTIC) } {
+        match unsafe { mln_render_session_get_snapshot(session, &raw mut snapshot, NO_DIAGNOSTIC) } {
             MLN_STATUS_OK => Ok(snapshot),
             status => Err(status),
         }
@@ -787,8 +787,9 @@ pub(crate) mod tests {
             let mut batch = 0;
             let mut view = sized::<mln_render_frame_batch_view>();
             // SAFETY: local outputs.
-            let status =
-                unsafe { mln_render_session_drain_frame_results(session, &mut batch, &mut view, NO_DIAGNOSTIC) };
+            let status = unsafe {
+                mln_render_session_drain_frame_results(session, &raw mut batch, &raw mut view, NO_DIAGNOSTIC)
+            };
             assert_eq!(status, MLN_STATUS_OK);
             if batch != handles::NULL {
                 assert_eq!((view.result_count, view.result_size as usize), (1, size_of::<mln_render_frame_result>()));
@@ -825,14 +826,17 @@ pub(crate) mod tests {
         let (completion, receiver) = channel_completion::<Pixel>(send_pixel);
         // SAFETY: local arguments, and a completion whose sender the library
         // releases after its call.
-        assert_eq!(unsafe { mln_render_session_read_texture(session, &completion, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(
+            unsafe { mln_render_session_read_texture(session, &raw const completion, NO_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
         receiver.recv_timeout(Duration::from_secs(30)).unwrap()
     }
 
     pub(crate) fn demand(session: mln_render_session, flags: u32, token: u64) -> mln_status {
         let demand = mln_frame_demand { flags, token, ..sized() };
         // SAFETY: a local demand.
-        unsafe { mln_render_session_demand_frame(session, &demand, NO_DIAGNOSTIC) }
+        unsafe { mln_render_session_demand_frame(session, &raw const demand, NO_DIAGNOSTIC) }
     }
 
     /// An offscreen target of `width` by `height` logical pixels.
@@ -856,7 +860,15 @@ pub(crate) mod tests {
         // SAFETY: local arguments.
         let status = unsafe {
             let options = attach_options();
-            mln_map_attach(map, &target, 0, &options, &mut session, &attached.descriptor, NO_DIAGNOSTIC)
+            mln_map_attach(
+                map,
+                &raw const target,
+                0,
+                &raw const options,
+                &raw mut session,
+                &raw const attached.descriptor,
+                NO_DIAGNOSTIC,
+            )
         };
         assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
         assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, 1), MLN_STATUS_OK);
@@ -868,7 +880,10 @@ pub(crate) mod tests {
     pub(crate) fn release_session(session: mln_render_session) {
         let released = Waiter::new();
         // SAFETY: a local completion.
-        assert_eq!(unsafe { mln_render_session_release(session, &released.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(
+            unsafe { mln_render_session_release(session, &raw const released.descriptor, NO_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
         assert_eq!(released.status(), MLN_STATUS_OK);
     }
 
@@ -879,7 +894,7 @@ pub(crate) mod tests {
         let styled = Waiter::new();
         let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
         // SAFETY: local arguments.
-        let status = unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, NO_DIAGNOSTIC) };
+        let status = unsafe { mln_map_set_style_json(map, view(style), &raw const styled.descriptor, NO_DIAGNOSTIC) };
         assert_eq!((status, styled.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
 
         let target = offscreen_target(64, 32);
@@ -888,7 +903,15 @@ pub(crate) mod tests {
         // SAFETY: local arguments.
         let status = unsafe {
             let options = attach_options();
-            mln_map_attach(map, &target, 0, &options, &mut session, &attached.descriptor, NO_DIAGNOSTIC)
+            mln_map_attach(
+                map,
+                &raw const target,
+                0,
+                &raw const options,
+                &raw mut session,
+                &raw const attached.descriptor,
+                NO_DIAGNOSTIC,
+            )
         };
         assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
         let attached = snapshot(session).unwrap();
@@ -897,7 +920,7 @@ pub(crate) mod tests {
         assert!(attached.has_target);
         let mut capabilities = sized::<mln_render_session_capabilities>();
         // SAFETY: local capabilities.
-        let status = unsafe { mln_render_session_get_capabilities(session, &mut capabilities, NO_DIAGNOSTIC) };
+        let status = unsafe { mln_render_session_get_capabilities(session, &raw mut capabilities, NO_DIAGNOSTIC) };
         assert_eq!((status, capabilities.flags), (MLN_STATUS_OK, MLN_RENDER_SESSION_CAPABILITY_READBACK));
 
         assert_eq!(read_pixel(session).0, MLN_STATUS_INVALID_STATE);
@@ -911,13 +934,16 @@ pub(crate) mod tests {
         assert_eq!(read_pixel(session), (MLN_STATUS_OK, Some((64, 32, [255, 0, 0, 255]))));
         let mut out = diagnostic();
         // SAFETY: a local diagnostic.
-        let serviced = unsafe { mln_render_session_service_driver_work(session, &mut *out) };
+        let serviced = unsafe { mln_render_session_service_driver_work(session, &raw mut *out) };
         assert_eq!(serviced, MLN_STATUS_INVALID_STATE);
         assert!(message(&out).contains("core worker"), "{}", message(&out));
 
         let released = Waiter::new();
         // SAFETY: a local completion.
-        assert_eq!(unsafe { mln_render_session_release(session, &released.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(
+            unsafe { mln_render_session_release(session, &raw const released.descriptor, NO_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
         assert_eq!(released.status(), MLN_STATUS_OK);
         assert_eq!(snapshot(session).unwrap_err(), MLN_STATUS_INVALID_STATE);
         release_map(map);
@@ -932,13 +958,13 @@ pub(crate) mod tests {
             let mut snapshot: mln_map_snapshot = unsafe { core::mem::zeroed() };
             snapshot.size = size_of::<mln_map_snapshot>() as u32;
             // SAFETY: a local snapshot.
-            unsafe { mln_map_get_snapshot(map, &mut snapshot, NO_DIAGNOSTIC) }
+            unsafe { mln_map_get_snapshot(map, &raw mut snapshot, NO_DIAGNOSTIC) }
         };
 
         let refused = Waiter::new();
         let mut out = diagnostic();
         // SAFETY: local arguments.
-        let status = unsafe { mln_map_release(map, &refused.descriptor, &mut *out) };
+        let status = unsafe { mln_map_release(map, &raw const refused.descriptor, &raw mut *out) };
         assert_eq!(status, MLN_STATUS_INVALID_STATE);
         assert!(message(&out).contains("map still has an attached render session"), "{}", message(&out));
         refused.unused();
@@ -954,7 +980,7 @@ pub(crate) mod tests {
         assert_eq!((result.token, result.disposition), (2, MLN_RENDER_RESULT_RENDERED));
         let refused = Waiter::new();
         // SAFETY: local arguments.
-        let status = unsafe { mln_runtime_release(runtime, &refused.descriptor, NO_DIAGNOSTIC) };
+        let status = unsafe { mln_runtime_release(runtime, &raw const refused.descriptor, NO_DIAGNOSTIC) };
         assert_eq!(status, MLN_STATUS_INVALID_STATE);
         refused.unused();
 
@@ -966,7 +992,7 @@ pub(crate) mod tests {
     fn attach_options_check_their_driver_sync_kinds_and_queue_lock() {
         unsafe extern "C" fn lock(_: *mut c_void) {}
         // SAFETY: each pointer is to a local.
-        let check = |options: mln_render_session_attach_options| unsafe { super::attach_options(&options) };
+        let check = |options: mln_render_session_attach_options| unsafe { super::attach_options(&raw const options) };
         assert!(check(attach_options()).is_ok());
         let driver = check(mln_render_session_attach_options { driver: 9, ..attach_options() });
         assert!(driver.err().unwrap().message().contains("driver"));

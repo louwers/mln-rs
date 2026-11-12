@@ -119,6 +119,7 @@ impl Default for PipelineInfo {
 }
 
 impl PipelineInfo {
+    #[must_use]
     pub fn vulkan_format(value: AttributeDataType) -> vk::Format {
         use AttributeDataType as A;
         match value {
@@ -155,6 +156,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_primitive_topology(value: DrawModeType) -> vk::PrimitiveTopology {
         match value {
             DrawModeType::Points => vk::PrimitiveTopology::POINT_LIST,
@@ -163,11 +165,10 @@ impl PipelineInfo {
             DrawModeType::Triangles => vk::PrimitiveTopology::TRIANGLE_LIST,
             DrawModeType::TriangleStrip => vk::PrimitiveTopology::TRIANGLE_STRIP,
             DrawModeType::TriangleFan => vk::PrimitiveTopology::TRIANGLE_FAN,
-            #[allow(unreachable_patterns)]
-            _ => vk::PrimitiveTopology::TRIANGLE_LIST,
         }
     }
 
+    #[must_use]
     pub fn vulkan_cull_mode(value: CullFaceSideType) -> vk::CullModeFlags {
         match value {
             CullFaceSideType::Back => vk::CullModeFlags::BACK,
@@ -189,6 +190,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_front_face(value: CullFaceWindingType) -> vk::FrontFace {
         match value {
             CullFaceWindingType::Clockwise => vk::FrontFace::CLOCKWISE,
@@ -196,6 +198,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_blend_op(value: ColorBlendEquationType) -> vk::BlendOp {
         match value {
             ColorBlendEquationType::Add => vk::BlendOp::ADD,
@@ -204,6 +207,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_blend_factor(value: ColorBlendFactorType) -> vk::BlendFactor {
         use ColorBlendFactorType as F;
         match value {
@@ -225,6 +229,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_depth_compare_op(value: DepthFunctionType) -> vk::CompareOp {
         match value {
             DepthFunctionType::Never => vk::CompareOp::NEVER,
@@ -238,6 +243,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_stencil_compare_op(value: StencilFunctionType) -> vk::CompareOp {
         match value {
             StencilFunctionType::Never => vk::CompareOp::NEVER,
@@ -251,6 +257,7 @@ impl PipelineInfo {
         }
     }
 
+    #[must_use]
     pub fn vulkan_stencil_op(value: StencilOpType) -> vk::StencilOp {
         match value {
             StencilOpType::Zero => vk::StencilOp::ZERO,
@@ -355,6 +362,7 @@ impl PipelineInfo {
         self.dynamic_values.line_width = value;
     }
 
+    #[must_use]
     pub fn uses_blend_constants(&self) -> bool {
         let constant = |factor| {
             matches!(
@@ -384,6 +392,7 @@ impl PipelineInfo {
         self.vertex_input_hash = seed;
     }
 
+    #[must_use]
     pub fn hash(&self) -> u64 {
         use ash::vk::Handle;
         hash(&[

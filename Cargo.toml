@@ -258,49 +258,42 @@ egui_glow = { version = "0.37.0", default-features = false }
 egui_extras = { version = "0.37.0", default-features = false, features = ["svg"] }
 egui-winit = { version = "0.37.0", default-features = false, features = ["links", "wayland", "x11"] }
 
-# Lints for every package (`[lints] workspace = true`): clippy's default set,
-# with warnings denied in CI (the `lint` job), except the lints whose fix
-# would make the port read or behave less like the C++ it mirrors.
+# Lints for every package (`[lints] workspace = true`): clippy's default and
+# pedantic sets, with warnings denied in CI (the `lint` job). The pedantic
+# lints below are off.
 [workspace.lints.rust]
 # No `unsafe` outside FFI. The FFI modules allow it.
 unsafe_code = "deny"
 
 [workspace.lints.clippy]
-# The C++ code's shape: nested ifs, index loops, `x >= a && x <= b`,
-# `x % n == 0`, `if c > 0 { a / c }`, `i * 4 + 0`, a value
-# default-constructed and then set, a variable declared and then assigned in
-# each branch, branches that do the same thing.
-collapsible_if = "allow"
-field_reassign_with_default = "allow"
-identity_op = "allow"
-if_same_then_else = "allow"
-manual_checked_ops = "allow"
-manual_is_multiple_of = "allow"
-manual_range_contains = "allow"
-needless_late_init = "allow"
-needless_range_loop = "allow"
-# The C++ names and signatures: enumerators, methods named like std trait
-# methods (`add`, `next`), `toString()`, files named like their module,
-# factories, constructors, long parameter lists and nested template types.
-enum_variant_names = "allow"
-inherent_to_string = "allow"
-module_inception = "allow"
-new_ret_no_self = "allow"
-new_without_default = "allow"
-should_implement_trait = "allow"
-too_many_arguments = "allow"
-type_complexity = "allow"
-# Readability over a saved clone or bounds check: the expression signature
-# tables list types as `&[n.clone()]` (C++'s `{n}`), and the pixel loops
-# step with `chunks_exact(4)`.
-chunks_exact_to_as_chunks = "allow"
-cloned_ref_to_slice_refs = "allow"
-# The C++ float behaviour: literals with all their digits, `!(a < b)` that
-# holds for NaN, and std::min/std::max where `clamp` would panic on NaN or
-# reversed bounds.
-excessive_precision = "allow"
-manual_clamp = "allow"
-neg_cmp_op_on_partial_ord = "allow"
+pedantic = { level = "warn", priority = -1 }
+# Their fixes would change what the code does: numeric conversions that
+# truncate, wrap or saturate on purpose, where `try_from` would fail
+# instead, and exact float comparisons, which an epsilon would loosen.
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+float_cmp = "allow"
+# `assert!` for `if c { panic!(..) }` would take the panic out of
+# tools/ratchet's count of library panic sites.
+manual_assert = "allow"
+# Their fixes are redesigns: functions split by length, flags turned into
+# enums, coordinates and their deltas (`x`, `dx`, `x0`) renamed apart.
+fn_params_excessive_bools = "allow"
+many_single_char_names = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"
+too_many_lines = "allow"
+# Not worth their noise: `x.clone_from(&y)` and `"text".clone_into(&mut x)`
+# for every assignment of a copy, `# Errors` and `# Panics` sections on every
+# function that can, maps generic over their hasher, and fields that repeat
+# their struct's name.
+assigning_clones = "allow"
+implicit_hasher = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_field_names = "allow"
 
 [package]
 name = "mln-rs"

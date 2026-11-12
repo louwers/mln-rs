@@ -14,7 +14,10 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::fill_extrusion_layer_properties::*;
+use mln_style::layers::fill_extrusion_layer_properties::{
+    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties, FillExtrusionOpacity,
+    FillExtrusionPattern, FillExtrusionTranslate, FillExtrusionTranslateAnchor, FillExtrusionVerticalGradient,
+};
 use mln_style::properties::Property;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::constants::TILE_SIZE_D;
@@ -110,6 +113,8 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
 
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
+            const NEAR_CLIPPED: bool = true;
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
             };
@@ -138,8 +143,6 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             }
 
             let tile_id = tile_id.to_unwrapped();
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
-            const NEAR_CLIPPED: bool = true;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
@@ -154,9 +157,9 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 
             let int_zoom = state.get_integer_zoom();
-            let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, int_zoom as f32);
+            let tile_ratio = 1.0f32 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom));
             let zoom_scale = state.zoom_scale(f64::from(tile_id.canonical.z));
-            let nearest_zoom_scale = state.zoom_scale(int_zoom as f64 - f64::from(tile_id.canonical.z));
+            let nearest_zoom_scale = state.zoom_scale(f64::from(int_zoom) - f64::from(tile_id.canonical.z));
             let tile_size_at_nearest_zoom = (TILE_SIZE_D * nearest_zoom_scale).floor();
             let pixel_x = (tile_size_at_nearest_zoom
                 * (f64::from(tile_id.canonical.x) + f64::from(tile_id.wrap) * zoom_scale))

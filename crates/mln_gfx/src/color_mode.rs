@@ -24,6 +24,7 @@ pub enum BlendFunction {
 
 impl BlendFunction {
     /// `variant::which()`
+    #[must_use]
     pub fn which(&self) -> usize {
         match self {
             BlendFunction::Replace => 0,
@@ -34,6 +35,7 @@ impl BlendFunction {
     }
 
     /// The static `equation` member of the active alternative.
+    #[must_use]
     pub fn equation(&self) -> ColorBlendEquationType {
         match self {
             BlendFunction::Replace | BlendFunction::Add(_) => ColorBlendEquationType::Add,
@@ -43,6 +45,7 @@ impl BlendFunction {
     }
 
     /// `srcFactor` of the active alternative (`Replace`: One).
+    #[must_use]
     pub fn src_factor(&self) -> ColorBlendFactorType {
         match self {
             BlendFunction::Replace => ColorBlendFactorType::One,
@@ -51,6 +54,7 @@ impl BlendFunction {
     }
 
     /// `dstFactor` of the active alternative (`Replace`: Zero).
+    #[must_use]
     pub fn dst_factor(&self) -> ColorBlendFactorType {
         match self {
             BlendFunction::Replace => ColorBlendFactorType::Zero,
@@ -78,6 +82,7 @@ pub struct ColorMode {
 impl ColorMode {
     const ALL: Mask = Mask { r: true, g: true, b: true, a: true };
 
+    #[must_use]
     pub fn disabled() -> ColorMode {
         ColorMode {
             blend_function: BlendFunction::Replace,
@@ -86,10 +91,12 @@ impl ColorMode {
         }
     }
 
+    #[must_use]
     pub fn unblended() -> ColorMode {
         ColorMode { blend_function: BlendFunction::Replace, blend_color: Color::default(), mask: Self::ALL }
     }
 
+    #[must_use]
     pub fn alpha_blended() -> ColorMode {
         ColorMode {
             blend_function: BlendFunction::Add(LinearBlend {
@@ -101,6 +108,7 @@ impl ColorMode {
         }
     }
 
+    #[must_use]
     pub fn additive() -> ColorMode {
         ColorMode {
             blend_function: BlendFunction::Add(LinearBlend {
@@ -115,6 +123,7 @@ impl ColorMode {
     /// `ColorMode::hash()`.
     // TODO(port): C++ uses util::hash (boost hash_combine); the value is only
     // used as a pipeline cache key, so any stable combination works.
+    #[must_use]
     pub fn hash(&self) -> u64 {
         crate::util_hash::hash(&[
             self.blend_function.which() as u64,

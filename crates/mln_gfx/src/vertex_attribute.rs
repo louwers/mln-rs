@@ -56,6 +56,7 @@ pub struct VertexAttribute {
 }
 
 impl VertexAttribute {
+    #[must_use]
     pub fn with_stride(index: i32, data_type: AttributeDataType, count: usize, stride: usize) -> Self {
         VertexAttribute {
             index,
@@ -73,11 +74,13 @@ impl VertexAttribute {
         }
     }
 
+    #[must_use]
     pub fn new(index: i32, data_type: AttributeDataType, count: usize) -> Self {
         Self::with_stride(index, data_type, count, Self::get_stride_of(data_type))
     }
 
     /// The C++ copy constructor: everything but the raw data and the buffer.
+    #[must_use]
     pub fn copy(&self) -> Self {
         VertexAttribute {
             index: self.index,
@@ -95,38 +98,22 @@ impl VertexAttribute {
         }
     }
 
+    #[must_use]
     pub fn get_stride_of(type_: AttributeDataType) -> usize {
-        use AttributeDataType::*;
+        use AttributeDataType::{
+            Byte, Byte2, Byte3, Byte4, Float, Float2, Float3, Float4, Int, Int2, Int3, Int4, Invalid, Short, Short2,
+            Short3, Short4, UByte, UByte2, UByte3, UByte4, UByte4Normalized, UInt, UInt2, UInt3, UInt4, UShort,
+            UShort2, UShort3, UShort4, UShort8,
+        };
         match type_ {
-            Byte => 1,
-            Byte2 => 2,
-            Byte3 => 3,
-            Byte4 => 4,
-            UByte => 1,
-            UByte2 => 2,
-            UByte3 => 3,
-            UByte4 | UByte4Normalized => 4,
-            Short => 2,
-            Short2 => 4,
-            Short3 => 6,
-            Short4 => 8,
-            UShort => 2,
-            UShort2 => 4,
-            UShort3 => 6,
-            UShort4 => 8,
-            UShort8 => 16,
-            Int => 4,
-            Int2 => 8,
-            Int3 => 12,
-            Int4 => 16,
-            UInt => 4,
-            UInt2 => 8,
-            UInt3 => 12,
-            UInt4 => 16,
-            Float => 4,
-            Float2 => 8,
-            Float3 => 12,
-            Float4 => 16,
+            Byte | UByte => 1,
+            Byte2 | UByte2 | Short | UShort => 2,
+            Byte3 | UByte3 => 3,
+            Byte4 | UByte4 | UByte4Normalized | Short2 | UShort2 | Int | UInt | Float => 4,
+            Short3 | UShort3 => 6,
+            Short4 | UShort4 | Int2 | UInt2 | Float2 => 8,
+            Int3 | UInt3 | Float3 => 12,
+            UShort8 | Int4 | UInt4 | Float4 => 16,
             Invalid => 0,
         }
     }
@@ -277,26 +264,32 @@ pub struct VertexAttributeArray {
 pub type VertexAttributeArrayPtr = Rc<RefCell<VertexAttributeArray>>;
 
 impl VertexAttributeArray {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn new_ptr() -> VertexAttributeArrayPtr {
         Rc::new(RefCell::new(Self::new()))
     }
 
+    #[must_use]
     pub fn allocated_size(&self) -> usize {
         self.attrs.len()
     }
 
+    #[must_use]
     pub fn get_total_size(&self) -> usize {
         self.attrs.iter().map(|a| a.as_ref().map_or(0, |a| a.get_stride())).sum()
     }
 
+    #[must_use]
     pub fn get_min_count(&self) -> usize {
         self.attrs.iter().fold(usize::MAX, |acc, attr| acc.min(attr.as_ref().map_or(usize::MAX, |a| a.get_count())))
     }
 
+    #[must_use]
     pub fn get(&self, id: usize) -> Option<&VertexAttribute> {
         self.attrs.get(id).and_then(|a| a.as_deref())
     }
@@ -322,6 +315,7 @@ impl VertexAttributeArray {
         self.attrs[id].as_deref_mut()
     }
 
+    #[must_use]
     pub fn is_modified_after(&self, time: Instant) -> bool {
         self.attrs.iter().any(|attr| attr.as_ref().is_some_and(|a| a.is_modified_after(time)))
     }

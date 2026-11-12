@@ -17,6 +17,7 @@ pub struct AnchorOffsetPair {
 }
 
 impl AnchorOffsetPair {
+    #[must_use]
     pub fn new(anchor_type: SymbolAnchorType, offset: [f32; 2]) -> Self {
         AnchorOffsetPair { anchor_type, offset }
     }
@@ -28,10 +29,12 @@ pub struct VariableAnchorOffsetCollection {
 }
 
 impl VariableAnchorOffsetCollection {
+    #[must_use]
     pub fn new(values: Vec<AnchorOffsetPair>) -> Self {
         VariableAnchorOffsetCollection { anchor_offsets: values }
     }
 
+    #[must_use]
     pub fn get_offset_by_anchor(&self, anchor_type: &SymbolAnchorType) -> [f32; 2] {
         for entry in &self.anchor_offsets {
             if *anchor_type == entry.anchor_type {
@@ -42,35 +45,23 @@ impl VariableAnchorOffsetCollection {
         [0.0, 0.0]
     }
 
-    pub fn to_string(&self) -> String {
-        let mut writer = rapidjson::Writer::new();
-        writer.start_array();
-        for entry in &self.anchor_offsets {
-            writer.string(entry.anchor_type.to_string());
-            writer.start_array();
-            writer.double(entry.offset[0] as f64);
-            writer.double(entry.offset[1] as f64);
-            writer.end_array();
-        }
-
-        writer.end_array();
-        writer.into_string()
-    }
-
+    #[must_use]
     pub fn serialize(&self) -> Value {
         let mut serialized = Vec::new();
         for entry in &self.anchor_offsets {
             serialized.push(Value::String(entry.anchor_type.to_string().to_owned()));
-            let offset = vec![Value::Double(entry.offset[0] as f64), Value::Double(entry.offset[1] as f64)];
+            let offset = vec![Value::Double(f64::from(entry.offset[0])), Value::Double(f64::from(entry.offset[1]))];
             serialized.push(Value::Array(offset));
         }
         Value::Array(serialized)
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.anchor_offsets.is_empty()
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.anchor_offsets.len()
     }
@@ -83,11 +74,7 @@ impl VariableAnchorOffsetCollection {
     /// `std::runtime_error` with these messages).
     pub fn interpolate(a: &Self, b: &Self, t: f32) -> Result<Self, String> {
         if a.len() != b.len() {
-            return Err(format!(
-                "Cannot interpolate values of different length. from: {}, to: {}",
-                a.to_string(),
-                b.to_string()
-            ));
+            return Err(format!("Cannot interpolate values of different length. from: {a}, to: {b}"));
         }
         let mut offset_map = Vec::with_capacity(a.len());
         for index in 0..a.len() {
@@ -108,6 +95,25 @@ impl VariableAnchorOffsetCollection {
         }
 
         Ok(VariableAnchorOffsetCollection::new(offset_map))
+    }
+}
+
+/// The collection as JSON, an array of anchor names each followed by its
+/// offset.
+impl std::fmt::Display for VariableAnchorOffsetCollection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut writer = rapidjson::Writer::new();
+        writer.start_array();
+        for entry in &self.anchor_offsets {
+            writer.string(entry.anchor_type.to_string());
+            writer.start_array();
+            writer.double(f64::from(entry.offset[0]));
+            writer.double(f64::from(entry.offset[1]));
+            writer.end_array();
+        }
+
+        writer.end_array();
+        f.write_str(&writer.into_string())
     }
 }
 

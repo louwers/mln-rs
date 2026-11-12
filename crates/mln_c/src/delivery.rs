@@ -111,7 +111,7 @@ impl Queue {
     /// against a release.
     pub(crate) fn push_last(&self, call: Call, hold: Option<Hold>) -> Result<(), Call> {
         let settled = hold.and_then(|mut hold| {
-            debug_assert!(core::ptr::eq(&*hold.queue, self), "a hold settles on its own queue");
+            debug_assert!(core::ptr::eq(&raw const *hold.queue, self), "a hold settles on its own queue");
             hold.id.take()
         });
         self.append(call, settled)
@@ -368,7 +368,7 @@ pub(crate) mod tests {
     pub(crate) fn queue() -> mln_delivery_queue {
         let mut queue = 0;
         // SAFETY: null options, a local out-handle and a null diagnostic.
-        let status = unsafe { mln_delivery_queue_create(core::ptr::null(), &mut queue, core::ptr::null_mut()) };
+        let status = unsafe { mln_delivery_queue_create(core::ptr::null(), &raw mut queue, core::ptr::null_mut()) };
         assert_eq!(status, MLN_STATUS_OK);
         queue
     }
@@ -392,7 +392,7 @@ pub(crate) mod tests {
         };
         let mut queue = 0;
         // SAFETY: local options and out-handle, and a null diagnostic.
-        let status = unsafe { mln_delivery_queue_create(&options, &mut queue, core::ptr::null_mut()) };
+        let status = unsafe { mln_delivery_queue_create(&raw const options, &raw mut queue, core::ptr::null_mut()) };
         assert_eq!(status, MLN_STATUS_OK);
         (queue, wakes)
     }
@@ -432,17 +432,17 @@ pub(crate) mod tests {
             let create = |options: &mln_delivery_queue_options, out: *mut u64| {
                 mln_delivery_queue_create(options, out, core::ptr::null_mut())
             };
-            assert_eq!(create(&options, &mut unused), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(create(&options, &raw mut unused), MLN_STATUS_INVALID_ARGUMENT);
             options.size = size_of::<mln_delivery_queue_options>() as u32;
             options.wake.release_user_data = Some(Log::release);
-            assert_eq!(create(&options, &mut unused), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(create(&options, &raw mut unused), MLN_STATUS_INVALID_ARGUMENT);
             options.wake.release_user_data = None;
             assert_eq!(create(&options, core::ptr::null_mut()), MLN_STATUS_INVALID_ARGUMENT);
 
             let mut queue = 0;
-            assert_eq!(create(&options, &mut queue), MLN_STATUS_OK);
+            assert_eq!(create(&options, &raw mut queue), MLN_STATUS_OK);
             let mut occupied = queue;
-            assert_eq!(create(&options, &mut occupied), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(create(&options, &raw mut occupied), MLN_STATUS_INVALID_ARGUMENT);
 
             // A queue's own wake can't name a queue.
             options.wake = mln_wake {
@@ -452,7 +452,7 @@ pub(crate) mod tests {
                 queue,
             };
             let mut other = 0;
-            assert_eq!(create(&options, &mut other), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(create(&options, &raw mut other), MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(other, 0);
 
             mln_delivery_queue_release(queue);
@@ -495,7 +495,10 @@ pub(crate) mod tests {
         };
         let mut queue = 0;
         // SAFETY: local options and out-handle, and a null diagnostic.
-        assert_eq!(unsafe { mln_delivery_queue_create(&options, &mut queue, core::ptr::null_mut()) }, MLN_STATUS_OK);
+        assert_eq!(
+            unsafe { mln_delivery_queue_create(&raw const options, &raw mut queue, core::ptr::null_mut()) },
+            MLN_STATUS_OK
+        );
         push(queue, || {});
         mln_delivery_queue_release(queue);
         assert_eq!(log.take(), "wwwr");
@@ -648,7 +651,7 @@ pub(crate) mod tests {
         }
         within_deadline(|| {
             let state: &'static Releasing = Box::leak(Box::new(Releasing {
-                queue: Default::default(),
+                queue: std::sync::atomic::AtomicU64::new(0),
                 calls: AtomicUsize::new(0),
                 releases: AtomicUsize::new(0),
             }));
@@ -664,7 +667,8 @@ pub(crate) mod tests {
             };
             let mut queue = 0;
             // SAFETY: local options and out-handle, and a null diagnostic.
-            let status = unsafe { mln_delivery_queue_create(&options, &mut queue, core::ptr::null_mut()) };
+            let status =
+                unsafe { mln_delivery_queue_create(&raw const options, &raw mut queue, core::ptr::null_mut()) };
             assert_eq!(status, MLN_STATUS_OK);
             state.queue.store(queue, Ordering::SeqCst);
             let shared = resolve(queue).unwrap();

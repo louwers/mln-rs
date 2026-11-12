@@ -19,6 +19,7 @@ pub enum Test {
 
 impl Test {
     /// The static `func` of the active alternative.
+    #[must_use]
     pub fn func(&self) -> StencilFunctionType {
         match self {
             Test::Never => StencilFunctionType::Never,
@@ -33,6 +34,7 @@ impl Test {
     }
 
     /// The `mask` member, for `MaskedTest`s only (`requires { test.mask; }`).
+    #[must_use]
     pub fn masked(&self) -> Option<u32> {
         match *self {
             Test::Never | Test::Always => None,
@@ -57,6 +59,7 @@ pub struct StencilMode {
 }
 
 impl StencilMode {
+    #[must_use]
     pub fn disabled() -> StencilMode {
         StencilMode {
             test: Test::Always,

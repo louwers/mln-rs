@@ -27,7 +27,7 @@ impl TestThread {
         TestThread
     }
 
-    fn get_number(&self, result: mpsc::Sender<i32>) {
+    fn get_number(result: &mpsc::Sender<i32>) {
         result.send(NUMBER.with(|n| **n.borrow().as_ref().unwrap())).unwrap();
     }
 }
@@ -57,15 +57,15 @@ fn basic() {
     let thread3_ref = thread3.actor();
 
     let (result1, result1_future) = mpsc::channel();
-    thread1_ref.invoke(move |t: &TestThread| t.get_number(result1));
+    thread1_ref.invoke(move |_: &TestThread| TestThread::get_number(&result1));
     assert_eq!(*number1, get(&result1_future));
 
     let (result2, result2_future) = mpsc::channel();
-    thread2_ref.invoke(move |t: &TestThread| t.get_number(result2));
+    thread2_ref.invoke(move |_: &TestThread| TestThread::get_number(&result2));
     assert_eq!(*number2, get(&result2_future));
 
     let (result3, result3_future) = mpsc::channel();
-    thread3_ref.invoke(move |t: &TestThread| t.get_number(result3));
+    thread3_ref.invoke(move |_: &TestThread| TestThread::get_number(&result3));
     assert_eq!(*number3, get(&result3_future));
 }
 
