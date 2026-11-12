@@ -73,6 +73,11 @@ const _: unsafe extern "C" fn(
     *const mln_frame_pacer_options,
     *mut mln_frame_pacer,
     *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::android::mln_android_frame_pacer_create;
+const _: unsafe extern "C" fn(
+    *const mln_frame_pacer_options,
+    *mut mln_frame_pacer,
+    *mut mln_diagnostic,
 ) -> mln_status = crate::frame_pacer::apple::mln_apple_frame_pacer_create;
 const _: unsafe extern "C" fn(
     *mut ::core::ffi::c_void,

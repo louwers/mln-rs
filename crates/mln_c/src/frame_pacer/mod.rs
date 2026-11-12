@@ -23,6 +23,7 @@
     allow(dead_code)
 )]
 
+pub(crate) mod android;
 pub(crate) mod apple;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
