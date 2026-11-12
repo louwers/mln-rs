@@ -28,6 +28,9 @@ const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 /// storage buffers with, which Vulkan 1.0 doesn't have.
 const STORAGE_BUFFER_STORAGE_CLASS: &CStr = c"VK_KHR_storage_buffer_storage_class";
 
+/// `VK_OHOS_surface`, OpenHarmony's surface extension, which ash lacks.
+pub(crate) const OHOS_SURFACE: &CStr = c"VK_OHOS_surface";
+
 /// The instance extensions of the platforms' surfaces, which the library's
 /// instance enables where the loader has them.
 const SURFACE_EXTENSIONS: &[&CStr] = &[
@@ -36,8 +39,18 @@ const SURFACE_EXTENSIONS: &[&CStr] = &[
     ash::khr::xcb_surface::NAME,
     ash::khr::win32_surface::NAME,
     ash::khr::android_surface::NAME,
+    OHOS_SURFACE,
     ash::ext::headless_surface::NAME,
 ];
+
+/// The system's Vulkan library. OpenHarmony names its loader `libvulkan.so`,
+/// which ash looks for only on Android.
+fn load_entry() -> Result<ash::Entry, Error> {
+    // SAFETY: the Vulkan library's initializers have no preconditions.
+    let entry =
+        unsafe { if cfg!(target_env = "ohos") { ash::Entry::load_from("libvulkan.so") } else { ash::Entry::load() } };
+    entry.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))
+}
 
 /// A host's lock on a queue that it submits to too. The device holds it
 /// around each submission and present to the queue, never across a wait.
@@ -344,8 +357,7 @@ impl Device {
     }
 
     fn create(selector: Selector) -> Result<Device, Error> {
-        // SAFETY: the Vulkan library's initializers have no preconditions.
-        let entry = unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?;
+        let entry = load_entry()?;
 
         // SAFETY: plain queries of the loader.
         let (available_layers, available_extensions, loader_version) = unsafe {
@@ -691,9 +703,7 @@ impl Device {
             Some(get_instance_proc_addr) => unsafe {
                 ash::Entry::from_static_fn(ash::StaticFn { get_instance_proc_addr })
             },
-            // SAFETY: the Vulkan library's initializers have no
-            // preconditions.
-            None => unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?,
+            None => load_entry()?,
         };
         let get_instance_proc_addr = entry.static_fn().get_instance_proc_addr;
         let lookup = |name: &CStr| -> *const c_void {
@@ -981,6 +991,7 @@ impl Shared {
             (ash::khr::xcb_surface::NAME, c"vkCreateXcbSurfaceKHR"),
             (ash::khr::win32_surface::NAME, c"vkCreateWin32SurfaceKHR"),
             (ash::khr::android_surface::NAME, c"vkCreateAndroidSurfaceKHR"),
+            (OHOS_SURFACE, c"vkCreateSurfaceOHOS"),
             (ash::ext::headless_surface::NAME, c"vkCreateHeadlessSurfaceEXT"),
         ]
         .into_iter()
