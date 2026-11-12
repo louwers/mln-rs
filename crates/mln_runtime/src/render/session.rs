@@ -319,8 +319,9 @@ impl SessionShared {
 
     /// Releases the session without waiting: it detaches, unless it is
     /// detached or abandoned already, and every call on it fails after. A
-    /// caller-driven session that isn't attached is abandoned instead, so the
-    /// release doesn't wait for the host to service it.
+    /// caller-driven session that isn't attached, or whose map was released,
+    /// is abandoned instead, so the release doesn't wait for the host to
+    /// service it.
     fn dispose(&self, done: Option<Resolver<()>>) -> Result<(), Error> {
         with_unlocked_wakes(|| self.dispose_locked(done))
     }
@@ -362,6 +363,8 @@ impl SessionShared {
             return Err(released());
         }
         state.released = true;
+        // A released map waits for no service of its session's detach.
+        let map_released = state.map.as_ref().is_some_and(Map::is_released);
         match state.lifecycle {
             RenderSessionState::Detached | RenderSessionState::Abandoned => {
                 drop(state);
@@ -374,13 +377,13 @@ impl SessionShared {
             RenderSessionState::Attaching | RenderSessionState::Failed if self.driver == Driver::CallerThread => {
                 state.release_waiters.extend(done);
                 drop(state);
-                if self.abandon(Abandoner::Library).is_err() {
-                    // Only the session's own work could hold the gate here.
-                    let mut state = self.state.lock_unpoisoned();
-                    if state.lifecycle != RenderSessionState::Abandoned {
-                        self.start_detach(&mut state);
-                    }
-                }
+                self.abandon_or_detach();
+                return Ok(());
+            }
+            RenderSessionState::Attached if self.driver == Driver::CallerThread && map_released => {
+                state.release_waiters.extend(done);
+                drop(state);
+                self.abandon_or_detach();
                 return Ok(());
             }
             RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Failed => {
@@ -389,6 +392,17 @@ impl SessionShared {
         }
         state.release_waiters.extend(done);
         Ok(())
+    }
+
+    /// Abandons the released session, or detaches it when its own work
+    /// holds the gate, which only it could here.
+    fn abandon_or_detach(&self) {
+        if self.abandon(Abandoner::Library).is_err() {
+            let mut state = self.state.lock_unpoisoned();
+            if state.lifecycle != RenderSessionState::Abandoned {
+                self.start_detach(&mut state);
+            }
+        }
     }
 
     /// Stops the session at once, as [`RenderSession::abandon`] documents,

@@ -573,6 +573,11 @@ impl Map {
         })
     }
 
+    /// Whether the map was released or disposed.
+    pub(crate) fn is_released(&self) -> bool {
+        self.shared.released.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn runtime_thread(&self) -> std::thread::ThreadId {
         self.shared.runtime.thread()
     }

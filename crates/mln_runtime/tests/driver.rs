@@ -361,6 +361,19 @@ fn an_abandon_on_the_drivers_thread_keeps_only_open_gl_objects() {
 }
 
 #[test]
+fn a_session_released_after_its_map_is_abandoned_without_a_service() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (session, driver) = attach(&map, caller_options());
+    // The disposed map waits for the session, which a release then
+    // abandons rather than detach at a service that may never come.
+    let map_released = map.dispose().unwrap();
+    session.release().unwrap().wait().unwrap();
+    map_released.wait().unwrap();
+    assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+}
+
+#[test]
 fn dropping_the_driver_work_abandons_the_session() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");
