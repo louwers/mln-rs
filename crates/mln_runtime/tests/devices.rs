@@ -301,6 +301,94 @@ fn a_webgpu_ring_hands_each_frame_back() {
     wait(session.detach());
 }
 
+/// A WebGPU device and `count` textures of it for a ring, or `None` where
+/// this build or machine has no WebGPU device.
+#[cfg(feature = "webgpu")]
+fn webgpu_ring(count: usize) -> Option<(Device, Vec<wgpu::Texture>)> {
+    let device = device_of(BackendType::WebGPU)?;
+    let textures = (0..count).map(|_| webgpu_texture(&device)).collect();
+    Some((device, textures))
+}
+
+/// A texture of a WebGPU device for a ring.
+#[cfg(feature = "webgpu")]
+fn webgpu_texture(device: &Device) -> wgpu::Texture {
+    let Device::WebGpu(webgpu) = device else { unreachable!() };
+    webgpu.device().create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width: SIZE.width, height: SIZE.height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    })
+}
+
+#[cfg(feature = "webgpu")]
+fn webgpu_session(map: &Map, device: &Device, textures: &[wgpu::Texture], options: AttachOptions) -> RenderSession {
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.to_vec(), size: SIZE });
+    let target = RenderTarget::Borrowed { size: SIZE, ring, device: device.clone() };
+    let options = AttachOptions { producer_sync_kinds: SyncKinds::of(&[SyncKind::QueueOrder]), ..options };
+    let (session, attached) = map.attach(target, options).unwrap();
+    attached.wait().unwrap();
+    session
+}
+
+// While the host holds the frame in a ring's only texture, no frame renders
+// into it, however the host's acquires and the session's demands interleave.
+#[cfg(feature = "webgpu")]
+#[test]
+fn no_frame_renders_into_a_texture_that_the_host_holds() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    let Some((device, textures)) = webgpu_ring(1) else { return };
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let session = webgpu_session(&map, &device, &textures, AttachOptions::default());
+    const DEMANDS: u64 = 10_000;
+    let done = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let host = scope.spawn(|| {
+            let mut held = 0u64;
+            while !done.load(Ordering::SeqCst) {
+                let Some(frame) = session.acquire_frame().unwrap() else {
+                    std::hint::spin_loop();
+                    continue;
+                };
+                // A frame that rendered meanwhile would count past it.
+                let generation = frame.result().frame_generation;
+                let until = Instant::now() + Duration::from_millis(1);
+                while Instant::now() < until {
+                    assert_eq!(
+                        generation,
+                        session.snapshot().unwrap().frame_generation,
+                        "a frame rendered into the texture that the host holds"
+                    );
+                }
+                frame.release(ConsumerSync::of(GpuSync::of(SyncKind::QueueOrder))).unwrap();
+                held += 1;
+            }
+            held
+        });
+        for token in 0..DEMANDS {
+            session.demand_frame(FrameDemand::new(DemandMode::Force, token)).unwrap();
+        }
+        let mut finished = 0;
+        let deadline = Instant::now() + Duration::from_secs(600);
+        while finished < DEMANDS && !host.is_finished() && Instant::now() < deadline {
+            finished += session.drain_frame_results().unwrap().len() as u64;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        done.store(true, Ordering::SeqCst);
+        assert!(host.join().unwrap() > 0);
+        assert_eq!(DEMANDS, finished);
+    });
+    wait(session.detach());
+}
+
 #[cfg(all(feature = "gl", target_os = "linux"))]
 mod gl {
     use std::ptr::NonNull;

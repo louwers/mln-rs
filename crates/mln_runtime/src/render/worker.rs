@@ -196,12 +196,13 @@ struct PendingDemand {
     sequence: u64,
 }
 
-/// Whether a borrowed ring has a texture for the next frame.
+/// The texture of a borrowed ring that the next frame renders into.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum RingStatus {
+enum RingPick {
     /// The target isn't a ring.
     None,
-    Free,
+    /// The ring's texture at this slot, which is now marked as rendering.
+    Slot(usize),
     /// The host holds a frame in every texture it may render into.
     Full,
     /// No texture may be rendered into again.
@@ -482,15 +483,16 @@ impl Worker {
             return;
         }
         while let Some(pending) = self.parked.pop_front() {
-            if self.ring_status() == RingStatus::Full {
+            if let Some(pending) = self.evaluate(pending, outbox) {
                 self.parked.push_front(pending);
                 return;
             }
-            self.evaluate(pending, outbox);
         }
         while self.parked.is_empty() && self.queue.front().is_some_and(|pending| pending.sequence <= self.map_applied) {
-            if let Some(pending) = self.queue.pop_front() {
-                self.evaluate(pending, outbox);
+            if let Some(pending) = self.queue.pop_front()
+                && let Some(pending) = self.evaluate(pending, outbox)
+            {
+                self.parked.push_back(pending);
             }
         }
         let latest = self.latest_generation();
@@ -501,40 +503,47 @@ impl Worker {
             self.waiting.drain(..).partition(|(_, seen)| !retargeting && latest > *seen);
         self.waiting = waiting;
         for (pending, _) in updated {
-            self.evaluate(pending, outbox);
+            if let Some(pending) = self.evaluate(pending, outbox) {
+                self.parked.push_back(pending);
+            }
         }
         self.render_still_image(outbox);
     }
 
-    fn evaluate(&mut self, pending: PendingDemand, outbox: &mut Outbox) {
+    /// Renders the demand, or ends it, or has it wait for an update. Returns
+    /// it when it waits for the ring to free a texture.
+    fn evaluate(&mut self, pending: PendingDemand, outbox: &mut Outbox) -> Option<PendingDemand> {
         let token = Some(pending.demand.token);
         let latest = self.latest();
         let latest_generation = latest.as_ref().map_or(0, |update| update.generation);
         if self.gfx.is_none() {
             let failed = self.shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Failed;
             let disposition = if failed { FrameDisposition::Failed } else { FrameDisposition::TargetNotReady };
-            return self.publish(FrameResult::unrendered(token, disposition, latest_generation), outbox);
+            self.publish(FrameResult::unrendered(token, disposition, latest_generation), outbox);
+            return None;
         }
         let changed = latest_generation != self.rendered_update || self.generation() != self.rendered_generation;
-        let renders = latest.is_some() && (pending.demand.mode == DemandMode::Force || changed);
-        if renders {
-            match self.ring_status() {
-                RingStatus::Full => return self.parked.push_back(pending),
-                RingStatus::Quarantined => {
-                    let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, latest_generation);
-                    return self.publish(result, outbox);
-                }
-                RingStatus::None | RingStatus::Free => {}
+        match latest {
+            Some(update) if pending.demand.mode == DemandMode::Force || changed => {
+                // The texture is picked and marked in one step, so the host
+                // can't acquire it in between.
+                let slot = match self.pick_slot() {
+                    RingPick::Full => return Some(pending),
+                    RingPick::Quarantined => {
+                        let result =
+                            FrameResult::unrendered(token, FrameDisposition::TargetNotReady, latest_generation);
+                        self.publish(result, outbox);
+                        return None;
+                    }
+                    RingPick::None => None,
+                    RingPick::Slot(slot) => Some(slot),
+                };
+                self.render(token, update, slot, outbox);
             }
-        }
-        match (latest, pending.demand.mode) {
-            (Some(update), DemandMode::Force) => self.render(token, update, outbox),
-            (Some(update), DemandMode::IfChanged | DemandMode::WaitForUpdate) if changed => {
-                self.render(token, update, outbox);
-            }
-            (_, DemandMode::WaitForUpdate) => self.waiting.push((pending, latest_generation)),
+            _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
             _ => self.publish(FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
         }
+        None
     }
 
     /// Renders an update that asks for a still image, once for each update
@@ -542,32 +551,37 @@ impl Worker {
     fn render_still_image(&mut self, outbox: &mut Outbox) {
         let Some(update) = self.latest() else { return };
         let Some(gfx) = self.gfx.as_ref() else { return };
-        if !update.parameters.still_image_request
-            || update.generation <= self.still_attempted
-            || !gfx.ready_for_frame()
-            || matches!(self.ring_status(), RingStatus::Full | RingStatus::Quarantined)
+        if !update.parameters.still_image_request || update.generation <= self.still_attempted || !gfx.ready_for_frame()
         {
             return;
         }
+        let slot = match self.pick_slot() {
+            RingPick::Full | RingPick::Quarantined => return,
+            RingPick::None => None,
+            RingPick::Slot(slot) => Some(slot),
+        };
         self.still_attempted = update.generation;
-        self.render(None, update, outbox);
+        self.render(None, update, slot, outbox);
     }
 
     fn generation(&self) -> u64 {
         self.shared.state.lock_unpoisoned().generation
     }
 
-    /// Renders `update` for the demand `token`, and publishes its result. A
-    /// still map draws no frame until everything that it shows has loaded,
-    /// and a surface without a texture to render into takes no frame.
-    fn render(&mut self, token: Option<u64>, update: Update, outbox: &mut Outbox) {
-        let Some(gfx) = self.gfx.as_mut() else { return };
-        if !gfx.ready_for_frame() {
+    /// Renders `update` for the demand `token` into the ring's `slot`, which
+    /// [`pick_slot`](Self::pick_slot) marked, or into a target without a
+    /// ring, and publishes its result. A still map draws no frame until
+    /// everything that it shows has loaded, and a surface without a texture
+    /// to render into takes no frame.
+    fn render(&mut self, token: Option<u64>, update: Update, slot: Option<usize>, outbox: &mut Outbox) {
+        let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
+        let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
+            if let Some(slot) = slot {
+                self.end_slot(slot, None);
+            }
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
             return self.publish(result, outbox);
-        }
-        let slot = self.take_slot();
-        let Some(gfx) = self.gfx.as_mut() else { return };
+        };
         if let Some(slot) = slot
             && gfx.target.select_slot(slot).is_err()
         {
@@ -662,25 +676,17 @@ impl Worker {
 
     // MARK: - Borrowed rings
 
-    /// Whether a borrowed ring has a texture for the next frame.
-    fn ring_status(&self) -> RingStatus {
-        let state = self.shared.state.lock_unpoisoned();
-        if state.ring.is_empty() {
-            RingStatus::None
-        } else if state.ring.iter().all(|slot| slot.quarantined) {
-            RingStatus::Quarantined
-        } else if state.ring.iter().all(|slot| slot.busy()) {
-            RingStatus::Full
-        } else {
-            RingStatus::Free
-        }
-    }
-
-    /// The ring's texture that the next frame renders into, which it marks
-    /// as rendering: one that holds no frame, or else the one with the
+    /// Picks the ring's texture that the next frame renders into, and marks
+    /// it as rendering: one that holds no frame, or else the one with the
     /// oldest frame that the host didn't acquire.
-    fn take_slot(&self) -> Option<usize> {
+    fn pick_slot(&self) -> RingPick {
         let mut state = self.shared.state.lock_unpoisoned();
+        if state.ring.is_empty() {
+            return RingPick::None;
+        }
+        if state.ring.iter().all(|slot| slot.quarantined) {
+            return RingPick::Quarantined;
+        }
         let free = state.ring.iter().enumerate().filter(|(_, slot)| !slot.busy());
         let index = free
             .clone()
@@ -688,11 +694,12 @@ impl Worker {
             .or_else(|| {
                 free.min_by_key(|(_, slot)| slot.frame.as_ref().map_or(0, |frame| frame.result.frame_generation))
             })
-            .map(|(index, _)| index)?;
+            .map(|(index, _)| index);
+        let Some(index) = index else { return RingPick::Full };
         let slot = &mut state.ring[index];
         slot.rendering = true;
         slot.frame = None;
-        Some(index)
+        RingPick::Slot(index)
     }
 
     /// Ends a frame rendered into the ring's `slot`, which then holds
