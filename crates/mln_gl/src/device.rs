@@ -316,10 +316,10 @@ struct EglContext {
     surface: Option<egl::Surface>,
     /// Whether the surface is the context's own, which it destroys.
     owns_surface: bool,
-    /// What a host's thread had current, which the context makes current
-    /// again when it is done.
+    /// What the thread had current, which the context makes current again
+    /// when it is done: a host's thread that services a session has its own
+    /// context current.
     previous: Cell<Previous>,
-    restores: bool,
     /// The share group, which outlives its contexts.
     _device: Device,
 }
@@ -346,7 +346,6 @@ impl EglContext {
             surface: Some(surface),
             owns_surface: true,
             previous: Cell::new(None),
-            restores: false,
             _device: device,
         })
     }
@@ -370,33 +369,22 @@ impl EglContext {
                 }
             },
         };
-        Ok(EglContext {
-            egl,
-            display,
-            context,
-            surface,
-            owns_surface,
-            previous: Cell::new(None),
-            restores: true,
-            _device: device,
-        })
+        Ok(EglContext { egl, display, context, surface, owns_surface, previous: Cell::new(None), _device: device })
     }
 }
 
 impl PlatformContext for EglContext {
     fn make_current(&self) {
         let egl = self.egl;
-        if self.restores {
-            let previous = egl.get_current_context().filter(|context| *context != self.context).and_then(|context| {
-                Some((
-                    egl.get_current_display()?,
-                    egl.get_current_surface(egl::DRAW),
-                    egl.get_current_surface(egl::READ),
-                    context,
-                ))
-            });
-            self.previous.set(previous);
-        }
+        let previous = egl.get_current_context().filter(|context| *context != self.context).and_then(|context| {
+            Some((
+                egl.get_current_display()?,
+                egl.get_current_surface(egl::DRAW),
+                egl.get_current_surface(egl::READ),
+                context,
+            ))
+        });
+        self.previous.set(previous);
         if let Err(e) = egl.make_current(self.display, self.surface, self.surface, Some(self.context)) {
             Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
         }
