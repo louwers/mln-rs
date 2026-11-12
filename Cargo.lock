@@ -2139,6 +2139,7 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-map",
  "mln-rs-map-types",
+ "mln-rs-mtl",
  "mln-rs-rapidjson",
  "mln-rs-runtime",
  "mln-rs-storage",

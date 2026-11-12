@@ -237,8 +237,10 @@ fn metal_layer(size: Size, layer: NonNull<c_void>) -> Target {
     #[cfg(target_vendor = "apple")]
     {
         // SAFETY: the host's layer, which the header's contract keeps alive.
-        match unsafe { Surface::metal_layer_from_raw(layer.as_ptr()) } {
-            Some(surface) => Target::Surface { size, kind: SurfaceType::MetalLayer, surface },
+        match unsafe { mln_mtl::Layer::from_raw(layer.as_ptr()) } {
+            Some(layer) => {
+                Target::Surface { size, kind: SurfaceType::MetalLayer, surface: Surface::metal_layer(layer) }
+            }
             None => Target::Unsupported("a null layer"),
         }
     }

@@ -102,19 +102,6 @@ impl Surface {
         Surface { kind: SurfaceKind::MetalLayer(layer) }
     }
 
-    /// [`metal_layer`](Self::metal_layer) for the `CAMetalLayer` that
-    /// `layer` points to, which the surface retains, or `None` for a null
-    /// pointer.
-    ///
-    /// # Safety
-    ///
-    /// `layer` is null or points to a live `CAMetalLayer`.
-    #[cfg(all(feature = "metal", target_vendor = "apple"))]
-    pub unsafe fn metal_layer_from_raw(layer: *mut std::ffi::c_void) -> Option<Surface> {
-        // SAFETY: the caller's contract.
-        unsafe { mln_mtl::Layer::from_raw(layer) }.map(Surface::metal_layer)
-    }
-
     /// A surface that the host made with the instance of the WebGPU
     /// [`Device`] that the session renders on.
     #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
