@@ -3,7 +3,7 @@
 use crate::generated::types::{mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options, mln_status};
 
 /// `mln_ohos_frame_pacer_create()`: fails with `MLN_STATUS_UNSUPPORTED`
-/// outside OpenHarmony.
+/// outside `OpenHarmony`.
 ///
 /// # Safety
 ///

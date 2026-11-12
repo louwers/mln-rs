@@ -219,6 +219,10 @@ struct PacerState {
 }
 
 impl Pacer {
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the new pacer takes the handle that its source's refreshes reach it by"
+    )]
     pub(crate) fn new(limit: Option<Limit>, vsyncs: Vsyncs, source: Box<dyn VsyncSource>) -> Arc<Self> {
         let pacer = Arc::new(Self {
             state: Mutex::new(PacerState { waiting: Vec::new(), scheduled: false, throttle: Throttle::new(limit) }),

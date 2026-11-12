@@ -39,7 +39,7 @@ fn admitted(limit: Option<u32>, display_rate: u32, seconds: u32, jitter: Duratio
     (0..display_rate * seconds)
         .filter(|&refresh| {
             let ideal = start + period * refresh;
-            let time = if refresh % 2 == 0 { ideal + jitter } else { ideal - jitter };
+            let time = if refresh % 2 == 0 { ideal + jitter } else { ideal.checked_sub(jitter).unwrap() };
             throttle.admit(time)
         })
         .count() as u32
@@ -175,7 +175,7 @@ fn create_fake(options: *const mln_frame_pacer_options) -> Result<(mln_frame_pac
         Ok(FakeSource(Arc::clone(&display)))
     };
     // SAFETY: the caller's options, and a local out-handle.
-    match unsafe { create(options, &mut pacer, source) } {
+    match unsafe { create(options, &raw mut pacer, source) } {
         Ok(()) => Ok((pacer, display)),
         Err(error) => Err(error.status()),
     }
@@ -192,7 +192,7 @@ fn pacer_options(fields: u32, maximum_frames_per_second: u32) -> mln_frame_pacer
 #[test]
 fn options_check_their_fields_and_limit() {
     let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
-    let (pacer, _) = create_fake(&limited).unwrap();
+    let (pacer, _) = create_fake(&raw const limited).unwrap();
     assert_eq!(resolve(pacer).unwrap().state.lock().unwrap().throttle.limit, Limit::new(30));
     mln_frame_pacer_release(pacer);
     // A limit that its field doesn't set is no limit.
@@ -201,14 +201,14 @@ fn options_check_their_fields_and_limit() {
     mln_frame_pacer_release(pacer);
 
     let zero = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 0);
-    assert_eq!(create_fake(&zero).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
+    assert_eq!(create_fake(&raw const zero).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
     assert_eq!(create_fake(&pacer_options(1 << 7, 30)).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
     let small = mln_frame_pacer_options { size: 4, ..limited };
-    assert_eq!(create_fake(&small).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
+    assert_eq!(create_fake(&raw const small).err().unwrap(), MLN_STATUS_INVALID_ARGUMENT);
 
     let mut pacer = 7;
     // SAFETY: an out-handle that isn't null.
-    let created = unsafe { create(core::ptr::null(), &mut pacer, |_, _| Ok(FakeSource(Arc::default()))) };
+    let created = unsafe { create(core::ptr::null(), &raw mut pacer, |_, _| Ok(FakeSource(Arc::default()))) };
     assert_eq!(created.unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
     // SAFETY: a null out-handle.
     let created = unsafe { create(core::ptr::null(), core::ptr::null_mut(), |_, _| Ok(FakeSource(Arc::default()))) };
@@ -226,7 +226,7 @@ fn each_platform_but_its_own_refuses_to_create_a_pacer() {
         if !native {
             let mut pacer = handles::NULL;
             // SAFETY: null options, a local out-handle and a null diagnostic.
-            let status = unsafe { create(core::ptr::null(), &mut pacer, NO_DIAGNOSTIC) };
+            let status = unsafe { create(core::ptr::null(), &raw mut pacer, NO_DIAGNOSTIC) };
             assert_eq!((status, pacer), (crate::generated::types::MLN_STATUS_UNSUPPORTED, handles::NULL));
         }
     }
@@ -245,7 +245,7 @@ fn requests_share_one_refresh_until_it_comes() {
     assert_eq!(display.scheduled(), 1);
     assert_eq!(lock(&pacer.state).waiting, [1, 2]);
     assert!(display.refresh(now()));
-    assert!(lock(&pacer.state).waiting.is_empty());
+    assert_eq!(lock(&pacer.state).waiting, [] as [u64; 0]);
     assert_eq!(display.scheduled(), 0);
 
     pacer.request(3);
@@ -256,7 +256,7 @@ fn requests_share_one_refresh_until_it_comes() {
 #[test]
 fn a_refresh_that_the_limit_skips_schedules_the_next() {
     let limited = pacer_options(MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, 30);
-    let (handle, display) = create_fake(&limited).unwrap();
+    let (handle, display) = create_fake(&raw const limited).unwrap();
     let pacer = resolve(handle).unwrap();
     let at = Duration::from_millis;
     pacer.request(1);
@@ -290,7 +290,10 @@ fn set_pacer(session: mln_render_session, pacer: mln_frame_pacer) -> mln_status 
 fn barrier(session: mln_render_session) {
     let done = Waiter::new();
     // SAFETY: a local completion.
-    assert_eq!(unsafe { mln_render_session_barrier(session, &done.descriptor, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+    assert_eq!(
+        unsafe { mln_render_session_barrier(session, &raw const done.descriptor, NO_DIAGNOSTIC) },
+        MLN_STATUS_OK
+    );
     assert_eq!(done.status(), MLN_STATUS_OK);
 }
 
@@ -299,7 +302,8 @@ fn drain(session: mln_render_session) -> Vec<mln_render_frame_result> {
     let mut batch = handles::NULL;
     let mut view = sized::<mln_render_frame_batch_view>();
     // SAFETY: local outputs.
-    let status = unsafe { mln_render_session_drain_frame_results(session, &mut batch, &mut view, NO_DIAGNOSTIC) };
+    let status =
+        unsafe { mln_render_session_drain_frame_results(session, &raw mut batch, &raw mut view, NO_DIAGNOSTIC) };
     assert_eq!(status, MLN_STATUS_OK);
     if batch == handles::NULL {
         return Vec::new();
@@ -328,7 +332,7 @@ pub(crate) fn paint(map: mln_map, color: &str) -> u64 {
     let (completion, receiver) = channel_completion::<(mln_status, u64)>(send_update_generation);
     // SAFETY: local arguments, and a completion whose sender the library
     // releases after its call.
-    let status = unsafe { mln_map_set_style_json(map, view(&style), &completion, NO_DIAGNOSTIC) };
+    let status = unsafe { mln_map_set_style_json(map, view(&style), &raw const completion, NO_DIAGNOSTIC) };
     assert_eq!(status, MLN_STATUS_OK);
     let (status, generation) = receiver.recv_timeout(TIMEOUT).unwrap();
     assert_eq!(status, MLN_STATUS_OK);
@@ -513,8 +517,17 @@ fn set_frame_pacer_checks_its_session_and_pacer() {
     let mut session = handles::NULL;
     let attached = Waiter::new();
     // SAFETY: local arguments.
-    let status =
-        unsafe { mln_map_attach(map, &target, 0, &options, &mut session, &attached.descriptor, NO_DIAGNOSTIC) };
+    let status = unsafe {
+        mln_map_attach(
+            map,
+            &raw const target,
+            0,
+            &raw const options,
+            &raw mut session,
+            &raw const attached.descriptor,
+            NO_DIAGNOSTIC,
+        )
+    };
     assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
     assert_eq!(set_pacer(session, pacer), MLN_STATUS_INVALID_STATE);
     // A null pacer is no pacer, which a session with a redraw wake has.
