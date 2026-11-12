@@ -30,11 +30,10 @@ const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 /// An online file source whose thread has set up its HTTP transport, so that
 /// the tests that time their requests don't count that setup.
-fn online_file_source() -> Rc<dyn FileSource> {
-    let fs: Rc<dyn FileSource> = Rc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
+fn online_file_source() -> Rc<OnlineFileSource> {
+    let fs = Rc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
     // `pause` returns once the thread runs.
-    fs.pause();
-    fs.resume();
+    drop(fs.pause());
     fs
 }
 
@@ -362,7 +361,7 @@ fn load() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let fs = online_file_source();
+    let fs: Rc<dyn FileSource> = online_file_source();
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
     let base = server.url("/load/");
@@ -425,7 +424,7 @@ fn network_status_change_preempt() {
     let _serial = serial();
     let run_loop = RunLoop::new();
     let fs = online_file_source();
-    fs.pause();
+    let paused = fs.pause();
 
     let start = Clock::now();
     let counter = Cell::new(0);
@@ -475,7 +474,7 @@ fn network_status_change_preempt() {
         NetworkStatus::reachable,
     );
 
-    fs.resume();
+    drop(paused);
     run_loop.run();
 }
 
@@ -563,7 +562,7 @@ fn get_base_url_and_api_key_while_paused() {
     let _run_loop = RunLoop::new();
     let fs = online_file_source();
 
-    fs.pause();
+    let _paused = fs.pause();
 
     let base_url = "http://url";
     let api_key = "api_key";
@@ -655,7 +654,7 @@ fn low_high_priority_requests() {
     // After DefaultFileSource was split, OnlineFileSource lives on a separate
     // thread. Pause OnlineFileSource, so that messages are queued for
     // processing.
-    fs.pause();
+    let paused = fs.pause();
 
     // First regular request.
     let regular1 = Resource::new(Kind::Unknown, server.url("/load/1"));
@@ -702,7 +701,7 @@ fn low_high_priority_requests() {
     // two of them, those taken offline would wait for the reachability
     // notification and start after the later ones, low priority included.
     NetworkStatus::set(Status::Online);
-    fs.resume();
+    drop(paused);
     run_loop.run();
 }
 
@@ -719,7 +718,7 @@ fn low_high_priority_requests_many() {
 
     NetworkStatus::set(Status::Offline);
     fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
-    fs.pause();
+    let paused = fs.pause();
 
     let collector: Rc<RefCell<Vec<Req>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -777,7 +776,7 @@ fn low_high_priority_requests_many() {
 
     // Online before resuming, as in LowHighPriorityRequests.
     NetworkStatus::set(Status::Online);
-    fs.resume();
+    drop(paused);
     run_loop.run();
 }
 
