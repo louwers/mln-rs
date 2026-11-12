@@ -15,7 +15,7 @@ use mln_storage::{AsyncRequest, Data, FileSource, LoadingMethod, Resource, Respo
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Duration;
 use mln_util::error::Error;
-use mln_util::tileset::{EmptyResponse, Tileset};
+use mln_util::tileset::Tileset;
 
 use crate::tile::geometry_tile::GeometryTileInner;
 use crate::tile::geometry_tile_worker::SharedTileData;
@@ -46,12 +46,16 @@ pub trait LoaderTile {
     fn set_tried_cache(&self);
     fn on_tile_action(&self, op: TileOperation);
     fn set_metadata(&self, modified: Option<mln_util::chrono::Timestamp>, expires: Option<mln_util::chrono::Timestamp>);
+    /// `setData(data)`. Without data, the tile is in the tileset and has nothing in it: it's
+    /// renderable and draws nothing.
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding);
-    /// Loads the tile without data for an empty response the tileset calls missing
-    /// (`emptyResponse: "missing"`). The tile isn't renderable, so the pyramid draws a tile from
-    /// another zoom level in its place. A raster tile without an image already isn't.
-    fn set_missing(&self, encoding: VectorTileEncoding) {
-        self.set_data(None, encoding);
+    /// Loads the tile without data for a tile the tileset doesn't have at this zoom level. The
+    /// tile isn't renderable, so the pyramid draws a tile from another zoom level in its place.
+    fn set_missing(&self, encoding: VectorTileEncoding);
+    /// Whether a tile the tileset doesn't have (a 404) loads as an empty tile, as a vector tile
+    /// does in GL JS, rather than as a missing one, as a raster tile does.
+    fn not_found_is_empty(&self) -> bool {
+        false
     }
 }
 
@@ -104,12 +108,16 @@ impl LoaderTile for GeometryTileInner {
             GeometryTileInner::set_data(self, None);
         }
     }
+
+    fn not_found_is_empty(&self) -> bool {
+        true
+    }
 }
 
 struct State {
     tile: Weak<dyn LoaderTile>,
     encoding: VectorTileEncoding,
-    empty_response: EmptyResponse,
+    sparse: bool,
     necessity: TileNecessity,
     resource: Resource,
     file_source: Option<Arc<dyn FileSource>>,
@@ -154,7 +162,7 @@ impl TileLoader {
         let state = Rc::new(RefCell::new(State {
             tile,
             encoding,
-            empty_response: tileset.empty_response,
+            sparse: tileset.sparse,
             necessity: TileNecessity::Optional,
             resource,
             file_source: if tileset.tiles.is_empty() { None } else { parameters.file_source.clone() },
@@ -373,14 +381,18 @@ fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMet
         }
         if let Some(tile) = &tile {
             tile.set_metadata(res.modified, res.expires);
-            let (encoding, empty_response) = {
+            let (encoding, sparse) = {
                 let state = state_rc.borrow();
-                (state.encoding, state.empty_response)
+                (state.encoding, state.sparse)
             };
-            if res.no_content && empty_response == EmptyResponse::Missing {
+            // A 404 (Not Found), unlike an empty response (204, or no tile in an archive), says
+            // the tileset has no tile here.
+            let not_found = res.tile_not_found || res.error.as_ref().is_some_and(|e| e.reason == Reason::NotFound);
+            let empty = res.no_content || not_found;
+            if empty && (sparse || (not_found && !tile.not_found_is_empty())) {
                 tile.set_missing(encoding);
             } else {
-                tile.set_data(if res.no_content { None } else { res.data.clone() }, encoding);
+                tile.set_data(if empty { None } else { res.data.clone() }, encoding);
             }
         }
     }

@@ -74,15 +74,46 @@ fn on_parsed() {
     assert!(tile.is_complete());
 }
 
-// gtest: RasterTile.onParsedEmpty
+// gtest: RasterTile.onParsedEmpty. Unlike in C++, a parse without data is a tile with nothing in
+// it, which is renderable and draws nothing, as for an empty response (HTTP 204) in GL JS.
 #[test]
 fn on_parsed_empty() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
     tile.inner().on_parsed(None, 0);
-    assert!(!tile.is_renderable());
+    assert!(tile.is_renderable());
     assert!(tile.is_loaded());
     assert!(tile.is_complete());
+}
+
+// Port-only: a tile the tileset doesn't have (HTTP 404) isn't renderable, so the pyramid draws a
+// tile from another zoom level in its place. An empty tile is, and draws nothing. Each replaces
+// the image the tile had.
+#[test]
+fn missing_and_empty() {
+    let test = RasterTileTest::new();
+    let tile = tile(&test);
+    let layer = RasterLayer::new("r", "s").base_impl();
+    let wait = || {
+        while !tile.is_complete() {
+            test.run_loop.run_once();
+        }
+    };
+
+    tile.inner().set_data(Some(png(16, 16)), VectorTileEncoding::Mvt);
+    wait();
+    assert!(tile.is_renderable());
+    assert!(tile.create_render_data().get_bucket(&*layer).is_some());
+
+    LoaderTile::set_missing(&**tile.inner(), VectorTileEncoding::Mvt);
+    wait();
+    assert!(!tile.is_renderable());
+    assert!(tile.create_render_data().get_bucket(&*layer).is_none());
+
+    tile.inner().set_data(None, VectorTileEncoding::Mvt);
+    wait();
+    assert!(tile.is_renderable());
+    assert!(tile.create_render_data().get_bucket(&*layer).is_none());
 }
 
 // Port-only: raster tiles whose workers are in worker instances on other

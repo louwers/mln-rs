@@ -12,8 +12,14 @@
 // - A resize rebuilds the swapchain before the next frame, where C++ waits
 //   a few frames (`requestSurfaceUpdate`'s delay): a Wayland surface has the
 //   size of its swapchain's images, so a late rebuild shows frames of the
-//   old size scaled. An empty framebuffer, which a minimized window has,
-//   keeps the swapchain as it is.
+//   old size scaled. An empty framebuffer keeps the swapchain as it is.
+// - Port-only: no target is made on a surface whose extent is empty, as a
+//   minimized window's is (`on_surface`). Once a target's surface has such
+//   an extent, the frame whose acquire or present finds the swapchain out
+//   of date has its rebuild fail and presents nothing, and the target takes
+//   no frame until the surface has an extent again (`begin_frame`). The
+//   extent is asked for only then: on X11 the query is a round trip to the
+//   server. C++ leaves all of that to the host.
 // - Port-only: `request_readback` copies a presented frame into an image,
 //   and `set_overlay` draws over each frame before it is presented, such as
 //   an app's controls over the map.
@@ -144,6 +150,8 @@ impl SurfaceTarget {
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// backend can't present to the window, or Vulkan has no surface for it,
+    /// with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
+    /// window's surface has an empty extent, as a minimized window's has,
     /// and with [`ErrorKind::Native`](mln_util::ErrorKind) when the window
     /// gets no surface or swapchain.
     pub fn new(
@@ -179,9 +187,10 @@ impl SurfaceTarget {
     /// again when it is lost.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
-    /// device's queue can't present to the surface, and with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the surface gets no
-    /// swapchain.
+    /// device's queue can't present to the surface, with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the surface has
+    /// an empty extent, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// when the surface gets no swapchain.
     pub fn on_host_surface(
         backend: Rc<RendererBackend>,
         surface: HostSurface,
@@ -193,8 +202,9 @@ impl SurfaceTarget {
 
     /// A target that presents to `surface`, which the target owns when
     /// `provider` made it, and which `provider` makes again when it is lost.
-    /// A surface the queue can't present to fails with `Unsupported`, and is
-    /// destroyed when the target would own it.
+    /// A surface the queue can't present to fails with `Unsupported`, and
+    /// one of an empty extent, such as a minimized window's, with
+    /// `InvalidState`. Either is destroyed when the target would own it.
     fn on_surface(
         backend: Rc<RendererBackend>,
         surface: vk::SurfaceKHR,
@@ -223,6 +233,14 @@ impl SurfaceTarget {
                 unsafe { surface_loader.destroy_surface(surface, None) };
             }
             return Err(Error::unsupported("The Vulkan device's queue can't present to the surface"));
+        }
+        if crate::surface_resource::surface_extent(backend_impl, surface).is_some_and(is_empty) {
+            if provider.is_some() {
+                // SAFETY: nothing was made on the surface, which is the
+                // target's.
+                unsafe { surface_loader.destroy_surface(surface, None) };
+            }
+            return Err(Error::invalid_state("The window is minimized or has no client area"));
         }
         let context: &Rc<Context> = backend.vulkan_context();
         // SAFETY: the surface is the instance's, and the device presents to
@@ -317,18 +335,29 @@ impl SurfaceTarget {
     }
 }
 
+/// Whether `extent` has no pixels.
+fn is_empty(extent: vk::Extent2D) -> bool {
+    extent.width == 0 || extent.height == 0
+}
+
 impl FrameTarget for SurfaceTarget {
     /// The frame's image is acquired when the frame begins
     /// (`Context::begin_frame`). No frame is drawn into an empty
-    /// framebuffer.
+    /// framebuffer. A swapchain that couldn't be made, as for a surface of
+    /// an empty extent, such as a minimized window's, is made again before
+    /// the frame, once the surface has an extent.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
         let size = self.size.get();
         if size.width == 0 || size.height == 0 {
             return None;
         }
+        let unbuilt = self.resource.get_image_count() == 0;
+        if unbuilt && self.resource.current_extent().is_some_and(is_empty) {
+            return None;
+        }
         let context = self.backend.vulkan_context();
         context.set_surface(&self.resource);
-        if self.rebuild.take() {
+        if self.rebuild.take() || unbuilt {
             context.request_surface_update(false);
         }
         Some(self.image.clone())

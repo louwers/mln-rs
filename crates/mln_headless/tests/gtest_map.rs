@@ -4447,7 +4447,10 @@ fn releases_tiles_outside_zoom_range(param: InactiveLayerCase) {
         } else if z == 15 && (x == 16383 || x == 16384) && (y == 16383 || y == 16384) {
             response.data = Some(large_tile.clone());
         } else {
+            // The tileset has no other tiles (HTTP 404), so a parent is drawn in their place. An
+            // empty raster tile (HTTP 204) would draw nothing, as in GL JS.
             response.no_content = true;
+            response.tile_not_found = true;
         }
         Some(response)
     });

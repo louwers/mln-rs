@@ -588,6 +588,7 @@ pub(crate) fn attach(
             if device.is_none() && !surface.needs_no_device() {
                 return Err(Error::invalid_argument("a surface that the host made needs the host's device"));
             }
+            surface.check_area()?;
             (size, TargetInit::Surface { surface, device })
         }
         RenderTarget::Borrowed { size, ring: borrowed, device } => {
@@ -1105,12 +1106,16 @@ impl RenderSession {
     /// session makes its backend and renderer again.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
-    /// for an offscreen session. Completes with
+    /// empty size, with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// an offscreen session, and with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a window that is
+    /// minimized or has no client area. Completes with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the session's
     /// device can't present to the surface in the format that the session
-    /// renders in: attach a new session instead. The session then keeps the
-    /// surface it had, at the new size.
+    /// renders in: attach a new session instead. Completes with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the window had no
+    /// area to present to by then. The session then keeps the surface it had,
+    /// at the new size.
     pub fn set_surface(&self, size: Size, surface: Surface) -> Result<Completion<Applied>, Error> {
         check_usable(&self.shared().state.lock_unpoisoned())?;
         let capabilities = self.shared().capabilities;
@@ -1120,6 +1125,7 @@ impl RenderSession {
         if !capabilities.presentation {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
+        surface.check_area()?;
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
             worker.set_surface(size, scale_factor, surface, outbox).map(|()| None)
         })

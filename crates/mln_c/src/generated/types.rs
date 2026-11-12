@@ -3116,6 +3116,108 @@ pub struct mln_log_handler {
  platform's log even when the handler's queue can't accept it.*/
     pub platform_severities: mln_log_severity_flags,
 }
+/// A projection's camera, as mln_map_projection_get_camera() reports it.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_map_projection_camera_result {
+    pub size: u32,
+    pub camera: mln_camera,
+}
+pub const MLN_RENDERED_QUERY_GEOMETRY_TYPE_POINT: mln_rendered_query_geometry_type = 1;
+pub const MLN_RENDERED_QUERY_GEOMETRY_TYPE_BOX: mln_rendered_query_geometry_type = 2;
+pub const MLN_RENDERED_QUERY_GEOMETRY_TYPE_LINE_STRING: mln_rendered_query_geometry_type = 3;
+/// The shape of the screen area that a rendered feature query covers.
+pub type mln_rendered_query_geometry_type = u32;
+/// A rectangle of the screen, from its `min` corner to its `max` corner.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_screen_box {
+    pub min: mln_screen_point,
+    pub max: mln_screen_point,
+}
+/// A line through points on the screen.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_screen_line_string {
+    pub points: *const mln_screen_point,
+    pub point_count: usize,
+}
+/// The point, box, or line of a rendered feature query.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union mln_rendered_query_geometry_data {
+    pub point: mln_screen_point,
+    pub box_: mln_screen_box,
+    pub line_string: mln_screen_line_string,
+}
+/// The screen area that a rendered feature query covers.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct mln_rendered_query_geometry {
+    pub size: u32,
+    pub type_: mln_rendered_query_geometry_type,
+    pub data: mln_rendered_query_geometry_data,
+}
+pub const MLN_RENDERED_FEATURE_QUERY_OPTION_LAYER_IDS: mln_rendered_feature_query_option_field = 1;
+/// The fields that mln_rendered_feature_query_options sets.
+pub type mln_rendered_feature_query_option_field = u32;
+/// A set of mln_rendered_feature_query_option_field bits.
+pub type mln_rendered_feature_query_option_fields = u32;
+/// Options for a rendered feature query.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_rendered_feature_query_options {
+    pub size: u32,
+    pub fields: mln_rendered_feature_query_option_fields,
+    /// The layers to query. Without them, the query covers every layer.
+    pub layer_ids: *const mln_buffer_view,
+    pub layer_id_count: usize,
+    /** A [filter](https://maplibre.org/maplibre-style-spec/expressions/) that
+ each feature must match. Empty matches every feature.*/
+    pub filter: mln_buffer_view,
+}
+pub const MLN_SOURCE_FEATURE_QUERY_OPTION_SOURCE_LAYER_IDS: mln_source_feature_query_option_field = 1;
+/// The fields that mln_source_feature_query_options sets.
+pub type mln_source_feature_query_option_field = u32;
+/// A set of mln_source_feature_query_option_field bits.
+pub type mln_source_feature_query_option_fields = u32;
+/// Options for a source feature query.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_source_feature_query_options {
+    pub size: u32,
+    pub fields: mln_source_feature_query_option_fields,
+    /** The source layers to query. A vector source finds features only in the
+ source layers named here.*/
+    pub source_layer_ids: *const mln_buffer_view,
+    pub source_layer_id_count: usize,
+    /** A [filter](https://maplibre.org/maplibre-style-spec/expressions/) that
+ each feature must match. Empty matches every feature.*/
+    pub filter: mln_buffer_view,
+}
+/// A feature that a rendered feature query found.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_rendered_feature {
+    /// The feature, as a GeoJSON feature.
+    pub feature: mln_buffer_view,
+    /// The layer that drew the feature.
+    pub layer_id: mln_buffer_view,
+    pub source_id: mln_buffer_view,
+    /// The feature's source layer, or empty when its source has none.
+    pub source_layer_id: mln_buffer_view,
+    /// The feature's state, as a JSON object.
+    pub state: mln_buffer_view,
+}
+/// A feature that a source feature query found.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_source_feature {
+    /// The feature, as a GeoJSON feature.
+    pub feature: mln_buffer_view,
+    /// The feature's source layer, or empty when its source has none.
+    pub source_layer_id: mln_buffer_view,
+}
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
 /// The map had nothing new to draw.
 pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;
@@ -3224,11 +3326,15 @@ pub struct mln_render_abandon_result {
     pub reserved: u32,
 }
 pub const MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 1;
+/** Removes the frame rate limit, so the pacer can demand frames at every
+ display refresh, as it does by default. It can't be combined with
+ MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND.*/
+pub const MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 2;
 /// The optional settings of a frame pacer.
 pub type mln_frame_pacer_option_field = u32;
 /// A set of mln_frame_pacer_option_field bits.
 pub type mln_frame_pacer_option_fields = u32;
-/// Options for creating a frame pacer.
+/// Options for creating a frame pacer, or for mln_frame_pacer_set_options().
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_frame_pacer_options {
@@ -3238,108 +3344,6 @@ pub struct mln_frame_pacer_options {
  pacer skips display refreshes to stay within it. By default, it can demand
  frames at every refresh.*/
     pub maximum_frames_per_second: u32,
-}
-/// A projection's camera, as mln_map_projection_get_camera() reports it.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_map_projection_camera_result {
-    pub size: u32,
-    pub camera: mln_camera,
-}
-pub const MLN_RENDERED_QUERY_GEOMETRY_TYPE_POINT: mln_rendered_query_geometry_type = 1;
-pub const MLN_RENDERED_QUERY_GEOMETRY_TYPE_BOX: mln_rendered_query_geometry_type = 2;
-pub const MLN_RENDERED_QUERY_GEOMETRY_TYPE_LINE_STRING: mln_rendered_query_geometry_type = 3;
-/// The shape of the screen area that a rendered feature query covers.
-pub type mln_rendered_query_geometry_type = u32;
-/// A rectangle of the screen, from its `min` corner to its `max` corner.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_screen_box {
-    pub min: mln_screen_point,
-    pub max: mln_screen_point,
-}
-/// A line through points on the screen.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_screen_line_string {
-    pub points: *const mln_screen_point,
-    pub point_count: usize,
-}
-/// The point, box, or line of a rendered feature query.
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub union mln_rendered_query_geometry_data {
-    pub point: mln_screen_point,
-    pub box_: mln_screen_box,
-    pub line_string: mln_screen_line_string,
-}
-/// The screen area that a rendered feature query covers.
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct mln_rendered_query_geometry {
-    pub size: u32,
-    pub type_: mln_rendered_query_geometry_type,
-    pub data: mln_rendered_query_geometry_data,
-}
-pub const MLN_RENDERED_FEATURE_QUERY_OPTION_LAYER_IDS: mln_rendered_feature_query_option_field = 1;
-/// The fields that mln_rendered_feature_query_options sets.
-pub type mln_rendered_feature_query_option_field = u32;
-/// A set of mln_rendered_feature_query_option_field bits.
-pub type mln_rendered_feature_query_option_fields = u32;
-/// Options for a rendered feature query.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_rendered_feature_query_options {
-    pub size: u32,
-    pub fields: mln_rendered_feature_query_option_fields,
-    /// The layers to query. Without them, the query covers every layer.
-    pub layer_ids: *const mln_buffer_view,
-    pub layer_id_count: usize,
-    /** A [filter](https://maplibre.org/maplibre-style-spec/expressions/) that
- each feature must match. Empty matches every feature.*/
-    pub filter: mln_buffer_view,
-}
-pub const MLN_SOURCE_FEATURE_QUERY_OPTION_SOURCE_LAYER_IDS: mln_source_feature_query_option_field = 1;
-/// The fields that mln_source_feature_query_options sets.
-pub type mln_source_feature_query_option_field = u32;
-/// A set of mln_source_feature_query_option_field bits.
-pub type mln_source_feature_query_option_fields = u32;
-/// Options for a source feature query.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_source_feature_query_options {
-    pub size: u32,
-    pub fields: mln_source_feature_query_option_fields,
-    /** The source layers to query. A vector source finds features only in the
- source layers named here.*/
-    pub source_layer_ids: *const mln_buffer_view,
-    pub source_layer_id_count: usize,
-    /** A [filter](https://maplibre.org/maplibre-style-spec/expressions/) that
- each feature must match. Empty matches every feature.*/
-    pub filter: mln_buffer_view,
-}
-/// A feature that a rendered feature query found.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_rendered_feature {
-    /// The feature, as a GeoJSON feature.
-    pub feature: mln_buffer_view,
-    /// The layer that drew the feature.
-    pub layer_id: mln_buffer_view,
-    pub source_id: mln_buffer_view,
-    /// The feature's source layer, or empty when its source has none.
-    pub source_layer_id: mln_buffer_view,
-    /// The feature's state, as a JSON object.
-    pub state: mln_buffer_view,
-}
-/// A feature that a source feature query found.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_source_feature {
-    /// The feature, as a GeoJSON feature.
-    pub feature: mln_buffer_view,
-    /// The feature's source layer, or empty when its source has none.
-    pub source_layer_id: mln_buffer_view,
 }
 /// Any type.
 pub const MLN_STYLE_EXPRESSION_TYPE_VALUE: mln_style_expression_type_kind = 0;

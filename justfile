@@ -295,10 +295,11 @@ udeps:  (cargo-install 'cargo-udeps')
 update:
     cargo update
 
-# The version is the @maplibre/maplibre-gl-style-spec npm release the copy is from. Run `just generate-style-code` after.
-[doc("Refresh tools/style-codegen/v8.json from a release of the MapLibre style spec")]
-update-style-spec version='26.6.0':  (assert-cmd 'curl')
-    curl -fsSL https://unpkg.com/@maplibre/maplibre-gl-style-spec@{{version}}/src/reference/v8.json -o tools/style-codegen/v8.json
+# The ref is the maplibre/maplibre-style-spec tag (such as `v26.6.0`) or commit the copy is from. The default is a
+# commit after v26.6.0 that replaces `emptyResponse` with vector sources' `sparse`. Run `just generate-style-code` after.
+[doc("Refresh tools/style-codegen/v8.json from a tag or commit of the MapLibre style spec")]
+update-style-spec ref='c2a460f6e55899e4b6e04b44f8e29e08fef3067b':  (assert-cmd 'curl')
+    curl -fsSL https://raw.githubusercontent.com/maplibre/maplibre-style-spec/{{ref}}/src/reference/v8.json -o tools/style-codegen/v8.json
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there, outside
 # tools/c-abi-test (update-ffi-abi), is copied again.
@@ -320,7 +321,7 @@ update-testdata checkout=cpp:
 # builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
 # fix the suite's own bugs and drop its uses of the location-indicator layer type, which mln-rs doesn't have, and the
 # declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at
-# 3ec4e727a32f, which changes the render target headers ahead of their merge.
+# 71435e96ed4b, which changes the render target headers ahead of their merge.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash

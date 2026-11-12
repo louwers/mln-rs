@@ -456,6 +456,24 @@ fn put_tile_not_found() {
     check_log_empty(&log);
 }
 
+// Port-only: the ambient cache doesn't keep a tile's HTTP 404, which would read back as an empty
+// tile.
+#[test]
+fn put_tile_http_not_found() {
+    let log = FixtureLog::new();
+    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+
+    let resource = example_tile();
+    let mut response = Response::new();
+    response.no_content = true;
+    response.tile_not_found = true;
+
+    assert_eq!((false, 0), db.put(&resource, &response));
+    assert!(db.get(&resource).is_none());
+
+    check_log_empty(&log);
+}
+
 // gtest: OfflineDatabase.CreateRegion
 #[test]
 fn create_region() {

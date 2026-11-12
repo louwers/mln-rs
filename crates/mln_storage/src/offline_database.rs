@@ -624,9 +624,11 @@ impl OfflineDatabase {
         if let Some(tile_data) = tile_data(resource) { self.has_tile(tile_data) } else { self.has_resource(resource) }
     }
 
-    /// `put(const Resource&, const Response&)`: (inserted, stored size).
+    /// `put(const Resource&, const Response&)`: (inserted, stored size). The ambient cache doesn't
+    /// keep a tile the tileset doesn't have (`Response::tile_not_found`), since it would read back as
+    /// an empty tile.
     pub fn put(&mut self, resource: &Resource, response: &Response) -> (bool, u64) {
-        if self.read_only {
+        if self.read_only || response.tile_not_found {
             return (false, 0);
         }
 

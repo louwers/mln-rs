@@ -14,6 +14,7 @@ use crate::abi::{self, Fields};
 use crate::callback::Wake;
 use crate::completion::{self, CompletionValue, Generations, PendingCompletion};
 use crate::error::Error;
+use crate::frame_pacer::{self, Pacer, SessionPacing};
 use crate::generated::types::{
     MLN_FRAME_DEMAND_FORCE, MLN_FRAME_DEMAND_WAIT_FOR_UPDATE, MLN_GPU_SYNC_CPU_COMPLETE,
     MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_D3D12_FENCE, MLN_GPU_SYNC_KIND_FLAG_METAL_SHARED_EVENT,
@@ -51,10 +52,21 @@ pub(crate) struct SessionObject {
     /// The scale factor that the caller created the map with, which the
     /// session's extents and views report exactly.
     pub(crate) initial_scale_factor: f64,
-    has_redraw_wake: bool,
+    /// For a session attached without a redraw wake: its frame pacer, which
+    /// takes the runtime's redraw wakes.
+    pacing: Option<Arc<SessionPacing>>,
     /// Held so that its user data lives as long as the session's handle: a
     /// core worker never runs it.
     _driver_work_wake: Arc<Wake>,
+}
+
+impl Drop for SessionObject {
+    /// A released session stops pacing, and lets go of its pacer.
+    fn drop(&mut self) {
+        if let Some(pacing) = &self.pacing {
+            pacing.set(handles::NULL, None);
+        }
+    }
 }
 
 static SESSIONS: HandleTable<SessionObject> = HandleTable::new(HandleKind::RenderSession);
@@ -152,10 +164,14 @@ pub(crate) fn attach(
     target: RenderTarget,
     request: &AttachRequest,
 ) -> Result<(mln_render_session, ::mln_runtime::Completion<()>), Error> {
+    let pacing = (!request.has_redraw_wake).then(|| Arc::new(SessionPacing::default()));
     let options = AttachOptions {
         driver: request.driver,
         frame_wake: Some(runtime_wake(&request.frame_wake)),
-        redraw_wake: request.has_redraw_wake.then(|| runtime_wake(&request.redraw_wake)),
+        redraw_wake: Some(match &pacing {
+            Some(pacing) => pacing.wake(),
+            None => runtime_wake(&request.redraw_wake),
+        }),
         driver_work_wake: Some(runtime_wake(&request.driver_work_wake)),
         producer_sync_kinds: request.producer_sync_kinds,
     };
@@ -174,7 +190,7 @@ pub(crate) fn attach(
         session: session.clone(),
         map: map.map.clone(),
         initial_scale_factor: map.scale_factor,
-        has_redraw_wake: request.has_redraw_wake,
+        pacing,
         _driver_work_wake: Arc::clone(&request.driver_work_wake),
     };
     match SESSIONS.insert(Arc::new(object)) {
@@ -335,13 +351,27 @@ pub unsafe extern "C" fn mln_render_session_demand_frame(
             return Err(Error::invalid_argument("the token is reserved for still images"));
         }
         let object = resolve(session)?;
+        if let Some(pacing) = &object.pacing {
+            pacing.demanded();
+        }
         object.session.demand_frame(FrameDemand::new(mode, demand.token))?;
         Ok(())
     })
 }
 
-/// `mln_render_session_set_frame_pacer()`: only the null pacer, since this
-/// library creates no pacers.
+/// The demand that `pacer` makes at a display refresh: a frame without flags
+/// and with token 0, when `pacer` paces `session` and its map has something
+/// new to draw. A session that has gone or failed since it asked refuses it.
+pub(crate) fn demand_paced(session: mln_render_session, pacer: &Pacer) {
+    let Ok(object) = resolve(session) else {
+        return;
+    };
+    if object.pacing.as_ref().is_some_and(|pacing| pacing.take_redraw(pacer)) {
+        let _ = object.session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 0));
+    }
+}
+
+/// `mln_render_session_set_frame_pacer()`.
 ///
 /// # Safety
 ///
@@ -353,11 +383,7 @@ pub unsafe extern "C" fn mln_render_session_set_frame_pacer(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        if pacer != handles::NULL {
-            return Err(Error::invalid_argument(format!(
-                "mln_frame_pacer handle {pacer:#x} was never created by this process"
-            )));
-        }
+        let pacer = if pacer == handles::NULL { None } else { Some(frame_pacer::resolve(pacer)?) };
         let object = resolve(session)?;
         let snapshot = object.session.snapshot()?;
         match snapshot.state {
@@ -368,11 +394,18 @@ pub unsafe extern "C" fn mln_render_session_set_frame_pacer(
             }
             _ => return Err(Error::invalid_state("the render session is not attached: it was detached or abandoned")),
         }
-        if object.has_redraw_wake {
+        let Some(pacing) = &object.pacing else {
             return Err(Error::invalid_state("a render session with a redraw wake takes no pacer"));
-        }
+        };
+        pacing.set(session, pacer);
         Ok(())
     })
+}
+
+/// `mln_frame_pacer_release()`.
+#[unsafe(no_mangle)]
+pub extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {
+    frame_pacer::release(pacer);
 }
 
 fn disposition(disposition: FrameDisposition) -> u32 {

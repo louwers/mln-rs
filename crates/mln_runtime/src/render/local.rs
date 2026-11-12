@@ -8,8 +8,9 @@
 #![cfg_attr(target_family = "wasm", allow(unused_macros, unused_variables, unused_imports))]
 
 use std::rc::Rc;
+use std::sync::Arc;
 
-use mln_gfx::{ConsumerSync, ExportKind, ExportedImage, ExportedRing, FrameTarget, RendererBackend, SyncKind};
+use mln_gfx::{ConsumerSync, ExportKind, ExportedImage, ExportedRing, FrameTarget, RendererBackend, SyncKind, Window};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
@@ -478,6 +479,8 @@ pub struct LocalTarget {
     device: Device,
     backend: Backend,
     frames: Frames,
+    /// The window that a surface target presents to, if it presents to one.
+    window: Option<Arc<dyn Window>>,
 }
 
 impl LocalTarget {
@@ -493,7 +496,7 @@ impl LocalTarget {
         };
         let backend = Backend::new(&device)?;
         let frames = Frames::Offscreen(backend.offscreen(size));
-        Ok(LocalTarget { device, backend, frames })
+        Ok(LocalTarget { device, backend, frames, window: None })
     }
 
     /// A target of `size` pixels that presents to `surface`, on `device` or,
@@ -502,16 +505,20 @@ impl LocalTarget {
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// surface that the host made without the host's device, with
-    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the device can't
-    /// present to the surface, and with the error of the device or the
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a window or
+    /// surface without an area to present to, such as a minimized window,
+    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the device
+    /// can't present to the surface, and with the error of the device or the
     /// window's surface.
     pub fn surface(surface: Surface, device: Option<Device>, size: Size) -> Result<LocalTarget, Error> {
+        surface.check_area()?;
+        let window = surface.host_window();
         let device = match device {
             Some(device) => device,
             None => default_surface_device(&surface)?,
         };
         let (backend, target) = surface_backend(&device, surface, size)?;
-        Ok(LocalTarget { device, backend, frames: Frames::Presenting(Some(target)) })
+        Ok(LocalTarget { device, backend, frames: Frames::Presenting(Some(target)), window })
     }
 
     /// A target of `size` pixels on `device` that renders into the host's
@@ -523,7 +530,7 @@ impl LocalTarget {
     pub fn borrowed(device: Device, ring: BorrowedRing, producer: SyncKind) -> Result<LocalTarget, Error> {
         let backend = Backend::new(&device)?;
         let frames = Frames::Borrowed { target: Some(backend.borrowed(ring, producer)?), producer };
-        Ok(LocalTarget { device, backend, frames })
+        Ok(LocalTarget { device, backend, frames, window: None })
     }
 
     /// A target on `device` that renders into a ring of `ring.depth` images
@@ -547,7 +554,7 @@ impl LocalTarget {
             let _scope = mln_gfx::BackendScope::new(&*scoped, mln_gfx::ScopeType::Explicit);
             Frames::Exported(backend.exported(&device, ring, kind, size, producer)?)
         };
-        Ok(LocalTarget { device, backend, frames })
+        Ok(LocalTarget { device, backend, frames, window: None })
     }
 
     /// The device the target renders on.
@@ -572,6 +579,20 @@ impl LocalTarget {
             Frames::Borrowed { target, .. } => target.as_deref().map(|target| target as &dyn FrameTarget),
             Frames::Exported(target) => Some(&**target),
         }
+    }
+
+    /// Whether the target can take a frame as far as its window says: it
+    /// presents to no window, or to one with an area to present to
+    /// ([`mln_gfx::window::has_area`]).
+    #[must_use]
+    pub fn window_has_area(&self) -> bool {
+        self.window.as_deref().is_none_or(mln_gfx::window::has_area)
+    }
+
+    /// Whether frames are presented to a window or surface.
+    #[must_use]
+    pub fn is_presenting(&self) -> bool {
+        matches!(self.frames, Frames::Presenting(_))
     }
 
     /// Whether frames go to the host in images of the target's own.
@@ -723,6 +744,7 @@ impl LocalTarget {
         match &mut self.frames {
             Frames::Presenting(target) => {
                 drop(target.take());
+                self.window = None;
                 None
             }
             Frames::Borrowed { target, .. } => target.take().and_then(|target| target.take_pending()),
@@ -744,6 +766,8 @@ impl LocalTarget {
         if !matches!(self.frames, Frames::Presenting(_)) {
             return Err(Error::unsupported("only a surface target presents to another surface"));
         }
+        surface.check_area()?;
+        let window = surface.host_window();
         let retry = surface.clone_window();
         let (new_backend, target) = match self.backend.surface(surface, size) {
             Ok(target) => (false, target),
@@ -756,6 +780,7 @@ impl LocalTarget {
             Err(error) => return Err(error),
         };
         self.frames = Frames::Presenting(Some(target));
+        self.window = window;
         Ok(new_backend)
     }
 }

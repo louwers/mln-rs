@@ -990,8 +990,11 @@ fn set_max_parent_overscale_factor() {
             }
             // No tiles above zoom level 5 should be requested.
             assert!(5 <= i32::from(z), "requested z{z}");
+            // The tileset has no tiles (HTTP 404), so the source requests parents in their place.
+            // An empty raster tile (HTTP 204) would be drawn, empty, instead.
             let mut response = Response::new();
             response.no_content = true;
+            response.tile_not_found = true;
             Some(response)
         });
     }

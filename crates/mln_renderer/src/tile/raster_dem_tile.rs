@@ -148,6 +148,9 @@ pub struct RasterDEMTileInner {
     pub base: TileBase,
     obsolete: Cell<bool>,
     correlation_id: Cell<u64>,
+    /// The tileset has no tile here (`LoaderTile::set_missing`): a parse without data leaves
+    /// the tile unrenderable. Otherwise such a tile is empty, renderable without a bucket.
+    missing: Cell<bool>,
     encoding: RasterEncoding,
     /// Contains the Bucket object for the tile. Buckets are render objects
     /// and they get added by tile parsing operations.
@@ -173,7 +176,7 @@ impl RasterDEMTileInner {
     /// `onParsed(std::unique_ptr<HillshadeBucket>, correlationID)`.
     pub fn on_parsed(&self, result: Option<Arc<HillshadeBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
-            let renderable = result.is_some();
+            let renderable = result.is_some() || !self.missing.get();
             *self.bucket.borrow_mut() = result;
             self.base.loaded.set(true);
             if result_correlation_id == self.correlation_id.get() {
@@ -234,7 +237,19 @@ impl LoaderTile for RasterDEMTileInner {
 
     /// `setData(data)`.
     fn set_data(&self, data: Option<Data>, _encoding: VectorTileEncoding) {
+        self.parse(data, false);
+    }
+
+    fn set_missing(&self, _encoding: VectorTileEncoding) {
+        self.parse(None, true);
+    }
+}
+
+impl RasterDEMTileInner {
+    /// Sends the worker `data` to parse, for a tile the tileset is `missing` or has.
+    fn parse(&self, data: Option<Data>, missing: bool) {
         if !self.obsolete.get() {
+            self.missing.set(missing);
             self.correlation_id.set(self.correlation_id.get() + 1);
             if !self.base.pending.get() {
                 self.base.on_tile_action(TileOperation::StartParse);
@@ -285,6 +300,7 @@ impl RasterDEMTile {
             base: TileBase::new(Kind::RasterDEM, id, source_id, observer),
             obsolete: Cell::new(false),
             correlation_id: Cell::new(0),
+            missing: Cell::new(false),
             encoding,
             bucket: RefCell::new(None),
             neighboring_tiles: Cell::new(neighboring_tiles),
