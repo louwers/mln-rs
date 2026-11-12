@@ -23,7 +23,6 @@ abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_c
 abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host  # feature state stays in mln_runtime's store and never reaches the renderer
 abi/render/invalidation.c:feature_state_stays_with_the_update_held_by_a_command_group  # feature state stays in mln_runtime's store and never reaches the renderer
 abi/render/queries.c:location_indicator_hits_name_only_their_layer  # the renderer has no location-indicator layer for queries to hit
-abi/render/redraw.c:a_change_asks_for_one_redraw_until_the_next_demand  # likely: no redraw wake for the update that the map published at the attach
 abi/render/unused_images.c:only_images_set_with_keep_unused_survive_when_unused  # reduce_memory_use doesn't drop the image manager's unused images
 abi/resources/asset_paths.c:host_string_views_reject_nul_and_null_data_with_a_length  # mln_c accepts a text view with a NUL inside
 abi/resources/offline.c:an_offline_operation_accepted_before_release_still_completes  # a runtime release drops the core before the offline database replies

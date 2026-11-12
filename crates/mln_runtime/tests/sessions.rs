@@ -363,6 +363,25 @@ fn the_redraw_wake_runs_once_per_demand() {
     assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 2));
 }
 
+#[test]
+fn a_new_session_wakes_for_the_map_it_has_to_draw() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let redraws = Arc::new(AtomicUsize::new(0));
+    let counter = redraws.clone();
+    let options = AttachOptions {
+        redraw_wake: Some(Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })),
+        ..AttachOptions::default()
+    };
+    let (session, attached) = map.attach(offscreen(SIZE), options).unwrap();
+    attached.wait().unwrap();
+    assert!(eventually(|| redraws.load(Ordering::SeqCst) == 1));
+    demand(&session, DemandMode::IfChanged, 1);
+    assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
+}
+
 // MARK: - Resizing
 
 #[test]

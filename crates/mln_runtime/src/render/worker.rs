@@ -458,6 +458,10 @@ impl Worker {
         if let Some(attach) = attach {
             outbox.resolve(attach, Ok(()));
         }
+        // A new session has the map's latest update to draw.
+        if self.gfx.is_some() && self.latest().is_some() {
+            self.wake_for_redraw(outbox);
+        }
         // The demands that came while the session attached wait for the
         // attach to complete, which the outbox delivers once this task ends,
         // so they render in a task of their own.
