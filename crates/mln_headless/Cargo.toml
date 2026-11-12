@@ -90,6 +90,11 @@ path = "tests/debug_options_test.rs"
 name = "pixel_ratio_test"
 path = "tests/pixel_ratio_test.rs"
 
+# A tile source's emptyResponse through Map -> HeadlessFrontend.
+[[test]]
+name = "empty_response_test"
+path = "tests/empty_response_test.rs"
+
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.
 feature = { package = "mln-rs-feature", path = "../../vendor/feature" }

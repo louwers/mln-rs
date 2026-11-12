@@ -3,7 +3,7 @@
 // src/mln/style/conversion/source_options.cpp.
 
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::tileset::{RasterEncoding, Scheme, Tileset, VectorEncoding};
+use mln_util::tileset::{EmptyResponse, RasterEncoding, Scheme, Tileset, VectorEncoding};
 
 use super::{Converter, Convertible, Error};
 
@@ -63,6 +63,22 @@ impl Converter for SourceOptions {
             return None;
         }
         Some(options)
+    }
+}
+
+/// A tile source's `emptyResponse`, `blank` when it has none. `Err(())` is an invalid value, with
+/// `error` set.
+pub(crate) fn empty_response_member(value: &Convertible<'_>, error: &mut Error) -> Result<EmptyResponse, ()> {
+    let Some(member) = value.object_member("emptyResponse") else {
+        return Ok(EmptyResponse::Blank);
+    };
+    match member.to_string().as_deref() {
+        Some("blank") => Ok(EmptyResponse::Blank),
+        Some("missing") => Ok(EmptyResponse::Missing),
+        _ => {
+            error.message = "invalid emptyResponse - valid values are 'blank' and 'missing'".to_owned();
+            Err(())
+        }
     }
 }
 

@@ -232,6 +232,9 @@ pub struct GeometryTileInner {
     mailbox: Arc<Mailbox>,
 
     correlation_id: Cell<u64>,
+    /// The tileset has no tile here (`emptyResponse: "missing"`): the tile
+    /// lays out without data but isn't renderable.
+    pub(crate) missing: Cell<bool>,
 
     layout_result: RefCell<Option<Rc<LayoutResult>>>,
     /// The render thread's copies of the layout result's bucket geometry.
@@ -313,7 +316,7 @@ impl GeometryTileInner {
     /// `onLayout(std::shared_ptr<LayoutResult>, correlationID)`.
     pub fn on_layout(&self, result: LayoutResult, result_correlation_id: u64) {
         self.base.loaded.set(true);
-        self.base.renderable.set(true);
+        self.base.renderable.set(!self.missing.get());
         if result_correlation_id == self.correlation_id.get() {
             self.base.pending.set(false);
             self.base.on_tile_action(TileOperation::EndParse);
@@ -530,6 +533,7 @@ impl GeometryTile {
                 worker: parameters.tile_worker_transport.create(worker_parameters, tile),
                 mailbox: mailbox.clone(),
                 correlation_id: Cell::new(0),
+                missing: Cell::new(false),
                 layout_result: RefCell::new(None),
                 bucket_geometry: RefCell::default(),
                 atlas_textures: RefCell::new(None),

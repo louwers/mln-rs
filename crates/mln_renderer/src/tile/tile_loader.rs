@@ -15,7 +15,7 @@ use mln_storage::{AsyncRequest, Data, FileSource, LoadingMethod, Resource, Respo
 use mln_tile_id::OverscaledTileID;
 use mln_util::chrono::Duration;
 use mln_util::error::Error;
-use mln_util::tileset::Tileset;
+use mln_util::tileset::{EmptyResponse, Tileset};
 
 use crate::tile::geometry_tile::GeometryTileInner;
 use crate::tile::geometry_tile_worker::SharedTileData;
@@ -47,6 +47,12 @@ pub trait LoaderTile {
     fn on_tile_action(&self, op: TileOperation);
     fn set_metadata(&self, modified: Option<mln_util::chrono::Timestamp>, expires: Option<mln_util::chrono::Timestamp>);
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding);
+    /// Loads the tile without data for an empty response the tileset calls missing
+    /// (`emptyResponse: "missing"`). The tile isn't renderable, so the pyramid draws a tile from
+    /// another zoom level in its place. A raster tile without an image already isn't.
+    fn set_missing(&self, encoding: VectorTileEncoding) {
+        self.set_data(None, encoding);
+    }
 }
 
 /// VectorTile's half of the loader interface (vector_tile.cpp,
@@ -81,6 +87,7 @@ impl LoaderTile for GeometryTileInner {
     /// `VectorMVTTile::setData(data)` / `VectorMLTTile::setData(data)`.
     fn set_data(&self, data: Option<Data>, encoding: VectorTileEncoding) {
         if !self.is_obsolete() {
+            self.missing.set(false);
             let data: Option<SharedTileData> = data.map(|data| match encoding {
                 VectorTileEncoding::Mvt => Arc::new(mln_tile::VectorMVTTileData::new(data)) as SharedTileData,
                 VectorTileEncoding::Mlt { fast_pfor_enabled } => {
@@ -90,11 +97,19 @@ impl LoaderTile for GeometryTileInner {
             GeometryTileInner::set_data(self, data);
         }
     }
+
+    fn set_missing(&self, _encoding: VectorTileEncoding) {
+        if !self.is_obsolete() {
+            self.missing.set(true);
+            GeometryTileInner::set_data(self, None);
+        }
+    }
 }
 
 struct State {
     tile: Weak<dyn LoaderTile>,
     encoding: VectorTileEncoding,
+    empty_response: EmptyResponse,
     necessity: TileNecessity,
     resource: Resource,
     file_source: Option<Arc<dyn FileSource>>,
@@ -139,6 +154,7 @@ impl TileLoader {
         let state = Rc::new(RefCell::new(State {
             tile,
             encoding,
+            empty_response: tileset.empty_response,
             necessity: TileNecessity::Optional,
             resource,
             file_source: if tileset.tiles.is_empty() { None } else { parameters.file_source.clone() },
@@ -357,8 +373,15 @@ fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMet
         }
         if let Some(tile) = &tile {
             tile.set_metadata(res.modified, res.expires);
-            let encoding = state_rc.borrow().encoding;
-            tile.set_data(if res.no_content { None } else { res.data.clone() }, encoding);
+            let (encoding, empty_response) = {
+                let state = state_rc.borrow();
+                (state.encoding, state.empty_response)
+            };
+            if res.no_content && empty_response == EmptyResponse::Missing {
+                tile.set_missing(encoding);
+            } else {
+                tile.set_data(if res.no_content { None } else { res.data.clone() }, encoding);
+            }
         }
     }
 }
