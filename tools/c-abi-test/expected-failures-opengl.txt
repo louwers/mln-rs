@@ -17,8 +17,6 @@ abi/map/tile_cache.c:a_map_keeps_the_tiles_that_left_the_view_by_default
 abi/map/tile_cache.c:a_map_with_the_tile_cache_enabled_keeps_them
 abi/plugin/plugin_layer.c:a_registered_layer_type_renders_through_the_c_api
 abi/projection/projection.c:creation_rejects_invalid_views
-abi/render/demands.c:a_detach_ends_a_demand_waiting_for_commands  # a service of a detached caller-driven session fails instead of finding no work
-abi/render/demands.c:a_waiting_demand_ends_by_supersession_barrier_or_detach  # a service of a detached caller-driven session fails instead of finding no work
 abi/render/driver.c:parent_first_disposal_retires_a_native_render_attachment  # a caller-driven session released after its map waits for a service to detach
 abi/render/driver.c:wakes_may_call_back_into_the_session  # each map command wakes a caller's driver, which takes the wake the demand's work needs
 abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features

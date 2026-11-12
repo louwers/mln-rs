@@ -12,6 +12,7 @@ use ::mln_runtime::{
     AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, LogicalExtent,
     RenderSession, RenderSessionState, RenderTarget,
 };
+use mln_util::ErrorKind;
 use mln_util::size::Size;
 
 use crate::abi::{self, Fields};
@@ -29,10 +30,10 @@ use crate::generated::types::{
     MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_SESSION_CAPABILITY_READBACK,
     MLN_RENDER_SESSION_STATE_ABANDONED, MLN_RENDER_SESSION_STATE_ATTACHED, MLN_RENDER_SESSION_STATE_ATTACHING,
     MLN_RENDER_SESSION_STATE_DETACHED, MLN_RENDER_SESSION_STATE_DETACHING, MLN_RENDER_SESSION_STATE_FAILED,
-    MLN_STATUS_NATIVE_ERROR, MLN_STATUS_OK, MLN_STATUS_TARGET_LOST, mln_completion, mln_diagnostic, mln_frame_demand,
-    mln_frame_pacer, mln_logical_extent, mln_map_view, mln_render_abandon_result, mln_render_frame_batch,
-    mln_render_frame_batch_view, mln_render_frame_result, mln_render_session, mln_render_session_attach_options,
-    mln_render_session_capabilities, mln_render_session_snapshot, mln_status,
+    MLN_STATUS_INVALID_STATE, MLN_STATUS_NATIVE_ERROR, MLN_STATUS_OK, MLN_STATUS_TARGET_LOST, mln_completion,
+    mln_diagnostic, mln_frame_demand, mln_frame_pacer, mln_logical_extent, mln_map_view, mln_render_abandon_result,
+    mln_render_frame_batch, mln_render_frame_batch_view, mln_render_frame_result, mln_render_session,
+    mln_render_session_attach_options, mln_render_session_capabilities, mln_render_session_snapshot, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::map::{self, MapObject};
@@ -679,20 +680,40 @@ pub unsafe extern "C" fn mln_render_session_service_driver_work(
     session: mln_render_session,
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
-    export!(out_diagnostic, {
-        let work = match DRIVERS.with(|drivers| drivers.0.borrow().get(&session).cloned()) {
-            Some(work) => work,
-            None => take_driver_work(session)?,
-        };
-        // The service may run the host's callbacks, which may service
-        // sessions of this thread: nothing here is borrowed meanwhile.
-        let serviced = work.service();
-        if work.is_finished() {
-            DRIVERS.with(|drivers| drivers.0.borrow_mut().remove(&session));
-            lock(&SERVICING).remove(&session);
-        }
-        Ok(serviced?)
-    })
+    export!(out_diagnostic, { service(session).or_else(|error| ended_service(session, error)) })
+}
+
+fn service(session: mln_render_session) -> Result<(), Error> {
+    let work = match DRIVERS.with(|drivers| drivers.0.borrow().get(&session).cloned()) {
+        Some(work) => work,
+        None => take_driver_work(session)?,
+    };
+    // The service may run the host's callbacks, which may service sessions
+    // of this thread: nothing here is borrowed meanwhile.
+    let serviced = work.service();
+    if work.is_finished() {
+        DRIVERS.with(|drivers| drivers.0.borrow_mut().remove(&session));
+        lock(&SERVICING).remove(&session);
+    }
+    Ok(serviced?)
+}
+
+/// What a service of `session` that failed with `error` reports instead
+/// when the session's driver work ended and its handle is live: nothing to
+/// do for a detached session, and a lost target for an abandoned one.
+fn ended_service(session: mln_render_session, error: Error) -> Result<(), Error> {
+    if error.status() != MLN_STATUS_INVALID_STATE {
+        return Err(error);
+    }
+    let Ok(object) = resolve(session) else { return Err(error) };
+    if object.session.capabilities().map(|capabilities| capabilities.driver) != Ok(Driver::CallerThread) {
+        return Err(error);
+    }
+    match object.session.snapshot().map(|snapshot| snapshot.state) {
+        Ok(RenderSessionState::Detached) => Ok(()),
+        Ok(RenderSessionState::Abandoned) => Err(Error::new(ErrorKind::TargetLost, "the render session was abandoned")),
+        _ => Err(error),
+    }
 }
 
 // MARK: - Lifecycle
@@ -1215,6 +1236,31 @@ mod driver_tests {
     }
 
     #[test]
+    fn a_detached_caller_driven_session_has_no_work_until_it_is_released() {
+        static WAKES: AtomicUsize = AtomicUsize::new(0);
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let (session, attached) = attach_caller_driven(map, &WAKES);
+        service_until(session, || attached.is_complete());
+
+        // The detach runs at the next service, and the services after find
+        // nothing to do.
+        let detached = Waiter::new();
+        // SAFETY: a local completion.
+        let status = unsafe { mln_render_session_detach(session, &raw const detached.descriptor, NO_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_OK);
+        assert_eq!(detached.status(), MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_OK);
+        // SAFETY: a null diagnostic.
+        assert_eq!(unsafe { mln_render_session_dispose(session, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_INVALID_STATE);
+        release_map(map);
+        release(runtime);
+    }
+
+    #[test]
     fn an_abandon_reports_the_graphics_objects_that_a_caller_driven_session_keeps() {
         static WAKES: AtomicUsize = AtomicUsize::new(0);
         let runtime = create();
@@ -1236,9 +1282,10 @@ mod driver_tests {
         .join()
         .unwrap();
         assert_eq!(abandoned, (MLN_STATUS_OK, MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED, 2));
-        // The next service lets go of the session, and takes no more.
-        assert_eq!(service(session), MLN_STATUS_INVALID_STATE);
-        assert_eq!(service(session), MLN_STATUS_INVALID_STATE);
+        // The next service lets go of the session, and each reports the lost
+        // target until the handle is released.
+        assert_eq!(service(session), MLN_STATUS_TARGET_LOST);
+        assert_eq!(service(session), MLN_STATUS_TARGET_LOST);
         // SAFETY: a null diagnostic.
         assert_eq!(unsafe { mln_render_session_dispose(session, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         release_map(map);
