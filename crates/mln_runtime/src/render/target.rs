@@ -459,6 +459,8 @@ pub enum SurfaceType {
     Wayland,
     /// An Android `ANativeWindow`.
     AndroidNdk,
+    /// An OpenHarmony `OHNativeWindow`.
+    OhosNdk,
 }
 
 impl SurfaceType {
@@ -469,9 +471,10 @@ impl SurfaceType {
             SurfaceType::MetalLayer => false,
             SurfaceType::Win32 => cfg!(windows),
             SurfaceType::Xlib | SurfaceType::Xcb | SurfaceType::Wayland => {
-                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android")))
+                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos")))
             }
             SurfaceType::AndroidNdk => cfg!(target_os = "android"),
+            SurfaceType::OhosNdk => cfg!(target_env = "ohos"),
         };
         match backend {
             BackendType::Metal => {
@@ -482,7 +485,8 @@ impl SurfaceType {
             }
             BackendType::OpenGL => {
                 cfg!(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))
-                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland)
+                    && windowing
+                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::OhosNdk)
             }
             BackendType::WebGPU => cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing,
             #[allow(unreachable_patterns)]
