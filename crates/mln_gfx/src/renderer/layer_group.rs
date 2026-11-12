@@ -21,7 +21,6 @@ use std::rc::Rc;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::identity::SimpleIdentity;
 
-use crate::context_observer::ContextObserver;
 use crate::drawable::{Drawable, UniqueDrawable};
 use crate::paint_parameters::PaintParameters;
 use crate::renderer::render_pass::RenderPass;
@@ -44,13 +43,12 @@ pub struct LayerGroupBaseData {
     pub enabled: bool,
     pub layer_index: i32,
     pub name: String,
-    pub observer: Option<Rc<dyn ContextObserver>>,
 }
 
 impl LayerGroupBaseData {
     #[must_use]
     pub fn new(layer_index: i32, name: String, type_: Type) -> Self {
-        LayerGroupBaseData { unique_id: SimpleIdentity::new(), type_, enabled: true, layer_index, name, observer: None }
+        LayerGroupBaseData { unique_id: SimpleIdentity::new(), type_, enabled: true, layer_index, name }
     }
 }
 
@@ -69,9 +67,6 @@ pub trait LayerGroupBase: Any {
     fn as_tile_layer_group_mut(&mut self) -> Option<&mut TileLayerGroup> {
         None
     }
-    fn as_layer_group(&self) -> Option<&LayerGroup> {
-        None
-    }
     fn as_layer_group_mut(&mut self) -> Option<&mut LayerGroup> {
         None
     }
@@ -81,8 +76,6 @@ pub trait LayerGroupBase: Any {
     /// Clear the drawable collection
     fn clear_drawables(&mut self) -> usize;
 
-    /// Called before starting each frame
-    fn pre_render(&mut self, _parameters: &mut dyn PaintParameters) {}
     /// Called during the upload pass
     fn upload(&mut self, _upload_pass: &dyn UploadPass) {}
     /// Called during each render pass
@@ -90,8 +83,7 @@ pub trait LayerGroupBase: Any {
     /// Called at the end of each frame
     fn post_render(&mut self, _parameters: &mut dyn PaintParameters) {}
 
-    /// Get the uniform buffers attached to this layer group
-    fn get_uniform_buffers(&self) -> &UniformBufferArray;
+    /// The uniform buffers attached to this layer group, to write
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray;
 
     /// Update the layer index to a new value
@@ -102,30 +94,17 @@ pub trait LayerGroupBase: Any {
     fn get_id(&self) -> SimpleIdentity {
         self.base().unique_id
     }
-    fn get_enabled(&self) -> bool {
-        self.base().enabled
-    }
     fn set_enabled(&mut self, value: bool) {
         self.base_mut().enabled = value;
     }
     fn get_type(&self) -> Type {
         self.base().type_
     }
-    fn get_name(&self) -> &str {
-        &self.base().name
-    }
-    fn set_name(&mut self, value: String) {
-        self.base_mut().name = value;
-    }
     fn get_layer_index(&self) -> i32 {
         self.base().layer_index
     }
     fn empty(&self) -> bool {
         self.get_drawable_count() == 0
-    }
-    /// `setObserver(nullptr)` restores the null observer.
-    fn set_observer(&mut self, observer: Option<Rc<dyn ContextObserver>>) {
-        self.base_mut().observer = observer;
     }
 }
 
@@ -269,19 +248,6 @@ impl LayerGroup {
         self.drawables.len()
     }
 
-    /// Declared but not defined in C++ (no callers); implemented by pass bit.
-    #[must_use]
-    pub fn get_drawable_count_for(&self, pass: RenderPass) -> usize {
-        self.drawables.values().filter(|d| d.has_render_pass(pass)).count()
-    }
-
-    /// Declared but not defined in C++ (no callers); implemented by pass bit.
-    pub fn remove_drawables(&mut self, pass: RenderPass) -> Vec<UniqueDrawable> {
-        let keys: Vec<SortKey> =
-            self.drawables.iter().filter(|(_, d)| d.has_render_pass(pass)).map(|(k, _)| *k).collect();
-        keys.into_iter().filter_map(|k| self.drawables.remove(&k)).collect()
-    }
-
     pub fn add_drawable(&mut self, mut drawable: UniqueDrawable) {
         init_drawable_tweakers(drawable.as_mut());
         let key = sort_key(drawable.as_ref());
@@ -291,13 +257,6 @@ impl LayerGroup {
     pub fn visit_drawables(&mut self, mut f: impl FnMut(&mut dyn Drawable)) -> usize {
         for drawable in self.drawables.values_mut() {
             f(drawable.as_mut());
-        }
-        self.drawables.len()
-    }
-
-    pub fn visit_drawables_ref(&self, mut f: impl FnMut(&dyn Drawable)) -> usize {
-        for drawable in self.drawables.values() {
-            f(drawable.as_ref());
         }
         self.drawables.len()
     }
@@ -339,17 +298,5 @@ pub fn visit_layer_group_drawables(layer_group: &mut dyn LayerGroupBase, f: impl
         Type::Invalid => {
             // C++ logs "Unknown layer group type" in debug builds.
         }
-    }
-}
-
-/// `removeLayerGroupDrawablesIf(layerGroup, f)`
-pub fn remove_layer_group_drawables_if(
-    layer_group: &mut dyn LayerGroupBase,
-    f: impl FnMut(&mut dyn Drawable) -> bool,
-) -> usize {
-    match layer_group.get_type() {
-        Type::LayerGroup => layer_group.as_layer_group_mut().map_or(0, |g| g.remove_drawables_if(f)),
-        Type::TileLayerGroup => layer_group.as_tile_layer_group_mut().map_or(0, |g| g.remove_drawables_if(f)),
-        Type::Invalid => 0,
     }
 }

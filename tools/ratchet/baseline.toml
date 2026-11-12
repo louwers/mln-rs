@@ -37,7 +37,6 @@
 "crates/mln_expression/src/step.rs" = 3
 "crates/mln_gfx/src/drawable_builder.rs" = 4
 "crates/mln_gfx/src/polyline_generator.rs" = 5
-"crates/mln_gfx/src/shaders/program_parameters.rs" = 2
 "crates/mln_gl/src/context.rs" = 1
 "crates/mln_headless/src/map_snapshotter.rs" = 1
 "crates/mln_image/src/png_writer.rs" = 1
@@ -197,7 +196,6 @@
 "crates/mln_gfx/src/drawable_builder.rs" = 4
 "crates/mln_gfx/src/renderer_backend.rs" = 1
 "crates/mln_gfx/src/rendering_stats.rs" = 1
-"crates/mln_gfx/src/shader_group.rs" = 1
 "crates/mln_gfx/src/shaders/program_parameters.rs" = 1
 "crates/mln_gfx/src/shaders/segment.rs" = 1
 "crates/mln_gfx/src/shaders/shader_defines.rs" = 1

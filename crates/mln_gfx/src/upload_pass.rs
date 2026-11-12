@@ -9,18 +9,18 @@ use mln_util::time::Instant;
 
 use crate::attribute::AttributeBindingArray;
 use crate::context::Context;
-use crate::debug_group::{DebugGroup, DebugGroupTarget};
+use crate::debug_group::DebugGroupTarget;
 use crate::gfx_types::AttributeDataType;
 use crate::types::BufferUsageType;
 use crate::vertex_attribute::VertexAttributeArray;
-use crate::vertex_buffer::{IndexBufferResource, UniqueVertexBufferResource, VertexBufferResource};
+use crate::vertex_buffer::IndexBufferResource;
 
 pub trait UploadPass: DebugGroupTarget + Any {
     fn get_context(&self) -> &dyn Context;
 
     /// Build the vertex bindings for a drawable: one binding per shader
     /// attribute index, from `overrides` (the drawable's attributes) or a
-    /// dummy buffer for missing ones (kept alive in `out_buffers`).
+    /// dummy buffer for missing ones.
     #[allow(clippy::too_many_arguments)]
     fn build_attribute_bindings(
         &self,
@@ -32,29 +32,14 @@ pub trait UploadPass: DebugGroupTarget + Any {
         overrides: &mut VertexAttributeArray,
         usage: BufferUsageType,
         last_update: Option<Instant>,
-        out_buffers: &mut Vec<UniqueVertexBufferResource>,
     ) -> AttributeBindingArray;
 
-    fn create_vertex_buffer_resource(
-        &self,
-        data: &[u8],
-        usage: BufferUsageType,
-        persistent: bool,
-    ) -> UniqueVertexBufferResource;
-    fn update_vertex_buffer_resource(&self, resource: &dyn VertexBufferResource, data: &[u8]);
     fn create_index_buffer_resource(
         &self,
         data: &[u8],
         usage: BufferUsageType,
         persistent: bool,
     ) -> Box<dyn IndexBufferResource>;
-    fn update_index_buffer_resource(&self, resource: &dyn IndexBufferResource, data: &[u8]);
 
     fn as_any(&self) -> &dyn Any;
-}
-
-impl dyn UploadPass {
-    pub fn create_debug_group(&self, name: &str) -> DebugGroup<'_> {
-        DebugGroup::new(self, name)
-    }
 }

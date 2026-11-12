@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use khronos_egl as egl;
 use mln_gfx::command_encoder::CommandEncoder;
-use mln_gfx::context::Context as GfxContext;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::stencil_mode::StencilMode;
 use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
@@ -549,7 +548,7 @@ impl FrameTarget for SurfaceTarget {
             context.bind_framebuffer(None, size, true);
             context.set_stencil_mode(&StencilMode::disabled());
             overlay(&OverlayTarget { gl: context.get_backend().gl_shared(), size });
-            GfxContext::set_dirty_state(&*context);
+            context.set_dirty_state();
         }
         if self.presentation.readback_requested.replace(false) {
             context.bind_framebuffer(None, size, true);

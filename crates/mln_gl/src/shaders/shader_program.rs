@@ -14,14 +14,11 @@ use std::any::Any;
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
-use mln_gfx::backend::Type as BackendType;
-use mln_gfx::context::Context as _;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shader::Shader;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
@@ -84,7 +81,6 @@ impl ShaderProgram {
     /// couldn't (C++ throws).
     pub fn create(
         context: &Context,
-        shader_id: BuiltIn,
         name: &str,
         program_parameters: &ProgramParameters,
         first_attrib_name: &str,
@@ -93,15 +89,8 @@ impl ShaderProgram {
     ) -> Option<ShaderProgram> {
         const VERSION: &str = "#version 300 es\n";
 
-        let observer = context.get_observer();
-        if let Some(observer) = &observer {
-            observer.on_pre_compile_shader(shader_id, BackendType::OpenGL, additional_defines);
-        }
         let failed = |message: String| {
             Log::error(Event::Shader, message);
-            if let Some(observer) = &observer {
-                observer.on_shader_compile_failed(shader_id, BackendType::OpenGL, additional_defines);
-            }
             None
         };
 
@@ -128,9 +117,6 @@ impl ShaderProgram {
             Ok(program) => program,
             Err(log) => return failed(format!("{name}: program failed to link: {log}")),
         };
-        if let Some(observer) = &observer {
-            observer.on_post_compile_shader(shader_id, BackendType::OpenGL, additional_defines);
-        }
 
         let gl = context.gl();
         let mut uniform_blocks = Vec::with_capacity(source.uniform_blocks.len());

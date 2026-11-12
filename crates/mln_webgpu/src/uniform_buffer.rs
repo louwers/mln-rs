@@ -84,14 +84,6 @@ impl UniformBuffer {
         UniformBuffer { size, backend, context, buffer, offset, written: Cell::new(written) }
     }
 
-    /// `clone()`: a new buffer of the same size; contents are not copied
-    /// (C++: "We can't directly copy buffer contents in WebGPU without a
-    /// command encoder").
-    #[must_use]
-    pub fn clone_buffer(&self) -> Self {
-        UniformBuffer::with_backend(self.backend.clone(), self.context.clone(), None, self.size)
-    }
-
     pub fn get_buffer(&self) -> Option<&wgpu::Buffer> {
         self.buffer.as_ref()
     }

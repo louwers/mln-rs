@@ -25,7 +25,6 @@ use crate::upload_pass::UploadPass;
 pub struct CommandEncoder {
     context: Rc<Context>,
     encoder: RefCell<Option<wgpu::CommandEncoder>>,
-    debug_group_names: RefCell<Vec<String>>,
 }
 
 fn new_encoder(context: &Context) -> Option<wgpu::CommandEncoder> {
@@ -36,7 +35,7 @@ fn new_encoder(context: &Context) -> Option<wgpu::CommandEncoder> {
 impl CommandEncoder {
     pub fn new(context: Rc<Context>) -> Self {
         let encoder = new_encoder(&context);
-        CommandEncoder { context, encoder: RefCell::new(encoder), debug_group_names: RefCell::new(Vec::new()) }
+        CommandEncoder { context, encoder: RefCell::new(encoder) }
     }
 
     pub fn get_context(&self) -> &Rc<Context> {
@@ -46,18 +45,6 @@ impl CommandEncoder {
     /// `getEncoder()`
     pub fn get_encoder(&self) -> RefMut<'_, Option<wgpu::CommandEncoder>> {
         self.encoder.borrow_mut()
-    }
-
-    pub fn visit_debug_groups(&self, mut f: impl FnMut(&str)) {
-        for name in self.debug_group_names.borrow().iter() {
-            f(name);
-        }
-    }
-
-    /// WebGPU-specific: submit the command buffer directly, then start a new
-    /// encoder so subsequent passes in the same frame can continue recording.
-    pub fn submit_command_buffer(&self) {
-        self.submit_frame(None);
     }
 
     /// Submits the command buffer, ending it with what `resource` records
@@ -82,14 +69,10 @@ impl CommandEncoder {
     }
 }
 
+/// Only render passes record debug groups in WebGPU.
 impl DebugGroupTarget for CommandEncoder {
-    fn push_debug_group(&self, name: &str) {
-        // Debug markers are currently handled at the render pass level.
-        self.debug_group_names.borrow_mut().push(name.to_owned());
-    }
-    fn pop_debug_group(&self) {
-        self.debug_group_names.borrow_mut().pop();
-    }
+    fn push_debug_group(&self, _name: &str) {}
+    fn pop_debug_group(&self) {}
 }
 
 impl command_encoder::CommandEncoder for CommandEncoder {

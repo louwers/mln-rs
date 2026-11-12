@@ -340,7 +340,7 @@ fn background_shader_opaque_and_translucent() {
 
     let registry = ShaderRegistry::new();
     backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
-    assert!(registry.is_shader_group("BackgroundShader"));
+    assert!(registry.get_shader_group("BackgroundShader").is_some());
 
     // Opaque: a solid color at opacity 1 renders in both the opaque and the
     // translucent pass list, unblended (render_background_layer.cpp).

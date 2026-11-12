@@ -49,7 +49,7 @@ use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBase
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{StencilOpType, TextureChannelDataType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
+use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
@@ -67,10 +67,6 @@ use crate::types::{
     BufferID, FramebufferID, Gl, ProgramID, RenderbufferID, ShaderID, TextureID, UniformLocation, VertexArrayID,
 };
 use crate::uniform_buffer::UniformBuffer;
-
-/// `gfx::Context::minimumRequiredVertexBindingCount`: what GL ES 3.0
-/// guarantees is twice that.
-const MAXIMUM_VERTEX_BINDING_COUNT: u32 = 16;
 
 /// The objects whose owners are gone, deleted by `perform_cleanup` while the
 /// context is current (C++: `abandonedPrograms` and the others).
@@ -157,7 +153,7 @@ impl Context {
             || extensions.contains("EXT_color_buffer_float")
             || extensions.contains("GL_EXT_color_buffer_float");
         Rc::new_cyclic(|weak| Context {
-            base: ContextBase::new(MAXIMUM_VERTEX_BINDING_COUNT),
+            base: ContextBase::default(),
             backend,
             weak_self: weak.clone(),
             state: State::default(),
@@ -465,6 +461,12 @@ impl Context {
     /// `setCullFaceMode`
     pub fn set_cull_face_mode(&self, mode: &CullFaceMode) {
         self.state.set_cull_face_mode(self.gl(), mode);
+    }
+
+    /// Forgets the GL state the context tracks, so that the next draw sets
+    /// all of it again. Call it after code outside the context changed it.
+    pub fn set_dirty_state(&self) {
+        self.state.set_dirty();
     }
 
     /// `setScissorTest`. The renderer's rectangles have their origin at the
@@ -845,17 +847,6 @@ impl GfxContext for Context {
         Box::new(CommandEncoder::new(self.rc()))
     }
 
-    fn clear_stencil_buffer(&self, value: i32) {
-        // glClear writes only the bits the stencil write mask lets through,
-        // and clipping leaves that mask at zero.
-        self.clear(None, None, Some(value));
-        self.rendering_stats().stencil_clears += 1;
-    }
-
-    fn set_dirty_state(&self) {
-        self.state.set_dirty();
-    }
-
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr {
         VertexAttributeArray::new_ptr()
     }
@@ -866,10 +857,6 @@ impl GfxContext for Context {
 
     fn create_uniform_buffer(&self, data: &[u8], _persistent: bool, ssbo: bool) -> UniformBufferPtr {
         Rc::new(UniformBuffer::new(self, data, ssbo))
-    }
-
-    fn create_layer_uniform_buffer_array(&self) -> UniqueUniformBufferArray {
-        Box::new(UniformBufferArray::new())
     }
 
     fn get_generic_shader(
@@ -897,14 +884,6 @@ impl GfxContext for Context {
 
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_gl_texture_2d()
-    }
-
-    fn reset_state(&self, depth_mode: DepthMode, color_mode: ColorMode) {
-        // Reset dynamic state
-        self.set_depth_mode(&depth_mode);
-        self.set_stencil_mode(&StencilMode::disabled());
-        self.set_color_mode(&color_mode);
-        self.set_cull_face_mode(&CullFaceMode::disabled());
     }
 
     fn emplace_or_update_uniform_buffer(
