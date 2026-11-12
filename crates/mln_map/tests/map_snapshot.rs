@@ -6,9 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use mln_actor::RunLoop;
 use mln_map::{
-    AnimationOptions, BoundOptions, CameraBounds, CameraOptions, ConstrainMode, FreeCamera, FreeCameraOptions, Map,
-    MapDebugOptions, MapMode, MapOptions, MapProjection, MapView, NorthOrientation, ProjectionMode, TileLodMode,
-    UpdateReader, ViewportMode,
+    AnimationOptions, BoundOptions, CameraBounds, CameraDelta, CameraOptions, CameraUpdate, CameraUpdateMode,
+    ConstrainMode, FreeCamera, FreeCameraOptions, GesturePhase, Map, MapDebugOptions, MapMode, MapOptions,
+    MapProjection, MapView, NorthOrientation, ProjectionMode, TileLodMode, UpdateReader, ViewportMode,
 };
 use mln_storage::stub_file_source::{ResponseType, StubFileSource};
 use mln_style_types::{ProjectionDefinition, ProjectionType};
@@ -73,7 +73,7 @@ fn snapshot_reports_every_member() {
     map.set_frustum_offset(&insets(1.0, 2.0, 3.0, 4.0));
     map.set_projection_mode(&ProjectionMode::default().with_axonometric(true).with_x_skew(0.25).with_y_skew(0.5));
     map.enable_rendering_stats_view(true);
-    map.set_gesture_in_progress(true);
+    map.apply_camera_delta(&CameraDelta { phase: GesturePhase::Begin, ..CameraDelta::default() }).unwrap();
     let camera = CameraOptions::default()
         .with_center(Some(ll(10.0, 20.0)))
         .with_padding(Some(insets(10.0, 20.0, 30.0, 40.0)))
@@ -83,10 +83,12 @@ fn snapshot_reports_every_member() {
         .with_roll(Some(5.0))
         .with_fov(Some(40.0));
     map.jump_to(&camera);
-    map.ease_to(
-        &CameraOptions::default().with_zoom(Some(7.0)),
-        &AnimationOptions { duration: Some(Duration::from_secs(10)), ..AnimationOptions::default() },
-    );
+    map.update_camera(&CameraUpdate {
+        mode: CameraUpdateMode::Ease,
+        camera: CameraOptions::default().with_zoom(Some(7.0)),
+        animation: AnimationOptions { duration: Some(Duration::from_secs(10)), ..AnimationOptions::default() },
+        ..CameraUpdate::default()
+    });
 
     let snapshot = map.snapshot();
     assert_eq!(snapshot.debug, MapDebugOptions::TILE_BORDERS | MapDebugOptions::COLLISION);
@@ -107,9 +109,8 @@ fn snapshot_reports_every_member() {
         snapshot.bounds,
         CameraBounds { bounds: Some(bounds), min_zoom: 1.0, max_zoom: 18.0, min_pitch: 5.0, max_pitch: 50.0 }
     );
-    assert_eq!(BoundOptions::from(snapshot.bounds), map.get_bounds());
 
-    let free_camera = map.get_free_camera_options();
+    let free_camera = map.get_transform_state().get_free_camera_options();
     assert_eq!(
         snapshot.free_camera,
         FreeCamera { position: free_camera.position.unwrap(), orientation: free_camera.orientation.unwrap() }
@@ -136,7 +137,7 @@ fn snapshot_reports_every_member() {
     assert_eq!(view.viewport.frustum_offset, insets(1.0, 2.0, 3.0, 4.0));
 
     map.cancel_transitions();
-    map.set_gesture_in_progress(false);
+    map.apply_camera_delta(&CameraDelta { phase: GesturePhase::End, ..CameraDelta::default() }).unwrap();
     let snapshot = map.snapshot();
     assert!(!snapshot.transition_in_progress);
     assert!(!snapshot.gesture_in_progress);

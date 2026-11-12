@@ -324,8 +324,8 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
     assert_near(virtual_camera.center.unwrap().latitude(), 28.49288, 1e-5);
     assert_near(virtual_camera.center.unwrap().longitude(), 74.97437, 1e-5);
     assert_double_eq(virtual_camera.pitch.unwrap(), 0.0);
-    assert_double_eq(test.map().get_bounds().min_pitch.unwrap(), 0.0);
-    assert_double_eq(test.map().get_bounds().max_pitch.unwrap(), 0.0);
+    assert_double_eq(test.map().snapshot().bounds.min_pitch, 0.0);
+    assert_double_eq(test.map().snapshot().bounds.max_pitch, 0.0);
 
     test.map().set_bounds(&BoundOptions::default().with_min_pitch(20.0).with_max_pitch(60.0)).unwrap();
     virtual_camera =
@@ -335,8 +335,8 @@ fn lat_lngs_to_camera_with_bearing_and_pitch_min_max() {
     assert_near(virtual_camera.center.unwrap().latitude(), 28.53718, 1e-5);
     assert_near(virtual_camera.center.unwrap().longitude(), 74.31746, 1e-5);
     assert_double_eq(virtual_camera.pitch.unwrap(), 20.0);
-    assert_double_eq(test.map().get_bounds().min_pitch.unwrap(), 20.0);
-    assert_double_eq(test.map().get_bounds().max_pitch.unwrap(), 60.0);
+    assert_double_eq(test.map().snapshot().bounds.min_pitch, 20.0);
+    assert_double_eq(test.map().snapshot().bounds.max_pitch, 60.0);
 }
 
 /// A geometry fits as its points do, wherever they sit in it.
@@ -437,7 +437,12 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
     assert!(run_until_idle());
 
     let target = cam().with_center(Some(ll(40.0, -74.0))).with_zoom(Some(10.0));
-    test.map().fly_to(&target, &AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() });
+    test.map().update_camera(&mln_map::CameraUpdate {
+        mode: mln_map::CameraUpdateMode::Fly,
+        camera: target,
+        animation: AnimationOptions { velocity: Some(f64::from_bits(1)), ..AnimationOptions::default() },
+        ..mln_map::CameraUpdate::default()
+    });
     assert!(!test.map().in_transition());
     assert_near(test.map().get_camera_options(None).zoom.unwrap(), 10.0, 1e-9);
     assert!(run_until_idle());
@@ -453,14 +458,19 @@ fn free_camera_options_place_the_camera_and_cancel_commands() {
         transition_end_fn: Some(Arc::new(move |end: &mln_map::TransitionEnd| record.set(Some(end.outcome)))),
         ..AnimationOptions::new(Duration::from_secs(10))
     };
-    test.map().ease_to(&cam().with_zoom(Some(10.0)), &animation);
+    test.map().update_camera(&mln_map::CameraUpdate {
+        mode: mln_map::CameraUpdateMode::Ease,
+        camera: cam().with_zoom(Some(10.0)),
+        animation,
+        ..mln_map::CameraUpdate::default()
+    });
     assert!(test.map().in_transition());
 
     let position = [0.25, 0.25, 0.01];
     test.map().set_free_camera_options(&mln_map::FreeCameraOptions { position: Some(position), orientation: None });
     assert_eq!(ended.get(), Some(mln_map::TransitionOutcome::Cancelled));
     assert!(!test.map().in_transition());
-    let placed = test.map().get_free_camera_options().position.unwrap();
+    let placed = test.map().snapshot().free_camera.position;
     for (placed, wanted) in placed.iter().zip(position) {
         assert_near(*placed, wanted, 1e-9);
     }
@@ -667,9 +677,13 @@ fn pixel_for_lat_lng_during_a_fling_across_the_antimeridian() {
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(4.0)));
 
     let degree = 512.0 * 16.0 / 360.0;
-    test.map().set_gesture_in_progress(true);
     test.map()
-        .move_by(&ScreenCoordinate::new(-2.0 * degree, 0.0), &AnimationOptions::new(mln_util::chrono::seconds(10)))
+        .apply_camera_delta(&mln_map::CameraDelta {
+            offset: Some(ScreenCoordinate::new(-2.0 * degree, 0.0)),
+            animation: AnimationOptions::new(mln_util::chrono::seconds(10)),
+            phase: mln_map::GesturePhase::Begin,
+            ..mln_map::CameraDelta::default()
+        })
         .unwrap();
     let center = test.map().get_camera_options(None).center.unwrap().longitude();
     assert!(center < -180.0, "{center}");
@@ -816,11 +830,11 @@ fn bound_options() {
     test.map()
         .set_bounds(&BoundOptions::default().with_min_zoom(4.0).with_max_zoom(10.0).with_lat_lng_bounds(llb))
         .unwrap();
-    let bounds = test.map().get_bounds();
+    let bounds = test.map().snapshot().bounds;
 
-    assert_eq!(bounds.min_zoom.unwrap(), 4.0);
-    assert_eq!(bounds.max_zoom.unwrap(), 10.0);
-    assert_eq!(bounds.bounds.unwrap(), llb);
+    assert_eq!(bounds.min_zoom, 4.0);
+    assert_eq!(bounds.max_zoom, 10.0);
+    assert_eq!(bounds.bounds, Some(llb));
 }
 
 // gtest: Map.DefaultBoundOptions
@@ -828,15 +842,13 @@ fn bound_options() {
 fn default_bound_options() {
     let test = MapTest::new();
 
-    let bounds = test.map().get_bounds();
+    let bounds = test.map().snapshot().bounds;
 
-    assert!(bounds.min_zoom.is_some());
-    assert!(bounds.max_zoom.is_some());
-    assert!(bounds.bounds.is_some());
-
-    assert_eq!(bounds.min_zoom.unwrap(), mln_util::constants::MIN_ZOOM);
-    assert_eq!(bounds.max_zoom.unwrap(), f64::from(mln_util::constants::DEFAULT_MAX_ZOOM));
-    assert_eq!(bounds.bounds.unwrap(), LatLngBounds::default());
+    assert_eq!(bounds.min_zoom, mln_util::constants::MIN_ZOOM);
+    assert_eq!(bounds.max_zoom, f64::from(mln_util::constants::DEFAULT_MAX_ZOOM));
+    // A snapshot reports the default, unlimited bounds as none.
+    assert_eq!(bounds.bounds, None);
+    assert_eq!(BoundOptions::from(bounds).bounds, Some(LatLngBounds::default()));
 }
 
 // gtest: Map.MapOptions
