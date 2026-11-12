@@ -913,7 +913,7 @@ mod apple {
     }
 }
 
-#[cfg(all(feature = "vulkan", target_os = "android"))]
+#[cfg(target_os = "android")]
 mod android {
     use std::ffi::{c_int, c_void};
 
@@ -952,13 +952,16 @@ mod android {
     const USAGE_GPU_SAMPLED_IMAGE: u64 = 1 << 8;
     const USAGE_GPU_COLOR_OUTPUT: u64 = 1 << 9;
 
-    /// A session of a map of `style` on the Vulkan device, whose ring of
+    /// The backends whose devices export hardware buffers on Android.
+    const EXPORTING: [BackendType; 2] = [BackendType::Vulkan, BackendType::OpenGL];
+
+    /// A session of a map of `style` on a device of `backend`, whose ring of
     /// hardware buffers the CPU reads, or `None` where the device exports
     /// none.
-    fn session(runtime: &Runtime, style: &str, producer: SyncKinds) -> Option<RenderSession> {
-        let device = device_of(BackendType::Vulkan)?;
+    fn session(runtime: &Runtime, backend: BackendType, style: &str, producer: SyncKinds) -> Option<RenderSession> {
+        let device = device_of(backend)?;
         if !device.export_kinds().contains(ExportKind::AndroidHardwareBuffer) {
-            eprintln!("skipped: the Vulkan device exports no hardware buffers");
+            eprintln!("skipped: the {backend:?} device exports no hardware buffers");
             return None;
         }
         let options = MapOptions::new(mln_map::MapOptions::new().with_size(SIZE).with_map_mode(MapMode::Continuous));
@@ -1008,18 +1011,42 @@ mod android {
         }
     }
 
+    /// What the host's reads of `frame` end with: a sync file where the
+    /// session waits for one, here a duplicate of the frame's own, which
+    /// has signaled, and a finished read otherwise.
+    fn consumer_of(frame: &AcquiredFrame, consumers: SyncKinds) -> ConsumerSync {
+        use std::os::fd::{AsRawFd as _, BorrowedFd};
+        let sync = frame.producer_sync();
+        if !consumers.contains(SyncKind::SyncFd) || sync.kind != SyncKind::SyncFd || (sync.handle as i64) < 0 {
+            return ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete));
+        }
+        // SAFETY: the frame's live sync file, which the frame keeps.
+        let file = unsafe { BorrowedFd::borrow_raw(sync.handle as i32) }.try_clone_to_owned().unwrap();
+        let handle = file.as_raw_fd() as u64;
+        ConsumerSync { sync: GpuSync { kind: SyncKind::SyncFd, handle, value: 0 }, sync_file: Some(file) }
+    }
+
     #[test]
     fn a_hardware_buffer_ring_renders_into_buffers_that_the_cpu_reads() {
-        let runtime = runtime();
-        let producer = SyncKinds::of(&[SyncKind::SyncFd, SyncKind::CpuComplete]);
-        let Some(session) = session(&runtime, &style("#ff0000"), producer) else { return };
-        let capabilities = session.capabilities().unwrap();
-        assert_eq!(Some(ExportKind::AndroidHardwareBuffer), capabilities.export_kind);
-        for token in 1..=2 * DEPTH as u64 {
-            let frame = render_and_acquire(&session, token);
-            assert_eq!(capabilities.producer_sync_kind, Some(frame.producer_sync().kind));
-            assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height / 2));
-            frame.release(ConsumerSync::of(GpuSync::of(SyncKind::CpuComplete))).unwrap();
+        for backend in EXPORTING {
+            let runtime = runtime();
+            let producer = SyncKinds::of(&[SyncKind::SyncFd, SyncKind::CpuComplete]);
+            let Some(session) = session(&runtime, backend, &style("#ff0000"), producer) else { continue };
+            let capabilities = session.capabilities().unwrap();
+            assert_eq!(Some(ExportKind::AndroidHardwareBuffer), capabilities.export_kind, "{backend:?}");
+            eprintln!(
+                "{backend:?}: producer {:?}, consumers {:?}",
+                capabilities.producer_sync_kind,
+                capabilities.consumer_sync_kinds.iter().collect::<Vec<_>>()
+            );
+            for token in 1..=2 * DEPTH as u64 {
+                let frame = render_and_acquire(&session, token);
+                assert_eq!(capabilities.producer_sync_kind, Some(frame.producer_sync().kind), "{backend:?}");
+                assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height / 2), "{backend:?}");
+                let consumer = consumer_of(&frame, capabilities.consumer_sync_kinds);
+                frame.release(consumer).unwrap();
+            }
+            detach(session);
         }
     }
 
@@ -1027,20 +1054,24 @@ mod android {
     /// layer, take its first row as the top of the image: the map's north.
     #[test]
     fn a_hardware_buffer_starts_at_the_top_of_the_map() {
-        let runtime = runtime();
         let north = r##"{"version":8,"transition":{"duration":0,"delay":0},"sources":{"north":{"type":"geojson","data":{"type":"Polygon","coordinates":[[[-180,0],[180,0],[180,85],[-180,85],[-180,0]]]}}},"layers":[{"id":"bg","type":"background","paint":{"background-color":"#ff0000"}},{"id":"north","type":"fill","source":"north","paint":{"fill-color":"#0000ff","fill-antialias":false}}]}"##;
-        let Some(session) = session(&runtime, north, SyncKinds::NONE) else { return };
-        let mut frame = render_and_acquire(&session, 1);
-        // The fill loads after the first frame.
-        for token in 2..50 {
-            if pixel(&frame, SIZE.width / 2, SIZE.height / 4) != RED {
-                break;
+        for backend in EXPORTING {
+            let runtime = runtime();
+            let Some(session) = session(&runtime, backend, north, SyncKinds::NONE) else { continue };
+            let mut frame = render_and_acquire(&session, 1);
+            // The fill loads after the first frame.
+            for token in 2..50 {
+                if pixel(&frame, SIZE.width / 2, SIZE.height / 4) != RED {
+                    break;
+                }
+                drop(frame);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                frame = render_and_acquire(&session, token);
             }
+            assert_eq!([0, 0, 255, 255], pixel(&frame, SIZE.width / 2, SIZE.height / 4), "{backend:?}");
+            assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height * 3 / 4), "{backend:?}");
             drop(frame);
-            std::thread::sleep(std::time::Duration::from_millis(20));
-            frame = render_and_acquire(&session, token);
+            detach(session);
         }
-        assert_eq!([0, 0, 255, 255], pixel(&frame, SIZE.width / 2, SIZE.height / 4));
-        assert_eq!(RED, pixel(&frame, SIZE.width / 2, SIZE.height * 3 / 4));
     }
 }

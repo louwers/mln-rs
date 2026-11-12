@@ -442,10 +442,28 @@ mod tests {
         (frame, buffer.slot)
     }
 
-    // An exported ring of a session that makes its own device hands out
-    // hardware buffers with the host's usage bits, which the CPU reads.
+    // An exported ring of a session that makes its own device, and of one on
+    // an OpenGL device, hands out hardware buffers with the host's usage
+    // bits, which the CPU reads.
     #[test]
     fn an_exported_ring_hands_out_hardware_buffers() {
+        let gl = device(MLN_RENDER_BACKEND_OPEN_GL);
+        let mut capabilities = sized::<mln_gpu_device_capabilities>();
+        // SAFETY: local arguments.
+        unsafe { mln_gpu_device_get_capabilities(gl, &raw mut capabilities, NO_DIAGNOSTIC) };
+        let mut devices = vec![0];
+        if capabilities.export_kinds & MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER == 0 {
+            eprintln!("skipped: the OpenGL device exports no hardware buffers");
+        } else {
+            devices.push(gl);
+        }
+        for device in devices {
+            exported_ring_hands_out_hardware_buffers(device);
+        }
+        mln_gpu_device_release(gl);
+    }
+
+    fn exported_ring_hands_out_hardware_buffers(device: mln_gpu_device) {
         let runtime = create();
         let map = red_map(runtime);
         let ring = mln_exported_ring_target {
@@ -462,9 +480,9 @@ mod tests {
             ..sized()
         };
         let producer = MLN_GPU_SYNC_KIND_FLAG_SYNC_FD | MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE;
-        let session = attach(map, &target, 0, producer);
+        let session = attach(map, &target, device, producer);
         let capabilities = capabilities(session);
-        assert_eq!(capabilities.export_kind, MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER);
+        assert_eq!(capabilities.export_kind, MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER, "device {device}");
         assert_eq!(capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION);
         // A sync file where the device has them.
         assert!(matches!(capabilities.producer_sync_kind, MLN_GPU_SYNC_SYNC_FD | MLN_GPU_SYNC_CPU_COMPLETE));

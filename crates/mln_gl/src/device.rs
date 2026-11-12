@@ -418,8 +418,8 @@ enum Kind {
 #[derive(Clone)]
 pub struct Device {
     kind: Arc<Kind>,
-    /// What exports the group's dmabufs, found once, when first asked.
-    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    /// What exports the group's shared images, found once, when first asked.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     exporter: Arc<OnceLock<Option<Arc<crate::exported_target::Exporter>>>>,
 }
 
@@ -532,13 +532,13 @@ impl Device {
     fn of(kind: Kind) -> Device {
         Device {
             kind: Arc::new(kind),
-            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(unix, not(target_vendor = "apple")))]
             exporter: Arc::default(),
         }
     }
 
     /// The EGL library and the display of the group.
-    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     pub(crate) fn display(&self) -> (&'static Egl, egl::Display) {
         match &*self.kind {
             Kind::Library(group) => (group.display.egl, group.display.display),
@@ -547,8 +547,8 @@ impl Device {
         }
     }
 
-    /// What exports the group's dmabufs, or `None` where nothing does.
-    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    /// What exports the group's shared images, or `None` where nothing does.
+    #[cfg(all(unix, not(target_vendor = "apple")))]
     pub(crate) fn exporter(&self) -> Option<Arc<crate::exported_target::Exporter>> {
         self.exporter.get_or_init(|| crate::exported_target::Exporter::probe(self).map(Arc::new)).clone()
     }

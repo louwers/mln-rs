@@ -706,7 +706,7 @@ impl Device {
             Device::Vulkan(device) => device.export_kinds(),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
             #[allow(unreachable_patterns)]
             _ => ExportKinds::NONE,
@@ -734,10 +734,10 @@ impl Device {
                 let (producer, consumer) = mln_mtl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => {
                 let kind = mln_gl::exported_target::plan(device, ring)?;
-                let (producer, consumer) = mln_gl::exported_target::sync_kinds();
+                let (producer, consumer) = mln_gl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
             _ => {
@@ -761,8 +761,8 @@ impl Device {
             Device::Vulkan(device) => mln_vulkan::exported_target::sync_kinds(device),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
-            Device::Gl(_) => mln_gl::exported_target::sync_kinds(),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
+            Device::Gl(device) => mln_gl::exported_target::sync_kinds(device),
             _ => (SyncKinds::NONE, SyncKinds::NONE),
         }
     }

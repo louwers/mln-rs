@@ -165,7 +165,7 @@ macro_rules! exported {
 exported!(mln_vulkan::ExportedTarget);
 #[cfg(all(feature = "metal", target_vendor = "apple"))]
 exported!(mln_mtl::ExportedTarget);
-#[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
 exported!(mln_gl::ExportedTarget);
 
 macro_rules! offscreen {
@@ -341,7 +341,7 @@ impl Backend {
             Backend::Metal(backend) => {
                 Ok(Box::new(mln_mtl::ExportedTarget::new(backend.clone(), ring, kind, size, producer)?))
             }
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Backend::Gl(backend) => {
                 let Device::Gl(device) = device else {
                     return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
