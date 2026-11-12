@@ -201,6 +201,11 @@ const LMS_TO_XYZ: Mat3 = [
 const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
 const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
 
+// https://drafts.csswg.org/css-color-4/#powerless
+const POWERLESS_HUE_EPSILON: f64 = 0.000004;
+// The chroma of 100% in oklch(): https://drafts.csswg.org/css-color-4/#specifying-oklab-oklch
+const CHROMA_PERCENT_REFERENCE: f64 = 0.4;
+
 #[derive(Clone, Copy)]
 struct Oklch {
     l: f64,
@@ -239,8 +244,7 @@ fn oklab_to_srgb(lab: Vec3) -> Vec3 {
 fn rgb_to_oklch(rgb: Rgb) -> Oklch {
     let lab = srgb_to_oklab([rgb.r, rgb.g, rgb.b]);
     let c = (lab[1] * lab[1] + lab[2] * lab[2]).sqrt();
-    // https://drafts.csswg.org/css-color-4/#powerless
-    if c <= 0.000004 {
+    if c <= POWERLESS_HUE_EPSILON {
         return Oklch { l: lab[0], c: 0.0, h: f64::NAN, alpha: rgb.a };
     }
     Oklch { l: lab[0], c, h: constrain_angle(lab[2].atan2(lab[1]) * RAD_TO_DEG), alpha: rgb.a }
@@ -385,7 +389,7 @@ fn parse_oklch(text: &str) -> Option<Oklch> {
     if !skip_whitespace(&mut pos) {
         return None;
     }
-    let c = read_oklch_argument(inside, &mut pos, 0.4, false)?;
+    let c = read_oklch_argument(inside, &mut pos, CHROMA_PERCENT_REFERENCE, false)?;
     if !skip_whitespace(&mut pos) {
         return None;
     }
