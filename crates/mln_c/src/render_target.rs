@@ -915,7 +915,8 @@ mod tests {
     // target takes a reference of its own, which outlives the host's, and
     // presents on each backend that a device of the library's has, through
     // the C API. The window has no buffer size of its own, so the session
-    // gives it the frames'.
+    // gives it the frames'. Once the consumer goes away, the session's
+    // frames find no window.
     #[cfg(target_env = "ohos")]
     #[test]
     fn an_ohos_window_target_holds_its_window_and_presents_on_each_backend() {
@@ -924,8 +925,9 @@ mod tests {
 
         use crate::generated::types::{
             MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_RENDER_RESULT_RENDERED,
-            MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW,
-            mln_gpu_device_capabilities, mln_gpu_device_options, mln_render_session_capabilities,
+            MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION,
+            MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW, mln_gpu_device_capabilities, mln_gpu_device_options,
+            mln_render_session_capabilities,
         };
         use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities};
         use crate::map::mln_map_set_style_json;
@@ -1096,10 +1098,17 @@ mod tests {
             assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED, "{backend:?}");
             // SAFETY: the live image.
             assert_eq!(unsafe { newest_frame(image) }, ((48, 40), [0xff, 0, 0]), "{backend:?}");
-            release_session(session);
-            // SAFETY: the image is the test's, and the session let go of its
-            // window.
+
+            // A frame may still present to the window as its consumer goes,
+            // and the next finds no window.
+            // SAFETY: the image is the test's. The session holds the window.
             unsafe { OH_NativeImage_Destroy(&mut image) };
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 2), MLN_STATUS_OK);
+            let first = wait_for_result(session).disposition;
+            assert!([MLN_RENDER_RESULT_RENDERED, MLN_RENDER_RESULT_TARGET_NOT_READY].contains(&first), "{backend:?}");
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 3), MLN_STATUS_OK);
+            assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_TARGET_NOT_READY, "{backend:?}");
+            release_session(session);
             presented += 1;
         }
         assert!(presented > 0, "no backend presents to an OpenHarmony window");

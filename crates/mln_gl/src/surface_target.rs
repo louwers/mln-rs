@@ -122,6 +122,10 @@ struct EglWindow {
     presenting: Cell<bool>,
     /// Made when the context is first made current to present.
     surface: Cell<Option<egl::Surface>>,
+    /// Whether the context is current on `surface`. It isn't when EGL can
+    /// make no surface of the window, or when the window went away under
+    /// the surface, as an OpenHarmony window does with its consumer.
+    on_surface: Cell<bool>,
     wl_egl_window: Cell<*mut c_void>,
     /// What `handle` names, which stays open until the context is gone.
     _window: Arc<dyn Window>,
@@ -218,6 +222,7 @@ impl EglWindow {
             swap_interval: egl::Int::from(cap_frame_rate && matches!(handle, WindowHandle::Xlib { .. })),
             presenting: Cell::new(false),
             surface: Cell::new(None),
+            on_surface: Cell::new(false),
             wl_egl_window: Cell::new(std::ptr::null_mut()),
             _window: window,
         })
@@ -266,12 +271,14 @@ impl EglWindow {
     /// is the context's to present to, and without a surface while it isn't
     /// (which needs EGL_KHR_surfaceless_context).
     fn make_current(&self) -> Result<(), egl::Error> {
+        self.on_surface.set(false);
         if !self.presenting.get() {
             return self.egl.make_current(self.display, None, None, Some(self.context));
         }
         let first = self.surface.get().is_none();
         let surface = self.surface();
         self.egl.make_current(self.display, surface, surface, Some(self.context))?;
+        self.on_surface.set(surface.is_some());
         if first && surface.is_some() {
             let _ = self.egl.swap_interval(self.display, self.swap_interval);
         }
@@ -307,10 +314,16 @@ impl EglWindow {
         }
     }
 
+    /// Makes no context current on this thread.
+    fn clear_current(&self) -> Result<(), egl::Error> {
+        self.on_surface.set(false);
+        self.egl.make_current(self.display, None, None, None)
+    }
+
     /// Stops presenting to the window: destroys the surface.
     fn release_surface(&self) {
         self.presenting.set(false);
-        let _ = self.egl.make_current(self.display, None, None, None);
+        let _ = self.clear_current();
         if let Some(surface) = self.surface.take() {
             let _ = self.egl.destroy_surface(self.display, surface);
         }
@@ -347,8 +360,7 @@ impl PlatformContext for WindowContext {
     }
 
     fn done_current(&self) {
-        let window = &self.0;
-        if let Err(e) = window.egl.make_current(window.display, None, None, None) {
+        if let Err(e) = self.0.clear_current() {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
         }
     }
@@ -400,6 +412,10 @@ pub struct SurfaceTarget {
     size: Rc<Cell<Size>>,
     /// Made with the first frame.
     image: RefCell<Option<Rc<DrawTarget>>>,
+    /// Whether a frame began and hasn't ended. Until it ends, each
+    /// `begin_frame` returns its image, as [`FrameTarget`] asks, even when
+    /// the window went away in between.
+    in_frame: Cell<bool>,
 }
 
 impl SurfaceTarget {
@@ -432,7 +448,7 @@ impl SurfaceTarget {
                 window.egl.get_proc_address(name).map_or(std::ptr::null(), |function| function as *const _)
             })
         };
-        let _ = window.egl.make_current(window.display, None, None, None);
+        let _ = window.clear_current();
         let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(window.clone()))));
         let target = SurfaceTarget {
             backend: backend.clone(),
@@ -440,6 +456,7 @@ impl SurfaceTarget {
             presentation: Presentation::default(),
             size: Rc::new(Cell::new(framebuffer_size)),
             image: RefCell::new(None),
+            in_frame: Cell::new(false),
         };
         Ok((backend, target))
     }
@@ -474,12 +491,17 @@ impl SurfaceTarget {
 }
 
 impl FrameTarget for SurfaceTarget {
-    /// Takes the window over. Its framebuffer is always there to draw into.
+    /// Takes the window over. A frame begins while the context is current
+    /// on the window's surface, and not when EGL makes no surface of the
+    /// window or the window went away.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
         if !self.window.presenting.replace(true) {
             // The context is current without a surface: make it current on
             // the window's.
             self.backend.activate();
+        }
+        if !self.in_frame.get() && !self.window.on_surface.get() {
+            return None;
         }
         let mut image = self.image.borrow_mut();
         if image.is_none() {
@@ -488,11 +510,13 @@ impl FrameTarget for SurfaceTarget {
         }
         let image = image.clone()?;
         image.set_size(self.size.get());
+        self.in_frame.set(true);
         Some(image)
     }
 
     /// Presents the frame, with the overlay over it.
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
+        self.in_frame.set(false);
         let Some(context) = self.backend.gl_context() else {
             return Handoff::Dropped;
         };
