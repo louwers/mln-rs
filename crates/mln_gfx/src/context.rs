@@ -11,15 +11,11 @@
 
 use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
-use std::rc::Rc;
 
 use mln_util::size::Size;
 
 use crate::backend::Type as BackendType;
-use crate::color_mode::ColorMode;
 use crate::command_encoder::CommandEncoder;
-use crate::context_observer::ContextObserver;
-use crate::depth_mode::DepthMode;
 use crate::drawable_builder::UniqueDrawableBuilder;
 use crate::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use crate::offscreen_texture::OffscreenTexture;
@@ -32,40 +28,18 @@ use crate::shaders::clipping_mask_ubo::ClipUBO;
 use crate::shaders::shader_program_base::ShaderProgramBasePtr;
 use crate::texture2d::Texture2DPtr;
 use crate::types::TextureChannelDataType;
-use crate::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
+use crate::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use crate::vertex_attribute::VertexAttributeArrayPtr;
 
 /// The data members of `gfx::Context`.
+#[derive(Default)]
 pub struct ContextBase {
-    pub maximum_vertex_binding_count: u32,
     stats: RefCell<RenderingStats>,
-    observer: RefCell<Option<Rc<dyn ContextObserver>>>,
-}
-
-impl ContextBase {
-    pub const MINIMUM_REQUIRED_VERTEX_BINDING_COUNT: u32 = 8;
-
-    #[must_use]
-    pub fn new(maximum_vertex_binding_count: u32) -> Self {
-        ContextBase {
-            maximum_vertex_binding_count,
-            stats: RefCell::new(RenderingStats::default()),
-            observer: RefCell::new(None),
-        }
-    }
 }
 
 pub trait Context: Any {
     fn context_base(&self) -> &ContextBase;
     fn as_any(&self) -> &dyn Any;
-
-    /// `setObserver(nullptr)` restores the null observer.
-    fn set_observer(&self, observer: Option<Rc<dyn ContextObserver>>) {
-        *self.context_base().observer.borrow_mut() = observer;
-    }
-    fn get_observer(&self) -> Option<Rc<dyn ContextObserver>> {
-        self.context_base().observer.borrow().clone()
-    }
 
     /// The backend this context is of. C++ builds one backend and asks
     /// `gfx::Backend::GetType()`; the port can build several and asks the
@@ -87,13 +61,9 @@ pub trait Context: Any {
         self.context_base().stats.borrow().clone()
     }
 
-    fn clear_stencil_buffer(&self, value: i32);
-    fn set_dirty_state(&self);
-
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr;
     fn create_drawable_builder(&self, name: String) -> UniqueDrawableBuilder;
     fn create_uniform_buffer(&self, data: &[u8], persistent: bool, ssbo: bool) -> UniformBufferPtr;
-    fn create_layer_uniform_buffer_array(&self) -> UniqueUniformBufferArray;
     fn get_generic_shader(
         &self,
         registry: &ShaderRegistry,
@@ -108,8 +78,6 @@ pub trait Context: Any {
     ) -> Option<LayerGroupBasePtr>;
     fn create_layer_group(&self, layer_index: i32, initial_capacity: usize, name: String) -> Option<LayerGroupBasePtr>;
     fn create_texture_2d(&self) -> Texture2DPtr;
-
-    fn reset_state(&self, depth_mode: DepthMode, color_mode: ColorMode);
 
     /// Creates the buffer if `ptr` is empty (returns true), else updates it.
     fn emplace_or_update_uniform_buffer(

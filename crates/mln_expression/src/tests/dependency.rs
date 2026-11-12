@@ -93,14 +93,6 @@ fn distance() {
     assert_eq!(Dependency::FEATURE, expression.dependencies());
 }
 
-// gtest: ExpressionDependencies.CustomLayer
-#[test]
-#[ignore = "TODO(port): CustomLayer (style/layers/custom_layer*) and CustomLayerProperties"]
-fn custom_layer() {
-    // TODO(port): body: `CustomLayerProperties{makeMutable<CustomLayer::Impl>("", nullptr)}.getDependencies()`
-    // is `Dependency::None` (an mln_style test once CustomLayer exists).
-}
-
 // gtest: ExpressionDependencies.Semiliteral
 #[test]
 fn semiliteral() {

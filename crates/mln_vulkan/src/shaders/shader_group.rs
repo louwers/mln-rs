@@ -78,13 +78,8 @@ impl shader_group::ShaderGroup for ShaderGroup {
         }
 
         let context = gfx_context.as_any().downcast_ref::<Context>()?;
-        let mut shader = context.create_program(
-            self.shader_id,
-            shader_name.clone(),
-            source.glsl,
-            &self.program_parameters,
-            &additional_defines,
-        )?;
+        let mut shader =
+            context.create_program(shader_name.clone(), source.glsl, &self.program_parameters, &additional_defines)?;
         for attribute in source.attributes {
             if !properties_as_uniforms.1.contains(&attribute.id) {
                 shader.init_vertex_attribute(attribute);

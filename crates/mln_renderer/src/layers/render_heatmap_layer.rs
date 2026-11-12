@@ -148,17 +148,15 @@ impl RenderHeatmapLayer {
 
     /// `removeTile(RenderPass, const OverscaledTileID&)`: the tile drawables
     /// live in the render target's layer group.
-    fn remove_tile(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) -> usize {
+    fn remove_tile(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
         let Some(layer_group) = self.render_target_layer_group() else {
-            return 0;
+            return;
         };
         let mut group = layer_group.borrow_mut();
         let Some(tile_layer_group) = group.as_tile_layer_group_mut() else {
-            return 0;
+            return;
         };
-        let count = tile_layer_group.remove_drawables(render_pass, tile_id).len();
-        self.base.stats.drawables_removed += count;
-        count
+        tile_layer_group.remove_drawables(render_pass, tile_id);
     }
 
     /// `updateTile(tileLayerGroup, renderPass, tileID, update)`.
@@ -280,22 +278,14 @@ impl RenderLayer for RenderHeatmapLayer {
         activate_render_target(self.render_target.as_ref(), will_render, changes);
     }
 
-    fn remove_all_drawables(&mut self) -> usize {
+    fn remove_all_drawables(&mut self) {
         // RenderLayer::removeAllDrawables
-        let mut removed = 0;
         if let Some(group) = &self.base.layer_group {
-            let count = group.borrow().get_drawable_count();
-            self.base.stats.drawables_removed += count;
             group.borrow_mut().clear_drawables();
-            removed = count;
         }
         if let Some(layer_group) = self.render_target_layer_group() {
-            let count = layer_group.borrow().get_drawable_count();
-            removed += count;
-            self.base.stats.drawables_removed += count;
             layer_group.borrow_mut().clear_drawables();
         }
-        removed
     }
 
     fn update(
@@ -377,10 +367,9 @@ impl RenderLayer for RenderHeatmapLayer {
             let mut group = tile_layer_group.borrow_mut();
             let tile_group = group.as_tile_layer_group_mut().expect("heatmap render target group is a TileLayerGroup");
             let base = &self.base;
-            let removed = tile_group.remove_drawables_if(|drawable| {
+            tile_group.remove_drawables_if(|drawable| {
                 drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
         }
 
         let evaluated_properties = self.base.evaluated_properties.clone();
@@ -511,7 +500,6 @@ impl RenderLayer for RenderHeatmapLayer {
                 drawable.set_binders(drawable_binders_slot(&render_data.bucket, self.get_id()));
                 drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
                 tile_group.add_drawable(render_pass, &tile_id, drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
 
@@ -616,7 +604,6 @@ impl RenderLayer for RenderHeatmapLayer {
         for mut drawable in heatmap_texture_builder.clear_drawables() {
             drawable.set_layer_tweaker(texture_tweaker.as_ref().and_then(layer_tweaker_slot));
             texture_layer_group.add_drawable(drawable);
-            self.base.stats.drawables_added += 1;
         }
     }
 }

@@ -348,14 +348,6 @@ impl FileSource for DatabaseFileSource {
         }
     }
 
-    fn pause(&self) {
-        self.impl_.thread.pause();
-    }
-
-    fn resume(&self) {
-        self.impl_.thread.resume();
-    }
-
     fn set_resource_options(&self, options: ResourceOptions) {
         *self.impl_.resource_options.lock_unpoisoned() = options;
     }

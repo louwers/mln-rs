@@ -22,7 +22,6 @@
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
-use std::fmt::Write as _;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::backend::Type as BackendType;
@@ -43,7 +42,7 @@ use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{DepthFunctionType, DepthMaskType, StencilFunctionType, StencilOpType, TextureChannelDataType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
+use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
@@ -71,10 +70,6 @@ use crate::shaders::shader_source::shader_source;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 use crate::uniform_buffer::{UniformBuffer, bind_uniform_buffer_array};
-
-/// The maximum number of vertex attributes per vertex descriptor: 31 for
-/// Apple2-8 and Mac2 (Metal feature set tables).
-const MAXIMUM_VERTEX_BINDING_COUNT: u32 = 31;
 
 /// The resource options of every buffer (`MTL::ResourceStorageModeShared`).
 const BUFFER_USAGE: MTLResourceOptions = MTLResourceOptions::StorageModeShared;
@@ -170,7 +165,7 @@ impl Context {
     #[must_use]
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
-            base: ContextBase::new(MAXIMUM_VERTEX_BINDING_COUNT),
+            base: ContextBase::default(),
             backend,
             weak_self: weak.clone(),
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
@@ -223,13 +218,11 @@ impl Context {
         BufferResource::new(self, data, size, BUFFER_USAGE, is_index_buffer, persistent)
     }
 
-    /// `createProgram(shaderID, name, source, vertexName, fragmentName,
+    /// `createProgram(name, source, vertexName, fragmentName,
     /// programParameters, additionalDefines)`: compiles `source` with the
     /// program's defines and `additional_defines` as preprocessor macros.
-    #[allow(clippy::too_many_arguments)]
     pub fn create_program(
         &self,
-        shader_id: BuiltIn,
         name: String,
         source: &str,
         vertex_name: &str,
@@ -237,23 +230,14 @@ impl Context {
         program_parameters: &ProgramParameters,
         additional_defines: &HashMap<String, String>,
     ) -> Option<ShaderProgram> {
-        let mut define_str = String::new();
         let mut keys = Vec::new();
         let mut values = Vec::new();
         for (key, value) in program_parameters.get_defines().iter().chain(additional_defines.iter()) {
-            let _ = writeln!(define_str, "#define {key} {value}");
             keys.push(NSString::from_str(key));
             values.push(Retained::into_super(NSString::from_str(value)));
         }
-        let observer = self.get_observer();
-        if let Some(observer) = &observer {
-            observer.on_pre_compile_shader(shader_id, BackendType::Metal, &define_str);
-        }
         let failed = |message: String| {
             Log::error(Event::Shader, message);
-            if let Some(observer) = &observer {
-                observer.on_shader_compile_failed(shader_id, BackendType::Metal, &define_str);
-            }
             debug_assert!(false, "shader compile failed");
             None
         };
@@ -290,11 +274,7 @@ impl Context {
             }
         }
 
-        let shader = ShaderProgram::new(name, self.backend.clone(), vertex_function, fragment_function);
-        if let Some(observer) = &observer {
-            observer.on_post_compile_shader(shader_id, BackendType::Metal, &define_str);
-        }
-        Some(shader)
+        Some(ShaderProgram::new(name, self.backend.clone(), vertex_function, fragment_function))
     }
 
     /// `createTexture2D()` with the concrete type.
@@ -667,13 +647,6 @@ impl GfxContext for Context {
         Box::new(CommandEncoder::new(self.rc()))
     }
 
-    /// Metal clears the stencil buffer by drawing (`PaintParameters::clearStencil`).
-    fn clear_stencil_buffer(&self, _value: i32) {
-        debug_assert!(false);
-    }
-
-    fn set_dirty_state(&self) {}
-
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr {
         VertexAttributeArray::new_ptr()
     }
@@ -684,10 +657,6 @@ impl GfxContext for Context {
 
     fn create_uniform_buffer(&self, data: &[u8], persistent: bool, _ssbo: bool) -> UniformBufferPtr {
         Rc::new(UniformBuffer::create(self, data, persistent))
-    }
-
-    fn create_layer_uniform_buffer_array(&self) -> UniqueUniformBufferArray {
-        Box::new(UniformBufferArray::new())
     }
 
     fn get_generic_shader(
@@ -716,8 +685,6 @@ impl GfxContext for Context {
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_mtl_texture_2d()
     }
-
-    fn reset_state(&self, _depth_mode: DepthMode, _color_mode: ColorMode) {}
 
     fn emplace_or_update_uniform_buffer(
         &self,

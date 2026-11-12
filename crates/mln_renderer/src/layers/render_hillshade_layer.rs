@@ -320,10 +320,9 @@ impl RenderLayer for RenderHillshadeLayer {
             let mut group = layer_group.borrow_mut();
             let tile_layer_group = group.as_tile_layer_group_mut().expect("hillshade layer group is a TileLayerGroup");
             let base = &self.base;
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
         }
 
         if self.static_data_shared_vertices.is_none() {
@@ -455,7 +454,6 @@ impl RenderLayer for RenderHillshadeLayer {
                         maxzoom: self.maxzoom,
                     })));
                     tile_group.add_drawable(render_pass, &tile_id, drawable);
-                    self.base.stats.drawables_added += 1;
                 }
             }
             let render_target_texture =
@@ -553,7 +551,6 @@ impl RenderLayer for RenderHillshadeLayer {
                 drawable.set_data(Some(Box::new(HillshadeDrawableGeometryTime(geometry_time))));
 
                 tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
     }

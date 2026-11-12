@@ -4,10 +4,10 @@
 // The C++ constructor forwards the object's constructor arguments to the
 // thread; here `make` is a `Send` closure that builds the object on the new
 // thread (it gets the actor's own `ActorRef`, like `O(ActorRef<O>, args...)`).
-// Waiting for the thread to be running (`running.wait()`) happens in
-// `pause` and `drop`, as in C++ (gtests-core: it used to happen at the end of
-// the constructor, which deadlocks when the object's constructor waits for
-// the caller, test/util/thread.test.cpp InvokeBeforeChildStarts).
+// Waiting for the thread to be running (`running.wait()`) happens in `drop`,
+// as in C++, not at the end of the constructor, which would deadlock when the
+// object's constructor waits for the caller (test/util/thread.test.cpp
+// InvokeBeforeChildStarts).
 //
 // TODO(port): the thread priority setters (`makeThreadPrioritySetter`,
 // platform settings) and `platform::attachThread`/`detachThread` (no-ops on
@@ -16,10 +16,9 @@
 // Port-only: with a cooperative scheduler installed (a host without threads,
 // see cooperative_scheduler.rs) no thread starts: the object is established
 // on the creating thread's RunLoop, which the host drives, and its messages
-// run there. `pause` and `resume` do nothing then (pausing would block the
-// only thread).
+// run there.
 
-use std::sync::{Mutex, OnceLock, mpsc};
+use std::sync::{Mutex, mpsc};
 use std::thread::JoinHandle;
 
 use mln_util::sync::MutexExt;
@@ -27,7 +26,7 @@ use mln_util::sync::MutexExt;
 use crate::actor_ref::ActorRef;
 use crate::established_actor::{AspiringActor, EstablishedActor};
 use crate::local_object::LocalObject;
-use crate::run_loop::{Priority, RunLoop, RunLoopHandle};
+use crate::run_loop::{RunLoop, RunLoopHandle};
 use crate::scheduler;
 
 /// `util::Thread<Object>`.
@@ -41,10 +40,9 @@ enum Backing<O: 'static> {
     /// On a thread of its own (C++).
     Spawned {
         thread: Option<JoinHandle<()>>,
-        /// `running`: the child's loop, once its object is established.
-        running: Mutex<Option<mpsc::Receiver<RunLoopHandle>>>,
-        run_loop: OnceLock<RunLoopHandle>,
-        paused: Mutex<Option<mpsc::Sender<()>>>,
+        /// `running`: the child's loop, once its object is established (in a
+        /// `Mutex` so that a `Thread` is `Sync`).
+        running: Mutex<mpsc::Receiver<RunLoopHandle>>,
     },
     /// Port-only: on the creating thread, with a cooperative scheduler.
     /// Dropping it drops the object.
@@ -71,15 +69,7 @@ impl<O: 'static> Thread<O> {
                 drop(established_actor);
             })
             .expect("failed to spawn thread");
-        Thread {
-            object,
-            backing: Backing::Spawned {
-                thread: Some(thread),
-                running: Mutex::new(Some(running_rx)),
-                run_loop: OnceLock::new(),
-                paused: Mutex::new(None),
-            },
-        }
+        Thread { object, backing: Backing::Spawned { thread: Some(thread), running: Mutex::new(running_rx) } }
     }
 
     /// `actor()`: a reference to the object on the thread. Messages sent
@@ -87,63 +77,17 @@ impl<O: 'static> Thread<O> {
     pub fn actor(&self) -> ActorRef<O> {
         self.object.self_ref()
     }
-
-    /// `pause()`: blocks the thread's loop (high priority task) until
-    /// `resume()`.
-    pub fn pause(&self) {
-        let Backing::Spawned { running, run_loop, paused, .. } = &self.backing else {
-            return;
-        };
-        let mut paused = paused.lock_unpoisoned();
-        assert!(paused.is_none());
-        let (paused_tx, paused_rx) = mpsc::channel::<()>();
-        let (resumed_tx, resumed_rx) = mpsc::channel::<()>();
-        child_loop(running, run_loop).invoke_with_priority(Priority::High, move || {
-            let _ = paused_tx.send(());
-            let _ = resumed_rx.recv();
-        });
-        let _ = paused_rx.recv();
-        *paused = Some(resumed_tx);
-    }
-
-    /// `resume()`.
-    pub fn resume(&self) {
-        let Backing::Spawned { paused, .. } = &self.backing else {
-            return;
-        };
-        let resumed = paused.lock_unpoisoned().take();
-        assert!(resumed.is_some());
-        if let Some(resumed) = resumed {
-            let _ = resumed.send(());
-        }
-    }
-}
-
-/// `running.wait()`, then the child's `loop`.
-fn child_loop<'a>(
-    running: &Mutex<Option<mpsc::Receiver<RunLoopHandle>>>,
-    run_loop: &'a OnceLock<RunLoopHandle>,
-) -> &'a RunLoopHandle {
-    run_loop.get_or_init(|| {
-        let running = running.lock_unpoisoned().take().expect("running");
-        running.recv().expect("thread failed to start")
-    })
 }
 
 impl<O: 'static> Drop for Thread<O> {
-    /// `~Thread()`: resume if paused, wait for the queue up to here, stop
-    /// the loop and join.
+    /// `~Thread()`: wait for the queue up to here, stop the loop and join.
     fn drop(&mut self) {
-        if let Backing::Spawned { paused, .. } = &self.backing
-            && paused.lock_unpoisoned().is_some()
-        {
-            self.resume();
-        }
-        let Backing::Spawned { thread, running, run_loop, .. } = &mut self.backing else {
+        let Backing::Spawned { thread, running } = &mut self.backing else {
             return;
         };
         let (stoppable_tx, stoppable_rx) = mpsc::channel::<()>();
-        let run_loop = child_loop(running, run_loop).clone();
+        // `running.wait()`.
+        let run_loop = running.lock_unpoisoned().recv().expect("thread failed to start");
         run_loop.invoke(move || {
             let _ = stoppable_tx.send(());
         });
@@ -189,23 +133,5 @@ mod tests {
         }
         drop(thread);
         assert_eq!(total.load(Ordering::SeqCst), 100);
-    }
-
-    #[test]
-    fn pause_resume() {
-        let total = Arc::new(AtomicUsize::new(0));
-        let t = total.clone();
-        let thread = Thread::new("Test", move |_| Counter { count: Cell::new(0), total: t });
-        thread.pause();
-        let seen = Arc::new(AtomicUsize::new(0));
-        let s = seen.clone();
-        thread.actor().invoke(move |_: &Counter| {
-            s.store(1, Ordering::SeqCst);
-        });
-        std::thread::sleep(std::time::Duration::from_millis(20));
-        assert_eq!(seen.load(Ordering::SeqCst), 0);
-        thread.resume();
-        drop(thread);
-        assert_eq!(seen.load(Ordering::SeqCst), 1);
     }
 }

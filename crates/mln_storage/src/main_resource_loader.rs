@@ -314,6 +314,12 @@ impl MainResourceLoader {
             ),
         }
     }
+
+    /// Holds the loader's thread until the guard drops (`crate::tests::pause`).
+    #[cfg(test)]
+    pub(crate) fn pause(&self) -> crate::tests::Paused {
+        crate::tests::pause(&self.impl_.thread.actor())
+    }
 }
 
 impl FileSource for MainResourceLoader {
@@ -327,14 +333,6 @@ impl FileSource for MainResourceLoader {
 
     fn can_request(&self, resource: &Resource) -> bool {
         self.impl_.can_request(resource)
-    }
-
-    fn pause(&self) {
-        self.impl_.thread.pause();
-    }
-
-    fn resume(&self) {
-        self.impl_.thread.resume();
     }
 
     fn set_resource_options(&self, options: ResourceOptions) {

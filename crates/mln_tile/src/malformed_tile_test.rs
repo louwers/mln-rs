@@ -1,5 +1,5 @@
-// Port-only tests: malformed MVT and MLT tiles give the C++ exception as an
-// error through the GeometryTile* traits, and never panic.
+// Port-only tests: malformed MVT and MLT tiles give an error through the
+// GeometryTile* traits, and never panic.
 
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
@@ -107,14 +107,15 @@ fn tile_with_tags(tags: &[u64]) -> Vec<u8> {
 #[test]
 fn corrupt_mvt_tile_is_a_get_layer_error() {
     let data = VectorMVTTileData::new(Arc::new(b"CORRUPTED".to_vec()));
-    assert_eq!(data.get_layer("water").err().unwrap().to_string(), "unknown pbf field type exception");
-    assert_eq!(data.layer_names().unwrap_err().to_string(), "unknown pbf field type exception");
+    let message = "protobuf decode error: invalid wire type: 7";
+    assert_eq!(data.get_layer("water").err().unwrap().to_string(), message);
+    assert_eq!(data.layer_names().unwrap_err().to_string(), message);
 }
 
 #[test]
 fn truncated_mvt_tile_is_a_get_layer_error() {
     let data = VectorMVTTileData::new(Arc::new(MVT[..MVT.len() / 2].to_vec()));
-    assert_eq!(data.get_layer("water").err().unwrap().to_string(), "end of buffer exception");
+    assert_eq!(data.get_layer("water").err().unwrap().to_string(), "protobuf decode error: unexpected end of buffer");
 }
 
 #[test]
@@ -127,14 +128,14 @@ fn malformed_value_is_the_feature_error() {
     assert!(feature.check().is_ok());
 
     // The value index is past the end of the layer's values: getValue and
-    // getProperties throw a std::runtime_error in C++.
+    // getProperties fail.
     let tile = tile_with_tags(&[0, 7]);
     let data = VectorMVTTileData::new(Arc::new(tile));
     let layer = data.get_layer("l").unwrap().unwrap();
     let feature = layer.get_feature(0).unwrap();
     assert!(feature.check().is_ok());
     assert_eq!(feature.get_value("k"), None);
-    let message = "feature referenced out of range value";
+    let message = "invalid value index 7";
     assert_eq!(feature.check().unwrap_err().to_string(), message);
     assert!(feature.get_properties().is_empty());
     // The geometry is fine, and the first exception is kept.

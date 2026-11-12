@@ -76,7 +76,6 @@ impl shader_group::ShaderGroup for ShaderGroup {
         let context = gfx_context.as_any().downcast_ref::<Context>()?;
         let shader: ShaderProgramBasePtr = Rc::new(ShaderProgram::create(
             context,
-            self.shader_id,
             &shader_name,
             &self.program_parameters,
             first_attrib_name,

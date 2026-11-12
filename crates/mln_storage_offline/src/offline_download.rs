@@ -414,10 +414,7 @@ impl Inner {
                     }
                 }
 
-                SourceType::Video
-                | SourceType::Annotations
-                | SourceType::CustomVector
-                | SourceType::CustomMVTVector => {}
+                SourceType::CustomVector | SourceType::CustomMVTVector => {}
             }
         }
 
@@ -568,10 +565,7 @@ impl Inner {
                     }
                 }
 
-                SourceType::Video
-                | SourceType::Annotations
-                | SourceType::CustomVector
-                | SourceType::CustomMVTVector => {}
+                SourceType::CustomVector | SourceType::CustomMVTVector => {}
             }
         }
 

@@ -1,4 +1,4 @@
-// Port-only: the map's image decoding, behind a decoder that a host can set.
+// Port-only: the map's image decoding.
 //
 // C++ links one `decodeImage` per platform and calls it synchronously where
 // an image arrives. Here those places call `decode`, which hands the bytes to
@@ -6,11 +6,8 @@
 // the browser's on wasm, which answers later from the event loop, on the
 // thread that asked.
 
-use std::sync::{Arc, Mutex};
-
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-use mln_util::sync::MutexExt;
 
 use crate::image::{ImageType, UNSUPPORTED, image_type};
 
@@ -29,15 +26,6 @@ pub trait ImageDecoder: Send + Sync {
     fn decode(&self, data: &[u8], kind: ImageType, done: DecodeDone);
 }
 
-static DECODER: Mutex<Option<Arc<dyn ImageDecoder>>> = Mutex::new(None);
-
-/// Sets the decoder `decode` uses from now on, instead of the default
-/// (`decode_image` natively, the browser's on wasm): for a host with decoders
-/// of its own.
-pub fn set_decoder(decoder: Arc<dyn ImageDecoder>) {
-    *DECODER.lock_unpoisoned() = Some(decoder);
-}
-
 /// `decodeImage(data)`, handing the result to `done`: before returning, or
 /// later on the calling thread. Data of no type `decode_image`
 /// recognizes fails before returning, with its error.
@@ -46,20 +34,16 @@ pub fn decode(data: &[u8], done: impl FnOnce(DecodeResult) + 'static) {
         done(Err(Error::unsupported(UNSUPPORTED)));
         return;
     };
-    let decoder = DECODER.lock_unpoisoned().clone();
-    match decoder {
-        Some(decoder) => decoder.decode(data, kind, Box::new(done)),
-        None => default_decode(data, kind, done),
-    }
+    platform_decode(data, kind, done);
 }
 
 #[cfg(not(target_family = "wasm"))]
-fn default_decode(data: &[u8], _kind: ImageType, done: impl FnOnce(DecodeResult)) {
+fn platform_decode(data: &[u8], _kind: ImageType, done: impl FnOnce(DecodeResult)) {
     done(crate::image::decode_image(data));
 }
 
 #[cfg(target_family = "wasm")]
-fn default_decode(data: &[u8], kind: ImageType, done: impl FnOnce(DecodeResult) + 'static) {
+fn platform_decode(data: &[u8], kind: ImageType, done: impl FnOnce(DecodeResult) + 'static) {
     crate::browser_decoder::BrowserDecoder.decode(data, kind, Box::new(done));
 }
 
@@ -78,7 +62,7 @@ mod tests {
     }
 
     #[test]
-    fn default_decoder_answers_at_once() {
+    fn native_decoder_answers_at_once() {
         assert_eq!(decode_now(b"GIF89a").unwrap_err().message, UNSUPPORTED);
         let png =
             crate::encode_png(&PremultipliedImage::from_vec(mln_util::size::Size::new(1, 1), vec![64, 0, 0, 128]));

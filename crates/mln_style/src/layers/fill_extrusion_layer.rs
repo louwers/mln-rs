@@ -14,7 +14,6 @@ use crate::layers::fill_extrusion_layer_properties::{
     FillExtrusionPattern, FillExtrusionRoundedCornerDistance, FillExtrusionTranslate, FillExtrusionTranslateAnchor,
     FillExtrusionVerticalGradient,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -85,11 +84,6 @@ impl FillExtrusionLayer {
     // Layout properties
 
     #[must_use]
-    pub fn get_default_fill_extrusion_rounded_corner_distance() -> PropertyValue<f32> {
-        PropertyValue::Constant(FillExtrusionRoundedCornerDistance::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_extrusion_rounded_corner_distance(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<FillExtrusionRoundedCornerDistance>()
     }
@@ -104,11 +98,6 @@ impl FillExtrusionLayer {
     }
 
     // Paint properties
-
-    #[must_use]
-    pub fn get_default_fill_extrusion_base() -> PropertyValue<f32> {
-        PropertyValue::Constant(FillExtrusionBase::default_value())
-    }
 
     #[must_use]
     pub fn get_fill_extrusion_base(&self) -> &PropertyValue<f32> {
@@ -133,11 +122,6 @@ impl FillExtrusionLayer {
     #[must_use]
     pub fn get_fill_extrusion_base_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionBase>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_extrusion_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(FillExtrusionColor::default_value())
     }
 
     #[must_use]
@@ -166,11 +150,6 @@ impl FillExtrusionLayer {
     }
 
     #[must_use]
-    pub fn get_default_fill_extrusion_height() -> PropertyValue<f32> {
-        PropertyValue::Constant(FillExtrusionHeight::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_extrusion_height(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<FillExtrusionHeight>().value
     }
@@ -193,11 +172,6 @@ impl FillExtrusionLayer {
     #[must_use]
     pub fn get_fill_extrusion_height_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionHeight>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_extrusion_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(FillExtrusionOpacity::default_value())
     }
 
     #[must_use]
@@ -226,11 +200,6 @@ impl FillExtrusionLayer {
     }
 
     #[must_use]
-    pub fn get_default_fill_extrusion_pattern() -> PropertyValue<Image> {
-        PropertyValue::Constant(FillExtrusionPattern::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_extrusion_pattern(&self) -> &PropertyValue<Image> {
         &self.impl_().paint.get::<FillExtrusionPattern>().value
     }
@@ -253,11 +222,6 @@ impl FillExtrusionLayer {
     #[must_use]
     pub fn get_fill_extrusion_pattern_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionPattern>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_extrusion_translate() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(FillExtrusionTranslate::default_value())
     }
 
     #[must_use]
@@ -286,11 +250,6 @@ impl FillExtrusionLayer {
     }
 
     #[must_use]
-    pub fn get_default_fill_extrusion_translate_anchor() -> PropertyValue<TranslateAnchorType> {
-        PropertyValue::Constant(FillExtrusionTranslateAnchor::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_extrusion_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<FillExtrusionTranslateAnchor>().value
     }
@@ -313,11 +272,6 @@ impl FillExtrusionLayer {
     #[must_use]
     pub fn get_fill_extrusion_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionTranslateAnchor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_extrusion_vertical_gradient() -> PropertyValue<bool> {
-        PropertyValue::Constant(FillExtrusionVerticalGradient::default_value())
     }
 
     #[must_use]

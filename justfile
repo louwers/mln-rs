@@ -9,8 +9,8 @@ binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-tele
 # Where `just ci-coverage` writes the LCOV report that CI uploads to Codecov
 coverage_lcov := 'target/llvm-cov/lcov.info'
 
-# The C++ core the port is ported from, for the recipes that read its sources (update-testdata, the generate-* and the
-# analysis recipes).
+# The C++ core the port is ported from, for the recipes that read its sources (update-testdata and the generate-*
+# recipes).
 cpp := justfile_directory() / '..' / 'maplibre-native'
 # maplibre-native-ffi, whose C headers and ABI suite crates/mln_c and tools/c-abi-test copy (update-ffi-abi).
 ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
@@ -81,8 +81,8 @@ check:
 # (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
 # GL bindings), which only the `webgl` module needs.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
-check-wasm:
-    cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
+check-wasm:  _dev-shell
+    {{dev_shell}} cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '
@@ -242,19 +242,6 @@ web-check *args:  web
     cargo build -p mln-rs-render-test --bin render-test
     node examples/web/check/check.mjs "$@"
 
-# Report which C++ gtests have Rust ports (`// gtest: Group.Name` markers), e.g. `just gtest-parity --missing util`
-[positional-arguments]
-gtest-parity *args:
-    python3 -I tools/gtest-parity/gtest_parity.py --cpp {{quote(cpp)}} "$@"
-
-# List which C++ files include which headers across selected module edges (tools/cycles)
-include-back-edges:
-    python3 -I tools/cycles/back_edges.py {{quote(cpp)}}
-
-# Print the C++ core's module-level include graph and its cycles (tools/cycles)
-include-graph:
-    python3 -I tools/cycles/include_graph.py {{quote(cpp)}}
-
 # The desktop app is never released.
 # The verify step serves the packaged crates to each other from a local registry, and Cargo
 # treats a registry crate's name and version as immutable: it keeps the source it unpacked
@@ -330,8 +317,9 @@ update-testdata checkout=cpp:
 
 # The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
 # builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
-# fix the suite's own bugs, and the declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's
-# t3/gpu-device-targets branch at 71435e96ed4b, which changes the render target headers ahead of their merge.
+# fix the suite's own bugs and drop its uses of the location-indicator layer type, which mln-rs doesn't have, and the
+# declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's t3/gpu-device-targets branch at
+# 71435e96ed4b, which changes the render target headers ahead of their merge.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash

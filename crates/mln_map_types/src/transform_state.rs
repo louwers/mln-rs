@@ -278,7 +278,6 @@ struct Matrices {
     inv_projection: Mat4,
     coord: Mat4,
     inverted: Mat4,
-    globe_radius: f64,
     globe_view_projection: Mat4,
     inv_globe_view_projection: Mat4,
     globe_clipping_plane: Vec4,
@@ -763,7 +762,6 @@ impl TransformState {
                 if matrix::invert(&mut inv_globe_view_projection, &globe_view_projection) {
                     matrix::identity(&mut inv_globe_view_projection);
                 }
-                matrices.globe_radius = globe_radius;
                 matrices.globe_view_projection = globe_view_projection;
                 matrices.inv_globe_view_projection = inv_globe_view_projection;
                 matrices.globe_clipping_plane = VerticalPerspectiveProjection::clipping_plane(self, globe_radius);
@@ -773,13 +771,9 @@ impl TransformState {
         })
     }
 
-    /// The globe's radius in pixels for the current camera, valid while
+    /// The globe's view projection for the current camera, valid while
     /// `is_globe_rendering()`; cached with the matrices, as are the globe
     /// getters below.
-    pub fn get_globe_radius_pixels(&self) -> f64 {
-        self.matrices().globe_radius
-    }
-
     pub fn get_globe_view_projection_matrix(&self) -> Mat4 {
         self.matrices().globe_view_projection
     }
@@ -1742,17 +1736,6 @@ impl TransformState {
         self.bc = Projection::world_size(self.scale) / constants::DEGREES_MAX;
         self.cc = Projection::world_size(self.scale) / M2PI;
         self.invalidate_matrices();
-    }
-
-    pub fn get_camera_to_tile_distance(&self, tile_id: &UnwrappedTileID) -> f32 {
-        let mut tile_projection_matrix: Mat4 = [0.0; 16];
-        self.matrix_for(&mut tile_projection_matrix, tile_id);
-        let b = tile_projection_matrix;
-        matrix::multiply(&mut tile_projection_matrix, &self.get_projection_matrix(), &b);
-        let tile_center: Vec4 = [TILE_SIZE_D / 2.0, TILE_SIZE_D / 2.0, 0.0, 1.0];
-        let mut projected_center: Vec4 = [0.0; 4];
-        matrix::transform_mat4(&mut projected_center, &tile_center, &tile_projection_matrix);
-        projected_center[3] as f32
     }
 
     pub fn max_pitch_scale_factor(&self) -> f32 {

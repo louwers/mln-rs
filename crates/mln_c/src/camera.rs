@@ -334,7 +334,6 @@ impl Animation {
                 easing: easing.map(|easing| UnitBezier::new(easing.x1, easing.y1, easing.x2, easing.y2)),
                 transition_end_fn: handler.as_ref().map(EndHandler::end_fn),
                 transition_id: fields.get(MLN_ANIMATION_OPTION_TRANSITION_ID, animation.transition_id),
-                ..AnimationOptions::default()
             },
             handler,
         })

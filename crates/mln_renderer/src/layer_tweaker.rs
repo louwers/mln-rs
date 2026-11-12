@@ -83,17 +83,6 @@ pub trait LayerTweaker {
         base.evaluated_properties = new_props;
         base.properties_updated = true;
     }
-
-    /// `checkTweakDrawable`: apply to a drawable if it references us, or if
-    /// it doesn't reference anything. The drawable's tweaker slot is opaque
-    /// in `mln_gfx` (`Rc<dyn Any>`); renderer layers store a `LayerTweakerPtr`
-    /// in it (see `layer_tweaker_slot`).
-    fn check_tweak_drawable(&self, drawable: &dyn Drawable) -> bool {
-        match drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>()) {
-            None => true,
-            Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), std::ptr::from_ref::<Self>(self)),
-        }
-    }
 }
 
 /// The value for `Drawable::set_layer_tweaker` (C++

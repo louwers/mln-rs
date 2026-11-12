@@ -72,9 +72,6 @@ fn emit_tag(w: &mut Writer, property: &Property, layer_type: &str, layout: bool)
     } else {
         let default = rust_value(&default_value(property), &t);
         let mut options = String::new();
-        if is_overridable(property) {
-            options.push_str(", overridable = true");
-        }
         if property.name == "line-floor-width" {
             // `using EvaluatorType = DataDrivenPropertyEvaluator<float, true>;`
             options.push_str(", use_integer_zoom = true");

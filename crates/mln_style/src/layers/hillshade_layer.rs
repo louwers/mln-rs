@@ -13,7 +13,6 @@ use crate::layers::hillshade_layer_properties::{
     HillshadeIlluminationAnchor, HillshadeIlluminationDirection, HillshadeMethod, HillshadePaintProperties,
     HillshadeShadowColor, Resampling,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -84,11 +83,6 @@ impl HillshadeLayer {
     // Paint properties
 
     #[must_use]
-    pub fn get_default_hillshade_accent_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(HillshadeAccentColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_hillshade_accent_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<HillshadeAccentColor>().value
     }
@@ -111,11 +105,6 @@ impl HillshadeLayer {
     #[must_use]
     pub fn get_hillshade_accent_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeAccentColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_hillshade_exaggeration() -> PropertyValue<f32> {
-        PropertyValue::Constant(HillshadeExaggeration::default_value())
     }
 
     #[must_use]
@@ -144,11 +133,6 @@ impl HillshadeLayer {
     }
 
     #[must_use]
-    pub fn get_default_hillshade_highlight_color() -> PropertyValue<Vec<Color>> {
-        PropertyValue::Constant(HillshadeHighlightColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_hillshade_highlight_color(&self) -> &PropertyValue<Vec<Color>> {
         &self.impl_().paint.get::<HillshadeHighlightColor>().value
     }
@@ -171,11 +155,6 @@ impl HillshadeLayer {
     #[must_use]
     pub fn get_hillshade_highlight_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeHighlightColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_hillshade_illumination_altitude() -> PropertyValue<Vec<f32>> {
-        PropertyValue::Constant(HillshadeIlluminationAltitude::default_value())
     }
 
     #[must_use]
@@ -204,11 +183,6 @@ impl HillshadeLayer {
     }
 
     #[must_use]
-    pub fn get_default_hillshade_illumination_anchor() -> PropertyValue<HillshadeIlluminationAnchorType> {
-        PropertyValue::Constant(HillshadeIlluminationAnchor::default_value())
-    }
-
-    #[must_use]
     pub fn get_hillshade_illumination_anchor(&self) -> &PropertyValue<HillshadeIlluminationAnchorType> {
         &self.impl_().paint.get::<HillshadeIlluminationAnchor>().value
     }
@@ -231,11 +205,6 @@ impl HillshadeLayer {
     #[must_use]
     pub fn get_hillshade_illumination_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeIlluminationAnchor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_hillshade_illumination_direction() -> PropertyValue<Vec<f32>> {
-        PropertyValue::Constant(HillshadeIlluminationDirection::default_value())
     }
 
     #[must_use]
@@ -264,11 +233,6 @@ impl HillshadeLayer {
     }
 
     #[must_use]
-    pub fn get_default_hillshade_method() -> PropertyValue<HillshadeMethodType> {
-        PropertyValue::Constant(HillshadeMethod::default_value())
-    }
-
-    #[must_use]
     pub fn get_hillshade_method(&self) -> &PropertyValue<HillshadeMethodType> {
         &self.impl_().paint.get::<HillshadeMethod>().value
     }
@@ -294,11 +258,6 @@ impl HillshadeLayer {
     }
 
     #[must_use]
-    pub fn get_default_hillshade_shadow_color() -> PropertyValue<Vec<Color>> {
-        PropertyValue::Constant(HillshadeShadowColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_hillshade_shadow_color(&self) -> &PropertyValue<Vec<Color>> {
         &self.impl_().paint.get::<HillshadeShadowColor>().value
     }
@@ -321,11 +280,6 @@ impl HillshadeLayer {
     #[must_use]
     pub fn get_hillshade_shadow_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeShadowColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
-        PropertyValue::Constant(Resampling::default_value())
     }
 
     #[must_use]

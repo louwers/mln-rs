@@ -6,8 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use feature::Value;
-use mln_actor::{RunLoop, Timer};
-use mln_util::chrono::Duration;
+use mln_actor::RunLoop;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use super::{local_callback, req, temp_path};
@@ -24,25 +23,6 @@ fn dbfs() -> Arc<dyn FileSource> {
     FileSourceManager::new()
         .get_file_source(FileSourceType::Database, &ResourceOptions::default())
         .expect("database file source")
-}
-
-// gtest: DatabaseFileSource.PauseResume
-#[test]
-fn pause_resume() {
-    let run_loop = RunLoop::new();
-
-    let dbfs = dbfs();
-    dbfs.pause();
-
-    let res = Resource::with_tile_data(Kind::Unknown, "http://127.0.0.1:3000/test", None, LoadingMethod::CacheOnly);
-    let stop = run_loop.clone();
-    let _req = dbfs.request(&res, Box::new(move |_: Response| stop.stop()));
-
-    let resume_timer = Timer::new();
-    let resumed = dbfs.clone();
-    resume_timer.start(Duration::from_millis(5), Duration::zero(), move || resumed.resume());
-
-    run_loop.run();
 }
 
 // gtest: DatabaseFileSource.VolatileResource

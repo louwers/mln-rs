@@ -10,23 +10,13 @@ pub struct BufferResource {
     context: Rc<Context>,
     buffer: Option<wgpu::Buffer>,
     size: usize,
-    usage: wgpu::BufferUsages,
     version: VersionType,
-    persistent: bool,
 }
 
 impl BufferResource {
-    /// `BufferResource(context, data, size, usage, isIndexBuffer, persistent)`,
-    /// where `usage` says whether it's an index buffer;
-    /// `data == None` is the C++ null pointer (size without contents).
-    pub fn new(
-        context: Rc<Context>,
-        data: Option<&[u8]>,
-        size: usize,
-        usage: wgpu::BufferUsages,
-        persistent: bool,
-    ) -> Self {
-        let mut res = BufferResource { context, buffer: None, size, usage, version: 0, persistent };
+    /// A buffer of `size` bytes for `usage`, holding `data` if it's given.
+    pub fn new(context: Rc<Context>, data: Option<&[u8]>, size: usize, usage: wgpu::BufferUsages) -> Self {
+        let mut res = BufferResource { context, buffer: None, size, version: 0 };
         if size == 0 {
             return res;
         }
@@ -64,9 +54,8 @@ impl BufferResource {
         context: Rc<Context>,
         data: &mln_util::host_bytes::HostBytes,
         usage: wgpu::BufferUsages,
-        persistent: bool,
     ) -> Self {
-        let res = BufferResource::new(context, None, data.len(), usage, persistent);
+        let res = BufferResource::new(context, None, data.len(), usage);
         if let Some(buffer) = &res.buffer {
             res.context.get_backend().write_buffer_from_host(buffer, 0, data);
         }
@@ -111,20 +100,6 @@ impl BufferResource {
     #[must_use]
     pub fn get_version(&self) -> VersionType {
         self.version
-    }
-    /// Indicates whether this buffer needs to be re-bound from a previous
-    /// binding at the given version
-    #[must_use]
-    pub fn need_re_bind(&self, version: VersionType) -> bool {
-        self.version != version
-    }
-    #[must_use]
-    pub fn get_usage(&self) -> wgpu::BufferUsages {
-        self.usage
-    }
-    #[must_use]
-    pub fn is_persistent(&self) -> bool {
-        self.persistent
     }
 }
 

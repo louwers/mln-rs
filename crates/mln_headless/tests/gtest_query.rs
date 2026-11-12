@@ -100,17 +100,8 @@ fn rendered(ids: Option<Vec<String>>, filter: Option<Filter>) -> RenderedQueryOp
 fn query_rendered_features() {
     let test = QueryTest::new();
 
-    // Batch conversion of latLngs to pixels
-    let points = test.map().pixels_for_lat_lngs(&[ll(0.0, 0.0), ll(9.0, 9.0)]);
-    assert_eq!(2, points.len());
-    // Single conversion of latLng to pixel
     let point0 = test.map().pixel_for_lat_lng(&ll(0.0, 0.0));
-    assert_near(points[0].x, point0.x, 1e-8);
-    assert_near(points[0].y, point0.y, 1e-8);
-
     let point1 = test.map().pixel_for_lat_lng(&ll(9.0, 9.0));
-    assert_near(points[1].x, point1.x, 1e-8);
-    assert_near(points[1].y, point1.y, 1e-8);
 
     let features1 = test.query_rendered_features(&point0, &RenderedQueryOptions::default());
     assert_eq!(features1.len(), 4);

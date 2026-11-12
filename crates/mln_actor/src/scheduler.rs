@@ -10,8 +10,7 @@
 // startup (`install_cooperative`), which `GetBackground` and `GetSequenced`
 // then return (cooperative_scheduler.rs).
 //
-// TODO(port): `runOnRenderThread`/`runRenderJobs`. (gtests-core added
-// `GetSequenced` and `setExceptionHandler`.)
+// TODO(port): `runOnRenderThread`/`runRenderJobs`.
 
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, OnceLock, Weak};
@@ -24,10 +23,6 @@ use crate::local_object::LocalObject;
 use crate::thread_pool::{SequencedScheduler, ThreadPool};
 
 pub type Task = Box<dyn FnOnce() + Send + 'static>;
-
-/// `std::function<void(const std::exception_ptr)>`: gets the payload of a
-/// task that panicked (gtests-core).
-pub type ExceptionHandler = Box<dyn Fn(Box<dyn std::any::Any + Send>) + Send + Sync>;
 
 /// A `Scheduler` is responsible for coordinating the processing of messages
 /// by one or more actors via their mailboxes.
@@ -49,11 +44,6 @@ pub trait Scheduler {
     fn wait_for_empty_tagged(&self, _tag: SimpleIdentity) {
         self.wait_for_empty();
     }
-
-    /// `setExceptionHandler(handler)` (gtests-core): called when a task on a
-    /// thread this scheduler controls panics (only thread pools call it, as
-    /// in C++).
-    fn set_exception_handler(&self, _handler: ExceptionHandler) {}
 }
 
 pub type SchedulerPtr = Arc<dyn Scheduler + Send + Sync>;
@@ -123,7 +113,7 @@ pub fn get_background() -> SchedulerPtr {
     scheduler
 }
 
-/// `Scheduler::GetSequenced()` (gtests-core): one of 10 process-wide
+/// `Scheduler::GetSequenced()`: one of 10 process-wide
 /// single-thread schedulers, round robin, each created on first use and
 /// kept alive by its users (or the installed cooperative scheduler).
 pub fn get_sequenced() -> SchedulerPtr {

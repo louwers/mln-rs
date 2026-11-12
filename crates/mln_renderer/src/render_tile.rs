@@ -14,7 +14,7 @@ use mln_style::layer;
 use mln_style_types::TranslateAnchorType;
 use mln_style_types::image::ImagePosition;
 use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
-use mln_util::mat4::{Mat4, matrix};
+use mln_util::mat4::Mat4;
 
 use crate::bucket::BucketPtr;
 use crate::buckets::debug_bucket::DebugBucket; // layers: debug
@@ -38,7 +38,6 @@ pub struct RenderTile {
     /// The projection contract for this tile; `matrix` is its main matrix.
     pub projection: ProjectionData,
     pub matrix: Mat4,
-    pub near_clipped_matrix: Mat4,
     /// layers: debug
     pub debug_bucket: Option<Box<DebugBucket>>,
 
@@ -59,41 +58,12 @@ impl RenderTile {
             projection: ProjectionData::default(),
             // C++ default-constructs `mat4` (uninitialized); prepare sets it.
             matrix: [0.0; 16],
-            near_clipped_matrix: [0.0; 16],
             tile_id: tile.id(),
             tile_hold_for_fade: tile.hold_for_fade(),
             render_data: None,
             needs_rendering: false,
             debug_bucket: None, // layers: debug
         }
-    }
-
-    /// `translateVtxMatrix(id, tileMatrix, translation, anchor, state,
-    /// inViewportPixelUnits)` (static).
-    pub fn translate_vtx_matrix_for(
-        id: &UnwrappedTileID,
-        tile_matrix: &Mat4,
-        translation: &[f32; 2],
-        anchor: TranslateAnchorType,
-        state: &TransformState,
-        in_viewport_pixel_units: bool,
-    ) -> Mat4 {
-        if translation[0] == 0.0 && translation[1] == 0.0 {
-            return *tile_matrix;
-        }
-
-        let mut vtx_matrix: Mat4 = [0.0; 16];
-
-        if in_viewport_pixel_units {
-            let angle = if anchor == TranslateAnchorType::Map { state.get_bearing() as f32 } else { 0.0f32 };
-            let translate = rotate(Point::new(translation[0], translation[1]), angle);
-            matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate.x), f64::from(translate.y), 0.0);
-        } else {
-            let translate = Self::tile_unit_translation(id, translation, anchor, state);
-            matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate[0]), f64::from(translate[1]), 0.0);
-        }
-
-        vtx_matrix
     }
 
     /// `tileUnitTranslation(id, translation, anchor, state)` (static): the
@@ -111,37 +81,6 @@ impl RenderTile {
         let translate = rotate(Point::new(translation[0], translation[1]), angle);
         let zoom = state.get_zoom() as f32;
         [id.pixels_to_tile_units(translate.x, zoom), id.pixels_to_tile_units(translate.y, zoom)]
-    }
-
-    /// `translateVtxMatrix(tileMatrix, translation, anchor, state,
-    /// inViewportPixelUnits)`.
-    pub fn translate_vtx_matrix(
-        &self,
-        tile_matrix: &Mat4,
-        translation: &[f32; 2],
-        anchor: TranslateAnchorType,
-        state: &TransformState,
-        in_viewport_pixel_units: bool,
-    ) -> Mat4 {
-        Self::translate_vtx_matrix_for(&self.id, tile_matrix, translation, anchor, state, in_viewport_pixel_units)
-    }
-
-    pub fn translated_matrix(
-        &self,
-        translation: &[f32; 2],
-        anchor: TranslateAnchorType,
-        state: &TransformState,
-    ) -> Mat4 {
-        self.translate_vtx_matrix(&self.matrix, translation, anchor, state, false)
-    }
-
-    pub fn translated_clip_matrix(
-        &self,
-        translation: &[f32; 2],
-        anchor: TranslateAnchorType,
-        state: &TransformState,
-    ) -> Mat4 {
-        self.translate_vtx_matrix(&self.near_clipped_matrix, translation, anchor, state, false)
     }
 
     #[must_use]
@@ -234,17 +173,10 @@ impl RenderTile {
             self.debug_bucket = None;
         }
 
-        // Calculate two matrices for this tile: matrix is the standard tile
-        // matrix; nearClippedMatrix has near plane moved further, to enhance
-        // depth buffer precision
+        // Calculate the standard tile matrix.
         let transform = parameters.transform;
         self.projection = transform.state.get_projection_data_with(&self.id, &transform.proj_matrix);
         self.matrix = self.projection.main_matrix;
-        self.near_clipped_matrix = if transform.state.is_globe_rendering() {
-            self.matrix
-        } else {
-            transform.state.get_projection_data_with(&self.id, &transform.near_clipped_proj_matrix).main_matrix
-        };
     }
 
     // TODO(port): setFeatureState (feature state, M6).

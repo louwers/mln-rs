@@ -483,8 +483,6 @@ pub struct Transform {
     observer: Rc<dyn TransformObserver>,
     state: TransformState,
 
-    latest_transition_start: TimePoint,
-    latest_transition_duration: Duration,
     transitions: Vec<Rc<Transition>>,
     /// What the commands being started come from: a command unless a gesture
     /// or a momentum starts them (see [`Self::with_source`]).
@@ -541,8 +539,6 @@ impl Transform {
         Transform {
             observer,
             state: TransformState::new(constrain_mode, viewport_mode),
-            latest_transition_start: TimePoint::default(),
-            latest_transition_duration: Duration::zero(),
             transitions: Vec::new(),
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
@@ -557,8 +553,6 @@ impl Transform {
         Transform {
             observer: Rc::new(NullTransformObserver),
             state,
-            latest_transition_start: TimePoint::default(),
-            latest_transition_duration: Duration::zero(),
             transitions: Vec::new(),
             source: CameraChangeSource::Command,
             gesture: GestureState::default(),
@@ -1610,8 +1604,6 @@ impl Transform {
 
         let start = self.now();
         let duration = if fields != 0 { duration } else { Duration::zero() };
-        self.latest_transition_start = start;
-        self.latest_transition_duration = duration;
         let transition = Rc::new(Transition {
             coupled_fields,
             anchor,
@@ -1813,14 +1805,6 @@ impl Transform {
             }
         }
         self.update_movement_flags();
-
-        for transition in &self.transitions {
-            if let Some(frame_fn) = &transition.animation.transition_frame_fn
-                && transition.duration.get() != Duration::zero()
-            {
-                frame_fn(transition.progress(now));
-            }
-        }
         if !self.transitions.is_empty() {
             self.observer.on_camera_is_changing();
         }
@@ -1918,8 +1902,6 @@ impl Transform {
         }
 
         let start = self.now();
-        self.latest_transition_start = start;
-        self.latest_transition_duration = motion;
 
         // A momentum that doesn't move ends at once, without a camera change,
         // and instant snaps without motion settle at once.
@@ -2245,17 +2227,6 @@ impl Transform {
     fn now(&self) -> TimePoint {
         let now = Clock::now();
         self.fresh_frame_time(now).unwrap_or(now)
-    }
-
-    /// Timing of the most recently started command, even after it finishes.
-    /// Other commands may still be active.
-    pub fn get_latest_transition_start(&self) -> TimePoint {
-        self.latest_transition_start
-    }
-
-    /// See [`get_latest_transition_start`](Self::get_latest_transition_start).
-    pub fn get_latest_transition_duration(&self) -> Duration {
-        self.latest_transition_duration
     }
 
     pub fn cancel_transitions(&mut self) {

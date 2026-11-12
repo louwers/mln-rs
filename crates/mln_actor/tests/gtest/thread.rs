@@ -270,101 +270,6 @@ fn reference_can_outlive_thread() {
     assert!(!happened.load(Ordering::SeqCst), "Should never happen");
 }
 
-// gtest: Thread.DeletePausedThread
-#[test]
-fn delete_paused_thread() {
-    let flag = Arc::new(AtomicBool::new(false));
-
-    let thread = Thread::new("Test", TestWorker::new);
-    thread.pause();
-    let f = flag.clone();
-    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || f.store(true, Ordering::SeqCst)));
-
-    // Should not hang.
-    drop(thread);
-
-    // Should process the queue before destruction.
-    assert!(flag.load(Ordering::SeqCst));
-}
-
-// gtest: Thread.Pause
-#[test]
-fn pause() {
-    let run_loop = RunLoop::new();
-    let failures = Failures::default();
-
-    let flag = Arc::new(AtomicBool::new(false));
-
-    let thread1 = Thread::new("Test1", TestWorker::new);
-    thread1.pause();
-
-    let thread2 = Thread::new("Test2", TestWorker::new);
-
-    for _ in 0..100 {
-        let f = flag.clone();
-        thread1.actor().invoke(move |_: &TestWorker| TestWorker::send(move || f.store(true, Ordering::SeqCst)));
-        let f = flag.clone();
-        let failures = failures.clone();
-        thread2.actor().invoke(move |_: &TestWorker| {
-            TestWorker::send(move || failures.expect(!f.load(Ordering::SeqCst), "!flag"));
-        });
-    }
-
-    // Queue a message at the end of thread2 queue.
-    let handle = run_loop.handle();
-    thread2.actor().invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop()));
-    run_loop.run();
-
-    failures.assert_none();
-}
-
-// gtest: Thread.Resume
-#[test]
-fn resume() {
-    let run_loop = RunLoop::new();
-
-    let flag = Arc::new(AtomicBool::new(false));
-
-    let thread = Thread::new("Test", TestWorker::new);
-    thread.pause();
-
-    for _ in 0..100 {
-        let f = flag.clone();
-        thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || f.store(true, Ordering::SeqCst)));
-    }
-
-    // Thread messages are ondered, when we resume, this is going
-    // to me the last thing to run on the message queue.
-    let handle = run_loop.handle();
-    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop()));
-
-    // This test will be flaky if the thread doesn't get paused.
-    assert!(!flag.load(Ordering::SeqCst));
-
-    thread.resume();
-    run_loop.run();
-
-    assert!(flag.load(Ordering::SeqCst));
-}
-
-// gtest: Thread.PauseResume
-#[test]
-fn pause_resume() {
-    let run_loop = RunLoop::new();
-
-    let thread = Thread::new("Test", TestWorker::new);
-
-    // Test if multiple pause/resume work.
-    for _ in 0..100 {
-        thread.pause();
-        thread.resume();
-    }
-
-    let handle = run_loop.handle();
-    thread.actor().invoke(move |_: &TestWorker| TestWorker::send(move || handle.stop()));
-    run_loop.run();
-}
-
 struct TestWorkerDelayedConstruction {
     _timer: Timer,
 }
@@ -521,36 +426,6 @@ fn pool_wait_add() {
     pool.wait_for_empty();
 
     assert!(state.added.load(Ordering::SeqCst) >= 1);
-}
-
-// gtest: Thread.PoolWaitException
-#[test]
-fn pool_wait_exception() {
-    let id = SimpleIdentity::new();
-    let pool = scheduler::get_background();
-
-    let caught = Arc::new(AtomicI32::new(0));
-    let c = caught.clone();
-    pool.set_exception_handler(Box::new(move |_| {
-        c.fetch_add(1, Ordering::SeqCst);
-    }));
-
-    let thread_count = 3;
-    for i in 0..thread_count {
-        pool.schedule_tagged(
-            id,
-            Box::new(move || {
-                std::thread::sleep(std::time::Duration::from_millis(i as u64));
-                // throw std::runtime_error("test");
-                assert!(i & 1 == 0, "test");
-                std::panic::panic_any(1); // throw 1;
-            }),
-        );
-    }
-
-    // Exceptions shouldn't cause deadlocks by, e.g., abandoning locks.
-    pool.wait_for_empty_tagged(id);
-    assert_eq!(thread_count, caught.load(Ordering::SeqCst));
 }
 
 // gtest: Thread.WrongThread

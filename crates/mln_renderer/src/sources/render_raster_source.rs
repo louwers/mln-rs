@@ -2,11 +2,9 @@
 // src/mln/renderer/sources/render_raster_source.cpp (with the
 // RenderTileSetSource half of render_tile_source.cpp).
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_map_types::MapMode;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source::{self, static_immutable_cast};
@@ -35,9 +33,9 @@ pub struct RenderRasterSource {
 
 impl RenderRasterSource {
     #[must_use]
-    pub fn new(impl_: Arc<tile_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
+    pub fn new(impl_: Arc<tile_source::Impl>) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
-        RenderRasterSource { tile_source: RenderTileSource::new(impl_, thread_pool), cached_tileset: None }
+        RenderRasterSource { tile_source: RenderTileSource::new(impl_), cached_tileset: None }
     }
 
     fn impl_(&self) -> Arc<tile_source::Impl> {
@@ -82,10 +80,6 @@ impl RenderSource for RenderRasterSource {
 
     fn base_mut(&mut self) -> &mut RenderSourceBase {
         &mut self.tile_source.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn is_loaded(&self) -> bool {

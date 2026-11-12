@@ -785,7 +785,7 @@ fn cached_resource_low_priority() {
     dbfs.forward(&resource2, &response, Some(Box::new(|| {})));
 
     online_fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
-    fs.pause();
+    let paused = fs.pause();
     NetworkStatus::set(Status::Offline);
 
     // Ensure that the online requests for new resources are processed first.
@@ -867,7 +867,7 @@ fn cached_resource_low_priority() {
         }),
     ));
 
-    fs.resume();
+    drop(paused);
     NetworkStatus::set(Status::Online);
 
     run_loop.run();

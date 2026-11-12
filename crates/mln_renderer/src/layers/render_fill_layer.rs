@@ -398,10 +398,9 @@ impl RenderLayer for RenderFillLayer {
             let base = &self.base;
             // If the render pass has changed or the tile has dropped out of
             // the cover set, remove it.
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
 
             tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
         }
@@ -529,24 +528,21 @@ impl RenderLayer for RenderFillLayer {
                 attrs
             };
 
-            let base_stats = &mut self.base.stats;
             let layer_id = self.base.base_impl.id.clone();
-            let finish =
-                |builder: &mut dyn DrawableBuilder, type_: FillVariant, base_stats: &mut crate::render_layer::Stats| {
-                    builder.flush(context);
+            let finish = |builder: &mut dyn DrawableBuilder, type_: FillVariant| {
+                builder.flush(context);
 
-                    let mut group = layer_group.borrow_mut();
-                    let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
-                    for mut drawable in builder.clear_drawables() {
-                        drawable.set_tile_id(tile_id);
-                        drawable.set_type(type_ as usize);
-                        drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
-                        drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
-                        drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
-                        tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-                        base_stats.drawables_added += 1;
-                    }
-                };
+                let mut group = layer_group.borrow_mut();
+                let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
+                for mut drawable in builder.clear_drawables() {
+                    drawable.set_tile_id(tile_id);
+                    drawable.set_type(type_ as usize);
+                    drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
+                    drawable.set_binders(drawable_binders_slot(&render_data.bucket, &layer_id));
+                    drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
+                    tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
+                }
+            };
 
             if self.unevaluated.get::<FillPattern>().is_undefined() {
                 // Simple fill
@@ -638,7 +634,7 @@ impl RenderLayer for RenderFillLayer {
                         Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
                         &bucket.triangle_segments,
                     );
-                    finish(builder.as_mut(), FillVariant::Fill, base_stats);
+                    finish(builder.as_mut(), FillVariant::Fill);
                 }
 
                 if do_outline && let Some(builder) = outline_builder.as_mut() {
@@ -658,7 +654,7 @@ impl RenderLayer for RenderFillLayer {
                                 Some(bucket_indexes(geometry, bucket, &bucket.line_indexes)),
                                 &bucket.line_segments,
                             );
-                            finish(builder.as_mut(), FillVariant::FillOutlineTriangulated, base_stats);
+                            finish(builder.as_mut(), FillVariant::FillOutlineTriangulated);
                         }
                     } else if !bucket.basic_lines.is_empty() {
                         builder.set_shader(outline_shader.clone());
@@ -668,7 +664,7 @@ impl RenderLayer for RenderFillLayer {
                             Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
                             &bucket.basic_line_segments,
                         );
-                        finish(builder.as_mut(), FillVariant::FillOutline, base_stats);
+                        finish(builder.as_mut(), FillVariant::FillOutline);
                     }
                 }
             } else {
@@ -766,7 +762,7 @@ impl RenderLayer for RenderFillLayer {
                         &bucket.triangle_segments,
                     );
 
-                    finish(builder.as_mut(), FillVariant::FillPattern, base_stats);
+                    finish(builder.as_mut(), FillVariant::FillPattern);
                 }
 
                 if do_outline
@@ -782,7 +778,7 @@ impl RenderLayer for RenderFillLayer {
                         &bucket.basic_line_segments,
                     );
 
-                    finish(builder.as_mut(), FillVariant::FillOutlinePattern, base_stats);
+                    finish(builder.as_mut(), FillVariant::FillOutlinePattern);
                 }
             }
         }

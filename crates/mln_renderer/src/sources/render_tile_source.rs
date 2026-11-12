@@ -17,7 +17,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use geometry::Point;
-use mln_actor::TaggedScheduler;
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::polyline_generator::PolylineGeneratorOptions;
 use mln_gfx::projection_variant::ProjectionVariant;
@@ -363,7 +362,6 @@ impl layer::Impl for PolylineLayerImpl {
     fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
         false
     }
-    fn stringify_layout(&self, _writer: &mut String) {}
     fn get_type_info(&self) -> &'static LayerTypeInfo {
         &POLYLINE_LAYER_TYPE_INFO
     }
@@ -519,10 +517,11 @@ pub struct RenderTileSource {
 }
 
 impl RenderTileSource {
-    /// `RenderTileSource(Immutable<style::Source::Impl>, const TaggedScheduler&)`.
-    pub fn new(impl_: Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler) -> Self {
+    /// `RenderTileSource(Immutable<style::Source::Impl>, const TaggedScheduler&)`,
+    /// without the thread pool (see `TileCache::new`).
+    pub fn new(impl_: Immutable<dyn source::Impl>) -> Self {
         let base = RenderSourceBase::new(impl_);
-        let mut tile_pyramid = TilePyramid::new(thread_pool.clone());
+        let mut tile_pyramid = TilePyramid::new();
         tile_pyramid.set_observer(base.tile_observer());
         RenderTileSource {
             base,

@@ -1,11 +1,9 @@
 // Ports src/mln/renderer/sources/render_custom_geometry_source.hpp and
 // src/mln/renderer/sources/render_custom_geometry_source.cpp.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source::{self, static_immutable_cast};
 use mln_style::source_impl::Impl as _;
@@ -28,9 +26,9 @@ pub struct RenderCustomGeometrySource {
 impl RenderCustomGeometrySource {
     /// `RenderCustomGeometrySource(Immutable<style::CustomGeometrySource::Impl>, const TaggedScheduler&)`.
     #[must_use]
-    pub fn new(impl_: Arc<custom_geometry_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
+    pub fn new(impl_: Arc<custom_geometry_source::Impl>) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
-        RenderCustomGeometrySource { tile_source: RenderTileSource::new(impl_, thread_pool) }
+        RenderCustomGeometrySource { tile_source: RenderTileSource::new(impl_) }
     }
 
     /// `impl()`.
@@ -50,10 +48,6 @@ impl RenderSource for RenderCustomGeometrySource {
 
     fn base_mut(&mut self) -> &mut RenderSourceBase {
         &mut self.tile_source.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn is_loaded(&self) -> bool {

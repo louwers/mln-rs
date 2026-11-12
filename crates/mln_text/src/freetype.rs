@@ -36,16 +36,6 @@ pub struct FreeTypeFace {
 }
 
 impl FreeTypeFace {
-    /// `FreeTypeFace(const std::string& fontFileName, const FreeTypeLibrary&)`
-    /// (`FT_New_Face` on a file).
-    #[must_use]
-    pub fn from_file(font_file_name: &str, lib: &FreeTypeLibrary) -> Self {
-        match std::fs::read(font_file_name) {
-            Ok(data) => Self::from_memory(data, lib),
-            Err(_) => FreeTypeFace { memory_file: FontData::default(), face: None, scaler: Arc::default() },
-        }
-    }
-
     /// `FreeTypeFace(const char* fontData, size_t fontDataSize, const FreeTypeLibrary&)`.
     /// The face keeps `font_data` instead of copying it, unless it is a WOFF
     /// or WOFF2 file: then it keeps the font decoded from it, and isn't valid
@@ -130,12 +120,6 @@ impl FreeTypeFace {
     pub(crate) fn scaler(&self) -> Option<&skrifa::ScalerFont> {
         self.face.as_ref()?;
         self.scaler.get_or_init(|| crate::rasterize::new_scaler(&self.memory_file)).as_ref()
-    }
-
-    /// The hinting engine `rasterize_glyph` uses (for tests and reports).
-    #[must_use]
-    pub fn hint_engine(&self) -> Option<skrifa::HintEngine> {
-        self.scaler()?.hint_engine()
     }
 
     /// `rasterizeGlyph`.

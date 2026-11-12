@@ -1,7 +1,6 @@
 // Ports src/mln/style/layers/background_layer_impl.hpp +
-// src/mln/style/layers/background_layer_impl.cpp. `staticTypeInfo()` and
-// `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
-// background_layer.rs.
+// src/mln/style/layers/background_layer_impl.cpp. `staticTypeInfo()` is generated
+// in C++ (layer.cpp.ejs); here it is in background_layer.rs.
 
 use serde::{Deserialize, Serialize};
 
@@ -50,8 +49,6 @@ impl layer::Impl for Impl {
     fn has_layout_difference(&self, _other: &dyn layer::Impl) -> bool {
         false
     }
-
-    fn stringify_layout(&self, _writer: &mut String) {}
 
     fn get_type_info(&self) -> &'static LayerTypeInfo {
         Impl::static_type_info()

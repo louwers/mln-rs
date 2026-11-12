@@ -14,7 +14,6 @@
 //   include/mln/shaders/mtl/hillshade.hpp
 //   include/mln/shaders/mtl/hillshade_prepare.hpp
 //   include/mln/shaders/mtl/line.hpp
-//   include/mln/shaders/mtl/location_indicator.hpp
 //   include/mln/shaders/mtl/raster.hpp
 //   include/mln/shaders/mtl/shader_group.hpp
 //   include/mln/shaders/mtl/shader_program.hpp
@@ -6313,108 +6312,6 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 ",
 };
 
-/// `ShaderSource<BuiltIn::LocationIndicatorShader, gfx::Backend::Type::Metal>`
-pub const LOCATION_INDICATOR_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LocationIndicatorShader",
-    name: r"LocationIndicatorShader",
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLocationIndicatorUBO = drawableReservedUBOCount,
-    locationIndicatorUBOCount
-};
-
-struct alignas(16) LocationIndicatorDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float4 color;
-    /* 80 */
-};
-static_assert(sizeof(LocationIndicatorDrawableUBO) == 5 * 16, "wrong size");
-
-"#,
-    source: r"
-
-struct VertexStage {
-    float2 position [[attribute(0)]];
-};
-
-struct FragmentStage {
-    float4 position [[position, invariant]];
-};
-
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
-
-    return {
-        .position = projectTile(vertx.position, projectionVector[uboIndex])
-    };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LocationIndicatorDrawableUBO& drawable [[buffer(idLocationIndicatorUBO)]]) {
-    return half4(drawable.color);
-}
-",
-};
-
-/// `ShaderSource<BuiltIn::LocationIndicatorTexturedShader, gfx::Backend::Type::Metal>`
-pub const LOCATION_INDICATOR_TEXTURED_SHADER: MslShaderSource = MslShaderSource {
-    built_in: "LocationIndicatorTexturedShader",
-    name: r"LocationIndicatorTexturedShader",
-    vertex_main_function: r"vertexMain",
-    fragment_main_function: r"fragmentMain",
-    prelude: r#"
-
-enum {
-    idLocationIndicatorUBO = drawableReservedUBOCount,
-    locationIndicatorUBOCount
-};
-
-struct alignas(16) LocationIndicatorDrawableUBO {
-    /*  0 */ float4x4 matrix;
-    /* 64 */ float4 color;
-    /* 80 */
-};
-static_assert(sizeof(LocationIndicatorDrawableUBO) == 5 * 16, "wrong size");
-
-"#,
-    source: r"
-
-struct VertexStage {
-    float2 position [[attribute(0)]];
-    float2 uv [[attribute(1)]];
-};
-
-struct FragmentStage {
-    float4 position [[position, invariant]];
-    float2 uv;
-};
-
-FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
-                                device const uint32_t& uboIndex [[buffer(idGlobalUBOIndex)]],
-                                device const ProjectionUBO* projectionVector [[buffer(idProjectionUBO)]]) {
-
-    return {
-        .position = projectTile(vertx.position, projectionVector[uboIndex]),
-        .uv = vertx.uv
-    };
-}
-
-half4 fragment fragmentMain(FragmentStage in [[stage_in]],
-                            device const LocationIndicatorDrawableUBO& drawable [[buffer(idLocationIndicatorUBO)]],
-                            texture2d<float, access::sample> colorTexture [[texture(0)]]) {
-
-    constexpr sampler sampler2d(coord::normalized, filter::linear);
-    const float4 color = colorTexture.sample(sampler2d, in.uv);
-
-    return half4(color);
-}
-",
-};
-
 /// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::Metal>`
 pub const RASTER_SHADER: MslShaderSource = MslShaderSource {
     built_in: "RasterShader",
@@ -8175,8 +8072,6 @@ pub const ALL: &[&MslShaderSource] = &[
     &LINE_PATTERN_SHADER,
     &LINE_SDF_SHADER,
     &LINE_SHADER,
-    &LOCATION_INDICATOR_SHADER,
-    &LOCATION_INDICATOR_TEXTURED_SHADER,
     &RASTER_SHADER,
     &SKY_SHADER,
     &SYMBOL_ICON_SHADER,

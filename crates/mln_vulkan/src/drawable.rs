@@ -151,9 +151,6 @@ impl Drawable {
     }
 
     pub fn upload(&mut self, upload_pass: &UploadPass) {
-        if self.base.is_custom {
-            return;
-        }
         let Some(shader_ptr) = self.base.shader.clone() else {
             Log::warning(
                 Event::General,
@@ -202,7 +199,6 @@ impl Drawable {
         if build_attribs {
             let attrs = self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr).clone();
             // Apply drawable values to shader defaults.
-            let mut vertex_buffers = Vec::new();
             let attribute_bindings = upload_pass.build_attribute_bindings(
                 self.impl_.vertex_count,
                 self.impl_.vertex_type,
@@ -212,7 +208,6 @@ impl Drawable {
                 &mut attrs.borrow_mut(),
                 usage,
                 self.base.attribute_update_time,
-                &mut vertex_buffers,
             );
             attrs.borrow().visit_attributes(|attrib| attrib.set_dirty(false));
             if self.impl_.attribute_bindings != attribute_bindings {
@@ -229,7 +224,6 @@ impl Drawable {
 
         if build_instance_buffer && let Some(attrs) = self.base.instance_attributes.clone() {
             // Build instance attribute buffers.
-            let mut instance_buffers = Vec::new();
             let count = attrs.borrow().get_min_count();
             let instance_bindings = upload_pass.build_attribute_bindings(
                 count,
@@ -240,7 +234,6 @@ impl Drawable {
                 &mut attrs.borrow_mut(),
                 usage,
                 self.base.attribute_update_time,
-                &mut instance_buffers,
             );
             // clear dirty flag
             attrs.borrow().visit_attributes(|attrib| attrib.set_dirty(false));
@@ -442,9 +435,6 @@ impl drawable::Drawable for Drawable {
     }
 
     fn draw(&mut self, parameters: &mut dyn PaintParameters) {
-        if self.base.is_custom {
-            return;
-        }
         let parameters: &dyn PaintParameters = parameters;
         let Some(context) = parameters.context().as_any().downcast_ref::<Context>() else {
             return;
@@ -602,10 +592,6 @@ impl drawable::Drawable for Drawable {
         debug_assert!(indexes.as_ref().is_some_and(|i| i.borrow().elements() != 0));
         self.impl_.indexes = indexes;
         self.impl_.segments = segments;
-    }
-
-    fn get_uniform_buffers(&self) -> &UniformBufferArray {
-        &self.impl_.uniform_buffers
     }
 
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {

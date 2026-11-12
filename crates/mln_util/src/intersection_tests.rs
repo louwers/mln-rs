@@ -157,22 +157,6 @@ pub fn polygon_intersects_buffered_point(
 }
 
 #[must_use]
-pub fn polygon_intersects_buffered_multi_point(
-    polygon: &[GeometryCoordinate],
-    rings: &[Vec<GeometryCoordinate>],
-    radius: f32,
-) -> bool {
-    for ring in rings {
-        for point in ring {
-            if polygon_intersects_buffered_point(polygon, point, radius) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-#[must_use]
 pub fn polygon_intersects_buffered_multi_line(
     polygon: &[GeometryCoordinate],
     multi_line: &[Vec<GeometryCoordinate>],

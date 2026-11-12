@@ -1,8 +1,9 @@
 // Ports include/mln/style/types.hpp + src/mln/style/types.cpp (the enum
 // names, MBGL_DEFINE_ENUM -> mln_util::define_enum!).
 //
-// Variant order and discriminants follow the C++ enums; `TextVariableAnchorType`
-// is an alias of `SymbolAnchorType` as in C++.
+// Variant order and discriminants follow the C++ enums, except that
+// `SourceType` has no `Video` or `Annotations`: mln-rs has neither source.
+// `TextVariableAnchorType` is an alias of `SymbolAnchorType` as in C++.
 
 use mln_util::define_enum;
 use serde::{Deserialize, Serialize};
@@ -15,8 +16,6 @@ pub enum SourceType {
     Raster,
     RasterDEM,
     GeoJSON,
-    Video,
-    Annotations,
     Image,
     CustomVector,
     CustomMVTVector,
@@ -209,8 +208,6 @@ define_enum!(
         (SourceType::Vector, "vector"),
         (SourceType::Raster, "raster"),
         (SourceType::GeoJSON, "geojson"),
-        (SourceType::Video, "video"),
-        (SourceType::Annotations, "annotations"),
         (SourceType::Image, "image"),
         (SourceType::CustomVector, "customvector"),
     ]
