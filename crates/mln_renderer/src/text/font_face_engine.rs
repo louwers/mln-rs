@@ -15,7 +15,7 @@ use mln_text::HBShapeAdjust;
 use mln_text::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use mln_util::sync::MutexExt;
 
-/// A font file loaded for shaping: what `HBShaper` does for GlyphManager.
+/// A font file loaded for shaping: what `HBShaper` does for `GlyphManager`.
 pub trait FontFaceShaper {
     /// `HBShaper::createComplexGlyphIDs`: appends the glyphs of `text`
     /// (UTF-16), one run of one direction in logical order, in visual order,
@@ -42,8 +42,8 @@ pub trait FontFaceEngine: Send + Sync {
 
 static ENGINE: Mutex<Option<Arc<dyn FontFaceEngine>>> = Mutex::new(None);
 
-/// Sets the engine of the GlyphManagers created from now on, instead of the
-/// default (mln_text's HBShaper with the `font-face-shaper` feature, else
+/// Sets the engine of the `GlyphManagers` created from now on, instead of the
+/// default (`mln_text`'s `HBShaper` with the `font-face-shaper` feature, else
 /// none): for a host that loads the shaper itself, such as the browser
 /// build.
 pub fn set_font_face_engine(engine: Arc<dyn FontFaceEngine>) {
@@ -90,7 +90,7 @@ mod in_process {
 
     use super::{FontFaceEngine, FontFaceShaper};
 
-    /// mln_text's HBShaper in this thread, as the C++ core shapes.
+    /// `mln_text`'s `HBShaper` in this thread, as the C++ core shapes.
     pub(super) struct HBShaperEngine;
 
     impl FontFaceEngine for HBShaperEngine {

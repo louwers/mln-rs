@@ -238,7 +238,7 @@ mod tests {
                 let mut v = base.clone();
                 nth_element(&mut v, nth, |a, b| a < b);
                 let mut sorted = base.clone();
-                sorted.sort();
+                sorted.sort_unstable();
                 assert_eq!(v[nth], sorted[nth]);
                 assert!(v[..nth].iter().all(|x| *x <= v[nth]));
                 assert!(v[nth + 1..].iter().all(|x| *x >= v[nth]));

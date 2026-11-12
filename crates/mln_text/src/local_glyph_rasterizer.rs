@@ -6,9 +6,9 @@ use mln_util::font_stack::FontStack;
 use crate::glyph::{Glyph, GlyphID};
 
 /// Given a font stack and a glyph ID, platform-specific implementations of
-/// LocalGlyphRasterizer will decide which, if any, local fonts to use and
+/// `LocalGlyphRasterizer` will decide which, if any, local fonts to use and
 /// then generate a matching glyph object with a greyscale rasterization of
-/// the glyph and appropriate metrics. GlyphManager will then use TinySDF to
+/// the glyph and appropriate metrics. `GlyphManager` will then use TinySDF to
 /// transform the rasterized bitmap into an SDF.
 ///
 /// The shared default codepoint filter is
@@ -17,7 +17,7 @@ use crate::glyph::{Glyph, GlyphID};
 /// via `GlyphMetrics::isDoubleResolution`.
 ///
 /// It is left to platform-specific implementation to decide how best to
-/// map a FontStack to a particular rasterization (font, weight, style).
+/// map a `FontStack` to a particular rasterization (font, weight, style).
 ///
 /// The default implementation simply refuses to rasterize any glyphs.
 pub trait LocalGlyphRasterizer {
@@ -50,6 +50,7 @@ pub struct DefaultLocalGlyphRasterizer {
 
 impl DefaultLocalGlyphRasterizer {
     #[cfg(not(target_family = "wasm"))]
+    #[must_use]
     pub fn new(font_family: Option<String>) -> Self {
         DefaultLocalGlyphRasterizer { _font_family: font_family }
     }

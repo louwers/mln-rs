@@ -24,13 +24,13 @@ fn asset_file_source() -> AssetFileSource {
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
-fn request(fs: &AssetFileSource, resource: Resource) -> Response {
+fn request(fs: &AssetFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &resource,
+        resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
             *out.borrow_mut() = Some(res);
@@ -136,7 +136,7 @@ fn load() {
                     }
                 }),
                 failures,
-            )
+            );
         });
         threads.push(thread);
     }
@@ -162,7 +162,7 @@ fn accepts_url() {
 #[test]
 fn empty_file() {
     let fs = asset_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "asset://empty"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "asset://empty"));
     assert_eq!(None, res.error);
     assert_eq!(b"", data(&res));
 }
@@ -171,7 +171,7 @@ fn empty_file() {
 #[test]
 fn non_empty_file() {
     let fs = asset_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "asset://nonempty"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "asset://nonempty"));
     assert_eq!(None, res.error);
     assert_eq!(b"content is here\n", data(&res));
 }
@@ -180,7 +180,7 @@ fn non_empty_file() {
 #[test]
 fn non_existent_file() {
     let fs = asset_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "asset://does_not_exist"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "asset://does_not_exist"));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(res.data.is_none());
@@ -191,7 +191,7 @@ fn non_existent_file() {
 #[test]
 fn invalid_url() {
     let fs = asset_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "test://wrong-scheme"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "test://wrong-scheme"));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert_eq!("Invalid asset URL", error.message);
@@ -202,7 +202,7 @@ fn invalid_url() {
 #[test]
 fn read_directory() {
     let fs = asset_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "asset://directory"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "asset://directory"));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(res.data.is_none());
@@ -213,7 +213,7 @@ fn read_directory() {
 #[test]
 fn url_encoding() {
     let fs = asset_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "asset://%6eonempty"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "asset://%6eonempty"));
     assert_eq!(None, res.error);
     assert_eq!(b"content is here\n", data(&res));
 }
@@ -226,7 +226,7 @@ fn range_request() {
     let mut resource = Resource::new(Kind::Unknown, "asset://nonempty");
     resource.data_range = Some((4, 12));
 
-    let res = request(&fs, resource);
+    let res = request(&fs, &resource);
     assert_eq!(None, res.error);
     assert_eq!(b"ent is he", data(&res));
 }

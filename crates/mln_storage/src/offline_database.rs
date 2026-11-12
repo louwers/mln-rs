@@ -50,41 +50,31 @@ pub const MAX_PENDING_ACCESSED: usize = 4096;
 
 /// The offline regions would hold more tiles from MapLibre's demo tile server
 /// than the database's limit allows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("Mapbox tile limit exceeded")]
 pub struct TileCountLimitExceeded;
 
-impl std::fmt::Display for TileCountLimitExceeded {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("Mapbox tile limit exceeded")
-    }
-}
-
-impl std::error::Error for TileCountLimitExceeded {}
-
 /// Why a database operation failed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum DatabaseError {
-    Sqlite(SqliteError),
+    #[error(transparent)]
+    Sqlite(#[from] SqliteError),
     /// A file operation failed with the OS error `code`.
-    Io {
-        code: i32,
-        message: String,
-    },
+    #[error("{message}")]
+    Io { code: i32, message: String },
     /// See [`TileCountLimitExceeded`].
+    #[error("{}", TileCountLimitExceeded)]
     TileCountLimitExceeded,
     /// The operation failed, such as on a malformed region definition in the
     /// database.
+    #[error("{0}")]
     Runtime(String),
     /// An argument was invalid, such as a region definition's zoom range.
+    #[error("{0}")]
     Logic(String),
     /// The database has no offline region with this ID.
+    #[error("no offline region has ID {0}")]
     RegionNotFound(i64),
-}
-
-impl From<SqliteError> for DatabaseError {
-    fn from(e: SqliteError) -> Self {
-        DatabaseError::Sqlite(e)
-    }
 }
 
 impl From<rusqlite::Error> for DatabaseError {
@@ -98,18 +88,6 @@ impl From<Error> for DatabaseError {
         match e.kind {
             ErrorKind::InvalidArgument => DatabaseError::Logic(e.message),
             _ => DatabaseError::Runtime(e.message),
-        }
-    }
-}
-
-impl std::fmt::Display for DatabaseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DatabaseError::Sqlite(e) => f.write_str(&e.message),
-            DatabaseError::Io { message, .. } => f.write_str(message),
-            DatabaseError::TileCountLimitExceeded => TileCountLimitExceeded.fmt(f),
-            DatabaseError::Runtime(message) | DatabaseError::Logic(message) => f.write_str(message),
-            DatabaseError::RegionNotFound(region_id) => write!(f, "no offline region has ID {region_id}"),
         }
     }
 }
@@ -232,6 +210,7 @@ impl OfflineDatabase {
     /// the URL is not enough to guarantee uniqueness (eg. PMTiles where all
     /// requests resolve to the same URL), this function creates a synthetic
     /// key based on the requested data range.
+    #[must_use]
     pub fn cache_key(resource: &Resource) -> String {
         let Some((first, second)) = resource.data_range else {
             return resource.url.clone();
@@ -345,6 +324,7 @@ impl OfflineDatabase {
     }
 
     /// The number of rows whose `accessed` timestamp waits to be written.
+    #[must_use]
     pub fn pending_accessed_count(&self) -> usize {
         self.pending_resource_accessed.len() + self.pending_tile_accessed.len()
     }
@@ -439,7 +419,7 @@ impl OfflineDatabase {
                     Log::record(
                         EventSeverity::Error,
                         Event::Database,
-                        ex.code as i64,
+                        i64::from(ex.code),
                         &format!("Can't {action}: {}", ex.message),
                     );
                     if let Err(io_ex) = self.remove_existing() {
@@ -451,18 +431,19 @@ impl OfflineDatabase {
                     Log::record(
                         EventSeverity::Warning,
                         Event::Database,
-                        ex.code as i64,
+                        i64::from(ex.code),
                         &format!("Can't {action}: {}", ex.message),
                     );
                 }
             }
             DatabaseError::Io { code, message } => {
                 // We failed to delete the database file.
-                Log::record(EventSeverity::Error, Event::Database, *code as i64, &format!("Can't {action}: {message}"));
-            }
-            DatabaseError::TileCountLimitExceeded => {
-                // This is ours and must be handled on client side (C++
-                // rethrows; the callers that can see it return it).
+                Log::record(
+                    EventSeverity::Error,
+                    Event::Database,
+                    i64::from(*code),
+                    &format!("Can't {action}: {message}"),
+                );
             }
             DatabaseError::Runtime(message) => {
                 Log::error(Event::Database, format!("Can't {action}: {message}"));
@@ -471,9 +452,10 @@ impl OfflineDatabase {
                 // C++: assert(false) in debug builds.
                 Log::error(Event::Database, format!("Can't {action}"));
             }
-            DatabaseError::RegionNotFound(_) => {
-                // The caller's to report.
-            }
+            // `TileCountLimitExceeded` is ours and must be handled on client
+            // side (C++ rethrows; the callers that can see it return it).
+            // `RegionNotFound` is the caller's to report.
+            DatabaseError::TileCountLimitExceeded | DatabaseError::RegionNotFound(_) => {}
         }
     }
 
@@ -553,14 +535,12 @@ impl OfflineDatabase {
 
     fn vacuum(&mut self) -> DbResult<()> {
         self.check_flags()?;
-        if self.get_pragma_i64("PRAGMA auto_vacuum")? != 2
-        /*INCREMENTAL*/
-        {
+        if self.get_pragma_i64("PRAGMA auto_vacuum")? == 2 {
+            self.get_db()?.exec("PRAGMA incremental_vacuum")?;
+        } else {
             let db = self.get_db()?;
             db.exec("PRAGMA auto_vacuum = INCREMENTAL")?;
             db.exec("VACUUM")?;
-        } else {
-            self.get_db()?.exec("PRAGMA incremental_vacuum")?;
         }
         Ok(())
     }
@@ -1209,7 +1189,7 @@ impl OfflineDatabase {
                 Log::record(
                     EventSeverity::Error,
                     Event::Database,
-                    ex.code as i64,
+                    i64::from(ex.code),
                     &format!("Can't attach database ({side_database_path}) for merge: {}", ex.message),
                 );
                 return Err(DatabaseError::Sqlite(ex));
@@ -1312,7 +1292,7 @@ impl OfflineDatabase {
     }
 
     /// `deleteRegion(OfflineRegion&&)`.
-    pub fn delete_region(&mut self, region: OfflineRegion) -> Option<DatabaseError> {
+    pub fn delete_region(&mut self, region: &OfflineRegion) -> Option<DatabaseError> {
         let result = (|| -> DbResult<()> {
             self.check_flags()?;
             // Eviction uses the stored timestamps if this fails.
@@ -1811,6 +1791,7 @@ impl OfflineDatabase {
     }
 
     /// `getOfflineMapboxTileCountLimit`.
+    #[must_use]
     pub fn get_offline_mapbox_tile_count_limit(&self) -> u64 {
         self.offline_mapbox_tile_count_limit
     }
@@ -1894,6 +1875,7 @@ impl OfflineDatabase {
         self.autopack = autopack;
     }
 
+    #[must_use]
     pub fn tile_server_options(&self) -> &TileServerOptions {
         &self.tile_server_options
     }

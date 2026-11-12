@@ -25,6 +25,7 @@ pub struct Wagyu {
 }
 
 impl Wagyu {
+    #[must_use]
     pub fn new() -> Self {
         Wagyu::default()
     }

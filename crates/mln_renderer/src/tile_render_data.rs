@@ -62,7 +62,7 @@ pub trait TileRenderData {
     fn prepare(&mut self, _parameters: &SourcePrepareParameters<'_>) {}
 
     /// Port-only: the render thread's copies of the buckets' geometry
-    /// (bucket_geometry.rs).
+    /// (`bucket_geometry.rs`).
     fn get_bucket_geometry(&self) -> Option<&crate::bucket_geometry::BucketGeometry> {
         None
     }
@@ -74,6 +74,7 @@ pub struct SharedBucketTileRenderData {
 }
 
 impl SharedBucketTileRenderData {
+    #[must_use]
     pub fn new(bucket: Option<BucketPtr>) -> Self {
         SharedBucketTileRenderData { bucket }
     }

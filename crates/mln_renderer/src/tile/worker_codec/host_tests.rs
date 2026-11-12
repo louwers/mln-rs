@@ -82,7 +82,7 @@ impl Test {
         let corrupt = Rc::new(Cell::new(None));
         let next = corrupt.clone();
         let transport = SerializingTransport::new(move |replies| {
-            Box::new(Corrupting { instances: ThreadWorkerInstances::new(1, replies), next })
+            Box::new(Corrupting { instances: ThreadWorkerInstances::new(1, &replies), next })
         });
         let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         let transform_state = TransformState::default();
@@ -155,7 +155,7 @@ fn garbage() -> SharedTileData {
 }
 
 /// A layer of the fixture's "water" source layer, evaluated as the
-/// RenderOrchestrator evaluates it.
+/// `RenderOrchestrator` evaluates it.
 fn layer(id: &str, type_: &str) -> Immutable<dyn LayerProperties> {
     let json = serde_json::json!({"id": id, "type": type_, "source": "s", "source-layer": "water"});
     let mut error = ConversionError::default();

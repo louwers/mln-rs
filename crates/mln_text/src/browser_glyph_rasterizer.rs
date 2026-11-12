@@ -8,7 +8,7 @@
 //! top measured per character. The weight and style come from the font
 //! stack's first font name, as GL JS sniffs them.
 
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 
 use js_sys::Reflect;
 use mln_util::constants::ONE_EM;
@@ -32,8 +32,8 @@ const TOP_ADJUSTMENT: f64 = 26.5;
 #[derive(Debug)]
 pub(crate) struct BrowserGlyphRasterizer {
     font_family: String,
-    /// The canvas, created at the first glyph; `None` inside if it can't be.
-    canvas: RefCell<Option<Option<Canvas>>>,
+    /// The canvas, created at the first glyph; `None` if it can't be.
+    canvas: OnceCell<Option<RefCell<Canvas>>>,
 }
 
 #[derive(Debug)]
@@ -47,13 +47,12 @@ struct Canvas {
 
 impl BrowserGlyphRasterizer {
     pub(crate) fn new(font_family: String) -> Self {
-        BrowserGlyphRasterizer { font_family, canvas: RefCell::new(None) }
+        BrowserGlyphRasterizer { font_family, canvas: OnceCell::new() }
     }
 
     pub(crate) fn rasterize_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> Glyph {
-        let mut canvas = self.canvas.borrow_mut();
-        let canvas = canvas.get_or_insert_with(|| match Canvas::new() {
-            Ok(canvas) => Some(canvas),
+        let canvas = self.canvas.get_or_init(|| match Canvas::new() {
+            Ok(canvas) => Some(RefCell::new(canvas)),
             Err(error) => {
                 Log::warning(Event::Glyph, format!("Unable to create a canvas for local glyphs: {error:?}"));
                 None
@@ -67,7 +66,7 @@ impl BrowserGlyphRasterizer {
         };
         let first = font_stack.first().map_or("", String::as_str);
         let font = format!("{} {} {FONT_SIZE}px {}", font_style(first), font_weight(first), self.font_family);
-        match canvas.draw(&font, &text.to_string()) {
+        match canvas.borrow_mut().draw(&font, &text.to_string()) {
             Ok((bitmap, metrics)) => Glyph { id: glyph_id, bitmap, metrics },
             Err(error) => {
                 Log::warning(Event::Glyph, format!("Unable to draw glyph {}: {error:?}", glyph_id.code));
@@ -106,7 +105,7 @@ impl Canvas {
         context.clear_rect(0.0, 0.0, size, size);
         context.fill_text(text, 0.0, RASTER_BUFFER + glyph_top)?;
         let rgba = context.get_image_data(0.0, 0.0, size, size)?.data().0;
-        let alpha = rgba.chunks_exact(4).map(|texel| texel[3]).collect();
+        let alpha = rgba.as_chunks::<4>().0.iter().map(|texel| texel[3]).collect();
 
         let scale = f64::from(TEXTURE_SCALE);
         let metrics = GlyphMetrics {

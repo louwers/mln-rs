@@ -39,8 +39,8 @@ fn data(res: &Response) -> &[u8] {
     res.data.as_deref().map(Vec::as_slice).expect("data")
 }
 
-fn bytes(s: &str) -> Option<crate::response::Data> {
-    Some(Arc::new(s.as_bytes().to_vec()))
+fn bytes(s: &str) -> crate::response::Data {
+    Arc::new(s.as_bytes().to_vec())
 }
 
 fn in_one_hour() -> Timestamp {
@@ -145,7 +145,7 @@ fn volatile_storage_policy() {
     run_loop.run();
 }
 
-/// CacheRevalidateSame and CacheRevalidateModified share their structure.
+/// `CacheRevalidateSame` and `CacheRevalidateModified` share their structure.
 fn cache_revalidate(path: &str, check: fn(&Response)) {
     let _serial = serial();
     let file_sources = FileSourceManager::new();
@@ -183,21 +183,7 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
             *r2.borrow_mut() = Some(fs2.request(
                 &revalidate2,
                 Box::new(move |res2: Response| {
-                    if !got_response.get() {
-                        // Even though we could find the response in the
-                        // database, we send a revalidation request and get a
-                        // 304 response. Since we haven't sent a reply yet,
-                        // we're forcing notModified to be false so that
-                        // implementations can continue to use the
-                        // notModified flag to skip parsing new data.
-                        got_response.set(true);
-                        assert_eq!(None, res2.error);
-                        assert!(!res2.not_modified);
-                        assert_eq!(b"Response", data(&res2));
-                        assert!(res2.expires.is_some());
-                        assert!(res2.must_revalidate);
-                        check(&res2);
-                    } else {
+                    if got_response.get() {
                         // The test server sends a Cache-Control header with
                         // a max-age of 1 second. This means that our
                         // OnlineFileSource implementation will request the
@@ -213,6 +199,20 @@ fn cache_revalidate(path: &str, check: fn(&Response)) {
                         assert!(res2.must_revalidate);
                         check(&res2);
                         stop.stop();
+                    } else {
+                        // Even though we could find the response in the
+                        // database, we send a revalidation request and get a
+                        // 304 response. Since we haven't sent a reply yet,
+                        // we're forcing notModified to be false so that
+                        // implementations can continue to use the
+                        // notModified flag to skip parsing new data.
+                        got_response.set(true);
+                        assert_eq!(None, res2.error);
+                        assert!(!res2.not_modified);
+                        assert_eq!(b"Response", data(&res2));
+                        assert!(res2.expires.is_some());
+                        assert!(res2.must_revalidate);
+                        check(&res2);
                     }
                 }),
             ));
@@ -235,7 +235,7 @@ fn cache_revalidate_same() {
 #[test]
 fn cache_revalidate_modified() {
     cache_revalidate("/revalidate-modified", |res| {
-        assert_eq!(Some(Timestamp::from_secs(1420070400)), res.modified);
+        assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
         assert!(res.etag.is_none());
     });
 }
@@ -338,7 +338,7 @@ fn http_issue_1369() {
     run_loop.run();
 }
 
-/// OptionalNonExpired and OptionalExpired: a cached value is returned for a
+/// `OptionalNonExpired` and `OptionalExpired`: a cached value is returned for a
 /// cache-only request whether it has expired or not.
 fn optional_cached(expires: Timestamp) {
     let _serial = serial();
@@ -349,7 +349,7 @@ fn optional_cached(expires: Timestamp) {
     let optional_resource = cache_only("http://127.0.0.1:3000/test");
 
     let mut response = Response::new();
-    response.data = bytes("Cached value");
+    response.data = Some(bytes("Cached value"));
     response.expires = Some(expires);
 
     let req = req();
@@ -424,21 +424,21 @@ fn optional_not_found() {
     run_loop.run();
 }
 
-/// The NoCache* tests: put a fake value into the cache to make sure we're
+/// The `NoCache`* tests: put a fake value into the cache to make sure we're
 /// not retrieving anything from the cache, then request network-only.
-fn no_cache(resource: Resource, check: impl Fn(&Response) + 'static) {
+fn no_cache(resource: &Resource, check: impl Fn(&Response) + 'static) {
     let file_sources = FileSourceManager::new();
     let run_loop = RunLoop::new();
     let fs = main_resource_loader(&file_sources);
 
     let mut response = Response::new();
-    response.data = bytes("Cached value");
+    response.data = Some(bytes("Cached value"));
     response.expires = Some(in_one_hour());
     let req = req();
     let dbfs = database_file_source(&file_sources);
     let (r, fs2, stop, resource2) = (req.clone(), fs.clone(), run_loop.clone(), resource.clone());
     dbfs.forward(
-        &resource,
+        resource,
         &response,
         Some(local_callback(move || {
             let rc = r.clone();
@@ -468,7 +468,7 @@ fn no_cache_refresh_etag_not_modified() {
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_etag = Some("snowfall".to_owned());
 
-    no_cache(resource, |res| {
+    no_cache(&resource, |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
         assert!(res.expires.is_some());
@@ -490,7 +490,7 @@ fn no_cache_refresh_etag_modified() {
     resource.loading_method = LoadingMethod::NetworkOnly;
     resource.prior_etag = Some("sunshine".to_owned());
 
-    no_cache(resource, |res| {
+    no_cache(&resource, |res| {
         assert!(!res.not_modified);
         assert_eq!(b"Response", data(res));
         assert!(res.expires.is_none());
@@ -510,7 +510,7 @@ fn no_cache_full() {
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
     resource.loading_method = LoadingMethod::NetworkOnly;
 
-    no_cache(resource, |res| {
+    no_cache(&resource, |res| {
         assert!(!res.not_modified);
         assert_eq!(b"Response", data(res));
         assert!(res.expires.is_none());
@@ -529,15 +529,15 @@ fn no_cache_refresh_modified_not_modified() {
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-modified"));
     resource.loading_method = LoadingMethod::NetworkOnly;
-    resource.prior_modified = Some(Timestamp::from_secs(1420070400)); // January 1, 2015
+    resource.prior_modified = Some(Timestamp::from_secs(1_420_070_400)); // January 1, 2015
 
-    no_cache(resource, |res| {
+    no_cache(&resource, |res| {
         assert!(res.not_modified);
         assert!(res.data.is_none());
         assert!(res.expires.is_some());
         assert!(Some(now()) < res.expires);
         assert!(res.must_revalidate);
-        assert_eq!(Some(Timestamp::from_secs(1420070400)), res.modified);
+        assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
         assert!(res.etag.is_none());
     });
 }
@@ -551,14 +551,14 @@ fn no_cache_refresh_modified_modified() {
     let server = HttpServer::new();
     let mut resource = Resource::new(Kind::Unknown, server.url("/revalidate-modified"));
     resource.loading_method = LoadingMethod::NetworkOnly;
-    resource.prior_modified = Some(Timestamp::from_secs(1417392000)); // December 1, 2014
+    resource.prior_modified = Some(Timestamp::from_secs(1_417_392_000)); // December 1, 2014
 
-    no_cache(resource, |res| {
+    no_cache(&resource, |res| {
         assert!(!res.not_modified);
         assert_eq!(b"Response", data(res));
         assert!(res.expires.is_none());
         assert!(res.must_revalidate);
-        assert_eq!(Some(Timestamp::from_secs(1420070400)), res.modified);
+        assert_eq!(Some(Timestamp::from_secs(1_420_070_400)), res.modified);
         assert!(res.etag.is_none());
     });
 }
@@ -569,7 +569,7 @@ struct TransformActor {
 }
 
 impl TransformActor {
-    /// The actor's callback: translates "localhost://test" to the test
+    /// The actor's callback: translates "<localhost://test>" to the test
     /// server's /test.
     fn call(&self, url: &str, cb: FinishedCallback) {
         if url == "localhost://test" {
@@ -675,9 +675,9 @@ fn respond_to_stale_must_revalidate() {
     // Put an existing value in the cache that has expired, and has
     // must-revalidate set.
     let mut response = Response::new();
-    response.data = bytes("Cached value");
-    response.modified = Some(Timestamp::from_secs(1417392000)); // December 1, 2014
-    response.expires = Some(Timestamp::from_secs(1417392000));
+    response.data = Some(bytes("Cached value"));
+    response.modified = Some(Timestamp::from_secs(1_417_392_000)); // December 1, 2014
+    response.expires = Some(Timestamp::from_secs(1_417_392_000));
     response.must_revalidate = true;
     response.etag = Some("snowfall".to_owned());
     let req = req();
@@ -699,9 +699,9 @@ fn respond_to_stale_must_revalidate() {
                     assert_eq!("Cached resource is unusable", error.message);
                     assert!(!res.not_modified);
                     assert_eq!(b"Cached value", data(&res));
-                    assert_eq!(Some(Timestamp::from_secs(1417392000)), res.expires);
+                    assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.expires);
                     assert!(res.must_revalidate);
-                    assert_eq!(Some(Timestamp::from_secs(1417392000)), res.modified);
+                    assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.modified);
                     assert_eq!(Some("snowfall"), res.etag.as_deref());
 
                     let mut resource = resource2.borrow_mut();
@@ -723,7 +723,7 @@ fn respond_to_stale_must_revalidate() {
     // can check that the MainResourceLoader doesn't attempt another database
     // access if we already have the value.
     resource.borrow_mut().loading_method = LoadingMethod::NetworkOnly;
-    resource.borrow_mut().prior_data = bytes("Prior value");
+    resource.borrow_mut().prior_data = Some(bytes("Prior value"));
 
     let (r, stop) = (req.clone(), run_loop.clone());
     let request = resource.borrow().clone();
@@ -746,7 +746,7 @@ fn respond_to_stale_must_revalidate() {
             assert!(res.expires.is_some());
             assert!(Some(now()) <= res.expires);
             assert!(res.must_revalidate);
-            assert_eq!(Some(Timestamp::from_secs(1417392000)), res.modified);
+            assert_eq!(Some(Timestamp::from_secs(1_417_392_000)), res.modified);
             assert_eq!(Some("snowfall"), res.etag.as_deref());
             stop.stop();
         }),
@@ -777,11 +777,11 @@ fn cached_resource_low_priority() {
 
     // Put existing values into the cache.
     let resource1 = Resource::with_tile_data(Kind::Unknown, server.url("/load/3"), None, LoadingMethod::All);
-    response.data = bytes("Cached Request 3");
+    response.data = Some(bytes("Cached Request 3"));
     dbfs.forward(&resource1, &response, Some(Box::new(|| {})));
 
     let resource2 = Resource::with_tile_data(Kind::Unknown, server.url("/load/4"), None, LoadingMethod::All);
-    response.data = bytes("Cached Request 4");
+    response.data = Some(bytes("Cached Request 4"));
     dbfs.forward(&resource2, &response, Some(Box::new(|| {})));
 
     online_fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
@@ -821,14 +821,14 @@ fn cached_resource_low_priority() {
         &resource1,
         Box::new(move |res: Response| {
             // Offline callback is received first
-            if !received.get() {
-                assert_eq!(b"Cached Request 3", data(&res));
-                received.set(true);
-            } else {
+            if received.get() {
                 counter.set(counter.get() + 1);
                 r.borrow_mut().take();
                 assert_eq!(counter.get(), 3);
                 assert_eq!(b"Request 3", data(&res));
+            } else {
+                assert_eq!(b"Cached Request 3", data(&res));
+                received.set(true);
             }
         }),
     ));
@@ -841,15 +841,15 @@ fn cached_resource_low_priority() {
         &resource2,
         Box::new(move |res: Response| {
             // Offline callback is received first
-            if !received.get() {
-                assert_eq!(b"Cached Request 4", data(&res));
-                received.set(true);
-            } else {
+            if received.get() {
                 counter.set(counter.get() + 1);
                 r.borrow_mut().take();
                 assert_eq!(counter.get(), 4);
                 assert_eq!(b"Request 4", data(&res));
                 stop.stop();
+            } else {
+                assert_eq!(b"Cached Request 4", data(&res));
+                received.set(true);
             }
         }),
     ));
@@ -884,7 +884,7 @@ fn no_double_dispatch() {
 
     let resource = Resource::new(Kind::Unknown, server.url("/revalidate-same"));
     let mut response = Response::new();
-    response.data = bytes("data");
+    response.data = Some(bytes("data"));
     response.etag = Some("snowfall".to_owned());
 
     let req = req();

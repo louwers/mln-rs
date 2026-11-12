@@ -105,9 +105,9 @@ fn insert_point(bnd: &Bound, hp: GPoint, rings: &mut RingManager) -> bool {
     let ring = bnd.ring;
     let op = rings.rings[ring].points;
     let to_front = bnd.side == EdgeSide::Left;
-    if to_front && hp.x == rings.pt(op).x && hp.y == rings.pt(op).y {
-        return false;
-    } else if !to_front && hp.x == rings.pt(rings.prev(op)).x && hp.y == rings.pt(rings.prev(op)).y {
+    if (to_front && hp.x == rings.pt(op).x && hp.y == rings.pt(op).y)
+        || (!to_front && hp.x == rings.pt(rings.prev(op)).x && hp.y == rings.pt(rings.prev(op)).y)
+    {
         return false;
     }
     let new_point = create_new_point_before(ring, hp, op, rings);
@@ -117,7 +117,7 @@ fn insert_point(bnd: &Bound, hp: GPoint, rings: &mut RingManager) -> bool {
     true
 }
 
-/// `hot_pixel_set_left_to_right` over hot_pixels[itr..end).
+/// `hot_pixel_set_left_to_right` over `hot_pixels`[itr..end).
 #[allow(clippy::too_many_arguments)]
 fn hot_pixel_set_left_to_right(
     y: i32,
@@ -146,7 +146,7 @@ fn hot_pixel_set_left_to_right(
     }
 }
 
-/// `hot_pixel_set_right_to_left` over hot_pixels[first..last) backwards
+/// `hot_pixel_set_right_to_left` over `hot_pixels`[first..last) backwards
 /// (the reverse iterators of the C++).
 #[allow(clippy::too_many_arguments)]
 fn hot_pixel_set_right_to_left(
@@ -405,13 +405,9 @@ fn get_lower_most_ring(ring1: RingPtr, ring2: RingPtr, rings: &mut RingManager) 
         ring2
     } else if x1 < x2 {
         ring1
-    } else if x1 > x2 {
+    } else if x1 > x2 || rings.next(pt1) == pt1 {
         ring2
-    } else if rings.next(pt1) == pt1 {
-        ring2
-    } else if rings.next(pt2) == pt2 {
-        ring1
-    } else if first_is_bottom_point(rings, pt1, pt2) {
+    } else if rings.next(pt2) == pt2 || first_is_bottom_point(rings, pt1, pt2) {
         ring1
     } else {
         ring2
@@ -452,9 +448,9 @@ fn append_ring(b1: BoundPtr, b2: BoundPtr, active_bounds: &[BoundPtr], b: &mut [
 
     let (keep_ring, keep_bound, remove_ring, remove_bound) = if ring1_child_below_ring2(out_rec1, out_rec2, manager) {
         (out_rec2, b2, out_rec1, b1)
-    } else if ring1_child_below_ring2(out_rec2, out_rec1, manager) {
-        (out_rec1, b1, out_rec2, b2)
-    } else if out_rec1 == get_lower_most_ring(out_rec1, out_rec2, manager) {
+    } else if ring1_child_below_ring2(out_rec2, out_rec1, manager)
+        || out_rec1 == get_lower_most_ring(out_rec1, out_rec2, manager)
+    {
         (out_rec1, b1, out_rec2, b2)
     } else {
         (out_rec2, b2, out_rec1, b1)
@@ -506,11 +502,11 @@ fn append_ring(b1: BoundPtr, b2: BoundPtr, active_bounds: &[BoundPtr], b: &mut [
 
     manager.rings[remove_ring].points = NIL;
     manager.rings[remove_ring].bottom_point = NIL;
-    if keep_is_hole != remove_is_hole {
+    if keep_is_hole == remove_is_hole {
+        ring1_replaces_ring2(keep_ring, remove_ring, manager);
+    } else {
         let parent = manager.rings[keep_ring].parent;
         ring1_replaces_ring2(parent, remove_ring, manager);
-    } else {
-        ring1_replaces_ring2(keep_ring, remove_ring, manager);
     }
 
     update_points_ring(keep_ring, manager);
@@ -556,28 +552,26 @@ pub(crate) fn add_local_maximum_point(
 /// `enum point_in_polygon_result`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PointInPolygonResult {
-    OnPolygon = -1,
-    InsidePolygon = 0,
-    OutsidePolygon = 1,
+    On = -1,
+    Inside = 0,
+    Outside = 1,
 }
 
-use PointInPolygonResult::{InsidePolygon, OnPolygon, OutsidePolygon};
-
 fn toggle(result: PointInPolygonResult) -> PointInPolygonResult {
-    if result == OutsidePolygon { InsidePolygon } else { OutsidePolygon }
+    if result == PointInPolygonResult::Outside { PointInPolygonResult::Inside } else { PointInPolygonResult::Outside }
 }
 
 /// `point_in_polygon(point<T> const&, point_ptr<T>)`.
 fn point_in_polygon(pt: (i32, i32), mut op: PointPtr, rings: &RingManager) -> PointInPolygonResult {
     // returns 0 if false, +1 if true, -1 if pt ON polygon boundary
-    let mut result = OutsidePolygon;
+    let mut result = PointInPolygonResult::Outside;
     let start_op = op;
     let (ptx, pty) = pt;
     loop {
         let (opx, opy) = rings.xy(op);
         let (nx, ny) = rings.xy(rings.next(op));
         if ny == pty && ((nx == ptx) || (opy == pty && ((nx > ptx) == (opx < ptx)))) {
-            return OnPolygon;
+            return PointInPolygonResult::On;
         }
         if (opy < pty) != (ny < pty) {
             if opx >= ptx {
@@ -589,7 +583,7 @@ fn point_in_polygon(pt: (i32, i32), mut op: PointPtr, rings: &RingManager) -> Po
                     let d = f64::from(opx.wrapping_sub(ptx)) * f64::from(ny.wrapping_sub(pty))
                         - f64::from(nx.wrapping_sub(ptx)) * f64::from(opy.wrapping_sub(pty));
                     if value_is_zero(d) {
-                        return OnPolygon;
+                        return PointInPolygonResult::On;
                     }
                     if (d > 0.0) == (ny > opy) {
                         result = toggle(result);
@@ -599,7 +593,7 @@ fn point_in_polygon(pt: (i32, i32), mut op: PointPtr, rings: &RingManager) -> Po
                 let d = f64::from(opx.wrapping_sub(ptx)) * f64::from(ny.wrapping_sub(pty))
                     - f64::from(nx.wrapping_sub(ptx)) * f64::from(opy.wrapping_sub(pty));
                 if value_is_zero(d) {
-                    return OnPolygon;
+                    return PointInPolygonResult::On;
                 }
                 if (d > 0.0) == (ny > opy) {
                     result = toggle(result);
@@ -617,7 +611,7 @@ fn point_in_polygon(pt: (i32, i32), mut op: PointPtr, rings: &RingManager) -> Po
 /// `point_in_polygon(mapbox::geometry::point<double> const&, point_ptr<T>)`.
 fn point_in_polygon_f(pt: (f64, f64), mut op: PointPtr, rings: &RingManager) -> PointInPolygonResult {
     // returns 0 if false, +1 if true, -1 if pt ON polygon boundary
-    let mut result = OutsidePolygon;
+    let mut result = PointInPolygonResult::Outside;
     let start_op = op;
     let (ptx, pty) = pt;
     loop {
@@ -631,7 +625,7 @@ fn point_in_polygon_f(pt: (f64, f64), mut op: PointPtr, rings: &RingManager) -> 
             && (values_are_equal(op_next_x, ptx)
                 || (values_are_equal(op_y, pty) && ((op_next_x > ptx) == (op_x < ptx))))
         {
-            return OnPolygon;
+            return PointInPolygonResult::On;
         }
         if (op_y < pty) != (op_next_y < pty) {
             if greater_than_or_equal(op_x, ptx) {
@@ -640,7 +634,7 @@ fn point_in_polygon_f(pt: (f64, f64), mut op: PointPtr, rings: &RingManager) -> 
                 } else {
                     let d = (op_x - ptx) * (op_next_y - pty) - (op_next_x - ptx) * (op_y - pty);
                     if value_is_zero(d) {
-                        return OnPolygon;
+                        return PointInPolygonResult::On;
                     }
                     if (d > 0.0) == (op_next_y > op_y) {
                         result = toggle(result);
@@ -649,7 +643,7 @@ fn point_in_polygon_f(pt: (f64, f64), mut op: PointPtr, rings: &RingManager) -> 
             } else if op_next_x > ptx {
                 let d = (op_x - ptx) * (op_next_y - pty) - (op_next_x - ptx) * (op_y - pty);
                 if value_is_zero(d) {
-                    return OnPolygon;
+                    return PointInPolygonResult::On;
                 }
                 if (d > 0.0) == (op_next_y > op_y) {
                     result = toggle(result);
@@ -703,7 +697,7 @@ fn inside_or_outside_special(
     loop {
         if is_convex(itr, rings) {
             let pt = centroid_of_points(itr, rings);
-            if InsidePolygon == point_in_polygon_f(pt, first_pt, rings) {
+            if PointInPolygonResult::Inside == point_in_polygon_f(pt, first_pt, rings) {
                 return Ok(point_in_polygon_f(pt, other_poly, rings));
             }
         }
@@ -735,8 +729,8 @@ pub(crate) fn poly2_contains_poly1(ring1: RingPtr, ring2: RingPtr, rings: &mut R
     loop {
         // nb: PointInPolygon returns 0 if false, +1 if true, -1 if pt on polygon
         let res = point_in_polygon(rings.xy(op), outpt2, rings);
-        if res != OnPolygon {
-            return Ok(res == InsidePolygon);
+        if res != PointInPolygonResult::On {
+            return Ok(res == PointInPolygonResult::Inside);
         }
         op = rings.next(op);
         if op == outpt1 {
@@ -744,5 +738,5 @@ pub(crate) fn poly2_contains_poly1(ring1: RingPtr, ring2: RingPtr, rings: &mut R
         }
     }
     let res = inside_or_outside_special(outpt1, outpt2, rings)?;
-    Ok(res == InsidePolygon)
+    Ok(res == PointInPolygonResult::Inside)
 }

@@ -144,10 +144,12 @@ impl RenderTile {
         self.translate_vtx_matrix(&self.near_clipped_matrix, translation, anchor, state, false)
     }
 
+    #[must_use]
     pub fn get_overscaled_tile_id(&self) -> &OverscaledTileID {
         &self.tile_id
     }
 
+    #[must_use]
     pub fn hold_for_fade(&self) -> bool {
         self.tile_hold_for_fade
     }
@@ -162,12 +164,14 @@ impl RenderTile {
     }
 
     /// symbols: the feature index of the tile's layout result.
+    #[must_use]
     pub fn get_feature_index(&self) -> Option<std::sync::Arc<crate::geometry::feature_index::FeatureIndex>> {
         self.render_data.as_ref().and_then(|data| data.get_feature_index())
     }
 
     /// Port-only: the render thread's copies of the tile's bucket geometry
-    /// (bucket_geometry.rs).
+    /// (`bucket_geometry.rs`).
+    #[must_use]
     pub fn get_bucket_geometry(&self) -> Option<&crate::bucket_geometry::BucketGeometry> {
         self.render_data.as_deref().and_then(|data| data.get_bucket_geometry())
     }
@@ -176,14 +180,17 @@ impl RenderTile {
         self.render_data().get_layer_render_data(impl_)
     }
 
+    #[must_use]
     pub fn get_pattern(&self, pattern: &str) -> Option<ImagePosition> {
         self.render_data().get_pattern(pattern)
     }
 
+    #[must_use]
     pub fn get_atlas_textures(&self) -> Option<&Rc<TileAtlasTextures>> {
         self.render_data.as_deref().and_then(|data| data.get_atlas_textures())
     }
 
+    #[must_use]
     pub fn get_needs_rendering(&self) -> bool {
         self.needs_rendering
     }
@@ -193,7 +200,7 @@ impl RenderTile {
     }
 
     /// `prepare(const SourcePrepareParameters&)`; `tile` is the tile this
-    /// RenderTile was created for.
+    /// `RenderTile` was created for.
     pub fn prepare(&mut self, tile: &dyn Tile, parameters: &SourcePrepareParameters<'_>) {
         let mut render_data = tile.create_render_data();
         render_data.prepare(parameters);

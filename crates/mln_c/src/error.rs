@@ -2,7 +2,6 @@
 //! diagnostic message.
 
 use std::borrow::Cow;
-use std::fmt;
 
 use mln_util::ErrorKind;
 
@@ -29,7 +28,8 @@ pub(crate) const fn status(kind: ErrorKind) -> mln_status {
 
 /// A failure: the status a C function returns or a completion carries, and
 /// the message its diagnostic shows.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
 pub(crate) struct Error {
     status: mln_status,
     message: Cow<'static, str>,
@@ -67,14 +67,6 @@ impl From<mln_util::Error> for Error {
         Self::new(error.kind, error.message)
     }
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Error {}
 
 #[cfg(test)]
 mod tests {

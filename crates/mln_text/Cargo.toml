@@ -23,6 +23,7 @@ mln_vec_map.workspace = true
 protozero.workspace = true
 serde.workspace = true
 skrifa.workspace = true
+thiserror.workspace = true
 unicode-bidi.workspace = true
 wuff.workspace = true
 

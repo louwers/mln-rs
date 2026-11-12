@@ -24,7 +24,7 @@ impl Writer {
         self.add_uint64(tag, u64::from(v));
     }
 
-    /// pbf_writer::add_int32 writes the value sign-extended to 64 bits.
+    /// `pbf_writer::add_int32` writes the value sign-extended to 64 bits.
     pub fn add_int32(&mut self, tag: u32, v: i32) {
         self.add_uint64(tag, i64::from(v) as u64);
     }

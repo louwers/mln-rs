@@ -130,7 +130,7 @@ fn invoke<V: CompletionValue>(
         };
         // SAFETY: the host's completion callback with its user data, and a
         // result whose views stay valid until it returns.
-        unsafe { callback(user_data.get(), &result) };
+        unsafe { callback(user_data.get(), &raw const result) };
     };
     match result {
         Ok(value) => value.lend(call),
@@ -257,7 +257,9 @@ mod tests {
         let values = (0..result.value_count)
             .map(|index| {
                 // SAFETY: `value_count` items, `value_size` bytes apart.
-                unsafe { result.value.cast::<u8>().add(index * result.value_size as usize).cast::<u64>().read() }
+                unsafe {
+                    result.value.cast::<u8>().add(index * result.value_size as usize).cast::<u64>().read_unaligned()
+                }
             })
             .collect();
         let seen = Seen {

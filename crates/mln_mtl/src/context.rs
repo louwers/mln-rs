@@ -22,6 +22,7 @@
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::rc::{Rc, Weak};
 
 use mln_gfx::backend::Type as BackendType;
@@ -29,7 +30,7 @@ use mln_gfx::color_mode::ColorMode;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::globe_clip_mask::GlobeClipMask;
+use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::shader_group::StringIDSetsPair;
@@ -45,7 +46,6 @@ use mln_gfx::types::{DepthFunctionType, DepthMaskType, StencilFunctionType, Sten
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_tile_id::CanonicalTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::range::Range;
 use mln_util::size::Size;
@@ -167,6 +167,7 @@ fn map_operation(op: StencilOpType) -> MTLStencilOperation {
 
 impl Context {
     /// `Context(RendererBackend&)`
+    #[must_use]
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::new(MAXIMUM_VERTEX_BINDING_COUNT),
@@ -225,6 +226,7 @@ impl Context {
     /// `createProgram(shaderID, name, source, vertexName, fragmentName,
     /// programParameters, additionalDefines)`: compiles `source` with the
     /// program's defines and `additional_defines` as preprocessor macros.
+    #[allow(clippy::too_many_arguments)]
     pub fn create_program(
         &self,
         shader_id: BuiltIn,
@@ -239,7 +241,7 @@ impl Context {
         let mut keys = Vec::new();
         let mut values = Vec::new();
         for (key, value) in program_parameters.get_defines().iter().chain(additional_defines.iter()) {
-            define_str.push_str(&format!("#define {key} {value}\n"));
+            let _ = writeln!(define_str, "#define {key} {value}");
             keys.push(NSString::from_str(key));
             values.push(Retained::into_super(NSString::from_str(value)));
         }
@@ -347,7 +349,7 @@ impl Context {
     }
 
     /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four
-    /// corners of the tile extent as short2 (inlined: RenderStaticData is a
+    /// corners of the tile extent as short2 (inlined: `RenderStaticData` is a
     /// renderer type).
     pub fn get_tile_vertex_buffer(&self) -> Option<MTLBufferPtr> {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
@@ -424,7 +426,6 @@ impl Context {
     /// `makeClipMaskPipelineState(shader, renderable)`: a pipeline state for
     /// a clip mask shader over the position-only tile vertex layout.
     fn make_clip_mask_pipeline_state(
-        &self,
         shader: &ShaderProgram,
         formats: AttachmentFormats,
     ) -> Option<MTLRenderPipelineStatePtr> {
@@ -496,7 +497,7 @@ impl Context {
         self.check_clip_mask_formats(formats);
         self.set_clip_mask_depth_stencil_state(render_pass);
         if self.clip_mask_pipeline_state.borrow().is_none() {
-            *self.clip_mask_pipeline_state.borrow_mut() = self.make_clip_mask_pipeline_state(shader, formats);
+            *self.clip_mask_pipeline_state.borrow_mut() = Self::make_clip_mask_pipeline_state(shader, formats);
         }
         let Some(pipeline_state) = self.clip_mask_pipeline_state.borrow().clone() else {
             debug_assert!(false, "Failed to create render pipeline state for clip masking");
@@ -540,7 +541,7 @@ impl Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         let Some(shader_ptr) =
             self.get_clip_mask_shader(shaders, ProjectionVariant::Globe, &self.globe_clip_mask_shader)
@@ -565,7 +566,7 @@ impl Context {
         self.check_clip_mask_formats(formats);
         self.set_clip_mask_depth_stencil_state(render_pass);
         if self.globe_clip_mask_pipeline_state.borrow().is_none() {
-            *self.globe_clip_mask_pipeline_state.borrow_mut() = self.make_clip_mask_pipeline_state(shader, formats);
+            *self.globe_clip_mask_pipeline_state.borrow_mut() = Self::make_clip_mask_pipeline_state(shader, formats);
         }
         let Some(pipeline_state) = self.globe_clip_mask_pipeline_state.borrow().clone() else {
             debug_assert!(false, "Failed to create render pipeline state for globe clip masking");
@@ -724,15 +725,12 @@ impl GfxContext for Context {
         data: &[u8],
         persistent: bool,
     ) -> bool {
-        match ptr {
-            Some(buffer) => {
-                buffer.update(data);
-                false
-            }
-            None => {
-                *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-                true
-            }
+        if let Some(buffer) = ptr {
+            buffer.update(data);
+            false
+        } else {
+            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
+            true
         }
     }
 
@@ -770,7 +768,7 @@ impl GfxContext for Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
     }

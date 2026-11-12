@@ -48,6 +48,7 @@ pub struct ReplySlot<M> {
 }
 
 impl<M> OrderedReplies<M> {
+    #[must_use]
     pub fn new(parent: Box<dyn TileEndpoint<M>>) -> Self {
         OrderedReplies { state: Arc::new(Mutex::new(State { parent, slots: VecDeque::new(), first: 0 })) }
     }

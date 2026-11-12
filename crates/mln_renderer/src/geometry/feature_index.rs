@@ -66,6 +66,7 @@ pub struct IndexedSubfeature {
 
 impl IndexedSubfeature {
     /// `IndexedSubfeature(const RefIndexedSubfeature&)`.
+    #[must_use]
     pub fn from_ref(other: &RefIndexedSubfeature) -> Self {
         IndexedSubfeature {
             index: other.index,
@@ -78,6 +79,7 @@ impl IndexedSubfeature {
     }
 
     /// `IndexedSubfeature(const RefIndexedSubfeature&, bucketInstanceId, collisionGroupId)`.
+    #[must_use]
     pub fn from_ref_with(other: &RefIndexedSubfeature, bucket_instance_id: u32, collision_group_id: u16) -> Self {
         IndexedSubfeature { bucket_instance_id, collision_group_id, ..IndexedSubfeature::from_ref(other) }
     }
@@ -126,6 +128,7 @@ impl FeatureIndex {
     /// `FeatureIndex(std::unique_ptr<const GeometryTileData>)`. C++ gets a
     /// `clone()` of the tile data, which shares the data; this shares the
     /// `Arc`.
+    #[must_use]
     pub fn new(tile_data: Option<Arc<dyn GeometryTileData + Send + Sync>>) -> Self {
         FeatureIndex {
             // 16x16 grid -> 32px cell
@@ -138,6 +141,7 @@ impl FeatureIndex {
     }
 
     /// `getData()`.
+    #[must_use]
     pub fn get_data(&self) -> Option<&(dyn GeometryTileData + Send + Sync)> {
         self.tile_data.as_deref()
     }
@@ -317,8 +321,8 @@ impl FeatureIndex {
                 // we sort each feature based on the first matching symbol instance.
                 let sorted_a = order.iter().position(|&i| i == a.index).unwrap_or(order.len());
                 let sorted_b = order.iter().position(|&i| i == b.index).unwrap_or(order.len());
-                debug_assert!(sorted_a != order.len());
-                debug_assert!(sorted_b != order.len());
+                debug_assert_ne!(sorted_a, order.len());
+                debug_assert_ne!(sorted_b, order.len());
                 sorted_b.cmp(&sorted_a)
             } else {
                 // Bucket hasn't been re-sorted based on angle, so use same
@@ -392,10 +396,10 @@ impl FeatureIndex {
         let feature = source_layer.get_feature(index)?;
         let source_layer_id = source_layer.get_name();
         let mut state = FeatureState::default();
-        if let Some(source_feature_state) = source_feature_state {
-            if let Some(id_str) = feature_id_to_string(&feature.get_id()) {
-                state = source_feature_state.get_state(Some(&source_layer_id), &id_str);
-            }
+        if let Some(source_feature_state) = source_feature_state
+            && let Some(id_str) = feature_id_to_string(&feature.get_id())
+        {
+            state = source_feature_state.get_state(Some(&source_layer_id), &id_str);
         }
 
         for layer_id in layer_ids {
@@ -450,6 +454,7 @@ impl FeatureIndex {
 
     /// `translateQueryGeometry(queryGeometry, translate, anchorType, bearing,
     /// pixelsToTileUnits)`.
+    #[must_use]
     pub fn translate_query_geometry(
         query_geometry: &GeometryCoordinates,
         translate: &[f32; 2],
@@ -484,13 +489,14 @@ impl FeatureIndex {
     }
 
     /// The bucket leaders and their layer ids (sorted, for inspection).
+    #[must_use]
     pub fn bucket_layer_ids(&self) -> VecMap<String, Vec<String>> {
         self.bucket_layer_ids.iter().map(|(k, v)| (k.to_string(), v.clone())).collect()
     }
 }
 
 /// Port-only: a `FeatureIndex` as serde writes it, for a tile worker in
-/// another wasm instance (tile/worker_codec): the grid's boxes in insertion
+/// another wasm instance (`tile/worker_codec)`: the grid's boxes in insertion
 /// order, which `insert` puts in an empty grid again, with their strings once
 /// each, and the tile data by key (the side that gets the index has the data
 /// it sent). A derive would write the grid's cells too, and every element's

@@ -87,6 +87,7 @@ impl BufferResource {
         self.version = self.version.wrapping_add(1);
     }
 
+    #[must_use]
     pub fn get_size_in_bytes(&self) -> usize {
         self.size
     }
@@ -94,27 +95,34 @@ impl BufferResource {
     pub fn get_allocated_size(&self) -> u64 {
         self.buffer.as_ref().map_or(0, wgpu::Buffer::size)
     }
+    #[must_use]
     pub fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
+    #[must_use]
     pub fn get_buffer(&self) -> Option<&wgpu::Buffer> {
         self.buffer.as_ref()
     }
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         self.buffer.is_some()
     }
     /// Used to detect whether buffer contents have changed
+    #[must_use]
     pub fn get_version(&self) -> VersionType {
         self.version
     }
     /// Indicates whether this buffer needs to be re-bound from a previous
     /// binding at the given version
+    #[must_use]
     pub fn need_re_bind(&self, version: VersionType) -> bool {
         self.version != version
     }
+    #[must_use]
     pub fn get_usage(&self) -> wgpu::BufferUsages {
         self.usage
     }
+    #[must_use]
     pub fn is_persistent(&self) -> bool {
         self.persistent
     }

@@ -103,7 +103,7 @@ fn device_modifiers(device: &Device, format: vk::Format) -> Vec<vk::DrmFormatMod
     let mut properties = vk::FormatProperties2::default().push_next(&mut list);
     // SAFETY: a plain query of the GPU, which is of Vulkan 1.1.
     unsafe {
-        instance.get_physical_device_format_properties2(device.shared.physical_device(), format, &mut properties)
+        instance.get_physical_device_format_properties2(device.shared.physical_device(), format, &mut properties);
     };
     let count = list.drm_format_modifier_count as usize;
     let mut modifiers = vec![vk::DrmFormatModifierPropertiesEXT::default(); count];
@@ -111,7 +111,7 @@ fn device_modifiers(device: &Device, format: vk::Format) -> Vec<vk::DrmFormatMod
     let mut properties = vk::FormatProperties2::default().push_next(&mut list);
     // SAFETY: as above, into an array of the count it reported.
     unsafe {
-        instance.get_physical_device_format_properties2(device.shared.physical_device(), format, &mut properties)
+        instance.get_physical_device_format_properties2(device.shared.physical_device(), format, &mut properties);
     };
     let written = list.drm_format_modifier_count as usize;
     modifiers.truncate(written);
@@ -263,10 +263,10 @@ struct ExportedMemory {
 
 impl ExportedMemory {
     fn new(device: &Device, extent: vk::Extent2D, layout: &Layout) -> Result<ExportedMemory, Error> {
-        let vk_device = device.shared.device().clone();
         fn native(what: &'static str) -> impl Fn(vk::Result) -> Error {
             move |e| Error::native(format!("{what} failed: {e}"))
         }
+        let vk_device = device.shared.device().clone();
         let mut this = ExportedMemory {
             device: vk_device.clone(),
             image: vk::Image::null(),
@@ -391,6 +391,7 @@ impl ExportedMemory {
     /// have the offsets and strides of `planes`, or opaque memory of
     /// `allocation_size` bytes.
     #[cfg(unix)]
+    #[expect(clippy::used_underscore_binding, reason = "the image keeps the descriptor only to close it")]
     fn export_fd(
         &mut self,
         device: &Device,
@@ -541,11 +542,12 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
 /// frame (the producer's), and the target for the host's reads (the
 /// consumer's): a finished frame, or the sync that crosses APIs on the
 /// platform: a sync file, or on Windows, a D3D12 fence.
+#[must_use]
 pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
     let (producer, consumer) = device.sync_kinds();
     let crossing = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::SyncFd, SyncKind::D3d12Fence]);
     let keep = |kinds: SyncKinds| {
-        crossing.iter().filter(|kind| kinds.contains(*kind)).fold(SyncKinds::NONE, |kinds, kind| kinds.with(kind))
+        crossing.iter().filter(|kind| kinds.contains(*kind)).fold(SyncKinds::NONE, mln_gfx::SyncKinds::with)
     };
     (keep(producer), keep(consumer))
 }

@@ -72,10 +72,10 @@ impl ThreadInner {
             res,
             Box::new(move |response: Response| {
                 let _ptr = &parent_keep_alive;
-                if let Some(this) = weak.upgrade() {
-                    if let Some(database_file_source) = &this.database_file_source {
-                        database_file_source.forward(&forwarded, &response, None);
-                    }
+                if let Some(this) = weak.upgrade()
+                    && let Some(database_file_source) = &this.database_file_source
+                {
+                    database_file_source.forward(&forwarded, &response, None);
                 }
                 // TODO(port): MBGL_TIMING_FINISH for tiles.
                 callback(response);
@@ -178,18 +178,15 @@ impl MainResourceLoaderThread {
             inner.request_from_network(resource, resource, None, callback.clone())
         };
 
-        match task {
-            Some(task) => {
-                inner.tasks.borrow_mut().insert(req, task);
-            }
-            None => {
-                // If no new tasks were added, notify client that request
-                // cannot be processed.
-                let mut response = Response::new();
-                response.no_content = true;
-                response.error = Some(Box::new(ResourceError::new(Reason::Other, "Unsupported resource request.")));
-                callback(response);
-            }
+        if let Some(task) = task {
+            inner.tasks.borrow_mut().insert(req, task);
+        } else {
+            // If no new tasks were added, notify client that request
+            // cannot be processed.
+            let mut response = Response::new();
+            response.no_content = true;
+            response.error = Some(Box::new(ResourceError::new(Reason::Other, "Unsupported resource request.")));
+            callback(response);
         }
     }
 
@@ -302,6 +299,7 @@ pub struct MainResourceLoader {
 impl MainResourceLoader {
     /// A loader over `file_sources`' asset, database, file system,
     /// network, MBTiles and PMTiles file sources for these options.
+    #[must_use]
     pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let get = |type_| file_sources.get_file_source(type_, resource_options);
         MainResourceLoader {

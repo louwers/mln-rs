@@ -18,7 +18,7 @@ impl PlatformCollator {
         nunicode::collator_compare(lhs, rhs, self.case_sensitive, self.diacritic_sensitive)
     }
 
-    fn resolved_locale(&self) -> String {
+    fn resolved_locale() -> String {
         String::new()
     }
 }
@@ -30,15 +30,18 @@ pub struct Collator {
 }
 
 impl Collator {
+    #[must_use]
     pub fn new(case_sensitive: bool, diacritic_sensitive: bool, _locale: Option<String>) -> Self {
         Collator { collator: PlatformCollator { case_sensitive, diacritic_sensitive } }
     }
 
+    #[must_use]
     pub fn compare(&self, lhs: &str, rhs: &str) -> i32 {
         self.collator.compare(lhs, rhs)
     }
 
+    #[must_use]
     pub fn resolved_locale(&self) -> String {
-        self.collator.resolved_locale()
+        PlatformCollator::resolved_locale()
     }
 }

@@ -38,16 +38,16 @@ fn count_decimal_digit32(n: u32) -> i32 {
     if n < 10000 {
         return 4;
     }
-    if n < 100000 {
+    if n < 100_000 {
         return 5;
     }
-    if n < 1000000 {
+    if n < 1_000_000 {
         return 6;
     }
-    if n < 10000000 {
+    if n < 10_000_000 {
         return 7;
     }
-    if n < 100000000 {
+    if n < 100_000_000 {
         return 8;
     }
     // Will not reach 10 digits in DigitGen()
@@ -62,21 +62,21 @@ const POW10: [u64; 20] = [
     100,
     1000,
     10000,
-    100000,
-    1000000,
-    10000000,
-    100000000,
-    1000000000,
-    10000000000,
-    100000000000,
-    1000000000000,
-    10000000000000,
-    100000000000000,
-    1000000000000000,
-    10000000000000000,
-    100000000000000000,
-    1000000000000000000,
-    10000000000000000000,
+    100_000,
+    1_000_000,
+    10_000_000,
+    100_000_000,
+    1_000_000_000,
+    10_000_000_000,
+    100_000_000_000,
+    1_000_000_000_000,
+    10_000_000_000_000,
+    100_000_000_000_000,
+    1_000_000_000_000_000,
+    10_000_000_000_000_000,
+    100_000_000_000_000_000,
+    1_000_000_000_000_000_000,
+    10_000_000_000_000_000_000,
 ];
 
 fn digit_gen(w: &DiyFp, mp: &DiyFp, mut delta: u64, buffer: &mut [u8], len: &mut i32, k: &mut i32) {
@@ -91,20 +91,20 @@ fn digit_gen(w: &DiyFp, mp: &DiyFp, mut delta: u64, buffer: &mut [u8], len: &mut
         let d: u32;
         match kappa {
             9 => {
-                d = p1 / 100000000;
-                p1 %= 100000000;
+                d = p1 / 100_000_000;
+                p1 %= 100_000_000;
             }
             8 => {
-                d = p1 / 10000000;
-                p1 %= 10000000;
+                d = p1 / 10_000_000;
+                p1 %= 10_000_000;
             }
             7 => {
-                d = p1 / 1000000;
-                p1 %= 1000000;
+                d = p1 / 1_000_000;
+                p1 %= 1_000_000;
             }
             6 => {
-                d = p1 / 100000;
-                p1 %= 100000;
+                d = p1 / 100_000;
+                p1 %= 100_000;
             }
             5 => {
                 d = p1 / 10000;
@@ -133,7 +133,7 @@ fn digit_gen(w: &DiyFp, mp: &DiyFp, mut delta: u64, buffer: &mut [u8], len: &mut
             *len += 1;
         }
         kappa -= 1;
-        let tmp = ((p1 as u64) << -one.e).wrapping_add(p2);
+        let tmp = (u64::from(p1) << -one.e).wrapping_add(p2);
         if tmp <= delta {
             *k += kappa;
             grisu_round(buffer, *len, delta, tmp, POW10[kappa as usize] << -one.e, wp_w.f);
@@ -288,6 +288,7 @@ fn prettify(buffer: &mut [u8], length: i32, k: i32, max_decimal_places: i32) -> 
 
 /// `rapidjson::internal::dtoa`: formats a finite double (NaN and infinities
 /// are the caller's business, as in C++).
+#[must_use]
 pub fn dtoa(value: f64, max_decimal_places: i32) -> String {
     debug_assert!(max_decimal_places >= 1);
     // The C++ buffer is 25 bytes; Prettify can write slightly past the
@@ -336,20 +337,20 @@ mod tests {
         assert_eq!(t(1.0), "1.0");
         assert_eq!(t(-1.0), "-1.0");
         assert_eq!(t(1.2345), "1.2345");
-        assert_eq!(t(1.2345678), "1.2345678");
-        assert_eq!(t(0.123456789012), "0.123456789012");
-        assert_eq!(t(1234567.8), "1234567.8");
-        assert_eq!(t(-79.39773355813419), "-79.39773355813419");
-        assert_eq!(t(-36.973846435546875), "-36.973846435546875");
-        assert_eq!(t(0.000001), "0.000001");
-        assert_eq!(t(0.0000001), "1e-7");
+        assert_eq!(t(1.234_567_8), "1.2345678");
+        assert_eq!(t(0.123_456_789_012), "0.123456789012");
+        assert_eq!(t(1_234_567.8), "1234567.8");
+        assert_eq!(t(-79.397_733_558_134_19), "-79.39773355813419");
+        assert_eq!(t(-36.973_846_435_546_875), "-36.973846435546875");
+        assert_eq!(t(0.000_001), "0.000001");
+        assert_eq!(t(0.000_000_1), "1e-7");
         assert_eq!(t(1e30), "1e30");
-        assert_eq!(t(1.234567890123456e30), "1.234567890123456e30");
+        assert_eq!(t(1.234_567_890_123_456e30), "1.234567890123456e30");
         assert_eq!(t(5e-324), "5e-324"); // Min subnormal positive double
-        assert_eq!(t(2.225073858507201e-308), "2.225073858507201e-308"); // Max subnormal positive double
-        assert_eq!(t(2.2250738585072014e-308), "2.2250738585072014e-308"); // Min normal positive double
-        assert_eq!(t(1.7976931348623157e308), "1.7976931348623157e308"); // Max double
-        assert_eq!(t(123456789012345678901.0), "123456789012345680000.0");
+        assert_eq!(t(2.225_073_858_507_201e-308), "2.225073858507201e-308"); // Max subnormal positive double
+        assert_eq!(t(2.225_073_858_507_201_4e-308), "2.2250738585072014e-308"); // Min normal positive double
+        assert_eq!(t(1.797_693_134_862_315_7e308), "1.7976931348623157e308"); // Max double
+        assert_eq!(t(123_456_789_012_345_678_901.0), "123456789012345680000.0");
         assert_eq!(t(1e21), "1e21");
     }
 

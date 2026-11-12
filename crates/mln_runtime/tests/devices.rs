@@ -318,6 +318,7 @@ mod vulkan {
             // records one copy of the image, in the layout the ring leaves
             // it in, and goes to the queue under the host's lock.
             unsafe {
+                use mln_vulkan::QueueLock as _;
                 let size = u64::from(SIZE.width * SIZE.height * 4);
                 let info = vk::BufferCreateInfo::default().size(size).usage(vk::BufferUsageFlags::TRANSFER_DST);
                 let buffer = self.device.create_buffer(&info, None).unwrap();
@@ -364,7 +365,6 @@ mod vulkan {
                 self.fences.push(fence);
                 let command_buffers = [command_buffer];
                 let submit = vk::SubmitInfo::default().command_buffers(&command_buffers);
-                use mln_vulkan::QueueLock as _;
                 self.lock.lock();
                 let submitted = self.device.queue_submit(self.raw.queue, &[submit], fence);
                 self.lock.unlock();
@@ -451,9 +451,9 @@ mod vulkan {
         let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
         let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
         let produced = |frame: &mln_runtime::AcquiredFrame| {
+            use vk::Handle as _;
             let sync = frame.producer_sync();
             assert_eq!(SyncKind::VulkanTimelineSemaphore, sync.kind);
-            use vk::Handle as _;
             (vk::Semaphore::from_raw(sync.handle), sync.value)
         };
 
@@ -662,6 +662,7 @@ mod vulkan {
 
     #[test]
     fn a_session_presents_to_the_hosts_surface() {
+        use vk::Handle as _;
         let Some(device) = device_of(BackendType::Vulkan) else { return };
         let Device::Vulkan(vulkan) = &device else { unreachable!() };
         if !vulkan.presents() {
@@ -695,7 +696,6 @@ mod vulkan {
         };
         let runtime = runtime();
         let map = map_of(&runtime, "#ff0000");
-        use vk::Handle as _;
         // SAFETY: a live surface of the device's instance, destroyed after
         // the session lets go of it.
         let host_surface = unsafe { mln_vulkan::HostSurface::from_raw(surface.as_raw()) };
@@ -850,6 +850,7 @@ fn webgpu_session(map: &Map, device: &Device, textures: &[wgpu::Texture], option
 #[cfg(feature = "webgpu")]
 #[test]
 fn no_frame_renders_into_a_texture_that_the_host_holds() {
+    const DEMANDS: u64 = 10_000;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
 
@@ -857,7 +858,6 @@ fn no_frame_renders_into_a_texture_that_the_host_holds() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");
     let session = webgpu_session(&map, &device, &textures, AttachOptions::default());
-    const DEMANDS: u64 = 10_000;
     let done = AtomicBool::new(false);
     std::thread::scope(|scope| {
         let host = scope.spawn(|| {
@@ -1014,11 +1014,11 @@ mod gl {
 
     impl Host {
         fn new() -> Option<Host> {
+            const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
             // SAFETY: loading the system's EGL.
             let egl = unsafe { Egl::load_required() }.ok()?;
             // Mesa's surfaceless platform where there is one, as the library's
             // devices take.
-            const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
             // SAFETY: the default native display is valid on every platform.
             let display = unsafe {
                 egl.upcast::<egl::EGL1_5>()

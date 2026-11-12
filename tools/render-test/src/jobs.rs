@@ -71,6 +71,7 @@ struct Run {
 /// every test that was not skipped, in test order. The metadata of a test
 /// that a worker ran holds what the statistics, the return code and the
 /// report read (`ResultHeader`).
+#[must_use]
 pub fn run_jobs(arguments: &Arguments, manifest: &Manifest, output_path: &Path, jobs: usize) -> Vec<TestMetadata> {
     let dir = output_path.join(".render-test-jobs");
     let (mut crashes, not_run) = match start(arguments, manifest, &dir) {
@@ -89,12 +90,12 @@ pub fn run_jobs(arguments: &Arguments, manifest: &Manifest, output_path: &Path, 
     let mut metadatas = Vec::new();
     for (index, test_path) in manifest.get_test_paths().iter().enumerate() {
         let error = match read_result(&dir, index, test_path) {
-            Ok(Some(Some(metadata))) => {
+            Ok(WorkerResult::Finished(metadata)) => {
                 metadatas.push(*metadata);
                 continue;
             }
-            Ok(Some(None)) => continue,
-            Ok(None) => crashes.remove(&index).unwrap_or_else(|| not_run.clone()),
+            Ok(WorkerResult::Skipped) => continue,
+            Ok(WorkerResult::Missing) => crashes.remove(&index).unwrap_or_else(|| not_run.clone()),
             Err(e) => format!("Failed to read this test's result from its worker: {e}"),
         };
         // Reported as a test that errored before it rendered.
@@ -332,18 +333,27 @@ fn write_result(dir: &Path, index: usize, metadata: Option<&TestMetadata>) -> io
     fs::rename(partial, path)
 }
 
-/// Reads the result of test `index` at `test_path`: `None` if no worker
-/// finished it, `Some(None)` if it was skipped.
-fn read_result(dir: &Path, index: usize, test_path: &TestPaths) -> io::Result<Option<Option<Box<TestMetadata>>>> {
+/// What the workers left for one test.
+enum WorkerResult {
+    /// No worker finished the test.
+    Missing,
+    /// A worker skipped the test.
+    Skipped,
+    /// A worker ran the test.
+    Finished(Box<TestMetadata>),
+}
+
+/// Reads the result of test `index` at `test_path`.
+fn read_result(dir: &Path, index: usize, test_path: &TestPaths) -> io::Result<WorkerResult> {
     let bytes = match fs::read(dir.join(RESULTS_DIR).join(index.to_string())) {
         Ok(bytes) => bytes,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(WorkerResult::Missing),
         Err(e) => return Err(e),
     };
     let invalid = |what: &str| io::Error::new(io::ErrorKind::InvalidData, what.to_string());
     let newline = bytes.iter().position(|&byte| byte == b'\n').ok_or_else(|| invalid("no header line"))?;
     let Some(header) = serde_json::from_slice::<Option<ResultHeader>>(&bytes[..newline])? else {
-        return Ok(Some(None));
+        return Ok(WorkerResult::Skipped);
     };
     if !matches!(header.status.as_str(), "passed" | "failed" | "errored" | "ignored passed" | "ignored failed") {
         return Err(invalid(&format!("unknown status {:?}", header.status)));
@@ -353,7 +363,7 @@ fn read_result(dir: &Path, index: usize, test_path: &TestPaths) -> io::Result<Op
     if diff.len() != header.diff_len {
         return Err(invalid("wrong length"));
     }
-    Ok(Some(Some(Box::new(TestMetadata {
+    Ok(WorkerResult::Finished(Box::new(TestMetadata {
         paths: test_path.clone(),
         id: header.id,
         status: header.status,
@@ -373,5 +383,5 @@ fn read_result(dir: &Path, index: usize, test_path: &TestPaths) -> io::Result<Op
         expected: expected.to_vec(),
         diff: diff.to_vec(),
         ..TestMetadata::default()
-    }))))
+    })))
 }

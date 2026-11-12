@@ -150,6 +150,7 @@ pub struct TransferRequest {
 }
 
 impl TransferRequest {
+    #[must_use]
     pub fn resource(&self) -> &Resource {
         &self.resource
     }
@@ -158,12 +159,14 @@ impl TransferRequest {
     /// besides its own, and drops when a redirect leaves the origin of the
     /// URL that sent them. A transport that can't drop them fails a
     /// redirect instead of following it.
+    #[must_use]
     pub fn headers(&self) -> &[(String, String)] {
         &self.headers
     }
 
     /// Whether the request was dropped, so that nobody waits for the
     /// transfer any more: a transport can skip it.
+    #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.cancellation.is_cancelled()
     }
@@ -194,7 +197,7 @@ impl TransferRequest {
 pub trait HttpTransport: Send + Sync {
     /// Starts the transfer of `request` without blocking the caller, and
     /// calls `request.finish` once it is done, from any thread (ureq: one
-    /// of its worker threads; NSURLSession: its delegate queue; a browser's
+    /// of its worker threads; `NSURLSession`: its delegate queue; a browser's
     /// fetch: the event loop). A request
     /// dropped without `finish` never answers, as if it had been cancelled.
     fn start(&self, request: TransferRequest);
@@ -203,7 +206,7 @@ pub trait HttpTransport: Send + Sync {
 static TRANSPORT: Mutex<Option<Arc<dyn HttpTransport>>> = Mutex::new(None);
 
 /// Sets the transport of the `HTTPFileSource`s created from now on, instead of
-/// the default (NSURLSession on Apple platforms, fetch on wasm, ureq
+/// the default (`NSURLSession` on Apple platforms, fetch on wasm, ureq
 /// elsewhere): for a host with its own HTTP stack.
 pub fn set_transport(transport: Arc<dyn HttpTransport>) {
     *TRANSPORT.lock_unpoisoned() = Some(transport);
@@ -303,6 +306,7 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
 
 /// The `Range` request header for a resource's data range, for transports
 /// (`TransferRequest::resource`).
+#[must_use]
 pub fn range_header(resource: &Resource) -> Option<String> {
     resource.data_range.map(|(first, second)| format!("bytes={first}-{second}"))
 }
@@ -345,7 +349,7 @@ fn origin(url: &str) -> Option<(String, String, u16)> {
     (!host.is_empty()).then(|| (scheme, host.to_ascii_lowercase(), port))
 }
 
-/// `HTTPFileSource`: plain HTTP(S) requests, used by the OnlineFileSource.
+/// `HTTPFileSource`: plain HTTP(S) requests, used by the `OnlineFileSource`.
 pub struct HTTPFileSource {
     impl_: Impl,
 }
@@ -353,6 +357,7 @@ pub struct HTTPFileSource {
 impl HTTPFileSource {
     /// An HTTP file source over the transport `set_transport` set, else
     /// the platform's default.
+    #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         HTTPFileSource {
             impl_: Impl {
@@ -364,7 +369,7 @@ impl HTTPFileSource {
     }
 
     /// `request(const Resource&, Callback)`. The callback runs on the
-    /// calling thread's RunLoop.
+    /// calling thread's `RunLoop`.
     pub fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
         let state = Rc::new(HTTPRequestState { callback: RefCell::new(callback) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);

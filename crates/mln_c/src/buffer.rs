@@ -156,17 +156,17 @@ mod tests {
         let mut length = 0;
         // SAFETY: `out` has the capacity passed, and `length` is a local.
         unsafe {
-            write_text("toolong!", out.as_mut_ptr(), out.len(), &mut length, ("out", "out_length")).unwrap();
+            write_text("toolong!", out.as_mut_ptr(), out.len(), &raw mut length, ("out", "out_length")).unwrap();
             assert_eq!(length, 8);
             assert_eq!(out[0], b'x' as c_char);
 
-            write_text("fits", out.as_mut_ptr(), out.len(), &mut length, ("out", "out_length")).unwrap();
+            write_text("fits", out.as_mut_ptr(), out.len(), &raw mut length, ("out", "out_length")).unwrap();
             assert_eq!(length, 4);
             assert_eq!(&out[..5], b"fits\0".map(|byte| byte as c_char));
 
-            write_text("measure", core::ptr::null_mut(), 0, &mut length, ("out", "out_length")).unwrap();
+            write_text("measure", core::ptr::null_mut(), 0, &raw mut length, ("out", "out_length")).unwrap();
             assert_eq!(length, 7);
-            assert!(write_text("x", core::ptr::null_mut(), 4, &mut length, ("out", "out_length")).is_err());
+            assert!(write_text("x", core::ptr::null_mut(), 4, &raw mut length, ("out", "out_length")).is_err());
             assert!(write_text("x", out.as_mut_ptr(), 4, core::ptr::null_mut(), ("out", "out_length")).is_err());
         }
     }

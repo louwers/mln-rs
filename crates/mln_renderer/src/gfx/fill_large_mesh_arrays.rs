@@ -121,11 +121,11 @@ pub fn fill_large_mesh_arrays<V>(
             (Some(lines), Some(segment)) => lines.segments[segment].vertex_length,
             _ => 0,
         };
-        for point in flattened.chunks_exact(2) {
+        for point in flattened.as_chunks::<2>().0 {
             vertices.push(layout_vertex(point[0], point[1]));
         }
         if let Some(segment) = triangle_segment {
-            for triangle in triangle_indices.chunks_exact(3) {
+            for triangle in triangle_indices.as_chunks::<3>().0 {
                 triangle_indexes.push((triangle_base + triangle[0] as usize) as u16);
                 triangle_indexes.push((triangle_base + triangle[1] as usize) as u16);
                 triangle_indexes.push((triangle_base + triangle[2] as usize) as u16);
@@ -135,7 +135,7 @@ pub fn fill_large_mesh_arrays<V>(
         }
         if let (Some(lines), Some(segment)) = (lines, line_segment) {
             for line in lines.lists {
-                for pair in line.chunks_exact(2) {
+                for pair in line.as_chunks::<2>().0 {
                     lines.indexes.push((line_base + pair[0] as usize) as u16);
                     lines.indexes.push((line_base + pair[1] as usize) as u16);
                 }

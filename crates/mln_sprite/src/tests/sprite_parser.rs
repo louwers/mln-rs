@@ -253,7 +253,7 @@ fn sprite_parsing() {
         "zoo_icon",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(std::string::ToString::to_string)
     .collect();
     assert_eq!(expected, names);
 

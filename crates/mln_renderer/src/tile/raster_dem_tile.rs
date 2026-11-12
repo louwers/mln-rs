@@ -74,7 +74,7 @@ impl std::ops::BitAnd for DEMTileNeighbors {
 
 /// The messages a `RasterDEMTile` sends its `RasterDEMTileWorker`: the
 /// worker's public member functions. Port-only: serde writes them for a
-/// worker in another wasm instance (tile/worker_codec).
+/// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterDEMWorkerMessage {
     /// `parse(data, correlationID, encoding)`.
@@ -88,7 +88,7 @@ pub enum RasterDEMWorkerMessage {
 
 /// The messages a `RasterDEMTileWorker` sends its `RasterDEMTile`: the
 /// tile's member functions the worker calls. Port-only: serde writes them
-/// for a worker in another wasm instance (tile/worker_codec).
+/// for a worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterDEMTileMessage {
     /// `onParsed(std::move(bucket), correlationID)`.
@@ -100,12 +100,13 @@ pub enum RasterDEMTileMessage {
 /// `RasterDEMTileWorker`.
 pub struct RasterDEMTileWorker {
     /// The tile, which gets the replies in the order of their parses
-    /// although images may decode asynchronously (ordered_replies.rs).
+    /// although images may decode asynchronously (`ordered_replies.rs`).
     parent: OrderedReplies<RasterDEMTileMessage>,
 }
 
 impl RasterDEMTileWorker {
     /// `RasterDEMTileWorker(ActorRef<RasterDEMTileWorker>, ActorRef<RasterDEMTile>)`.
+    #[must_use]
     pub fn new(parent: Box<dyn TileEndpoint<RasterDEMTileMessage>>) -> Self {
         RasterDEMTileWorker { parent: OrderedReplies::new(parent) }
     }
@@ -114,14 +115,14 @@ impl RasterDEMTileWorker {
     pub fn handle(&mut self, message: RasterDEMWorkerMessage) {
         match message {
             RasterDEMWorkerMessage::Parse { data, correlation_id, encoding } => {
-                self.parse(data, correlation_id, encoding)
+                self.parse(data, correlation_id, encoding);
             }
         }
     }
 
     /// `parse(data, correlationID, encoding)`. The reply goes once the
     /// image has decoded, which may be after this returns (decoder.rs in
-    /// mln_image).
+    /// `mln_image`).
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64, encoding: RasterEncoding) {
         let parent = self.parent.slot();
         let Some(data) = data else {
@@ -130,7 +131,7 @@ impl RasterDEMTileWorker {
             return;
         };
 
-        let parse = move |image| HillshadeBucket::new(image, encoding).map_err(Error::native);
+        let parse = move |image| HillshadeBucket::new(&image, encoding).map_err(Error::native);
         decoder::decode(&data, move |result| match result.and_then(parse) {
             Ok(bucket) => {
                 parent.send(RasterDEMTileMessage::Parsed { bucket: Some(Arc::new(bucket)), correlation_id });
@@ -254,6 +255,7 @@ pub struct RasterDEMTile {
 
 impl RasterDEMTile {
     /// `RasterDEMTile(id, sourceID, parameters, tileset, observer)`.
+    #[must_use]
     pub fn new(
         id: OverscaledTileID,
         source_id: String,
@@ -295,16 +297,19 @@ impl RasterDEMTile {
         RasterDEMTile { inner, loader: Some(loader) }
     }
 
+    #[must_use]
     pub fn inner(&self) -> &Rc<RasterDEMTileInner> {
         &self.inner
     }
 
     /// `getBucket()`.
+    #[must_use]
     pub fn get_bucket(&self) -> Option<Arc<HillshadeBucket>> {
         self.inner.bucket.borrow().clone()
     }
 
     /// `neighboringTiles`.
+    #[must_use]
     pub fn neighboring_tiles(&self) -> DEMTileNeighbors {
         self.inner.neighboring_tiles.get()
     }

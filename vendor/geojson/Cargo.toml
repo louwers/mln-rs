@@ -20,6 +20,7 @@ feature.workspace = true
 geometry.workspace = true
 rapidjson.workspace = true
 serde_json.workspace = true
+thiserror.workspace = true
 
 # Port of geojson.hpp/test/test.cpp over its fixtures, read in place.
 [[test]]

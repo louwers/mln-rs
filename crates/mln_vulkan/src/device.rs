@@ -59,7 +59,7 @@ pub trait QueueLock: Send + Sync {
     fn unlock(&self);
 }
 
-/// What MLN_VULKAN_VALIDATION asks for.
+/// What `MLN_VULKAN_VALIDATION` asks for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Validation {
     Off,
@@ -373,7 +373,7 @@ impl Device {
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library or a GPU that can render, or without what
-    /// MLN_VULKAN_VALIDATION=abort needs of the instance, with
+    /// `MLN_VULKAN_VALIDATION=abort` needs of the instance, with
     /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when there is no GPU at
     /// `adapter_index`, and with [`ErrorKind::Native`](mln_util::ErrorKind)
     /// when a Vulkan call fails.
@@ -949,6 +949,7 @@ impl Device {
     }
 
     /// The device's raw handles.
+    #[must_use]
     pub fn raw(&self) -> RawDevice {
         let shared = &*self.shared;
         RawDevice {
@@ -963,12 +964,14 @@ impl Device {
     }
 
     /// Whether `self` and `other` are clones of one device.
+    #[must_use]
     pub fn same_as(&self, other: &Device) -> bool {
         Arc::ptr_eq(&self.shared, &other.shared)
     }
 
     /// Whether renderers on the device can present: its instance has
     /// `VK_KHR_surface` and its device `VK_KHR_swapchain`.
+    #[must_use]
     pub fn presents(&self) -> bool {
         self.shared.surface.is_some() && self.shared.swapchain.is_some()
     }
@@ -982,6 +985,7 @@ impl Device {
     }
 
     /// What the device lets renderers do.
+    #[must_use]
     pub fn features(&self) -> Features {
         self.shared.features
     }
@@ -992,6 +996,7 @@ impl Device {
     /// order needs no sync object: the host orders its reads after a frame
     /// with a barrier, and the next frame begins with one after the host's
     /// reads.
+    #[must_use]
     pub fn sync_kinds(&self) -> (SyncKinds, SyncKinds) {
         let features = self.shared.features;
         let mut producer = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::QueueOrder]);
@@ -1017,17 +1022,20 @@ impl Device {
 
     /// The device extensions enabled on the device: the library's, or the
     /// ones the host listed.
+    #[must_use]
     pub fn enabled_extensions(&self) -> &[CString] {
         &self.shared.device_extensions
     }
 
     /// The kinds of exported ring that the device shares its images in: those
     /// it exported an image of, once, when first asked.
+    #[must_use]
     pub fn export_kinds(&self) -> ExportKinds {
         *self.shared.export_kinds.get_or_init(|| crate::exported_target::probe(self))
     }
 
     /// The name of the GPU.
+    #[must_use]
     pub fn name(&self) -> String {
         self.shared
             .properties

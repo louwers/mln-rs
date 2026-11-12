@@ -17,6 +17,7 @@ pub struct Case {
 }
 
 impl Case {
+    #[must_use]
     pub fn new(type_: Type, branches: Vec<Branch>, otherwise: Box<dyn Expression>) -> Self {
         let deps = branches.iter().fold(Dependency::NONE, |a, b| a | b.0.dependencies() | b.1.dependencies())
             | otherwise.dependencies();
@@ -32,16 +33,16 @@ impl Case {
         }
 
         // Expect even-length array: ["case", 2 * (n pairs)..., otherwise]
-        if length % 2 != 0 {
+        if !length.is_multiple_of(2) {
             ctx.error("Expected an odd number of arguments".to_owned());
             return None;
         }
 
         let mut output_type: Option<Type> = None;
-        if let Some(expected) = ctx.get_expected() {
-            if expected != Type::Value {
-                output_type = Some(expected);
-            }
+        if let Some(expected) = ctx.get_expected()
+            && expected != Type::Value
+        {
+            output_type = Some(expected);
         }
 
         let mut branches = Vec::with_capacity((length - 2) / 2);

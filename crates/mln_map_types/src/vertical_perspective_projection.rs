@@ -24,7 +24,7 @@ use crate::projection_base::{
 use crate::transform_state::{NorthOrientation, TransformState};
 
 /// `LatLng{lat, lon, mode}`: C++ constructs it directly, which throws
-/// std::domain_error on invalid input; nothing catches it there.
+/// `std::domain_error` on invalid input; nothing catches it there.
 fn lat_lng(lat: f64, lon: f64, mode: WrapMode) -> LatLng {
     LatLng::with_mode(lat, lon, mode).unwrap_or_else(|e| panic!("{e}"))
 }
@@ -192,7 +192,7 @@ pub struct VerticalPerspectiveProjection;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CenterAndBearing {
     pub center: LatLng,
-    /// In degrees, with CameraOptions's sign.
+    /// In degrees, with `CameraOptions`'s sign.
     pub bearing: f64,
 }
 
@@ -219,10 +219,11 @@ fn remap_saturate(value: f64, old_min: f64, old_max: f64, new_min: f64, new_max:
 impl VerticalPerspectiveProjection {
     /// GL JS `earthRadius`, `GLOBE_RADIUS` in the shaders: the meters an
     /// elevation is measured against.
-    pub const GLOBE_RADIUS_METERS: f64 = 6371008.8;
+    pub const GLOBE_RADIUS_METERS: f64 = 6_371_008.8;
 
     /// Globe radius in pixels at the given world size and center latitude, so
     /// zoom means the same on both projections.
+    #[must_use]
     pub fn globe_radius_pixels(world_size: f64, center_latitude: f64) -> f64 {
         world_size / (2.0 * PI) / Self::planet_scale(center_latitude)
     }
@@ -230,11 +231,13 @@ impl VerticalPerspectiveProjection {
     /// GL JS `planetScaleAtLatitude`: the cosine of the center latitude the
     /// globe radius is divided by. Mercator ends at the edge of its range, so
     /// past it the globe keeps its size there.
+    #[must_use]
     pub fn planet_scale(center_latitude: f64) -> f64 {
         mln_math::deg2rad(std_min(center_latitude.abs(), LATITUDE_MAX)).cos()
     }
 
     /// The unit-sphere position of a point in tile units.
+    #[must_use]
     pub fn tile_coordinates_to_sphere(tile_point: &Point<f64>, tile_id: &UnwrappedTileID) -> Vec3 {
         let scale = 1.0 / (1u64 << tile_id.canonical.z) as f64;
         let mercator_x = tile_point.x / f64::from(EXTENT) * scale + f64::from(tile_id.canonical.x) * scale;
@@ -329,6 +332,7 @@ impl VerticalPerspectiveProjection {
         position
     }
 
+    #[must_use]
     pub fn surface_vector(lat_lng: &LatLng) -> Vec3 {
         let lng = mln_math::deg2rad(lat_lng.longitude());
         let lat = mln_math::deg2rad(lat_lng.latitude());
@@ -336,6 +340,7 @@ impl VerticalPerspectiveProjection {
         [lng.sin() * len, lat.sin(), lng.cos() * len]
     }
 
+    #[must_use]
     pub fn surface_vector_to_lat_lng(surface: &Vec3) -> LatLng {
         let latitude = mln_math::rad2deg(clamp(surface[1], -1.0, 1.0).asin());
         let length_xz = (surface[0] * surface[0] + surface[2] * surface[2]).sqrt();
@@ -415,6 +420,7 @@ impl VerticalPerspectiveProjection {
     ) -> Option<LatLng> {
         // GL JS `setLocationAtPoint`: solve the rotation that carries the
         // surface point under the pixel onto the target.
+        const LIMIT: f64 = PI * 0.5;
         let center = state.get_lat_lng(WrapMode::Unwrapped);
         let vec_to_pixel_current = Self::screen_coordinate_to_surface(state, anchor);
         let vec_to_target = Self::surface_vector(lat_lng);
@@ -450,7 +456,6 @@ impl VerticalPerspectiveProjection {
         let (lng_a, lat_a) = solve(intersection_a);
         let (lng_b, lat_b) = solve(intersection_b);
 
-        const LIMIT: f64 = PI * 0.5;
         let valid_a = (-LIMIT..=LIMIT).contains(&lat_a);
         let valid_b = (-LIMIT..=LIMIT).contains(&lat_b);
 
@@ -577,6 +582,7 @@ impl VerticalPerspectiveProjection {
 
     /// Zoom change that keeps the globe the same apparent size when the
     /// center moves between latitudes.
+    #[must_use]
     pub fn zoom_adjustment(from_latitude: f64, to_latitude: f64) -> f64 {
         (Self::planet_scale(to_latitude) / Self::planet_scale(from_latitude)).log2()
     }
@@ -675,6 +681,7 @@ impl VerticalPerspectiveProjection {
 
     /// The camera `t` of the way from one camera to another, the planet
     /// turning about one axis.
+    #[must_use]
     pub fn interpolate_camera(from: &CenterAndBearing, to: &CenterAndBearing, t: f64) -> CenterAndBearing {
         center_and_bearing(
             &slerp(
@@ -735,6 +742,7 @@ impl VerticalPerspectiveProjection {
     }
 
     /// The shorter signed way around from one angle to the other, in degrees.
+    #[must_use]
     pub fn difference_of_angles_degrees(from: f64, to: f64) -> f64 {
         let a = mln_math::wrap(from, 0.0, 360.0);
         let b = mln_math::wrap(to, 0.0, 360.0);
@@ -745,6 +753,7 @@ impl VerticalPerspectiveProjection {
 
     /// Distance between two locations along the surface, in pixels at the
     /// given world size and center latitude.
+    #[must_use]
     pub fn surface_distance_pixels(world_size: f64, center_latitude: f64, a: &LatLng, b: &LatLng) -> f64 {
         let radians = clamp(dot(&Self::surface_vector(a), &Self::surface_vector(b)), -1.0, 1.0).acos();
         radians * Self::globe_radius_pixels(world_size, center_latitude)
@@ -754,6 +763,7 @@ impl VerticalPerspectiveProjection {
     /// longitude paced at 1 / cos(latitude) so the globe appears to turn at a
     /// steady rate. The pace grows without bound towards the poles, so past
     /// the Mercator range it keeps its value at the edge.
+    #[must_use]
     pub fn interpolate_lat_lng(start: &LatLng, delta_latitude: f64, delta_longitude: f64, t: f64) -> LatLng {
         let latitude = clamp(start.latitude() + delta_latitude * t, -90.0, 90.0);
         let start_latitude = clamp(start.latitude(), -LATITUDE_MAX, LATITUDE_MAX);

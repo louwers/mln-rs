@@ -10,27 +10,29 @@ use crate::text::check_max_angle::check_max_angle;
 
 /// `util::dist<float>(a, b)` on `Point<int16_t>` (util/math.hpp): a double
 /// sqrt of the `int` sum, narrowed to float.
-fn dist(a: &GeometryCoordinate, b: &GeometryCoordinate) -> f32 {
-    let dx = (b.x as i32 - a.x as i32) as f64;
-    let dy = (b.y as i32 - a.y as i32) as f64;
+fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
+    let dx = f64::from(i32::from(b.x) - i32::from(a.x));
+    let dy = f64::from(i32::from(b.y) - i32::from(a.y));
     (dx * dx + dy * dy).sqrt() as f32
 }
 
 /// `util::angle_to(a, b)` on `Point<int16_t>`, in double.
-fn angle_to(a: &GeometryCoordinate, b: &GeometryCoordinate) -> f64 {
-    ((a.y as i32 - b.y as i32) as f64).atan2((a.x as i32 - b.x as i32) as f64)
+fn angle_to(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
+    f64::from(i32::from(a.y) - i32::from(b.y)).atan2(f64::from(i32::from(a.x) - i32::from(b.x)))
 }
 
 /// `getAngleWindowSize`.
+#[must_use]
 pub fn get_angle_window_size(text_left: f32, text_right: f32, glyph_size: f32, box_scale: f32) -> f32 {
-    if (text_left - text_right) != 0.0 { 3.0f32 / 5.0f32 * glyph_size * box_scale } else { 0.0 }
+    if (text_left - text_right) == 0.0 { 0.0 } else { 3.0f32 / 5.0f32 * glyph_size * box_scale }
 }
 
 /// `getLineLength`.
+#[must_use]
 pub fn get_line_length(line: &GeometryCoordinates) -> f32 {
     let mut line_length: f32 = 0.0;
     for segment in line.windows(2) {
-        line_length += dist(&segment[0], &segment[1]);
+        line_length += dist(segment[0], segment[1]);
     }
     line_length
 }
@@ -60,15 +62,15 @@ fn resample(
         let a = &segment[0];
         let b = &segment[1];
 
-        let segment_dist = dist(a, b);
-        let angle = angle_to(b, a) as f32;
+        let segment_dist = dist(*a, *b);
+        let angle = angle_to(*b, *a) as f32;
 
         while marked_distance + spacing < distance + segment_dist {
             marked_distance += spacing;
 
             let t = (marked_distance - distance) / segment_dist;
-            let x = (a.x as f32).interpolate_f32(&(b.x as f32), t);
-            let y = (a.y as f32).interpolate_f32(&(b.y as f32), t);
+            let x = f32::from(a.x).interpolate_f32(&f32::from(b.x), t);
+            let y = f32::from(a.y).interpolate_f32(&f32::from(b.y), t);
 
             // Check that the point is within the tile boundaries and that
             // the label would fit before the beginning and end of the line
@@ -109,6 +111,7 @@ fn resample(
 
 /// `getAnchors`.
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn get_anchors(
     line: &GeometryCoordinates,
     mut spacing: f32,
@@ -135,7 +138,8 @@ pub fn get_anchors(
     let label_length = shaped_label_length * box_scale;
 
     // Is the line continued from outside the tile boundary?
-    let continued_line = line[0].x == 0 || line[0].x as i32 == EXTENT || line[0].y == 0 || line[0].y as i32 == EXTENT;
+    let continued_line =
+        line[0].x == 0 || i32::from(line[0].x) == EXTENT || line[0].y == 0 || i32::from(line[0].y) == EXTENT;
 
     // Is the label long, relative to the spacing?
     // If so, adjust the spacing so there is always a minimum space of `spacing / 4` between label edges.
@@ -151,10 +155,10 @@ pub fn get_anchors(
     let fixed_extra_offset = glyph_size * 2.0;
 
     // `std::fmod` on floats (fmodf) is `%`.
-    let offset = if !continued_line {
-        ((shaped_label_length / 2.0 + fixed_extra_offset) * box_scale * overscaling) % spacing
-    } else {
+    let offset = if continued_line {
         (spacing / 2.0 * overscaling) % spacing
+    } else {
+        ((shaped_label_length / 2.0 + fixed_extra_offset) * box_scale * overscaling) % spacing
     };
 
     resample(line, offset, spacing, angle_window_size, max_angle, label_length, continued_line, false)
@@ -162,6 +166,7 @@ pub fn get_anchors(
 
 /// `getCenterAnchor`.
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn get_center_anchor(
     line: &GeometryCoordinates,
     max_angle: f32,
@@ -186,15 +191,15 @@ pub fn get_center_anchor(
         let a = &segment[0];
         let b = &segment[1];
 
-        let segment_distance = dist(a, b);
+        let segment_distance = dist(*a, *b);
 
         if prev_distance + segment_distance > center_distance {
             // The center is on this segment
             let t = (center_distance - prev_distance) / segment_distance;
-            let x = (a.x as f32).interpolate_f32(&(b.x as f32), t);
-            let y = (a.y as f32).interpolate_f32(&(b.y as f32), t);
+            let x = f32::from(a.x).interpolate_f32(&f32::from(b.x), t);
+            let y = f32::from(a.y).interpolate_f32(&f32::from(b.y), t);
 
-            let anchor = Anchor::new(x.round(), y.round(), angle_to(b, a) as f32, Some(i));
+            let anchor = Anchor::new(x.round(), y.round(), angle_to(*b, *a) as f32, Some(i));
 
             if angle_window_size == 0.0 || check_max_angle(line, &anchor, label_length, angle_window_size, max_angle) {
                 return Some(anchor);
@@ -211,7 +216,7 @@ pub fn get_center_anchor(
 #[cfg(test)]
 mod tests {
     // Ports test/text/get_anchors.test.cpp.
-    use std::f32::consts::PI;
+    use std::f32::consts::{FRAC_PI_4, PI};
 
     use geometry::Point;
 
@@ -263,7 +268,7 @@ mod tests {
             OVERSCALING,
         );
         let expected_anchors =
-            vec![anchor(1.0, 2.0, 1.570796371, 1), anchor(1.0, 5.0, 1.570796371, 4), anchor(1.0, 8.0, 1.570796371, 7)];
+            vec![anchor(1.0, 2.0, 1.570_796_4, 1), anchor(1.0, 5.0, 1.570_796_4, 4), anchor(1.0, 8.0, 1.570_796_4, 7)];
 
         assert_eq!(anchors, expected_anchors);
     }
@@ -284,7 +289,7 @@ mod tests {
             OVERSCALING,
         );
         let expected_anchors =
-            vec![anchor(1.0, 2.0, 1.570796371, 1), anchor(1.0, 5.0, 1.570796371, 3), anchor(1.0, 7.0, 1.570796371, 6)];
+            vec![anchor(1.0, 2.0, 1.570_796_4, 1), anchor(1.0, 5.0, 1.570_796_4, 3), anchor(1.0, 7.0, 1.570_796_4, 6)];
 
         assert_eq!(anchors, expected_anchors);
     }
@@ -305,7 +310,7 @@ mod tests {
             OVERSCALING,
         );
         let expected_anchors =
-            vec![anchor(1.0, 2.0, 1.570796371, 1), anchor(1.0, 5.0, 1.570796371, 4), anchor(1.0, 8.0, 1.570796371, 7)];
+            vec![anchor(1.0, 2.0, 1.570_796_4, 1), anchor(1.0, 5.0, 1.570_796_4, 4), anchor(1.0, 8.0, 1.570_796_4, 7)];
 
         assert_eq!(anchors, expected_anchors);
     }
@@ -326,7 +331,7 @@ mod tests {
             OVERSCALING,
         );
         let expected_anchors =
-            vec![anchor(1.0, 1.0, 1.570796371, 1), anchor(1.0, 4.0, 1.570796371, 3), anchor(1.0, 6.0, 1.570796371, 6)];
+            vec![anchor(1.0, 1.0, 1.570_796_4, 1), anchor(1.0, 4.0, 1.570_796_4, 3), anchor(1.0, 6.0, 1.570_796_4, 6)];
 
         assert_eq!(anchors, expected_anchors);
     }
@@ -379,7 +384,7 @@ mod tests {
             BOX_SCALE,
             OVERSCALING,
         );
-        let expected_anchors = vec![anchor(1.0, 2.0, 1.570796371, 0)];
+        let expected_anchors = vec![anchor(1.0, 2.0, 1.570_796_4, 0)];
 
         assert_eq!(anchors, expected_anchors);
     }
@@ -390,7 +395,7 @@ mod tests {
         let line: GeometryCoordinates = vec![Point::new(1, 1), Point::new(1, 3), Point::new(3, 6), Point::new(4, 7)];
         let anchor_ = get_center_anchor(&line, PI, TEXT_LEFT, TEXT_RIGHT, ICON_LEFT, ICON_RIGHT, GLYPH_SIZE, BOX_SCALE);
         assert!(anchor_.is_some());
-        assert_eq!(anchor_.unwrap(), anchor(2.0, 4.0, 0.982793748, 1));
+        assert_eq!(anchor_.unwrap(), anchor(2.0, 4.0, 0.982_793_75, 1));
     }
 
     // gtest: getAnchors.GetCenterAnchorOutsideTileBounds
@@ -399,7 +404,7 @@ mod tests {
         let line: GeometryCoordinates = vec![Point::new(-10, -10), Point::new(5, 5)];
         let anchor_ = get_center_anchor(&line, PI, TEXT_LEFT, TEXT_RIGHT, ICON_LEFT, ICON_RIGHT, GLYPH_SIZE, BOX_SCALE);
         assert!(anchor_.is_some());
-        assert_eq!(anchor_.unwrap(), anchor(-3.0, -3.0, 0.785398185, 0));
+        assert_eq!(anchor_.unwrap(), anchor(-3.0, -3.0, FRAC_PI_4, 0));
     }
 
     // gtest: getAnchors.GetCenterAnchorFailMaxAngle

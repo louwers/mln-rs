@@ -123,6 +123,7 @@ impl Device {
     /// it must support, or else with a format it supports that is the first
     /// of BGRA8 and RGBA8 for the device's adapter. The host keeps the
     /// device's uncaptured-error handler.
+    #[must_use]
     pub fn from_wgpu(
         instance: Option<wgpu::Instance>,
         device: wgpu::Device,
@@ -132,14 +133,17 @@ impl Device {
         Device { instance, adapter: None, device, queue, surface_format }
     }
 
+    #[must_use]
     pub fn device(&self) -> &wgpu::Device {
         &self.device
     }
 
+    #[must_use]
     pub fn queue(&self) -> &wgpu::Queue {
         &self.queue
     }
 
+    #[must_use]
     pub fn instance(&self) -> Option<&wgpu::Instance> {
         self.instance.as_ref()
     }
@@ -153,6 +157,7 @@ impl Device {
     }
 
     /// The adapter the device is on (name, backend, driver).
+    #[must_use]
     pub fn adapter_info(&self) -> wgpu::AdapterInfo {
         self.device.adapter_info()
     }

@@ -69,7 +69,7 @@ fn background_impl(style: &Impl, id: &str) -> Immutable<BackgroundLayerImpl> {
     static_immutable_cast::<BackgroundLayerImpl>(impl_)
 }
 
-/// One RenderOrchestrator update: `layer->transition(transitionParameters)`
+/// One `RenderOrchestrator` update: `layer->transition(transitionParameters)`
 /// then `layer->evaluate(evaluationParameters)`.
 fn transition_and_evaluate(
     impl_: &BackgroundLayerImpl,
@@ -108,7 +108,7 @@ fn evaluate_static(style: &Impl, id: &str) -> BackgroundPaintProperties::Possibl
 /// `Interpolator<Color>` with a double t (what the interpolate expression
 /// uses): per channel `float(a * (1.0 - t) + b * t)`.
 fn lerp_color_f64(a: Color, b: Color, t: f64) -> Color {
-    let lerp = |a: f32, b: f32| (a as f64 * (1.0 - t) + b as f64 * t) as f32;
+    let lerp = |a: f32, b: f32| (f64::from(a) * (1.0 - t) + f64::from(b) * t) as f32;
     Color::new_unchecked(lerp(a.r, b.r), lerp(a.g, b.g), lerp(a.b, b.b), lerp(a.a, b.a))
 }
 
@@ -150,7 +150,7 @@ fn background_color_function() {
 }
 
 /// C++ ignores "colorSpace" in legacy functions (function.cpp interpolates
-/// with ColorSpace::RGB), so both colorSpace tests evaluate to the RGB
+/// with `ColorSpace::RGB`), so both colorSpace tests evaluate to the RGB
 /// midpoint at zoom 5. (render-tests/background-color/colorSpace-hcl is in
 /// metrics/ignores/platform-all.json for that reason.)
 fn color_space_expected() -> Color {
@@ -158,7 +158,7 @@ fn color_space_expected() -> Color {
     let upper = Color::parse("rgb(255,155,0)").unwrap();
     // interpolationFactor(base 1, {0, 10}, 5) = 5 / 10 in float.
     let t = (5.0_f32 - 0.0) / (10.0_f32 - 0.0);
-    lerp_color_f64(lower, upper, t as f64)
+    lerp_color_f64(lower, upper, f64::from(t))
 }
 
 #[test]
@@ -212,7 +212,7 @@ fn background_color_transition() {
     // started at t0, the red->white one at t1, both 1000 ms long.
     let ease = |start: TimePoint, now: TimePoint| {
         let t = Duration::float_seconds_div(now - start, milliseconds(1000));
-        UnitBezier::new(0.0, 0.0, 0.25, 1.0).solve(t as f64, 0.001) as f32
+        UnitBezier::new(0.0, 0.0, 0.25, 1.0).solve(f64::from(t), 0.001) as f32
     };
     let red = Color::parse("red").unwrap();
     let white = Color::parse("white").unwrap();

@@ -45,7 +45,8 @@ impl<'a> BackendScope<'a> {
         scope
     }
 
-    /// Returns true when there is currently a BackendScope active in this thread.
+    /// Returns true when there is currently a `BackendScope` active in this thread.
+    #[must_use]
     pub fn exists() -> bool {
         CURRENT_SCOPES.with(|s| !s.borrow().is_empty())
     }

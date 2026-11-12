@@ -12,21 +12,22 @@ fn network_byte_u32(value: u32) -> [u8; 4] {
     value.to_be_bytes()
 }
 
-fn add_chunk(png: &mut Vec<u8>, type_: &[u8; 4], data: &[u8]) {
+fn add_chunk(png: &mut Vec<u8>, type_: [u8; 4], data: &[u8]) {
     // Checksum encompasses type + data
     let mut checksum = flate2::Crc::new();
-    checksum.update(type_);
+    checksum.update(&type_);
     checksum.update(data);
 
     let size = data.len() as u32;
     png.reserve(4 /* length */ + 4 /* type */ + data.len() + 4 /* CRC */);
     png.extend_from_slice(&network_byte_u32(size));
-    png.extend_from_slice(type_);
+    png.extend_from_slice(&type_);
     png.extend_from_slice(data);
     png.extend_from_slice(&network_byte_u32(checksum.sum()));
 }
 
 /// `mln::encodePNG(const PremultipliedImage&)`.
+#[must_use]
 pub fn encode_png(pre: &PremultipliedImage) -> Vec<u8> {
     // Make copy of the image so that we can unpremultiply it.
     let src = unpremultiply(pre.clone());
@@ -59,9 +60,9 @@ pub fn encode_png(pre: &PremultipliedImage) -> Vec<u8> {
     // Assemble the PNG.
     let mut png = Vec::with_capacity(8 + (12 + 13) + (12 + idat.len()) + 12);
     png.extend_from_slice(&preamble);
-    add_chunk(&mut png, b"IHDR", &ihdr);
-    add_chunk(&mut png, b"IDAT", &idat);
-    add_chunk(&mut png, b"IEND", &[]);
+    add_chunk(&mut png, *b"IHDR", &ihdr);
+    add_chunk(&mut png, *b"IDAT", &idat);
+    add_chunk(&mut png, *b"IEND", &[]);
     png
 }
 

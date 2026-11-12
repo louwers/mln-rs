@@ -63,12 +63,12 @@ fn parse_style_fixture(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// TEST_P(StyleParserTest, ParseStyle), instantiated over every fixture.
+/// `TEST_P(StyleParserTest`, `ParseStyle`), instantiated over every fixture.
 // gtest: StyleParserTest.ParseStyle
 #[test]
 fn parse_style() {
     let names = fixture_names();
-    assert!(!names.is_empty());
+    assert_ne!(names, [] as [std::string::String; 0]);
     let mut failures = Vec::new();
     for name in &names {
         if let Err(failure) = parse_style_fixture(name) {
@@ -300,7 +300,7 @@ fn fallback_font_faces() {
     assert_eq!(faces[0].name, "");
     assert_eq!(faces[0].url, "a.ttf");
     assert_eq!(faces[0].ranges, vec![(0x1000, 0x109F), (0xA9E0, 0xA9FF)]);
-    assert_eq!(faces[1].ranges, vec![(0, 0x10FFFF)]);
+    assert_eq!(faces[1].ranges, vec![(0, 0x0010_FFFF)]);
     assert_ne!(faces[0].type_, GlyphIDType::FontPBF);
 
     assert!(parse_fallback_font_faces("{}").is_err());

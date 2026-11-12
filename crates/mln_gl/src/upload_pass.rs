@@ -48,10 +48,12 @@ impl VertexBufferBase for VertexBuffer {
 
 impl UploadPass {
     /// `UploadPass(commandEncoder, name)`
+    #[must_use]
     pub fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
         UploadPass { context: command_encoder.get_context().clone() }
     }
 
+    #[must_use]
     pub fn gl_context(&self) -> &Rc<Context> {
         &self.context
     }
@@ -77,6 +79,7 @@ impl UploadPass {
 
     /// An index buffer of `indexes`, written from the JS array they're in,
     /// if they are.
+    #[must_use]
     pub fn create_index_buffer_of(&self, indexes: &IndexVectorBase) -> Box<dyn vertex_buffer::IndexBufferResource> {
         #[cfg(target_family = "wasm")]
         if let Some(data) = indexes.host_data() {
@@ -91,6 +94,7 @@ impl UploadPass {
     }
 
     /// `getBuffer(const VertexVectorBasePtr&, usage)`
+    #[must_use]
     pub fn get_buffer(
         &self,
         vec: Option<&VertexVectorBasePtr>,

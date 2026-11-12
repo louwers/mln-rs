@@ -116,8 +116,8 @@ fn second_background_layer_uses_the_drawable_path() {
     );
     let p = pixel(&image, 8, 8);
     // red * 0.5 + blue * 0.5 (premultiplied, alpha blended)
-    assert!((p[0] as i32 - 128).abs() <= 1, "{p:?}");
+    assert!((i32::from(p[0]) - 128).abs() <= 1, "{p:?}");
     assert_eq!(p[1], 0, "{p:?}");
-    assert!((p[2] as i32 - 128).abs() <= 1, "{p:?}");
+    assert!((i32::from(p[2]) - 128).abs() <= 1, "{p:?}");
     assert_eq!(p[3], 255, "{p:?}");
 }

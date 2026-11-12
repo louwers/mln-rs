@@ -115,7 +115,7 @@ pub type Features = Vec<Feature<f64>>;
 /// `style::GeoJSONData`.
 pub trait GeoJSONData: Send + Sync {
     /// `getTile(id, fn, runSynchronously)`: `callback` runs on the calling
-    /// thread, either right away or later from its RunLoop.
+    /// thread, either right away or later from its `RunLoop`.
     fn get_tile(&self, id: &CanonicalTileID, callback: Box<dyn FnOnce(TileFeatures)>, run_synchronously: bool);
 
     // SuperclusterData: data that isn't clustered has no clusters, and
@@ -146,6 +146,7 @@ pub struct GeoJSONDataBuilder {
 }
 
 impl GeoJSONDataBuilder {
+    #[must_use]
     pub fn options(&self) -> &Immutable<GeoJSONOptions> {
         &self.options
     }
@@ -204,6 +205,7 @@ impl GeoJSONSource {
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> Arc<Impl> {
         static_immutable_cast::<Impl>(&self.inner.base.base_impl())
     }
@@ -231,6 +233,7 @@ impl GeoJSONSource {
 
     /// What builds data for this source with its options, on any thread,
     /// for [`set_geojson_data`](Self::set_geojson_data) to take.
+    #[must_use]
     pub fn data_builder(&self) -> GeoJSONDataBuilder {
         GeoJSONDataBuilder {
             options: self.impl_().get_options().clone(),
@@ -241,6 +244,7 @@ impl GeoJSONSource {
     /// A count that goes up each time new data, a URL, or a URL's response
     /// replaces the source's data or starts to: data built while it stays
     /// the same is still the newest.
+    #[must_use]
     pub fn data_generation(&self) -> u64 {
         self.inner.request_generation.get()
     }
@@ -260,14 +264,17 @@ impl GeoJSONSource {
         self.inner.request_generation.set(self.inner.request_generation.get() + 1);
     }
 
+    #[must_use]
     pub fn get_url(&self) -> Option<String> {
         self.inner.url.borrow().clone()
     }
 
+    #[must_use]
     pub fn get_options(&self) -> Immutable<GeoJSONOptions> {
         self.impl_().get_options().clone()
     }
 
+    #[must_use]
     pub fn is_update_synchronous(&self) -> bool {
         source_impl::Impl::is_update_synchronous(&*self.impl_())
     }
@@ -279,7 +286,7 @@ impl GeoJSONSource {
 
 /// The part of `loadDescription`'s response handler that runs on the
 /// requesting thread.
-fn on_description_response(weak: &Weak<Inner>, res: Response) {
+fn on_description_response(weak: &Weak<Inner>, res: &Response) {
     let Some(inner) = weak.upgrade() else {
         return;
     };
@@ -361,7 +368,7 @@ impl Source for GeoJSONSource {
 
         let weak = Rc::downgrade(&self.inner);
         let req = file_source
-            .request(&Resource::source(&url), Box::new(move |res: Response| on_description_response(&weak, res)));
+            .request(&Resource::source(&url), Box::new(move |res: Response| on_description_response(&weak, &res)));
         *self.inner.req.borrow_mut() = Some(req);
     }
 

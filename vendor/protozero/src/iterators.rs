@@ -128,7 +128,7 @@ impl<T: Copy + PartialEq + Distance> IteratorRange<T> {
     }
 }
 
-impl<'a, T: VarintValue> IteratorRange<ConstVarintIterator<'a, T>> {
+impl<T: VarintValue> IteratorRange<ConstVarintIterator<'_, T>> {
     /// Get element at the beginning of the range (`front()`; the C++ asserts
     /// that the range is not empty).
     pub fn front(&self) -> Result<T, Exception> {
@@ -143,7 +143,7 @@ impl<'a, T: VarintValue> IteratorRange<ConstVarintIterator<'a, T>> {
     }
 }
 
-impl<'a, T: SvarintValue> IteratorRange<ConstSvarintIterator<'a, T>> {
+impl<T: SvarintValue> IteratorRange<ConstSvarintIterator<'_, T>> {
     /// `front()`.
     pub fn front(&self) -> Result<T, Exception> {
         debug_assert!(!self.empty());
@@ -157,8 +157,9 @@ impl<'a, T: SvarintValue> IteratorRange<ConstSvarintIterator<'a, T>> {
     }
 }
 
-impl<'a, T: FixedValue> IteratorRange<ConstFixedIterator<'a, T>> {
+impl<T: FixedValue> IteratorRange<ConstFixedIterator<'_, T>> {
     /// `front()`.
+    #[must_use]
     pub fn front(&self) -> T {
         debug_assert!(!self.empty());
         self.first.deref()
@@ -214,11 +215,13 @@ impl<T> Default for ConstFixedIterator<'_, T> {
 
 impl<'a, T: FixedValue> ConstFixedIterator<'a, T> {
     /// An iterator at byte offset `pos` of `buf`.
+    #[must_use]
     pub fn new(buf: &'a [u8], pos: usize) -> Self {
         ConstFixedIterator { buf, pos, _marker: std::marker::PhantomData }
     }
 
     /// `operator*`.
+    #[must_use]
     pub fn deref(&self) -> T {
         T::from_bytes(&self.buf[self.pos..self.pos + T::SIZE])
     }
@@ -229,6 +232,7 @@ impl<'a, T: FixedValue> ConstFixedIterator<'a, T> {
     }
 
     /// `operator++(int)`.
+    #[must_use]
     pub fn post_increment(&mut self) -> Self {
         let tmp = *self;
         self.increment();
@@ -241,6 +245,7 @@ impl<'a, T: FixedValue> ConstFixedIterator<'a, T> {
     }
 
     /// `operator+(difference_type)` (also `+=` with `*it = it.add(n)`).
+    #[must_use]
     pub fn add(&self, n: isize) -> Self {
         let mut tmp = *self;
         tmp.pos = (tmp.pos as isize + T::SIZE as isize * n) as usize;
@@ -248,11 +253,13 @@ impl<'a, T: FixedValue> ConstFixedIterator<'a, T> {
     }
 
     /// `operator[]`.
+    #[must_use]
     pub fn index(&self, n: isize) -> T {
         self.add(n).deref()
     }
 
     /// `operator-(const_fixed_iterator, const_fixed_iterator)`.
+    #[must_use]
     pub fn diff(&self, rhs: &Self) -> isize {
         (self.pos as isize - rhs.pos as isize) / T::SIZE as isize
     }
@@ -304,7 +311,7 @@ impl<T: FixedValue> Iterator for FixedRangeIter<'_, T> {
 impl<T: FixedValue> ExactSizeIterator for FixedRangeIter<'_, T> {}
 
 /// `const_varint_iterator<T>`: a forward iterator over varints. `data` is
-/// the C++ [m_data, m_end).
+/// the C++ [`m_data`, `m_end`).
 #[derive(Clone, Copy, Debug)]
 pub struct ConstVarintIterator<'a, T> {
     data: &'a [u8],
@@ -319,6 +326,7 @@ impl<T> Default for ConstVarintIterator<'_, T> {
 
 impl<'a, T: VarintValue> ConstVarintIterator<'a, T> {
     /// `const_varint_iterator(data, end)` with `data` = [data, end).
+    #[must_use]
     pub fn new(data: &'a [u8]) -> Self {
         ConstVarintIterator { data, _marker: std::marker::PhantomData }
     }
@@ -341,7 +349,8 @@ impl<'a, T: VarintValue> ConstVarintIterator<'a, T> {
         Ok(tmp)
     }
 
-    /// The remaining bytes [m_data, m_end).
+    /// The remaining bytes [`m_data`, `m_end`).
+    #[must_use]
     pub fn data(&self) -> &'a [u8] {
         self.data
     }
@@ -407,6 +416,7 @@ impl<T> Default for ConstSvarintIterator<'_, T> {
 
 impl<'a, T: SvarintValue> ConstSvarintIterator<'a, T> {
     /// `const_svarint_iterator(data, end)` with `data` = [data, end).
+    #[must_use]
     pub fn new(data: &'a [u8]) -> Self {
         ConstSvarintIterator { data, _marker: std::marker::PhantomData }
     }
@@ -429,7 +439,8 @@ impl<'a, T: SvarintValue> ConstSvarintIterator<'a, T> {
         Ok(tmp)
     }
 
-    /// The remaining bytes [m_data, m_end).
+    /// The remaining bytes [`m_data`, `m_end`).
+    #[must_use]
     pub fn data(&self) -> &'a [u8] {
         self.data
     }
@@ -476,13 +487,13 @@ mod tests {
         let a = ConstVarintIterator::<u32>::default();
         let b = ConstVarintIterator::<u32>::default();
         let r = IteratorRange::<ConstVarintIterator<u32>>::default();
-        assert!(a == a);
-        assert!(a == b);
-        assert!(a == r.begin());
-        assert!(a == r.end());
+        assert_eq!(a, a);
+        assert_eq!(a, b);
+        assert_eq!(a, r.begin());
+        assert_eq!(a, r.end());
         assert!(r.empty());
         assert_eq!(r.size(), 0);
-        assert!(r.begin() == r.end());
+        assert_eq!(r.begin(), r.end());
     }
 
     #[test]

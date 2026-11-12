@@ -35,12 +35,12 @@ impl Default for LatLng {
 }
 
 fn lat_(z: u8, y: i64) -> f64 {
-    let n = std::f64::consts::PI - 2.0 * std::f64::consts::PI * y as f64 / 2.0f64.powf(z as f64);
+    let n = std::f64::consts::PI - 2.0 * std::f64::consts::PI * y as f64 / 2.0f64.powf(f64::from(z));
     rad2deg((0.5 * (n.exp() - (-n).exp())).atan())
 }
 
 fn lon_(z: u8, x: i64) -> f64 {
-    x as f64 / 2.0f64.powf(z as f64) * constants::DEGREES_MAX - constants::LONGITUDE_MAX
+    x as f64 / 2.0f64.powf(f64::from(z)) * constants::DEGREES_MAX - constants::LONGITUDE_MAX
 }
 
 impl LatLng {
@@ -77,23 +77,28 @@ impl LatLng {
     }
 
     /// `LatLng(const CanonicalTileID&)`: the top left of the tile.
+    #[must_use]
     pub fn from_canonical_tile(z: u8, x: u32, y: u32) -> Self {
-        LatLng::new_unchecked(lat_(z, y as i64), lon_(z, x as i64))
+        LatLng::new_unchecked(lat_(z, i64::from(y)), lon_(z, i64::from(x)))
     }
 
     /// `LatLng(const UnwrappedTileID&)`.
+    #[must_use]
     pub fn from_unwrapped_tile(z: u8, x: u32, y: u32, wrap: i16) -> Self {
-        LatLng::new_unchecked(lat_(z, y as i64), lon_(z, x as i64) + wrap as f64 * constants::DEGREES_MAX)
+        LatLng::new_unchecked(lat_(z, i64::from(y)), lon_(z, i64::from(x)) + f64::from(wrap) * constants::DEGREES_MAX)
     }
 
+    #[must_use]
     pub fn latitude(&self) -> f64 {
         self.lat
     }
 
+    #[must_use]
     pub fn longitude(&self) -> f64 {
         self.lon
     }
 
+    #[must_use]
     pub fn wrapped(&self) -> LatLng {
         let mut r = *self;
         r.wrap();
@@ -143,17 +148,20 @@ impl LatLngBounds {
     }
 
     /// Return a bounds covering the entire (unwrapped) world.
+    #[must_use]
     pub fn world() -> Self {
         LatLngBounds::from_corners(LatLng::new_unchecked(-90.0, -180.0), LatLng::new_unchecked(90.0, 180.0))
     }
 
     /// Return the bounds consisting of the single point.
+    #[must_use]
     pub fn singleton(a: LatLng) -> Self {
         LatLngBounds::from_corners(a, a)
     }
 
     /// Return the convex hull of two points; the smallest bounds that
     /// contains both.
+    #[must_use]
     pub fn hull(a: LatLng, b: LatLng) -> Self {
         let mut bounds = LatLngBounds::from_corners(a, a);
         bounds.extend(&b);
@@ -162,6 +170,7 @@ impl LatLngBounds {
 
     /// Return a bounds that may serve as the identity element for the
     /// extend operation.
+    #[must_use]
     pub fn empty() -> Self {
         let mut bounds = Self::world();
         std::mem::swap(&mut bounds.sw, &mut bounds.ne);
@@ -171,8 +180,9 @@ impl LatLngBounds {
     /// Construct an infinite bound, a bound for which the constrain method
     /// returns its input unmodified (the C++ default constructor).
     ///
-    /// Note: this is different than LatLngBounds::world() since arbitrary
+    /// Note: this is different than `LatLngBounds::world()` since arbitrary
     /// unwrapped coordinates are also inside the bounds.
+    #[must_use]
     pub fn infinite() -> Self {
         LatLngBounds {
             sw: LatLng::new_unchecked(-90.0, -180.0),
@@ -182,51 +192,66 @@ impl LatLngBounds {
     }
 
     /// `LatLngBounds(const CanonicalTileID&)`: the tile's exact boundaries.
+    #[must_use]
     pub fn from_canonical_tile(z: u8, x: u32, y: u32) -> Self {
         LatLngBounds::from_corners(
             // `id.y + 1` is uint32_t arithmetic.
-            LatLng::new_unchecked(lat_(z, y.wrapping_add(1) as i64), lon_(z, x as i64)),
-            LatLng::new_unchecked(lat_(z, y as i64), lon_(z, x.wrapping_add(1) as i64)),
+            LatLng::new_unchecked(lat_(z, i64::from(y.wrapping_add(1))), lon_(z, i64::from(x))),
+            LatLng::new_unchecked(lat_(z, i64::from(y)), lon_(z, i64::from(x.wrapping_add(1)))),
         )
     }
 
+    #[must_use]
     pub fn valid(&self) -> bool {
         (self.sw.latitude() <= self.ne.latitude()) && (self.sw.longitude() <= self.ne.longitude())
     }
 
+    #[must_use]
     pub fn south(&self) -> f64 {
         self.sw.latitude()
     }
+    #[must_use]
     pub fn west(&self) -> f64 {
         self.sw.longitude()
     }
+    #[must_use]
     pub fn north(&self) -> f64 {
         self.ne.latitude()
     }
+    #[must_use]
     pub fn east(&self) -> f64 {
         self.ne.longitude()
     }
 
+    #[must_use]
     pub fn southwest(&self) -> LatLng {
         self.sw
     }
+    #[must_use]
     pub fn northeast(&self) -> LatLng {
         self.ne
     }
+    #[must_use]
     pub fn southeast(&self) -> LatLng {
         LatLng::new_unchecked(self.south(), self.east())
     }
+    #[must_use]
     pub fn northwest(&self) -> LatLng {
         LatLng::new_unchecked(self.north(), self.west())
     }
 
-    /// C++ constructs the LatLng in a `noexcept` function, so a longitude sum
+    /// C++ constructs the `LatLng` in a `noexcept` function, so a longitude sum
     /// that overflows to infinity terminates; this panics.
+    #[must_use]
     pub fn center(&self) -> LatLng {
-        LatLng::new((self.sw.latitude() + self.ne.latitude()) / 2.0, (self.sw.longitude() + self.ne.longitude()) / 2.0)
-            .expect("LatLngBounds::center")
+        LatLng::new(
+            f64::midpoint(self.sw.latitude(), self.ne.latitude()),
+            f64::midpoint(self.sw.longitude(), self.ne.longitude()),
+        )
+        .expect("LatLngBounds::center")
     }
 
+    #[must_use]
     pub fn constrain(&self, p: &LatLng) -> LatLng {
         if !self.bounded {
             return *p;
@@ -262,24 +287,29 @@ impl LatLngBounds {
         self.extend(&bounds.ne);
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sw.latitude() > self.ne.latitude() || self.sw.longitude() > self.ne.longitude()
     }
 
+    #[must_use]
     pub fn crosses_antimeridian(&self) -> bool {
         self.sw.wrapped().longitude() > self.ne.wrapped().longitude()
     }
 
     // TODO(port): contains(const CanonicalTileID&) (util::TileRange).
 
+    #[must_use]
     pub fn contains(&self, point: &LatLng) -> bool {
         self.contains_with_mode(point, WrapMode::Unwrapped)
     }
 
+    #[must_use]
     pub fn contains_with_mode(&self, point: &LatLng, wrap: WrapMode) -> bool {
         self.contains_latitude(point.latitude()) && self.contains_longitude(point.longitude(), wrap)
     }
 
+    #[must_use]
     pub fn contains_bounds(&self, area: &LatLngBounds, wrap: WrapMode) -> bool {
         let contains_area_latitude = area.north() <= self.north() && area.south() >= self.south();
         if !contains_area_latitude {
@@ -295,13 +325,13 @@ impl LatLngBounds {
             if self.crosses_antimeridian() && !area.crosses_antimeridian() {
                 return (other.east() <= constants::LONGITUDE_MAX && other.west() >= wrapped.west())
                     || (other.east() <= wrapped.east() && other.west() >= -constants::LONGITUDE_MAX);
-            } else {
-                return other.east() <= wrapped.east() && other.west() >= wrapped.west();
             }
+            return other.east() <= wrapped.east() && other.west() >= wrapped.west();
         }
         false
     }
 
+    #[must_use]
     pub fn intersects(&self, area: LatLngBounds, wrap: WrapMode) -> bool {
         let latitude_intersects = area.north() > self.south() && area.south() < self.north();
         if !latitude_intersects {
@@ -318,9 +348,8 @@ impl LatLngBounds {
                 return area.crosses_antimeridian() || other.east() > wrapped.west() || other.west() < wrapped.east();
             } else if other.crosses_antimeridian() {
                 return other.east() > wrapped.west() || other.west() < wrapped.east();
-            } else {
-                return other.east() > wrapped.west() && other.west() < wrapped.east();
             }
+            return other.east() > wrapped.west() && other.west() < wrapped.east();
         }
         false
     }
@@ -410,27 +439,33 @@ impl EdgeInsets {
         Ok(EdgeInsets { top, left, bottom, right })
     }
 
+    #[must_use]
     pub fn top(&self) -> f64 {
         self.top
     }
+    #[must_use]
     pub fn left(&self) -> f64 {
         self.left
     }
+    #[must_use]
     pub fn bottom(&self) -> f64 {
         self.bottom
     }
+    #[must_use]
     pub fn right(&self) -> f64 {
         self.right
     }
 
+    #[must_use]
     pub fn is_flush(&self) -> bool {
         self.top == 0.0 && self.left == 0.0 && self.bottom == 0.0 && self.right == 0.0
     }
 
+    #[must_use]
     pub fn get_center(&self, width: u16, height: u16) -> ScreenCoordinate {
         Point::new(
-            (width as f64 - self.left() - self.right()) / 2.0 + self.left(),
-            (height as f64 - self.top() - self.bottom()) / 2.0 + self.top(),
+            (f64::from(width) - self.left() - self.right()) / 2.0 + self.left(),
+            (f64::from(height) - self.top() - self.bottom()) / 2.0 + self.top(),
         )
     }
 }

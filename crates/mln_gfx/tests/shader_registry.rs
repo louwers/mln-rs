@@ -85,11 +85,11 @@ fn use_shader(registry: &ShaderRegistry, type_name: &str) -> u32 {
     program.as_deref().and_then(|p| to_stub(p, type_name)).map_or(0, StubProgram::draw)
 }
 
-fn same(a: &Option<ShaderProgramBasePtr>, b: &ShaderProgramBasePtr) -> bool {
-    a.as_ref().is_some_and(|a| std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b)))
+fn same(a: Option<&ShaderProgramBasePtr>, b: &ShaderProgramBasePtr) -> bool {
+    a.is_some_and(|a| std::ptr::addr_eq(Rc::as_ptr(a), Rc::as_ptr(b)))
 }
 
-/// Ensure we can register a gfx::Shader-based type with a registry object
+/// Ensure we can register a `gfx::Shader-based` type with a registry object
 // gtest: ShaderRegistry.RegisterShader
 #[test]
 fn register_shader() {
@@ -105,7 +105,7 @@ fn register_shader() {
     // Ensure the shader is present in the registry now
     assert!(registry.get_legacy_group().is_shader(STUB_PROGRAM_1));
     // And we can fetch it
-    assert!(same(&registry.get_legacy_group().get_typed(STUB_PROGRAM_1, STUB_PROGRAM_1), &program));
+    assert!(same(registry.get_legacy_group().get_typed(STUB_PROGRAM_1, STUB_PROGRAM_1).as_ref(), &program));
 
     // Make sure downcasting to program1 works as expected
     assert_eq!(use_shader(&registry, STUB_PROGRAM_1), 10);
@@ -149,7 +149,7 @@ fn shader_rtti() {
     let program1 = StubProgram::new(STUB_PROGRAM_1, 10);
     let as_base: &dyn Shader = &program1;
     // Should convert to program 1 but not program 2
-    assert!(to_stub(as_base, STUB_PROGRAM_1).is_some_and(|p| std::ptr::eq(p, &program1)));
+    assert!(to_stub(as_base, STUB_PROGRAM_1).is_some_and(|p| std::ptr::eq(p, &raw const program1)));
     assert!(to_stub(as_base, STUB_PROGRAM_2).is_none());
 }
 
@@ -168,7 +168,7 @@ fn multi_register() {
     // Register with an explicit name
     let b = group.get_typed("SecondProgram", STUB_PROGRAM_1);
     assert!(b.is_some());
-    assert!(!same(&a, b.as_ref().unwrap()));
+    assert!(!same(a.as_ref(), b.as_ref().unwrap()));
 }
 
 /// `populate(to, name)`: fill `to` when empty.
@@ -193,7 +193,7 @@ fn registry_fetch() {
     let mut prog_b = None;
     assert!(populate(group, &mut prog_a, STUB_PROGRAM_1, STUB_PROGRAM_1));
     assert!(populate(group, &mut prog_b, "SecondProgram", STUB_PROGRAM_1));
-    assert!(!same(&prog_a, prog_b.as_ref().unwrap()));
+    assert!(!same(prog_a.as_ref(), prog_b.as_ref().unwrap()));
     assert!(prog_a.is_some());
     assert!(prog_b.is_some());
 }
@@ -218,7 +218,7 @@ fn named_replace() {
     assert!(prog_b.is_some());
 
     // Should be different instances
-    assert!(!same(&prog_a, prog_b.as_ref().unwrap()));
+    assert!(!same(prog_a.as_ref(), prog_b.as_ref().unwrap()));
 }
 
 // The three GLSL replacement tests are OpenGL-only in C++

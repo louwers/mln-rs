@@ -80,6 +80,7 @@ pub struct ShaderProgram {
 impl ShaderProgram {
     pub const NAME: &'static str = "GenericMTLShader";
 
+    #[must_use]
     pub fn new(
         name: String,
         backend: Rc<BackendImpl>,

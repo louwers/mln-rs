@@ -7,7 +7,7 @@
 //! The descriptor sets are C++'s (`layout`): the global uniform buffers, a
 //! layer's buffers, a drawable's uniform buffers and a drawable's textures.
 //! C++ gives every buffer of a Vulkan build an id of its own across the sets
-//! (`getEnumValue(packed, unpacked)` in shader_defines.hpp picks the
+//! (`getEnumValue(packed, unpacked)` in `shader_defines.hpp` picks the
 //! unpacked one), so an id is a binding. The port's renderer uses the packed
 //! ids of the WebGPU and Metal builds, where a layer's uniform buffer can
 //! have the id of another layer's storage buffer, so a buffer's binding

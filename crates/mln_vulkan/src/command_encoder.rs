@@ -24,10 +24,12 @@ impl CommandEncoder {
         CommandEncoder { context, command_buffer }
     }
 
+    #[must_use]
     pub fn get_context(&self) -> &Rc<Context> {
         &self.context
     }
 
+    #[must_use]
     pub fn get_command_buffer(&self) -> vk::CommandBuffer {
         self.command_buffer
     }

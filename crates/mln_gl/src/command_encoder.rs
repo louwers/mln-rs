@@ -24,6 +24,7 @@ impl CommandEncoder {
         CommandEncoder { context }
     }
 
+    #[must_use]
     pub fn get_context(&self) -> &Rc<Context> {
         &self.context
     }

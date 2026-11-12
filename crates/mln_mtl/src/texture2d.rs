@@ -83,6 +83,7 @@ impl Texture2D {
     }
 
     /// `getMetalTexture()`
+    #[must_use]
     pub fn get_metal_texture(&self) -> Option<&MTLTexturePtr> {
         debug_assert!(self.metal_texture.is_some());
         self.metal_texture.as_ref()
@@ -218,6 +219,7 @@ impl Texture2D {
     }
 
     /// Port-only: a shared buffer that holds the texture's pixels.
+    #[must_use]
     pub fn new_pixels_buffer(&self) -> Option<MTLBufferPtr> {
         self.context.get_backend().get_device().newBufferWithLength_options(
             texture2d::Texture2D::get_data_size(self).max(1),
@@ -228,6 +230,7 @@ impl Texture2D {
     /// Port-only: copies the texture's pixels into `buffer` as
     /// `encode_copy_to` does, once the GPU work queued before is done, and
     /// waits for the copy. False if there is nothing to copy.
+    #[must_use]
     pub fn copy_to(&self, buffer: &MTLBufferPtr) -> bool {
         autoreleasepool(|_| {
             let Some(command_buffer) = self.context.get_backend().get_command_queue().commandBuffer() else {

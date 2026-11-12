@@ -91,7 +91,7 @@ pub(crate) fn get_maxima_pair(bnd: usize, active_bounds: &[BoundPtr], b: &[Bound
     active_bounds.iter().position(|&x| x == maximum).unwrap_or(active_bounds.len())
 }
 
-/// `set_winding_count`. The reverse iterator is kept as its base() index.
+/// `set_winding_count`. The reverse iterator is kept as its `base()` index.
 fn set_winding_count(
     bnd_itr: usize,
     active_bounds: &[BoundPtr],
@@ -161,7 +161,7 @@ fn set_winding_count(
     if is_even_odd_alt_fill_type(&b[me], subject_fill_type, clip_fill_type) {
         // EvenOdd filling ...
         while fwd != bnd_itr {
-            b[me].winding_count2 = if b[me].winding_count2 == 0 { 1 } else { 0 };
+            b[me].winding_count2 = i32::from(b[me].winding_count2 == 0);
             fwd += 1;
         }
     } else {

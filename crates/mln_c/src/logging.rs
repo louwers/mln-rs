@@ -75,18 +75,19 @@ fn flag(severity: mln_log_severity) -> mln_log_severity_flags {
 }
 
 /// Sends `record` to the host's handler, if there is one.
-fn deliver(record: Record) {
+fn deliver(record: &Record) {
     let handler = HANDLER.read().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(handler) = &*handler else { return };
     let callback = handler.callback;
     let _forbid = ForbidReentry::enter(REENTRY);
     let previous = IN_CALLBACK.replace(true);
     let message = LentText::new(&record.message);
+    let Record { severity, event, code, .. } = *record;
     // A record that the handler's released queue refuses is dropped.
     let _ = handler.registration.deliver(move |user_data| {
         // SAFETY: the host's callback, with its user data and a message that
         // lives until it returns.
-        unsafe { callback(user_data.get(), record.severity, record.event, record.code, message.view()) };
+        unsafe { callback(user_data.get(), severity, event, code, message.view()) };
     });
     IN_CALLBACK.set(previous);
 }
@@ -100,7 +101,8 @@ fn deliver_later(record: Record) -> Result<(), Record> {
     let mut thread = lock(&LOG_THREAD);
     if thread.is_none() {
         let (sender, receiver) = mpsc::channel::<Record>();
-        let started = mln_util::thread::builder("mln-log").spawn(move || receiver.into_iter().for_each(deliver));
+        let started = mln_util::thread::builder("mln-log")
+            .spawn(move || receiver.into_iter().for_each(|record| deliver(&record)));
         if started.is_err() {
             return Err(record);
         }
@@ -132,10 +134,10 @@ impl Observer for Forwarder {
         let record = Record { severity, event: event as mln_log_event, code, message: message.to_owned() };
         if ASYNC_SEVERITIES.load(Ordering::Acquire) & flag(severity) != 0 {
             if let Err(record) = deliver_later(record) {
-                deliver(record);
+                deliver(&record);
             }
         } else {
-            deliver(record);
+            deliver(&record);
         }
         // The core sends a record that isn't handled to the platform's log.
         !platform
@@ -290,7 +292,7 @@ mod tests {
         fn clear_from_callback() -> (mln_status, String) {
             let mut out = diagnostic();
             // SAFETY: a local diagnostic.
-            let status = unsafe { mln_log_clear_callback(&mut *out) };
+            let status = unsafe { mln_log_clear_callback(&raw mut *out) };
             (status, message(&out).to_owned())
         }
     }
@@ -396,7 +398,7 @@ mod tests {
         for mask in [1, 1 << 4] {
             let mut out = diagnostic();
             // SAFETY: a local diagnostic.
-            assert_eq!(unsafe { mln_log_set_async_severity_mask(mask, &mut *out) }, MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(unsafe { mln_log_set_async_severity_mask(mask, &raw mut *out) }, MLN_STATUS_INVALID_ARGUMENT);
             assert!(message(&out).contains("unknown bits"), "{}", message(&out));
         }
     }
@@ -477,7 +479,7 @@ mod tests {
         let probe = Probe::new("queued", true);
         assert_eq!(set(&handler(&probe, queue)), MLN_STATUS_OK);
         Log::info(Event::General, "queued");
-        assert!(probe.records().is_empty());
+        assert_eq!(probe.records(), Vec::<Seen>::new());
         // SAFETY: a null diagnostic.
         assert_eq!(unsafe { mln_delivery_queue_dispatch(queue, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
         assert_eq!(probe.records().len(), 1);

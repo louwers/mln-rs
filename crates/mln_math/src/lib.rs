@@ -13,21 +13,25 @@ use std::f64::consts::PI;
 // --- Ports include/mln/math/angles.hpp ---
 
 /// Converts degrees to radians.
+#[must_use]
 pub const fn deg2rad(deg: f64) -> f64 {
     deg * PI / 180.0
 }
 
 /// Converts degrees to radians (f32).
+#[must_use]
 pub const fn deg2radf(deg: f32) -> f32 {
     deg * std::f32::consts::PI / 180.0
 }
 
 /// Converts radians to degrees.
+#[must_use]
 pub const fn rad2deg(rad: f64) -> f64 {
     rad * 180.0 / PI
 }
 
 /// Converts radians to degrees (f32).
+#[must_use]
 pub const fn rad2degf(rad: f32) -> f32 {
     rad * 180.0 / std::f32::consts::PI
 }
@@ -35,6 +39,7 @@ pub const fn rad2degf(rad: f32) -> f32 {
 // --- Ports include/mln/math/minmax.hpp ---
 
 /// glibc `fmax`: NaN loses; equal operands (±0) return `a`.
+#[must_use]
 pub fn fmax(a: f64, b: f64) -> f64 {
     if a.is_nan() {
         b
@@ -46,6 +51,7 @@ pub fn fmax(a: f64, b: f64) -> f64 {
 }
 
 /// glibc `fmin`: NaN loses; equal operands (±0) return `a`.
+#[must_use]
 pub fn fmin(a: f64, b: f64) -> f64 {
     if a.is_nan() {
         b
@@ -57,6 +63,7 @@ pub fn fmin(a: f64, b: f64) -> f64 {
 }
 
 /// glibc `fmaxf`.
+#[must_use]
 pub fn fmaxf(a: f32, b: f32) -> f32 {
     if a.is_nan() {
         b
@@ -68,6 +75,7 @@ pub fn fmaxf(a: f32, b: f32) -> f32 {
 }
 
 /// glibc `fminf`.
+#[must_use]
 pub fn fminf(a: f32, b: f32) -> f32 {
     if a.is_nan() {
         b
@@ -89,21 +97,25 @@ pub fn min<T: Ord>(a: T, b: T) -> T {
 }
 
 /// `util::max<double>` = `::fmax`.
+#[must_use]
 pub fn max_f64(a: f64, b: f64) -> f64 {
     fmax(a, b)
 }
 
 /// `util::min<double>` = `::fmin`.
+#[must_use]
 pub fn min_f64(a: f64, b: f64) -> f64 {
     fmin(a, b)
 }
 
 /// `util::max<float>` = `::fmax` (on floats, the same as `fmaxf`).
+#[must_use]
 pub fn max_f32(a: f32, b: f32) -> f32 {
     fmaxf(a, b)
 }
 
 /// `util::min<float>` = `::fmin` (on floats, the same as `fminf`).
+#[must_use]
 pub fn min_f32(a: f32, b: f32) -> f32 {
     fminf(a, b)
 }
@@ -118,11 +130,13 @@ pub fn clamp<T: Ord>(value: T, min_: T, max_: T) -> T {
 }
 
 /// Clamp for f64, with the C++ `fmax(min, fmin(max, value))` semantics.
+#[must_use]
 pub fn clamp_f64(value: f64, min_: f64, max_: f64) -> f64 {
     max_f64(min_, min_f64(max_, value))
 }
 
 /// Clamp for f32, with the C++ `fmax(min, fmin(max, value))` semantics.
+#[must_use]
 pub fn clamp_f32(value: f32, min_: f32, max_: f32) -> f32 {
     max_f32(min_, min_f32(max_, value))
 }
@@ -131,6 +145,7 @@ pub fn clamp_f32(value: f32, min_: f32, max_: f32) -> f32 {
 
 /// Constrains n to the given range (including min, excluding max) via modular
 /// arithmetic.
+#[must_use]
 pub fn wrap(value: f64, min: f64, max: f64) -> f64 {
     if value >= min && value < max {
         return value;
@@ -144,6 +159,7 @@ pub fn wrap(value: f64, min: f64, max: f64) -> f64 {
 }
 
 /// `util::wrap<float>`.
+#[must_use]
 pub fn wrap_f32(value: f32, min: f32, max: f32) -> f32 {
     if value >= min && value < max {
         return value;
@@ -160,17 +176,18 @@ pub fn wrap_f32(value: f32, min: f32, max: f32) -> f32 {
 
 /// Computes the log2(x) rounded up to the next integer.
 /// (== number of bits required to store x)
+#[must_use]
 pub fn ceil_log2(mut x: u64) -> u32 {
     // From http://stackoverflow.com/questions/3272424/compute-fast-log-base-2-ceiling
     const T: [u64; 6] = [
-        0xFFFFFFFF00000000,
-        0x00000000FFFF0000,
-        0x000000000000FF00,
-        0x00000000000000F0,
-        0x000000000000000C,
-        0x0000000000000002,
+        0xFFFF_FFFF_0000_0000,
+        0x0000_0000_FFFF_0000,
+        0x0000_0000_0000_FF00,
+        0x0000_0000_0000_00F0,
+        0x0000_0000_0000_000C,
+        0x0000_0000_0000_0002,
     ];
-    let mut y: u32 = if (x & x.wrapping_sub(1)) == 0 { 0 } else { 1 };
+    let mut y: u32 = u32::from((x & x.wrapping_sub(1)) != 0);
     let mut j: u32 = 32;
 
     for i in T {
@@ -184,6 +201,7 @@ pub fn ceil_log2(mut x: u64) -> u32 {
 }
 
 /// `util::log2` (non-Android): `::log2`.
+#[must_use]
 pub fn log2(x: f64) -> f64 {
     x.log2()
 }
@@ -198,6 +216,7 @@ unsafe extern "C" {
 /// `std::asinh`: the C library's. Rust's `f64::asinh` is a formula of its
 /// own, which can differ from it in the last bit.
 #[allow(unsafe_code)]
+#[must_use]
 pub fn asinh(x: f64) -> f64 {
     // SAFETY: asinh is a pure C library function of a double.
     unsafe { libm_asinh(x) }

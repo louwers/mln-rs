@@ -36,7 +36,7 @@ use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
-use mln_gfx::globe_clip_mask::GlobeClipMask;
+use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -51,7 +51,6 @@ use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{StencilOpType, TextureChannelDataType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_tile_id::CanonicalTileID;
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -118,7 +117,7 @@ pub struct Context {
     /// `GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT`
     uniform_buffer_offset_alignment: usize,
     /// Whether a half-float texture can be rendered into
-    /// (EXT_color_buffer_half_float or EXT_color_buffer_float).
+    /// (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`).
     half_float_renderable: bool,
     global_uniform_buffers: RefCell<UniformBufferArray>,
     /// The uniform buffers of the layer group being drawn.
@@ -147,6 +146,7 @@ fn clip_mask_stencil_mode(stencil_ref: i32) -> StencilMode {
 
 impl Context {
     /// `Context(RendererBackend&)`. The backend's context must be current.
+    #[must_use]
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         let gl = backend.gl();
         // SAFETY: the parameters are GL ES 3.0's.
@@ -158,7 +158,7 @@ impl Context {
             || extensions.contains("GL_EXT_color_buffer_float");
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::new(MAXIMUM_VERTEX_BINDING_COUNT),
-            backend: backend.clone(),
+            backend,
             weak_self: weak.clone(),
             state: State::default(),
             uniform_buffer_offset_alignment: alignment.max(1) as usize,
@@ -208,7 +208,7 @@ impl Context {
         *self.layer_uniform_buffers.borrow_mut() = UniformBufferArray::new();
         let clip_masks = std::mem::take(&mut *self.clip_masks.borrow_mut());
         for mesh in clip_masks.tile_mesh.into_iter().chain(clip_masks.globe_meshes.into_values()) {
-            self.abandon_clip_mesh(mesh);
+            self.abandon_clip_mesh(&mesh);
         }
         if let Some(buffer) = clip_masks.projection_buffer {
             self.abandon_uncounted_buffer(buffer);
@@ -269,7 +269,7 @@ impl Context {
     }
 
     /// `create_buffer` of bytes that are still in a JS array
-    /// (mln_util::host_bytes), written from there.
+    /// (`mln_util::host_bytes`), written from there.
     #[cfg(target_family = "wasm")]
     pub fn create_buffer_from_host(
         &self,
@@ -339,7 +339,7 @@ impl Context {
         self.abandoned.borrow_mut().renderbuffers.push(renderbuffer);
     }
 
-    fn abandon_clip_mesh(&self, mesh: ClipMesh) {
+    fn abandon_clip_mesh(&self, mesh: &ClipMesh) {
         self.abandon_vertex_array(mesh.vertex_array);
         self.abandon_uncounted_buffer(mesh.vertex_buffer);
         self.abandon_uncounted_buffer(mesh.index_buffer);
@@ -704,7 +704,7 @@ impl Context {
         &self,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         if !self.has_stencil_buffer() {
             return true;
@@ -826,7 +826,7 @@ impl GfxContext for Context {
     }
 
     /// `createOffscreenTexture(size, type)`. Where a half-float texture
-    /// can't be rendered into (a WebGL2 without EXT_color_buffer_float), the
+    /// can't be rendered into (a WebGL2 without `EXT_color_buffer_float`), the
     /// texture has bytes, as the heatmap's has in C++ on such a context.
     fn create_offscreen_texture(
         &self,
@@ -913,15 +913,12 @@ impl GfxContext for Context {
         data: &[u8],
         persistent: bool,
     ) -> bool {
-        match ptr {
-            Some(buffer) => {
-                buffer.update(data);
-                false
-            }
-            None => {
-                *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-                true
-            }
+        if let Some(buffer) = ptr {
+            buffer.update(data);
+            false
+        } else {
+            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
+            true
         }
     }
 
@@ -951,7 +948,7 @@ impl GfxContext for Context {
     fn release_globe_clip_masks(&self) {
         let meshes = std::mem::take(&mut self.clip_masks.borrow_mut().globe_meshes);
         for mesh in meshes.into_values() {
-            self.abandon_clip_mesh(mesh);
+            self.abandon_clip_mesh(&mesh);
         }
     }
 
@@ -960,7 +957,7 @@ impl GfxContext for Context {
         _render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         self.render_globe_tile_clipping_masks_impl(shaders, masks, mesh)
     }

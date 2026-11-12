@@ -59,10 +59,12 @@ pub mod matrix {
         out[15] = 1.0;
     }
 
+    #[must_use]
     pub const fn identity4() -> Mat4 {
         [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     }
 
+    #[must_use]
     pub const fn identity4f() -> Matf4 {
         [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
     }
@@ -398,6 +400,7 @@ pub mod matrix {
     /// The value-returning `transformMat4(a, m)` overload; also the C++
     /// `operator*(mat4, vec4)`. a * m if m is row-major, m * a if m is
     /// column-major (OpenGL style).
+    #[must_use]
     pub fn transform_mat4_value(a: &Vec4, m: &Mat4) -> Vec4 {
         let mut result = [0.0; 4];
         transform_mat4(&mut result, a, m);
@@ -408,7 +411,7 @@ pub mod matrix {
         for i in 0..16 {
             out_value[i] = source[i] as f32;
             // double - float in double, then narrowed to float
-            out_diff[i] = (source[i] - out_value[i] as f64) as f32;
+            out_diff[i] = (source[i] - f64::from(out_value[i])) as f32;
         }
     }
 }

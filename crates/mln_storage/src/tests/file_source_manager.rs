@@ -60,10 +60,10 @@ fn a_released_file_source_is_made_again() {
     let options = ResourceOptions::default();
 
     let file_source = manager.get_file_source(FileSourceType::Network, &options).unwrap();
-    let _shared = manager.get_file_source(FileSourceType::Network, &options).unwrap();
+    let shared = manager.get_file_source(FileSourceType::Network, &options).unwrap();
     assert_eq!(1, calls.load(Ordering::SeqCst));
 
-    drop((file_source, _shared));
+    drop((file_source, shared));
     let _again = manager.get_file_source(FileSourceType::Network, &options).unwrap();
     assert_eq!(2, calls.load(Ordering::SeqCst));
 }
@@ -97,7 +97,7 @@ fn failing_transform(message: &'static str) -> ResourceTransform {
     })))
 }
 
-/// The error message of a request through `manager`'s ResourceLoader.
+/// The error message of a request through `manager`'s `ResourceLoader`.
 fn loader_error(manager: &FileSourceManager) -> String {
     let run_loop = RunLoop::new();
     let loader = manager.get_file_source(FileSourceType::ResourceLoader, &ResourceOptions::default()).unwrap();

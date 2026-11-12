@@ -24,6 +24,10 @@ mln_vec_map.workspace = true
 pollster.workspace = true
 wgpu.workspace = true
 
+# The shaders natively go to wgpu as naga modules (shader_program.rs).
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+wgpu = { workspace = true, features = ["naga-ir"] }
+
 # Headless wgpu smoke test: Vulkan (lavapipe) device, offscreen clear and
 # readback.
 [[test]]

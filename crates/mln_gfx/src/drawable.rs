@@ -37,7 +37,7 @@ pub type DrawPriority = i64;
 /// Array of textures to bind
 pub type Textures = [Option<Texture2DPtr>; MAX_TEXTURE_COUNT_PER_SHADER];
 
-/// `gfx::Drawable::DrawSegment` (drawable_impl.hpp)
+/// `gfx::Drawable::DrawSegment` (`drawable_impl.hpp`)
 #[derive(Debug)]
 pub struct DrawSegment {
     mode: DrawMode,
@@ -45,12 +45,15 @@ pub struct DrawSegment {
 }
 
 impl DrawSegment {
+    #[must_use]
     pub fn new(mode: DrawMode, segment: SegmentBase) -> Self {
         DrawSegment { mode, segment }
     }
+    #[must_use]
     pub fn get_mode(&self) -> &DrawMode {
         &self.mode
     }
+    #[must_use]
     pub fn get_segment(&self) -> &SegmentBase {
         &self.segment
     }
@@ -87,7 +90,7 @@ pub struct DrawableBase {
     pub tweakers: Vec<DrawableTweakerPtr>,
     /// `LayerTweakerPtr`: the drawable only keeps the layer tweaker alive
     /// (C++: "used to manage the lifetime of the tweaker"). `LayerTweaker`
-    /// lives in mln_renderer, so the handle is opaque here.
+    /// lives in `mln_renderer`, so the handle is opaque here.
     pub layer_tweaker: Option<Rc<dyn Any>>,
     pub type_: usize,
     pub origin: Option<Point<f64>>,
@@ -107,6 +110,7 @@ pub struct DrawableBase {
 
 impl DrawableBase {
     /// `Drawable(std::string name)`
+    #[must_use]
     pub fn new(name: String) -> Self {
         DrawableBase {
             enabled: true,

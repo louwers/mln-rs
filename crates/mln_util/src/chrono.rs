@@ -18,45 +18,54 @@ use serde::{Deserialize, Serialize};
 pub struct Duration(i64);
 
 impl Duration {
+    #[must_use]
     pub const fn zero() -> Self {
         Duration(0)
     }
 
+    #[must_use]
     pub const fn max() -> Self {
         Duration(i64::MAX)
     }
 
+    #[must_use]
     pub const fn min() -> Self {
         Duration(i64::MIN)
     }
 
+    #[must_use]
     pub const fn from_nanos(nanos: i64) -> Self {
         Duration(nanos)
     }
 
     /// `Milliseconds(ms)` converted to `Duration`.
+    #[must_use]
     pub const fn from_millis(millis: i64) -> Self {
         Duration(millis.wrapping_mul(1_000_000))
     }
 
     /// `Seconds(s)` converted to `Duration`.
+    #[must_use]
     pub const fn from_secs(secs: i64) -> Self {
         Duration(secs.wrapping_mul(1_000_000_000))
     }
 
     /// The tick count (nanoseconds).
+    #[must_use]
     pub const fn count(self) -> i64 {
         self.0
     }
 
     /// `std::chrono::duration_cast<std::chrono::milliseconds>(d).count()`
     /// (truncates toward zero).
+    #[must_use]
     pub const fn as_millis(self) -> i64 {
         self.0 / 1_000_000
     }
 
-    /// `std::chrono::duration<float>(d).count()`: libstdc++'s duration_cast
+    /// `std::chrono::duration<float>(d).count()`: libstdc++'s `duration_cast`
     /// computes `float(count) / float(1e9)`.
+    #[must_use]
     pub fn as_secs_f32(self) -> f32 {
         self.0 as f32 / 1_000_000_000.0_f32
     }
@@ -66,6 +75,7 @@ impl Duration {
     /// progress: both operands go to the common type
     /// `duration<float, nano>`, so the float seconds are scaled back by 1e9
     /// before the float division.
+    #[must_use]
     pub fn float_seconds_div(lhs: Duration, rhs: Duration) -> f32 {
         let lhs_ns = lhs.as_secs_f32() * 1_000_000_000.0_f32;
         let rhs_ns = rhs.0 as f32;
@@ -107,11 +117,13 @@ impl SubAssign for Duration {
 }
 
 /// `mln::Seconds(n)`.
+#[must_use]
 pub const fn seconds(n: i64) -> Duration {
     Duration::from_secs(n)
 }
 
 /// `mln::Milliseconds(n)`.
+#[must_use]
 pub const fn milliseconds(n: i64) -> Duration {
     Duration::from_millis(n)
 }
@@ -123,20 +135,24 @@ pub struct TimePoint(Duration);
 
 impl TimePoint {
     /// `TimePoint(d)`: the epoch plus `d`.
+    #[must_use]
     pub const fn new(since_epoch: Duration) -> Self {
         TimePoint(since_epoch)
     }
 
+    #[must_use]
     pub const fn time_since_epoch(self) -> Duration {
         self.0
     }
 
     /// `Clock::time_point::max()`.
+    #[must_use]
     pub const fn max() -> Self {
         TimePoint(Duration::max())
     }
 
     /// `Clock::time_point::min()`.
+    #[must_use]
     pub const fn min() -> Self {
         TimePoint(Duration::min())
     }
@@ -179,7 +195,7 @@ impl SubAssign<Duration> for TimePoint {
 pub struct Clock;
 
 impl Clock {
-    /// `Clock::now()`. Monotonic. std exposes no raw CLOCK_MONOTONIC reading,
+    /// `Clock::now()`. Monotonic. std exposes no raw `CLOCK_MONOTONIC` reading,
     /// so the epoch is placed at the wall-clock time of the first call; like
     /// the C++ steady clock, values are then far from the epoch (code that
     /// compares against `TimePoint(Duration::zero())`, such as
@@ -189,8 +205,7 @@ impl Clock {
         let (instant, base) = ANCHOR.get_or_init(|| {
             let since_unix = crate::time::SystemTime::now()
                 .duration_since(crate::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as i64)
-                .unwrap_or(0);
+                .map_or(0, |d| d.as_nanos() as i64);
             (crate::time::Instant::now(), since_unix)
         });
         let elapsed = instant.elapsed().as_nanos() as i64;
@@ -235,11 +250,13 @@ pub struct Timestamp(i64);
 
 impl Timestamp {
     /// `Timestamp(Seconds(secs))`.
+    #[must_use]
     pub const fn from_secs(secs: i64) -> Self {
         Timestamp(secs)
     }
 
     /// `time_since_epoch().count()`.
+    #[must_use]
     pub const fn secs_since_epoch(self) -> i64 {
         self.0
     }
@@ -247,6 +264,7 @@ impl Timestamp {
 
 /// `util::now()` (`platform::now()`: `time_point_cast<Seconds>(system_clock::now())`,
 /// which truncates toward zero).
+#[must_use]
 pub fn now() -> Timestamp {
     let secs = match crate::time::SystemTime::now().duration_since(crate::time::UNIX_EPOCH) {
         Ok(d) => d.as_secs() as i64,
@@ -266,10 +284,10 @@ fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
     // 1970-01-01 was a Thursday.
     let wday = (days + 4).rem_euclid(7) as usize;
     // Civil from days (Howard Hinnant's algorithm).
-    let z = days + 719468;
-    let era = z.div_euclid(146097);
-    let doe = z.rem_euclid(146097);
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
     let mp = (5 * doy + 2) / 153;
     let mday = doy - (153 * mp + 2) / 5 + 1;
@@ -279,6 +297,7 @@ fn gmtime(secs: i64) -> (usize, i64, usize, i64, i64, i64, i64) {
 }
 
 /// `util::rfc1123(Timestamp)`: e.g. "Sun, 06 Nov 1994 08:49:37 GMT".
+#[must_use]
 pub fn rfc1123(timestamp: Timestamp) -> String {
     const WEEK: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -287,6 +306,7 @@ pub fn rfc1123(timestamp: Timestamp) -> String {
 }
 
 /// `util::iso8601(Timestamp)`: e.g. "1994-11-06 08:49:37" (UTC).
+#[must_use]
 pub fn iso8601(timestamp: Timestamp) -> String {
     let (_, mday, month, year, hour, min, sec) = gmtime(timestamp.secs_since_epoch());
     format!("{year:04}-{:02}-{mday:02} {hour:02}:{min:02}:{sec:02}", month + 1)
@@ -294,11 +314,13 @@ pub fn iso8601(timestamp: Timestamp) -> String {
 
 /// `util::parseTimestamp(const char*)`: vendor/parsedate's `parse_date`
 /// (-1 when the date does not parse).
+#[must_use]
 pub fn parse_timestamp_str(timestamp: &str) -> Timestamp {
     Timestamp::from_secs(crate::parsedate::parse_date(timestamp))
 }
 
 /// `util::parseTimestamp(int32_t)`.
+#[must_use]
 pub fn parse_timestamp_i32(timestamp: i32) -> Timestamp {
     Timestamp::from_secs(i64::from(timestamp))
 }
@@ -310,16 +332,19 @@ mod wall_clock_tests {
     #[test]
     fn rfc1123_format() {
         // test/util/timestamp... the C++ formats with gmtime_r + snprintf.
-        assert_eq!(rfc1123(Timestamp::from_secs(784111777)), "Sun, 06 Nov 1994 08:49:37 GMT");
+        assert_eq!(rfc1123(Timestamp::from_secs(784_111_777)), "Sun, 06 Nov 1994 08:49:37 GMT");
         assert_eq!(rfc1123(Timestamp::from_secs(0)), "Thu, 01 Jan 1970 00:00:00 GMT");
-        assert_eq!(rfc1123(Timestamp::from_secs(951782400)), "Tue, 29 Feb 2000 00:00:00 GMT");
-        assert_eq!(parse_timestamp_str(&rfc1123(Timestamp::from_secs(1445412480))), Timestamp::from_secs(1445412480));
+        assert_eq!(rfc1123(Timestamp::from_secs(951_782_400)), "Tue, 29 Feb 2000 00:00:00 GMT");
+        assert_eq!(
+            parse_timestamp_str(&rfc1123(Timestamp::from_secs(1_445_412_480))),
+            Timestamp::from_secs(1_445_412_480)
+        );
     }
 
     #[test]
     fn iso8601_format() {
-        assert_eq!(iso8601(Timestamp::from_secs(784111777)), "1994-11-06 08:49:37");
+        assert_eq!(iso8601(Timestamp::from_secs(784_111_777)), "1994-11-06 08:49:37");
         assert_eq!(iso8601(Timestamp::from_secs(0)), "1970-01-01 00:00:00");
-        assert_eq!(iso8601(Timestamp::from_secs(951782400)), "2000-02-29 00:00:00");
+        assert_eq!(iso8601(Timestamp::from_secs(951_782_400)), "2000-02-29 00:00:00");
     }
 }

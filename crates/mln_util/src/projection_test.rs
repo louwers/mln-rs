@@ -7,12 +7,12 @@ const DEFAULT_MAX_ZOOM: u8 = 22;
 
 /// gtest `EXPECT_DOUBLE_EQ`: within 4 ULPs, NaN never equal.
 fn double_eq(a: f64, b: f64) -> bool {
-    if a.is_nan() || b.is_nan() {
-        return false;
-    }
     fn biased(f: f64) -> u64 {
         let bits = f.to_bits();
         if bits & 0x8000_0000_0000_0000 != 0 { (!bits).wrapping_add(1) } else { 0x8000_0000_0000_0000 | bits }
+    }
+    if a.is_nan() || b.is_nan() {
+        return false;
     }
     let (ba, bb) = (biased(a), biased(b));
     ba.abs_diff(bb) <= 4
@@ -51,7 +51,7 @@ fn boundaries() {
     let ne = ll(90.0, 180.0);
 
     let min_scale = 2.0f64.powf(0.0);
-    let max_scale = 2.0f64.powf(DEFAULT_MAX_ZOOM as f64);
+    let max_scale = 2.0f64.powf(f64::from(DEFAULT_MAX_ZOOM));
 
     let mut projected = Projection::project(&sw, min_scale);
     expect_double_eq!(projected.x, 0.0);
@@ -90,16 +90,16 @@ fn boundaries() {
 #[test]
 fn meters_per_pixel_at_latitude() {
     let mut zoom = 0.0;
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(0.0, zoom), 78271.516964020484, 1e-7);
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 6752.2284729446501, 1e-7);
+    expect_near!(Projection::get_meters_per_pixel_at_latitude(0.0, zoom), 78_271.516_964_020_48, 1e-7);
+    expect_near!(Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 6_752.228_472_944_65, 1e-7);
     expect_double_eq!(
         Projection::get_meters_per_pixel_at_latitude(LATITUDE_MAX, zoom),
         Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom)
     );
 
     zoom = 20.0;
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(0.0, zoom), 0.074645535434742435, 1e-7);
-    expect_near!(Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 0.0064394268731543065, 1e-7);
+    expect_near!(Projection::get_meters_per_pixel_at_latitude(0.0, zoom), 0.074_645_535_434_742_44, 1e-7);
+    expect_near!(Projection::get_meters_per_pixel_at_latitude(-LATITUDE_MAX, zoom), 0.006_439_426_873_154_306_5, 1e-7);
 
     // std::numeric_limits<double>::lowest() / max()
     expect_double_eq!(
@@ -137,13 +137,13 @@ fn projected_meters() {
 
     let south_west = ll(-LATITUDE_MAX, -LONGITUDE_MAX);
     projected_meters = Projection::projected_meters_for_lat_lng(&south_west);
-    expect_double_eq!(projected_meters.northing(), -20037508.342789274);
-    expect_double_eq!(projected_meters.easting(), -20037508.342789244);
+    expect_double_eq!(projected_meters.northing(), -20_037_508.342_789_274);
+    expect_double_eq!(projected_meters.easting(), -20_037_508.342_789_244);
 
     let north_east = ll(LATITUDE_MAX, LONGITUDE_MAX);
     projected_meters = Projection::projected_meters_for_lat_lng(&north_east);
-    expect_double_eq!(projected_meters.northing(), 20037508.342789274);
-    expect_double_eq!(projected_meters.easting(), 20037508.342789244);
+    expect_double_eq!(projected_meters.northing(), 20_037_508.342_789_274);
+    expect_double_eq!(projected_meters.easting(), 20_037_508.342_789_244);
 
     projected_meters = ProjectedMeters::new(f64::MIN, f64::MIN).unwrap();
     lat_lng = Projection::lat_lng_for_projected_meters(&projected_meters);

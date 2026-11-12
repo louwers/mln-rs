@@ -37,7 +37,7 @@ fn get_image_diff(base: &str, actual: &PremultipliedImage, pixel_threshold: f64)
         pixel_threshold,
         false,
     );
-    pixels as f64 / (expected.size.width as f64 * expected.size.height as f64)
+    pixels as f64 / (f64::from(expected.size.width) * f64::from(expected.size.height))
 }
 
 /// `test::checkImage(base, actual, imageThreshold, pixelThreshold)`.

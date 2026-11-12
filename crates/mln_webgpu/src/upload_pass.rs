@@ -43,6 +43,7 @@ impl UploadPass {
         UploadPass { context: command_encoder.get_context().clone() }
     }
 
+    #[must_use]
     pub fn webgpu_context(&self) -> &Rc<Context> {
         &self.context
     }
@@ -74,6 +75,7 @@ impl UploadPass {
 
     /// An index buffer of `indexes`, written from the JS array they're in,
     /// if they are.
+    #[must_use]
     pub fn create_index_buffer_of(
         &self,
         indexes: &IndexVectorBase,
@@ -98,6 +100,7 @@ impl UploadPass {
     }
 
     /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`
+    #[must_use]
     pub fn get_buffer(
         &self,
         vec: Option<&VertexVectorBasePtr>,
@@ -153,7 +156,7 @@ impl UploadPass {
         let count = vertex_count.max(2 * cached_count).max(1);
         let mut data = vec![0u8; VertexAttribute::get_stride_of(data_type) * count];
         if matches!(data_type, AttributeDataType::Float4 | AttributeDataType::Float2) {
-            for v in data.chunks_exact_mut(4) {
+            for v in data.as_chunks_mut::<4>().0 {
                 v.copy_from_slice(&1.0f32.to_ne_bytes());
             }
         }

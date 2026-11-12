@@ -103,50 +103,59 @@ impl PropertyExpressionBase {
         }
     }
 
+    #[must_use]
     pub fn is_zoom_constant(&self) -> bool {
         self.is_zoom_constant
     }
 
+    #[must_use]
     pub fn is_feature_constant(&self) -> bool {
         self.is_feature_constant
     }
 
+    #[must_use]
     pub fn is_runtime_constant(&self) -> bool {
         self.is_runtime_constant
     }
 
+    #[must_use]
     pub fn interpolation_factor(&self, input_levels: Range<f32>, input_value: f32) -> f32 {
         match self.get_zoom_curve() {
             ZoomCurvePtr::Null => {
                 debug_assert!(false);
                 0.0
             }
-            ZoomCurvePtr::Interpolate(z) => z
-                .interpolation_factor(Range::new(input_levels.min as f64, input_levels.max as f64), input_value as f64)
-                as f32,
+            ZoomCurvePtr::Interpolate(z) => z.interpolation_factor(
+                Range::new(f64::from(input_levels.min), f64::from(input_levels.max)),
+                f64::from(input_value),
+            ) as f32,
             ZoomCurvePtr::Step(_) => 0.0,
         }
     }
 
+    #[must_use]
     pub fn get_covering_stops(&self, lower: f32, upper: f32) -> Range<f32> {
         match self.get_zoom_curve() {
             ZoomCurvePtr::Null => {
                 debug_assert!(false);
                 Range::new(0.0, 0.0)
             }
-            ZoomCurvePtr::Interpolate(z) => z.get_covering_stops(lower as f64, upper as f64),
-            ZoomCurvePtr::Step(z) => z.get_covering_stops(lower as f64, upper as f64),
+            ZoomCurvePtr::Interpolate(z) => z.get_covering_stops(f64::from(lower), f64::from(upper)),
+            ZoomCurvePtr::Step(z) => z.get_covering_stops(f64::from(lower), f64::from(upper)),
         }
     }
 
+    #[must_use]
     pub fn get_expression(&self) -> &dyn Expression {
         self.expression.as_ref()
     }
 
+    #[must_use]
     pub fn is_gpu_capable(&self) -> bool {
         self.is_gpu_capable
     }
 
+    #[must_use]
     pub fn get_use_integer_zoom(&self) -> bool {
         self.use_integer_zoom
     }
@@ -178,17 +187,20 @@ impl PropertyExpressionBase {
         self.global_state_pinned = true;
     }
 
+    #[must_use]
     pub fn get_captured_global_state(&self) -> Option<&Arc<GlobalStateMap>> {
         self.captured_global_state.as_ref()
     }
 
     /// None if the expression does not reference the global state.
+    #[must_use]
     pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
     }
 
     /// Can be used for aggregating property expressions from multiple
     /// properties(layers) into single match / case expression.
+    #[must_use]
     pub fn get_shared_expression(&self) -> Arc<dyn Expression> {
         self.expression.clone()
     }
@@ -196,11 +208,13 @@ impl PropertyExpressionBase {
     // TODO(port): getGPUExpression (gfx::GPUExpression) with the renderer's
     // GPU-expression path.
 
+    #[must_use]
     pub fn get_dependencies(&self) -> Dependency {
         self.expression.dependencies()
     }
 
     /// `getZoomCurve()` (recomputed, see the struct comment).
+    #[must_use]
     pub fn get_zoom_curve(&self) -> ZoomCurvePtr<'_> {
         if self.expression.has(Dependency::ZOOM) {
             find_zoom_curve_checked(self.expression.as_ref())
@@ -419,10 +433,10 @@ impl<T: Clone + ValueConverter> PropertyExpression<T> {
     }
 
     fn evaluate_context(&self, context: &EvaluationContext<'_>, final_default_value: T) -> T {
-        if let Ok(result) = self.base.expression.evaluate(context) {
-            if let Some(typed) = T::from_expression_value(&result) {
-                return typed;
-            }
+        if let Ok(result) = self.base.expression.evaluate(context)
+            && let Some(typed) = T::from_expression_value(&result)
+        {
+            return typed;
         }
         match &self.default_value {
             Some(default_value) => default_value.clone(),

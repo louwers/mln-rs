@@ -15,7 +15,7 @@ pub trait TileObserver {
     fn on_tile_action(&self, _id: &OverscaledTileID, _source_id: &str, _op: TileOperation) {}
 }
 
-/// `TileObserver nullObserver` (tile.cpp, tile_pyramid.cpp).
+/// `TileObserver nullObserver` (tile.cpp, `tile_pyramid.cpp`).
 pub struct NullTileObserver;
 
 impl TileObserver for NullTileObserver {}

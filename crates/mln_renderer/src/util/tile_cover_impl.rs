@@ -38,6 +38,7 @@ pub struct Bound {
 
 impl Bound {
     /// Compute the interpolated x coordinate at y for the current edge
+    #[must_use]
     pub fn interpolate(&self, y: u32) -> f64 {
         let p0 = &self.points[self.current_point];
         let p1 = &self.points[self.current_point + 1];
@@ -48,15 +49,15 @@ impl Bound {
         if dx == 0.0 {
             return x;
         } else if dy == 0.0 {
-            return if y as f64 <= p0.y { p0.x } else { p1.x };
+            return if f64::from(y) <= p0.y { p0.x } else { p1.x };
         }
-        if (y as f64) < p0.y {
+        if f64::from(y) < p0.y {
             return x;
         }
-        if y as f64 > p1.y {
+        if f64::from(y) > p1.y {
             return p1.x;
         }
-        x = (dx / dy) * (y as f64 - p0.y) + p0.x;
+        x = (dx / dy) * (f64::from(y) - p0.y) + p0.x;
         x
     }
 }
@@ -172,7 +173,7 @@ fn start_row(y: f64, max_tile: f64) -> u32 {
 
 /// Given a set of points (ring or list) representing a shape, compute a set
 /// of Bounds, where each Bound represents edges going from a local minima to
-/// a local maxima point. The BoundsMap is an edge table indexed on the
+/// a local maxima point. The `BoundsMap` is an edge table indexed on the
 /// starting Y-tile of each Bound.
 fn build_bounds_map(points: &mut PointList, max_tile: u32, et: &mut BoundsMap, closed: bool) {
     if points.len() < 2 {
@@ -191,15 +192,15 @@ fn build_bounds_map(points: &mut PointList, max_tile: u32, et: &mut BoundsMap, c
 
         if to_max.points.len() >= 2 {
             // Projections may result in values beyond the bounds, clamp to max tile coordinates
-            let y = start_row(to_max.points[0].y, max_tile as f64);
+            let y = start_row(to_max.points[0].y, f64::from(max_tile));
             et.entry(y).or_default().push(to_max);
         }
         if to_min.points.len() >= 2 {
-            let y = start_row(to_min.points[0].y, max_tile as f64);
+            let y = start_row(to_min.points[0].y, f64::from(max_tile));
             et.entry(y).or_default().push(to_min);
         }
     }
-    debug_assert!(points_iter == points.len());
+    debug_assert_eq!(points_iter, points.len());
 }
 
 fn update_span(xp: &mut TileSpan, x: f64) {
@@ -230,7 +231,7 @@ fn scan_row(y: u32, active_bounds: &mut Bounds) -> Vec<TileSpan> {
             // If this edge ends beyond the current row, find the x-intercept
             // where it exits the row
             let p1 = b.points[b.current_point + 1];
-            if p1.y > y1 as f64 {
+            if p1.y > f64::from(y1) {
                 x = b.interpolate(y1);
                 update_span(&mut xp, x);
                 break;
@@ -246,7 +247,7 @@ fn scan_row(y: u32, active_bounds: &mut Bounds) -> Vec<TileSpan> {
     // Erase bounds in the active table whose current edge ends inside this row,
     // or there are no more edges
     active_bounds.retain(|bound| {
-        !(bound.current_point == bound.points.len() - 1 && bound.points[bound.current_point].y <= y1 as f64)
+        !(bound.current_point == bound.points.len() - 1 && bound.points[bound.current_point].y <= f64::from(y1))
     });
     // Sort the X-extents of each crossing bound by x_min, x_max
     std_sort(&mut tile_range, |a, b| (a.xmin, a.xmax) < (b.xmin, b.xmax));
@@ -308,7 +309,7 @@ impl BuildBoundsMap {
         }
         bnd.points.extend([point, point]);
         bnd.winding = false;
-        let y = start_row(point.y, self.max_tile() as f64);
+        let y = start_row(point.y, f64::from(self.max_tile()));
         et.entry(y).or_default().push(bnd);
         Ok(())
     }
@@ -324,7 +325,7 @@ impl BuildBoundsMap {
     fn apply(&self, geom: &Geometry<f64>) -> Result<BoundsMap, Error> {
         let mut et = BoundsMap::new();
         match geom {
-            Geometry::Empty => {}
+            Geometry::Empty | Geometry::GeometryCollection(_) => {}
             Geometry::Point(p) => self.point(p, &mut et)?,
             Geometry::MultiPoint(points) => self.multi_point(points, &mut et)?,
             Geometry::LineString(lines) => self.build_table(lines, &mut et, false)?,
@@ -339,7 +340,6 @@ impl BuildBoundsMap {
                     self.build_polygon_table(polygon, &mut et)?;
                 }
             }
-            Geometry::GeometryCollection(_) => {}
         }
         Ok(et)
     }
@@ -362,7 +362,7 @@ type TileSpans = VecDeque<(i32, i32)>;
 /// intersects the top and bottom of a tile row. Interior tiles of a polygon
 /// are captured by merging spans using the non-zero rule. The result of a scan
 /// using `nextRow()` is a list of spans (tileXSpans) of x-coordinates that
-/// includes edges and interiors of polygons. next() returns a tileID for each
+/// includes edges and interiors of polygons. `next()` returns a tileID for each
 /// x-coordinate from (first, second] in each span in tileXSpans.
 pub struct Impl {
     zoom: i32,
@@ -412,10 +412,10 @@ impl Impl {
     }
 
     /// Aggregate all Bounds that start in or enter into the next tileY row.
-    /// Multi-geoms may have discontinuity in the BoundMap, so skip forward to
+    /// Multi-geoms may have discontinuity in the `BoundMap`, so skip forward to
     /// the next tileY row when the current/next row has no more bounds in it.
-    /// Use scan_row to generate the tileX spans. Merge spans to avoid
-    /// duplicate tiles in TileCoverImpl::next(). For closed geometry, use the
+    /// Use `scan_row` to generate the tileX spans. Merge spans to avoid
+    /// duplicate tiles in `TileCoverImpl::next()`. For closed geometry, use the
     /// non-zero rule to expand (fill) tiles between pairs of spans.
     fn next_row(&mut self) {
         // Update activeBounds for next row
@@ -439,11 +439,9 @@ impl Impl {
         let mut x_max = xps[0].xmax;
         let mut nz_rule: i32 = if xps[0].winding { 1 } else { -1 };
         for xp in &xps[1..] {
-            if !self.is_closed || nz_rule == 0 {
-                if xp.xmin > x_max && xp.xmax >= x_max {
-                    self.tile_x_spans.push_back((x_min, x_max));
-                    x_min = xp.xmin;
-                }
+            if (!self.is_closed || nz_rule == 0) && xp.xmin > x_max && xp.xmax >= x_max {
+                self.tile_x_spans.push_back((x_min, x_max));
+                x_min = xp.xmin;
             }
             nz_rule += if xp.winding { 1 } else { -1 };
             // Quirk kept: `std::max(x_min, xp.xmax)`, not `std::max(x_max, xp.xmax)`.
@@ -452,14 +450,19 @@ impl Impl {
         self.tile_x_spans.push_back((x_min, x_max));
     }
 
+    #[must_use]
     pub fn has_next(&self) -> bool {
         match self.tile_x_spans.front() {
             Some(&(_, second)) => self.tile_x < second && self.tile_y < 1u32.wrapping_shl(self.zoom as u32),
             None => false,
         }
     }
+}
 
-    pub fn next(&mut self) -> Option<UnwrappedTileID> {
+impl Iterator for Impl {
+    type Item = UnwrappedTileID;
+
+    fn next(&mut self) -> Option<UnwrappedTileID> {
         if !self.has_next() {
             return None;
         }
@@ -478,6 +481,6 @@ impl Impl {
             }
         }
         // `UnwrappedTileID(zoom, x, y)`: the int32_t zoom narrows to uint8_t.
-        Some(UnwrappedTileID::new(self.zoom as u8, x as i64, y as i64))
+        Some(UnwrappedTileID::new(self.zoom as u8, i64::from(x), i64::from(y)))
     }
 }

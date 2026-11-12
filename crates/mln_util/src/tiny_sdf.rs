@@ -17,8 +17,8 @@ fn edt1d(f: &[f64], d: &mut [f64], v: &mut [i16], z: &mut [f64], n: u32) {
 
     let mut k: usize = 0;
     for q in 1..n {
-        let qf = q as f64;
-        let vk = |v: &[i16], k: usize| v[k] as f64;
+        let qf = f64::from(q);
+        let vk = |v: &[i16], k: usize| f64::from(v[k]);
         let mut s =
             ((f[q as usize] + qf * qf) - (f[v[k] as usize] + vk(v, k) * vk(v, k))) / (2.0 * qf - 2.0 * vk(v, k));
         while s <= z[k] {
@@ -33,11 +33,11 @@ fn edt1d(f: &[f64], d: &mut [f64], v: &mut [i16], z: &mut [f64], n: u32) {
 
     let mut k: usize = 0;
     for q in 0..n {
-        let qf = q as f64;
+        let qf = f64::from(q);
         while z[k + 1] < qf {
             k += 1;
         }
-        let vk = v[k] as f64;
+        let vk = f64::from(v[k]);
         d[q as usize] = (qf - vk) * (qf - vk) + f[v[k] as usize];
     }
 }
@@ -67,6 +67,7 @@ fn edt(data: &mut [f64], width: u32, height: u32, f: &mut [f64], d: &mut [f64], 
 
 /// `transformRasterToSDF`: an alpha raster to a signed distance field of
 /// the same size.
+#[must_use]
 pub fn transform_raster_to_sdf(raster_input: &AlphaImage, radius: f64, cutoff: f64) -> AlphaImage {
     let size = raster_input.size.width * raster_input.size.height;
     let max_dimension = raster_input.size.width.max(raster_input.size.height);
@@ -82,7 +83,7 @@ pub fn transform_raster_to_sdf(raster_input: &AlphaImage, radius: f64, cutoff: f
     let mut v = vec![0i16; max_dimension as usize];
 
     for i in 0..size as usize {
-        let a = raster_input.data[i] as f64 / 255.0; // alpha value
+        let a = f64::from(raster_input.data[i]) / 255.0; // alpha value
         grid_outer[i] = if a == 1.0 {
             0.0
         } else if a == 0.0 {
@@ -113,10 +114,10 @@ pub fn transform_raster_to_sdf(raster_input: &AlphaImage, radius: f64, cutoff: f
 }
 
 /// `::lround` (halfway cases away from zero; out-of-range values give the
-/// x86-64 result, LONG_MIN).
+/// x86-64 result, `LONG_MIN`).
 fn lround(x: f64) -> i64 {
     let r = x.round();
-    if r >= -9.223_372_036_854_776e18 && r < 9.223_372_036_854_776e18 { r as i64 } else { i64::MIN }
+    if (-9.223_372_036_854_776e18..9.223_372_036_854_776e18).contains(&r) { r as i64 } else { i64::MIN }
 }
 
 #[cfg(test)]

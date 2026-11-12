@@ -52,7 +52,7 @@ pub trait PaintParameters {
 
     /// conformance: `parameters.state.getPitch()` and
     /// `parameters.state.isChanging()`, which `gfx::DrawableAtlasesTweaker`
-    /// reads (the transform state is a map type, above mln_gfx).
+    /// reads (the transform state is a map type, above `mln_gfx`).
     fn state_pitch(&self) -> f64 {
         0.0
     }

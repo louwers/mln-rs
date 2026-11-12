@@ -21,6 +21,7 @@ pub struct Filter {
 }
 
 impl Filter {
+    #[must_use]
     pub fn new(expression: Option<Arc<dyn Expression>>, legacy_filter: Option<Value>) -> Self {
         Filter { expression, legacy_filter, property_keys: OnceLock::new() }
     }

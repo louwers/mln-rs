@@ -72,6 +72,7 @@ fn render_and_acquire(session: &RenderSession, token: u64) -> AcquiredFrame {
 }
 
 /// Detaches `session`, so that its map takes another.
+#[expect(clippy::needless_pass_by_value, reason = "a detached session is done with")]
 fn detach(session: RenderSession) {
     wait(session.detach());
 }
@@ -142,17 +143,14 @@ fn a_ring_without_a_device_renders_on_one_that_exports_its_kind() {
         .into_iter()
         .filter_map(device_of)
         .find_map(|device| device.export_kinds().iter().next().map(|kind| (device.backend(), kind)));
-    match exporting {
-        Some((_, kind)) => {
-            let session = attach(&map, ring(&[kind]), None, SyncKinds::NONE).unwrap();
-            assert_eq!(Some(kind), session.capabilities().unwrap().export_kind);
-            let frame = render_and_acquire(&session, 1);
-            assert_eq!(SIZE, exported_image(&frame).0);
-        }
-        None => {
-            let error = attach(&map, ring(&EVERY_KIND), None, SyncKinds::NONE).unwrap_err();
-            assert_eq!(ErrorKind::Unsupported, error.kind);
-        }
+    if let Some((_, kind)) = exporting {
+        let session = attach(&map, ring(&[kind]), None, SyncKinds::NONE).unwrap();
+        assert_eq!(Some(kind), session.capabilities().unwrap().export_kind);
+        let frame = render_and_acquire(&session, 1);
+        assert_eq!(SIZE, exported_image(&frame).0);
+    } else {
+        let error = attach(&map, ring(&EVERY_KIND), None, SyncKinds::NONE).unwrap_err();
+        assert_eq!(ErrorKind::Unsupported, error.kind);
     }
 }
 
@@ -401,7 +399,7 @@ mod linux {
         }
         let mut waiting = libc::pollfd { fd: sync.handle as i32, events: libc::POLLIN, revents: 0 };
         // SAFETY: a poll of the frame's live sync file.
-        assert_eq!(1, unsafe { libc::poll(&mut waiting, 1, 10_000) }, "the frame's sync file signals");
+        assert_eq!(1, unsafe { libc::poll(&raw mut waiting, 1, 10_000) }, "the frame's sync file signals");
     }
 
     #[test]

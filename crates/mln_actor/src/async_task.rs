@@ -15,7 +15,7 @@ pub struct AsyncTask {
 }
 
 impl AsyncTask {
-    /// `AsyncTask(std::function<void()>&&)`, on the current thread's RunLoop.
+    /// `AsyncTask(std::function<void()>&&)`, on the current thread's `RunLoop`.
     pub fn new(task: impl FnMut() + 'static) -> Self {
         let run_loop = RunLoop::get();
         let handle = Rc::new(AsyncHandle {
@@ -38,6 +38,7 @@ impl AsyncTask {
     /// A `Send + Sync` handle whose `send()` is this task's `send()`: C++
     /// calls `AsyncTask::send` from other threads through a pointer (e.g.
     /// `NetworkStatus` observers).
+    #[must_use]
     pub fn sender(&self) -> AsyncTaskSender {
         AsyncTaskSender { pending: self.handle.pending.clone(), core: self.handle.core.clone() }
     }

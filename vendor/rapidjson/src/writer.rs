@@ -66,6 +66,7 @@ impl Default for Writer {
 }
 
 impl Writer {
+    #[must_use]
     pub fn new() -> Self {
         Writer {
             os: String::new(),
@@ -76,14 +77,17 @@ impl Writer {
     }
 
     /// `StringBuffer::GetString()`.
+    #[must_use]
     pub fn get_string(&self) -> &str {
         &self.os
     }
 
+    #[must_use]
     pub fn into_string(self) -> String {
         self.os
     }
 
+    #[must_use]
     pub fn get_max_decimal_places(&self) -> i32 {
         self.max_decimal_places
     }
@@ -93,6 +97,7 @@ impl Writer {
     }
 
     /// Checks whether the output is a complete JSON.
+    #[must_use]
     pub fn is_complete(&self) -> bool {
         self.has_root && self.level_stack.is_empty()
     }
@@ -164,7 +169,7 @@ impl Writer {
     pub fn end_object(&mut self) -> bool {
         debug_assert!(!self.level_stack.is_empty()); // not inside an Object
         debug_assert!(!self.level_stack.last().unwrap().in_array); // currently inside an Array, not Object
-        debug_assert!(self.level_stack.last().unwrap().value_count % 2 == 0); // Object has a Key without a Value
+        debug_assert!(self.level_stack.last().unwrap().value_count.is_multiple_of(2)); // Object has a Key without a Value
         self.level_stack.pop();
         self.os.push('}');
         true
@@ -239,7 +244,7 @@ impl Writer {
                 }
             }
             if !level.in_array && level.value_count % 2 == 0 {
-                debug_assert!(type_ == Type::String); // if it's in object, then even number should be a name
+                debug_assert_eq!(type_, Type::String); // if it's in object, then even number should be a name
             }
             level.value_count += 1;
         } else {

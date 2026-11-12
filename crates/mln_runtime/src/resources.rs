@@ -401,17 +401,20 @@ pub struct ResourceRequest {
 impl ResourceRequest {
     /// The resource as the style names it, with the cache's earlier copy in
     /// its `prior_*` fields.
+    #[must_use]
     pub fn resource(&self) -> &Resource {
         &self.resource
     }
 
     /// The URL to load: the resource's after the library expands any
     /// shorthand in it, and before any resource transform.
+    #[must_use]
     pub fn resolved_url(&self) -> &str {
         &self.resolved_url
     }
 
     /// Whether the library no longer needs the request.
+    #[must_use]
     pub fn is_cancelled(&self) -> bool {
         self.shared.as_ref().is_none_or(|shared| shared.state.lock_unpoisoned().cancelled)
     }
@@ -487,7 +490,7 @@ impl std::fmt::Debug for ResourceRequest {
             .field("kind", &self.resource.kind)
             .field("url", &self.resource.url)
             .field("resolved_url", &self.resolved_url)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -513,6 +516,7 @@ const MANAGED_HEADERS: [&str; 15] = [
 
 /// Whether the library or the platform manages the HTTP header `name`, in
 /// any letter case, so that a header transform can't set it.
+#[must_use]
 pub fn is_managed_http_header(name: &str) -> bool {
     MANAGED_HEADERS.iter().any(|managed| managed.eq_ignore_ascii_case(name))
 }

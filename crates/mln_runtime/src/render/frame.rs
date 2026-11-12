@@ -25,6 +25,7 @@ pub struct FrameDemand {
 }
 
 impl FrameDemand {
+    #[must_use]
     pub fn new(mode: DemandMode, token: u64) -> Self {
         FrameDemand { mode, token }
     }

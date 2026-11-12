@@ -18,6 +18,7 @@ pub struct RenderLight {
 
 impl RenderLight {
     /// `RenderLight(Immutable<style::Light::Impl>)`.
+    #[must_use]
     pub fn new(impl_: Immutable<light::Impl>) -> Self {
         let transitioning = impl_.properties.untransitioned();
         RenderLight { impl_, transitioning, evaluated: EvaluatedLight::default() }

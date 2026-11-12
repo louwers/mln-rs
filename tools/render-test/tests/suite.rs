@@ -21,7 +21,7 @@ pub fn run(name: &str, args: &[&str], factory: Option<ImplFactory>) -> i32 {
     let mut argv =
         vec!["render-test", "--manifestPath", manifest, "--output", output.to_str().unwrap(), "--jobs", &jobs];
     argv.extend(args);
-    match parse_arguments(&argv.iter().map(|arg| arg.to_string()).collect::<Vec<_>>()) {
+    match parse_arguments(&argv.iter().map(std::string::ToString::to_string).collect::<Vec<_>>()) {
         Ok(mut arguments) => {
             arguments.worker_program = Some(PathBuf::from(env!("CARGO_BIN_EXE_render-test")));
             run_render_tests_with(&arguments, factory).return_code

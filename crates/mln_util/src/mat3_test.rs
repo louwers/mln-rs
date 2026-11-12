@@ -7,12 +7,12 @@ use crate::vectors::Vec3f;
 
 /// gtest `EXPECT_FLOAT_EQ`: within 4 ULPs, NaN never equal.
 fn float_eq(a: f32, b: f32) -> bool {
-    if a.is_nan() || b.is_nan() {
-        return false;
-    }
     fn biased(f: f32) -> u32 {
         let bits = f.to_bits();
         if bits & 0x8000_0000 != 0 { (!bits).wrapping_add(1) } else { 0x8000_0000 | bits }
+    }
+    if a.is_nan() || b.is_nan() {
+        return false;
     }
     let (ba, bb) = (biased(a), biased(b));
     ba.abs_diff(bb) <= 4
@@ -52,7 +52,7 @@ fn transform_mat3f_aliased() {
     let a = rotation;
     matrix::rotate(&mut rotation, &a, -PI * 3.0 / 4.0);
 
-    let input: Vec3f = [0.2875, -0.497964, 0.995929];
+    let input: Vec3f = [0.2875, -0.497_964, 0.995_929];
 
     let mut separate: Vec3f = [0.0; 3];
     matrix::transform_mat3f(&mut separate, &input, &rotation);
@@ -72,21 +72,21 @@ fn transform_mat3f_aliased() {
 fn transform_mat3f_rotation_preserves_length() {
     // A rotation about z leaves |xy| and z alone. Before the aliasing fix, a quarter turn of
     // this vector reported |xy| = 0.704 where the input is 0.575.
-    let input: Vec3f = [0.2875, -0.497964, 0.995929];
+    let input: Vec3f = [0.2875, -0.497_964, 0.995_929];
 
     for degrees in (0..360).step_by(15) {
         let mut rotation: Mat3 = [0.0; 9];
         matrix::identity(&mut rotation);
         let a = rotation;
-        matrix::rotate(&mut rotation, &a, degrees as f64 * PI / 180.0);
+        matrix::rotate(&mut rotation, &a, f64::from(degrees) * PI / 180.0);
 
         let mut out = input;
         let a = out;
         matrix::transform_mat3f(&mut out, &a, &rotation);
 
         // EXPECT_NEAR(..., 1e-5f): gtest compares in double.
-        let (l_in, l_out) = (length_xy(&input) as f64, length_xy(&out) as f64);
-        assert!((l_in - l_out).abs() <= 1e-5f32 as f64, "at {degrees} degrees: {l_in} vs {l_out}");
+        let (l_in, l_out) = (f64::from(length_xy(&input)), f64::from(length_xy(&out)));
+        assert!((l_in - l_out).abs() <= f64::from(1e-5f32), "at {degrees} degrees: {l_in} vs {l_out}");
         expect_float_eq!(input[2], out[2], "at {} degrees", degrees);
     }
 }

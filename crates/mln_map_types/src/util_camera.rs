@@ -92,17 +92,20 @@ impl Default for Camera {
 }
 
 impl Camera {
+    #[must_use]
     pub fn new() -> Self {
         let mut transform = [0.0; 16];
         matrix::identity(&mut transform);
         Camera { orientation: Quaternion::IDENTITY, transform }
     }
 
+    #[must_use]
     pub fn get_position(&self) -> Vec3 {
         let p = get_column(&self.transform, 3);
         [p[0], p[1], p[2]]
     }
 
+    #[must_use]
     pub fn get_camera_to_world(&self, scale: f64, flipped_y: bool) -> Mat4 {
         let mut camera_to_world = [0.0; 16];
         // C++ ignores the result.
@@ -110,6 +113,7 @@ impl Camera {
         camera_to_world
     }
 
+    #[must_use]
     pub fn get_world_to_camera(&self, scale: f64, flipped_y: bool) -> Mat4 {
         // transformation chain from world space to camera space:
         // 1. Height value (z) of renderables is in meters. Scale z coordinate
@@ -153,35 +157,41 @@ impl Camera {
         result
     }
 
+    #[must_use]
     pub fn get_camera_to_clip_perspective(&self, fovy: f64, aspect_ratio: f64, near_z: f64, far_z: f64) -> Mat4 {
         let mut projection = [0.0; 16];
         matrix::perspective(&mut projection, fovy, aspect_ratio, near_z, far_z);
         projection
     }
 
+    #[must_use]
     pub fn forward(&self) -> Vec3 {
         let column = get_column(&self.transform, 2);
         // The forward direction is towards the map, [0, 0, -1]
         [-column[0], -column[1], -column[2]]
     }
 
+    #[must_use]
     pub fn right(&self) -> Vec3 {
         let column = get_column(&self.transform, 0);
         [column[0], column[1], column[2]]
     }
 
+    #[must_use]
     pub fn up(&self) -> Vec3 {
         let column = get_column(&self.transform, 1);
         // Up direction has to be flipped due to y-axis pointing towards south
         [-column[0], -column[1], -column[2]]
     }
 
+    #[must_use]
     pub fn get_orientation(&self) -> &Quaternion {
         &self.orientation
     }
 
     /// `getOrientation(double& roll, double& pitch, double& bearing)`,
     /// returned as `(roll, pitch, bearing)`.
+    #[must_use]
     pub fn get_orientation_angles(&self) -> (f64, f64, f64) {
         let f = self.forward();
         let r = self.right();
@@ -189,15 +199,9 @@ impl Camera {
 
         let f01 = (f[0] * f[0] + f[1] * f[1]).sqrt();
         let pitch = f01.atan2(-f[2]);
-        let bearing;
-        let roll;
-        if f01 > 1.0e-3 {
-            bearing = -f[0].atan2(-f[1]);
-            roll = -r[2].atan2(u[2]);
-        } else {
-            bearing = (-r[1]).atan2(r[0]);
-            roll = 0.0;
-        }
+
+        let (bearing, roll) =
+            if f01 > 1.0e-3 { (-f[0].atan2(-f[1]), -r[2].atan2(u[2])) } else { ((-r[1]).atan2(r[0]), 0.0) };
         (roll, pitch, bearing)
     }
 
@@ -215,6 +219,7 @@ impl Camera {
         update_transform_position(&mut self.transform, position);
     }
 
+    #[must_use]
     pub fn orientation_from_frame(forward: &Vec3, up: &Vec3) -> Option<Quaternion> {
         let epsilon = 1e-15;
 
@@ -226,15 +231,12 @@ impl Camera {
 
         let f01 = (forward[0] * forward[0] + forward[1] * forward[1]).sqrt();
         let pitch = f01.atan2(-forward[2]);
-        let bearing;
-        let roll;
-        if f01 > 1.0e-3 {
-            bearing = -forward[0].atan2(-forward[1]);
-            roll = -right[2].atan2(up[2]);
+
+        let (bearing, roll) = if f01 > 1.0e-3 {
+            (-forward[0].atan2(-forward[1]), -right[2].atan2(up[2]))
         } else {
-            bearing = (-right[1]).atan2(right[0]);
-            roll = 0.0;
-        }
+            ((-right[1]).atan2(right[0]), 0.0)
+        };
 
         Some(orientation_from_roll_pitch_bearing(roll, pitch, bearing))
     }
@@ -250,6 +252,7 @@ impl FreeCameraOptions {
     /// Helper function for converting mercator position into Lat&Lng and
     /// altitude in meters. This function fails to return a value if
     /// `position` is invalid or is not set.
+    #[must_use]
     pub fn get_location(&self) -> Option<LatLngAltitude> {
         let position_value = self.position?;
         if position_value[1] < 0.0 || position_value[1] > 1.0 {

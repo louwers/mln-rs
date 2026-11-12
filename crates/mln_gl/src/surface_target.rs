@@ -269,7 +269,7 @@ impl EglWindow {
 
     /// Makes the context current: on the window's surface while the window
     /// is the context's to present to, and without a surface while it isn't
-    /// (which needs EGL_KHR_surfaceless_context).
+    /// (which needs `EGL_KHR_surfaceless_context`).
     fn make_current(&self) -> Result<(), egl::Error> {
         self.on_surface.set(false);
         if !self.presenting.get() {

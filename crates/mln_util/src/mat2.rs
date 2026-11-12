@@ -63,6 +63,7 @@ pub mod matrix {
     }
 
     /// `transformMat2(a, m)`; also the C++ `operator*(mat2, vec2)`.
+    #[must_use]
     pub fn transform_mat2(a: &Vec2, m: &Mat2) -> Vec2 {
         [a[0] * m[0] + a[1] * m[2], a[0] * m[1] + a[1] * m[3]]
     }

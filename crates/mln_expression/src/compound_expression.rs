@@ -101,16 +101,13 @@ fn feature_property_as_expression_value(params: &EvaluationContext<'_>, key: &st
     feature.get_value(key).map(from_mbgl_value_owned)
 }
 
-fn feature_type_as_string(t: FeatureType) -> Option<String> {
-    Some(
-        match t {
-            FeatureType::Point => "Point",
-            FeatureType::LineString => "LineString",
-            FeatureType::Polygon => "Polygon",
-            FeatureType::Unknown => "Unknown",
-        }
-        .to_owned(),
-    )
+fn feature_type_as_string(t: FeatureType) -> &'static str {
+    match t {
+        FeatureType::Point => "Point",
+        FeatureType::LineString => "LineString",
+        FeatureType::Polygon => "Polygon",
+        FeatureType::Unknown => "Unknown",
+    }
 }
 
 fn feature_property_as_double(params: &EvaluationContext<'_>, key: &str) -> Option<f64> {
@@ -171,7 +168,7 @@ fn is_supported_script(params: &EvaluationContext<'_>, x: &str) -> bool {
 }
 
 /// `platform::uppercase` / `platform::lowercase` (platform/default
-/// string_stdlib.cpp, nunicode case mapping). nunicode writes invalid UTF-8
+/// `string_stdlib.cpp`, nunicode case mapping). nunicode writes invalid UTF-8
 /// for some 4-byte results; a Rust String holds U+FFFD there.
 fn uppercase(s: &str) -> String {
     nunicode::uppercase(s)
@@ -242,13 +239,13 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         }),
         sig("rgb", T::Color, fixed(&[n.clone(), n.clone(), n.clone()]), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
-            Ok(Value::Color(rgba(num(&a[0]), num(&a[1]), num(&a[2]), 1.0f32 as f64)?))
+            Ok(Value::Color(rgba(num(&a[0]), num(&a[1]), num(&a[2]), f64::from(1.0f32))?))
         }),
         sig("zoom", n.clone(), fixed(&[]), D::ZOOM, |p, _| match p.zoom {
             None => {
                 Err(EvaluationError::new("The 'zoom' expression is unavailable in the current evaluation context."))
             }
-            Some(zoom) => Ok(Value::Number(zoom as f64)),
+            Some(zoom) => Ok(Value::Number(f64::from(zoom))),
         }),
         sig("heatmap-density", n.clone(), fixed(&[]), D::NONE, |p, _| match p.color_ramp_parameter {
             None => Err(EvaluationError::new(
@@ -263,7 +260,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             }
             // For 3D terrain, elevation is passed directly
             if let Some(v) = p.elevation {
-                return Ok(Value::Number(v as f64));
+                return Ok(Value::Number(f64::from(v)));
             }
             // During parsing/validation, return a valid value to allow
             // parsing to succeed. The Dependency::Elevation flag prevents
@@ -282,7 +279,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             )),
             Some(v) => Ok(mbgl_to_expression_value(v)),
         }),
-        sig("has", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
+        sig("has", T::Boolean, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
             let key = evaluate_ref(&*args[0], p)?;
             let Some(feature) = p.feature else {
                 return Err(feature_unavailable());
@@ -294,7 +291,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             let Value::Object(object) = &a[1] else { panic!("object argument") };
             Ok(Value::Bool(object.contains_key(string(&a[0]))))
         }),
-        sig("get", T::Value, fixed(&[s.clone()]), D::FEATURE, |p, args| {
+        sig("get", T::Value, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
             let key = evaluate_ref(&*args[0], p)?;
             let Some(feature) = p.feature else {
                 return Err(feature_unavailable());
@@ -341,7 +338,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         }),
         sig("+", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
-            let mut sum = 0.0f32 as f64;
+            let mut sum = f64::from(0.0f32);
             for arg in &a {
                 sum += num(arg);
             }
@@ -351,13 +348,13 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             let a = eval_args(p, args)?;
             Ok(Value::Number(num(&a[0]) - num(&a[1])))
         }),
-        sig("-", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| {
+        sig("-", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             Ok(Value::Number(-num(&a[0])))
         }),
         sig("*", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
-            let mut prod = 1.0f32 as f64;
+            let mut prod = f64::from(1.0f32);
             for arg in &a {
                 prod *= num(arg);
             }
@@ -388,16 +385,16 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             let a = eval_args(p, args)?;
             Ok(Value::Number(num(&a[0]).powf(num(&a[1]))))
         }),
-        sig("sqrt", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::sqrt)),
-        sig("log10", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::log10)),
-        sig("ln", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::ln)),
-        sig("log2", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::log2)),
-        sig("sin", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::sin)),
-        sig("cos", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::cos)),
-        sig("tan", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::tan)),
-        sig("asin", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::asin)),
-        sig("acos", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::acos)),
-        sig("atan", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::atan)),
+        sig("sqrt", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::sqrt)),
+        sig("log10", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::log10)),
+        sig("ln", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::ln)),
+        sig("log2", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::log2)),
+        sig("sin", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::sin)),
+        sig("cos", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::cos)),
+        sig("tan", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::tan)),
+        sig("asin", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::asin)),
+        sig("acos", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::acos)),
+        sig("atan", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::atan)),
         sig("min", n.clone(), Params::Varargs(n.clone()), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             let mut result = f64::INFINITY;
@@ -415,23 +412,23 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             Ok(Value::Number(result))
         }),
         // C `round` rounds half away from zero, as f64::round does.
-        sig("round", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::round)),
-        sig("floor", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::floor)),
-        sig("ceil", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::ceil)),
-        sig("abs", n.clone(), fixed(&[n.clone()]), D::NONE, |p, args| math1(p, args, f64::abs)),
+        sig("round", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::round)),
+        sig("floor", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::floor)),
+        sig("ceil", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::ceil)),
+        sig("abs", n.clone(), fixed(std::slice::from_ref(&n)), D::NONE, |p, args| math1(p, args, f64::abs)),
         sig("!", T::Boolean, fixed(&[T::Boolean]), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             Ok(Value::Bool(!boolean(&a[0])))
         }),
-        sig("is-supported-script", T::Boolean, fixed(&[s.clone()]), D::NONE, |p, args| {
+        sig("is-supported-script", T::Boolean, fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             Ok(Value::Bool(is_supported_script(p, string(&a[0]))))
         }),
-        sig("upcase", s.clone(), fixed(&[s.clone()]), D::NONE, |p, args| {
+        sig("upcase", s.clone(), fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             Ok(Value::String(uppercase(string(&a[0]))))
         }),
-        sig("downcase", s.clone(), fixed(&[s.clone()]), D::NONE, |p, args| {
+        sig("downcase", s.clone(), fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             Ok(Value::String(lowercase(string(&a[0]))))
         }),
@@ -486,27 +483,27 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             let Value::Collator(collator) = &a[0] else { panic!("collator argument") };
             Ok(Value::String(Collator::resolved_locale(collator)))
         }),
-        sig("error", T::Error, fixed(&[s.clone()]), D::NONE, |p, args| {
+        sig("error", T::Error, fixed(std::slice::from_ref(&s)), D::NONE, |p, args| {
             let a = eval_args(p, args)?;
             Err(EvaluationError::new(string(&a[0])))
         }),
-        sig("feature-state", T::Value, fixed(&[s.clone()]), D::FEATURE, |p, args| {
+        sig("feature-state", T::Value, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
             let a = eval_args(p, args)?;
             let mut state = MbglValue::Null;
-            if let Some(feature_state) = p.feature_state {
-                if let Some(v) = feature_state.get(string(&a[0])) {
-                    state = v.clone();
-                }
+            if let Some(feature_state) = p.feature_state
+                && let Some(v) = feature_state.get(string(&a[0]))
+            {
+                state = v.clone();
             }
             Ok(mbgl_to_expression_value(&state))
         }),
-        sig("global-state", T::Value, fixed(&[s.clone()]), D::GLOBAL_STATE, |p, args| {
+        sig("global-state", T::Value, fixed(std::slice::from_ref(&s)), D::GLOBAL_STATE, |p, args| {
             let a = eval_args(p, args)?;
             let mut state = MbglValue::Null;
-            if let Some(global_state) = p.global_state {
-                if let Some(v) = global_state.get(string(&a[0])) {
-                    state = v.clone();
-                }
+            if let Some(global_state) = p.global_state
+                && let Some(v) = global_state.get(string(&a[0]))
+            {
+                state = v.clone();
             }
             Ok(mbgl_to_expression_value(&state))
         }),
@@ -520,12 +517,12 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             let a = eval_args(p, args)?;
             Ok(Value::Bool(a[0] == feature_id_as_expression_value(p)))
         }),
-        sig("filter-type-==", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
+        sig("filter-type-==", T::Boolean, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
             let a = eval_args(p, args)?;
             let Some(feature) = p.feature else {
                 return Ok(Value::Bool(false));
             };
-            Ok(Value::Bool(feature_type_as_string(feature.get_type()).as_deref() == Some(string(&a[0]))))
+            Ok(Value::Bool(feature_type_as_string(feature.get_type()) == string(&a[0])))
         }),
         sig("filter-<", T::Boolean, fixed(&[s.clone(), T::Value]), D::FEATURE, |p, args| {
             filter_property(p, args, PartialOrd::lt, PartialOrd::lt)
@@ -551,7 +548,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
         sig("filter-id->=", T::Boolean, fixed(&[T::Value]), D::FEATURE, |p, args| {
             filter_id(p, args, PartialOrd::ge, PartialOrd::ge)
         }),
-        sig("filter-has", T::Boolean, fixed(&[s.clone()]), D::FEATURE, |p, args| {
+        sig("filter-has", T::Boolean, fixed(std::slice::from_ref(&s)), D::FEATURE, |p, args| {
             let a = eval_args(p, args)?;
             let feature = p.feature.expect("feature");
             Ok(Value::Bool(feature.get_value(string(&a[0])).is_some()))
@@ -564,7 +561,7 @@ static REGISTRY: LazyLock<Vec<SignatureBase>> = LazyLock::new(|| {
             let a = eval_args(p, args)?;
             let feature = p.feature.expect("feature");
             let t = feature_type_as_string(feature.get_type());
-            Ok(Value::Bool(a.iter().any(|v| t.as_deref() == Some(string(v)))))
+            Ok(Value::Bool(a.iter().any(|v| t == string(v))))
         }),
         sig("filter-id-in", T::Boolean, Params::Varargs(T::Value), D::FEATURE, |p, args| {
             let a = eval_args(p, args)?;
@@ -594,6 +591,7 @@ pub struct CompoundExpression {
 }
 
 impl CompoundExpression {
+    #[must_use]
     pub fn new(signature: &'static SignatureBase, args: Vec<Box<dyn Expression>>) -> Self {
         CompoundExpression {
             base: ExpressionBase::new(
@@ -606,6 +604,7 @@ impl CompoundExpression {
         }
     }
 
+    #[must_use]
     pub fn get_parameter_count(&self) -> Option<usize> {
         match &self.signature.params {
             Params::Varargs(_) => None,
@@ -614,10 +613,12 @@ impl CompoundExpression {
     }
 
     /// The signature the arguments matched.
+    #[must_use]
     pub fn signature(&self) -> &'static SignatureBase {
         self.signature
     }
 
+    #[must_use]
     pub fn args(&self) -> &[Box<dyn Expression>] {
         &self.args
     }
@@ -736,7 +737,7 @@ fn create_compound_expression_from(
     }
 
     if definitions.len() == 1 {
-        ctx.append_errors(signature_context);
+        ctx.append_errors(&signature_context);
     } else {
         ctx.error(expected_types_error(definitions, &args));
     }
@@ -795,11 +796,9 @@ pub fn parse_compound_expression(name: &str, value: &Convertible<'_>, ctx: &mut 
                 };
                 args.push(parsed);
             }
-            if arg_parse_failed {
-                // Couldn't coerce args of this overload to expected type,
-                // move on to next one.
-                continue;
-            } else {
+            // When the args couldn't be coerced to this overload's expected
+            // types, move on to the next one.
+            if !arg_parse_failed {
                 let parse_with_args = create_compound_expression_from(&definitions, args, ctx);
                 if parse_with_args.is_some() {
                     return parse_with_args;

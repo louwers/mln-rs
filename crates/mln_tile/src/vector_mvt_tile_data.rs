@@ -50,7 +50,7 @@ impl<'l> VectorMVTTileFeature<'l> {
     }
 
     /// Keeps the first exception a trait accessor would have thrown.
-    fn keep_error(&self, error: Error) {
+    fn keep_error(&self, error: &Error) {
         let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
@@ -123,7 +123,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
 
     fn get_value(&self, key: &str) -> Option<Value> {
         self.try_get_value(key).unwrap_or_else(|e| {
-            self.keep_error(e);
+            self.keep_error(&e);
             None
         })
     }
@@ -132,7 +132,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
         match self.try_get_properties() {
             Ok(properties) => properties,
             Err(e) => {
-                self.keep_error(e);
+                self.keep_error(&e);
                 &EMPTY_PROPERTIES
             }
         }
@@ -146,7 +146,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
         match self.try_get_geometries() {
             Ok(lines) => lines,
             Err(e) => {
-                self.keep_error(e);
+                self.keep_error(&e);
                 &EMPTY_GEOMETRIES
             }
         }
@@ -176,6 +176,7 @@ impl<'d> VectorMVTTileLayer<'d> {
     }
 
     /// The `mapbox::vector_tile::layer`.
+    #[must_use]
     pub fn layer(&self) -> &vector_tile::Layer<'d> {
         &self.layer
     }
@@ -231,17 +232,16 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
             if !valid {
                 return None;
             }
-            let group = match index.get(codes.as_slice()) {
-                Some(&group) => group,
-                None => {
-                    if groups.first.len() == limit {
-                        return None;
-                    }
-                    let group = groups.first.len() as u32;
-                    index.insert(codes.as_slice().into(), group);
-                    groups.first.push(i);
-                    group
+            let group = if let Some(&group) = index.get(codes.as_slice()) {
+                group
+            } else {
+                if groups.first.len() == limit {
+                    return None;
                 }
+                let group = groups.first.len() as u32;
+                index.insert(codes.as_slice().into(), group);
+                groups.first.push(i);
+                group
             };
             groups.of_feature.push(group);
         }
@@ -262,6 +262,7 @@ pub struct VectorMVTTileData {
 }
 
 impl VectorMVTTileData {
+    #[must_use]
     pub fn new(data: Arc<Vec<u8>>) -> Self {
         VectorMVTTileData { data, layers: std::sync::OnceLock::new() }
     }
@@ -275,20 +276,19 @@ impl VectorMVTTileData {
     /// is cached, as C++ sets `parsed` after it) and the
     /// `mapbox::vector_tile::layer` constructor errors.
     pub fn try_get_layer(&self, name: &str) -> Result<Option<VectorMVTTileLayer<'_>>, Error> {
-        let layers = match self.layers.get() {
-            Some(layers) => layers,
-            None => {
-                // We're parsing this lazily so that we can construct VectorTileData
-                // objects on the main thread without incurring the overhead of parsing
-                // immediately.
-                let base = self.data.as_ptr() as usize;
-                let layers = vector_tile::Buffer::new(&self.data)?
-                    .get_layers()
-                    .into_iter()
-                    .map(|(name, view)| (name, (view.as_ptr() as usize - base, view.len())))
-                    .collect();
-                self.layers.get_or_init(|| layers)
-            }
+        let layers = if let Some(layers) = self.layers.get() {
+            layers
+        } else {
+            // We're parsing this lazily so that we can construct VectorTileData
+            // objects on the main thread without incurring the overhead of parsing
+            // immediately.
+            let base = self.data.as_ptr() as usize;
+            let layers = vector_tile::Buffer::new(&self.data)?
+                .get_layers()
+                .into_iter()
+                .map(|(name, view)| (name, (view.as_ptr() as usize - base, view.len())))
+                .collect();
+            self.layers.get_or_init(|| layers)
         };
 
         match layers.get(name.as_bytes()) {

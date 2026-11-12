@@ -39,8 +39,14 @@ html, body {
 
 canvas {
   display: block;
+}
+
+/* The map's box: the window, unless the page's parameters fix its size.
+   main.ts sizes the canvas in it. */
+#map-box {
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
 }
 
 button {

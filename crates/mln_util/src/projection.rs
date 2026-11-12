@@ -15,7 +15,7 @@ const TILE_SIZE_D: f64 = 512.0;
 // TODO(port): use mln_util::constants::M2PI once it exists.
 const M2PI: f64 = PI * 2.0;
 // TODO(port): use mln_util::constants::EARTH_RADIUS_M once it exists.
-const EARTH_RADIUS_M: f64 = 6378137.0;
+const EARTH_RADIUS_M: f64 = 6_378_137.0;
 
 /// `mln::ProjectedMeters`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -42,10 +42,12 @@ impl ProjectedMeters {
         Ok(ProjectedMeters { northing: n, easting: e })
     }
 
+    #[must_use]
     pub fn northing(&self) -> f64 {
         self.northing
     }
 
+    #[must_use]
     pub fn easting(&self) -> f64 {
         self.easting
     }
@@ -57,10 +59,12 @@ pub struct Projection;
 
 impl Projection {
     /// Map pixel width at given scale.
+    #[must_use]
     pub fn world_size(scale: f64) -> f64 {
         scale * TILE_SIZE_D
     }
 
+    #[must_use]
     pub fn get_meters_per_pixel_at_latitude(lat: f64, zoom: f64) -> f64 {
         let constrained_zoom = clamp_f64(zoom, MIN_ZOOM, MAX_ZOOM);
         let constrained_scale = 2.0f64.powf(constrained_zoom);
@@ -68,6 +72,7 @@ impl Projection {
         deg2rad(constrained_latitude).cos() * M2PI * EARTH_RADIUS_M / Self::world_size(constrained_scale)
     }
 
+    #[must_use]
     pub fn projected_meters_for_lat_lng(lat_lng: &LatLng) -> ProjectedMeters {
         let constrained_latitude = clamp_f64(lat_lng.latitude(), -LATITUDE_MAX, LATITUDE_MAX);
         let constrained_longitude = clamp_f64(lat_lng.longitude(), -LONGITUDE_MAX, LONGITUDE_MAX);
@@ -83,7 +88,8 @@ impl Projection {
     }
 
     /// Not noexcept in C++, but the clamps keep both values in range (a NaN
-    /// clamps to the upper bound), so the LatLng constructor cannot throw.
+    /// clamps to the upper bound), so the `LatLng` constructor cannot throw.
+    #[must_use]
     pub fn lat_lng_for_projected_meters(projected_meters: &ProjectedMeters) -> LatLng {
         let mut latitude = rad2deg(2.0 * (projected_meters.northing() / EARTH_RADIUS_M).exp().atan() - (PI / 2.0));
         let mut longitude = rad2deg(projected_meters.easting()) / EARTH_RADIUS_M;
@@ -94,14 +100,16 @@ impl Projection {
         LatLng::new(latitude, longitude).expect("clamped latitude and longitude")
     }
 
+    #[must_use]
     pub fn project(lat_lng: &LatLng, scale: f64) -> Point<f64> {
         Self::project_(lat_lng, Self::world_size(scale))
     }
 
     /// Returns point on tile. The C++ `project(const LatLng&, int32_t zoom)`
     /// overload: `worldSize = 1 << zoom` (int shift; zoom must be 0..=30).
+    #[must_use]
     pub fn project_zoom(lat_lng: &LatLng, zoom: i32) -> Point<f64> {
-        Self::project_(lat_lng, (1i32 << zoom) as f64)
+        Self::project_(lat_lng, f64::from(1i32 << zoom))
     }
 
     /// Fails with the [`LatLng::new`] error for a NaN or infinite result.

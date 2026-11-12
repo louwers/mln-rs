@@ -111,10 +111,10 @@ impl GeoJSONData for SuperclusterData {
 
 /// `evaluateFeature<Value>(f, expression, accumulated)`.
 fn evaluate_feature(f: &Feature<f64>, expression: &Arc<dyn Expression>, accumulated: Option<&Value>) -> Value {
-    if let Ok(result) = evaluate_accumulated(expression.as_ref(), accumulated, f) {
-        if let Some(typed) = from_expression_value::<Value>(&result) {
-            return typed;
-        }
+    if let Ok(result) = evaluate_accumulated(expression.as_ref(), accumulated, f)
+        && let Some(typed) = from_expression_value::<Value>(&result)
+    {
+        return typed;
     }
     Value::default()
 }
@@ -126,52 +126,50 @@ pub(super) fn create(
     options: &Immutable<GeoJSONOptions>,
 ) -> Result<Arc<dyn GeoJSONData>, Error> {
     let scale: f64 = f64::from(constants::EXTENT) / constants::TILE_SIZE_D;
-    if options.cluster {
-        if let GeoJSON::FeatureCollection(features) = geojson {
-            if !features.is_empty() {
-                let mut cluster_options = supercluster::Options {
-                    max_zoom: options.cluster_max_zoom,
-                    extent: constants::EXTENT as u16,
-                    radius: (scale * f64::from(options.cluster_radius)).round() as u16,
-                    min_points: options.cluster_min_points,
-                    ..Default::default()
-                };
+    if options.cluster
+        && let GeoJSON::FeatureCollection(features) = geojson
+        && !features.is_empty()
+    {
+        let mut cluster_options = supercluster::Options {
+            max_zoom: options.cluster_max_zoom,
+            extent: constants::EXTENT as u16,
+            radius: (scale * f64::from(options.cluster_radius)).round() as u16,
+            min_points: options.cluster_min_points,
+            ..Default::default()
+        };
 
-                // C++ shares one feature (default geometry) between the two
-                // closures and assigns its properties before each
-                // evaluation; a fresh feature per evaluation is the same.
-                let map_options = options.clone();
-                cluster_options.map = Arc::new(move |properties: &PropertyMap| -> PropertyMap {
-                    let mut ret = PropertyMap::new();
-                    if properties.is_empty() {
-                        return ret;
-                    }
-                    for (key, (map_expression, _)) in &map_options.cluster_properties {
-                        let mut feature = Feature::new(Geometry::Empty);
-                        feature.properties = properties.clone();
-                        ret.insert(key.clone(), evaluate_feature(&feature, map_expression, None));
-                    }
-                    ret
-                });
-                let reduce_options = options.clone();
-                cluster_options.reduce = Some(Arc::new(move |to_return: &mut PropertyMap, to_fill: &PropertyMap| {
-                    for (key, (_, reduce_expression)) in &reduce_options.cluster_properties {
-                        if !to_fill.contains_key(key) {
-                            continue;
-                        }
-                        let mut feature = Feature::new(Geometry::Empty);
-                        feature.properties = to_fill.clone();
-                        // `toReturn[p.first]` default-constructs a missing entry.
-                        let accumulated = to_return.entry(key.clone()).or_default().clone();
-                        let value = evaluate_feature(&feature, reduce_expression, Some(&accumulated));
-                        to_return.insert(key.clone(), value);
-                    }
-                }));
-                let impl_ =
-                    supercluster::Supercluster::new(features, cluster_options).map_err(Error::invalid_argument)?;
-                return Ok(Arc::new(SuperclusterData { impl_ }));
+        // C++ shares one feature (default geometry) between the two
+        // closures and assigns its properties before each
+        // evaluation; a fresh feature per evaluation is the same.
+        let map_options = options.clone();
+        cluster_options.map = Arc::new(move |properties: &PropertyMap| -> PropertyMap {
+            let mut ret = PropertyMap::new();
+            if properties.is_empty() {
+                return ret;
             }
-        }
+            for (key, (map_expression, _)) in &map_options.cluster_properties {
+                let mut feature = Feature::new(Geometry::Empty);
+                feature.properties = properties.clone();
+                ret.insert(key.clone(), evaluate_feature(&feature, map_expression, None));
+            }
+            ret
+        });
+        let reduce_options = options.clone();
+        cluster_options.reduce = Some(Arc::new(move |to_return: &mut PropertyMap, to_fill: &PropertyMap| {
+            for (key, (_, reduce_expression)) in &reduce_options.cluster_properties {
+                if !to_fill.contains_key(key) {
+                    continue;
+                }
+                let mut feature = Feature::new(Geometry::Empty);
+                feature.properties = to_fill.clone();
+                // `toReturn[p.first]` default-constructs a missing entry.
+                let accumulated = to_return.entry(key.clone()).or_default().clone();
+                let value = evaluate_feature(&feature, reduce_expression, Some(&accumulated));
+                to_return.insert(key.clone(), value);
+            }
+        }));
+        let impl_ = supercluster::Supercluster::new(features, cluster_options).map_err(Error::invalid_argument)?;
+        return Ok(Arc::new(SuperclusterData { impl_ }));
     }
 
     let vt_options = geojson_vt::Options {
@@ -220,6 +218,7 @@ impl Clone for Impl {
 
 impl Impl {
     /// `Impl(std::string id, Immutable<GeoJSONOptions>)`.
+    #[must_use]
     pub fn new(id: String, options: Immutable<GeoJSONOptions>) -> Self {
         Impl {
             base: ImplBase::new(SourceType::GeoJSON, id),
@@ -243,7 +242,7 @@ impl Impl {
         Range::new(self.options.minzoom, self.options.maxzoom)
     }
 
-    /// `std::weak_ptr<GeoJSONData> getData()` (`None` = an empty weak_ptr).
+    /// `std::weak_ptr<GeoJSONData> getData()` (`None` = an empty `weak_ptr`).
     pub fn get_data(&self) -> Option<Weak<dyn GeoJSONData>> {
         self.data.as_ref().map(Arc::downgrade)
     }

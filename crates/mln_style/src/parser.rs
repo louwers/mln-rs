@@ -31,7 +31,7 @@ pub type StyleParseResult = Result<(), mln_util::Error>;
 pub struct Parser {
     pub sprites: Vec<Sprite>,
     pub glyph_url: String,
-    /// `std::shared_ptr<FontFaces> fontFaces` (symbols: MLN_TEXT_SHAPING_HARFBUZZ).
+    /// `std::shared_ptr<FontFaces> fontFaces` (symbols: `MLN_TEXT_SHAPING_HARFBUZZ`).
     pub font_faces: Option<std::sync::Arc<mln_text::glyph::FontFaces>>,
     pub sources: Vec<Box<dyn Source>>,
     pub layers: Vec<Box<dyn Layer>>,
@@ -112,10 +112,10 @@ impl Parser {
             }
         }
 
-        if let Some(value) = object.get("name") {
-            if let Some(name) = value.as_str() {
-                self.name = name.to_owned();
-            }
+        if let Some(value) = object.get("name")
+            && let Some(name) = value.as_str()
+        {
+            self.name = name.to_owned();
         }
 
         if let Some(value) = object.get("center") {
@@ -126,34 +126,34 @@ impl Parser {
             }
         }
 
-        if let Some(value) = object.get("centerAltitude") {
-            if is_number(value) {
-                self.center_altitude = get_double(value);
-            }
+        if let Some(value) = object.get("centerAltitude")
+            && is_number(value)
+        {
+            self.center_altitude = get_double(value);
         }
 
-        if let Some(value) = object.get("zoom") {
-            if is_number(value) {
-                self.zoom = get_double(value);
-            }
+        if let Some(value) = object.get("zoom")
+            && is_number(value)
+        {
+            self.zoom = get_double(value);
         }
 
-        if let Some(value) = object.get("bearing") {
-            if is_number(value) {
-                self.bearing = get_double(value);
-            }
+        if let Some(value) = object.get("bearing")
+            && is_number(value)
+        {
+            self.bearing = get_double(value);
         }
 
-        if let Some(value) = object.get("pitch") {
-            if is_number(value) {
-                self.pitch = get_double(value);
-            }
+        if let Some(value) = object.get("pitch")
+            && is_number(value)
+        {
+            self.pitch = get_double(value);
         }
 
-        if let Some(value) = object.get("roll") {
-            if is_number(value) {
-                self.roll = get_double(value);
-            }
+        if let Some(value) = object.get("roll")
+            && is_number(value)
+        {
+            self.roll = get_double(value);
         }
 
         if let Some(value) = object.get("transition") {
@@ -188,21 +188,21 @@ impl Parser {
             self.parse_sprites(value);
         }
 
-        if let Some(glyphs) = object.get("glyphs") {
-            if let Some(glyphs) = glyphs.as_str() {
-                self.glyph_url = glyphs.to_owned();
-            }
+        if let Some(glyphs) = object.get("glyphs")
+            && let Some(glyphs) = glyphs.as_str()
+        {
+            self.glyph_url = glyphs.to_owned();
         }
 
         // symbols: "font-faces" (MLN_TEXT_SHAPING_HARFBUZZ).
-        if let Some(faces) = object.get("font-faces") {
-            if let Some(faces) = faces.as_object() {
-                self.font_faces = Some(std::sync::Arc::new(parse_font_faces(faces)));
-            }
+        if let Some(faces) = object.get("font-faces")
+            && let Some(faces) = faces.as_object()
+        {
+            self.font_faces = Some(std::sync::Arc::new(parse_font_faces(faces)));
         }
 
         // Call for side effect of logging warnings for invalid values.
-        self.font_stacks();
+        let _ = self.font_stacks();
 
         Ok(())
     }
@@ -363,15 +363,16 @@ impl Parser {
         }
 
         for id in &ids {
-            if let Some(entry) = layers_map.get_mut(id) {
-                if let Some(layer) = entry.layer.take() {
-                    self.layers.push(layer);
-                }
+            if let Some(entry) = layers_map.get_mut(id)
+                && let Some(layer) = entry.layer.take()
+            {
+                self.layers.push(layer);
             }
         }
     }
 
     /// Statically evaluate layer properties to determine what font stacks are used.
+    #[must_use]
     pub fn font_stacks(&self) -> VecSet<FontStack> {
         // mln::fontStacks(impls) (src/mln/util/font_stack.cpp).
         let mut result = VecSet::new();
@@ -443,7 +444,7 @@ fn parse_layer(id: &str, layers_map: &mut HashMap<String, LayerEntry<'_>>, stack
     }
 }
 
-/// `formatJSONParseError` (src/mln/util/rapidjson.cpp), with serde_json's
+/// `formatJSONParseError` (src/mln/util/rapidjson.cpp), with `serde_json`'s
 /// message instead of rapidjson's (see the file comment).
 fn format_json_parse_error(error: &serde_json::Error) -> String {
     error.to_string()
@@ -458,7 +459,7 @@ fn parse_font_file(
     font_file: &serde_json::Map<String, serde_json::Value>,
     warnings: &mut Vec<String>,
 ) -> mln_text::glyph::FontFace {
-    let mut font_face = mln_text::glyph::FontFace::new(face_name, "", vec![(0, 0x10FFFF)]);
+    let mut font_face = mln_text::glyph::FontFace::new(face_name, "", vec![(0, 0x0010_FFFF)]);
 
     if let Some(url) = font_file.get("url").and_then(|u| u.as_str()) {
         font_face.url = url.to_owned();
@@ -531,7 +532,7 @@ pub fn parse_fallback_font_faces(json: &str) -> Result<mln_text::glyph::FontFace
     Ok(font_faces)
 }
 
-/// The "font-faces" block of `Parser::parse` (MLN_TEXT_SHAPING_HARFBUZZ).
+/// The "font-faces" block of `Parser::parse` (`MLN_TEXT_SHAPING_HARFBUZZ`).
 fn parse_font_faces(faces: &serde_json::Map<String, serde_json::Value>) -> mln_text::glyph::FontFaces {
     use mln_text::glyph::{FontFace, gen_new_glyph_id_type};
     let mut font_faces = mln_text::glyph::FontFaces::new();
@@ -560,7 +561,7 @@ fn parse_font_faces(faces: &serde_json::Map<String, serde_json::Value>) -> mln_t
                 }
             }
         } else if let Some(url) = face_value.as_str() {
-            let mut font_face = FontFace::new(face_name, url, vec![(0, 0x10FFFF)]);
+            let mut font_face = FontFace::new(face_name, url, vec![(0, 0x0010_FFFF)]);
             font_face.type_ = gen_new_glyph_id_type(&font_face.url, &vec![font_face.name.clone()], &font_face.ranges);
             font_faces.push(font_face);
         } else {

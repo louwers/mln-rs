@@ -34,28 +34,28 @@ fn starts_with_ignore_case(s: &[u8], i: usize, word: &[u8]) -> bool {
 
 fn hex_value(c: u8) -> u32 {
     match c {
-        b'0'..=b'9' => (c - b'0') as u32,
-        b'a'..=b'f' => (c - b'a' + 10) as u32,
-        b'A'..=b'F' => (c - b'A' + 10) as u32,
+        b'0'..=b'9' => u32::from(c - b'0'),
+        b'a'..=b'f' => u32::from(c - b'a' + 10),
+        b'A'..=b'F' => u32::from(c - b'A' + 10),
         _ => unreachable!(),
     }
 }
 
 /// An IEEE binary format.
 struct Format {
-    /// MANT_DIG: significand bits including the hidden bit.
+    /// `MANT_DIG`: significand bits including the hidden bit.
     p: i64,
-    /// Exponent of the smallest normal (MIN_EXP - 1).
+    /// Exponent of the smallest normal (`MIN_EXP` - 1).
     emin: i64,
-    /// Exponent of the largest finite value (MAX_EXP - 1).
+    /// Exponent of the largest finite value (`MAX_EXP` - 1).
     emax: i64,
-    /// Decimal values >= 10^dec_overflow overflow.
+    /// Decimal values >= `10^dec_overflow` overflow.
     dec_overflow: i64,
-    /// Decimal values < 10^(dec_zero + 1) round to zero.
+    /// Decimal values < `10^(dec_zero` + 1) round to zero.
     dec_zero: i64,
-    /// Binary values >= 2^bin_overflow overflow.
+    /// Binary values >= `2^bin_overflow` overflow.
     bin_overflow: i64,
-    /// Binary values < 2^(bin_zero + 1) round to zero.
+    /// Binary values < `2^(bin_zero` + 1) round to zero.
     bin_zero: i64,
 }
 
@@ -101,7 +101,7 @@ fn round_ratio(mut n: Big, mut d: Big, f: &Format) -> (Magnitude, bool) {
     }
     // value = (q + frac) * 2^-sh, q in (2^(p+2), 2^(p+4))
     let (q, sticky) = n.div_small_quotient(&d);
-    let bits = 64 - q.leading_zeros() as i64;
+    let bits = 64 - i64::from(q.leading_zeros());
     let lead = bits - 1 - sh;
 
     let round = |q: u64, drop: i64| -> (u64, bool) {
@@ -109,7 +109,7 @@ fn round_ratio(mut n: Big, mut d: Big, f: &Format) -> (Magnitude, bool) {
         let rem = q & ((1u64 << drop) - 1);
         let half = 1u64 << (drop - 1);
         let up = rem > half || (rem == half && (sticky || m & 1 == 1));
-        (m + up as u64, rem != 0 || sticky)
+        (m + u64::from(up), rem != 0 || sticky)
     };
 
     let qe = (lead - (f.p - 1)).max(f.emin - (f.p - 1));
@@ -231,7 +231,7 @@ fn parse_float(s: &[u8], f: &Format) -> Parsed {
         if at(s, j).is_ascii_digit() {
             while at(s, j).is_ascii_digit() {
                 // Saturate: anything this large overflows or underflows.
-                exponent = (exponent * 10 + (at(s, j) - b'0') as i64).min(1_000_000_000_000);
+                exponent = (exponent * 10 + i64::from(at(s, j) - b'0')).min(1_000_000_000_000);
                 j += 1;
             }
             if exp_negative {
@@ -297,7 +297,7 @@ fn parse_float(s: &[u8], f: &Format) -> Parsed {
     let mut m = Big::default();
     let kept = sig.len().min(MAX_DEC_DIGITS);
     for &d in &sig[..kept] {
-        m.mul_add_small(10, (d - b'0') as u32);
+        m.mul_add_small(10, u32::from(d - b'0'));
     }
     e10 += (sig.len() - kept) as i64;
     if kept < sig.len() {
@@ -317,7 +317,7 @@ fn parse_float(s: &[u8], f: &Format) -> Parsed {
 
 fn to_bits(p: &Parsed, f: &Format, exp_bits: u32) -> u64 {
     let sign_shift = (f.p - 1) as u32 + exp_bits;
-    let sign = (p.negative as u64) << sign_shift;
+    let sign = u64::from(p.negative) << sign_shift;
     let exp_all = ((1u64 << exp_bits) - 1) << (f.p - 1);
     let bias = f.emax;
     let mant_mask = (1u64 << (f.p - 1)) - 1;
@@ -337,6 +337,7 @@ fn to_bits(p: &Parsed, f: &Format, exp_bits: u32) -> u64 {
 }
 
 /// glibc `strtof`: `(value, consumed, erange)`.
+#[must_use]
 pub fn strtof(s: &[u8]) -> (f32, usize, bool) {
     let p = parse_float(s, &BINARY32);
     let v = f32::from_bits(to_bits(&p, &BINARY32, 8) as u32);
@@ -344,6 +345,7 @@ pub fn strtof(s: &[u8]) -> (f32, usize, bool) {
 }
 
 /// glibc `strtod`: `(value, consumed, erange)`.
+#[must_use]
 pub fn strtod(s: &[u8]) -> (f64, usize, bool) {
     let p = parse_float(s, &BINARY64);
     let v = f64::from_bits(to_bits(&p, &BINARY64, 11));
@@ -352,6 +354,7 @@ pub fn strtod(s: &[u8]) -> (f64, usize, bool) {
 
 /// glibc `strtoll(s, &end, base)`: `(value, consumed, erange)`. `base` is 0
 /// or 2..=36.
+#[must_use]
 pub fn strtoll(s: &[u8], base: u32) -> (i64, usize, bool) {
     assert!(base == 0 || (2..=36).contains(&base), "invalid base");
     let mut i = 0usize;
@@ -388,16 +391,16 @@ pub fn strtoll(s: &[u8], base: u32) -> (i64, usize, bool) {
     loop {
         let c = at(s, i);
         let d = match c {
-            b'0'..=b'9' => (c - b'0') as u32,
-            b'a'..=b'z' => (c - b'a' + 10) as u32,
-            b'A'..=b'Z' => (c - b'A' + 10) as u32,
+            b'0'..=b'9' => u32::from(c - b'0'),
+            b'a'..=b'z' => u32::from(c - b'a' + 10),
+            b'A'..=b'Z' => u32::from(c - b'A' + 10),
             _ => break,
         };
         if d >= base {
             break;
         }
         if !overflow {
-            match acc.checked_mul(base as u64).and_then(|v| v.checked_add(d as u64)) {
+            match acc.checked_mul(u64::from(base)).and_then(|v| v.checked_add(u64::from(d))) {
                 Some(v) => acc = v,
                 None => overflow = true,
             }

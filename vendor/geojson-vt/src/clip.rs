@@ -3,7 +3,10 @@
 // The C++ `clipper<I>` and `clip<I>` are templates on the axis `I`
 // (0 = x, 1 = y); here a const generic.
 
-use crate::types::*;
+use crate::types::{
+    VtFeature, VtFeatures, VtGeometry, VtGeometryCollection, VtLineString, VtLinearRing, VtMultiLineString,
+    VtMultiPoint, VtMultiPolygon, VtPolygon, calc_progress, get, get_point, intersect,
+};
 
 /// `clipper<I>`
 pub struct Clipper<const I: u8> {
@@ -13,11 +16,13 @@ pub struct Clipper<const I: u8> {
 }
 
 impl<const I: u8> Clipper<I> {
+    #[must_use]
     pub fn new(k1: f64, k2: f64, line_metrics: bool) -> Self {
         Clipper { k1, k2, line_metrics }
     }
 
     /// `operator()` on any `vt_geometry` alternative.
+    #[must_use]
     pub fn clip(&self, geometry: &VtGeometry) -> VtGeometry {
         match geometry {
             VtGeometry::Empty => VtGeometry::Empty,
@@ -31,6 +36,7 @@ impl<const I: u8> Clipper<I> {
         }
     }
 
+    #[must_use]
     pub fn multi_point(&self, points: &VtMultiPoint) -> VtGeometry {
         let mut part = VtMultiPoint::new();
         for p in points {
@@ -42,12 +48,14 @@ impl<const I: u8> Clipper<I> {
         VtGeometry::MultiPoint(part)
     }
 
+    #[must_use]
     pub fn line_string(&self, line: &VtLineString) -> VtGeometry {
         let mut parts = VtMultiLineString::new();
         self.clip_line(line, &mut parts);
         if parts.len() == 1 { VtGeometry::LineString(parts.swap_remove(0)) } else { VtGeometry::MultiLineString(parts) }
     }
 
+    #[must_use]
     pub fn multi_line_string(&self, lines: &VtMultiLineString) -> VtGeometry {
         let mut parts = VtMultiLineString::new();
         for line in lines {
@@ -56,6 +64,7 @@ impl<const I: u8> Clipper<I> {
         if parts.len() == 1 { VtGeometry::LineString(parts.swap_remove(0)) } else { VtGeometry::MultiLineString(parts) }
     }
 
+    #[must_use]
     pub fn polygon(&self, polygon: &VtPolygon) -> VtGeometry {
         let mut result = VtPolygon::new();
         for ring in polygon {
@@ -67,6 +76,7 @@ impl<const I: u8> Clipper<I> {
         VtGeometry::Polygon(result)
     }
 
+    #[must_use]
     pub fn multi_polygon(&self, polygons: &VtMultiPolygon) -> VtGeometry {
         let mut result = VtMultiPolygon::new();
         for polygon in polygons {
@@ -84,6 +94,7 @@ impl<const I: u8> Clipper<I> {
         VtGeometry::MultiPolygon(result)
     }
 
+    #[must_use]
     pub fn geometry_collection(&self, geometries: &VtGeometryCollection) -> VtGeometry {
         let mut result = VtGeometryCollection::new();
         for geometry in geometries {
@@ -293,6 +304,7 @@ impl<const I: u8> Clipper<I> {
 
 /// `clip<I>(features, k1, k2, minAll, maxAll, lineMetrics)`: clip features
 /// between two axis-parallel lines.
+#[must_use]
 pub fn clip<const I: u8>(
     features: &VtFeatures,
     k1: f64,
@@ -326,7 +338,6 @@ pub fn clip<const I: u8>(
             clipped.push(feature.clone());
         } else if max < k1 || min >= k2 {
             // trivial reject
-            continue;
         } else {
             let clipped_geom = Clipper::<I>::new(k1, k2, line_metrics).clip(geom);
 

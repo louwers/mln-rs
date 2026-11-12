@@ -65,6 +65,7 @@ pub struct ShapedTextOrientations {
 }
 
 impl ShapedTextOrientations {
+    #[must_use]
     pub fn right(&self) -> &Shaping {
         &self.horizontal
     }
@@ -105,6 +106,7 @@ pub struct SymbolInstanceSharedData {
 
 impl SymbolInstanceSharedData {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         line: GeometryCoordinates,
         shaped_text_orientations: &ShapedTextOrientations,
@@ -164,6 +166,7 @@ impl SymbolInstanceSharedData {
         data
     }
 
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.right_justified_glyph_quads.is_empty()
             && self.center_justified_glyph_quads.is_empty()
@@ -214,6 +217,7 @@ impl SymbolInstance {
     pub const INVALID_CROSS_TILE_ID: u32 = u32::MAX;
 
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         anchor: Anchor,
         shared_data: Arc<SymbolInstanceSharedData>,
@@ -300,7 +304,7 @@ impl SymbolInstance {
         let center_justified_glyph_quads_size = shared_data.center_justified_glyph_quads.len();
         let left_justified_glyph_quads_size = shared_data.left_justified_glyph_quads.len();
         let vertical_glyph_quads_size = shared_data.vertical_glyph_quads.len();
-        let icon_quads_size = shared_data.icon_quads.as_ref().map_or(0, |q| q.len());
+        let icon_quads_size = shared_data.icon_quads.as_ref().map_or(0, Vec::len);
 
         let mut writing_modes = WritingModeType::None;
         if right_justified_glyph_quads_size != 0
@@ -349,38 +353,49 @@ impl SymbolInstance {
         self.shared_data.as_deref().expect("SymbolInstance: shared data released")
     }
 
+    #[must_use]
     pub fn get_default_horizontal_placed_text_index(&self) -> Option<usize> {
         self.placed_right_text_index.or(self.placed_center_text_index).or(self.placed_left_text_index)
     }
 
+    #[must_use]
     pub fn line(&self) -> &GeometryCoordinates {
         &self.shared().line
     }
+    #[must_use]
     pub fn right_justified_glyph_quads(&self) -> &SymbolQuads {
         &self.shared().right_justified_glyph_quads
     }
+    #[must_use]
     pub fn left_justified_glyph_quads(&self) -> &SymbolQuads {
         &self.shared().left_justified_glyph_quads
     }
+    #[must_use]
     pub fn center_justified_glyph_quads(&self) -> &SymbolQuads {
         &self.shared().center_justified_glyph_quads
     }
+    #[must_use]
     pub fn vertical_glyph_quads(&self) -> &SymbolQuads {
         &self.shared().vertical_glyph_quads
     }
+    #[must_use]
     pub fn icon_quads(&self) -> &Option<SymbolQuads> {
         &self.shared().icon_quads
     }
+    #[must_use]
     pub fn vertical_icon_quads(&self) -> &Option<SymbolQuads> {
         &self.shared().vertical_icon_quads
     }
 
+    #[must_use]
     pub fn has_text(&self) -> bool {
         (self.symbol_content & SymbolContent::Text).0 != 0
     }
+    #[must_use]
     pub fn has_icon(&self) -> bool {
         (self.symbol_content & SymbolContent::IconRGBA).0 != 0 || self.has_sdf_icon()
     }
+    #[must_use]
     pub fn has_sdf_icon(&self) -> bool {
         (self.symbol_content & SymbolContent::IconSDF).0 != 0
     }
@@ -389,6 +404,7 @@ impl SymbolInstance {
         self.shared_data = None;
     }
 
+    #[must_use]
     pub fn get_text_anchors(&self) -> Vec<SymbolAnchorType> {
         match &self.text_variable_anchor_offset {
             Some(offsets) => offsets.iter().map(|anchor_offset| anchor_offset.anchor_type).collect(),
@@ -396,63 +412,83 @@ impl SymbolInstance {
         }
     }
 
+    #[must_use]
     pub fn get_anchor(&self) -> &Anchor {
         &self.anchor
     }
+    #[must_use]
     pub fn get_right_justified_glyph_quads_size(&self) -> usize {
         self.right_justified_glyph_quads_size
     }
+    #[must_use]
     pub fn get_center_justified_glyph_quads_size(&self) -> usize {
         self.center_justified_glyph_quads_size
     }
+    #[must_use]
     pub fn get_left_justified_glyph_quads_size(&self) -> usize {
         self.left_justified_glyph_quads_size
     }
+    #[must_use]
     pub fn get_vertical_glyph_quads_size(&self) -> usize {
         self.vertical_glyph_quads_size
     }
+    #[must_use]
     pub fn get_icon_quads_size(&self) -> usize {
         self.icon_quads_size
     }
+    #[must_use]
     pub fn get_text_collision_feature(&self) -> &CollisionFeature {
         &self.text_collision_feature
     }
+    #[must_use]
     pub fn get_icon_collision_feature(&self) -> &CollisionFeature {
         &self.icon_collision_feature
     }
+    #[must_use]
     pub fn get_vertical_text_collision_feature(&self) -> &Option<CollisionFeature> {
         &self.vertical_text_collision_feature
     }
+    #[must_use]
     pub fn get_vertical_icon_collision_feature(&self) -> &Option<CollisionFeature> {
         &self.vertical_icon_collision_feature
     }
+    #[must_use]
     pub fn get_writing_modes(&self) -> WritingModeType {
         self.writing_modes
     }
+    #[must_use]
     pub fn get_layout_feature_index(&self) -> usize {
         self.layout_feature_index
     }
+    #[must_use]
     pub fn get_data_feature_index(&self) -> usize {
         self.data_feature_index
     }
+    #[must_use]
     pub fn get_text_offset(&self) -> [f32; 2] {
         self.text_offset
     }
+    #[must_use]
     pub fn get_icon_offset(&self) -> [f32; 2] {
         self.icon_offset
     }
+    #[must_use]
     pub fn get_key(&self) -> &[u16] {
         &self.key
     }
+    #[must_use]
     pub fn get_text_box_scale(&self) -> f32 {
         self.text_box_scale
     }
+    #[must_use]
     pub fn get_text_variable_anchor_offset(&self) -> &Option<VariableAnchorOffsetCollection> {
         &self.text_variable_anchor_offset
     }
+    #[must_use]
     pub fn get_single_line(&self) -> bool {
         self.single_line
     }
+    #[must_use]
     pub fn get_cross_tile_id(&self) -> u32 {
         self.cross_tile_id
     }

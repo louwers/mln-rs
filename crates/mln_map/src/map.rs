@@ -791,7 +791,7 @@ impl Map {
     // query: the render-test runner's tile mode uses it.
     /// `latLngBoundsForCamera(camera)`.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a camera whose
-    /// corners have no LatLng.
+    /// corners have no `LatLng`.
     pub fn lat_lng_bounds_for_camera(&self, camera: &CameraOptions) -> Result<mln_util::geo::LatLngBounds, Error> {
         let mut shallow = crate::transform::Transform::from_state(self.transform.get_state().clone());
         let size = shallow.get_state().get_size();
@@ -875,7 +875,7 @@ impl Map {
     // latLngBoundsForCameraUnwrapped (test/map/map.test.cpp).
     /// `cameraForLatLngBounds(bounds, padding, bearing, pitch)`. Fails with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a center that has no
-    /// LatLng (padding that pushes it to infinity).
+    /// `LatLng` (padding that pushes it to infinity).
     pub fn camera_for_lat_lng_bounds(
         &self,
         bounds: &LatLngBounds,
@@ -917,7 +917,7 @@ impl Map {
     /// that fits every point of `geometry` (x longitude, y latitude), as
     /// [`camera_for_lat_lngs`](Self::camera_for_lat_lngs) fits them. Fails as
     /// that does, and with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
-    /// point with no LatLng (an infinite or NaN coordinate, or a latitude
+    /// point with no `LatLng` (an infinite or NaN coordinate, or a latitude
     /// beyond ±90°).
     pub fn camera_for_geometry(
         &self,
@@ -1025,7 +1025,7 @@ impl Map {
     }
 
     /// Returns the current map bound options. All optional fields in
-    /// BoundOptions are set.
+    /// `BoundOptions` are set.
     pub fn get_bounds(&self) -> BoundOptions {
         let transform = &self.transform;
         let state = transform.get_state();
@@ -1535,7 +1535,8 @@ fn camera_for_lat_lngs_on_screen(
     }
 
     // Calculate the center point of a virtual bounds that is extended in all directions by padding.
-    let center_pixel = ScreenCoordinate::new((ne_pixel.x + sw_pixel.x) / 2.0, (ne_pixel.y + sw_pixel.y) / 2.0);
+    let center_pixel =
+        ScreenCoordinate::new(f64::midpoint(ne_pixel.x, sw_pixel.x), f64::midpoint(ne_pixel.y, sw_pixel.y));
 
     Ok(CameraOptions::default()
         .with_center(Some(transform.screen_coordinate_to_lat_lng(&center_pixel, WrapMode::Wrapped)?))
