@@ -444,9 +444,9 @@ impl SymbolLayout {
                     }
                     let mut u8string = section.text.clone();
                     if text_transform == TextTransformType::Uppercase {
-                        u8string = nunicode::uppercase(&u8string);
+                        u8string = u8string.to_uppercase();
                     } else if text_transform == TextTransformType::Lowercase {
-                        u8string = nunicode::lowercase(&u8string);
+                        u8string = u8string.to_lowercase();
                     }
 
                     // Only the sections that draw from glyph PBFs take ICU's

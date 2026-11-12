@@ -48,7 +48,6 @@ mln_expression = { package = "mln-rs-expression", path = "../mln_expression" }
 mln_style = { package = "mln-rs-style", path = "../mln_style" }
 mln_style_types = { package = "mln-rs-style-types", path = "../mln_style_types" }
 mln_tile_id = { package = "mln-rs-tile-id", path = "../mln_tile_id" }
-nunicode = { package = "mln-rs-nunicode", path = "../../vendor/nunicode" }
 postcard.workspace = true
 serde_json.workspace = true
 

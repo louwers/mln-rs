@@ -46,7 +46,6 @@ mln_tile.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
-nunicode.workspace = true
 polylabel.workspace = true
 postcard.workspace = true
 serde.workspace = true

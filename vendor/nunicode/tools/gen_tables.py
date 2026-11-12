@@ -200,8 +200,6 @@ def main():
     nunicode, outdir = sys.argv[1], sys.argv[2]
     for src, dst in [
         ("_ducet.c", "ducet.rs"),
-        ("_tolower.c", "tolower.rs"),
-        ("_toupper.c", "toupper.rs"),
         ("_tounaccent.c", "tounaccent.rs"),
     ]:
         gen_tables(nunicode, src, os.path.join(outdir, dst))
