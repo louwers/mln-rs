@@ -12,12 +12,14 @@ use crate::interpolate::interpolate as util_interpolate;
 use crate::string::to_string_double;
 
 /// The space a color interpolation runs in: RGB blends the premultiplied
-/// channels, LAB and HCL the straight color.
+/// channels, LAB and HCL the straight color, OKLCH the premultiplied lightness
+/// and chroma.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ColorSpace {
     Rgb,
     Lab,
     Hcl,
+    Oklch,
 }
 
 /// Stores a premultiplied color, with all four channels ranging from 0..1.
@@ -161,6 +163,247 @@ fn lerp(a: f64, b: f64, t: f64) -> f64 {
     a * (1.0 - t) + b * t
 }
 
+type Vec3 = [f64; 3];
+type Mat3 = [Vec3; 3];
+
+// The matrices of https://drafts.csswg.org/css-color-4/#color-conversion-code
+const LINEAR_SRGB_TO_XYZ: Mat3 = [
+    [506752.0 / 1228815.0, 87881.0 / 245763.0, 12673.0 / 70218.0],
+    [87098.0 / 409605.0, 175762.0 / 245763.0, 12673.0 / 175545.0],
+    [7918.0 / 409605.0, 87881.0 / 737289.0, 1001167.0 / 1053270.0],
+];
+const XYZ_TO_LINEAR_SRGB: Mat3 = [
+    [12831.0 / 3959.0, -329.0 / 214.0, -1974.0 / 3959.0],
+    [-851781.0 / 878810.0, 1648619.0 / 878810.0, 36519.0 / 878810.0],
+    [705.0 / 12673.0, -2585.0 / 12673.0, 705.0 / 667.0],
+];
+const XYZ_TO_LMS: Mat3 = [
+    [0.8190224379967030, 0.3619062600528904, -0.1288737815209879],
+    [0.0329836539323885, 0.9292868615863434, 0.0361446663506424],
+    [0.0481771893596242, 0.2642395317527308, 0.6335478284694309],
+];
+const LMS_TO_OKLAB: Mat3 = [
+    [0.2104542683093140, 0.7936177747023054, -0.0040720430116193],
+    [1.9779985324311684, -2.4285922420485799, 0.4505937096174110],
+    [0.0259040424655478, 0.7827717124575296, -0.8086757549230774],
+];
+const OKLAB_TO_LMS: Mat3 = [
+    [1.0, 0.3963377773761749, 0.2158037573099136],
+    [1.0, -0.1055613458156586, -0.0638541728258133],
+    [1.0, -0.0894841775298119, -1.2914855480194092],
+];
+const LMS_TO_XYZ: Mat3 = [
+    [1.2268798758459243, -0.5578149944602171, 0.2813910456659647],
+    [-0.0405757452148008, 1.1122868032803170, -0.0717110580655164],
+    [-0.0763729366746601, -0.4214933324022432, 1.5869240198367816],
+];
+
+const DEG_TO_RAD: f64 = std::f64::consts::PI / 180.0;
+const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
+
+#[derive(Clone, Copy)]
+struct Oklch {
+    l: f64,
+    c: f64,
+    h: f64,
+    alpha: f64,
+}
+
+fn multiply(m: &Mat3, v: Vec3) -> Vec3 {
+    [
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+    ]
+}
+
+fn linear_to_srgb(x: f64) -> f64 {
+    let magnitude = x.abs();
+    if magnitude > 0.0031308 { (1.055 * magnitude.powf(1.0 / 2.4) - 0.055).copysign(x) } else { 12.92 * x }
+}
+
+fn srgb_to_oklab(rgb: Vec3) -> Vec3 {
+    let lms = multiply(&XYZ_TO_LMS, multiply(&LINEAR_SRGB_TO_XYZ, [rgb2xyz(rgb[0]), rgb2xyz(rgb[1]), rgb2xyz(rgb[2])]));
+    multiply(&LMS_TO_OKLAB, [lms[0].cbrt(), lms[1].cbrt(), lms[2].cbrt()])
+}
+
+fn oklab_to_srgb(lab: Vec3) -> Vec3 {
+    let lms = multiply(&OKLAB_TO_LMS, lab);
+    let rgb = multiply(
+        &XYZ_TO_LINEAR_SRGB,
+        multiply(&LMS_TO_XYZ, [lms[0] * lms[0] * lms[0], lms[1] * lms[1] * lms[1], lms[2] * lms[2] * lms[2]]),
+    );
+    [linear_to_srgb(rgb[0]), linear_to_srgb(rgb[1]), linear_to_srgb(rgb[2])]
+}
+
+fn rgb_to_oklch(rgb: Rgb) -> Oklch {
+    let lab = srgb_to_oklab([rgb.r, rgb.g, rgb.b]);
+    let c = (lab[1] * lab[1] + lab[2] * lab[2]).sqrt();
+    // https://drafts.csswg.org/css-color-4/#powerless
+    if c <= 0.000004 {
+        return Oklch { l: lab[0], c: 0.0, h: f64::NAN, alpha: rgb.a };
+    }
+    Oklch { l: lab[0], c, h: constrain_angle(lab[2].atan2(lab[1]) * RAD_TO_DEG), alpha: rgb.a }
+}
+
+fn is_in_srgb_gamut(rgb: Vec3) -> bool {
+    rgb.iter().all(|&x| x >= 0.0 && x <= 1.0)
+}
+
+fn clip_to_srgb_gamut(rgb: Vec3) -> Vec3 {
+    rgb.map(|x| x.clamp(0.0, 1.0))
+}
+
+// Maps a color outside sRGB to a lower chroma at the same lightness and hue,
+// https://drafts.csswg.org/css-color-4/#binary-search-gamut-map-with-local-minde
+fn oklch_to_rgb(color: Oklch) -> Rgb {
+    if color.l >= 1.0 {
+        return Rgb { r: 1.0, g: 1.0, b: 1.0, a: color.alpha };
+    }
+    if color.l <= 0.0 {
+        return Rgb { r: 0.0, g: 0.0, b: 0.0, a: color.alpha };
+    }
+    let hue = if color.h.is_nan() { 0.0 } else { color.h * DEG_TO_RAD };
+    let cos_hue = hue.cos();
+    let sin_hue = hue.sin();
+    let to_srgb = |chroma: f64| oklab_to_srgb([color.l, chroma * cos_hue, chroma * sin_hue]);
+    let delta_eok = |rgb: Vec3, chroma: f64| {
+        let lab = srgb_to_oklab(rgb);
+        let dl = color.l - lab[0];
+        let da = chroma * cos_hue - lab[1];
+        let db = chroma * sin_hue - lab[2];
+        (dl * dl + da * da + db * db).sqrt()
+    };
+    const JND: f64 = 0.02;
+    const EPSILON: f64 = 0.0001;
+
+    let rgb = to_srgb(color.c);
+    if is_in_srgb_gamut(rgb) {
+        return Rgb { r: rgb[0], g: rgb[1], b: rgb[2], a: color.alpha };
+    }
+    let mut clipped = clip_to_srgb_gamut(rgb);
+    if delta_eok(clipped, color.c) >= JND {
+        let mut min = 0.0;
+        let mut max = color.c;
+        let mut min_in_gamut = true;
+        while max - min > EPSILON {
+            let chroma = (min + max) / 2.0;
+            let current = to_srgb(chroma);
+            if min_in_gamut && is_in_srgb_gamut(current) {
+                min = chroma;
+                continue;
+            }
+            clipped = clip_to_srgb_gamut(current);
+            let e = delta_eok(clipped, chroma);
+            if e < JND {
+                if JND - e < EPSILON {
+                    break;
+                }
+                min_in_gamut = false;
+                min = chroma;
+            } else {
+                max = chroma;
+            }
+        }
+    }
+    Rgb { r: clipped[0], g: clipped[1], b: clipped[2], a: color.alpha }
+}
+
+fn is_css_whitespace(c: u8) -> bool {
+    matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r')
+}
+
+// Reads `none` as 0, or a CSS <number> followed by a `%` that makes 100%
+// `percent_reference` or, for a hue, by an angle unit, in degrees.
+fn read_oklch_argument(input: &[u8], pos: &mut usize, percent_reference: f64, hue: bool) -> Option<f64> {
+    if input[*pos..].starts_with(b"none") {
+        *pos += 4;
+        return Some(0.0);
+    }
+    let start = *pos;
+    let digits = |pos: &mut usize| {
+        let first = *pos;
+        while *pos < input.len() && input[*pos].is_ascii_digit() {
+            *pos += 1;
+        }
+        *pos > first
+    };
+    if *pos < input.len() && (input[*pos] == b'+' || input[*pos] == b'-') {
+        *pos += 1;
+    }
+    let integer = digits(pos);
+    if *pos + 1 < input.len() && input[*pos] == b'.' && input[*pos + 1].is_ascii_digit() {
+        *pos += 1;
+        digits(pos);
+    } else if !integer {
+        return None;
+    }
+    if *pos < input.len() && input[*pos] == b'e' {
+        let mut exponent = *pos + 1;
+        if exponent < input.len() && (input[exponent] == b'+' || input[exponent] == b'-') {
+            exponent += 1;
+        }
+        if exponent < input.len() && input[exponent].is_ascii_digit() {
+            *pos = exponent;
+            digits(pos);
+        }
+    }
+    let mut value: f64 = std::str::from_utf8(&input[start..*pos]).ok()?.parse().ok()?;
+    if hue {
+        const UNITS: [(&[u8], f64); 4] = [(b"deg", 1.0), (b"grad", 0.9), (b"rad", RAD_TO_DEG), (b"turn", 360.0)];
+        if let Some((unit, degrees)) = UNITS.iter().find(|(unit, _)| input[*pos..].starts_with(unit)) {
+            *pos += unit.len();
+            value *= degrees;
+        }
+    } else if *pos < input.len() && input[*pos] == b'%' {
+        *pos += 1;
+        value = value / 100.0 * percent_reference;
+    }
+    value.is_finite().then_some(value)
+}
+
+// https://drafts.csswg.org/css-color-4/#specifying-oklab-oklch
+fn parse_oklch(text: &str) -> Option<Oklch> {
+    const PREFIX: &str = "oklch(";
+    let text = text.trim_matches(|c: char| c.is_ascii() && is_css_whitespace(c as u8));
+    if text.len() <= PREFIX.len() || !text.get(..PREFIX.len())?.eq_ignore_ascii_case(PREFIX) {
+        return None;
+    }
+    let input = text.to_ascii_lowercase();
+    let inside = input.strip_suffix(')')?.as_bytes().get(PREFIX.len()..)?;
+    let mut pos = 0;
+    let skip_whitespace = |pos: &mut usize| {
+        let from = *pos;
+        while *pos < inside.len() && is_css_whitespace(inside[*pos]) {
+            *pos += 1;
+        }
+        *pos > from
+    };
+
+    skip_whitespace(&mut pos);
+    let l = read_oklch_argument(inside, &mut pos, 1.0, false)?;
+    if !skip_whitespace(&mut pos) {
+        return None;
+    }
+    let c = read_oklch_argument(inside, &mut pos, 0.4, false)?;
+    if !skip_whitespace(&mut pos) {
+        return None;
+    }
+    let h = read_oklch_argument(inside, &mut pos, 1.0, true)?;
+    skip_whitespace(&mut pos);
+    let mut alpha = 1.0;
+    if pos < inside.len() && inside[pos] == b'/' {
+        pos += 1;
+        skip_whitespace(&mut pos);
+        alpha = read_oklch_argument(inside, &mut pos, 1.0, false)?;
+        skip_whitespace(&mut pos);
+    }
+    if pos != inside.len() {
+        return None;
+    }
+    Some(Oklch { l: l.clamp(0.0, 1.0), c: if c < 0.0 { 0.0 } else { c }, h: h % 360.0, alpha: alpha.clamp(0.0, 1.0) })
+}
+
 impl Color {
     pub fn new(r: f32, g: f32, b: f32, a: f32) -> Self {
         debug_assert!((0.0..=1.0).contains(&r));
@@ -197,6 +440,10 @@ impl Color {
     /// builds) that the alpha is in 0..1, which a NaN alpha (`rgba(0,0,0,nan)`)
     /// is not.
     pub fn parse(s: &str) -> Option<Color> {
+        if let Some(oklch) = parse_oklch(s) {
+            return Some(premultiplied(oklch_to_rgb(oklch)));
+        }
+
         let css_color = csscolorparser::parse(s)?;
 
         // Premultiply the color.
@@ -252,6 +499,26 @@ impl Color {
                     c: if chroma.is_nan() { lerp(a.c, b.c, t) } else { chroma },
                     l: lerp(a.l, b.l, t),
                     alpha: lerp(a.alpha, b.alpha, t),
+                }))
+            }
+            ColorSpace::Oklch => {
+                // https://drafts.csswg.org/css-color-4/#interpolation
+                let a = rgb_to_oklch(straight(from));
+                let b = rgb_to_oklch(straight(to));
+                let mut hue_a = if a.h.is_nan() { b.h } else { a.h };
+                let mut hue_b = if b.h.is_nan() { a.h } else { b.h };
+                if hue_b - hue_a > 180.0 {
+                    hue_a += 360.0;
+                } else if hue_b - hue_a < -180.0 {
+                    hue_b += 360.0;
+                }
+                let alpha = lerp(a.alpha, b.alpha, t);
+                let divisor = if alpha == 0.0 { 1.0 } else { alpha };
+                premultiplied(oklch_to_rgb(Oklch {
+                    l: lerp(a.l * a.alpha, b.l * b.alpha, t) / divisor,
+                    c: lerp(a.c * a.alpha, b.c * b.alpha, t) / divisor,
+                    h: lerp(hue_a, hue_b, t),
+                    alpha,
                 }))
             }
         }
