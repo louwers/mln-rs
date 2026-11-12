@@ -151,7 +151,6 @@
 "crates/mln_webgpu/src/shaders/shader_group.rs" = 2
 "crates/mln_webgpu/src/shaders/shader_source.rs" = 1
 "crates/mln_webgpu/src/upload_pass.rs" = 1
-"vendor/csscolorparser/src/cstdlib.rs" = 2
 "vendor/csscolorparser/src/lib.rs" = 3
 "vendor/geojson-vt/src/lib.rs" = 2
 "vendor/geojson/src/geojson_impl.rs" = 5

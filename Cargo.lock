@@ -2271,7 +2271,6 @@ name = "mln-rs-expression-test"
 version = "0.0.11"
 dependencies = [
  "mln-rs-conversion",
- "mln-rs-csscolorparser",
  "mln-rs-expression",
  "mln-rs-feature",
  "mln-rs-geometry",
@@ -2494,7 +2493,6 @@ dependencies = [
  "fastrand",
  "mln-rs-actor",
  "mln-rs-conversion",
- "mln-rs-csscolorparser",
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-geometry",

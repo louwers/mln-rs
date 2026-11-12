@@ -5,7 +5,7 @@
 > any release without notice. Depend on [`mln-rs`](https://crates.io/crates/mln-rs)
 > instead: it re-exports this crate as `mln_rs::csscolorparser`.
 
-Ports csscolorparser (the C++ core's `vendor/csscolorparser`), the CSS color parser, with the glibc `strtof`/`strtod`/`strtoll` behaviour it relies on. It is not the crates.io `csscolorparser` crate, which accepts different input.
+Ports csscolorparser (the C++ core's `vendor/csscolorparser`), the CSS color parser. It is not the crates.io `csscolorparser` crate, which accepts different input.
 
 Licensed under the MIT License, as csscolorparser is ([LICENSE](LICENSE)).
 

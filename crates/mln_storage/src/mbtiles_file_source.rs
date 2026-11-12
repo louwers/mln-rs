@@ -22,6 +22,7 @@ use mln_actor::{ActorRef, Thread};
 use mln_util::chrono::Timestamp;
 use mln_util::compression::{decompress, is_compressed};
 use mln_util::constants::MBTILES_PROTOCOL;
+use mln_util::string::float_prefix;
 use mln_util::sync::MutexExt;
 use mln_util::url::percent_decode;
 use mln_vec_map::VecMap;
@@ -49,29 +50,17 @@ fn json_double(d: f64) -> Json {
     serde_json::Number::from_f64(d).map_or(Json::Null, Json::Number)
 }
 
-/// The longest prefix of `s` that is a number, after leading whitespace, and
-/// its value.
-fn number_prefix(s: &str) -> Option<(&str, f64)> {
-    let s = s.trim_start();
-    let mut best = None;
-    for (i, _) in s.char_indices().skip(1).chain(std::iter::once((s.len(), ' '))) {
-        if let Ok(v) = s[..i].parse::<f64>() {
-            best = Some((&s[..i], v));
-        }
-    }
-    best
-}
-
-/// `std::strtod(s, nullptr)`: the longest prefix that is a number, after
-/// leading whitespace; 0 when there is none.
+/// The number at the start of `s`, after leading whitespace; 0 when there is
+/// none.
 pub(crate) fn strtod(s: &str) -> f64 {
-    number_prefix(s).map_or(0.0, |(_, v)| v)
+    float_prefix(s).parse().unwrap_or(0.0)
 }
 
-/// `std::stod(s)`: [`strtod`], but an error when there is no number, or when
-/// it overflows to infinity or underflows to zero.
+/// The number at the start of `s`, after leading whitespace; an error when
+/// there is none, or when it overflows to infinity or underflows to zero.
 fn stod(s: &str) -> Result<f64, String> {
-    let (number, v) = number_prefix(s).ok_or_else(|| format!("\"{s}\" is not a number"))?;
+    let number = float_prefix(s);
+    let v: f64 = number.parse().map_err(|_| format!("\"{s}\" is not a number"))?;
     let mantissa = number.split(['e', 'E']).next().unwrap_or_default();
     let overflow = v.is_infinite() && !number.to_ascii_lowercase().contains("inf");
     let underflow = v == 0.0 && mantissa.bytes().any(|b| (b'1'..=b'9').contains(&b));
@@ -98,7 +87,7 @@ fn zoom(name: &str, value: &str) -> Result<i32, String> {
     if value.is_empty() { Ok(0) } else { stoi(value).map_err(|e| format!("MBTiles {name}: {e}")) }
 }
 
-/// `split(s, delim)`: each `std::getline` piece through `std::strtod`.
+/// `split(s, delim)`: each `std::getline` piece through [`strtod`].
 fn split(s: &str, delim: char) -> Vec<f64> {
     let mut elems: Vec<f64> = s.split(delim).map(strtod).collect();
     // `std::getline` yields no final empty piece after a trailing delimiter

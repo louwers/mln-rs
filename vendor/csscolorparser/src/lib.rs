@@ -5,14 +5,10 @@
 //! <https://github.com/kkaefer/css-color-parser-cpp>).
 //!
 //! The C++ works on the bytes of a `std::string` and leans on C library
-//! behaviour (`strtof`, `strtoll`, `std::getline`, `std::modf`, x86 float to
-//! integer conversion); all of it is reproduced here. `cstdlib` exposes the
-//! glibc `strtof`/`strtod`/`strtoll` ports for other users.
-
-mod bigint;
-pub mod cstdlib;
-
-use cstdlib::{strtof, strtoll};
+//! behaviour (`std::getline`, `std::modf`, x86 float to integer conversion),
+//! which is reproduced here. Numbers parse with `str::parse` from the longest
+//! prefix that is one, as `strtof` and `strtoll` read them, but without their
+//! hexadecimal `0x` forms.
 
 /// `CSSColorParser::Color`.
 #[derive(Clone, Copy, Debug)]
@@ -233,12 +229,55 @@ fn clamp_css_float(f: f32) -> f32 {
     f.clamp(0.0, 1.0)
 }
 
-fn parse_float(s: &[u8]) -> f32 {
-    strtof(s).0
+/// The longest prefix of `s`, after leading whitespace, that is a number
+/// `str::parse::<f32>` accepts: an optional sign, then decimal digits with an
+/// optional `.` and exponent, or `inf`, `infinity` or `nan` in any case.
+fn float_prefix(s: &[u8]) -> &[u8] {
+    let s = s.trim_ascii_start();
+    let digits = |from: usize| s[from..].iter().take_while(|c| c.is_ascii_digit()).count();
+    let mut end = usize::from(matches!(s.first(), Some(b'+' | b'-')));
+    for word in [&b"infinity"[..], b"inf", b"nan"] {
+        if s.get(end..end + word.len()).is_some_and(|w| w.eq_ignore_ascii_case(word)) {
+            return &s[..end + word.len()];
+        }
+    }
+    let int = digits(end);
+    end += int;
+    if s.get(end) == Some(&b'.') {
+        let frac = digits(end + 1);
+        if int + frac == 0 {
+            return &[];
+        }
+        end += 1 + frac;
+    } else if int == 0 {
+        return &[];
+    }
+    if matches!(s.get(end), Some(b'e' | b'E')) {
+        let sign = usize::from(matches!(s.get(end + 1), Some(b'+' | b'-')));
+        let exp = digits(end + 1 + sign);
+        if exp > 0 {
+            end += 1 + sign + exp;
+        }
+    }
+    &s[..end]
 }
 
-fn parse_int(s: &[u8], base: u32) -> i64 {
-    strtoll(s, base).0
+/// The number at the start of `s`; 0 when there is none.
+fn parse_float(s: &[u8]) -> f32 {
+    std::str::from_utf8(float_prefix(s)).ok().and_then(|n| n.parse().ok()).unwrap_or(0.0)
+}
+
+/// The integer in `radix` at the start of `s`, after leading whitespace and
+/// an optional sign, saturating at the `i64` range; 0 when there is none.
+fn parse_int(s: &[u8], radix: u32) -> i64 {
+    let s = s.trim_ascii_start();
+    let sign = usize::from(matches!(s.first(), Some(b'+' | b'-')));
+    let digits = s[sign..].iter().take_while(|&&c| char::from(c).is_digit(radix)).count();
+    if digits == 0 {
+        return 0;
+    }
+    let saturated = if s[0] == b'-' { i64::MIN } else { i64::MAX };
+    std::str::from_utf8(&s[..sign + digits]).map_or(0, |n| i64::from_str_radix(n, radix).unwrap_or(saturated))
 }
 
 /// int or percentage.
@@ -463,6 +502,23 @@ mod tests {
         // Hex alpha
         assert_eq!(Some(c(255, 0, 17, 0.0)), parse("#ff001100"));
         assert_eq!(Some(c(255, 255, 255, 1.0)), parse("#ffff"));
+    }
+
+    #[test]
+    fn number_prefixes() {
+        assert_eq!(parse_float(b"50%"), 50.0);
+        assert_eq!(parse_float(b"-.5e1x"), -5.0);
+        assert_eq!(parse_float(b"1e"), 1.0);
+        assert_eq!(parse_float(b"x"), 0.0);
+        assert_eq!(parse_float(b"inf"), f32::INFINITY);
+        assert_eq!(parse_int(b"12.9", 10), 12);
+        assert_eq!(parse_int(b"-ff", 16), -255);
+        assert_eq!(parse_int(b"0x1", 16), 0);
+        assert_eq!(parse_int(b"99999999999999999999", 10), i64::MAX);
+        assert_eq!(parse_int(b"-99999999999999999999", 10), i64::MIN);
+        assert_eq!(parse_int(b"+", 10), 0);
+        assert_eq!(Some(c(0, 0, 0, 1.0)), parse("rgba(0, 0, 0, inf)"));
+        assert_eq!(Some(c(0, 255, 255, 1.0)), parse("#ffx"));
     }
 
     #[test]

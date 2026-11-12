@@ -66,11 +66,9 @@ fn which(v: &Value) -> usize {
     }
 }
 
-/// `std::stod` (strtod over the whole string; throws if nothing parsed or
-/// out of range).
+/// The number at the start of `s`, after leading whitespace, if there is one.
 fn stod(s: &str) -> Option<f64> {
-    let (value, consumed, erange) = csscolorparser::cstdlib::strtod(s.as_bytes());
-    if consumed == 0 || erange { None } else { Some(value) }
+    mln_util::string::float_prefix(s).parse().ok()
 }
 
 #[must_use]

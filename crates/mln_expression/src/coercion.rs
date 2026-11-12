@@ -33,8 +33,8 @@ fn to_boolean(v: &Value) -> Value {
     })
 }
 
-/// `util::stof` (`std::stof`): `strtof` on the whole string, throwing when
-/// nothing was converted or the result is out of range.
+/// [`mln_util::string::stof`]: the number at the start of the string, or
+/// `None` when there is none or it is out of the `f32` range.
 fn stof(s: &str) -> Option<f32> {
     mln_util::string::stof(s).ok()
 }
