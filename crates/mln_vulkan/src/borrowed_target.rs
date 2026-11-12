@@ -58,6 +58,7 @@ impl BorrowedImages {
     /// The kinds of sync with which the host can wait for a frame (the
     /// producer's) and the target for the host's reads (the consumer's), on
     /// `device`.
+    #[must_use]
     pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
         device.sync_kinds()
     }
@@ -84,7 +85,7 @@ struct Resource {
     framebuffers: Vec<vk::Framebuffer>,
     /// The image the next frame draws into.
     selected: Cell<usize>,
-    _depth: ImageAllocation,
+    depth: ImageAllocation,
 }
 
 impl Resource {
@@ -133,9 +134,9 @@ impl Resource {
             return Err(Error::native("Failed to create a render pass for the borrowed images"));
         }
         let mut resource =
-            Resource { backend, extent, render_pass, framebuffers: Vec::new(), selected: Cell::new(0), _depth: depth };
+            Resource { backend, extent, render_pass, framebuffers: Vec::new(), selected: Cell::new(0), depth };
         for image in &images.images {
-            let attachments = [image.view, resource._depth.image_view()];
+            let attachments = [image.view, resource.depth.image_view()];
             let create_info = vk::FramebufferCreateInfo::default()
                 .render_pass(render_pass)
                 .attachments(&attachments)
@@ -687,7 +688,7 @@ fn wait_timeline(backend: &BackendImpl, semaphore: vk::Semaphore, value: u64, de
     let timeout = u64::try_from(deadline.saturating_duration_since(Instant::now()).as_nanos()).unwrap_or(u64::MAX);
     // SAFETY: the host's timeline, of the device, which stays valid until
     // the session ends.
-    unsafe { wait(raw.device, &info, timeout) == vk::Result::SUCCESS }
+    unsafe { wait(raw.device, &raw const info, timeout) == vk::Result::SUCCESS }
 }
 
 /// Waits until `deadline` for `file`, a sync file, to signal, and returns
@@ -701,7 +702,7 @@ fn poll_until(file: &std::os::fd::OwnedFd, deadline: Instant) -> bool {
         let timeout = i32::try_from(remaining.as_micros().div_ceil(1000)).unwrap_or(i32::MAX);
         let mut poll = libc::pollfd { fd: file.as_raw_fd(), events: libc::POLLIN, revents: 0 };
         // SAFETY: one live descriptor, which the call only reads.
-        match unsafe { libc::poll(&mut poll, 1, timeout) } {
+        match unsafe { libc::poll(&raw mut poll, 1, timeout) } {
             0 => return false,
             ready if ready > 0 => return true,
             _ if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted => {}

@@ -486,7 +486,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_web_gpu_texture(
 
 #[cfg(all(test, unix))]
 mod tests {
-    use std::os::fd::{AsRawFd as _, IntoRawFd as _, OwnedFd};
+    use std::os::fd::{IntoRawFd as _, OwnedFd};
 
     use super::*;
 
@@ -510,6 +510,6 @@ mod tests {
         assert_eq!(sync_file(fd as u64), sync);
         // SAFETY: the descriptor is the test's to hand over.
         let consumer = unsafe { consumer_sync(sync) };
-        assert_eq!(Some(fd), consumer.sync_file.as_ref().map(|file| file.as_raw_fd()));
+        assert_eq!(Some(fd), consumer.sync_file.as_ref().map(std::os::fd::AsRawFd::as_raw_fd));
     }
 }

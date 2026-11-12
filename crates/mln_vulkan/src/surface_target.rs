@@ -46,6 +46,7 @@ impl HostSurface {
     ///
     /// `surface` is a live surface of the instance of the device that the
     /// targets on it render on, and it outlives them.
+    #[must_use]
     pub unsafe fn from_raw(surface: u64) -> HostSurface {
         use ash::vk::Handle as _;
         HostSurface(vk::SurfaceKHR::from_raw(surface))

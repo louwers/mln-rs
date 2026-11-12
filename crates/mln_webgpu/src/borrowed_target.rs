@@ -29,6 +29,7 @@ impl BorrowedTextures {
     /// The kinds of sync with which the host can wait for a frame (the
     /// producer's) and the target for the host's reads (the consumer's):
     /// both share the device's queue.
+    #[must_use]
     pub fn sync_kinds() -> (SyncKinds, SyncKinds) {
         let kinds = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::QueueOrder]);
         (kinds, kinds)
@@ -158,6 +159,7 @@ impl BorrowedTarget {
     }
 
     /// How many textures the ring has.
+    #[must_use]
     pub fn depth(&self) -> usize {
         self.resource.textures.borrow().textures.len()
     }
@@ -169,6 +171,10 @@ impl BorrowedTarget {
 
     /// The host gave the texture at `slot` back. The host's reads went to
     /// the queue before the next frame does, or have finished.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the release takes the host's sync, as every backend's does, and drops it"
+    )]
     pub fn release(&self, _slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         match consumer.sync.kind {
             SyncKind::CpuComplete | SyncKind::QueueOrder => Ok(()),
@@ -211,13 +217,12 @@ impl FrameTarget for BorrowedTarget {
             return Handoff::Dropped;
         };
         encoder.submit_frame(Some(self.target.resource()));
-        let sync = match self.producer {
-            SyncKind::QueueOrder => GpuSync::of(SyncKind::QueueOrder),
-            _ => {
-                let wait = wgpu::PollType::Wait { submission_index: None, timeout: None };
-                let _ = self.backend.device().device().poll(wait);
-                GpuSync::of(SyncKind::CpuComplete)
-            }
+        let sync = if self.producer == SyncKind::QueueOrder {
+            GpuSync::of(SyncKind::QueueOrder)
+        } else {
+            let wait = wgpu::PollType::Wait { submission_index: None, timeout: None };
+            let _ = self.backend.device().device().poll(wait);
+            GpuSync::of(SyncKind::CpuComplete)
         };
         Handoff::GivenBack { slot: self.resource.selected.get(), sync }
     }

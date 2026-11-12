@@ -78,8 +78,8 @@ impl BackendImpl {
     /// `init()`'s allocator and command pool on `device`, for `max_frames`
     /// frames in flight.
     fn new(device: &Device, max_frames: u32) -> Result<BackendImpl, Error> {
-        let shared = &device.shared;
         const MB: u64 = 1024 * 1024;
+        let shared = &device.shared;
         let allocator = Allocator::new(&AllocatorCreateDesc {
             instance: shared.instance().clone(),
             device: shared.device().clone(),

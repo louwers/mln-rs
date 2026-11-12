@@ -469,11 +469,13 @@ impl LocalTarget {
     }
 
     /// Whether frames go to the host's ring.
+    #[must_use]
     pub fn is_borrowed(&self) -> bool {
         matches!(self.frames, Frames::Borrowed { .. })
     }
 
     /// Whether the target is a ring that let go of its textures.
+    #[must_use]
     pub fn ring_released(&self) -> bool {
         matches!(self.frames, Frames::Borrowed { target: None, .. })
     }

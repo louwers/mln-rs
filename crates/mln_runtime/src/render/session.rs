@@ -420,7 +420,7 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session_then(self.id, self.run_loop.clone(), |worker, outbox| worker.finish(outbox));
+                map.unbind_session_then(self.id, self.run_loop.clone(), super::worker::Worker::finish);
                 map.release_session_claim(self.id);
             }
             None => worker::post(&self.run_loop, worker::Worker::finish),
@@ -896,7 +896,7 @@ impl RenderSession {
         // resize drops it.
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
             let _guard = guard;
-            worker.set_ring(size, scale_factor, ring, outbox)
+            worker.set_ring(size, scale_factor, &ring, outbox)
         })
     }
 
@@ -1325,17 +1325,19 @@ pub struct AcquiredFrame {
 
 impl std::fmt::Debug for AcquiredFrame {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AcquiredFrame").field("slot", &self.slot).field("frame", &self.frame).finish()
+        f.debug_struct("AcquiredFrame").field("slot", &self.slot).field("frame", &self.frame).finish_non_exhaustive()
     }
 }
 
 impl AcquiredFrame {
     /// The index of the frame's texture in the ring.
+    #[must_use]
     pub fn slot(&self) -> usize {
         self.slot
     }
 
     /// The result of the demand that rendered the frame.
+    #[must_use]
     pub fn result(&self) -> &FrameResult {
         &self.frame.result
     }
@@ -1343,16 +1345,19 @@ impl AcquiredFrame {
     /// What to wait for before reading the frame's texture. The object it
     /// names is the session's, and stays valid until the frame is given
     /// back.
+    #[must_use]
     pub fn producer_sync(&self) -> GpuSync {
         self.frame.sync
     }
 
     /// The host's texture that holds the frame.
+    #[must_use]
     pub fn texture(&self) -> Option<&FrameTexture> {
         self.frame.texture.as_ref()
     }
 
     /// Whether [`release`](Self::release) takes a sync of `kind`.
+    #[must_use]
     pub fn accepts(&self, kind: SyncKind) -> bool {
         self.shared.capabilities.consumer_sync_kinds.contains(kind)
     }
@@ -1379,6 +1384,7 @@ impl AcquiredFrame {
 
     /// Whether the session can still render: the frame's objects stay valid
     /// until it ends.
+    #[must_use]
     pub fn session_live(&self) -> bool {
         matches!(
             self.shared.state.lock_unpoisoned().lifecycle,
@@ -1469,17 +1475,14 @@ fn give_back(shared: &Arc<SessionShared>, slot: usize, consumer: Option<Consumer
             // A sync file that no backend waits on closes with `consumer`.
             return;
         }
-        match consumer {
-            Some(sync) => {
-                worker::post(&shared.run_loop, move |worker, outbox| worker.release_slot(slot, sync, outbox));
+        if let Some(sync) = consumer {
+            worker::post(&shared.run_loop, move |worker, outbox| worker.release_slot(slot, sync, outbox));
+        } else {
+            if let Some(entry) = state.ring.get_mut(slot) {
+                entry.acquired = false;
+                entry.quarantined = true;
             }
-            None => {
-                if let Some(entry) = state.ring.get_mut(slot) {
-                    entry.acquired = false;
-                    entry.quarantined = true;
-                }
-                worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
-            }
+            worker::post(&shared.run_loop, move |worker, outbox| worker.discard_slot(slot, outbox));
         }
     });
 }

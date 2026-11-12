@@ -88,7 +88,7 @@ impl Target {
 }
 
 /// A borrowed ring's textures: `count` of them at `textures`, from one to
-/// MLN_TEXTURE_RING_MAX_DEPTH, distinct by `key`, of a positive size.
+/// `MLN_TEXTURE_RING_MAX_DEPTH`, distinct by `key`, of a positive size.
 ///
 /// # Safety
 ///

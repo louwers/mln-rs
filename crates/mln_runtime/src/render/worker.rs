@@ -285,8 +285,11 @@ const SETTLE_POLL: Duration = Duration::from_millis(2);
 struct Settling {
     reads: Box<dyn PendingReads>,
     deadline: Instant,
-    done: Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>,
+    done: SettleDone,
 }
+
+/// What runs once a release or replacement has settled, with its result.
+type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 
 /// Starts a thread that has the session's thread poll the host's reads on
 /// its later turns, until the returned flag stops it. It posts to the
@@ -299,7 +302,7 @@ fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
     let spawned = mln_util::thread::builder("RenderSessionSettle").spawn(move || {
         while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
             std::thread::sleep(SETTLE_POLL);
-            post(&run_loop, |worker, outbox| worker.poll_settling(outbox));
+            post(&run_loop, Worker::poll_settling);
         }
     });
     if spawned.is_err() {
@@ -422,7 +425,7 @@ impl Worker {
         // The demands that came while the session attached wait for the
         // attach to complete, which the outbox delivers once this task ends,
         // so they render in a task of their own.
-        post(&self.shared.run_loop, |worker, outbox| worker.pump(outbox));
+        post(&self.shared.run_loop, Worker::pump);
     }
 
     /// The map couldn't bind the session.
@@ -590,7 +593,7 @@ impl Worker {
                     RingPick::None => None,
                     RingPick::Slot(slot) => Some(slot),
                 };
-                self.render(token, update, slot, outbox);
+                self.render(token, &update, slot, outbox);
             }
             _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
             _ => self.publish(&FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
@@ -613,7 +616,7 @@ impl Worker {
             RingPick::Slot(slot) => Some(slot),
         };
         self.still_attempted = update.generation;
-        self.render(None, update, slot, outbox);
+        self.render(None, &update, slot, outbox);
     }
 
     fn generation(&self) -> u64 {
@@ -625,7 +628,7 @@ impl Worker {
     /// ring, and publishes its result. A still map draws no frame until
     /// everything that it shows has loaded, and a surface without a texture
     /// to render into takes no frame.
-    fn render(&mut self, token: Option<u64>, update: Update, slot: Option<usize>, outbox: &mut Outbox) {
+    fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>, outbox: &mut Outbox) {
         let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
             if let Some(slot) = slot {
@@ -832,7 +835,7 @@ impl Worker {
         &mut self,
         size: Size,
         scale_factor: f64,
-        ring: BorrowedRing,
+        ring: &BorrowedRing,
         outbox: &mut Outbox,
     ) -> Result<Pending, Error> {
         self.set_scale_factor(scale_factor)?;
@@ -840,7 +843,7 @@ impl Worker {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         // The ring it has already: nothing changes, and the frames it holds
         // stay.
-        if self.ring.as_ref() == Some(&ring) && gfx.target.frames().is_some() && same_size {
+        if self.ring.as_ref() == Some(ring) && gfx.target.frames().is_some() && same_size {
             // The demands that wait keep waiting for an update past the
             // replacement's resize.
             let latest = self.latest_generation();
