@@ -8,7 +8,6 @@
 #
 # Implementing a function makes cases pass, and the command with `--update`
 # then shrinks this list, keeping the reasons of the cases that stay.
-abi/backend/retarget.c:a_released_surface_can_be_destroyed_before_the_next  # a window's EGL display outlives its Wayland connection, whose address a later one reuses
 abi/base/logging.c:a_failed_discarded_command_logs_one_warning
 abi/base/logging.c:a_log_callback_cannot_call_back_into_the_c_api
 abi/map/still_image.c:a_barrier_ends_a_still_image_demand_until_the_next
@@ -32,7 +31,6 @@ abi/render/invalidation.c:feature_state_stays_with_the_update_held_by_a_command_
 abi/render/queries.c:location_indicator_hits_name_only_their_layer
 abi/render/redraw.c:a_change_asks_for_one_redraw_until_the_next_demand
 abi/render/unused_images.c:only_images_set_with_keep_unused_survive_when_unused
-abi/render/window_wayland.c:a_session_presents_to_each_surface_that_it_gets  # a window's EGL display outlives its Wayland connection, whose address a later one reuses
 abi/resources/asset_paths.c:host_string_views_reject_nul_and_null_data_with_a_length
 abi/resources/offline.c:an_offline_operation_accepted_before_release_still_completes
 abi/runtime/event_payloads.c:a_failed_style_load_names_its_kind
