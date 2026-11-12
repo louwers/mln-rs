@@ -83,15 +83,14 @@ fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
 
     static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
     let cached = PARSED.lock_unpoisoned().get_or_insert_default().get(source).cloned();
-    let module = match cached {
-        Some(module) => module,
-        None => {
-            let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
-                return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
-            };
-            PARSED.lock_unpoisoned().get_or_insert_default().insert(source.to_owned(), module.clone());
-            module
-        }
+    let module = if let Some(module) = cached {
+        module
+    } else {
+        let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
+            return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
+        };
+        PARSED.lock_unpoisoned().get_or_insert_default().insert(source.to_owned(), module.clone());
+        module
     };
     wgpu::ShaderSource::Naga(Cow::Owned(module))
 }
