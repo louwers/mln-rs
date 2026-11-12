@@ -38,6 +38,8 @@ pub struct TransformParameters {
     pub proj_matrix: Mat4,
     pub aligned_proj_matrix: Mat4,
     pub near_clipped_proj_matrix: Mat4,
+    /// The near plane of `near_clipped_proj_matrix`, in pixels.
+    pub near_clipped_near_z: f64,
     pub state: TransformState,
 }
 
@@ -65,7 +67,13 @@ impl TransformParameters {
         let near_z = (0.1 * f64::from(state.get_camera_to_center_distance())) as u16;
         state.get_proj_matrix(&mut near_clipped_proj_matrix, near_z, false);
 
-        TransformParameters { proj_matrix, aligned_proj_matrix, near_clipped_proj_matrix, state }
+        TransformParameters {
+            proj_matrix,
+            aligned_proj_matrix,
+            near_clipped_proj_matrix,
+            near_clipped_near_z: f64::from(near_z),
+            state,
+        }
     }
 }
 

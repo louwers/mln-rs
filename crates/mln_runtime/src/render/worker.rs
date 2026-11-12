@@ -652,6 +652,7 @@ impl Worker {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
             gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
         };
+        let projection = gfx.renderer.frame_projection();
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
         self.sources = Some(update.parameters.sources.clone());
@@ -683,6 +684,7 @@ impl Worker {
                     needs_repaint: report.needs_repaint,
                     view: Some(MapView::from_state(&update.parameters.transform_state, self.scale_factor)),
                     mode: report.mode,
+                    projection,
                 }
             }
             None => FrameResult::unrendered(token, FrameDisposition::NoUpdate, update.generation),

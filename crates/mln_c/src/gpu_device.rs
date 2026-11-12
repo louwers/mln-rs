@@ -383,7 +383,24 @@ fn capabilities(device: &Device) -> mln_gpu_device_capabilities {
         target_kinds,
         export_kinds: crate::render_target::export_flags(exports),
         sync_kinds: sync_flags(sync),
+        depth_stencil_formats: depth_stencil_flags(device.depth_stencil_formats()),
+        depth_export_kinds: crate::render_target::export_flags(device.depth_export_kinds()),
     }
+}
+
+/// The `mln_depth_stencil_format_flags` of `formats`.
+fn depth_stencil_flags(formats: ::mln_runtime::DepthStencilFormats) -> types::mln_depth_stencil_format_flags {
+    formats.iter().fold(0, |flags, format| {
+        flags
+            | match format {
+                ::mln_runtime::DepthStencilFormat::Depth24Stencil8 => {
+                    types::MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH24_STENCIL8
+                }
+                ::mln_runtime::DepthStencilFormat::Depth32FloatStencil8 => {
+                    types::MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH32_FLOAT_STENCIL8
+                }
+            }
+    })
 }
 
 /// `mln_gpu_device_get_capabilities()`.

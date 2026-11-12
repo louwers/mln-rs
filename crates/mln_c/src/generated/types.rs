@@ -1772,6 +1772,88 @@ pub struct mln_map_view {
     /// The style's projection at the camera's zoom.
     pub projection: mln_projection_definition,
 }
+/// A vector in four dimensions, such as a point in homogeneous coordinates.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_vec4 {
+    pub x: f64,
+    pub y: f64,
+    pub z: f64,
+    pub w: f64,
+}
+/** A 4×4 matrix, by its columns: it takes a vector to `x` times the vector's x,
+ plus `y` times its y, `z` times its z, and `w` times its w. In memory it is
+ 16 doubles in column-major order, as OpenGL, Metal, Vulkan, and WebGPU
+ shaders take a matrix.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_mat4 {
+    pub x: mln_vec4,
+    pub y: mln_vec4,
+    pub z: mln_vec4,
+    pub w: mln_vec4,
+}
+/** Clip z runs from 0 to w, as in Metal, Vulkan, WebGPU, Direct3D, and
+ OpenGL with `glClipControl(GL_LOWER_LEFT, GL_ZERO_TO_ONE)`.*/
+pub const MLN_CLIP_DEPTH_RANGE_ZERO_TO_ONE: mln_clip_depth_range = 1;
+/// Clip z runs from -w to w, as in OpenGL by default.
+pub const MLN_CLIP_DEPTH_RANGE_NEGATIVE_ONE_TO_ONE: mln_clip_depth_range = 2;
+/// How a graphics API's clip space holds depth.
+pub type mln_clip_depth_range = u32;
+/** Where a frame drew the map, and the depth that it wrote there.
+
+ World coordinates are Web Mercator's. x runs from 0 at 180° west to 1 at
+ 180° east, and on past both into the copies of the world beside the first.
+ y runs from 0 at the north edge of the Mercator world, about 85.05° north, to
+ 1 at its south edge. z is the altitude in meters above sea level, at the
+ scale of the heights of the map's 3D layers, and the map draws its ground at
+ 0.
+
+ `matrix` takes a world point to the clip coordinates where the frame drew
+ it, with the camera's padding, roll, field of view, and center altitude, and
+ the map's viewport and projection mode. Clip y points up, as the map draws
+ with OpenGL, Metal, and WebGPU. The map negates clip y with Vulkan, so negate
+ it there too. At high zooms, single precision can't tell nearby world points
+ apart: subtract an origin near your geometry from its coordinates in double
+ precision, and fold the origin into the matrix, before you convert to float.
+
+ Clip z follows `clip_depth_range`, the convention of the device's graphics
+ API. With the API's default depth range of 0 to 1, a fragment that you draw
+ through `matrix` gets the depth that the map's 3D layers, such as fill
+ extrusions, wrote at the same place: 0 at `near_distance` from the camera,
+ up to `far_depth` at `far_distance`. Depth-tested against the frame's depth,
+ your fragments hide behind the map's 3D layers where those stand in front of
+ them.
+
+ The frame's depth starts at 1. The map's 3D layers write the depth of each of
+ their fragments. A 2D layer below every 3D layer of the style that draws
+ opaque fragments, such as an opaque fill, writes one depth over all of them,
+ wherever they are: the higher the layer, the lower its depth, and every one
+ between `far_depth` and 1. Backgrounds, translucent fragments, and the 2D
+ layers above a 3D layer, such as labels, write no depth. So what you draw
+ through `matrix`, even on the ground, lies in front of every 2D layer.
+
+ While `globe` is true, the frame drew the map onto a globe, and its 2D layers
+ wrote no depth. `matrix` then is the map's Mercator one, which doesn't place
+ points on the globe.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_frame_projection {
+    pub matrix: mln_mat4,
+    pub clip_depth_range: mln_clip_depth_range,
+    /** The distance from the camera to the plane where the depth that you get
+ through `matrix` is 0, along the camera's view. Like `far_distance`, it is
+ in pixels of the map at the camera's zoom, where the world is
+ 512 × 2^zoom pixels wide.*/
+    pub near_distance: f64,
+    /// The distance to the plane where the depth is `far_depth`.
+    pub far_distance: f64,
+    /// The depth at `far_distance`, below 1.
+    pub far_depth: f64,
+    /** Whether the frame drew the map as a globe, alone or blending into
+ Mercator.*/
+    pub globe: bool,
+}
 /** How the map picks the tiles to load.
 
  The `lod_` members lower the level of detail away from the camera, so the
@@ -2322,6 +2404,18 @@ pub const MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD: mln_gpu_export_kind_flag = 16;
 pub type mln_gpu_export_kind_flag = u32;
 /// A set of mln_gpu_export_kind_flag bits.
 pub type mln_gpu_export_kind_flags = u32;
+/** 24-bit normalized depth and 8-bit stencil: VK_FORMAT_D24_UNORM_S8_UINT,
+ MTLPixelFormatDepth24Unorm_Stencil8, GL_DEPTH24_STENCIL8, or
+ WGPUTextureFormat_Depth24PlusStencil8.*/
+pub const MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH24_STENCIL8: mln_depth_stencil_format_flag = 1;
+/** 32-bit float depth and 8-bit stencil: VK_FORMAT_D32_SFLOAT_S8_UINT,
+ MTLPixelFormatDepth32Float_Stencil8, GL_DEPTH32F_STENCIL8, or
+ WGPUTextureFormat_Depth32FloatStencil8.*/
+pub const MLN_DEPTH_STENCIL_FORMAT_FLAG_DEPTH32_FLOAT_STENCIL8: mln_depth_stencil_format_flag = 2;
+/// A format of depth and stencil textures, as a bit in a set.
+pub type mln_depth_stencil_format_flag = u32;
+/// A set of mln_depth_stencil_format_flag bits.
+pub type mln_depth_stencil_format_flags = u32;
 /// Options for attaching a render session to a map.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -2357,6 +2451,17 @@ pub struct mln_render_session_attach_options {
  has work for mln_render_session_service_driver_work(). It isn't called
  again until a service runs.*/
     pub driver_work_wake: mln_wake,
+    /** Whether an exported ring keeps the depth and stencil of each frame for
+ you, so that you can draw into the frame depth-tested against the map, as
+ mln_frame_projection says. The getter of the device's API, such as
+ mln_acquired_frame_get_vulkan_texture(), gets a frame's depth texture on
+ the device, and mln_acquired_frame_get_opaque_fd() shares it across APIs
+ when mln_gpu_device_capabilities.depth_export_kinds has the ring's kind.
+ Keeping depth costs memory bandwidth, most on tile-based GPUs. A borrowed
+ ring keeps depth in the textures that you give it instead, and the other
+ targets keep none, so an attach to them with `keep_depth` fails with
+ MLN_STATUS_UNSUPPORTED.*/
+    pub keep_depth: bool,
 }
 /// What an attached render session supports.
 #[repr(C)]
@@ -2708,7 +2813,16 @@ pub struct mln_metal_borrowed_texture {
  which is usually `logical_size` times the map's scale factor. The textures
  must all have that size, the device's `MTLDevice`, one pixel format, one
  sample, and `MTLTextureUsageRenderTarget`. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+ MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, and stores them. They must have the size of
+ `textures`, one pixel format of
+ mln_gpu_device_capabilities.depth_stencil_formats, one sample,
+ `MTLTextureUsageRenderTarget`, and a storage mode other than
+ `MTLStorageModeMemoryless`.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_metal_borrowed_textures_target {
@@ -2717,6 +2831,8 @@ pub struct mln_metal_borrowed_textures_target {
     pub physical_height: u32,
     pub textures: *const mln_metal_borrowed_texture,
     pub texture_count: usize,
+    pub depth_textures: *const mln_metal_borrowed_texture,
+    pub depth_texture_count: usize,
 }
 /// A Vulkan image of a borrowed ring.
 #[repr(C)]
@@ -2746,7 +2862,16 @@ pub type mln_vulkan_image_owner = u32;
  which is usually `logical_size` times the map's scale factor. Each image must
  have that size, `format`, and `VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT`, and
  belong to the device's `VkDevice`. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct images.*/
+ MLN_TEXTURE_RING_MAX_DEPTH distinct images.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, stores them, and leaves it in
+ `depth_final_layout`, with `owner` as for the color image. They must have the
+ size of `textures`, `depth_format`, one sample, and
+ `VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT`, and their views both the
+ depth and the stencil aspect.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_vulkan_borrowed_textures_target {
@@ -2760,6 +2885,13 @@ pub struct mln_vulkan_borrowed_textures_target {
     /// The `VkImageLayout` that each frame leaves its image in.
     pub final_layout: u32,
     pub owner: mln_vulkan_image_owner,
+    pub depth_textures: *const mln_vulkan_borrowed_texture,
+    pub depth_texture_count: usize,
+    /** The depth images' `VkFormat`, of
+ mln_gpu_device_capabilities.depth_stencil_formats.*/
+    pub depth_format: u32,
+    /// The `VkImageLayout` that each frame leaves its depth image in.
+    pub depth_final_layout: u32,
 }
 /// An OpenGL texture of a borrowed ring.
 #[repr(C)]
@@ -2774,7 +2906,14 @@ pub struct mln_open_gl_borrowed_texture {
  `physical_width` and `physical_height` give the textures' size in pixels,
  which is usually `logical_size` times the map's scale factor. Each texture
  must be in your context's share group, with RGBA8 storage of that size. The
- ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+ ring holds up to MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, and renders the
+ map's depth and stencil into it. They must be `GL_TEXTURE_2D` textures in the
+ share group, with storage of the size of `textures` in a format of
+ mln_gpu_device_capabilities.depth_stencil_formats.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_open_gl_borrowed_textures_target {
@@ -2785,6 +2924,8 @@ pub struct mln_open_gl_borrowed_textures_target {
     pub texture_count: usize,
     /// The textures' target. It must be `GL_TEXTURE_2D`.
     pub target: u32,
+    pub depth_textures: *const mln_open_gl_borrowed_texture,
+    pub depth_texture_count: usize,
 }
 /// A WebGPU texture of a borrowed ring.
 #[repr(C)]
@@ -2802,7 +2943,15 @@ pub struct mln_web_gpu_borrowed_texture {
  which is usually `logical_size` times the map's scale factor. Each texture
  must be 2D with that size, `format`, one layer, one mip level, one sample,
  and `WGPUTextureUsage_RenderAttachment`. The ring holds up to
- MLN_TEXTURE_RING_MAX_DEPTH distinct textures.*/
+ MLN_TEXTURE_RING_MAX_DEPTH distinct textures.
+
+ Give the ring `depth_textures` to draw into each frame depth-tested against
+ the map, as mln_frame_projection says: one for each of `textures`, at the
+ same index, or none. Each frame clears the one at its slot, renders the
+ map's depth and stencil into it, and stores them. They must be 2D with the
+ size of `textures`, `depth_format`, one layer, one mip level, one sample, and
+ `WGPUTextureUsage_RenderAttachment`, and their views both the depth and the
+ stencil aspect.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_borrowed_textures_target {
@@ -2813,6 +2962,11 @@ pub struct mln_web_gpu_borrowed_textures_target {
     pub texture_count: usize,
     /// The textures' `WGPUTextureFormat`.
     pub format: u32,
+    pub depth_textures: *const mln_web_gpu_borrowed_texture,
+    pub depth_texture_count: usize,
+    /** The depth textures' `WGPUTextureFormat`, of
+ mln_gpu_device_capabilities.depth_stencil_formats.*/
+    pub depth_format: u32,
 }
 /// A DRM format and modifier that you can import.
 #[repr(C)]
@@ -2999,6 +3153,13 @@ pub struct mln_gpu_device_capabilities {
     pub export_kinds: mln_gpu_export_kind_flags,
     /// The kinds of mln_gpu_sync that the device can signal and wait on.
     pub sync_kinds: mln_gpu_sync_kind_flags,
+    /// The formats of the depth textures that a borrowed ring takes.
+    pub depth_stencil_formats: mln_depth_stencil_format_flags,
+    /** The kinds of `export_kinds` whose rings also share each frame's depth
+ texture, with mln_render_session_attach_options.keep_depth. An IOSurface
+ or a dmabuf holds no depth format, so only MLN_GPU_EXPORT_KIND_OPAQUE_FD
+ can be here.*/
+    pub depth_export_kinds: mln_gpu_export_kind_flags,
 }
 /** Your Vulkan device and queue, for mln_gpu_device_wrap_vulkan().
 
@@ -3116,129 +3277,6 @@ pub struct mln_log_handler {
  platform's log even when the handler's queue can't accept it.*/
     pub platform_severities: mln_log_severity_flags,
 }
-pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
-/// The map had nothing new to draw.
-pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;
-/** The target couldn't take a frame, such as while a window is hidden or
- destroyed, or after mln_render_session_release_target(). Demand a frame
- again later.*/
-pub const MLN_RENDER_RESULT_TARGET_NOT_READY: mln_render_result = 2;
-/// A later demand with the same flags replaced this one.
-pub const MLN_RENDER_RESULT_SUPERSEDED: mln_render_result = 3;
-/** The session failed, and mln_render_session_get_failure() reports why. Once
- mln_render_session_release() completes, you can attach a new session.*/
-pub const MLN_RENDER_RESULT_FAILED: mln_render_result = 4;
-/// How a frame demand finished.
-pub type mln_render_result = u32;
-pub const MLN_RENDER_SESSION_STATE_ATTACHING: mln_render_session_state = 1;
-pub const MLN_RENDER_SESSION_STATE_ATTACHED: mln_render_session_state = 2;
-pub const MLN_RENDER_SESSION_STATE_DETACHING: mln_render_session_state = 3;
-pub const MLN_RENDER_SESSION_STATE_DETACHED: mln_render_session_state = 4;
-pub const MLN_RENDER_SESSION_STATE_FAILED: mln_render_session_state = 5;
-pub const MLN_RENDER_SESSION_STATE_ABANDONED: mln_render_session_state = 6;
-/// Where a render session is in its life.
-pub type mln_render_session_state = u32;
-/** Draws a frame even when nothing changed since the last one. It can't be
- combined with MLN_FRAME_DEMAND_WAIT_FOR_UPDATE.*/
-pub const MLN_FRAME_DEMAND_FORCE: mln_frame_demand_flag = 1;
-/** When the map has nothing new to draw, waits for its next update instead of
- finishing with MLN_RENDER_RESULT_NO_UPDATE.*/
-pub const MLN_FRAME_DEMAND_WAIT_FOR_UPDATE: mln_frame_demand_flag = 4;
-/** How a frame demand behaves.
-
- Without flags, a demand draws a frame when the map changed since the last
- one, and otherwise finishes with MLN_RENDER_RESULT_NO_UPDATE. A session with
- a surface target shows each frame that it draws.*/
-pub type mln_frame_demand_flag = u32;
-/// A set of mln_frame_demand_flag bits.
-pub type mln_frame_demand_flags = u32;
-/// A demand for one frame.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_frame_demand {
-    pub size: u32,
-    pub flags: mln_frame_demand_flags,
-    /// A value of your choice that the demand's frame result carries.
-    pub token: u64,
-}
-/// How one frame demand finished.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_render_frame_result {
-    pub size: u32,
-    pub disposition: mln_render_result,
-    pub token: u64,
-    /** The map update that a rendered frame shows. The frame includes a command's
- change when this is at least the command's
- mln_completion_result.render_update_generation.*/
-    pub map_update_generation: u64,
-    pub generation: u64,
-    pub frame_generation: u64,
-    pub needs_repaint: bool,
-    /// The camera and extent that a rendered frame shows.
-    pub view: mln_map_view,
-    pub mode: mln_render_mode,
-}
-/// The frame results that mln_render_session_drain_frame_results() took.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_render_frame_batch_view {
-    pub size: u32,
-    pub result_size: u32,
-    pub results: *const mln_render_frame_result,
-    pub result_count: usize,
-}
-/// The state of a render session at one moment.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_render_session_snapshot {
-    pub size: u32,
-    pub state: mln_render_session_state,
-    /// The target's logical size, and the map's scale factor.
-    pub extent: mln_logical_extent,
-    pub generation: u64,
-    pub frame_generation: u64,
-    pub acquired_frame_count: u32,
-    /** MLN_STATUS_OK until the session fails. Then MLN_STATUS_TARGET_LOST when
- it failed because it lost its target, or MLN_STATUS_NATIVE_ERROR when it
- failed for another reason.*/
-    pub failure_status: mln_status,
-    /** Whether the session is attached and has a target to render to. It's false
- from when mln_render_session_release_target() completes until you give the
- session a new target.*/
-    pub has_target: bool,
-}
-pub const MLN_RENDER_ABANDON_DISPOSITION_CLEAN: mln_render_abandon_disposition = 0;
-/** It kept some objects that it couldn't destroy safely. They stay allocated
- until the process exits.*/
-pub const MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED: mln_render_abandon_disposition = 1;
-/// What mln_render_session_abandon() did with a session's graphics objects.
-pub type mln_render_abandon_disposition = u32;
-/// The outcome of mln_render_session_abandon().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_render_abandon_result {
-    pub size: u32,
-    pub disposition: mln_render_abandon_disposition,
-    pub quarantined_resource_count: u32,
-    pub reserved: u32,
-}
-pub const MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 1;
-/// The optional settings of a frame pacer.
-pub type mln_frame_pacer_option_field = u32;
-/// A set of mln_frame_pacer_option_field bits.
-pub type mln_frame_pacer_option_fields = u32;
-/// Options for creating a frame pacer.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_frame_pacer_options {
-    pub size: u32,
-    pub fields: mln_frame_pacer_option_fields,
-    /** The most frames per second that the pacer demands, greater than zero. The
- pacer skips display refreshes to stay within it. By default, it can demand
- frames at every refresh.*/
-    pub maximum_frames_per_second: u32,
-}
 /// A projection's camera, as mln_map_projection_get_camera() reports it.
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -3341,6 +3379,136 @@ pub struct mln_source_feature {
     /// The feature's source layer, or empty when its source has none.
     pub source_layer_id: mln_buffer_view,
 }
+pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
+/// The map had nothing new to draw.
+pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;
+/** The target couldn't take a frame, such as while a window is hidden or
+ destroyed, or after mln_render_session_release_target(). Demand a frame
+ again later.*/
+pub const MLN_RENDER_RESULT_TARGET_NOT_READY: mln_render_result = 2;
+/// A later demand with the same flags replaced this one.
+pub const MLN_RENDER_RESULT_SUPERSEDED: mln_render_result = 3;
+/** The session failed, and mln_render_session_get_failure() reports why. Once
+ mln_render_session_release() completes, you can attach a new session.*/
+pub const MLN_RENDER_RESULT_FAILED: mln_render_result = 4;
+/// How a frame demand finished.
+pub type mln_render_result = u32;
+pub const MLN_RENDER_SESSION_STATE_ATTACHING: mln_render_session_state = 1;
+pub const MLN_RENDER_SESSION_STATE_ATTACHED: mln_render_session_state = 2;
+pub const MLN_RENDER_SESSION_STATE_DETACHING: mln_render_session_state = 3;
+pub const MLN_RENDER_SESSION_STATE_DETACHED: mln_render_session_state = 4;
+pub const MLN_RENDER_SESSION_STATE_FAILED: mln_render_session_state = 5;
+pub const MLN_RENDER_SESSION_STATE_ABANDONED: mln_render_session_state = 6;
+/// Where a render session is in its life.
+pub type mln_render_session_state = u32;
+/** Draws a frame even when nothing changed since the last one. It can't be
+ combined with MLN_FRAME_DEMAND_WAIT_FOR_UPDATE.*/
+pub const MLN_FRAME_DEMAND_FORCE: mln_frame_demand_flag = 1;
+/** When the map has nothing new to draw, waits for its next update instead of
+ finishing with MLN_RENDER_RESULT_NO_UPDATE.*/
+pub const MLN_FRAME_DEMAND_WAIT_FOR_UPDATE: mln_frame_demand_flag = 4;
+/** How a frame demand behaves.
+
+ Without flags, a demand draws a frame when the map changed since the last
+ one, and otherwise finishes with MLN_RENDER_RESULT_NO_UPDATE. A session with
+ a surface target shows each frame that it draws.*/
+pub type mln_frame_demand_flag = u32;
+/// A set of mln_frame_demand_flag bits.
+pub type mln_frame_demand_flags = u32;
+/// A demand for one frame.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_frame_demand {
+    pub size: u32,
+    pub flags: mln_frame_demand_flags,
+    /// A value of your choice that the demand's frame result carries.
+    pub token: u64,
+}
+/// How one frame demand finished.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_render_frame_result {
+    pub size: u32,
+    pub disposition: mln_render_result,
+    pub token: u64,
+    /** The map update that a rendered frame shows. The frame includes a command's
+ change when this is at least the command's
+ mln_completion_result.render_update_generation.*/
+    pub map_update_generation: u64,
+    pub generation: u64,
+    pub frame_generation: u64,
+    pub needs_repaint: bool,
+    /// The camera and extent that a rendered frame shows.
+    pub view: mln_map_view,
+    pub mode: mln_render_mode,
+    /** Where a rendered frame drew the map, for drawing into its frame with
+ depth. All zero for a demand that rendered nothing.*/
+    pub frame_projection: mln_frame_projection,
+}
+/// The frame results that mln_render_session_drain_frame_results() took.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_render_frame_batch_view {
+    pub size: u32,
+    pub result_size: u32,
+    pub results: *const mln_render_frame_result,
+    pub result_count: usize,
+}
+/// The state of a render session at one moment.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_render_session_snapshot {
+    pub size: u32,
+    pub state: mln_render_session_state,
+    /// The target's logical size, and the map's scale factor.
+    pub extent: mln_logical_extent,
+    pub generation: u64,
+    pub frame_generation: u64,
+    pub acquired_frame_count: u32,
+    /** MLN_STATUS_OK until the session fails. Then MLN_STATUS_TARGET_LOST when
+ it failed because it lost its target, or MLN_STATUS_NATIVE_ERROR when it
+ failed for another reason.*/
+    pub failure_status: mln_status,
+    /** Whether the session is attached and has a target to render to. It's false
+ from when mln_render_session_release_target() completes until you give the
+ session a new target.*/
+    pub has_target: bool,
+}
+pub const MLN_RENDER_ABANDON_DISPOSITION_CLEAN: mln_render_abandon_disposition = 0;
+/** It kept some objects that it couldn't destroy safely. They stay allocated
+ until the process exits.*/
+pub const MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED: mln_render_abandon_disposition = 1;
+/// What mln_render_session_abandon() did with a session's graphics objects.
+pub type mln_render_abandon_disposition = u32;
+/// The outcome of mln_render_session_abandon().
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_render_abandon_result {
+    pub size: u32,
+    pub disposition: mln_render_abandon_disposition,
+    pub quarantined_resource_count: u32,
+    pub reserved: u32,
+}
+pub const MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 1;
+/** Removes the frame rate limit, so the pacer can demand frames at every
+ display refresh, as it does by default. It can't be combined with
+ MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND.*/
+pub const MLN_FRAME_PACER_OPTION_UNLIMITED_FRAMES_PER_SECOND: mln_frame_pacer_option_field = 2;
+/// The optional settings of a frame pacer.
+pub type mln_frame_pacer_option_field = u32;
+/// A set of mln_frame_pacer_option_field bits.
+pub type mln_frame_pacer_option_fields = u32;
+/// Options for creating a frame pacer, or for mln_frame_pacer_set_options().
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_frame_pacer_options {
+    pub size: u32,
+    pub fields: mln_frame_pacer_option_fields,
+    /** The most frames per second that the pacer demands, greater than zero. The
+ pacer skips display refreshes to stay within it. By default, it can demand
+ frames at every refresh.*/
+    pub maximum_frames_per_second: u32,
+}
 /// Any type.
 pub const MLN_STYLE_EXPRESSION_TYPE_VALUE: mln_style_expression_type_kind = 0;
 /// Any type.
@@ -3429,7 +3597,11 @@ pub struct mln_style_expression_info {
     /// True when the result doesn't depend on the zoom level.
     pub is_zoom_constant: bool,
 }
-/// The Metal texture of an acquired frame.
+/** The Metal texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture: one of a
+ borrowed ring's `depth_textures`, or an exported ring's with
+ mln_render_session_attach_options.keep_depth. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_metal_texture_frame {
@@ -3445,8 +3617,15 @@ pub struct mln_metal_texture_frame {
     pub device: *mut ::core::ffi::c_void,
     /// The texture's MTLPixelFormat.
     pub pixel_format: u64,
+    /// The MTLTexture that holds the frame's depth and stencil.
+    pub depth_texture: *mut ::core::ffi::c_void,
+    /// The depth texture's MTLPixelFormat.
+    pub depth_pixel_format: u64,
 }
-/// The Vulkan image of an acquired frame.
+/** The Vulkan image of an acquired frame.
+
+ The depth members are set when the frame has a depth image, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_vulkan_texture_frame {
@@ -3466,8 +3645,19 @@ pub struct mln_vulkan_texture_frame {
     pub format: u32,
     /// The VkImageLayout that the frame left the image in.
     pub layout: u32,
+    /// The VkImage that holds the frame's depth and stencil.
+    pub depth_image: mln_vulkan_non_dispatchable_handle,
+    /// A VkImageView of the depth image's depth and stencil aspects.
+    pub depth_image_view: mln_vulkan_non_dispatchable_handle,
+    /// The depth image's VkFormat.
+    pub depth_format: u32,
+    /// The VkImageLayout that the frame left the depth image in.
+    pub depth_layout: u32,
 }
-/// The WebGPU texture of an acquired frame.
+/** The WebGPU texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_web_gpu_texture_frame {
@@ -3485,8 +3675,17 @@ pub struct mln_web_gpu_texture_frame {
     pub device: *mut ::core::ffi::c_void,
     /// The texture's WGPUTextureFormat.
     pub format: u32,
+    /// The WGPUTexture that holds the frame's depth and stencil.
+    pub depth_texture: *mut ::core::ffi::c_void,
+    /// A WGPUTextureView of the depth texture.
+    pub depth_texture_view: *mut ::core::ffi::c_void,
+    /// The depth texture's WGPUTextureFormat.
+    pub depth_format: u32,
 }
-/// The OpenGL texture of an acquired frame.
+/** The OpenGL texture of an acquired frame.
+
+ The depth members are set when the frame has a depth texture, as for
+ mln_metal_texture_frame. Otherwise they are zero.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_open_gl_texture_frame {
@@ -3498,6 +3697,11 @@ pub struct mln_open_gl_texture_frame {
     pub slot: u32,
     pub texture: u32,
     pub target: u32,
+    /// The `GL_TEXTURE_2D` texture that holds the frame's depth and stencil.
+    pub depth_texture: u32,
+    /** The depth texture's internal format, such as GL_DEPTH24_STENCIL8, or zero
+ for a borrowed ring's.*/
+    pub depth_internal_format: u32,
 }
 /// The IOSurface of an exported ring's acquired frame.
 #[repr(C)]
@@ -3580,7 +3784,19 @@ pub struct mln_dxgi_shared_texture_frame {
  glImportMemoryFdEXT() and GL_HANDLE_TYPE_OPAQUE_FD_EXT, and make the texture
  with GL_TEXTURE_TILING_EXT set to GL_OPTIMAL_TILING_EXT and
  glTexStorageMem2DEXT() at offset 0. Each frame leaves the image in
- VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL.*/
+ VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL.
+
+ With mln_render_session_attach_options.keep_depth, on a device whose
+ mln_gpu_device_capabilities.depth_export_kinds has
+ MLN_GPU_EXPORT_KIND_OPAQUE_FD, the depth members share the memory of the
+ frame's depth image in the same way. Otherwise `depth_fd` is -1 and the
+ others are zero. The depth image is 2D, of `depth_format`, with one mip
+ level, one layer, optimal tiling, and the usage
+ VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_USAGE_SAMPLED_BIT, and
+ VK_IMAGE_USAGE_TRANSFER_SRC_BIT. Each frame leaves it in
+ VK_IMAGE_LAYOUT_GENERAL, released to VK_QUEUE_FAMILY_EXTERNAL. In OpenGL,
+ make its texture with the internal format that mln_depth_stencil_format_flag
+ names for `depth_format`.*/
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct mln_opaque_fd_frame {
@@ -3599,6 +3815,14 @@ pub struct mln_opaque_fd_frame {
     pub dedicated: bool,
     /// The image's `VkFormat`: VK_FORMAT_R8G8B8A8_UNORM, OpenGL's GL_RGBA8.
     pub format: u32,
+    /// The file descriptor of the depth image's memory.
+    pub depth_fd: i32,
+    /// The size of the depth image's memory in bytes.
+    pub depth_allocation_size: u64,
+    /// Whether the memory is the depth image's own.
+    pub depth_dedicated: bool,
+    /// The depth image's `VkFormat`.
+    pub depth_format: u32,
 }
 /// The layout of the pixels that mln_render_session_read_texture() reads.
 #[repr(C)]

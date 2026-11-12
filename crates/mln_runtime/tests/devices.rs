@@ -286,6 +286,7 @@ mod vulkan {
                 format: vk::Format::R8G8B8A8_UNORM,
                 final_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                 owner: mln_vulkan::ImageOwner::GraphicsQueue,
+                depth: None,
             })
         }
 
@@ -760,7 +761,11 @@ fn a_webgpu_ring_hands_each_frame_back() {
         data[offset..offset + 4].try_into().unwrap()
     };
     let textures = vec![texture(), texture()];
-    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.clone(), size: SIZE });
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: textures.clone(),
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");
     let target = RenderTarget::Borrowed { size: SIZE, ring, device: device.clone() };
@@ -801,7 +806,11 @@ fn a_webgpu_ring_hands_each_frame_back() {
 
     // New textures, as many as the ring has.
     let replacements = vec![texture(), texture()];
-    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: replacements.clone(), size: SIZE });
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: replacements.clone(),
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
     wait(session.set_ring(SIZE, ring));
     assert_eq!(FrameDisposition::Rendered, render(&session));
     let frame = session.acquire_frame().unwrap().expect("a frame");
@@ -837,7 +846,11 @@ fn webgpu_texture(device: &Device) -> wgpu::Texture {
 
 #[cfg(feature = "webgpu")]
 fn webgpu_session(map: &Map, device: &Device, textures: &[wgpu::Texture], options: AttachOptions) -> RenderSession {
-    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.to_vec(), size: SIZE });
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: textures.to_vec(),
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
     let target = RenderTarget::Borrowed { size: SIZE, ring, device: device.clone() };
     let options = AttachOptions { producer_sync_kinds: SyncKinds::of(&[SyncKind::QueueOrder]), ..options };
     let (session, attached) = map.attach(target, options).unwrap();
@@ -953,13 +966,20 @@ fn a_texture_that_the_host_gave_up_stays_quarantined_in_a_new_ring() {
     };
     assert!(eventually(|| quarantined(&session)));
 
-    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.clone(), size: SIZE });
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: textures.clone(),
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
     wait(session.set_ring(Size::new(SIZE.width / 2, SIZE.height / 2), ring));
     assert!(quarantined(&session));
 
     // A new texture renders.
-    let ring =
-        BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: vec![webgpu_texture(&device)], size: SIZE });
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: vec![webgpu_texture(&device)],
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
     wait(session.set_ring(SIZE, ring));
     assert_eq!(FrameDisposition::Rendered, render(&session));
     wait(session.detach());
@@ -984,7 +1004,11 @@ fn a_released_ring_forgets_the_textures_that_the_host_gave_up() {
     }));
 
     wait(session.release_target());
-    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.clone(), size: SIZE });
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures {
+        textures: textures.clone(),
+        size: SIZE,
+        depth_textures: Vec::new(),
+    });
     wait(session.set_ring(SIZE, ring));
     assert_eq!(FrameDisposition::Rendered, render(&session));
     wait(session.detach());
@@ -1160,6 +1184,7 @@ mod gl {
         let ring = BorrowedRing::gl(mln_gl::BorrowedTextures {
             textures: textures.iter().map(|texture| texture.0.get()).collect(),
             size: SIZE,
+            depth_textures: Vec::new(),
         });
         let runtime = runtime();
         let map = map_of(&runtime, "#ff0000");
@@ -1198,6 +1223,7 @@ mod gl {
         let ring = BorrowedRing::gl(mln_gl::BorrowedTextures {
             textures: textures.iter().map(|texture| texture.0.get()).collect(),
             size: SIZE,
+            depth_textures: Vec::new(),
         });
         let device = host.device();
         let runtime = runtime();

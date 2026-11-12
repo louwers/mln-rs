@@ -6,6 +6,7 @@ pub mod bucket_geometry;
 pub mod bucket_parameters;
 pub mod buckets;
 pub mod change_request;
+pub mod frame_projection;
 pub mod geometry;
 pub mod gfx;
 pub mod globe_depth_pass;
@@ -50,6 +51,7 @@ pub mod update_parameters;
 pub mod update_slot;
 pub mod util;
 
+pub use frame_projection::{ClipDepthRange, FrameProjection};
 pub use renderer::Renderer;
 pub use renderer_event::{
     FeatureInfo, FontStack, FrameRenderedFeaturesMap, GlyphRange, LayerFeaturesMap, NDCBound, OverscaledTileID,

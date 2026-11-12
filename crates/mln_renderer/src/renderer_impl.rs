@@ -14,6 +14,7 @@ use mln_map_types::MapDebugOptions;
 use mln_text::GlyphCache;
 use mln_util::Color;
 
+use crate::frame_projection::FrameProjection;
 use crate::paint_parameters::PaintParameters;
 use crate::render_orchestrator::RenderOrchestrator;
 use crate::render_pass::RenderPass;
@@ -37,6 +38,8 @@ pub struct RendererImpl {
     render_state: RenderState,
     frame_count: u64,
     pub style_loaded: bool,
+    /// Where the last frame drew the map.
+    frame_projection: Option<FrameProjection>,
     // TODO(port): dynamicTextureAtlas (symbols, M5).
 }
 
@@ -58,6 +61,7 @@ impl RendererImpl {
             render_state: RenderState::Never,
             frame_count: 0,
             style_loaded: false,
+            frame_projection: None,
         }
     }
 
@@ -402,6 +406,13 @@ impl RendererImpl {
         stats.frame_rendered_features = orchestrator.move_frame_rendered_features();
         let stats = Arc::new(stats);
         drop(parameters);
+        let depth_range_size =
+            1.0 - ((self.orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;
+        self.frame_projection = Some(FrameProjection::new(
+            &render_tree_parameters.transform_params,
+            depth_range_size,
+            context.backend_type(),
+        ));
 
         self.orchestrator.emit(RendererEvent::RenderFrameFinished {
             mode: if render_tree_parameters.loaded { RenderMode::Full } else { RenderMode::Partial },
@@ -424,6 +435,12 @@ impl RendererImpl {
 
         self.frame_count += 1;
         Some(handoff)
+    }
+
+    /// Where the last frame drew the map, or `None` before the first.
+    #[must_use]
+    pub fn frame_projection(&self) -> Option<FrameProjection> {
+        self.frame_projection
     }
 
     pub fn reduce_memory_use(&mut self) {

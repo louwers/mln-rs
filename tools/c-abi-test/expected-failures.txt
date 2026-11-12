@@ -22,6 +22,7 @@ abi/render/driver.c:abandon_from_a_driver_completion_is_busy
 abi/render/driver.c:abandon_from_an_attach_completion_is_busy
 abi/render/driver.c:an_attached_session_holds_its_map
 abi/render/driver.c:maintenance_waits_behind_a_demand_for_map_commands
+abi/render/frame_pacer.c:the_null_handle_takes_no_frame_pacer_options  # mln_frame_pacer_set_options: crates/mln_c paces no frames yet (louwers/mln-rs#208)
 abi/render/invalidation.c:a_frame_shows_feature_state_moved_between_features
 abi/render/invalidation.c:each_mutation_publishes_a_render_update_only_when_it_changes
 abi/render/invalidation.c:each_mutation_reaches_the_pixels_of_an_update_driven_host

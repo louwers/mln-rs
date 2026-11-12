@@ -52,6 +52,21 @@ pub struct BorrowedImages {
     /// The layout that each frame leaves its image in.
     pub final_layout: vk::ImageLayout,
     pub owner: ImageOwner,
+    /// The images that frames draw their depth and stencil into and store,
+    /// or `None` for depth of the target's own, which frames discard.
+    pub depth: Option<BorrowedDepth>,
+}
+
+/// The host's depth and stencil images of a ring, one for the color image
+/// of each slot, of the ring's size, with
+/// `VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT`, and views of both aspects.
+/// They go to the ring's owner as its color images do.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BorrowedDepth {
+    pub images: Vec<BorrowedImage>,
+    pub format: vk::Format,
+    /// The layout that each frame leaves its depth image in.
+    pub final_layout: vk::ImageLayout,
 }
 
 impl BorrowedImages {
@@ -67,17 +82,33 @@ impl BorrowedImages {
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
     /// images that go to the foreign queue family on a device without
-    /// `VK_EXT_queue_family_foreign`.
+    /// `VK_EXT_queue_family_foreign`, or depth images of a format that the
+    /// device draws no depth into, and with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for depth images
+    /// that aren't one for each image.
     pub fn check(&self, device: &Device) -> Result<(), Error> {
         if self.owner == ImageOwner::Foreign && !device.features().foreign_queue_family {
             return Err(Error::unsupported("the Vulkan device has no foreign queue family"));
+        }
+        if let Some(depth) = &self.depth {
+            if depth.images.len() != self.images.len() {
+                return Err(Error::invalid_argument("a ring's depth images must be one for each of its images"));
+            }
+            if !crate::device::depth_stencil_format(depth.format)
+                .is_some_and(|format| device.depth_stencil_formats().contains(format))
+            {
+                return Err(Error::unsupported(format!(
+                    "the Vulkan device draws no depth and stencil into {:?}",
+                    depth.format
+                )));
+            }
         }
         Ok(())
     }
 }
 
 /// The render pass and framebuffers over the ring's images, and their depth
-/// and stencil attachment.
+/// and stencil attachments: the host's, or one of the target's own.
 struct Resource {
     backend: Rc<BackendImpl>,
     extent: vk::Extent2D,
@@ -85,11 +116,15 @@ struct Resource {
     framebuffers: Vec<vk::Framebuffer>,
     /// The image the next frame draws into.
     selected: Cell<usize>,
-    depth: ImageAllocation,
+    /// The target's own depth and stencil image, when the host gave none.
+    _depth: Option<ImageAllocation>,
 }
 
 impl Resource {
     fn new(context: &Context, images: &BorrowedImages) -> Result<Resource, Error> {
+        if let Some(depth) = &images.depth {
+            return Self::with_host_depth(context, images, depth);
+        }
         let backend = context.get_backend().clone();
         let extent = vk::Extent2D { width: images.size.width, height: images.size.height };
         let formats = [vk::Format::D24_UNORM_S8_UINT, vk::Format::D32_SFLOAT_S8_UINT, vk::Format::D16_UNORM_S8_UINT];
@@ -129,14 +164,56 @@ impl Resource {
             depth_format: Some(depth_format),
             color_final_layout: images.final_layout,
             color_load: false,
+            depth_final_layout: None,
         });
         if render_pass == vk::RenderPass::null() {
             return Err(Error::native("Failed to create a render pass for the borrowed images"));
         }
-        let mut resource =
-            Resource { backend, extent, render_pass, framebuffers: Vec::new(), selected: Cell::new(0), depth };
-        for image in &images.images {
-            let attachments = [image.view, resource.depth.image_view()];
+        let views = vec![depth.image_view(); images.images.len()];
+        let mut resource = Resource {
+            backend,
+            extent,
+            render_pass,
+            framebuffers: Vec::new(),
+            selected: Cell::new(0),
+            _depth: Some(depth),
+        };
+        resource.create_framebuffers(images, &views)?;
+        Ok(resource)
+    }
+
+    /// The resource over `images` that draws each frame's depth and stencil
+    /// into the host's `depth` image of its slot, and stores them.
+    fn with_host_depth(context: &Context, images: &BorrowedImages, depth: &BorrowedDepth) -> Result<Resource, Error> {
+        let render_pass = context.get_render_pass(RenderPassKey {
+            color_format: images.format,
+            depth_format: Some(depth.format),
+            color_final_layout: images.final_layout,
+            color_load: false,
+            depth_final_layout: Some(depth.final_layout),
+        });
+        if render_pass == vk::RenderPass::null() {
+            return Err(Error::native("Failed to create a render pass for the borrowed images"));
+        }
+        let mut resource = Resource {
+            backend: context.get_backend().clone(),
+            extent: vk::Extent2D { width: images.size.width, height: images.size.height },
+            render_pass,
+            framebuffers: Vec::new(),
+            selected: Cell::new(0),
+            _depth: None,
+        };
+        let views: Vec<_> = depth.images.iter().map(|image| image.view).collect();
+        resource.create_framebuffers(images, &views)?;
+        Ok(resource)
+    }
+
+    /// Makes the framebuffer of each slot, over its image and the view of
+    /// `depth_views` at the slot.
+    fn create_framebuffers(&mut self, images: &BorrowedImages, depth_views: &[vk::ImageView]) -> Result<(), Error> {
+        let (render_pass, extent) = (self.render_pass, self.extent);
+        for (image, depth_view) in images.images.iter().zip(depth_views) {
+            let attachments = [image.view, *depth_view];
             let create_info = vk::FramebufferCreateInfo::default()
                 .render_pass(render_pass)
                 .attachments(&attachments)
@@ -145,11 +222,11 @@ impl Resource {
                 .layers(1);
             // SAFETY: the host's view and the depth view are live, of the
             // render pass's formats and of the framebuffer's size.
-            let framebuffer = unsafe { resource.backend.get_device().create_framebuffer(&create_info, None) }
+            let framebuffer = unsafe { self.backend.get_device().create_framebuffer(&create_info, None) }
                 .map_err(|e| Error::native(format!("Vulkan framebuffer creation failed: {e}")))?;
-            resource.framebuffers.push(framebuffer);
+            self.framebuffers.push(framebuffer);
         }
-        Ok(resource)
+        Ok(())
     }
 }
 
@@ -539,6 +616,11 @@ impl BorrowedTarget {
             {
                 return Err(Error::unsupported("a ring keeps its format, final layout and owner"));
             }
+            let depth = |images: &BorrowedImages| images.depth.as_ref().map(|depth| (depth.format, depth.final_layout));
+            if depth(&images) != depth(&current) {
+                return Err(Error::unsupported("a ring keeps its depth images' format and final layout"));
+            }
+            images.check(self.backend.backend_impl().device())?;
         }
         // The frames that drew into the old images are done before their
         // framebuffers go.
@@ -579,35 +661,56 @@ impl BorrowedTarget {
             ImageOwner::External => vk::QUEUE_FAMILY_EXTERNAL,
             ImageOwner::Foreign => vk::QUEUE_FAMILY_FOREIGN_EXT,
         };
-        let Some(image) = images.images.get(self.resource.borrow().selected.get()) else {
+        let slot = self.resource.borrow().selected.get();
+        let Some(image) = images.images.get(slot) else {
             return;
         };
-        let barrier = vk::ImageMemoryBarrier::default()
-            .src_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
-            .dst_access_mask(vk::AccessFlags::empty())
-            .old_layout(images.final_layout)
-            .new_layout(images.final_layout)
-            .src_queue_family_index(self.backend.backend_impl().get_graphics_queue_index())
-            .dst_queue_family_index(destination)
-            .image(image.image)
-            .subresource_range(vk::ImageSubresourceRange {
-                aspect_mask: vk::ImageAspectFlags::COLOR,
-                base_mip_level: 0,
-                level_count: 1,
-                base_array_layer: 0,
-                layer_count: 1,
-            });
+        let release = |image: vk::Image, layout, access, aspect_mask| {
+            vk::ImageMemoryBarrier::default()
+                .src_access_mask(access)
+                .dst_access_mask(vk::AccessFlags::empty())
+                .old_layout(layout)
+                .new_layout(layout)
+                .src_queue_family_index(self.backend.backend_impl().get_graphics_queue_index())
+                .dst_queue_family_index(destination)
+                .image(image)
+                .subresource_range(vk::ImageSubresourceRange {
+                    aspect_mask,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                })
+        };
+        let mut barriers = vec![release(
+            image.image,
+            images.final_layout,
+            vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+            vk::ImageAspectFlags::COLOR,
+        )];
+        let mut stages = vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT;
+        if let Some(depth) = &images.depth
+            && let Some(depth_image) = depth.images.get(slot)
+        {
+            barriers.push(release(
+                depth_image.image,
+                depth.final_layout,
+                vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE,
+                vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
+            ));
+            stages |= vk::PipelineStageFlags::LATE_FRAGMENT_TESTS;
+        }
         // SAFETY: the frame's command buffer is recording outside a render
-        // pass, and the image is the frame's, in its final layout.
+        // pass, and the images are the frame's, in their final layouts.
         unsafe {
             self.backend.backend_impl().get_device().cmd_pipeline_barrier(
                 context.get_command_buffer(),
-                vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+                stages,
                 vk::PipelineStageFlags::BOTTOM_OF_PIPE,
                 vk::DependencyFlags::empty(),
                 &[],
                 &[],
-                &[barrier],
+                &barriers,
             );
         }
     }

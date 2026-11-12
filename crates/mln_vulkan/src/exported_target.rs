@@ -29,13 +29,16 @@ use mln_gfx::export::{
     choose_dma_buf_format,
 };
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{ConsumerSync, DmaBufFormat, ExportKind, ExportKinds, ExportedImage, ExportedRing, SyncKind, SyncKinds};
+use mln_gfx::{
+    ConsumerSync, DmaBufFormat, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing, FrameDepth,
+    NativeTexture, SyncKind, SyncKinds,
+};
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
-use crate::borrowed_target::{BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner};
-use crate::device::Device;
+use crate::borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner};
+use crate::device::{Device, depth_vk_format};
 use crate::renderer_backend::RendererBackend;
 
 const DMA_BUF_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::from_raw(
@@ -275,6 +278,187 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
         }
     }
     kinds
+}
+
+/// The kinds of `device`'s export kinds whose rings share their depth
+/// images too, found by exporting a depth image of each: only opaque file
+/// descriptors, since no platform interchange holds depth.
+pub(crate) fn probe_depth(device: &Device) -> ExportKinds {
+    if !device.export_kinds().contains(ExportKind::OpaqueFd) {
+        return ExportKinds::NONE;
+    }
+    let Some(format) = depth_format(device, true) else {
+        return ExportKinds::NONE;
+    };
+    match DepthMemory::new(device, vk::Extent2D { width: 1, height: 1 }, format, true) {
+        Ok(_) => ExportKinds::of(&[ExportKind::OpaqueFd]),
+        Err(error) => {
+            Log::info(Event::Render, format!("The Vulkan device exports no opaque depth memory: {error}"));
+            ExportKinds::NONE
+        }
+    }
+}
+
+/// The usage of an exported ring's depth images.
+const DEPTH_USAGE: vk::ImageUsageFlags = vk::ImageUsageFlags::from_raw(
+    vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT.as_raw()
+        | vk::ImageUsageFlags::SAMPLED.as_raw()
+        | vk::ImageUsageFlags::TRANSFER_SRC.as_raw(),
+);
+
+/// The format of the depth images of `device`'s exported rings: the first
+/// that it draws into and samples, and exports as opaque memory when
+/// `exported`.
+fn depth_format(device: &Device, exported: bool) -> Option<vk::Format> {
+    device.depth_stencil_formats().iter().map(depth_vk_format).find(|&format| {
+        // SAFETY: a plain query of the GPU.
+        let properties = unsafe {
+            device.shared.instance().get_physical_device_format_properties(device.shared.physical_device(), format)
+        };
+        properties.optimal_tiling_features.contains(vk::FormatFeatureFlags::SAMPLED_IMAGE)
+            && (!exported || exports(device, format, DEPTH_USAGE, vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD, None))
+    })
+}
+
+/// A depth and stencil image of the target's own, with memory of its own,
+/// exported as an opaque file descriptor or not, and a view of both its
+/// aspects.
+struct DepthMemory {
+    device: ash::Device,
+    image: vk::Image,
+    view: vk::ImageView,
+    memory: vk::DeviceMemory,
+    format: vk::Format,
+    #[cfg(unix)]
+    _fd: Option<OwnedFd>,
+    export: Option<ExportedImage>,
+}
+
+impl DepthMemory {
+    fn new(device: &Device, extent: vk::Extent2D, format: vk::Format, exported: bool) -> Result<DepthMemory, Error> {
+        fn native(what: &'static str) -> impl Fn(vk::Result) -> Error {
+            move |e| Error::native(format!("{what} failed: {e}"))
+        }
+        let vk_device = device.shared.device().clone();
+        let mut this = DepthMemory {
+            device: vk_device.clone(),
+            image: vk::Image::null(),
+            view: vk::ImageView::null(),
+            memory: vk::DeviceMemory::null(),
+            format,
+            #[cfg(unix)]
+            _fd: None,
+            export: None,
+        };
+        let handle_type = vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD;
+        let mut external = vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_type);
+        let mut info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(format)
+            .extent(vk::Extent3D { width: extent.width, height: extent.height, depth: 1 })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::OPTIMAL)
+            .usage(DEPTH_USAGE)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED);
+        if exported {
+            info = info.push_next(&mut external);
+        }
+        // SAFETY: the create info is valid for the device, which draws into
+        // and samples the format, and exports it when asked (the caller
+        // checked).
+        this.image = unsafe { vk_device.create_image(&info, None) }.map_err(native("Creating a depth image"))?;
+        // SAFETY: the image is the device's.
+        let requirements = unsafe { vk_device.get_image_memory_requirements(this.image) };
+        // SAFETY: a plain query of the GPU.
+        let types =
+            unsafe { device.shared.instance().get_physical_device_memory_properties(device.shared.physical_device()) };
+        let memory_type = memory_type(requirements.memory_type_bits, &types, false)
+            .ok_or_else(|| Error::native("No memory type takes the depth image"))?;
+        let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(this.image);
+        let mut export = vk::ExportMemoryAllocateInfo::default().handle_types(handle_type);
+        let mut allocate = vk::MemoryAllocateInfo::default()
+            .allocation_size(requirements.size)
+            .memory_type_index(memory_type)
+            .push_next(&mut dedicated);
+        if exported {
+            allocate = allocate.push_next(&mut export);
+        }
+        // SAFETY: the allocate info is valid for the device.
+        this.memory =
+            unsafe { vk_device.allocate_memory(&allocate, None) }.map_err(native("Allocating depth memory"))?;
+        // SAFETY: the memory was made for the image, which has none.
+        unsafe { vk_device.bind_image_memory(this.image, this.memory, 0) }.map_err(native("Binding depth memory"))?;
+        if exported {
+            this.export_fd(device, requirements.size)?;
+        }
+        let view_info = vk::ImageViewCreateInfo::default()
+            .image(this.image)
+            .view_type(vk::ImageViewType::TYPE_2D)
+            .format(format)
+            .subresource_range(vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::DEPTH | vk::ImageAspectFlags::STENCIL,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            });
+        // SAFETY: the image is bound to its memory.
+        this.view =
+            unsafe { vk_device.create_image_view(&view_info, None) }.map_err(native("Creating a depth view"))?;
+        Ok(this)
+    }
+
+    /// Exports the image's memory of `allocation_size` bytes as an opaque
+    /// file descriptor, which the image keeps, and names it in `export`.
+    #[cfg(unix)]
+    #[expect(clippy::used_underscore_binding, reason = "the image keeps the descriptor only to close it")]
+    fn export_fd(&mut self, device: &Device, allocation_size: u64) -> Result<(), Error> {
+        let loader =
+            device.shared.memory_fd().ok_or_else(|| Error::unsupported("the Vulkan device exports no memory"))?;
+        let get = vk::MemoryGetFdInfoKHR::default()
+            .memory(self.memory)
+            .handle_type(vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD);
+        // SAFETY: the memory was allocated for export as opaque memory.
+        let fd = unsafe { loader.get_memory_fd(&get) }
+            .map_err(|e| Error::native(format!("Exporting the depth image's memory failed: {e}")))?;
+        // SAFETY: the export made the descriptor, which is the image's.
+        let fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        self.export = Some(ExportedImage::OpaqueFd {
+            fd: fd.as_raw_fd(),
+            allocation_size,
+            dedicated: true,
+            format: self.format.as_raw() as u32,
+        });
+        self._fd = Some(fd);
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    #[expect(clippy::unused_self, reason = "the stand-in for a method of another platform")]
+    fn export_fd(&mut self, _: &Device, _: u64) -> Result<(), Error> {
+        Err(Error::unsupported("this platform shares no memory as file descriptors"))
+    }
+}
+
+impl Drop for DepthMemory {
+    fn drop(&mut self) {
+        // SAFETY: the objects are this image's, and its generation's target
+        // waited for the frames that drew into it.
+        unsafe {
+            if self.view != vk::ImageView::null() {
+                self.device.destroy_image_view(self.view, None);
+            }
+            if self.image != vk::Image::null() {
+                self.device.destroy_image(self.image, None);
+            }
+            if self.memory != vk::DeviceMemory::null() {
+                self.device.free_memory(self.memory, None);
+            }
+        }
+    }
 }
 
 /// Whether the device imports hardware buffers as the images of a ring.
@@ -672,6 +856,8 @@ struct Generation {
     // them.
     target: BorrowedTarget,
     images: Vec<ExportedMemory>,
+    /// Each slot's depth image, when the ring keeps depth.
+    depth_images: Vec<DepthMemory>,
     size: Size,
 }
 
@@ -682,10 +868,17 @@ impl Generation {
         depth: usize,
         size: Size,
         producer: SyncKind,
+        depth_format: Option<(vk::Format, bool)>,
     ) -> Result<Generation, Error> {
         let device = backend.backend_impl().device();
         let extent = vk::Extent2D { width: size.width, height: size.height };
         let images = (0..depth).map(|_| ExportedMemory::new(device, extent, layout)).collect::<Result<Vec<_>, _>>()?;
+        let depth_images = match depth_format {
+            Some((format, exported)) => {
+                (0..depth).map(|_| DepthMemory::new(device, extent, format, exported)).collect::<Result<Vec<_>, _>>()?
+            }
+            None => Vec::new(),
+        };
         // A dmabuf's or hardware buffer's readers are outside the device,
         // for which the foreign queue family stands; another API of the
         // driver is external. A device that imports hardware buffers has the
@@ -702,9 +895,17 @@ impl Generation {
             format: layout.format(),
             final_layout: vk::ImageLayout::GENERAL,
             owner,
+            depth: depth_format.map(|(format, _)| BorrowedDepth {
+                images: depth_images
+                    .iter()
+                    .map(|image| BorrowedImage { image: image.image, view: image.view })
+                    .collect(),
+                format,
+                final_layout: vk::ImageLayout::GENERAL,
+            }),
         };
         let target = BorrowedTarget::new(backend.clone(), borrowed, producer)?;
-        Ok(Generation { target, images, size })
+        Ok(Generation { target, images, depth_images, size })
     }
 }
 
@@ -716,6 +917,9 @@ pub struct ExportedTarget {
     layout: Layout,
     depth: usize,
     producer: SyncKind,
+    /// The format of the depth images, when the ring keeps depth, and
+    /// whether they are exported.
+    depth_format: Option<(vk::Format, bool)>,
     generations: RefCell<Generations<Generation>>,
 }
 
@@ -724,6 +928,11 @@ impl ExportedTarget {
     /// pixels, exported as `kind`, which [`plan`] picked, and hands each
     /// frame over with sync of the kind `producer`, one of
     /// [`sync_kinds`]'s.
+    ///
+    /// With `ring.keep_depth`, each frame also stores its depth and stencil
+    /// into a depth image of the target's own, which an opaque file
+    /// descriptor shares where the device's
+    /// [`depth_export_kinds`](Device::depth_export_kinds) has `kind`.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
     /// device can't export `kind` or `producer`, and with
@@ -756,13 +965,22 @@ impl ExportedTarget {
             ExportKind::DxgiSharedHandle => Layout::Dxgi,
             _ => return Err(Error::unsupported(format!("the Vulkan device exports no {kind:?}"))),
         };
-        let current = Generation::new(&backend, &layout, ring.depth, size, producer)?;
+        let depth_format = if ring.keep_depth {
+            let exported = device.depth_export_kinds().contains(kind);
+            let format = depth_format(&device, exported)
+                .ok_or_else(|| Error::unsupported("the Vulkan device keeps no depth of an exported ring"))?;
+            Some((format, exported))
+        } else {
+            None
+        };
+        let current = Generation::new(&backend, &layout, ring.depth, size, producer, depth_format)?;
         Ok(ExportedTarget {
             backend,
             kind,
             layout,
             depth: ring.depth,
             producer,
+            depth_format,
             generations: RefCell::new(Generations::new(current)),
         })
     }
@@ -809,7 +1027,7 @@ impl ExportedTarget {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.backend, &self.layout, self.depth, size, self.producer)?;
+        let next = Generation::new(&self.backend, &self.layout, self.depth, size, self.producer, self.depth_format)?;
         self.generations.borrow_mut().replace(next, held);
         Ok(true)
     }
@@ -819,12 +1037,28 @@ impl ExportedTarget {
         self.generations.borrow().current().size
     }
 
-    /// The image of the frame at `slot`, and its size: of the generation
-    /// that the host holds it in.
-    pub fn image(&self, slot: usize) -> Option<(Size, ExportedImage)> {
+    /// The images of the frame at `slot`: of the generation that the host
+    /// holds it in.
+    pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
+        use ash::vk::Handle as _;
         let generations = self.generations.borrow();
         let generation = generations.retired(slot).unwrap_or(generations.current());
-        generation.images.get(slot).map(|image| (generation.size, image.export.clone()))
+        let image = generation.images.get(slot)?;
+        let native = |image: vk::Image, view: vk::ImageView, format: vk::Format| NativeTexture::Vulkan {
+            image: image.as_raw(),
+            view: view.as_raw(),
+            format: format.as_raw(),
+            layout: vk::ImageLayout::GENERAL.as_raw(),
+        };
+        Some(ExportedFrame {
+            size: generation.size,
+            image: image.export.clone(),
+            texture: native(image.image, image.view, self.layout.format()),
+            depth: generation.depth_images.get(slot).map(|depth| FrameDepth {
+                texture: native(depth.image, depth.view, depth.format),
+                export: depth.export.clone(),
+            }),
+        })
     }
 }
 

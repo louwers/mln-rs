@@ -122,6 +122,9 @@ pub struct RenderPassKey {
     /// is in `color_final_layout` when the pass begins, instead of clearing
     /// it.
     pub color_load: bool,
+    /// The layout the pass leaves the depth attachment in, having stored its
+    /// depth and stencil for the host, or `None` to discard them.
+    pub depth_final_layout: Option<vk::ImageLayout>,
 }
 
 #[derive(Default)]
@@ -895,16 +898,21 @@ impl Context {
             .color_attachments(&color_attachment_ref);
         let dependencies;
         if let Some(depth_format) = key.depth_format {
+            let store = if key.depth_final_layout.is_some() {
+                vk::AttachmentStoreOp::STORE
+            } else {
+                vk::AttachmentStoreOp::DONT_CARE
+            };
             attachments.push(
                 vk::AttachmentDescription::default()
                     .format(depth_format)
                     .samples(vk::SampleCountFlags::TYPE_1)
                     .load_op(vk::AttachmentLoadOp::CLEAR)
-                    .store_op(vk::AttachmentStoreOp::DONT_CARE)
+                    .store_op(store)
                     .stencil_load_op(vk::AttachmentLoadOp::CLEAR)
-                    .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                    .stencil_store_op(store)
                     .initial_layout(vk::ImageLayout::UNDEFINED)
-                    .final_layout(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL),
+                    .final_layout(key.depth_final_layout.unwrap_or(vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL)),
             );
             subpass = subpass.depth_stencil_attachment(&depth_attachment_ref);
             let depth_stages =

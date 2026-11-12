@@ -54,7 +54,7 @@ mod win32;
 mod window;
 
 pub use ash;
-pub use borrowed_target::{BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner, PendingReads};
+pub use borrowed_target::{BorrowedDepth, BorrowedImage, BorrowedImages, BorrowedTarget, ImageOwner, PendingReads};
 pub use context::Context;
 pub use device::{AdapterId, Device, Features, HostDevice, QueueLock, RawDevice};
 pub use exported_target::ExportedTarget;

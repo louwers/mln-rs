@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::size::Size;
 use objc2::rc::Retained;
@@ -30,6 +30,11 @@ use crate::renderer_backend::{BackendImpl, RendererBackend};
 pub struct BorrowedTextures {
     pub textures: Vec<MTLTexturePtr>,
     pub size: Size,
+    /// The host's textures that frames draw their depth and stencil into
+    /// and store, one for each of `textures`, of their size and device, one
+    /// depth and stencil pixel format, and `MTLTextureUsageRenderTarget`, or
+    /// none for depth of the target's own.
+    pub depth_textures: Vec<MTLTexturePtr>,
 }
 
 // SAFETY: Metal textures may be used from any thread; the target that draws
@@ -39,18 +44,32 @@ unsafe impl Send for BorrowedTextures {}
 unsafe impl Sync for BorrowedTextures {}
 
 impl BorrowedTextures {
-    /// The host's textures `textures`, which the ring retains.
+    /// The host's textures `textures` and depth textures `depth_textures`,
+    /// which the ring retains.
     ///
     /// # Safety
     ///
     /// Each pointer is an `id<MTLTexture>`.
-    pub unsafe fn from_raw(textures: &[*mut c_void], size: Size) -> Option<BorrowedTextures> {
-        let textures = textures
-            .iter()
-            // SAFETY: the caller's contract.
-            .map(|texture| unsafe { Retained::retain(texture.cast::<ProtocolObject<dyn MTLTexture>>()) })
-            .collect::<Option<Vec<_>>>()?;
-        Some(BorrowedTextures { textures, size })
+    pub unsafe fn from_raw(
+        textures: &[*mut c_void],
+        depth_textures: &[*mut c_void],
+        size: Size,
+    ) -> Option<BorrowedTextures> {
+        let retain = |textures: &[*mut c_void]| {
+            textures
+                .iter()
+                // SAFETY: the caller's contract.
+                .map(|texture| unsafe { Retained::retain(texture.cast::<ProtocolObject<dyn MTLTexture>>()) })
+                .collect::<Option<Vec<_>>>()
+        };
+        Some(BorrowedTextures { textures: retain(textures)?, size, depth_textures: retain(depth_textures)? })
+    }
+
+    /// The formats of the depth textures that frames draw into: Metal's
+    /// depth and stencil format of every GPU.
+    #[must_use]
+    pub fn depth_stencil_formats() -> DepthStencilFormats {
+        DepthStencilFormats::of(&[DepthStencilFormat::Depth32FloatStencil8])
     }
 
     /// The kinds of sync with which the host can wait for a frame (the
@@ -93,12 +112,46 @@ impl BorrowedTextures {
                 return Err(Error::invalid_argument("each texture must be 2D with one sample"));
             }
         }
+        let Some(depth) = self.depth_textures.first() else {
+            return Ok(());
+        };
+        if self.depth_textures.len() != self.textures.len() {
+            return Err(Error::invalid_argument("a ring's depth textures must be one for each of its textures"));
+        }
+        if depth.pixelFormat() != MTLPixelFormat::Depth32Float_Stencil8 {
+            return Err(Error::unsupported("a ring's depth textures must be of MTLPixelFormatDepth32Float_Stencil8"));
+        }
+        for texture in &self.depth_textures {
+            if texture.width() != self.size.width as usize
+                || texture.height() != self.size.height as usize
+                || texture.pixelFormat() != depth.pixelFormat()
+                || Retained::as_ptr(&texture.device()) != Retained::as_ptr(device.device())
+            {
+                return Err(Error::invalid_argument(
+                    "the ring's depth textures must have its size, a pixel format, and the device's MTLDevice",
+                ));
+            }
+            if !texture.usage().contains(MTLTextureUsage::RenderTarget)
+                || texture.storageMode() == MTLStorageMode::Memoryless
+                || texture.textureType() != MTLTextureType::Type2D
+                || texture.sampleCount() != 1
+            {
+                return Err(Error::invalid_argument(
+                    "each depth texture must be 2D with one sample, render-target usage, and memory to store into",
+                ));
+            }
+        }
         Ok(())
     }
 
     /// The textures' pixel format.
     pub fn pixel_format(&self) -> MTLPixelFormat {
         self.textures.first().map_or(MTLPixelFormat::Invalid, |texture| texture.pixelFormat())
+    }
+
+    /// The depth textures' pixel format, or `None` for a ring without them.
+    pub fn depth_pixel_format(&self) -> Option<MTLPixelFormat> {
+        self.depth_textures.first().map(|texture| texture.pixelFormat())
     }
 }
 
@@ -134,9 +187,13 @@ impl Resource {
         self.backend.get_device().newTextureWithDescriptor(&descriptor)
     }
 
-    /// The depth and stencil textures of the ring's size. Intel and AMD GPUs
-    /// take one texture for both.
+    /// The depth and stencil textures of the ring's size: the host's of the
+    /// selected slot, which holds both, or the target's own. Intel and AMD
+    /// GPUs take one texture for both.
     fn depth_stencil(&self) -> Option<(MTLTexturePtr, MTLTexturePtr)> {
+        if let Some(depth) = self.textures.borrow().depth_textures.get(self.selected.get()) {
+            return Some((depth.clone(), depth.clone()));
+        }
         let size = self.textures.borrow().size;
         let mut depth = self.depth.borrow_mut();
         if depth.as_ref().is_none_or(|(made, _, _)| *made != size) {
@@ -307,6 +364,10 @@ impl BorrowedTarget {
             }
             if textures.pixel_format() != current.pixel_format() {
                 return Err(Error::unsupported("a ring keeps its pixel format"));
+            }
+            let depth_format = |textures: &BorrowedTextures| textures.depth_textures.first().map(|t| t.pixelFormat());
+            if depth_format(&textures) != depth_format(&current) {
+                return Err(Error::unsupported("a ring keeps its depth textures' pixel format, or their lack"));
             }
         }
         textures.check(self.backend.device())?;

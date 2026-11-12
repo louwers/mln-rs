@@ -443,6 +443,7 @@ impl SurfaceResource {
             depth_format: Some(state.depth_format),
             color_final_layout: Self::color_final_layout(has_surface),
             color_load: false,
+            depth_final_layout: None,
         });
 
         // create swapchain framebuffers
@@ -584,6 +585,7 @@ impl SurfaceResource {
                 depth_format: None,
                 color_final_layout: Self::color_final_layout(state.surface != vk::SurfaceKHR::null()),
                 color_load: true,
+                depth_final_layout: None,
             });
             if render_pass == vk::RenderPass::null() {
                 return None;

@@ -128,6 +128,28 @@ unsafe fn ring_textures<'a, T, K: PartialEq>(
     Ok(textures)
 }
 
+/// A borrowed ring's depth textures: none, or `count` at `textures`, one for
+/// each of `colors`.
+///
+/// # Safety
+///
+/// `textures` is null or points to `count` readable entries.
+unsafe fn depth_textures<'a, T, C>(
+    textures: *const T,
+    count: usize,
+    colors: &[C],
+    name: &str,
+) -> Result<&'a [T], Error> {
+    if count == 0 {
+        return Ok(&[]);
+    }
+    if textures.is_null() || count != colors.len() {
+        return Err(Error::invalid_argument(format!("{name} needs one depth texture for each texture, or none")));
+    }
+    // SAFETY: the caller's contract.
+    Ok(unsafe { core::slice::from_raw_parts(textures, count) })
+}
+
 /// The ring of a caller's Vulkan images.
 fn vulkan_ring(
     target: &crate::generated::types::mln_vulkan_borrowed_textures_target,
@@ -156,18 +178,31 @@ fn vulkan_ring(
         }
         _ => return Err(Error::invalid_argument(format!("{name}.owner is invalid"))),
     };
+    // SAFETY: the header's contract for the depth textures array.
+    let depth_textures = unsafe { depth_textures(target.depth_textures, target.depth_texture_count, textures, name) }?;
+    if depth_textures.iter().any(|texture| texture.image == 0 || texture.image_view == 0) {
+        return Err(Error::invalid_argument(format!("{name} depth textures need an image and an image view")));
+    }
+    if !depth_textures.is_empty()
+        && (target.depth_format == 0 || target.depth_final_layout == 0 || target.depth_final_layout == 8)
+    {
+        return Err(Error::invalid_argument(format!("{name} needs a depth_format and depth_final_layout")));
+    }
     let size = Size::new(target.logical_size.width, target.logical_size.height);
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
     {
         use mln_vulkan::ash::vk::{self, Handle as _};
-        let images = mln_vulkan::BorrowedImages {
-            images: textures
+        let borrowed = |textures: &[crate::generated::types::mln_vulkan_borrowed_texture]| {
+            textures
                 .iter()
                 .map(|texture| mln_vulkan::BorrowedImage {
                     image: vk::Image::from_raw(texture.image),
                     view: vk::ImageView::from_raw(texture.image_view),
                 })
-                .collect(),
+                .collect::<Vec<_>>()
+        };
+        let images = mln_vulkan::BorrowedImages {
+            images: borrowed(textures),
             size: Size::new(target.physical_width, target.physical_height),
             format: vk::Format::from_raw(target.format as i32),
             final_layout: vk::ImageLayout::from_raw(target.final_layout as i32),
@@ -176,6 +211,11 @@ fn vulkan_ring(
                 MLN_VULKAN_IMAGE_OWNER_FOREIGN => mln_vulkan::ImageOwner::Foreign,
                 _ => mln_vulkan::ImageOwner::GraphicsQueue,
             },
+            depth: (!depth_textures.is_empty()).then(|| mln_vulkan::BorrowedDepth {
+                images: borrowed(depth_textures),
+                format: vk::Format::from_raw(target.depth_format as i32),
+                final_layout: vk::ImageLayout::from_raw(target.depth_final_layout as i32),
+            }),
         };
         Ok(Target::Borrowed { size, ring: BorrowedRing::vulkan(images) })
     }
@@ -480,16 +520,18 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     name,
                     |t| t.texture,
                 )?;
-                if textures.iter().any(|texture| texture.texture.is_null()) {
+                let depth = depth_textures(ring.depth_textures, ring.depth_texture_count, textures, name)?;
+                if textures.iter().chain(depth).any(|texture| texture.texture.is_null()) {
                     return Err(Error::invalid_argument(format!("{name} textures must not be null")));
                 }
                 #[cfg(target_vendor = "apple")]
                 {
                     let pointers: Vec<*mut c_void> = textures.iter().map(|texture| texture.texture).collect();
+                    let depth: Vec<*mut c_void> = depth.iter().map(|texture| texture.texture).collect();
                     let physical = Size::new(ring.physical_width, ring.physical_height);
                     // SAFETY: the host's textures, which the header's contract
                     // makes `id<MTLTexture>`s.
-                    match mln_mtl::BorrowedTextures::from_raw(&pointers, physical) {
+                    match mln_mtl::BorrowedTextures::from_raw(&pointers, &depth, physical) {
                         Some(textures) => Target::Borrowed { size, ring: BorrowedRing::metal(textures) },
                         None => return Err(Error::invalid_argument(format!("{name} textures must not be null"))),
                     }
@@ -510,7 +552,8 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     name,
                     |t| t.texture,
                 )?;
-                if textures.iter().any(|texture| texture.texture == 0) {
+                let depth = depth_textures(ring.depth_textures, ring.depth_texture_count, textures, name)?;
+                if textures.iter().chain(depth).any(|texture| texture.texture == 0) {
                     return Err(Error::invalid_argument(format!("{name} textures must not be zero")));
                 }
                 // GL_TEXTURE_2D.
@@ -522,6 +565,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                     let textures = mln_gl::BorrowedTextures {
                         textures: textures.iter().map(|texture| texture.texture).collect(),
                         size: Size::new(ring.physical_width, ring.physical_height),
+                        depth_textures: depth.iter().map(|texture| texture.texture).collect(),
                     };
                     Target::Borrowed { size, ring: BorrowedRing::gl(textures) }
                 }
@@ -637,6 +681,7 @@ unsafe fn exported_ring(
             .map(|format| DmaBufFormat { fourcc: format.fourcc, modifier: format.modifier })
             .collect(),
         android_hardware_buffer_usage: ring.android_hardware_buffer_usage,
+        keep_depth: false,
     };
     Ok(Target::Exported { size, ring })
 }
@@ -690,6 +735,9 @@ pub unsafe extern "C" fn mln_map_attach(
         let out_session = unsafe { handles::out_handle(out_session, "out_session") }?;
         // SAFETY: the caller's contract.
         let pending = unsafe { PendingCompletion::new(completion) }?;
+        if options.keep_depth && !matches!(target, Target::Exported { .. }) {
+            return Err(unsupported("only an exported ring keeps depth for the host"));
+        }
         let target = match target {
             Target::Offscreen(size) => {
                 options.require_core_worker("an offscreen session renders on a core worker")?;
@@ -717,11 +765,15 @@ pub unsafe extern "C" fn mln_map_attach(
                 let Some(device) = device else {
                     return Err(unsupported("a borrowed ring renders on the device of its textures"));
                 };
+                if !ring.takes_depth_on(&device) {
+                    return Err(unsupported("the device draws no depth into textures of the ring's depth format"));
+                }
                 options.require_core_worker("this library drives a borrowed ring on a core worker")?;
                 RenderTarget::Borrowed { size, ring, device }
             }
-            Target::Exported { size, ring } => {
+            Target::Exported { size, mut ring } => {
                 options.require_core_worker("an exported ring renders on a library thread, which owns its images")?;
+                ring.keep_depth = options.keep_depth;
                 RenderTarget::Exported { size, ring, device }
             }
             Target::Unsupported(message) => return Err(unsupported(message)),

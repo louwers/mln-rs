@@ -9,7 +9,7 @@ use std::rc::{Rc, Weak};
 use glow::HasContext;
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
-use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
+use mln_gfx::{ConsumerSync, DepthStencilFormat, DepthStencilFormats, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
 use mln_util::size::Size;
 
@@ -25,6 +25,10 @@ use crate::types::{FramebufferID, RenderbufferID};
 pub struct BorrowedTextures {
     pub textures: Vec<u32>,
     pub size: Size,
+    /// The host's `GL_TEXTURE_2D` textures that frames draw their depth and
+    /// stencil into, one for each of `textures`, of their size and a depth
+    /// and stencil format, or none for depth of the target's own.
+    pub depth_textures: Vec<u32>,
 }
 
 impl BorrowedTextures {
@@ -36,15 +40,40 @@ impl BorrowedTextures {
         let kinds = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::OpenGlFence]);
         (kinds, kinds)
     }
+
+    /// The formats of the depth textures that frames draw into, which
+    /// OpenGL ES 3.0 renders into.
+    #[must_use]
+    pub fn depth_stencil_formats() -> DepthStencilFormats {
+        DepthStencilFormats::of(&DepthStencilFormat::BY_PREFERENCE)
+    }
+
+    /// Checks the textures against their ring.
+    ///
+    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
+    /// depth textures that aren't one for each texture.
+    pub fn check(&self) -> Result<(), Error> {
+        if !self.depth_textures.is_empty() && self.depth_textures.len() != self.textures.len() {
+            return Err(Error::invalid_argument("a ring's depth textures must be one for each of its textures"));
+        }
+        Ok(())
+    }
+}
+
+/// A texture name of the host's.
+fn host_texture(name: u32) -> Result<glow::NativeTexture, Error> {
+    std::num::NonZeroU32::new(name)
+        .map(glow::NativeTexture)
+        .ok_or_else(|| Error::invalid_argument("a texture name is zero"))
 }
 
 /// The framebuffers over the ring's textures, and their depth and stencil
-/// renderbuffer.
+/// attachments: the host's textures, or a renderbuffer of the target's own.
 struct Resource {
     context: Weak<Context>,
     size: Size,
     framebuffers: Vec<FramebufferID>,
-    depth_stencil: RenderbufferID,
+    depth_stencil: Option<RenderbufferID>,
     selected: Rc<Cell<usize>>,
 }
 
@@ -55,17 +84,24 @@ impl Resource {
         // SAFETY: the renderbuffer and the framebuffers are new, and the
         // textures are the host's, in the context's share group.
         unsafe {
-            let depth_stencil = gl.create_renderbuffer().map_err(Error::native)?;
-            gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth_stencil));
-            gl.renderbuffer_storage(glow::RENDERBUFFER, glow::DEPTH24_STENCIL8, size.width as i32, size.height as i32);
-            gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+            let depth_stencil = if textures.depth_textures.is_empty() {
+                let depth_stencil = gl.create_renderbuffer().map_err(Error::native)?;
+                gl.bind_renderbuffer(glow::RENDERBUFFER, Some(depth_stencil));
+                gl.renderbuffer_storage(
+                    glow::RENDERBUFFER,
+                    glow::DEPTH24_STENCIL8,
+                    size.width as i32,
+                    size.height as i32,
+                );
+                gl.bind_renderbuffer(glow::RENDERBUFFER, None);
+                Some(depth_stencil)
+            } else {
+                None
+            };
             let mut resource =
                 Resource { context: context.weak(), size, framebuffers: Vec::new(), depth_stencil, selected };
-            for &texture in &textures.textures {
-                let texture = glow::NativeTexture(
-                    std::num::NonZeroU32::new(texture)
-                        .ok_or_else(|| Error::invalid_argument("a texture name is zero"))?,
-                );
+            for (slot, &texture) in textures.textures.iter().enumerate() {
+                let texture = host_texture(texture)?;
                 let framebuffer = gl.create_framebuffer().map_err(Error::native)?;
                 resource.framebuffers.push(framebuffer);
                 context.state().bind_framebuffer(gl, Some(framebuffer));
@@ -76,12 +112,22 @@ impl Resource {
                     Some(texture),
                     0,
                 );
-                gl.framebuffer_renderbuffer(
-                    glow::FRAMEBUFFER,
-                    glow::DEPTH_STENCIL_ATTACHMENT,
-                    glow::RENDERBUFFER,
-                    Some(depth_stencil),
-                );
+                match (depth_stencil, textures.depth_textures.get(slot)) {
+                    (Some(depth_stencil), _) => gl.framebuffer_renderbuffer(
+                        glow::FRAMEBUFFER,
+                        glow::DEPTH_STENCIL_ATTACHMENT,
+                        glow::RENDERBUFFER,
+                        Some(depth_stencil),
+                    ),
+                    (None, Some(&depth)) => gl.framebuffer_texture_2d(
+                        glow::FRAMEBUFFER,
+                        glow::DEPTH_STENCIL_ATTACHMENT,
+                        glow::TEXTURE_2D,
+                        Some(host_texture(depth)?),
+                        0,
+                    ),
+                    (None, None) => {}
+                }
                 let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
                 if status != glow::FRAMEBUFFER_COMPLETE {
                     return Err(Error::invalid_argument(format!(
@@ -102,7 +148,9 @@ impl Drop for Resource {
             for framebuffer in self.framebuffers.drain(..) {
                 context.abandon_framebuffer(framebuffer);
             }
-            context.abandon_renderbuffer(self.depth_stencil);
+            if let Some(depth_stencil) = self.depth_stencil {
+                context.abandon_renderbuffer(depth_stencil);
+            }
             mln_gfx::context::Context::rendering_stats(&*context).num_frame_buffers -= 1;
         }
     }
@@ -146,6 +194,7 @@ impl BorrowedTarget {
         if !BorrowedTextures::sync_kinds().0.contains(producer) {
             return Err(Error::unsupported(format!("an OpenGL target hands frames over with no {producer:?}")));
         }
+        textures.check()?;
         let depth = textures.textures.len();
         Ok(BorrowedTarget {
             backend,
@@ -214,14 +263,21 @@ impl BorrowedTarget {
         self.delete_fence(slot);
     }
 
-    /// Draws into `textures` from now on, which must be as many. Call it
-    /// with the backend's context current.
+    /// Draws into `textures` from now on, which must be as many, with depth
+    /// textures when the ring has them. Call it with the backend's context
+    /// current.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for
-    /// another number of textures.
+    /// another number of textures, and with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for depth textures
+    /// where the ring had none, or none where it had them.
     pub fn replace(&self, textures: BorrowedTextures) -> Result<(), Error> {
         if textures.textures.len() != self.depth() {
             return Err(Error::invalid_argument("a ring keeps its depth"));
+        }
+        textures.check()?;
+        if textures.depth_textures.is_empty() != self.textures.borrow().depth_textures.is_empty() {
+            return Err(Error::unsupported("a ring keeps its depth textures, or its lack of them"));
         }
         for slot in 0..self.depth() {
             self.delete_fence(slot);
@@ -256,6 +312,19 @@ impl FrameTarget for BorrowedTarget {
         let slot = self.selected.get();
         self.delete_fence(slot);
         let gl = self.backend.gl();
+        // Mesa marks a depth texture that a framebuffer rendered into as
+        // compressed, for another context that samples it to decompress it
+        // first, only once the context applies a change of framebuffer,
+        // which it does at its next draw or clear. Without that, radeonsi
+        // hands the host's context the compressed data of its depth texture.
+        if !self.textures.borrow().depth_textures.is_empty()
+            && let Some(context) = self.backend.gl_context()
+        {
+            context.state().bind_framebuffer(gl, None);
+            // SAFETY: the context is current (the renderer's backend scope),
+            // on its own surface, whose color nothing reads.
+            unsafe { gl.clear(glow::COLOR_BUFFER_BIT) };
+        }
         let sync = if self.producer == SyncKind::OpenGlFence {
             // SAFETY: the context is current (the renderer's backend
             // scope).

@@ -27,6 +27,7 @@ use mln_util::sync::RwLockExt;
 
 use super::{cast_matrix, check_tweak_drawable_ptr, get_drawable_binders, get_drawable_render_tile, slot_bucket};
 use crate::buckets::fill_extrusion_bucket::FillExtrusionBucket;
+use crate::frame_projection::zero_to_one_clip_z;
 use crate::layer_tweaker::{LayerTweaker, LayerTweakerBase, get_projection_data, to_projection_ubo};
 use crate::paint_parameters::PaintParameters;
 
@@ -111,6 +112,9 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
         let mut projection_ubo_vector = vec![ProjectionUBO::default(); count];
         let mut tile_props_ubo_vector = vec![FillExtrusionTilePropsUBO::default(); count];
 
+        // OpenGL writes the depth of Metal, Vulkan and WebGPU
+        // (`frame_projection`). The globe projects in its shaders.
+        let zero_to_one = context.backend_type() == mln_gfx::backend::Type::OpenGL && !state.is_globe_rendering();
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
             const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
@@ -143,7 +147,7 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
             }
 
             let tile_id = tile_id.to_unwrapped();
-            let projection = get_projection_data(
+            let mut projection = get_projection_data(
                 &tile_id,
                 parameters,
                 &translation,
@@ -153,6 +157,10 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 drawable,
                 false,
             );
+            if zero_to_one {
+                zero_to_one_clip_z(&mut projection.main_matrix);
+                zero_to_one_clip_z(&mut projection.fallback_matrix);
+            }
             let matrix = projection.fallback_matrix;
             projection_ubo_vector[i as usize] = to_projection_ubo(&projection);
 

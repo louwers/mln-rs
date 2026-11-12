@@ -2,6 +2,8 @@
 //! ways a texture's memory crosses to another API or process, how a ring
 //! picks one of those that the host imports, and what each frame hands over.
 
+use mln_util::size::Size;
+
 /// A way to share a texture's memory with another API or process.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ExportKind {
@@ -135,6 +137,9 @@ pub struct ExportedRing {
     pub dma_buf_formats: Vec<DmaBufFormat>,
     /// More `AHARDWAREBUFFER_USAGE_*` bits that the host's reads need.
     pub android_hardware_buffer_usage: u64,
+    /// Whether each frame keeps its depth and stencil for the host, in a
+    /// texture of the target's own beside each image.
+    pub keep_depth: bool,
 }
 
 /// Where one plane of a dmabuf keeps its data.
@@ -165,6 +170,92 @@ pub enum ExportedImage {
     /// A D3D11 texture's NT `HANDLE`, as an integer, of the `DXGI_FORMAT`
     /// `format`.
     DxgiSharedTexture { handle: u64, format: u32 },
+}
+
+/// A format of depth and stencil textures.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DepthStencilFormat {
+    /// 24-bit normalized depth and 8-bit stencil.
+    Depth24Stencil8,
+    /// 32-bit float depth and 8-bit stencil.
+    Depth32FloatStencil8,
+}
+
+impl DepthStencilFormat {
+    /// Every format, the one that a target prefers first.
+    pub const BY_PREFERENCE: [DepthStencilFormat; 2] =
+        [DepthStencilFormat::Depth24Stencil8, DepthStencilFormat::Depth32FloatStencil8];
+
+    fn bit(self) -> u8 {
+        1 << self as u8
+    }
+}
+
+/// A set of [`DepthStencilFormat`]s.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DepthStencilFormats(u8);
+
+impl DepthStencilFormats {
+    pub const NONE: DepthStencilFormats = DepthStencilFormats(0);
+
+    #[must_use]
+    pub fn of(formats: &[DepthStencilFormat]) -> DepthStencilFormats {
+        DepthStencilFormats(formats.iter().fold(0, |bits, format| bits | format.bit()))
+    }
+
+    #[must_use]
+    pub fn contains(self, format: DepthStencilFormat) -> bool {
+        self.0 & format.bit() != 0
+    }
+
+    #[must_use]
+    pub fn with(self, format: DepthStencilFormat) -> DepthStencilFormats {
+        DepthStencilFormats(self.0 | format.bit())
+    }
+
+    /// The formats, in [`DepthStencilFormat::BY_PREFERENCE`] order.
+    pub fn iter(self) -> impl Iterator<Item = DepthStencilFormat> {
+        DepthStencilFormat::BY_PREFERENCE.into_iter().filter(move |format| self.contains(*format))
+    }
+}
+
+/// A texture as the API of the device that drew into it names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum NativeTexture {
+    /// A `VkImage` and a `VkImageView` of it, in a `VkFormat`, left in a
+    /// `VkImageLayout`.
+    Vulkan { image: u64, view: u64, format: i32, layout: i32 },
+    /// An `id<MTLTexture>`, in an `MTLPixelFormat`.
+    Metal { texture: u64, pixel_format: u64 },
+    /// An OpenGL texture name, of a texture target, with an internal format,
+    /// or zero where the target doesn't know it.
+    OpenGl { texture: u32, target: u32, internal_format: u32 },
+    /// A WebGPU texture, which the host gave.
+    WebGpu,
+}
+
+/// An exported ring's frame: the shared memory of its image, and its
+/// textures on the device that drew it. The objects it names stay the
+/// target's until the host gives the frame back.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ExportedFrame {
+    pub size: Size,
+    pub image: ExportedImage,
+    /// The image, on the device.
+    pub texture: NativeTexture,
+    /// The frame's depth and stencil, when the ring keeps them.
+    pub depth: Option<FrameDepth>,
+}
+
+/// The texture that holds a frame's depth and stencil.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FrameDepth {
+    /// The texture, on the device.
+    pub texture: NativeTexture,
+    /// Its memory, as an opaque file descriptor, when the ring shares its
+    /// images so.
+    pub export: Option<ExportedImage>,
 }
 
 /// A target's generations of images: the ones it renders into now, and the

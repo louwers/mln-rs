@@ -65,7 +65,10 @@ pub use draw_mode::DrawMode;
 pub use drawable::{Drawable, UniqueDrawable};
 pub use drawable_builder::{DrawableBuilder, UniqueDrawableBuilder};
 pub use drawable_tweaker::{DrawableTweaker, DrawableTweakerPtr};
-pub use export::{DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedImage, ExportedRing};
+pub use export::{
+    DepthStencilFormat, DepthStencilFormats, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedFrame,
+    ExportedImage, ExportedRing, FrameDepth, NativeTexture,
+};
 pub use frame::{ConsumerSync, DrawTarget, FrameTarget, GpuSync, Handoff, SyncKind, SyncKinds};
 pub use gfx_types::{AttributeDataType, DrawModeType, PrimitiveType};
 pub use offscreen_texture::OffscreenTexture;

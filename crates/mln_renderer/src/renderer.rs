@@ -93,6 +93,13 @@ impl Renderer {
         impl_.render(&render_tree, update_parameters, target)
     }
 
+    /// Where the last frame that [`render`](Self::render) drew put the map,
+    /// or `None` before the first.
+    #[must_use]
+    pub fn frame_projection(&self) -> Option<crate::FrameProjection> {
+        self.impl_ref().frame_projection()
+    }
+
     // query: `Err` is the exception C++ throws out of the query (a
     // malformed tile).
     /// `queryRenderedFeatures(const ScreenLineString&, const RenderedQueryOptions&)`.

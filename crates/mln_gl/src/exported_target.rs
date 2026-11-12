@@ -20,7 +20,8 @@ use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::export::{DMA_BUF_MAX_PLANES, DRM_FORMAT_ABGR8888, DRM_FORMAT_MOD_LINEAR, DmaBufChoice, Generations};
 use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::{
-    ConsumerSync, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedImage, ExportedRing, SyncKind, SyncKinds,
+    ConsumerSync, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedFrame, ExportedImage, ExportedRing,
+    FrameDepth, NativeTexture, SyncKind, SyncKinds,
 };
 use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
@@ -525,6 +526,9 @@ struct SlotTexture {
     image: *mut c_void,
     texture: TextureID,
     framebuffer: FramebufferID,
+    /// The texture that the blit copies the frame's depth and stencil into,
+    /// when the ring keeps depth, which the framebuffer attaches.
+    depth: Option<TextureID>,
 }
 
 /// A generation's GL objects and images, which go with it.
@@ -535,6 +539,9 @@ struct Objects {
     /// The texture that frames render into, and the framebuffer that their
     /// blits read.
     canvas: Option<(TextureID, FramebufferID)>,
+    /// The canvas's depth texture, when the ring keeps depth, which frames
+    /// draw their depth into and blits read beside the canvas.
+    canvas_depth: Option<TextureID>,
 }
 
 impl Drop for Objects {
@@ -546,10 +553,18 @@ impl Drop for Objects {
             context.abandon_framebuffer(framebuffer);
             context.abandon_texture(texture);
         }
+        if let Some(texture) = self.canvas_depth.take()
+            && let Some(context) = &context
+        {
+            context.abandon_texture(texture);
+        }
         for slot in self.slots.drain(..) {
             if let Some(context) = &context {
                 context.abandon_framebuffer(slot.framebuffer);
                 context.abandon_texture(slot.texture);
+                if let Some(depth) = slot.depth {
+                    context.abandon_texture(depth);
+                }
             }
             // SAFETY: the image is the generation's, of its display; a
             // texture over it keeps its storage.
@@ -580,10 +595,16 @@ impl Generation {
         depth: usize,
         size: Size,
         producer: SyncKind,
+        keep_depth: bool,
     ) -> Result<Generation, Error> {
         let context = backend.gl_context().ok_or_else(|| Error::native("the OpenGL backend has no context"))?;
-        let mut objects =
-            Objects { context: context.weak(), exporter: exporter.clone(), slots: Vec::new(), canvas: None };
+        let mut objects = Objects {
+            context: context.weak(),
+            exporter: exporter.clone(),
+            slots: Vec::new(),
+            canvas: None,
+            canvas_depth: None,
+        };
         let gl = context.gl();
         let state = context.state();
         let framebuffer_of = |texture: TextureID| -> Result<FramebufferID, Error> {
@@ -636,7 +657,15 @@ impl Generation {
                     return Err(error);
                 }
             };
-            objects.slots.push(SlotTexture { buffer, image, texture, framebuffer });
+            // Pushed first, so that the slot's objects go with the generation
+            // when its depth texture fails.
+            objects.slots.push(SlotTexture { buffer, image, texture, framebuffer, depth: None });
+            if keep_depth {
+                let depth = depth_texture(&context, framebuffer, size)?;
+                if let Some(slot) = objects.slots.last_mut() {
+                    slot.depth = Some(depth);
+                }
+            }
         }
         // SAFETY: as above.
         let canvas = unsafe { gl.create_texture() }.map_err(Error::native)?;
@@ -655,13 +684,21 @@ impl Generation {
             }
         };
         objects.canvas = Some((canvas, read));
-        let textures = BorrowedTextures { textures: vec![canvas.0.get()], size };
+        if keep_depth {
+            objects.canvas_depth = Some(depth_texture(&context, read, size)?);
+        }
+        let textures = BorrowedTextures {
+            textures: vec![canvas.0.get()],
+            size,
+            depth_textures: objects.canvas_depth.iter().map(|texture| texture.0.get()).collect(),
+        };
         let target = BorrowedTarget::new(backend.clone(), textures, producer)?;
         Ok(Generation { target, objects, size, fourcc: choice.fourcc })
     }
 
-    /// Copies the canvas into the dmabuf of `slot`, upside down. Call it with
-    /// the context current.
+    /// Copies the canvas into the dmabuf of `slot`, upside down, with its
+    /// depth and stencil when the slot keeps them. Call it with the context
+    /// current.
     fn blit(&self, context: &Context, slot: usize) -> bool {
         let (Some((_, read)), Some(slot)) = (self.objects.canvas, self.objects.slots.get(slot)) else { return false };
         let gl = context.gl();
@@ -673,7 +710,12 @@ impl Generation {
         // that the state's cache holds.
         unsafe {
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(read));
-            gl.blit_framebuffer(0, 0, width, height, 0, height, width, 0, glow::COLOR_BUFFER_BIT, glow::NEAREST);
+            let mask = if slot.depth.is_some() {
+                glow::COLOR_BUFFER_BIT | glow::DEPTH_BUFFER_BIT | glow::STENCIL_BUFFER_BIT
+            } else {
+                glow::COLOR_BUFFER_BIT
+            };
+            gl.blit_framebuffer(0, 0, width, height, 0, height, width, 0, mask, glow::NEAREST);
             gl.bind_framebuffer(glow::READ_FRAMEBUFFER, Some(slot.framebuffer));
         }
         true
@@ -688,6 +730,7 @@ pub struct ExportedTarget {
     choice: DmaBufChoice,
     depth: usize,
     producer: SyncKind,
+    keep_depth: bool,
     generations: RefCell<Generations<Generation>>,
     /// The slot that the next frame goes to.
     selected: Cell<usize>,
@@ -722,13 +765,14 @@ impl ExportedTarget {
         let choice = exporter
             .choice(&ring.dma_buf_formats)
             .ok_or_else(|| Error::unsupported("the EGL display can render into a dmabuf of none of the formats"))?;
-        let current = Generation::new(&backend, &exporter, &choice, ring.depth, size, producer)?;
+        let current = Generation::new(&backend, &exporter, &choice, ring.depth, size, producer, ring.keep_depth)?;
         Ok(ExportedTarget {
             backend,
             exporter,
             choice,
             depth: ring.depth,
             producer,
+            keep_depth: ring.keep_depth,
             generations: RefCell::new(Generations::new(current)),
             selected: Cell::new(0),
         })
@@ -773,7 +817,15 @@ impl ExportedTarget {
         if self.size() == size {
             return Ok(false);
         }
-        let next = Generation::new(&self.backend, &self.exporter, &self.choice, self.depth, size, self.producer)?;
+        let next = Generation::new(
+            &self.backend,
+            &self.exporter,
+            &self.choice,
+            self.depth,
+            size,
+            self.producer,
+            self.keep_depth,
+        )?;
         self.generations.borrow_mut().replace(next, held);
         Ok(true)
     }
@@ -783,17 +835,32 @@ impl ExportedTarget {
         self.generations.borrow().current().size
     }
 
-    /// The dmabuf of the frame at `slot`, and its size.
-    pub fn image(&self, slot: usize) -> Option<(Size, ExportedImage)> {
+    /// The dmabuf of the frame at `slot`, its texture over it, and its depth
+    /// texture when the ring keeps depth: upside down from OpenGL's rows, as
+    /// the dmabuf's readers take them.
+    pub fn image(&self, slot: usize) -> Option<ExportedFrame> {
         let generations = self.generations.borrow();
         let generation = generations.retired(slot).unwrap_or(generations.current());
-        generation.objects.slots.get(slot).map(|texture| {
-            let image = ExportedImage::DmaBuf {
+        generation.objects.slots.get(slot).map(|texture| ExportedFrame {
+            size: generation.size,
+            image: ExportedImage::DmaBuf {
                 fourcc: generation.fourcc,
                 modifier: texture.buffer.modifier,
                 planes: texture.buffer.planes.clone(),
-            };
-            (generation.size, image)
+            },
+            texture: NativeTexture::OpenGl {
+                texture: texture.texture.0.get(),
+                target: glow::TEXTURE_2D,
+                internal_format: 0,
+            },
+            depth: texture.depth.map(|depth| FrameDepth {
+                texture: NativeTexture::OpenGl {
+                    texture: depth.0.get(),
+                    target: glow::TEXTURE_2D,
+                    internal_format: glow::DEPTH24_STENCIL8,
+                },
+                export: None,
+            }),
         })
     }
 }
@@ -822,5 +889,38 @@ impl FrameTarget for ExportedTarget {
 impl Drop for ExportedTarget {
     fn drop(&mut self) {
         self.generations.get_mut().clear_retired();
+    }
+}
+
+/// A `GL_DEPTH24_STENCIL8` texture of `size`, attached to `framebuffer`: a
+/// canvas's, which frames draw into and blits read, or a slot's, which blits
+/// copy into. Call it with the context current.
+fn depth_texture(context: &Context, framebuffer: FramebufferID, size: Size) -> Result<TextureID, Error> {
+    let gl = context.gl();
+    let state = context.state();
+    // SAFETY: the context is current (the caller's), and the texture is new;
+    // the state's cache sees each binding.
+    unsafe {
+        let texture = gl.create_texture().map_err(Error::native)?;
+        state.bind_texture(gl, 0, Some(texture));
+        gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::DEPTH24_STENCIL8, size.width as i32, size.height as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::NEAREST as i32);
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::NEAREST as i32);
+        state.bind_texture(gl, 0, None);
+        state.bind_framebuffer(gl, Some(framebuffer));
+        gl.framebuffer_texture_2d(
+            glow::FRAMEBUFFER,
+            glow::DEPTH_STENCIL_ATTACHMENT,
+            glow::TEXTURE_2D,
+            Some(texture),
+            0,
+        );
+        let status = gl.check_framebuffer_status(glow::FRAMEBUFFER);
+        state.bind_framebuffer(gl, None);
+        if status != glow::FRAMEBUFFER_COMPLETE {
+            context.abandon_texture(texture);
+            return Err(Error::native(format!("a depth texture makes no complete framebuffer: status {status:#x}")));
+        }
+        Ok(texture)
     }
 }

@@ -1,6 +1,7 @@
 //! Frame demands and the results that they finish with.
 
 use mln_map::{MapView, RenderMode};
+use mln_renderer::FrameProjection;
 
 /// When a demand draws a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -70,6 +71,8 @@ pub struct FrameResult {
     pub view: Option<MapView>,
     /// Whether everything that a rendered frame shows had loaded.
     pub mode: RenderMode,
+    /// Where a rendered frame drew the map, and the depth that it wrote.
+    pub projection: Option<FrameProjection>,
 }
 
 impl FrameResult {
@@ -84,6 +87,7 @@ impl FrameResult {
             needs_repaint: false,
             view: None,
             mode: RenderMode::Partial,
+            projection: None,
         }
     }
 }

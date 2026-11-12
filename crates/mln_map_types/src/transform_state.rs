@@ -468,12 +468,10 @@ impl TransformState {
         self.projection.get_projection_data(self, tile_id, mercator_matrix)
     }
 
-    /// `getProjMatrix(mat4&, uint16_t nearZ = 1, bool aligned = false)`.
-    pub fn get_proj_matrix(&self, proj_matrix: &mut Mat4, near_z: u16, aligned: bool) {
-        if self.size.is_empty() {
-            return;
-        }
-
+    /// The distance from the camera to the far plane of
+    /// [`get_proj_matrix`](Self::get_proj_matrix), in pixels at the zoom:
+    /// past the farthest point of the ground that the view shows.
+    pub fn get_far_z(&self) -> f64 {
         let camera_to_center_distance = f64::from(self.get_camera_to_center_distance());
         let offset = self.get_center_offset();
 
@@ -499,7 +497,19 @@ impl TransformState {
         let furthest_distance = camera_to_sea_level_distance / (1.0 - tan_multiple);
         // Add a bit extra to avoid precision problems when a fragment's
         // distance is exactly `furthestDistance`
-        let far_z = furthest_distance * 1.01;
+        furthest_distance * 1.01
+    }
+
+    /// `getProjMatrix(mat4&, uint16_t nearZ = 1, bool aligned = false)`.
+    pub fn get_proj_matrix(&self, proj_matrix: &mut Mat4, near_z: u16, aligned: bool) {
+        if self.size.is_empty() {
+            return;
+        }
+
+        let offset = self.get_center_offset();
+        let width = f64::from(self.size.width);
+        let height = f64::from(self.size.height);
+        let far_z = self.get_far_z();
 
         let camera = self.camera_state();
         let world_to_camera = camera.get_world_to_camera(self.scale, self.viewport_mode == ViewportMode::FlippedY);

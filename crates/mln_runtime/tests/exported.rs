@@ -43,6 +43,7 @@ fn ring(kinds: &[ExportKind]) -> ExportedRing {
         kinds: ExportKinds::of(kinds),
         dma_buf_formats: vec![DmaBufFormat { fourcc: ABGR8888, modifier: LINEAR }],
         android_hardware_buffer_usage: 0,
+        keep_depth: false,
     }
 }
 
