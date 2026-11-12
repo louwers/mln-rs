@@ -60,7 +60,8 @@ enum Target {
         surface: Surface,
     },
     /// The host's surface, which only a device of the host's instance or
-    /// share group presents to.
+    /// share group presents to. Apple builds have neither kind.
+    #[cfg_attr(any(target_vendor = "apple", target_family = "wasm"), allow(dead_code))]
     HostSurface {
         size: Size,
         surface: Surface,
