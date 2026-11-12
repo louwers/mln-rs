@@ -164,6 +164,11 @@ pub enum Handoff {
     /// waits for `sync`. The object `sync` names stays the target's until
     /// the host gives the slot back.
     GivenBack { slot: usize, sync: GpuSync },
+    /// The target's own image at `slot` of its exported ring holds it, for
+    /// the host to acquire and read once it waits for `sync`. The image and
+    /// the object `sync` names stay the target's until the host gives the
+    /// slot back.
+    Queued { slot: usize, sync: GpuSync },
     /// Nothing took it: the target had no image to hand off.
     Dropped,
 }
