@@ -231,7 +231,7 @@ keep lavapipe for the native runner (`VK_DRIVER_FILES`).
 - A local server serves the page and every fixture from the suite's
   cache database (tools/render-test/testdata/metrics/cache-style.db), with
   the URLs that the runner's file source maps (`local://`, `mapbox://`,
-  ...) rewritten to it. What the cache lacks gets no content, as in the
+  ...) rewritten to it. What the cache lacks is not found (404), as in the
   runner.
 - Once a view is fully loaded and its labels have faded in, the page
   reads its frame back from the GPU: headless Chromium composites WebGPU
