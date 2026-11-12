@@ -22,12 +22,12 @@ use std::sync::{Arc, Mutex};
 use harfrust::font::{Blob, Font, TableFunction};
 use harfrust::{Buffer, Direction, Feature, Language, Script, ShapeOptions, ShapePlan, ShaperFont, Tag};
 use mln_util::sync::MutexExt;
+use unicode_properties::{GeneralCategory, UnicodeGeneralCategory};
 
 use crate::freetype::{FreeTypeFace, FreeTypeLibrary};
 use crate::glyph::{FontData, Glyph, GlyphID, GlyphIDType};
 use crate::harfbuzz::HBShapeAdjust;
 use crate::hb_ft::HbFtFont;
-use crate::hb_ucd;
 
 /// Tables HarfBuzz never reads when built with `HB_TINY`.
 const HB_TINY_HIDDEN_TABLES: [&[u8; 4]; 7] = [b"morx", b"mort", b"kerx", b"kern", b"ankr", b"trak", b"feat"];
@@ -40,13 +40,14 @@ fn get_default_language() -> Language {
 
 /// `getUnicodeScript(u)`: combining marks inherit the script of their
 /// bases, regardless of their own script. Called on UTF-16 code units, as
-/// in C++ (surrogates are classified on their own).
+/// in C++ (surrogates are classified on their own). Uses the Unicode
+/// version of HarfRust's own tables.
 #[must_use]
 pub fn get_unicode_script(u: u32) -> [u8; 4] {
-    if hb_ucd::general_category(u) == hb_ucd::NON_SPACING_MARK {
-        return *b"Zinh"; // HB_SCRIPT_INHERITED
+    if char::from_u32(u).is_some_and(|c| c.general_category() == GeneralCategory::NonspacingMark) {
+        return Script::INHERITED.tag().to_be_bytes();
     }
-    hb_ucd::script(u)
+    harfrust::unicode::script(u).tag().to_be_bytes()
 }
 
 /// Shape plans by script tag and right-to-left direction.
@@ -324,6 +325,8 @@ mod tests {
         assert_eq!(&get_unicode_script(0x0301), b"Zinh");
         assert_eq!(&get_unicode_script(0x0941), b"Zinh"); // Devanagari vowel sign U (Mn)
         assert_eq!(&get_unicode_script(0x0627), b"Arab");
+        assert_eq!(&get_unicode_script(0x4E2D), b"Hani");
+        assert_eq!(&get_unicode_script(0xAC00), b"Hang");
         assert_eq!(&get_unicode_script(0xD83D), b"Zzzz");
     }
 }

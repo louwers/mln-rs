@@ -163,6 +163,9 @@ thiserror = "2.0.21"
 # Candidate for ICU's ubidi (platform/default/src/mln/text/bidi.cpp); kept only
 # if //difftest/shaping shows it matches ICU on the test corpus.
 unicode-bidi = { version = "0.3.18" }
+# General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
+# version of harfrust's own tables.
+unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
 # WOFF2 font faces (mln_text's woff): pure Rust, no unsafe. Only its Brotli
 # decoder: mln_text decodes WOFF 1.0 itself, with FreeType's checks.
 wuff = { version = "0.2.10", default-features = false, features = ["brotli"] }

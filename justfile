@@ -157,16 +157,10 @@ fmt *args:
 generate-c-abi:
     cargo run -q -p mln-rs-c-abi-gen
 
-# Regenerate the HarfBuzz Unicode tables (crates/mln_text's, and a difftest's) from the C++ core's HarfBuzz
-generate-hb-ucd-tables:
-    python3 -I crates/mln_text/tools/gen_hb_ucd.py {{quote(cpp)}} > crates/mln_text/src/hb_ucd_table.rs
-    python3 -I crates/mln_text/tools/gen_hb_ucd.py {{quote(cpp)}} --full-gc > difftest/text/hb_ucd15_full_gc.rs
-
 # crates/mln_text/tools/gen_icu_tables.py says where to get the ICU 78.3 sources.
-[doc("Regenerate the ICU property tables (Bidi_Class, General_Category) from an ICU 78.3 source tree's icu/source/common")]
+[doc("Regenerate the ICU Bidi_Class table from an ICU 78.3 source tree's icu/source/common")]
 generate-icu-tables icu_common:
-    python3 -I crates/mln_text/tools/gen_icu_tables.py bidi {{quote(icu_common)}} > crates/mln_text/src/icu/ubidi_props_data.rs
-    python3 -I crates/mln_text/tools/gen_icu_tables.py gc {{quote(icu_common)}} > crates/mln_util/src/i18n/uchar_props.rs
+    python3 -I crates/mln_text/tools/gen_icu_tables.py {{quote(icu_common)}} > crates/mln_text/src/icu/ubidi_props_data.rs
 
 # Regenerate vendor/nunicode's tables from the C++ core's vendored nunicode
 generate-nunicode-tables:

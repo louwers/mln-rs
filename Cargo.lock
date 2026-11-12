@@ -2741,6 +2741,7 @@ dependencies = [
  "skrifa 0.49.0",
  "thiserror 2.0.21",
  "unicode-bidi",
+ "unicode-properties",
  "wasm-bindgen",
  "web-sys",
  "wuff",
@@ -2795,6 +2796,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
+ "unicode-properties",
  "web-time",
 ]
 

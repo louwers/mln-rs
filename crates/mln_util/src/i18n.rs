@@ -3,11 +3,9 @@
 // `isPunctuationOrSymbol` on ICU's `u_charType`).
 //
 // The C++ functions take `char16_t`: astral code points never reach them, so
-// these take `u16`. The ICU general category tables (`i18n/uchar_props.rs`)
-// are generated from the ICU 78.3 data the Linux C++ build links.
+// these take `u16`. A lone surrogate code unit is Cs.
 
-#[rustfmt::skip]
-mod uchar_props;
+use unicode_properties::{GeneralCategory, GeneralCategoryGroup, UnicodeGeneralCategory};
 
 /// `isInRange` and the `DEFINE_IS_IN_UNICODE_BLOCK` helpers.
 #[inline]
@@ -630,29 +628,30 @@ pub fn is_whitespace(chr: u16) -> bool {
     chr == 0x20 || chr == 0x09 || chr == 0x0A || chr == 0x0B || chr == 0x0C || chr == 0x0D
 }
 
-fn in_ranges(table: &[(u16, u16)], chr: u16) -> bool {
-    // The last range starting at or before chr.
-    let i = table.partition_point(|&(start, _)| start <= chr);
-    i > 0 && chr <= table[i - 1].1
+/// The general category of a UTF-16 code unit; `None` for a surrogate.
+fn general_category(chr: u16) -> Option<GeneralCategory> {
+    char::from_u32(u32::from(chr)).map(UnicodeGeneralCategory::general_category)
 }
 
 /// `u_charType(chr) == U_DECIMAL_DIGIT_NUMBER` (platform/default).
 #[must_use]
 pub fn is_digit(chr: u16) -> bool {
-    in_ranges(&uchar_props::DECIMAL_DIGIT_NUMBER, chr)
+    general_category(chr) == Some(GeneralCategory::DecimalNumber)
 }
 
 /// `u_charType(chr) == U_UPPERCASE_LETTER` (platform/default).
 #[must_use]
 pub fn is_uppercase(chr: u16) -> bool {
-    in_ranges(&uchar_props::UPPERCASE_LETTER, chr)
+    general_category(chr) == Some(GeneralCategory::UppercaseLetter)
 }
 
 /// `(U_GET_GC_MASK(chr) & (U_GC_P_MASK | U_GC_S_MASK)) != 0`
 /// (platform/default).
 #[must_use]
 pub fn is_punctuation_or_symbol(chr: u16) -> bool {
-    in_ranges(&uchar_props::PUNCTUATION_OR_SYMBOL, chr)
+    char::from_u32(u32::from(chr)).is_some_and(|c| {
+        matches!(c.general_category_group(), GeneralCategoryGroup::Punctuation | GeneralCategoryGroup::Symbol)
+    })
 }
 
 #[must_use]
@@ -684,5 +683,6 @@ mod tests {
         assert!(is_punctuation_or_symbol('$' as u16));
         assert!(!is_punctuation_or_symbol('a' as u16));
         assert!(!is_punctuation_or_symbol(0xFFFF));
+        assert!(!is_digit(0xD800) && !is_uppercase(0xD800) && !is_punctuation_or_symbol(0xD800));
     }
 }
