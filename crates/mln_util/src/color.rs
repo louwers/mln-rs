@@ -198,6 +198,8 @@ const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
 const POWERLESS_HUE_EPSILON: f64 = 0.000004;
 // The chroma of 100% in oklch(): https://drafts.csswg.org/css-color-4/#specifying-oklab-oklch
 const CHROMA_PERCENT_REFERENCE: f64 = 0.4;
+// Keeps the conversion finite: past this chroma, the clipped color stops changing.
+const MAX_CHROMA: f64 = 1e6;
 
 #[derive(Clone, Copy)]
 struct Oklch {
@@ -243,67 +245,12 @@ fn rgb_to_oklch(rgb: Rgb) -> Oklch {
     Oklch { l: lab[0], c, h: constrain_angle(lab[2].atan2(lab[1]) * RAD_TO_DEG), alpha: rgb.a }
 }
 
-fn is_in_srgb_gamut(rgb: Vec3) -> bool {
-    rgb.iter().all(|&x| x >= 0.0 && x <= 1.0)
-}
-
-fn clip_to_srgb_gamut(rgb: Vec3) -> Vec3 {
-    rgb.map(|x| x.clamp(0.0, 1.0))
-}
-
-// Maps a color outside sRGB to a lower chroma at the same lightness and hue,
-// https://drafts.csswg.org/css-color-4/#binary-search-gamut-map-with-local-minde
+// Clips a color outside sRGB channel by channel, as browsers draw one.
 fn oklch_to_rgb(color: Oklch) -> Rgb {
-    if color.l >= 1.0 {
-        return Rgb { r: 1.0, g: 1.0, b: 1.0, a: color.alpha };
-    }
-    if color.l <= 0.0 {
-        return Rgb { r: 0.0, g: 0.0, b: 0.0, a: color.alpha };
-    }
     let hue = if color.h.is_nan() { 0.0 } else { color.h * DEG_TO_RAD };
-    let cos_hue = hue.cos();
-    let sin_hue = hue.sin();
-    let to_srgb = |chroma: f64| oklab_to_srgb([color.l, chroma * cos_hue, chroma * sin_hue]);
-    let delta_eok = |rgb: Vec3, chroma: f64| {
-        let lab = srgb_to_oklab(rgb);
-        let dl = color.l - lab[0];
-        let da = chroma * cos_hue - lab[1];
-        let db = chroma * sin_hue - lab[2];
-        (dl * dl + da * da + db * db).sqrt()
-    };
-    const JND: f64 = 0.02;
-    const EPSILON: f64 = 0.0001;
-
-    let rgb = to_srgb(color.c);
-    if is_in_srgb_gamut(rgb) {
-        return Rgb { r: rgb[0], g: rgb[1], b: rgb[2], a: color.alpha };
-    }
-    let mut clipped = clip_to_srgb_gamut(rgb);
-    if delta_eok(clipped, color.c) >= JND {
-        let mut min = 0.0;
-        let mut max = color.c;
-        let mut min_in_gamut = true;
-        while max - min > EPSILON {
-            let chroma = (min + max) / 2.0;
-            let current = to_srgb(chroma);
-            if min_in_gamut && is_in_srgb_gamut(current) {
-                min = chroma;
-                continue;
-            }
-            clipped = clip_to_srgb_gamut(current);
-            let e = delta_eok(clipped, chroma);
-            if e < JND {
-                if JND - e < EPSILON {
-                    break;
-                }
-                min_in_gamut = false;
-                min = chroma;
-            } else {
-                max = chroma;
-            }
-        }
-    }
-    Rgb { r: clipped[0], g: clipped[1], b: clipped[2], a: color.alpha }
+    let chroma = if MAX_CHROMA < color.c { MAX_CHROMA } else { color.c };
+    let rgb = oklab_to_srgb([color.l, chroma * hue.cos(), chroma * hue.sin()]);
+    Rgb { r: rgb[0].clamp(0.0, 1.0), g: rgb[1].clamp(0.0, 1.0), b: rgb[2].clamp(0.0, 1.0), a: color.alpha }
 }
 
 fn is_css_whitespace(c: u8) -> bool {
