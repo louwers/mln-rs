@@ -13,14 +13,6 @@ pub unsafe extern "C" fn mln_android_frame_pacer_create(
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_android_init(
-    jni_env: *mut ::core::ffi::c_void,
-    context: *mut ::core::ffi::c_void,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe { crate::diagnostic::unsupported(out_diagnostic, "mln_android_init") }
-}
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_apple_frame_pacer_create(
     options: *const mln_frame_pacer_options,
     out_pacer: *mut mln_frame_pacer,

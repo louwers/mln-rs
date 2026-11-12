@@ -2596,6 +2596,7 @@ version = "0.0.11"
 dependencies = [
  "block2 0.6.2",
  "httpmock",
+ "jni",
  "js-sys",
  "mln-rs-actor",
  "mln-rs-feature",
@@ -2611,6 +2612,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "rusqlite",
  "rustls",
+ "rustls-platform-verifier",
  "serde_json",
  "ureq",
  "wasm-bindgen",

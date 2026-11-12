@@ -11,6 +11,8 @@
 //! Without it the `ResourceLoader` has no ambient cache (examples/web relies
 //! on the browser's HTTP cache instead).
 
+#[cfg(target_os = "android")]
+pub mod android;
 pub mod asset_file_source;
 pub mod async_request;
 #[cfg(feature = "sqlite")]

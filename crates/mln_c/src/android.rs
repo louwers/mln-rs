@@ -1,8 +1,64 @@
 //! `platform/android.h`: the library's setup in an Android app, and the
 //! Android windows that window targets present to.
 
+use core::ffi::c_void;
+
 #[cfg(target_os = "android")]
 pub(crate) use window::Window;
+
+use crate::error::Error;
+use crate::generated::types::{mln_diagnostic, mln_status};
+
+/// `mln_android_init()`: what the library needs of the app is the Java VM
+/// that HTTPS verifies certificates in, with Android's own verifier
+/// (rustls-platform-verifier, whose Android component the app includes).
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_android_init(
+    jni_env: *mut c_void,
+    context: *mut c_void,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        if jni_env.is_null() || context.is_null() {
+            return Err(Error::invalid_argument("jni_env and context must not be null"));
+        }
+        #[cfg(target_os = "android")]
+        {
+            // SAFETY: the caller's contract.
+            unsafe { mln_storage::android::init(jni_env, context) }.map_err(Error::from)
+        }
+        #[cfg(not(target_os = "android"))]
+        Err(Error::new(mln_util::ErrorKind::Unsupported, "Android initialization is not supported"))
+    })
+}
+
+#[cfg(all(test, not(target_os = "android")))]
+mod init_tests {
+    use super::*;
+    use crate::diagnostic::tests::{diagnostic, message};
+    use crate::generated::types::{MLN_STATUS_INVALID_ARGUMENT, MLN_STATUS_UNSUPPORTED};
+
+    #[test]
+    fn android_initialization_needs_its_arguments_and_android() {
+        let mut sentinel = 0u8;
+        let sentinel: *mut c_void = (&raw mut sentinel).cast();
+        for (jni_env, context) in [(core::ptr::null_mut(), sentinel), (sentinel, core::ptr::null_mut())] {
+            let mut out = diagnostic();
+            // SAFETY: null or local pointers, which the call checks before
+            // it would use them, and a local diagnostic.
+            assert_eq!(unsafe { mln_android_init(jni_env, context, &mut *out) }, MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(message(&out), "jni_env and context must not be null");
+        }
+        let mut out = diagnostic();
+        // SAFETY: as above; no platform but Android reads them.
+        assert_eq!(unsafe { mln_android_init(sentinel, sentinel, &mut *out) }, MLN_STATUS_UNSUPPORTED);
+        assert_eq!(message(&out), "Android initialization is not supported");
+    }
+}
 
 #[cfg(target_os = "android")]
 mod window {
