@@ -1,12 +1,14 @@
 //! What a case measures besides wall time: the process's CPU time, every
 //! thread's, so work moved to the tile workers or a busy wait still counts;
-//! and the heap allocations of the whole process, through
-//! [`CountingAllocator`], which the `mln-bench` binary installs.
+//! on macOS, the instructions and cycles of every thread, which other load
+//! on the machine hardly changes; and the heap allocations of the whole
+//! process, through [`CountingAllocator`], which the `mln-bench` binary
+//! installs.
 //!
 //! A [`Meter`] times the timed part of each iteration of a case and leaves
 //! its setup out.
 
-// The allocator and the process CPU clock are the FFI here.
+// The allocator, the process CPU clock and its counters are the FFI here.
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -104,10 +106,46 @@ pub fn process_cpu() -> Duration {
     Duration::from_nanos((hundred_ns(kernel) + hundred_ns(user)) * 100)
 }
 
+/// The instructions and cycles every thread of the process has retired so
+/// far, or `None` where the system doesn't count them.
+#[cfg(target_os = "macos")]
+pub fn process_counters() -> Option<Counters> {
+    // SAFETY: rusage_info_v4 is plain integers, for which zero is valid.
+    let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
+    // SAFETY: the flavor names rusage_info_v4, which `info` is; the call
+    // takes it as a `rusage_info_t *`.
+    let status = unsafe {
+        libc::proc_pid_rusage(
+            std::process::id() as libc::c_int,
+            libc::RUSAGE_INFO_V4,
+            (&raw mut info).cast::<libc::rusage_info_t>(),
+        )
+    };
+    // Where the hardware or a virtual machine has no counters, they read
+    // zero; a running process has always retired instructions.
+    (status == 0 && info.ri_instructions > 0)
+        .then_some(Counters { instructions: info.ri_instructions, cycles: info.ri_cycles })
+}
+
+/// The instructions and cycles every thread of the process has retired so
+/// far, or `None` where the system doesn't count them.
+#[cfg(not(target_os = "macos"))]
+pub fn process_counters() -> Option<Counters> {
+    None
+}
+
+/// What [`process_counters`] reads.
+#[derive(Clone, Copy)]
+pub struct Counters {
+    pub instructions: u64,
+    pub cycles: u64,
+}
+
 #[derive(Clone, Copy)]
 struct Reading {
     wall: Instant,
     cpu: Duration,
+    counters: Option<Counters>,
     allocations: u64,
     allocated: u64,
 }
@@ -117,20 +155,24 @@ impl Reading {
         Reading {
             wall: Instant::now(),
             cpu: process_cpu(),
+            counters: process_counters(),
             allocations: ALLOCATIONS.load(Ordering::Relaxed),
             allocated: ALLOCATED.load(Ordering::Relaxed),
         }
     }
 }
 
-/// The timed parts of a case's iterations. `time_ms`, `cpu_ms`, `allocs`
-/// and `alloc_kib` are each iteration's median; `peak_heap_mib` is the
-/// most heap live at once from the meter's creation on, setup between
-/// iterations included.
+/// The timed parts of a case's iterations. `time_ms`, `cpu_ms`, `minstr`,
+/// `mcycles`, `allocs` and `alloc_kib` are each iteration's median;
+/// `peak_heap_mib` is the most heap live at once from the meter's creation
+/// on, setup between iterations included. `minstr` and `mcycles` are left
+/// out where [`process_counters`] has none.
 pub struct Meter {
     started: Option<Reading>,
     wall: Vec<f64>,
     cpu: Vec<f64>,
+    instructions: Vec<f64>,
+    cycles: Vec<f64>,
     allocations: Vec<f64>,
     allocated: Vec<f64>,
 }
@@ -140,7 +182,15 @@ impl Meter {
     /// case's setup.
     pub fn new() -> Meter {
         reset_peak();
-        Meter { started: None, wall: Vec::new(), cpu: Vec::new(), allocations: Vec::new(), allocated: Vec::new() }
+        Meter {
+            started: None,
+            wall: Vec::new(),
+            cpu: Vec::new(),
+            instructions: Vec::new(),
+            cycles: Vec::new(),
+            allocations: Vec::new(),
+            allocated: Vec::new(),
+        }
     }
 
     /// Times `work` as one iteration.
@@ -163,6 +213,10 @@ impl Meter {
         let start = self.started.take().expect("no iteration is running");
         self.wall.push(ms(end.wall - start.wall));
         self.cpu.push(ms(end.cpu - start.cpu));
+        if let (Some(start), Some(end)) = (start.counters, end.counters) {
+            self.instructions.push((end.instructions - start.instructions) as f64 / 1e6);
+            self.cycles.push((end.cycles - start.cycles) as f64 / 1e6);
+        }
         self.allocations.push((end.allocations - start.allocations) as f64);
         self.allocated.push((end.allocated - start.allocated) as f64 / 1024.0);
     }
@@ -172,11 +226,16 @@ impl Meter {
         &self.wall
     }
 
-    /// The iterations' metrics; all but `alloc_kib` lead.
+    /// The iterations' metrics; all but `mcycles` and `alloc_kib` lead.
     pub fn finish(self) -> Metrics {
         let mut metrics = Metrics::default();
         metrics.lead("time_ms", median(&self.wall));
         metrics.lead("cpu_ms", median(&self.cpu));
+        // Only when every iteration was counted, so the median is of them all.
+        if !self.instructions.is_empty() && self.instructions.len() == self.wall.len() {
+            metrics.lead("minstr", median(&self.instructions));
+            metrics.other("mcycles", median(&self.cycles));
+        }
         metrics.lead("allocs", median(&self.allocations));
         metrics.other("alloc_kib", median(&self.allocated));
         metrics.lead("peak_heap_mib", peak_heap_mib());
@@ -192,4 +251,25 @@ impl Default for Meter {
 
 pub fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_instructions_where_the_system_does() {
+        let mut meter = Meter::new();
+        // At least one instruction per step, so at least 10 million.
+        meter.time(|| (0..10_000_000u64).fold(0u64, |sum, i| std::hint::black_box(sum.wrapping_add(i))));
+        let metrics = meter.finish();
+        match process_counters() {
+            Some(_) => {
+                let instructions = metrics.get("minstr").expect("minstr").value;
+                assert!(instructions >= 10.0, "{instructions} million instructions");
+                assert!(metrics.get("mcycles").expect("mcycles").value > 0.0);
+            }
+            None => assert!(metrics.get("minstr").is_none() && metrics.get("mcycles").is_none()),
+        }
+    }
 }

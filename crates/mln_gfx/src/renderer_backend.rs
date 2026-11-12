@@ -12,26 +12,24 @@ use mln_util::identity::SimpleIdentity;
 
 use crate::backend_scope::BackendScope;
 use crate::context::Context;
-use crate::renderable::Renderable;
 use crate::shader_registry::ShaderRegistry;
 use crate::shaders::program_parameters::ProgramParameters;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ContextMode {
-    Unique,
-    Shared,
-}
 
 /// The data members of `gfx::RendererBackend`.
 pub struct RendererBackendBase {
     pub unique_id: SimpleIdentity,
     context: OnceCell<Rc<dyn Context>>,
-    context_mode: ContextMode,
+}
+
+impl Default for RendererBackendBase {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl RendererBackendBase {
-    pub fn new(context_mode: ContextMode) -> Self {
-        RendererBackendBase { unique_id: SimpleIdentity::new(), context: OnceCell::new(), context_mode }
+    pub fn new() -> Self {
+        RendererBackendBase { unique_id: SimpleIdentity::new(), context: OnceCell::new() }
     }
 
     /// `context.reset()` in the backend destructors. Returns the context, so
@@ -41,6 +39,8 @@ impl RendererBackendBase {
     }
 }
 
+/// A renderer's device-side state: its context and shaders. What it draws
+/// into is a `FrameTarget` built on it.
 pub trait RendererBackend: Any {
     fn renderer_backend_base(&self) -> &RendererBackendBase;
     fn as_any(&self) -> &dyn Any;
@@ -59,16 +59,9 @@ pub trait RendererBackend: Any {
         self.renderer_backend_base().context.get_or_init(|| self.create_context())
     }
 
-    fn context_is_shared(&self) -> bool {
-        self.renderer_backend_base().context_mode == ContextMode::Shared
-    }
-
     fn unique_id(&self) -> SimpleIdentity {
         self.renderer_backend_base().unique_id
     }
-
-    /// Returns a reference to the default surface that should be rendered on.
-    fn get_default_renderable(&self) -> &dyn Renderable;
 
     /// One-time shader initialization
     fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters);

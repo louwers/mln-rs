@@ -11,7 +11,7 @@ use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::rc::Rc;
 
-use mln_mtl::surface_backend::{Overlay, OverlayTarget};
+use mln_mtl::surface_target::{Overlay, OverlayTarget};
 use mln_util::logging::{Event, Log};
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;

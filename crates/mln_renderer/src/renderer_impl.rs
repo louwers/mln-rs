@@ -9,7 +9,7 @@ use std::sync::Arc;
 use mln_gfx::shaders::layer_ubo::GlobalPaintParamsUBO;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::ID_GLOBAL_PAINT_PARAMS_UBO;
-use mln_gfx::{RenderPassDescriptor, RendererBackend, ScissorRect, ShaderRegistry};
+use mln_gfx::{FrameTarget, Handoff, RenderPassDescriptor, RendererBackend, ScissorRect, ShaderRegistry};
 use mln_map_types::MapDebugOptions;
 use mln_text::GlyphCache;
 use mln_util::Color;
@@ -50,9 +50,8 @@ impl RendererImpl {
         local_font_family: Option<String>,
         glyph_cache: Arc<GlyphCache>,
     ) -> Self {
-        let background_layer_as_color = !backend.context_is_shared();
         RendererImpl {
-            orchestrator: RenderOrchestrator::new(background_layer_as_color, local_font_family, glyph_cache),
+            orchestrator: RenderOrchestrator::new(true, local_font_family, glyph_cache),
             backend,
             pixel_ratio,
             static_data: None,
@@ -77,13 +76,19 @@ impl RendererImpl {
         self.orchestrator.release_shaders();
     }
 
-    pub fn render(&mut self, render_tree: &RenderTree, update_parameters: &Arc<UpdateParameters>) {
+    /// Draws a frame of `render_tree` into `target`, unless the target has
+    /// nothing to draw into now.
+    pub fn render(
+        &mut self,
+        render_tree: &RenderTree,
+        update_parameters: &Arc<UpdateParameters>,
+        target: &dyn FrameTarget,
+    ) -> Option<Handoff> {
         let backend = self.backend.clone();
         let context = backend.get_context();
         // TODO(port): context.setObserver(this) (shader compile callbacks).
 
-        // Blocks execution until the renderable is available.
-        backend.get_default_renderable().wait();
+        let image = target.begin_frame()?;
         context.begin_frame();
 
         if self.static_data.is_none() {
@@ -101,7 +106,7 @@ impl RendererImpl {
         let render_tree_parameters = render_tree.get_parameters();
         let static_data = self.static_data.as_mut().expect("static data");
         static_data.has_3d = render_tree_parameters.has_3d;
-        let renderable_size = backend.get_default_renderable().get_size();
+        let renderable_size = image.size();
 
         if self.render_state == RenderState::Never {
             self.orchestrator.emit(RendererEvent::RenderMapStarted);
@@ -158,7 +163,7 @@ impl RendererImpl {
         // rendering.
         {
             let encoder = parameters.encoder.as_ref().expect("encoder");
-            let upload_pass = encoder.create_upload_pass("upload", backend.get_default_renderable());
+            let upload_pass = encoder.create_upload_pass("upload", &*image);
 
             // Update all clipping IDs + upload buckets.
             for item in render_tree.get_source_render_items() {
@@ -189,7 +194,7 @@ impl RendererImpl {
         // Upload layer groups
         {
             let encoder = parameters.encoder.as_ref().expect("encoder");
-            let upload_pass = encoder.create_upload_pass("layerGroup-upload", backend.get_default_renderable());
+            let upload_pass = encoder.create_upload_pass("layerGroup-upload", &*image);
 
             // Update the debug layer groups
             orchestrator.update_debug_layer_groups(render_tree, &parameters); // layers: debug
@@ -287,18 +292,17 @@ impl RendererImpl {
         // Renders the backdrop of the OpenGL view. This also paints in areas
         // where we don't have any tiles whatsoever.
         {
-            let mut color: Option<Color> = None;
-            if parameters.debug_options.contains(MapDebugOptions::OVERDRAW) {
-                color = Some(Color::black());
-            } else if !backend.context_is_shared() {
-                color = Some(render_tree_parameters.background_color);
-            }
+            let color = if parameters.debug_options.contains(MapDebugOptions::OVERDRAW) {
+                Color::black()
+            } else {
+                render_tree_parameters.background_color
+            };
             let encoder = parameters.encoder.as_ref().expect("encoder");
             parameters.render_pass = Some(encoder.create_render_pass(
                 "main buffer",
                 &RenderPassDescriptor {
-                    renderable: backend.get_default_renderable(),
-                    clear_color: color,
+                    target: &*image,
+                    clear_color: Some(color),
                     clear_depth: Some(1.0),
                     clear_stencil: Some(0),
                 },
@@ -405,8 +409,8 @@ impl RendererImpl {
         parameters.render_pass = None;
 
         let start_rendering = mln_util::time::Instant::now();
-        // present submits render commands
-        parameters.encoder.as_ref().expect("encoder").present(backend.get_default_renderable());
+        // Ending the frame submits its commands.
+        let handoff = target.end_frame(&**parameters.encoder.as_ref().expect("encoder"));
         context.rendering_stats().rendering_time = start_rendering.elapsed().as_secs_f64();
 
         parameters.encoder = None;
@@ -440,6 +444,7 @@ impl RendererImpl {
         }
 
         self.frame_count += 1;
+        Some(handoff)
     }
 
     pub fn reduce_memory_use(&mut self) {

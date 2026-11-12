@@ -24,7 +24,7 @@ use mln_util::size::Size;
 use mln_vulkan::Context;
 use mln_vulkan::renderer_backend::BackendImpl;
 use mln_vulkan::shaders::compiler::{Stage, compile};
-use mln_vulkan::surface_backend::{Overlay, OverlayTarget};
+use mln_vulkan::surface_target::{Overlay, OverlayTarget};
 use mln_vulkan::texture2d::Texture2D;
 
 use crate::overlay::Paint;

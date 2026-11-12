@@ -19,22 +19,23 @@
 //! The GLSL comes from the C++ headers, with the port's changes
 //! (`shaders::glsl_sources`).
 //!
-//! `HeadlessBackend` renders into a framebuffer of an EGL context,
-//! `SurfaceBackend` into a Wayland or X11 window through EGL, and
-//! `CanvasBackend` into the canvas of a WebGL2 context.
+//! A [`RendererBackend`] renders on a [`Device`], an EGL share group, into
+//! an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
+//! Wayland or X11 window through EGL from a context of the window's display,
+//! and a `CanvasTarget` draws into the canvas of a WebGL2 context.
 
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
 
 pub mod command_encoder;
 pub mod context;
+pub mod draw_target;
 pub mod drawable;
 pub mod drawable_builder;
 pub mod enums;
 pub mod layer_group;
 pub mod offscreen_texture;
 pub mod render_pass;
-pub mod renderable_resource;
 pub mod renderer_backend;
 pub mod shaders;
 pub mod state;
@@ -46,19 +47,23 @@ pub mod vertex_array;
 pub mod vertex_buffer_resource;
 
 #[cfg(target_arch = "wasm32")]
-pub mod canvas_backend;
+pub mod canvas_target;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod device;
 #[cfg(not(target_arch = "wasm32"))]
 mod egl;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod headless_backend;
+pub mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-pub mod surface_backend;
+pub mod surface_target;
 
 #[cfg(target_arch = "wasm32")]
-pub use canvas_backend::CanvasBackend;
+pub use canvas_target::CanvasTarget;
 pub use context::Context;
 #[cfg(not(target_arch = "wasm32"))]
-pub use headless_backend::HeadlessBackend;
+pub use device::Device;
+#[cfg(not(target_arch = "wasm32"))]
+pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
-pub use surface_backend::SurfaceBackend;
+pub use surface_target::SurfaceTarget;

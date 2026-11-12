@@ -12,8 +12,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use mln_gfx::context::Context;
-use mln_gfx::renderable::Renderable;
-use mln_gfx::renderer_backend::{ContextMode, RendererBackend, RendererBackendBase};
+use mln_gfx::renderer_backend::{RendererBackend, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::{BackendScope, ScopeType};
@@ -29,7 +28,7 @@ struct StubRendererBackend {
 impl StubRendererBackend {
     fn new() -> Self {
         StubRendererBackend {
-            base: RendererBackendBase::new(ContextMode::Unique),
+            base: RendererBackendBase::new(),
             activate_function: RefCell::new(None),
             deactivate_function: RefCell::new(None),
         }
@@ -43,10 +42,6 @@ impl RendererBackend for StubRendererBackend {
 
     fn as_any(&self) -> &dyn Any {
         self
-    }
-
-    fn get_default_renderable(&self) -> &dyn Renderable {
-        std::process::abort();
     }
 
     fn init_shaders(&self, _registry: &ShaderRegistry, _parameters: &ProgramParameters) {}

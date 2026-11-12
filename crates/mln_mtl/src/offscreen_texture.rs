@@ -10,17 +10,17 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mln_gfx::offscreen_texture;
-use mln_gfx::renderable::{Renderable, RenderableBase};
+use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use objc2_metal::{MTLCommandBuffer, MTLCommandQueue, MTLRenderPassDescriptor, MTLTextureUsage};
 
 use crate::context::Context;
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::mtl_fwd::{MTLBufferPtr, MTLCommandBufferPtr, MTLRenderPassDescriptorPtr};
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox, downcast_resource};
 use crate::texture2d::{Texture2D, buffer_bytes};
 
 fn linear_clamp() -> SamplerState {
@@ -129,7 +129,27 @@ impl Drop for OffscreenTextureResource {
     }
 }
 
-impl RenderableResource for OffscreenTextureResource {
+impl OffscreenTextureResource {
+    /// Commits the passes encoded since `bind`, with the copy a read asked
+    /// for, and waits for them.
+    pub fn commit(&self) {
+        let command_buffer = self.command_buffer.borrow_mut().take();
+        debug_assert!(command_buffer.is_some());
+        if let Some(command_buffer) = command_buffer {
+            if self.copy_next_frame.replace(false)
+                && let Some(buffer) = self.readback_buffer.borrow().as_ref()
+            {
+                let copied = self.color_texture.borrow().encode_copy_to(&command_buffer, buffer);
+                self.readback_current.set(copied);
+            }
+            command_buffer.commit();
+            command_buffer.waitUntilCompleted();
+        }
+        self.render_pass_descriptor.borrow_mut().take();
+    }
+}
+
+impl TargetResource for OffscreenTextureResource {
     fn bind(&self) {
         // An upload pass and a render pass both bind this resource in one
         // frame, and only the swap after the render pass commits. Keep the
@@ -160,22 +180,6 @@ impl RenderableResource for OffscreenTextureResource {
         *self.render_pass_descriptor.borrow_mut() = Some(descriptor);
     }
 
-    fn swap(&self) {
-        let command_buffer = self.command_buffer.borrow_mut().take();
-        debug_assert!(command_buffer.is_some());
-        if let Some(command_buffer) = command_buffer {
-            if self.copy_next_frame.replace(false)
-                && let Some(buffer) = self.readback_buffer.borrow().as_ref()
-            {
-                let copied = self.color_texture.borrow().encode_copy_to(&command_buffer, buffer);
-                self.readback_current.set(copied);
-            }
-            command_buffer.commit();
-            command_buffer.waitUntilCompleted();
-        }
-        self.render_pass_descriptor.borrow_mut().take();
-    }
-
     fn get_command_buffer(&self) -> Option<MTLCommandBufferPtr> {
         self.command_buffer.borrow().clone()
     }
@@ -192,34 +196,29 @@ impl RenderableResource for OffscreenTextureResource {
 
 /// `mtl::OffscreenTexture`
 pub struct OffscreenTexture {
-    renderable: RenderableBase,
+    target: DrawTarget,
+    resource: Rc<OffscreenTextureResource>,
     /// The resource's color texture.
     texture: Texture2DPtr,
 }
 
 impl OffscreenTexture {
     pub fn new(context: Rc<Context>, size: Size, type_: TextureChannelDataType, depth: bool, stencil: bool) -> Self {
-        let resource = OffscreenTextureResource::new(context, size, type_, depth, stencil);
+        let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
         let texture = resource.get_texture();
-        OffscreenTexture {
-            renderable: RenderableBase::new(size, Some(RenderableResourceBox::new_rc(resource))),
-            texture,
-        }
+        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource, texture }
     }
 
-    pub fn with_resource<R>(&self, f: impl FnOnce(&OffscreenTextureResource) -> R) -> Option<R> {
-        let resource = self.get_resource()?;
-        downcast_resource::<OffscreenTextureResource>(&*resource).map(f)
-    }
-}
-
-impl Renderable for OffscreenTexture {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
+    pub fn resource(&self) -> &OffscreenTextureResource {
+        &self.resource
     }
 }
 
 impl offscreen_texture::OffscreenTexture for OffscreenTexture {
+    fn draw_target(&self) -> &dyn frame::DrawTarget {
+        &self.target
+    }
+
     /// C++ asserts: nothing calls it.
     fn is_renderable(&self) -> bool {
         debug_assert!(false);
@@ -227,12 +226,15 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     }
 
     fn read_still_image(&self) -> PremultipliedImage {
-        self.with_resource(OffscreenTextureResource::read_still_image)
-            .unwrap_or_else(|| PremultipliedImage::new(self.get_size()))
+        self.resource().read_still_image()
     }
 
     fn get_texture(&self) -> Texture2DPtr {
         self.texture.clone()
+    }
+
+    fn submit(&self, _encoder: &dyn CommandEncoder) {
+        self.resource().commit();
     }
 
     fn as_any(&self) -> &dyn Any {

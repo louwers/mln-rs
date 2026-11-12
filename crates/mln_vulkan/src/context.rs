@@ -5,8 +5,8 @@
 // destroyed when dropped, instead of through the context's deletion queue.
 //
 // C++ reaches the default renderable's resource through its backend
-// (`backend.getDefaultRenderable()`); the platform backend of the port hands
-// it to the context when it makes it (`set_surface`).
+// (`backend.getDefaultRenderable()`); here the frame target hands its images
+// to the context when a frame begins (`set_surface`).
 //
 // Differences from C++:
 // - The render passes are the context's, one for each set of attachment
@@ -25,10 +25,7 @@
 // - Errors C++ throws (a failed wait for a frame, a surface that stays out
 //   of date) are logged. A frame that acquires no image, for a swapchain or
 //   a surface that couldn't be made again, is recorded without a
-//   framebuffer for the default renderable, and submitted without
-//   presenting.
-// - Port-only: `request_surface_recreation` has the platform surface made
-//   again without it being lost (`SurfaceBackend::restore_surface`).
+//   framebuffer for the frame target, and submitted without presenting.
 //
 // TODO(port): `createDynamicTexture`, `createRenderTarget`,
 // `createRenderbufferResource` and the render jobs of the backend thread
@@ -73,7 +70,6 @@ use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
 use crate::pipeline::PipelineInfo;
 use crate::render_pass::RenderPass;
-use crate::renderable_resource::SurfaceRenderableResource;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::compiler::{self, Stage};
 use crate::shaders::layout::{
@@ -82,6 +78,7 @@ use crate::shaders::layout::{
 };
 use crate::shaders::shader_program::{ShaderProgram, as_vulkan_shader};
 use crate::shaders::shader_source::shader_source;
+use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 use crate::uniform_buffer::UniformBuffer;
@@ -190,7 +187,7 @@ pub struct Context {
     /// acquired from the swapchain.
     frame_image_acquired: Cell<bool>,
 
-    surface: RefCell<Weak<SurfaceRenderableResource>>,
+    surface: RefCell<Weak<SurfaceResource>>,
     surface_update_requested: Cell<bool>,
     /// The platform surface must be recreated before the swapchain is
     /// rebuilt.
@@ -382,10 +379,15 @@ impl Context {
         &self.backend
     }
 
-    /// Makes `surface` the resource of the default renderable, which frames
-    /// are acquired from and presented to.
-    pub fn set_surface(&self, surface: &Rc<SurfaceRenderableResource>) {
-        *self.surface.borrow_mut() = Rc::downgrade(surface);
+    /// Makes `surface` the images that frames are acquired from and
+    /// presented to, from the next frame on.
+    pub fn set_surface(&self, surface: &Rc<SurfaceResource>) {
+        let surface = Rc::downgrade(surface);
+        if !self.surface.borrow().ptr_eq(&surface) {
+            *self.surface.borrow_mut() = surface;
+            self.surface_update_requested.set(false);
+            self.surface_lost.set(false);
+        }
     }
 
     /// `destroyResources()`: waits for the device, runs the deletion queues
@@ -550,13 +552,6 @@ impl Context {
         }
         self.surface_update_requested.set(true);
         self.surface_update_latency.set(if use_delay { self.backend.get_max_frames() as i32 * 3 } else { 0 });
-    }
-
-    /// Has the platform surface made again, as a lost one is, and its
-    /// swapchain with it, before the next frame.
-    pub fn request_surface_recreation(&self) {
-        self.surface_lost.set(true);
-        self.request_surface_update(false);
     }
 
     /// `updateSurface()`
@@ -832,7 +827,7 @@ impl Context {
     ///
     /// A pass clears its attachments, unless it loads the color
     /// (`RenderPassKey::color_load`). A pass with depth and stencil
-    /// (`SurfaceRenderableResource::initRenderPass`) keeps the color only; a
+    /// (`SurfaceResource::initRenderPass`) keeps the color only; a
     /// pass without (`OffscreenTextureResource::createRenderPass`) leaves
     /// the color attachment ready to be sampled.
     pub fn get_render_pass(&self, key: RenderPassKey) -> vk::RenderPass {

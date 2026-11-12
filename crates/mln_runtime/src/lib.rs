@@ -13,6 +13,13 @@
 //!
 //! The synchronous, single-thread core that these handles drive is
 //! `mln_map`'s; [`Map::with_core`] runs a closure on it.
+//!
+//! Sessions render with the backends of the crate's features: `webgpu`,
+//! `metal`, `vulkan` and `gl`, each where its platform has it. A session's
+//! [`Device`] picks its backend.
+
+#[cfg(not(any(feature = "webgpu", feature = "metal", feature = "vulkan", feature = "gl")))]
+compile_error!("mln_runtime renders with at least one backend: enable `webgpu`, `metal`, `vulkan` or `gl`");
 
 mod camera;
 mod completion;
@@ -35,9 +42,9 @@ pub use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 pub use mln_util::{Error, ErrorKind};
 pub use offline::Offline;
 pub use render::{
-    AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, HostDevice,
-    OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot,
-    RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface, Wake,
+    AttachOptions, BackendType, DemandMode, Device, DeviceOptions, Driver, DriverWork, FrameDemand, FrameDisposition,
+    FrameResult, LocalTarget, RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState,
+    RenderTarget, RenderedQueryGeometry, Surface, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

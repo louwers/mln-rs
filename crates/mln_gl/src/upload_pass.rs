@@ -7,7 +7,7 @@
 //   to the shader's types (`VertexAttributeGL::getRaw`) and interleaves them
 //   into one buffer; the port's renderer makes them in the types the shaders
 //   read.
-// - The pass doesn't bind its renderable: uploads touch no framebuffer.
+// - The pass doesn't bind its draw target: uploads touch no framebuffer.
 //
 // Not ported: the texture and renderbuffer resources of the legacy program
 // path.
@@ -19,7 +19,6 @@ use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescr
 use mln_gfx::debug_group::DebugGroupTarget;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::index_vector::IndexVectorBase;
-use mln_gfx::renderable::Renderable;
 use mln_gfx::types::BufferUsageType;
 use mln_gfx::upload_pass;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
@@ -49,7 +48,7 @@ impl VertexBufferBase for VertexBuffer {
 
 impl UploadPass {
     /// `UploadPass(commandEncoder, name)`
-    pub fn new(_renderable: &dyn Renderable, command_encoder: &CommandEncoder, _name: &str) -> Self {
+    pub fn new(command_encoder: &CommandEncoder, _name: &str) -> Self {
         UploadPass { context: command_encoder.get_context().clone() }
     }
 

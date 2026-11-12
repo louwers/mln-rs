@@ -2,7 +2,7 @@
 // Creating the headless surface through ash is the FFI here.
 #![allow(unsafe_code)]
 
-// The window backend (`SurfaceBackend`) without a window: on a surface of
+// The window target (`SurfaceTarget`) without a window: on a surface of
 // VK_EXT_headless_surface, whose swapchain takes and gives images like a
 // window's and shows them nowhere. The frames go through the swapchain as
 // the desktop app's do (acquire, render pass, overlay, present), and each
@@ -12,7 +12,7 @@
 // over half of it, as background_test.rs does: a frame that shows another
 // frame's image, or reads another frame's uniforms, has the wrong colors.
 //
-// The backend keeps two frames in flight on a surface, so a uniform buffer
+// A backend made for a surface keeps two frames in flight, so a uniform buffer
 // has a copy for each: the frames that aren't read back aren't waited for,
 // and the ones after them read the copy the frame before didn't write.
 //
@@ -29,13 +29,14 @@ use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
+use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::render_pass::{RenderPass as GfxRenderPass, RenderPassDescriptor};
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::renderer::render_pass::RenderPass;
-use mln_gfx::renderer_backend::RendererBackend;
+use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -53,9 +54,9 @@ use mln_util::Color;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_vulkan::SurfaceBackend;
 use mln_vulkan::renderer_backend::SurfaceProvider;
-use mln_vulkan::surface_backend::{Overlay, OverlayTarget, present_mode};
+use mln_vulkan::surface_target::{Overlay, OverlayTarget, present_mode};
+use mln_vulkan::{Device, RendererBackend, SurfaceTarget};
 
 const EXTENT: i16 = 8192;
 
@@ -105,20 +106,63 @@ fn unavailable() -> Option<String> {
         .map(|name| format!("Vulkan has no {}", name.to_string_lossy()))
 }
 
-/// A backend on a headless surface that `provider` makes, or `None` where
-/// there can't be one, which fails the test on CI.
-fn surface_backend_on(provider: Rc<HeadlessSurface>, size: Size, cap_frame_rate: bool) -> Option<SurfaceBackend> {
+/// A backend made for a headless surface, and a target that presents to it.
+struct Window {
+    backend: Rc<RendererBackend>,
+    target: SurfaceTarget,
+}
+
+impl Window {
+    /// Takes the next frame; false when there is none to draw into.
+    fn acquire_next_texture(&self) -> bool {
+        self.target.begin_frame().is_some()
+    }
+
+    fn set_framebuffer_size(&self, size: Size) {
+        self.target.resize(size);
+    }
+
+    fn get_framebuffer_size(&self) -> Size {
+        self.target.size()
+    }
+
+    fn request_readback(&self) {
+        self.target.request_readback();
+    }
+
+    fn take_readback(&self) -> Option<PremultipliedImage> {
+        self.target.take_readback()
+    }
+
+    fn set_overlay(&self, overlay: Option<Overlay>) {
+        self.target.set_overlay(overlay);
+    }
+}
+
+impl std::ops::Deref for Window {
+    type Target = RendererBackend;
+
+    fn deref(&self) -> &RendererBackend {
+        &self.backend
+    }
+}
+
+/// A backend and a target on a headless surface that `provider` makes, or
+/// `None` where there can't be one, which fails the test on CI.
+fn surface_backend_on(provider: Rc<HeadlessSurface>, size: Size, cap_frame_rate: bool) -> Option<Window> {
     if let Some(reason) = unavailable() {
         assert!(std::env::var_os("CI").is_none(), "the swapchain tests can't run on CI: {reason}");
         eprintln!("skipping the swapchain test: {reason}");
         return None;
     }
-    let backend = SurfaceBackend::new(provider, size, cap_frame_rate).expect("Vulkan device");
+    let device = Device::new(None).expect("Vulkan device");
+    let (backend, target) =
+        SurfaceTarget::with_backend_from_provider(&device, provider, size, cap_frame_rate).expect("Vulkan backend");
     eprintln!("rendering with {}", backend.get_device_name());
-    Some(backend)
+    Some(Window { backend, target })
 }
 
-fn surface_backend(size: Size, cap_frame_rate: bool) -> Option<SurfaceBackend> {
+fn surface_backend(size: Size, cap_frame_rate: bool) -> Option<Window> {
     surface_backend_on(Rc::default(), size, cap_frame_rate)
 }
 
@@ -201,7 +245,7 @@ struct Scene {
 }
 
 impl Scene {
-    fn new(backend: &SurfaceBackend) -> Scene {
+    fn new(backend: &Window) -> Scene {
         let registry = ShaderRegistry::new();
         backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
         let context = backend.get_context();
@@ -291,7 +335,7 @@ struct Change {
 /// draws the scene over `clear` and presents. With `read`, the presented
 /// frame is read back.
 fn render_frame(
-    backend: &SurfaceBackend,
+    backend: &Window,
     scene: Option<&Scene>,
     change: Change,
     clear: Color,
@@ -303,10 +347,11 @@ fn render_frame(
         assert!(backend.take_readback().is_none(), "nothing is read before the frame is presented");
     }
     let context = backend.get_context();
-    let renderable = backend.get_default_renderable();
+    let image = backend.target.begin_frame().expect("a frame");
+    let renderable = &*image;
     context.begin_frame();
 
-    let size = renderable.get_size();
+    let size = renderable.size();
     let mut parameters = TestPaintParameters {
         context,
         encoder: context.create_command_encoder(),
@@ -326,7 +371,12 @@ fn render_frame(
     }
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
-        &RenderPassDescriptor { renderable, clear_color: Some(clear), clear_depth: Some(1.0), clear_stencil: Some(0) },
+        &RenderPassDescriptor {
+            target: renderable,
+            clear_color: Some(clear),
+            clear_depth: Some(1.0),
+            clear_stencil: Some(0),
+        },
     ));
     context.bind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     if let Some(scene) = scene {
@@ -337,7 +387,7 @@ fn render_frame(
     }
     context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     parameters.render_pass = None;
-    parameters.encoder.present(renderable);
+    backend.target.end_frame(&*parameters.encoder);
     context.end_frame();
 
     let image = backend.take_readback();
@@ -414,9 +464,9 @@ fn frames_present_what_they_draw() {
         let Some(backend) = surface_backend(size, cap_frame_rate) else {
             return;
         };
-        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+        let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
         assert_eq!(backend.get_framebuffer_size(), size);
-        assert_ne!(backend.get_color_format(), vk::Format::UNDEFINED);
+        assert_ne!(backend.target.get_color_format(), vk::Format::UNDEFINED);
         let scene = Scene::new(&backend);
         // More frames than the swapchain has images.
         for frame in 0..12 {
@@ -436,7 +486,7 @@ fn uniforms_follow_each_frame_in_flight() {
     let Some(backend) = surface_backend(size, false) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let clear = color(0.0, 0.0, 0.0);
     let (red, green, blue) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
@@ -481,7 +531,7 @@ fn resize_rebuilds_the_swapchain() {
     let Some(backend) = surface_backend(Size::new(64, 32), true) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let mut frame = 0;
     let mut draw = |size: Size, read: bool| {
@@ -518,7 +568,7 @@ fn empty_framebuffer_draws_nothing() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let (clear, red, green) = (color(0.2, 0.4, 0.6), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(true) };
@@ -614,7 +664,7 @@ fn overlay_draws_over_the_frame_and_is_read_back() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let (calls, sizes) = (Rc::new(Cell::new(0)), Rc::new(RefCell::new(Vec::new())));
     let (clear, blue, green) = (color(0.2, 0.2, 0.2), color(0.0, 0.0, 1.0), color(0.0, 1.0, 0.0));
@@ -666,7 +716,7 @@ fn dropped_with_frames_in_flight_then_made_again() {
         let Some(backend) = surface_backend(size, false) else {
             return;
         };
-        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+        let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
         let scene = Scene::new(&backend);
         backend.set_overlay(Some(quarter_overlay(Rc::default(), Rc::default())));
         // Nothing waits for these frames, a resize among them; the
@@ -689,7 +739,7 @@ fn dropped_with_frames_in_flight_then_made_again() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let scene = Scene::new(&backend);
     let image = render_frame(&backend, Some(&scene), set(red), clear, true).unwrap();
     check_halves(&image, size, red, clear, "second backend");
@@ -698,96 +748,42 @@ fn dropped_with_frames_in_flight_then_made_again() {
 }
 
 #[test]
-fn released_surface_is_made_again() {
-    // What a window that goes to another backend, or away, has the backend
-    // do: the swapchain and the surface go while the device stays, and the
-    // provider makes the surface again, as it does a lost one.
+fn a_new_target_on_the_backend_presents() {
+    // What a session does with a surface the host gives it in place of
+    // another: the old target's swapchain and surface go, the backend and
+    // what the renderer made on it stay, and the new target presents.
     let provider = Rc::new(HeadlessSurface::default());
-    let mut size = Size::new(48, 32);
-    let Some(backend) = surface_backend_on(provider.clone(), size, true) else {
+    let size = Size::new(48, 32);
+    let Some(mut window) = surface_backend_on(provider.clone(), size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let scene = Scene::new(&backend);
-    backend.set_overlay(Some(quarter_overlay(Rc::default(), Rc::default())));
-    let (clear, red, green, blue) =
-        (color(0.4, 0.4, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
+    let backend = window.backend.clone();
+    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
+    let scene = Scene::new(&window);
+    let (clear, red, green) = (color(0.4, 0.4, 0.4), color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0));
     let set = |color: Color| Change { color: Some(color), right: Some(true) };
     assert_eq!(provider.made.get(), 1);
 
-    // Restoring a surface that wasn't released changes nothing.
-    backend.restore_surface();
-    render_frame(&backend, Some(&scene), set(red), clear, false);
-    let image = render_frame(&backend, Some(&scene), Change::default(), clear, true).unwrap();
-    check_overlaid(&image, size, clear, red, "before");
-    assert_eq!(provider.made.get(), 1);
-
-    // Released with a frame in flight: nothing can be drawn.
-    render_frame(&backend, Some(&scene), set(green), clear, false);
-    backend.release_surface();
-    backend.release_surface();
-    assert!(!backend.acquire_next_texture());
-    assert_eq!(provider.made.get(), 1);
-
-    // Restored: the scene, its uniforms and the overlay are as they were.
-    backend.restore_surface();
-    assert!(backend.acquire_next_texture());
-    let image = render_frame(&backend, Some(&scene), Change::default(), clear, true).unwrap();
-    check_overlaid(&image, size, clear, green, "restored");
+    // Replaced with a frame in flight: the scene and its uniforms are as
+    // they were.
+    render_frame(&window, Some(&scene), set(red), clear, false);
+    window.target = SurfaceTarget::from_provider(backend.clone(), provider.clone(), size, true).expect("target");
     assert_eq!(provider.made.get(), 2);
-    let image = render_frame(&backend, Some(&scene), set(blue), clear, true).unwrap();
-    check_overlaid(&image, size, clear, blue, "restored, second frame");
+    let image = render_frame(&window, Some(&scene), Change::default(), clear, true).unwrap();
+    check_halves(&image, size, clear, red, "new target");
 
-    // A resize while released is the size of the swapchain made after.
-    backend.release_surface();
-    size = Size::new(80, 24);
-    backend.set_framebuffer_size(size);
-    assert!(!backend.acquire_next_texture());
-    backend.restore_surface();
-    let image = render_frame(&backend, Some(&scene), set(red), clear, true).unwrap();
-    check_overlaid(&image, size, clear, red, "restored at another size");
-    assert_eq!(provider.made.get(), 3);
+    // At another size.
+    let size = Size::new(80, 24);
+    window.target = SurfaceTarget::from_provider(backend.clone(), provider.clone(), size, true).expect("target");
+    let image = render_frame(&window, Some(&scene), set(green), clear, true).unwrap();
+    check_halves(&image, size, clear, green, "new target at another size");
 
-    // Dropped while released.
-    backend.release_surface();
-}
-
-#[test]
-fn failed_surface_recreation_is_retried() {
-    // The end of test/renderer/vulkan_acquire.test.cpp's
-    // FailedSurfaceRecreationIsRetried: creating the surface fails, which
-    // leaves the resource without one. The frames until it succeeds have no
-    // image: they ask for the surface again, and present nothing.
-    let provider = Rc::new(HeadlessSurface::default());
-    let size = Size::new(32, 32);
-    let Some(backend) = surface_backend_on(provider.clone(), size, true) else {
-        return;
-    };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    let scene = Scene::new(&backend);
-    let (clear, red) = (color(0.0, 0.2, 0.4), color(1.0, 0.0, 0.0));
-    let set = |color: Color| Change { color: Some(color), right: Some(false) };
-    render_frame(&backend, Some(&scene), set(red), clear, false);
-
-    backend.release_surface();
+    // A surface that can't be made leaves the target the window has.
     provider.fail.set(true);
-    backend.restore_surface();
-    backend.request_readback();
-    let context = backend.get_context();
-    let renderable = backend.get_default_renderable();
-    for attempt in 0..3 {
-        context.begin_frame();
-        context.create_command_encoder().present(renderable);
-        context.end_frame();
-        assert_eq!(provider.made.get(), 2 + attempt, "each frame asks for the surface again");
-        assert!(backend.take_readback().is_none(), "a frame without an image isn't read back");
-    }
-
-    // With a surface again, the frame is drawn, and it is the one read.
+    assert!(SurfaceTarget::from_provider(backend.clone(), provider.clone(), size, true).is_err());
     provider.fail.set(false);
-    let image = render_frame(&backend, Some(&scene), Change::default(), clear, true).unwrap();
-    check_halves(&image, size, red, clear, "after the surface was made");
-    assert_eq!(provider.made.get(), 5);
+    let image = render_frame(&window, Some(&scene), set(red), clear, true).unwrap();
+    check_halves(&image, size, clear, red, "after a failed target");
 }
 
 #[test]
@@ -796,7 +792,7 @@ fn readback_is_of_the_frame_asked_for() {
     let Some(backend) = surface_backend(size, true) else {
         return;
     };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let (first, second, third) = (color(1.0, 0.0, 0.0), color(0.0, 1.0, 0.0), color(0.0, 0.0, 1.0));
     // No frame is read without a request.
     assert!(backend.take_readback().is_none());

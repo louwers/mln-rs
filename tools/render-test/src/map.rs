@@ -1,5 +1,5 @@
 // Ports the map side of render-test/runner.{hpp,cpp}: `TestRunner::Impl`
-// (HeadlessFrontend, Map), `swapBehavior`,
+// (HeadlessFrontend, Map),
 // `resetContext` and the map/style calls of the operations, over mln_map and
 // mln_headless.
 
@@ -8,7 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
-use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
@@ -28,11 +27,6 @@ fn map_mode(mode: MapMode) -> mln_map::MapMode {
         MapMode::Static => mln_map::MapMode::Static,
         MapMode::Tile => mln_map::MapMode::Tile,
     }
-}
-
-/// `swapBehavior(mode)` (runner.cpp).
-fn swap_behavior(mode: MapMode) -> SwapBehaviour {
-    if mode == MapMode::Continuous { SwapBehaviour::Flush } else { SwapBehaviour::NoFlush }
 }
 
 /// `TestRunner::Impl`.
@@ -56,13 +50,8 @@ impl Impl {
         let resource_options = mln_storage::ResourceOptions::default()
             .with_cache_path(resource_options.cache_path.clone())
             .with_api_key(resource_options.api_key.clone());
-        let frontend = HeadlessFrontend::with_options(
-            metadata.size,
-            metadata.pixel_ratio,
-            swap_behavior(metadata.map_mode),
-            ContextMode::Unique,
-            true,
-        );
+        let frontend =
+            HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
             let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)));

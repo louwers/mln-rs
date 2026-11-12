@@ -718,13 +718,12 @@ fn offline() {
     // "Apple Paravirtual device", where a few labels' glyphs land on other
     // labels (image difference 0.0176). Placement is identical to a run on an
     // Apple GPU, where the image matches. Skip on that device, as C++ does.
-    let backend = test.frontend.get_backend().as_any();
-    let device = backend
-        .downcast_ref::<mln_webgpu::HeadlessBackend>()
-        .and_then(|backend| backend.get_adapter_info())
-        .map(|info| info.name);
-    #[cfg(target_vendor = "apple")]
-    let device = device.or_else(|| backend.downcast_ref::<mln_mtl::HeadlessBackend>().map(|b| b.get_device_name()));
+    let device = match test.frontend.device() {
+        mln_runtime::Device::WebGpu(device) => Some(device.adapter_info().name),
+        #[cfg(target_vendor = "apple")]
+        mln_runtime::Device::Metal(device) => Some(device.name()),
+        _ => None,
+    };
     if device.is_some_and(|name| name == "Apple Paravirtual device") {
         eprintln!("Map.Offline: skipped on the Apple Paravirtual device, as in C++ CI");
         return;
@@ -1350,7 +1349,7 @@ fn continuous_rendering() {
 
     let timer = Rc::new(Timer::new());
 
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
 
     let observer = Rc::new(StubMapObserver::default());
     {
@@ -2233,7 +2232,7 @@ fn expired_sprite_sheet() {
         &ResourceOptions::default().with_cache_path(":memory:").with_asset_path("."),
     ));
     let observer = Rc::new(StubMapObserver::default());
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
     let options =
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()).with_pixel_ratio(1.0);
     let map = Map::with_file_source(file_source, options).unwrap();
@@ -2851,7 +2850,7 @@ fn observe_tile_lifecycle() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
@@ -3102,7 +3101,7 @@ fn globe_hand_off_keeps_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(
@@ -3317,7 +3316,7 @@ fn globe_bounded_source_loads_finer_tiles() {
         });
     }
 
-    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let mut frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     // C++ runs from the checkout's root; the asset path is relative to it.
     let asset_path = cpp_root().join("test/fixtures/api/assets");
     let mut map = Map::with_file_source(

@@ -6,7 +6,7 @@
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::{BackendScope, RendererBackend, ScopeType};
+use mln_gfx::{BackendScope, FrameTarget, Handoff, RendererBackend, ScopeType};
 use mln_text::GlyphCache;
 
 use crate::renderer_event::RendererEvents;
@@ -80,17 +80,20 @@ impl Renderer {
         self.impl_mut().orchestrator.set_event_queue(events);
     }
 
-    pub fn render(&mut self, update_parameters: &Arc<UpdateParameters>) {
+    /// Draws `update_parameters` into a frame of `target`, which must be
+    /// built on the renderer's backend. Returns where the frame went, or
+    /// `None` when nothing was drawn: there was nothing to draw, or the
+    /// target had nothing to draw into.
+    pub fn render(&mut self, update_parameters: &Arc<UpdateParameters>, target: &dyn FrameTarget) -> Option<Handoff> {
         let impl_ = self.impl_mut();
         let style_changed = impl_.style_loaded && !update_parameters.style_loaded;
         impl_.style_loaded = update_parameters.style_loaded;
         if style_changed {
             impl_.orchestrator.reset_dynamic_texture_atlas();
         }
-        if let Some(mut render_tree) = impl_.orchestrator.create_render_tree(update_parameters) {
-            render_tree.prepare();
-            impl_.render(&render_tree, update_parameters);
-        }
+        let mut render_tree = impl_.orchestrator.create_render_tree(update_parameters)?;
+        render_tree.prepare();
+        impl_.render(&render_tree, update_parameters, target)
     }
 
     // query: `Err` is the exception C++ throws out of the query (a

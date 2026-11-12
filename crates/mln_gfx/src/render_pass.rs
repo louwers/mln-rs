@@ -8,12 +8,12 @@ use std::any::Any;
 use mln_util::Color;
 
 use crate::debug_group::{DebugGroup, DebugGroupTarget};
-use crate::renderable::Renderable;
+use crate::frame::DrawTarget;
 
 /// `gfx::RenderPassDescriptor`
 #[derive(Clone, Copy)]
 pub struct RenderPassDescriptor<'a> {
-    pub renderable: &'a dyn Renderable,
+    pub target: &'a dyn DrawTarget,
     pub clear_color: Option<Color>,
     pub clear_depth: Option<f32>,
     pub clear_stencil: Option<i32>,

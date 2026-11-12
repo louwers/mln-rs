@@ -23,7 +23,7 @@ fn failed_swapchain_rebuild_is_retried() {
 
 // gtest: VulkanContext.FailedSurfaceRecreationIsRetried
 #[test]
-#[ignore = "needs C++'s replaceable Vulkan dispatcher, to lose the surface; surface_test covers the retry"]
+#[ignore = "needs C++'s replaceable Vulkan dispatcher, to lose the surface"]
 fn failed_surface_recreation_is_retried() {
     // test/renderer/vulkan_acquire.test.cpp:189
 }

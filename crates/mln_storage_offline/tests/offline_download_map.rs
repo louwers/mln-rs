@@ -136,7 +136,7 @@ fn resource_offline_usage_unset() {
         Some(fixture_response(&s, "0-0-0.vector.pbf"))
     });
 
-    let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
     let mut map = Map::with_file_source(
         stubfile_source,
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),

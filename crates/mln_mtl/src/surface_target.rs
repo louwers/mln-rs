@@ -1,8 +1,7 @@
-// Ports platform/glfw/metal_backend.h and platform/glfw/metal_backend.mm:
-// a `mtl::RendererBackend` that is its own default `gfx::Renderable` and
-// presents to a `CAMetalLayer`. The window stays with the host (such as
-// examples/desktop), which makes the layer and reports framebuffer resizes
-// through `set_framebuffer_size`.
+// Ports the presenting part of platform/glfw/metal_backend.h and
+// platform/glfw/metal_backend.mm: frames presented to a `CAMetalLayer`. The
+// window stays with the host (such as examples/desktop), which makes the
+// layer and reports framebuffer resizes through `resize`.
 //
 // Differences from C++:
 // - C++ takes the next drawable and a new command buffer in every `bind()`,
@@ -12,7 +11,7 @@
 //   queue for the window.
 // - The depth and stencil attachments are Metal textures of their own, not
 //   `mtl::Texture2D`s, which need the context that `bind` has no access to.
-// - Port-only: `acquire_next_texture` takes the drawable ahead of a frame,
+// - Port-only: `begin_frame` takes the drawable ahead of a frame,
 //   `request_readback` copies a presented frame into an image, with
 //   `cap_frame_rate` off the layer doesn't wait for the display, and
 //   `set_overlay` draws over each frame before it is presented, such as an
@@ -22,12 +21,8 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::renderable::{Renderable, RenderableBase};
-use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
-use mln_util::error::Error;
+use mln_gfx::command_encoder::CommandEncoder;
+use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use objc2::rc::{Retained, autoreleasepool};
@@ -39,15 +34,15 @@ use objc2_metal::{
 };
 use objc2_quartz_core::{CAMetalDrawable, CAMetalLayer};
 
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::mtl_fwd::{MTLCommandBufferPtr, MTLRenderPassDescriptorPtr, MTLTexturePtr};
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox};
 use crate::renderer_backend::{BackendImpl, RendererBackend};
 use crate::texture2d::{buffer_bytes, encode_texture_copy};
 
 /// The format of the layer's drawables.
 const COLOR_FORMAT: MTLPixelFormat = MTLPixelFormat::BGRA8Unorm;
 
-/// Port-only: what an overlay draws into (`SurfaceBackend::set_overlay`):
+/// Port-only: what an overlay draws into (`SurfaceTarget::set_overlay`):
 /// the frame's drawable, after the map and before it is presented.
 pub struct OverlayTarget<'a> {
     pub device: &'a ProtocolObject<dyn MTLDevice>,
@@ -58,7 +53,7 @@ pub struct OverlayTarget<'a> {
     pub size: Size,
 }
 
-/// Port-only: draws over a frame (`SurfaceBackend::set_overlay`).
+/// Port-only: draws over a frame (`SurfaceTarget::set_overlay`).
 pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
 /// The depth and stencil textures of a drawable size.
@@ -68,7 +63,7 @@ struct DepthStencil {
     stencil: MTLTexturePtr,
 }
 
-/// What the renderable resource and the backend share.
+/// What the draw target and the frame target share.
 struct SurfaceState {
     backend: Rc<BackendImpl>,
     layer: Retained<CAMetalLayer>,
@@ -144,12 +139,13 @@ impl SurfaceState {
             .then(|| (buffer, Size::new(width as u32, height as u32)))
     }
 
-    fn swap(&self) {
+    /// Presents the frame's drawable. Returns whether the frame had one.
+    fn swap(&self) -> bool {
         let drawable = self.drawable.borrow_mut().take();
         let command_buffer = self.command_buffer.borrow_mut().take();
         self.render_pass_descriptor.borrow_mut().take();
         let (Some(drawable), Some(command_buffer)) = (drawable, command_buffer) else {
-            return;
+            return false;
         };
 
         let texture = drawable.texture();
@@ -185,15 +181,16 @@ impl SurfaceState {
             }
             *self.readback.borrow_mut() = Some(image);
         }
+        true
     }
 }
 
-/// `MetalRenderableResource`: the layer as a renderable resource.
-struct SurfaceRenderableResource {
+/// `MetalRenderableResource`: the layer's drawable as a draw target.
+struct SurfaceResource {
     state: Rc<SurfaceState>,
 }
 
-impl RenderableResource for SurfaceRenderableResource {
+impl TargetResource for SurfaceResource {
     fn bind(&self) {
         let state = &self.state;
         if !state.acquire_drawable() {
@@ -217,10 +214,6 @@ impl RenderableResource for SurfaceRenderableResource {
         *state.render_pass_descriptor.borrow_mut() = Some(descriptor);
     }
 
-    fn swap(&self) {
-        self.state.swap();
-    }
-
     fn get_command_buffer(&self) -> Option<MTLCommandBufferPtr> {
         self.state.command_buffer.borrow().clone()
     }
@@ -234,22 +227,57 @@ impl RenderableResource for SurfaceRenderableResource {
     }
 }
 
-/// `MetalBackend` without the window: a `mtl::RendererBackend` and
-/// `gfx::Renderable` presenting to a `CAMetalLayer`.
-pub struct SurfaceBackend {
-    renderer_backend: RendererBackend,
-    renderable: RenderableBase,
-    state: Rc<SurfaceState>,
+/// A `CAMetalLayer` that a [`SurfaceTarget`] presents to, which may move to
+/// the thread that renders.
+pub struct Layer(Retained<CAMetalLayer>);
+
+// SAFETY: a target uses its layer on the thread that renders only, to take
+// drawables and set their size and format, which Core Animation allows off
+// the main thread.
+unsafe impl Send for Layer {}
+
+impl Layer {
+    pub fn new(layer: Retained<CAMetalLayer>) -> Layer {
+        Layer(layer)
+    }
+
+    /// The layer `layer` points to, retained, or `None` for a null pointer.
+    ///
+    /// # Safety
+    ///
+    /// `layer` is null or a live `CAMetalLayer`.
+    pub unsafe fn from_raw(layer: *mut std::ffi::c_void) -> Option<Layer> {
+        // SAFETY: the caller's contract.
+        unsafe { Retained::retain(layer.cast()) }.map(Layer)
+    }
+
+    /// The layer, as a pointer for other APIs.
+    pub fn as_ptr(&self) -> *mut std::ffi::c_void {
+        Retained::as_ptr(&self.0).cast_mut().cast()
+    }
 }
 
-impl SurfaceBackend {
-    /// A backend on the system's default device that presents to `layer`,
-    /// whose drawables it sizes to `framebuffer_size`. With
-    /// `cap_frame_rate` off, frames are presented without waiting for the
-    /// display.
-    pub fn new(layer: Retained<CAMetalLayer>, framebuffer_size: Size, cap_frame_rate: bool) -> Result<Self, Error> {
-        let renderer_backend = RendererBackend::new(ContextMode::Unique)?;
-        layer.setDevice(Some(renderer_backend.get_device()));
+impl std::fmt::Debug for Layer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Layer").finish_non_exhaustive()
+    }
+}
+
+/// `MetalBackend`'s layer without the window: frames presented to a
+/// `CAMetalLayer`.
+pub struct SurfaceTarget {
+    state: Rc<SurfaceState>,
+    image: Rc<DrawTarget>,
+    size: Cell<Size>,
+}
+
+impl SurfaceTarget {
+    /// A target on `backend` that presents to `layer`, whose drawables it
+    /// sizes to `framebuffer_size`. With `cap_frame_rate` off, frames are
+    /// presented without waiting for the display.
+    pub fn new(backend: &RendererBackend, layer: Layer, framebuffer_size: Size, cap_frame_rate: bool) -> SurfaceTarget {
+        let Layer(layer) = layer;
+        layer.setDevice(Some(backend.get_device()));
         layer.setPixelFormat(COLOR_FORMAT);
         layer.setFramebufferOnly(true);
         #[cfg(target_os = "macos")]
@@ -257,7 +285,7 @@ impl SurfaceBackend {
         #[cfg(not(target_os = "macos"))]
         let _ = cap_frame_rate;
         let state = Rc::new(SurfaceState {
-            backend: renderer_backend.backend_impl().clone(),
+            backend: backend.backend_impl().clone(),
             layer,
             drawable: RefCell::new(None),
             command_buffer: RefCell::new(None),
@@ -267,23 +295,10 @@ impl SurfaceBackend {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-        let resource = RenderableResourceBox::new_rc(SurfaceRenderableResource { state: state.clone() });
-        let backend = SurfaceBackend {
-            renderer_backend,
-            renderable: RenderableBase::new(Size::new(0, 0), Some(resource)),
-            state,
-        };
-        backend.set_framebuffer_size(framebuffer_size);
-        Ok(backend)
-    }
-
-    pub fn mtl_backend(&self) -> &RendererBackend {
-        &self.renderer_backend
-    }
-
-    /// The name of the GPU.
-    pub fn get_device_name(&self) -> String {
-        self.renderer_backend.get_device().name().to_string()
+        let image = Rc::new(DrawTarget::new(Size::new(0, 0), SurfaceResource { state: state.clone() }));
+        let target = SurfaceTarget { state, image, size: Cell::new(Size::new(0, 0)) };
+        target.resize(framebuffer_size);
+        target
     }
 
     /// The format of the layer's drawables.
@@ -291,25 +306,18 @@ impl SurfaceBackend {
         COLOR_FORMAT
     }
 
-    /// `getFramebufferSize()`
-    pub fn get_framebuffer_size(&self) -> Size {
-        self.get_size()
+    /// The size of the frames, in physical pixels.
+    pub fn size(&self) -> Size {
+        self.size.get()
     }
 
     /// `setSize(Size)`: the size of the drawables, in pixels.
-    pub fn set_framebuffer_size(&self, size: Size) {
-        self.set_renderable_size(size);
+    pub fn resize(&self, size: Size) {
+        self.size.set(size);
+        self.image.set_size(size);
         if size.width > 0 && size.height > 0 {
             self.state.layer.setDrawableSize(CGSize::new(f64::from(size.width), f64::from(size.height)));
         }
-    }
-
-    /// Port-only: takes the layer's next drawable ahead of a frame; false
-    /// when the layer has none right now. The caller skips the frame: a
-    /// render pass without a color attachment trips the drawables' debug
-    /// assertions.
-    pub fn acquire_next_texture(&self) -> bool {
-        autoreleasepool(|_| self.state.acquire_drawable())
     }
 
     /// Port-only: copy the next presented frame (see `take_readback`). The
@@ -339,48 +347,24 @@ impl SurfaceBackend {
     }
 }
 
-impl Drop for SurfaceBackend {
+impl FrameTarget for SurfaceTarget {
+    /// Takes the layer's next drawable unless the frame has one, or `None`
+    /// when the layer has none right now. A frame without one is skipped: a
+    /// render pass without a color attachment trips the drawables' debug
+    /// assertions.
+    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+        autoreleasepool(|_| self.state.acquire_drawable()).then(|| self.image.clone() as Rc<dyn frame::DrawTarget>)
+    }
+
+    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
+        if self.state.swap() { Handoff::Presented } else { Handoff::Dropped }
+    }
+}
+
+impl Drop for SurfaceTarget {
     fn drop(&mut self) {
-        self.renderer_backend.reset_context();
         self.state.drawable.borrow_mut().take();
         self.state.command_buffer.borrow_mut().take();
         self.state.overlay.borrow_mut().take();
-        self.set_resource(None);
-    }
-}
-
-impl Renderable for SurfaceBackend {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
-    }
-}
-
-impl renderer_backend::RendererBackend for SurfaceBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.renderer_backend.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn get_default_renderable(&self) -> &dyn Renderable {
-        self
-    }
-
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        self.renderer_backend.init_shaders(registry, parameters);
-    }
-
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        self.renderer_backend.create_context()
-    }
-
-    fn activate(&self) {
-        self.renderer_backend.activate();
-    }
-
-    fn deactivate(&self) {
-        self.renderer_backend.deactivate();
     }
 }

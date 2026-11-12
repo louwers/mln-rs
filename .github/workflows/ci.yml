@@ -21,7 +21,7 @@ jobs:
   # through each backend of a platform. On Linux: WebGPU (wgpu on
   # Vulkan/lavapipe), the Vulkan backend itself (MLN_RENDER_BACKEND=vulkan,
   # on lavapipe under Vulkan's validation layer) and the OpenGL backend
-  # (MLN_RENDER_BACKEND=gl, which `just` builds in: OpenGL ES 3.0 through
+  # (MLN_RENDER_BACKEND=gl: OpenGL ES 3.0 through
   # EGL, on Mesa's llvmpipe). On macOS: WebGPU (wgpu on Metal) and the Metal
   # backend itself (MLN_RENDER_BACKEND=metal), under Metal's API validation.
   # Either validation aborts on an error. The differential tests against the

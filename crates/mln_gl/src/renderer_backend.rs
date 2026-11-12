@@ -4,18 +4,20 @@
 // by the backend and its context: resources reach them through the context,
 // as C++'s do through `Context& -> getBackend()`.
 //
-// `getDefaultRenderable()` is implemented by the platform backends
-// (HeadlessBackend, SurfaceBackend, CanvasBackend), which embed this struct.
+// What the backend draws into is a target built on it (`OffscreenTarget`,
+// `SurfaceTarget`, `CanvasTarget`).
 //
 // Not ported: `assumeFramebufferBinding`, `assumeViewport`,
 // `assumeScissorTest` and the checks that go with them, for hosts that bind
 // the framebuffer themselves, and `getExtensionFunctionPointer`: glow loads
 // the functions.
 
+use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
+use mln_gfx::context::Context as GfxContext;
+use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_util::logging::{Event, Log};
@@ -69,36 +71,54 @@ impl BackendImpl {
     }
 }
 
-/// `gl::RendererBackend`: embedded by the platform backends, which implement
-/// `gfx::RendererBackend` by delegating to it.
+/// `gl::RendererBackend`: a renderer's GL context.
 pub struct RendererBackend {
-    pub base: RendererBackendBase,
+    base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
 }
 
 impl RendererBackend {
-    /// `RendererBackend(contextMode)`, on the functions of `platform`'s
-    /// context.
+    /// `RendererBackend()`: a backend on a context of `device`'s share
+    /// group, which the backend makes current around its frames.
+    ///
+    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes
+    /// no context, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
+    /// on the host's device.
     #[cfg(not(target_family = "wasm"))]
-    pub fn new(context_mode: ContextMode, gl: Gl, platform: Box<dyn PlatformContext>) -> Self {
-        #[allow(clippy::arc_with_non_send_sync)]
-        let gl = Arc::new(gl);
-        RendererBackend { base: RendererBackendBase::new(context_mode), impl_: Rc::new(BackendImpl { gl, platform }) }
+    pub fn new(device: &crate::device::Device) -> Result<Self, mln_util::error::Error> {
+        let (gl, platform) = device.create_context()?;
+        Ok(Self::from_parts(gl, platform))
     }
 
-    /// `RendererBackend(contextMode)`, on a canvas's WebGL2 context.
+    /// `RendererBackend()`, on the functions of `platform`'s context.
+    #[cfg(not(target_family = "wasm"))]
+    pub(crate) fn from_parts(gl: Gl, platform: Box<dyn PlatformContext>) -> Self {
+        #[allow(clippy::arc_with_non_send_sync)]
+        let gl = Arc::new(gl);
+        RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, platform }) }
+    }
+
+    /// `RendererBackend()`, on a canvas's WebGL2 context.
     #[cfg(target_family = "wasm")]
-    pub fn new(
-        context_mode: ContextMode,
-        webgl2: web_sys::WebGl2RenderingContext,
-        platform: Box<dyn PlatformContext>,
-    ) -> Self {
+    pub(crate) fn from_parts(webgl2: web_sys::WebGl2RenderingContext, platform: Box<dyn PlatformContext>) -> Self {
         #[allow(clippy::arc_with_non_send_sync)]
         let gl = Arc::new(glow::Context::from_webgl2_context(webgl2.clone()));
-        RendererBackend {
-            base: RendererBackendBase::new(context_mode),
-            impl_: Rc::new(BackendImpl { gl, webgl2, platform }),
-        }
+        RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(BackendImpl { gl, webgl2, platform }) }
+    }
+
+    /// The backend's context, made on first use. Call inside a
+    /// `BackendScope`.
+    pub fn gl_context(&self) -> Option<Rc<Context>> {
+        let context = renderer_backend::RendererBackend::get_context(self);
+        context.as_any().downcast_ref::<Context>().map(Context::rc)
+    }
+
+    /// `GL_RENDERER`: the name of the GL implementation. Call inside a
+    /// `BackendScope`.
+    pub fn get_renderer_name(&self) -> String {
+        use glow::HasContext as _;
+        // SAFETY: the context is current.
+        unsafe { self.gl().get_parameter_string(glow::RENDERER) }
     }
 
     pub fn backend_impl(&self) -> &Rc<BackendImpl> {
@@ -150,6 +170,32 @@ impl RendererBackend {
                 debug_assert!(false, "duplicate shader group");
             }
         }
+    }
+}
+
+impl renderer_backend::RendererBackend for RendererBackend {
+    fn renderer_backend_base(&self) -> &RendererBackendBase {
+        &self.base
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
+        RendererBackend::init_shaders(self, registry, parameters);
+    }
+
+    fn create_context(&self) -> Rc<dyn GfxContext> {
+        RendererBackend::create_context(self)
+    }
+
+    fn activate(&self) {
+        RendererBackend::activate(self);
+    }
+
+    fn deactivate(&self) {
+        RendererBackend::deactivate(self);
     }
 }
 
