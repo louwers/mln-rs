@@ -461,7 +461,7 @@ fn put_tile_not_found() {
 #[test]
 fn put_tile_http_not_found() {
     let log = FixtureLog::new();
-    let mut db = OfflineDatabase::new(":memory:", &fixture::tile_server_options());
+    let mut db = OfflineDatabase::new(":memory:");
 
     let resource = example_tile();
     let mut response = Response::new();
