@@ -83,6 +83,35 @@ pub fn load(text: &str) -> Result<Value, String> {
     let icon_requires = filtered(&spec, "icon-allow-overlap", r#"{"!":"icon-overlap"}"#)?;
     spec["layout_symbol"]["text-allow-overlap"]["requires"] = icon_requires;
 
+    // https://github.com/maplibre/maplibre-native/issues/1929
+    remove(&mut spec, &["layout_symbol"], "symbol-height-anchor")?;
+    remove(&mut spec, &["layout_symbol"], "symbol-height-offset")?;
+
+    // https://github.com/maplibre/maplibre-native/issues/4298
+    remove(&mut spec, &["paint_fill"], "fill-layer-opacity")?;
+    remove(&mut spec, &["paint_line"], "line-layer-opacity")?;
+
+    // https://github.com/maplibre/maplibre-native/issues/2963
+    remove(&mut spec, &["paint_fill"], "fill-layer-blend")?;
+    remove(&mut spec, &["paint_line"], "line-layer-blend")?;
+    remove(&mut spec, &["paint_raster"], "raster-layer-blend")?;
+
+    // https://github.com/maplibre/maplibre-native/issues/4117
+    remove(&mut spec, &["paint_raster"], "resampling")?;
+    remove(&mut spec, &["paint_hillshade"], "resampling")?;
+    remove(&mut spec, &["paint_color-relief"], "resampling")?;
+
+    // https://github.com/maplibre/maplibre-native/issues/4194
+    zoom_only(&mut spec, "layout_line", "line-cap", "data-constant")?;
+    zoom_only(&mut spec, "layout_line", "line-miter-limit", "data-constant")?;
+    zoom_only(&mut spec, "layout_line", "line-round-limit", "data-constant")?;
+
+    // https://github.com/maplibre/maplibre-native/issues/4517
+    zoom_only(&mut spec, "layout_symbol", "icon-rotation-alignment", "data-constant")?;
+
+    // https://github.com/maplibre/maplibre-native/issues/744
+    zoom_only(&mut spec, "paint_line", "line-dasharray", "cross-faded")?;
+
     spec["layer"]["type"]["values"]["location-indicator"] = json!({});
     spec["layout_location-indicator"] = location_indicator_layout();
     spec["paint_location-indicator"] = location_indicator_paint();
@@ -114,6 +143,23 @@ fn remove(spec: &mut Value, path: &[&str], key: &str) -> Result<(), String> {
     }
     let object = node.as_object_mut().ok_or_else(|| format!("{} is not an object", path.join(".")))?;
     object.shift_remove(key).map(|_| ()).ok_or_else(|| format!("spec has no {}.{key}", path.join(".")))
+}
+
+/// Makes a data-driven property follow zoom only, as `property_type`.
+fn zoom_only(spec: &mut Value, group: &str, property: &str, property_type: &str) -> Result<(), String> {
+    let entry = spec
+        .get_mut(group)
+        .and_then(|g| g.get_mut(property))
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| format!("spec has no {group}.{property}"))?;
+    entry.insert("property-type".to_owned(), json!(property_type));
+    let parameters = entry
+        .get_mut("expression")
+        .and_then(|e| e.get_mut("parameters"))
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| format!("{group}.{property} has no expression parameters"))?;
+    parameters.retain(|p| p != "feature");
+    Ok(())
 }
 
 /// JSON doesn't have a defined order, so generate-style-code.mjs sorts the

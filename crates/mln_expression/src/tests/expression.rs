@@ -28,7 +28,10 @@ fn read_file(relative: &str) -> String {
 // gtest: Expression.IsExpression
 #[test]
 fn is_expression_() {
-    let spec: serde_json::Value = serde_json::from_str(&read_file("scripts/style-spec-reference/v8.json")).unwrap();
+    // The style spec copy that style-codegen generates from.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/style-codegen/v8.json");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let spec: serde_json::Value = serde_json::from_str(&text).unwrap();
     let all_expressions = spec["expression_name"]["values"].as_object().expect("expression_name.values");
 
     for name in all_expressions.keys() {

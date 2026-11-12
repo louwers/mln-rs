@@ -171,10 +171,10 @@ generate-icu-tables icu_common:
 generate-nunicode-tables:
     python3 -I vendor/nunicode/tools/gen_tables.py {{quote(cpp / 'vendor/nunicode')}} vendor/nunicode/src/tables
 
-# The spec is the copy of the C++ repo's v8.json in tools/style-codegen/testdata (`just update-testdata` refreshes it).
+# The spec is tools/style-codegen/v8.json, a copy of the MapLibre style spec's (`just update-style-spec` refreshes it).
 [doc("Regenerate crates/mln_style's generated style code from the style spec (checked by style-codegen's generated_code_test)")]
 generate-style-code:
-    cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/testdata/scripts/style-spec-reference/v8.json --out crates/mln_style/src
+    cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src
 
 # Get a package field from the metadata
 get-crate-field field package=main_crate:  (assert-cmd 'jq')
@@ -391,6 +391,11 @@ udeps:  (cargo-install 'cargo-udeps')
 # Update the dependencies within their Cargo.toml requirements
 update:
     cargo update
+
+# The version is the @maplibre/maplibre-gl-style-spec npm release the copy is from. Run `just generate-style-code` after.
+[doc("Refresh tools/style-codegen/v8.json from a release of the MapLibre style spec")]
+update-style-spec version='26.6.0':  (assert-cmd 'curl')
+    curl -fsSL https://unpkg.com/@maplibre/maplibre-gl-style-spec@{{version}}/src/reference/v8.json -o tools/style-codegen/v8.json
 
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there, outside
 # tools/c-abi-test (update-ffi-abi), is copied again.

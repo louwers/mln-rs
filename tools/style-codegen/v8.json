@@ -101,7 +101,7 @@
     "state": {
       "type": "state",
       "default": {},
-      "doc": "An object used to define default values when using the [`global-state`](https://maplibre.org/maplibre-style-spec/expressions/#global-state) expression.",
+      "doc": "An object used to define default values when using the [`global-state`](expressions/#global-state) expression.",
       "example": {
         "chargerType": {
           "default": ["CCS", "CHAdeMO", "Type2"]
@@ -113,8 +113,8 @@
       "sdk-support": {
         "basic functionality": {
           "js": "5.6.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       }
     },
@@ -170,7 +170,7 @@
     "sources": {
       "required": true,
       "type": "sources",
-      "doc": "Sources state which data the map should display. Specify the type of source with the `type` property. Adding a source isn't enough to make data appear on the map because sources don't contain styling details like color or width. Layers refer to a source and give it a visual representation. This makes it possible to style the same source in different ways, like differentiating between types of roads in a highways layer.\n\nTiled sources (vector and raster) must specify their details according to the [TileJSON specification](https://github.com/mapbox/tilejson-spec).",
+      "doc": "Sources state which data the map should display. Specify the type of source with the `type` property. Adding a source isn't enough to make data appear on the map because sources don't contain styling details like color or width. Layers refer to a source and give it a visual representation. This makes it possible to style the same source in different ways, like differentiating between types of roads in a highways layer.\n\nTiled sources (vector and raster) must specify their details according to [TileJSON](tilejson.md).",
       "example": {
         "maplibre-demotiles": {
           "type": "vector",
@@ -204,7 +204,7 @@
     },
     "glyphs": {
       "type": "string",
-      "doc": "A URL template for loading signed-distance-field glyph sets in PBF format.\n\nIf this property is set, any text in the `text-field` layout property is displayed in the font stack named by the `text-font` layout property based on glyphs located at the URL specified by this property. Otherwise, font faces will be determined by the `text-font` property based on the local environment.\n\nThe URL must include:\n\n - `{fontstack}` - When requesting glyphs, this token is replaced with a comma separated list of fonts from a font stack specified in the `text-font` property of a symbol layer. \n\n - `{range}` - When requesting glyphs, this token is replaced with a range of 256 Unicode code points. For example, to load glyphs for the Unicode Basic Latin and Basic Latin-1 Supplement blocks, the range would be 0-255. The actual ranges that are loaded are determined at runtime based on what text needs to be displayed.\n\nThe URL must be absolute, containing the [scheme, authority and path components](https://en.wikipedia.org/wiki/URL#Syntax).",
+      "doc": "A URL template for loading signed-distance-field glyph sets in PBF format.\n\nIf this property is set, any text in the [`text-field`](layers/#text-field) layout property is displayed in the font stack named by the [`text-font`](layers/#text-font) layout property based on glyphs located at the URL specified by this property. Otherwise, font faces will be determined by the `text-font` property based on the local environment.\n\nThe URL must include:\n\n - `{fontstack}` - When requesting glyphs, this token is replaced with a comma separated list of fonts from a font stack specified in the `text-font` property of a symbol layer. \n\n - `{range}` - When requesting glyphs, this token is replaced with a range of 256 Unicode code points. For example, to load glyphs for the Unicode Basic Latin and Basic Latin-1 Supplement blocks, the range would be 0-255. The actual ranges that are loaded are determined at runtime based on what text needs to be displayed.\n\nThe URL must be absolute, containing the [scheme, authority and path components](https://en.wikipedia.org/wiki/URL#Syntax).",
       "example": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
       "sdk-support": {
         "basic functionality": {
@@ -221,7 +221,7 @@
     },
     "font-faces": {
       "type": "fontFaces",
-      "doc": "The `font-faces` property can be used to specify what font files to use for rendering text. Font faces contain information needed to render complex texts such as [Devanagari](https://en.wikipedia.org/wiki/Devanagari), [Khmer](https://en.wikipedia.org/wiki/Khmer_script) among many others.<h2>Unicode range</h2>The optional `unicode-range` property can be used to only use a particular font file for characters within the specified unicode range(s). Its value should be an array of strings, each indicating a start and end of a unicode range, similar to the [CSS descriptor with the same name](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/unicode-range). This allows specifying multiple non-consecutive unicode ranges. When not specified, the default value is `U+0-10FFFF`, meaning the font file will be used for all unicode characters.\n\nRefer to the [Unicode Character Code Charts](https://www.unicode.org/charts/) to see ranges for scripts supported by Unicode. To see what unicode code-points are available in a font, use a tool like [FontDrop](https://fontdrop.info/).\n\n<h2>Font Resolution</h2>For every name in a symbol layer’s [`text-font`](./layers.md/#text-font) array, characters are matched if they are covered one of the by the font files in the corresponding entry of the `font-faces` map. Any still-unmatched characters then fall back to the [`glyphs`](./glyphs.md) URL if provided.\n\n<h2>Supported Fonts</h2>What type of fonts are supported is implementation-defined. Unsupported fonts are ignored.",
+      "doc": "The `font-faces` property can be used to specify what font files to use for rendering text. Font faces contain information needed to render complex texts such as [Devanagari](https://en.wikipedia.org/wiki/Devanagari), [Khmer](https://en.wikipedia.org/wiki/Khmer_script) among many others.<h2>Unicode range</h2>The optional `unicode-range` property can be used to only use a particular font file for characters within the specified unicode range(s). Its value should be an array of strings, each indicating a start and end of a unicode range, similar to the [CSS descriptor with the same name](https://developer.mozilla.org/en-US/docs/Web/CSS/@font-face/unicode-range). This allows specifying multiple non-consecutive unicode ranges. When not specified, the default value is `U+0-10FFFF`, meaning the font file will be used for all unicode characters.\n\nRefer to the [Unicode Character Code Charts](https://www.unicode.org/charts/) to see ranges for scripts supported by Unicode. To see what unicode code-points are available in a font, use a tool like [FontDrop](https://fontdrop.info/).\n\n<h2>Font Resolution</h2>For every name in a symbol layer’s [`text-font`](./layers.md#text-font) array, characters are matched if they are covered one of the by the font files in the corresponding entry of the `font-faces` map. Any still-unmatched characters then fall back to the [`glyphs`](./glyphs.md) URL if provided.\n\n<h2>Supported Fonts</h2>What type of fonts are supported is implementation-defined. Unsupported fonts are ignored.",
       "example": {
         "Noto Sans Regular": [{
           "url": "https://cdn.jsdelivr.net/gh/notofonts/notofonts.github.io/fonts/NotoSansKhmer/hinted/ttf/NotoSansKhmer-Regular.ttf",
@@ -251,7 +251,7 @@
     },
     "transition": {
       "type": "transition",
-      "doc": "A global transition definition to use as a default across properties, to be used for timing transitions between one value and the next when no property-specific transition is set. Collision-based symbol fading is controlled independently of the style's `transition` property.",
+      "doc": "A global transition definition to use as a default across properties, to be used for timing transitions between one value and the next when no property-specific transition is set. Collision-based symbol fading is controlled independently of the style's `transition` property.\n\nIn addition to this global definition via `transition`, if any individual paint or layout property are marked as `Transitionable`, a corresponding `*-transition` property is avaliable to fine-tune the property’s animation between old and new values based on similar `duration` and `delay` values.\n\nFor example, [`fill-color`](layers/#fill-color) is marked as `Transitionable`, so it can transition either independently via `fill-color-transition` or globally via the style's `transition` property:",
       "example": {
         "duration": 300,
         "delay": 0
@@ -307,7 +307,19 @@
     "tiles": {
       "type": "array",
       "value": "string",
-      "doc": "An array of one or more tile source URLs, as in the TileJSON spec."
+      "doc": "An array of one or more tile source URLs, as in the TileJSON spec. These tokens in a URL are replaced for each tile:\n\n - `{z}`, `{x}` and `{y}` - The tile's zoom level, column and row. With `scheme` set to `tms`, the row counts from the bottom.\n\n - `{quadkey}` - The tile's quadkey, as Bing Maps addresses tiles.\n\n - `{bbox-epsg-3857}` - The tile's bounding box in EPSG:3857 meters, as `minX,minY,maxX,maxY`, for WMS requests.\n\n - `{bbox}` - Experimental. The tile's bounding box as `minX,minY,maxX,maxY` in the units of the map's coordinate system. With the `mercator`, `globe` and `vertical-perspective` projections this is the same as `{bbox-epsg-3857}`.\n\n - `{prefix}` - Two hexadecimal digits from the tile's column and row, to spread requests over host names.\n\n - `{ratio}` - `@2x` where the device pixel ratio is above 1, empty otherwise.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "supported",
+          "android": "supported",
+          "ios": "supported"
+        },
+        "`{bbox}` token": {
+          "js": "6.15.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/95",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/95"
+        }
+      }
     },
     "bounds": {
       "type": "array",
@@ -333,6 +345,26 @@
       },
       "default": "xyz",
       "doc": "Influences the y direction of the tile coordinates. The global-mercator (aka Spherical Mercator) profile is assumed."
+    },
+    "emptyResponse": {
+      "type": "enum",
+      "values": {
+        "blank": {
+          "doc": "The tile is in the tileset and has nothing at that place."
+        },
+        "missing": {
+          "doc": "The tileset has no tile there at that zoom level, and a renderer may use a tile from another zoom level in its place."
+        }
+      },
+      "default": "blank",
+      "doc": "Experimental. What an empty tile response (HTTP 204, or no tile data from an archive such as PMTiles) means in this tileset.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/3990",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4767",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4767"
+        }
+      }
     },
     "minzoom": {
       "type": "number",
@@ -412,7 +444,19 @@
     "tiles": {
       "type": "array",
       "value": "string",
-      "doc": "An array of one or more tile source URLs, as in the TileJSON spec."
+      "doc": "An array of one or more tile source URLs, as in the TileJSON spec. These tokens in a URL are replaced for each tile:\n\n - `{z}`, `{x}` and `{y}` - The tile's zoom level, column and row. With `scheme` set to `tms`, the row counts from the bottom.\n\n - `{quadkey}` - The tile's quadkey, as Bing Maps addresses tiles.\n\n - `{bbox-epsg-3857}` - The tile's bounding box in EPSG:3857 meters, as `minX,minY,maxX,maxY`, for WMS requests.\n\n - `{bbox}` - Experimental. The tile's bounding box as `minX,minY,maxX,maxY` in the units of the map's coordinate system. With the `mercator`, `globe` and `vertical-perspective` projections this is the same as `{bbox-epsg-3857}`.\n\n - `{prefix}` - Two hexadecimal digits from the tile's column and row, to spread requests over host names.\n\n - `{ratio}` - `@2x` where the device pixel ratio is above 1, empty otherwise.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "supported",
+          "android": "supported",
+          "ios": "supported"
+        },
+        "`{bbox}` token": {
+          "js": "6.15.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/95",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/95"
+        }
+      }
     },
     "bounds": {
       "type": "array",
@@ -440,7 +484,7 @@
       "type": "number",
       "default": 512,
       "units": "pixels",
-      "doc": "The minimum visual size to display tiles for this layer. Only configurable for raster layers."
+      "doc": "The minimum visual size to display tiles for this source."
     },
     "scheme": {
       "type": "enum",
@@ -454,6 +498,26 @@
       },
       "default": "xyz",
       "doc": "Influences the y direction of the tile coordinates. The global-mercator (aka Spherical Mercator) profile is assumed."
+    },
+    "emptyResponse": {
+      "type": "enum",
+      "values": {
+        "blank": {
+          "doc": "The tile is in the tileset and has nothing at that place."
+        },
+        "missing": {
+          "doc": "The tileset has no tile there at that zoom level, and a renderer may use a tile from another zoom level in its place."
+        }
+      },
+      "default": "blank",
+      "doc": "Experimental. What an empty tile response (HTTP 204, or no tile data from an archive such as PMTiles) means in this tileset.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/3990",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4767",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4767"
+        }
+      }
     },
     "attribution": {
       "type": "string",
@@ -494,7 +558,19 @@
     "tiles": {
       "type": "array",
       "value": "string",
-      "doc": "An array of one or more tile source URLs, as in the TileJSON spec."
+      "doc": "An array of one or more tile source URLs, as in the TileJSON spec. These tokens in a URL are replaced for each tile:\n\n - `{z}`, `{x}` and `{y}` - The tile's zoom level, column and row.\n\n - `{quadkey}` - The tile's quadkey, as Bing Maps addresses tiles.\n\n - `{bbox-epsg-3857}` - The tile's bounding box in EPSG:3857 meters, as `minX,minY,maxX,maxY`, for WMS requests.\n\n - `{bbox}` - Experimental. The tile's bounding box as `minX,minY,maxX,maxY` in the units of the map's coordinate system. With the `mercator`, `globe` and `vertical-perspective` projections this is the same as `{bbox-epsg-3857}`.\n\n - `{prefix}` - Two hexadecimal digits from the tile's column and row, to spread requests over host names.\n\n - `{ratio}` - `@2x` where the device pixel ratio is above 1, empty otherwise.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "supported",
+          "android": "supported",
+          "ios": "supported"
+        },
+        "`{bbox}` token": {
+          "js": "6.15.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/95",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/95"
+        }
+      }
     },
     "bounds": {
       "type": "array",
@@ -522,7 +598,27 @@
       "type": "number",
       "default": 512,
       "units": "pixels",
-      "doc": "The minimum visual size to display tiles for this layer. Only configurable for raster layers."
+      "doc": "The minimum visual size to display tiles for this source."
+    },
+    "emptyResponse": {
+      "type": "enum",
+      "values": {
+        "blank": {
+          "doc": "The tile is in the tileset and has nothing at that place."
+        },
+        "missing": {
+          "doc": "The tileset has no tile there at that zoom level, and a renderer may use a tile from another zoom level in its place."
+        }
+      },
+      "default": "blank",
+      "doc": "Experimental. What an empty tile response (HTTP 204, or no tile data from an archive such as PMTiles) means in this tileset.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/3990",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4767",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4767"
+        }
+      }
     },
     "attribution": {
       "type": "string",
@@ -683,12 +779,12 @@
     },
     "clusterProperties": {
       "type": "*",
-      "doc": "An object defining custom properties on the generated clusters if clustering is enabled, aggregating values from clustered points. Has the form `{\"property_name\": [operator, map_expression]}`. `operator` is any expression function that accepts at least 2 operands (e.g. `\"+\"` or `\"max\"`) — it accumulates the property value from clusters/points the cluster contains; `map_expression` produces the value of a single point.\n\nExample: `{\"sum\": [\"+\", [\"get\", \"scalerank\"]]}`.\n\nFor more advanced use cases, in place of `operator`, you can use a custom reduce expression that references a special `[\"accumulated\"]` value, e.g.:\n\n`{\"sum\": [[\"+\", [\"accumulated\"], [\"get\", \"sum\"]], [\"get\", \"scalerank\"]]}`"
+      "doc": "An object defining custom properties on the generated clusters if clustering is enabled, aggregating values from clustered points. Has the form `{\"property_name\": [operator, map_expression]}`. `operator` is any expression function that accepts at least 2 operands (e.g. `\"+\"` or `\"max\"`) - it accumulates the property value from clusters/points the cluster contains; `map_expression` produces the value of a single point.\n\nExample: `{\"sum\": [\"+\", [\"get\", \"scalerank\"]]}`.\n\nFor more advanced use cases, in place of `operator`, you can use a custom reduce expression that references a special `[\"accumulated\"]` value, e.g.:\n\n`{\"sum\": [[\"+\", [\"accumulated\"], [\"get\", \"sum\"]], [\"get\", \"scalerank\"]]}`"
     },
     "lineMetrics": {
       "type": "boolean",
       "default": false,
-      "doc": "Whether to calculate line distance metrics. This is required for line layers that specify `line-gradient` values."
+      "doc": "Whether to calculate line distance metrics. This is required for line layers that specify [`line-gradient`](layers/#line-gradient) values."
     },
     "generateId": {
       "type": "boolean",
@@ -742,9 +838,8 @@
       "doc": "The data type of the image source."
     },
     "url": {
-      "required": true,
       "type": "string",
-      "doc": "URL that points to an image."
+      "doc": "URL that points to an image. Optional: a source created without a url starts empty and renders nothing until an image is set at runtime."
     },
     "coordinates": {
       "required": true,
@@ -848,8 +943,8 @@
             },
             "additional methods": {
               "js": "5.5.0",
-              "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-              "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+              "android": "13.0.0",
+              "ios": "6.24.0"
             }
           }
         },
@@ -858,8 +953,8 @@
           "sdk-support": {
             "basic functionality": {
               "js": "5.6.0",
-              "android": "https://github.com/maplibre/maplibre-native/issues/3408",
-              "ios": "https://github.com/maplibre/maplibre-native/issues/3408"
+              "android": "13.0.0",
+              "ios": "6.24.0"
             }
           }
         },
@@ -906,7 +1001,7 @@
     },
     "filter": {
       "type": "filter",
-      "doc": "A expression specifying conditions on source features. Only features that match the filter are displayed. Zoom expressions in filters are only evaluated at integer zoom levels. The `feature-state` expression is not supported in filter expressions."
+      "doc": "A expression specifying conditions on source features. Only features that match the filter are displayed. Zoom expressions in filters are only evaluated at integer zoom levels. The [`feature-state`](expressions/#feature-state) expression is not supported in filter expressions."
     },
     "layout": {
       "type": "layout",
@@ -948,10 +1043,10 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -977,6 +1072,11 @@
           "js": "1.2.0",
           "android": "9.1.0",
           "ios": "5.8.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1006,10 +1106,10 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1035,6 +1135,11 @@
           "js": "1.2.0",
           "android": "9.2.0",
           "ios": "5.9.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1064,10 +1169,10 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1098,10 +1203,10 @@
           "android": "6.0.0",
           "ios": "4.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1114,20 +1219,6 @@
     }
   },
   "layout_fill-extrusion": {
-    "fill-extrusion-rounded-corner-distance": {
-      "type": "number",
-      "default": 0,
-      "minimum": 0,
-      "units": "meters",
-      "doc": "The distance from the corner that will be cut and replaced with rounded corner.",
-      "sdk-support": {
-        "basic functionality": {
-          "android": "13.0.0",
-          "ios": "6.0.0"
-        }
-      },
-      "property-type": "constant"
-    },
     "visibility": {
       "type": "enum",
       "values": {
@@ -1146,10 +1237,10 @@
           "android": "5.1.0",
           "ios": "3.6.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1159,6 +1250,21 @@
         ]
       },
       "property-type": "data-constant"
+    },
+    "fill-extrusion-rounded-corner-distance": {
+      "type": "number",
+      "default": 0,
+      "minimum": 0,
+      "units": "meters",
+      "doc": "The distance from each fill extrusion corner, measured along the adjacent edges, that is replaced by a rounded corner. A value of `0` disables rounded corners.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "6.2.0",
+          "android": "13.4.0",
+          "ios": "6.28.0"
+        }
+      },
+      "property-type": "constant"
     }
   },
   "layout_line": {
@@ -1182,15 +1288,26 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "data-driven styling": {
+          "js": "5.22.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4194",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4194"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
         "interpolated": false,
         "parameters": [
-          "zoom"
+          "zoom",
+          "feature"
         ]
       },
-      "property-type": "data-constant"
+      "property-type": "data-driven"
     },
     "line-join": {
       "type": "enum",
@@ -1217,6 +1334,11 @@
           "js": "0.40.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1242,15 +1364,26 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "data-driven styling": {
+          "js": "5.22.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4194",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4194"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
         "interpolated": true,
         "parameters": [
-          "zoom"
+          "zoom",
+          "feature"
         ]
       },
-      "property-type": "data-constant"
+      "property-type": "data-driven"
     },
     "line-round-limit": {
       "type": "number",
@@ -1266,15 +1399,26 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "data-driven styling": {
+          "js": "5.22.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4194",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4194"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
         "interpolated": true,
         "parameters": [
-          "zoom"
+          "zoom",
+          "feature"
         ]
       },
-      "property-type": "data-constant"
+      "property-type": "data-driven"
     },
     "line-sort-key": {
       "type": "number",
@@ -1289,6 +1433,11 @@
           "js": "1.2.0",
           "android": "9.1.0",
           "ios": "5.8.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1318,10 +1467,10 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1359,6 +1508,11 @@
           "js": "0.47.0",
           "android": "6.4.0",
           "ios": "4.3.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1385,6 +1539,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1404,6 +1563,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1416,7 +1580,7 @@
     },
     "symbol-sort-key": {
       "type": "number",
-      "doc": "Sorts features in ascending order based on this value. Features with lower sort keys are drawn and placed first.  When `icon-allow-overlap` or `text-allow-overlap` is `false`, features with a lower sort key will have priority during placement. When `icon-allow-overlap` or `text-allow-overlap` is set to `true`, features with a higher sort key will overlap over features with a lower sort key.",
+      "doc": "Sorts features in ascending order based on this value. Features with lower sort keys are drawn and placed first.  When [`icon-allow-overlap`](layers/#icon-allow-overlap) or [`text-allow-overlap`](layers/#text-allow-overlap) is `false`, features with a lower sort key will have priority during placement. When `icon-allow-overlap` or `text-allow-overlap` is set to `true`, features with a higher sort key will overlap over features with a lower sort key.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.53.0",
@@ -1427,6 +1591,11 @@
           "js": "0.53.0",
           "android": "7.4.0",
           "ios": "4.11.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1442,22 +1611,27 @@
       "type": "enum",
       "values": {
         "auto": {
-          "doc": "Sorts symbols by `symbol-sort-key` if set. Otherwise, sorts symbols by their y-position relative to the viewport if `icon-allow-overlap` or `text-allow-overlap` is set to `true` or `icon-ignore-placement` or `text-ignore-placement` is `false`."
+          "doc": "Sorts symbols by [`symbol-sort-key`](layers/#symbol-sort-key) if set. Otherwise, sorts symbols by their y-position relative to the viewport if [`icon-allow-overlap`](layers/#icon-allow-overlap) or [`text-allow-overlap`](layers/#text-allow-overlap) is set to `true` or [`icon-ignore-placement`](layers/#icon-ignore-placement) or [`text-ignore-placement`](layers/#text-ignore-placement) is `false`."
         },
         "viewport-y": {
-          "doc": "Sorts symbols by their y-position relative to the viewport if `icon-allow-overlap` or `text-allow-overlap` is set to `true` or `icon-ignore-placement` or `text-ignore-placement` is `false`."
+          "doc": "Sorts symbols by their y-position relative to the viewport if [`icon-allow-overlap`](layers/#icon-allow-overlap) or [`text-allow-overlap`](layers/#text-allow-overlap) is set to `true` or [`icon-ignore-placement`](layers/#icon-ignore-placement) or [`text-ignore-placement`](layers/#text-ignore-placement) is `false`."
         },
         "source": {
-          "doc": "Sorts symbols by `symbol-sort-key` if set. Otherwise, no sorting is applied; symbols are rendered in the same order as the source data."
+          "doc": "Sorts symbols by [`symbol-sort-key`](layers/#symbol-sort-key) if set. Otherwise, no sorting is applied; symbols are rendered in the same order as the source data."
         }
       },
       "default": "auto",
-      "doc": "Determines whether overlapping symbols in the same layer are rendered in the order that they appear in the data source or by their y-position relative to the viewport. To control the order and prioritization of symbols otherwise, use `symbol-sort-key`.",
+      "doc": "Determines whether overlapping symbols in the same layer are rendered in the order that they appear in the data source or by their y-position relative to the viewport. To control the order and prioritization of symbols otherwise, use [`symbol-sort-key`](layers/#symbol-sort-key).",
       "sdk-support": {
         "basic functionality": {
           "js": "0.49.0",
           "android": "6.6.0",
           "ios": "4.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1483,6 +1657,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1506,13 +1685,18 @@
           "doc": "If the icon collides with another previously drawn symbol, the overlap mode for that symbol is checked. If the previous symbol was placed using `never` overlap mode, the new icon is hidden. If the previous symbol was placed using `always` or `cooperative` overlap mode, the new icon is visible."
         }
       },
-      "doc": "Allows for control over whether to show an icon when it overlaps other symbols on the map. If `icon-overlap` is not set, `icon-allow-overlap` is used instead.",
+      "doc": "Allows for control over whether to show an icon when it overlaps other symbols on the map. If `icon-overlap` is not set, [`icon-allow-overlap`](layers/#icon-allow-overlap) is used instead.",
       "requires": [
         "icon-image"
       ],
       "sdk-support": {
         "basic functionality": {
           "js": "2.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/251",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/251"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
           "android": "https://github.com/maplibre/maplibre-native/issues/251",
           "ios": "https://github.com/maplibre/maplibre-native/issues/251"
         }
@@ -1537,6 +1721,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1560,6 +1749,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1574,17 +1768,17 @@
       "type": "enum",
       "values": {
         "map": {
-          "doc": "When `symbol-placement` is set to `point`, aligns icons east-west. When `symbol-placement` is set to `line` or `line-center`, aligns icon x-axes with the line."
+          "doc": "When [`symbol-placement`](layers/#symbol-placement) is set to `point`, aligns icons east-west. When `symbol-placement` is set to `line` or `line-center`, aligns icon x-axes with the line."
         },
         "viewport": {
-          "doc": "Produces icons whose x-axes are aligned with the x-axis of the viewport, regardless of the value of `symbol-placement`."
+          "doc": "Produces icons whose x-axes are aligned with the x-axis of the viewport, regardless of the value of [`symbol-placement`](layers/#symbol-placement)."
         },
         "auto": {
-          "doc": "When `symbol-placement` is set to `point`, this is equivalent to `viewport`. When `symbol-placement` is set to `line` or `line-center`, this is equivalent to `map`."
+          "doc": "When [`symbol-placement`](layers/#symbol-placement) is set to `point`, this is equivalent to `viewport`. When `symbol-placement` is set to `line` or `line-center`, this is equivalent to `map`."
         }
       },
       "default": "auto",
-      "doc": "In combination with `symbol-placement`, determines the rotation behavior of icons.",
+      "doc": "In combination with [`symbol-placement`](layers/#symbol-placement), determines the rotation behavior of icons.",
       "requires": [
         "icon-image"
       ],
@@ -1594,19 +1788,30 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
+        "data-driven styling": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/3461",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4517",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4517"
+        },
         "`auto` value": {
           "js": "0.25.0",
           "android": "4.2.0",
           "ios": "3.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
         "interpolated": false,
         "parameters": [
-          "zoom"
+          "zoom",
+          "feature"
         ]
       },
-      "property-type": "data-constant"
+      "property-type": "data-driven"
     },
     "icon-size": {
       "type": "number",
@@ -1627,6 +1832,11 @@
           "js": "0.35.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1670,6 +1880,11 @@
           "js": "1.6.0",
           "android": "9.2.0",
           "ios": "5.8.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1691,7 +1906,7 @@
         0
       ],
       "units": "pixels",
-      "doc": "Size of the additional area added to dimensions determined by `icon-text-fit`, in clockwise order: top, right, bottom, left.",
+      "doc": "Size of the additional area added to dimensions determined by [`icon-text-fit`](layers/#icon-text-fit), in clockwise order: top, right, bottom, left.",
       "requires": [
         "icon-image",
         "text-field",
@@ -1708,6 +1923,11 @@
           "js": "0.21.0",
           "android": "4.2.0",
           "ios": "3.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1732,6 +1952,11 @@
           "js": "0.35.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1762,6 +1987,11 @@
           "js": "0.21.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1791,6 +2021,11 @@
           "js": "2.2.0",
           "android": "https://github.com/maplibre/maplibre-native/issues/2754",
           "ios": "https://github.com/maplibre/maplibre-native/issues/2754"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1823,6 +2058,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1841,7 +2081,7 @@
         0,
         0
       ],
-      "doc": "Offset distance of icon from its anchor. Positive values indicate right and down, while negative values indicate left and up. Each component is multiplied by the value of `icon-size` to obtain the final offset in pixels. When combined with `icon-rotate` the offset will be as if the rotated direction was up.",
+      "doc": "Offset distance of icon from its anchor. Positive values indicate right and down, while negative values indicate left and up. Each component is multiplied by the value of [`icon-size`](layers/#icon-size) to obtain the final offset in pixels. When combined with [`icon-rotate`](layers/#icon-rotate) the offset will be as if the rotated direction was up.",
       "requires": [
         "icon-image"
       ],
@@ -1855,6 +2095,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1912,6 +2157,11 @@
           "js": "0.40.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1933,7 +2183,7 @@
           "doc": "The icon is aligned to the plane of the viewport."
         },
         "auto": {
-          "doc": "Automatically matches the value of `icon-rotation-alignment`."
+          "doc": "Automatically matches the value of [`icon-rotation-alignment`](layers/#icon-rotation-alignment)."
         }
       },
       "default": "auto",
@@ -1946,6 +2196,11 @@
           "js": "0.39.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1966,7 +2221,7 @@
           "doc": "The text is aligned to the plane of the viewport."
         },
         "auto": {
-          "doc": "Automatically matches the value of `text-rotation-alignment`."
+          "doc": "Automatically matches the value of [`text-rotation-alignment`](layers/#text-rotation-alignment)."
         }
       },
       "default": "auto",
@@ -1984,6 +2239,11 @@
           "js": "0.25.0",
           "android": "4.2.0",
           "ios": "3.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -1998,20 +2258,20 @@
       "type": "enum",
       "values": {
         "map": {
-          "doc": "When `symbol-placement` is set to `point`, aligns text east-west. When `symbol-placement` is set to `line` or `line-center`, aligns text x-axes with the line."
+          "doc": "When [`symbol-placement`](layers/#symbol-placement) is set to `point`, aligns text east-west. When `symbol-placement` is set to `line` or `line-center`, aligns text x-axes with the line."
         },
         "viewport": {
-          "doc": "Produces glyphs whose x-axes are aligned with the x-axis of the viewport, regardless of the value of `symbol-placement`."
+          "doc": "Produces glyphs whose x-axes are aligned with the x-axis of the viewport, regardless of the value of [`symbol-placement`](layers/#symbol-placement)."
         },
         "viewport-glyph": {
-          "doc": "When `symbol-placement` is set to `point`, aligns text to the x-axis of the viewport. When `symbol-placement` is set to `line` or `line-center`, aligns glyphs to the x-axis of the viewport and places them along the line."
+          "doc": "When [`symbol-placement`](layers/#symbol-placement) is set to `point`, aligns text to the x-axis of the viewport. When `symbol-placement` is set to `line` or `line-center`, aligns glyphs to the x-axis of the viewport and places them along the line."
         },
         "auto": {
-          "doc": "When `symbol-placement` is set to `point`, this is equivalent to `viewport`. When `symbol-placement` is set to `line` or `line-center`, this is equivalent to `map`."
+          "doc": "When [`symbol-placement`](layers/#symbol-placement) is set to `point`, this is equivalent to `viewport`. When `symbol-placement` is set to `line` or `line-center`, this is equivalent to `map`."
         }
       },
       "default": "auto",
-      "doc": "In combination with `symbol-placement`, determines the rotation behavior of the individual glyphs forming the text.",
+      "doc": "In combination with [`symbol-placement`](layers/#symbol-placement), determines the rotation behavior of the individual glyphs forming the text.",
       "requires": [
         "text-field"
       ],
@@ -2030,6 +2290,11 @@
           "js": "2.1.8",
           "android": "https://github.com/maplibre/maplibre-native/issues/250",
           "ios": "https://github.com/maplibre/maplibre-native/issues/250"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2055,6 +2320,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2092,6 +2362,11 @@
           "js": "https://github.com/maplibre/maplibre-gl-js/issues/3302",
           "android": "https://github.com/maplibre/maplibre-native/issues/165",
           "ios": "https://github.com/maplibre/maplibre-native/issues/165"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2122,6 +2397,11 @@
           "js": "0.35.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2152,6 +2432,11 @@
           "js": "0.40.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2176,6 +2461,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2204,6 +2494,11 @@
           "js": "0.40.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2251,6 +2546,11 @@
           "js": "0.54.0",
           "android": "7.4.0",
           "ios": "4.10.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2266,7 +2566,7 @@
       "type": "number",
       "units": "ems",
       "default": 0,
-      "doc": "Radial offset of text, in the direction of the symbol's anchor. Useful in combination with `text-variable-anchor`, which defaults to using the two-dimensional `text-offset` if present.",
+      "doc": "Radial offset of text, in the direction of the symbol's anchor. Useful in combination with [`text-variable-anchor`](layers/#text-variable-anchor), which defaults to using the two-dimensional [`text-offset`](layers/#text-offset) if present.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.54.0",
@@ -2277,6 +2577,11 @@
           "js": "0.54.0",
           "android": "7.4.0",
           "ios": "4.10.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "requires": [
@@ -2331,12 +2636,17 @@
           ]
         }
       ],
-      "doc": "To increase the chance of placing high-priority labels on the map, you can provide an array of `text-anchor` locations: the renderer will attempt to place the label at each location, in order, before moving onto the next label. Use `text-justify: auto` to choose justification based on anchor position. To apply an offset, use the `text-radial-offset` or the two-dimensional `text-offset`.",
+      "doc": "To increase the chance of placing high-priority labels on the map, you can provide an array of [`text-anchor`](layers/#text-anchor) locations: the renderer will attempt to place the label at each location, in order, before moving onto the next label. Use `text-justify: auto` to choose justification based on anchor position. To apply an offset, use the [`text-radial-offset`](layers/#text-radial-offset) or the two-dimensional [`text-offset`](layers/#text-offset).",
       "sdk-support": {
         "basic functionality": {
           "js": "0.54.0",
           "android": "7.4.0",
           "ios": "4.10.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2358,7 +2668,7 @@
           ]
         }
       ],
-      "doc": "To increase the chance of placing high-priority labels on the map, you can provide an array of `text-anchor` locations, each paired with an offset value. The renderer will attempt to place the label at each location, in order, before moving on to the next location+offset. Use `text-justify: auto` to choose justification based on anchor position. \n\n The length of the array must be even, and must alternate between enum and point entries. i.e., each anchor location must be accompanied by a point, and that point defines the offset when the corresponding anchor location is used. Positive offset values indicate right and down, while negative values indicate left and up. Anchor locations may repeat, allowing the renderer to try multiple offsets to try and place a label using the same anchor. \n\n When present, this property takes precedence over `text-anchor`, `text-variable-anchor`, `text-offset`, and `text-radial-offset`. \n\n ```json \n\n { \"text-variable-anchor-offset\": [\"top\", [0, 4], \"left\", [3,0], \"bottom\", [1, 1]] } \n\n ``` \n\n When the renderer chooses the `top` anchor, `[0, 4]` will be used for `text-offset`; the text will be shifted down by 4 ems. \n\n When the renderer chooses the `left` anchor, `[3, 0]` will be used for `text-offset`; the text will be shifted right by 3 ems.",
+      "doc": "To increase the chance of placing high-priority labels on the map, you can provide an array of [`text-anchor`](layers/#text-anchor) locations, each paired with an offset value. The renderer will attempt to place the label at each location, in order, before moving on to the next location+offset. Use `text-justify: auto` to choose justification based on anchor position. \n\n The length of the array must be even, and must alternate between enum and point entries. i.e., each anchor location must be accompanied by a point, and that point defines the offset when the corresponding anchor location is used. Positive offset values indicate right and down, while negative values indicate left and up. Anchor locations may repeat, allowing the renderer to try multiple offsets to try and place a label using the same anchor. \n\n When present, this property takes precedence over `text-anchor`, [`text-variable-anchor`](layers/#text-variable-anchor), [`text-offset`](layers/#text-offset), and [`text-radial-offset`](layers/#text-radial-offset). \n\n ```json \n\n { \"text-variable-anchor-offset\": [\"top\", [0, 4], \"left\", [3,0], \"bottom\", [1, 1]] } \n\n ``` \n\n When the renderer chooses the `top` anchor, `[0, 4]` will be used for `text-offset`; the text will be shifted down by 4 ems. \n\n When the renderer chooses the `left` anchor, `[3, 0]` will be used for `text-offset`; the text will be shifted right by 3 ems.",
       "sdk-support": {
         "basic functionality": {
           "js": "3.3.0",
@@ -2369,6 +2679,11 @@
           "js": "3.3.0",
           "ios": "https://github.com/maplibre/maplibre-native/issues/2358",
           "android": "https://github.com/maplibre/maplibre-native/issues/2358"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2430,6 +2745,11 @@
           "js": "0.39.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2460,6 +2780,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2495,6 +2820,11 @@
           "js": "1.3.0",
           "android": "8.3.0",
           "ios": "5.3.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2524,6 +2854,11 @@
           "js": "0.35.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2549,6 +2884,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2580,6 +2920,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2618,6 +2963,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2655,6 +3005,11 @@
           "js": "0.35.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2681,6 +3036,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2704,13 +3064,18 @@
           "doc": "If the text collides with another previously drawn symbol, the overlap mode for that symbol is checked. If the previous symbol was placed using `never` overlap mode, the new text is hidden. If the previous symbol was placed using `always` or `cooperative` overlap mode, the new text is visible."
         }
       },
-      "doc": "Allows for control over whether to show symbol text when it overlaps other symbols on the map. If `text-overlap` is not set, `text-allow-overlap` is used instead",
+      "doc": "Allows for control over whether to show symbol text when it overlaps other symbols on the map. If `text-overlap` is not set, [`text-allow-overlap`](layers/#text-allow-overlap) is used instead",
       "requires": [
         "text-field"
       ],
       "sdk-support": {
         "basic functionality": {
           "js": "2.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/251",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/251"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
           "android": "https://github.com/maplibre/maplibre-native/issues/251",
           "ios": "https://github.com/maplibre/maplibre-native/issues/251"
         }
@@ -2735,6 +3100,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2758,6 +3128,74 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.7.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "symbol-height-offset": {
+      "type": "number",
+      "default": 0,
+      "units": "meters",
+      "doc": "The height above the anchor, in meters, at which the symbol is placed. Use [`symbol-height-anchor`](layers/#symbol-height-anchor) to control what this height is measured from.",
+      "requires": [
+        {
+          "symbol-placement": [
+            "point"
+          ]
+        }
+      ],
+      "sdk-support": {
+        "basic functionality": {
+          "js": "6.6.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/1929",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/1929"
+        },
+        "data-driven styling": {
+          "js": "6.6.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/1929",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/1929"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom",
+          "feature"
+        ]
+      },
+      "property-type": "data-driven"
+    },
+    "symbol-height-anchor": {
+      "type": "enum",
+      "values": {
+        "ground": {
+          "doc": "[`symbol-height-offset`](layers/#symbol-height-offset) is measured from the ground below the symbol, i.e. the terrain elevation at the symbol's location, or zero when terrain is not enabled."
+        },
+        "absolute": {
+          "doc": "[`symbol-height-offset`](layers/#symbol-height-offset) is measured from sea level, ignoring the terrain elevation at the symbol's location."
+        }
+      },
+      "default": "ground",
+      "doc": "Defines what [`symbol-height-offset`](layers/#symbol-height-offset) is measured from.",
+      "requires": [
+        "symbol-height-offset"
+      ],
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/644",
+          "android": "https://github.com/maplibre/maplibre-native/issues/1929",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/1929"
         }
       },
       "expression": {
@@ -2786,10 +3224,10 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2820,10 +3258,10 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2854,10 +3292,10 @@
           "android": "6.0.0",
           "ios": "4.0.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -2885,13 +3323,13 @@
       "sdk-support": {
         "basic functionality": {
           "js": "5.6.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3408",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3408"
+          "android": "13.0.0",
+          "ios": "6.24.0"
         },
-        "`global state` expression": {
+        "[`global-state`](expressions/#global-state) expression": {
           "js": "5.16.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -3034,7 +3472,7 @@
     "default": {
       "type": "*",
       "required": false,
-      "doc": "A value to serve as a fallback function result when a value isn't otherwise available. It is used in the following circumstances:\n\n* In categorical functions, when the feature value does not match any of the stop domain values.\n\n* In property and zoom-and-property functions, when a feature does not contain a value for the specified property.\n\n* In identity functions, when the feature value is not valid for the style property (for example, if the function is being used for a `circle-color` property but the feature property value is not a string or not a valid color).\n\n* In interval or exponential property and zoom-and-property functions, when the feature value is not numeric.\n\nIf no default is provided, the style property's default is used in these circumstances."
+      "doc": "A value to serve as a fallback function result when a value isn't otherwise available. It is used in the following circumstances:\n\n* In categorical functions, when the feature value does not match any of the stop domain values.\n\n* In property and zoom-and-property functions, when a feature does not contain a value for the specified property.\n\n* In identity functions, when the feature value is not valid for the style property (for example, if the function is being used for a [`circle-color`](layers/#circle-color) property but the feature property value is not a string or not a valid color).\n\n* In interval or exponential property and zoom-and-property functions, when the feature value is not numeric.\n\nIf no default is provided, the style property's default is used in these circumstances."
     }
   },
   "function_stop": {
@@ -3096,7 +3534,7 @@
         }
       },
       "var": {
-        "doc": "References variable bound using `let`.\n\n - [Visualize population density](https://maplibre.org/maplibre-gl-js/docs/examples/visualize-population-density/)",
+        "doc": "References variable bound using [`let`](expressions/#let).\n\n - [Visualize population density](https://maplibre.org/maplibre-gl-js/docs/examples/visualize-population-density/)",
         "syntax": {
           "overloads": [
             {
@@ -3108,7 +3546,7 @@
             {
               "name": "var_name",
               "type": "string literal",
-              "doc": "The name of the variable bound using `let`."
+              "doc": "The name of the variable bound using [`let`](expressions/#let)."
             }
           ]
         },
@@ -3122,48 +3560,8 @@
           }
         }
       },
-      "semiliteral": {
-        "doc": "Provides an array value, evaluating expressions in the elements of the array.",
-        "syntax": {
-          "overloads": [
-            {
-              "parameters": [
-                "json_array"
-              ],
-              "output-type": "array"
-            }
-          ],
-          "parameters": [
-            {
-              "name": "json_array",
-              "type": "JSON array"
-            }
-          ]
-        },
-        "example": [
-          "semiliteral",
-          [
-            [
-              "get",
-              "label_x"
-            ],
-            [
-              "get",
-              "label_y"
-            ]
-          ]
-        ],
-        "group": "Types",
-        "sdk-support": {
-          "basic functionality": {
-            "js": "https://github.com/maplibre/maplibre-gl-js/issues/7933",
-            "android": "https://github.com/maplibre/maplibre-native/issues/4401",
-            "ios": "https://github.com/maplibre/maplibre-native/issues/4401"
-          }
-        }
-      },
       "literal": {
-        "doc": "Provides a literal array or object value.\n\n - [Display and style rich text labels](https://maplibre.org/maplibre-gl-js/docs/examples/display-and-style-rich-text-labels/)",
+        "doc": "Provides a literal array or object value, treating nested values as literals themselves.\n\n - [Display and style rich text labels](https://maplibre.org/maplibre-gl-js/docs/examples/display-and-style-rich-text-labels/)",
         "syntax": {
           "overloads": [
             {
@@ -3193,6 +3591,32 @@
             "js": "0.41.0",
             "android": "6.0.0",
             "ios": "4.0.0"
+          }
+        }
+      },
+      "semiliteral": {
+        "doc": "Provides an array value, evaluating expressions in the elements of the array.",
+        "syntax": {
+          "overloads": [
+            {
+              "parameters": ["json_array"],
+              "output-type": "array"
+            }
+          ],
+          "parameters": [
+            {
+              "name": "json_array",
+              "type": "JSON array"
+            }
+          ]
+        },
+        "example": ["semiliteral", [["get", "label_x"], ["get", "label_y"]]],
+        "group": "Types",
+        "sdk-support": {
+          "basic functionality": {
+            "js": "6.6.0",
+            "android": "https://github.com/maplibre/maplibre-native/issues/4401",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/4401"
           }
         }
       },
@@ -3561,7 +3985,7 @@
         }
       },
       "interpolate": {
-        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). The `input` may be any numeric expression (e.g., `[\"get\", \"population\"]`). Stop inputs must be numeric literals in strictly ascending order. The output type must be `number`, `array<number>`, `color`, `array<color>`, or `projection`.\n\n - [Animate map camera around a point](https://maplibre.org/maplibre-gl-js/docs/examples/animate-camera-around-point/)\n\n - [Change building color based on zoom level](https://maplibre.org/maplibre-gl-js/docs/examples/change-building-color-based-on-zoom-level/)\n\n - [Create a heatmap layer](https://maplibre.org/maplibre-gl-js/docs/examples/heatmap-layer/)\n\n - [Visualize population density](https://maplibre.org/maplibre-gl-js/docs/examples/visualize-population-density/)",
+        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). The `input` may be any numeric expression (e.g., `[\"get\", \"population\"]`). Stop inputs must be numeric literals in strictly ascending order. The output type must be `number`, `array<number>`, `color`, `array<color>`, or `projection`.\n\n - [Animate map camera around a point](https://maplibre.org/maplibre-gl-js/docs/examples/animate-map-camera-around-a-point/)\n\n - [Change building color based on zoom level](https://maplibre.org/maplibre-gl-js/docs/examples/change-building-color-based-on-zoom-level/)\n\n - [Create a heatmap layer](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-heatmap-layer/)\n\n - [Visualize population density](https://maplibre.org/maplibre-gl-js/docs/examples/visualize-population-density/)",
         "syntax": {
           "overloads": [
             {
@@ -3603,7 +4027,7 @@
         }
       },
       "interpolate-hcl": {
-        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). Works like `interpolate`, but the output type must be `color` or `array<color>`, and the interpolation is performed in the Hue-Chroma-Luminance color space.",
+        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). Works like [`interpolate`](expressions/#interpolate), but the output type must be `color` or `array<color>`, and the interpolation is performed in the Hue-Chroma-Luminance color space.",
         "syntax": {
           "overloads": [
             {
@@ -3642,7 +4066,7 @@
         }
       },
       "interpolate-lab": {
-        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). Works like `interpolate`, but the output type must be `color` or `array<color>`, and the interpolation is performed in the CIELAB color space.",
+        "doc": "Produces continuous, smooth results by interpolating between pairs of input and output values (\"stops\"). Works like [`interpolate`](expressions/#interpolate), but the output type must be `color` or `array<color>`, and the interpolation is performed in the CIELAB color space.",
         "syntax": {
           "overloads": [
             {
@@ -3871,7 +4295,7 @@
         }
       },
       "collator": {
-        "doc": "Returns a `collator` for use in locale-dependent comparison operations. Use `resolved-locale` to test the results of locale fallback behavior.",
+        "doc": "Returns a `collator` for use in locale-dependent comparison operations. Use [`resolved-locale`](expressions/#resolved-locale) to test the results of locale fallback behavior.",
         "syntax": {
           "overloads": [
             {
@@ -3915,7 +4339,7 @@
         }
       },
       "format": {
-        "doc": "Returns a `formatted` string for displaying mixed-format text in the `text-field` property. The input may contain a string literal or expression, including an [`'image'`](#image) expression. Strings may be followed by a style override object.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-case-of-labels/)\n\n - [Display and style rich text labels](https://maplibre.org/maplibre-gl-js/docs/examples/display-and-style-rich-text-labels/)",
+        "doc": "Returns a `formatted` string for displaying mixed-format text in the [`text-field`](layers/#text-field) property. The input may contain a string literal or expression, including an [`'image'`](#image) expression. Strings may be followed by a style override object.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-the-case-of-labels/)\n\n - [Display and style rich text labels](https://maplibre.org/maplibre-gl-js/docs/examples/display-and-style-rich-text-labels/)",
         "syntax": {
           "overloads": [
             {
@@ -3943,7 +4367,7 @@
                 },
                 "font-scale": {
                   "type": "number",
-                  "doc":"Applies a scaling factor on `text-size` as specified by the root layout property.",
+                  "doc":"Applies a scaling factor on [`text-size`](layers/#text-size) as specified by the root layout property.",
                   "example": 1.2
                 },
                 "vertical-align": {
@@ -4003,7 +4427,7 @@
         }
       },
       "image": {
-        "doc": "Returns an `image` type for use in `icon-image`, `*-pattern` entries and as a section in the `format` expression. If set, the `image` argument will check that the requested image exists in the style and will return either the resolved image name or `null`, depending on whether or not the image is currently in the style. This validation process is synchronous and requires the image to have been added to the style before requesting it in the `image` argument.\n\n - [Use a fallback image](https://maplibre.org/maplibre-gl-js/docs/examples/use-a-fallback-image/)",
+        "doc": "Returns an `image` type for use in [`icon-image`](layers/#icon-image), `*-pattern` entries and as a section in the [`format`](expressions/#format) expression. If set, the `image` argument will check that the requested image exists in the style and will return either the resolved image name or `null`, depending on whether or not the image is currently in the style. This validation process is synchronous and requires the image to have been added to the style before requesting it in the `image` argument.\n\n - [Use a fallback image](https://maplibre.org/maplibre-gl-js/docs/examples/use-a-fallback-image/)",
         "syntax": {
           "overloads": [
             {
@@ -4029,7 +4453,7 @@
         }
       },
       "global-state": {
-        "doc": "Retrieves a property value from global state that can be set with platform-specific APIs. Defaults can be provided using the [`state`](https://maplibre.org/maplibre-style-spec/root/#state) root property. Returns `null` if no value nor default value is set for the retrieved property.",
+        "doc": "Retrieves a property value from global state that can be set with platform-specific APIs. Defaults can be provided using the [`state`](root/#state) root property. Returns `null` if no value nor default value is set for the retrieved property.",
         "group": "Lookup",
         "syntax": {
           "overloads": [
@@ -4050,8 +4474,8 @@
         "sdk-support": {
           "basic functionality": {
             "js": "5.6.0",
-            "android": "https://github.com/maplibre/maplibre-native/issues/3302",
-            "ios": "https://github.com/maplibre/maplibre-native/issues/3302"
+            "android": "13.7.1",
+            "ios": "7.0.0"
           }
         }
       },
@@ -4112,7 +4536,7 @@
             "ios": "supported"
           },
           "`unit` property": {
-            "js": "https://github.com/maplibre/maplibre-gl-js/issues/7024",
+            "js": "5.20.0",
             "android": "https://github.com/maplibre/maplibre-native/issues/4071",
             "ios": "https://github.com/maplibre/maplibre-native/issues/4071"
           }
@@ -4321,7 +4745,7 @@
         }
       },
       "get": {
-        "doc": "Retrieves a property value from the current feature's properties, or from another object if a second argument is provided. Returns null if the requested property is missing.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-case-of-labels/)\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)\n\n - [Extrude polygons for 3D indoor mapping](https://maplibre.org/maplibre-gl-js/docs/examples/extrude-polygons-for-3d-indoor-mapping/)",
+        "doc": "Retrieves a property value from the current feature's properties, or from another object if a second argument is provided. Returns null if the requested property is missing.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-the-case-of-labels/)\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)\n\n - [Extrude polygons for 3D indoor mapping](https://maplibre.org/maplibre-gl-js/docs/examples/extrude-polygons-for-3d-indoor-mapping/)",
         "syntax": {
           "overloads": [
             {
@@ -4411,7 +4835,7 @@
         }
       },
       "properties": {
-        "doc": "Gets the feature properties object.  Note that in some cases, it may be more efficient to use [\"get\", \"property_name\"] directly.",
+        "doc": "Gets the feature properties object.  Note that in some cases, it may be more efficient to use `[\"get\", \"property_name\"]` directly.",
         "syntax": {
           "overloads": [
             {
@@ -4431,7 +4855,7 @@
         }
       },
       "feature-state": {
-        "doc": "Retrieves a property value from the current feature's state. Returns null if the requested property is not present on the feature's state. A feature's state is not part of the GeoJSON or vector tile data, and must be set programmatically on each feature. When `source.promoteId` is not provided, features are identified by their `id` attribute, which must be an integer or a string that can be cast to an integer. When `source.promoteId` is provided, features are identified by their `promoteId` property, which may be a number, string, or any primitive data type. Note that [\"feature-state\"] can only be used with paint properties that support data-driven styling.\n\n - [Create a hover effect](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-hover-effect/)",
+        "doc": "Retrieves a property value from the current feature's state. Returns null if the requested property is not present on the feature's state. A feature's state is not part of the GeoJSON or vector tile data, and must be set programmatically on each feature. When `source.promoteId` is not provided, features are identified by their `id` attribute, which must be an integer or a string that can be cast to an integer. When `source.promoteId` is provided, features are identified by their `promoteId` property, which may be a number, string, or any primitive data type. Note that `[\"feature-state\"]` can only be used with paint properties that support data-driven styling.\n\n - [Create a hover effect](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-hover-effect/)",
         "syntax": {
           "overloads": [
             {
@@ -4497,7 +4921,7 @@
         }
       },
       "zoom": {
-        "doc": "Gets the current zoom level.  Note that in style layout and paint properties, [\"zoom\"] may only appear as the input to a top-level \"step\" or \"interpolate\" expression.",
+        "doc": "Gets the current zoom level.  Note that in style layout and paint properties, `[\"zoom\"]` may only appear as the input to a top-level `\"step\"` or `\"interpolate\"` expression.",
         "syntax": {
           "overloads": [
             {
@@ -4517,7 +4941,7 @@
         }
       },
       "heatmap-density": {
-        "doc": "Gets the kernel density estimation of a pixel in a heatmap layer, which is a relative measure of how many data points are crowded around a particular pixel. Can only be used in the `heatmap-color` property.",
+        "doc": "Gets the kernel density estimation of a pixel in a heatmap layer, which is a relative measure of how many data points are crowded around a particular pixel. Can only be used in the [`heatmap-color`](layers/#heatmap-color) property.",
         "syntax": {
           "overloads": [
             {
@@ -4537,7 +4961,7 @@
         }
       },
       "elevation": {
-        "doc": "Gets the elevation of a pixel (in meters above the vertical datum reference of the `raster-dem` tiles) from a `raster-dem` source. Can only be used in the `color-relief-color` property of a `color-relief` layer.",
+        "doc": "Gets the elevation in meters at the current point. For a `raster-dem` source this is the elevation of a pixel above the vertical datum reference of the tiles; for a fill extrusion it is the height above the ground.",
         "syntax": {
           "overloads": [
             {
@@ -4551,13 +4975,18 @@
         "sdk-support": {
           "basic functionality": {
             "js": "5.6.0",
-            "android": "https://github.com/maplibre/maplibre-native/issues/3408",
-            "ios": "https://github.com/maplibre/maplibre-native/issues/3408"
+            "android": "13.0.0",
+            "ios": "6.24.0"
+          },
+          "[`fill-extrusion-color`](layers/#fill-extrusion-color)": {
+            "js": "https://github.com/maplibre/maplibre-gl-js/issues/8799",
+            "android": "https://github.com/maplibre/maplibre-native/issues/4787",
+            "ios": "https://github.com/maplibre/maplibre-native/issues/4787"
           }
         }
       },
       "line-progress": {
-        "doc": "Gets the progress along a gradient line. Can only be used in the `line-gradient` property.",
+        "doc": "Gets the progress along a gradient line. Can only be used in the [`line-gradient`](layers/#line-gradient) property.",
         "syntax": {
           "overloads": [
             {
@@ -5229,7 +5658,7 @@
         }
       },
       "==": {
-        "doc": "Returns `true` if the input values are equal, `false` otherwise. The comparison is strictly typed: values of different runtime types are always considered unequal. Cases where the types are known to be different at parse time are considered invalid and will produce a parse error. Accepts an optional `collator` argument to control locale-dependent string comparisons.\n\n - [Add multiple geometries from one GeoJSON source](https://maplibre.org/maplibre-gl-js/docs/examples/multiple-geometries/)\n\n - [Create a time slider](https://maplibre.org/maplibre-gl-js/docs/examples/timeline-animation/)\n\n - [Display buildings in 3D](https://maplibre.org/maplibre-gl-js/docs/examples/display-buildings-in-3d/)\n\n - [Filter symbols by toggling a list](https://maplibre.org/maplibre-gl-js/docs/examples/filter-symbols-by-toggling-a-list/)",
+        "doc": "Returns `true` if the input values are equal, `false` otherwise. The comparison is strictly typed: values of different runtime types are always considered unequal. Cases where the types are known to be different at parse time are considered invalid and will produce a parse error. Accepts an optional [`collator`](expressions/#collator) argument to control locale-dependent string comparisons.\n\n - [Add multiple geometries from one GeoJSON source](https://maplibre.org/maplibre-gl-js/docs/examples/add-multiple-geometries-from-one-geojson-source/)\n\n - [Create a time slider](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-time-slider/)\n\n - [Display buildings in 3D](https://maplibre.org/maplibre-gl-js/docs/examples/display-buildings-in-3d/)\n\n - [Filter symbols by toggling a list](https://maplibre.org/maplibre-gl-js/docs/examples/filter-symbols-by-toggling-a-list/)",
         "syntax": {
           "overloads": [
             {
@@ -5269,7 +5698,7 @@
         }
       },
       "!=": {
-        "doc": "Returns `true` if the input values are not equal, `false` otherwise. The comparison is strictly typed: values of different runtime types are always considered unequal. Cases where the types are known to be different at parse time are considered invalid and will produce a parse error. Accepts an optional `collator` argument to control locale-dependent string comparisons.\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)",
+        "doc": "Returns `true` if the input values are not equal, `false` otherwise. The comparison is strictly typed: values of different runtime types are always considered unequal. Cases where the types are known to be different at parse time are considered invalid and will produce a parse error. Accepts an optional [`collator`](expressions/#collator) argument to control locale-dependent string comparisons.\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)",
         "syntax": {
           "overloads": [
             {
@@ -5309,7 +5738,7 @@
         }
       },
       ">": {
-        "doc": "Returns `true` if the first input is strictly greater than the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional `collator` argument to control locale-dependent string comparisons.",
+        "doc": "Returns `true` if the first input is strictly greater than the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional [`collator`](expressions/#collator) argument to control locale-dependent string comparisons.",
         "syntax": {
           "overloads": [
             {
@@ -5353,7 +5782,7 @@
         }
       },
       "<": {
-        "doc": "Returns `true` if the first input is strictly less than the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional `collator` argument to control locale-dependent string comparisons.\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)",
+        "doc": "Returns `true` if the first input is strictly less than the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional [`collator`](expressions/#collator) argument to control locale-dependent string comparisons.\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)",
         "syntax": {
           "overloads": [
             {
@@ -5397,7 +5826,7 @@
         }
       },
       ">=": {
-        "doc": "Returns `true` if the first input is greater than or equal to the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional `collator` argument to control locale-dependent string comparisons.\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)",
+        "doc": "Returns `true` if the first input is greater than or equal to the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional [`collator`](expressions/#collator) argument to control locale-dependent string comparisons.\n\n - [Display HTML clusters with custom properties](https://maplibre.org/maplibre-gl-js/docs/examples/display-html-clusters-with-custom-properties/)",
         "syntax": {
           "overloads": [
             {
@@ -5441,7 +5870,7 @@
         }
       },
       "<=": {
-        "doc": "Returns `true` if the first input is less than or equal to the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional `collator` argument to control locale-dependent string comparisons.",
+        "doc": "Returns `true` if the first input is less than or equal to the second, `false` otherwise. The arguments are required to be either both strings or both numbers; if during evaluation they are not, expression evaluation produces an error. Cases where this constraint is known not to hold at parse time are considered in valid and will produce a parse error. Accepts an optional [`collator`](expressions/#collator) argument to control locale-dependent string comparisons.",
         "syntax": {
           "overloads": [
             {
@@ -5615,7 +6044,7 @@
         }
       },
       "upcase": {
-        "doc": "Returns the input string converted to uppercase. Follows the Unicode Default Case Conversion algorithm and the locale-insensitive case mappings in the Unicode Character Database.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-case-of-labels/)",
+        "doc": "Returns the input string converted to uppercase. Follows the Unicode Default Case Conversion algorithm and the locale-insensitive case mappings in the Unicode Character Database.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-the-case-of-labels/)",
         "syntax": {
           "overloads": [
             {
@@ -5641,7 +6070,7 @@
         }
       },
       "downcase": {
-        "doc": "Returns the input string converted to lowercase. Follows the Unicode Default Case Conversion algorithm and the locale-insensitive case mappings in the Unicode Character Database.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-case-of-labels/)",
+        "doc": "Returns the input string converted to lowercase. Follows the Unicode Default Case Conversion algorithm and the locale-insensitive case mappings in the Unicode Character Database.\n\n - [Change the case of labels](https://maplibre.org/maplibre-gl-js/docs/examples/change-the-case-of-labels/)",
         "syntax": {
           "overloads": [
             {
@@ -5667,7 +6096,7 @@
         }
       },
       "concat": {
-        "doc": "Returns a `string` consisting of the concatenation of the inputs. Each input is converted to a string as if by `to-string`.\n\n - [Add a generated icon to the map](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-generated-icon-to-the-map/)\n\n - [Create a time slider](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-time-slider/)\n\n - [Use a fallback image](https://maplibre.org/maplibre-gl-js/docs/examples/fallback-image/)\n\n - [Variable label placement](https://maplibre.org/maplibre-gl-js/docs/examples/variable-label-placement/)",
+        "doc": "Returns a `string` consisting of the concatenation of the inputs. Each input is converted to a string as if by [`to-string`](expressions/#to-string).\n\n - [Add a generated icon to the map](https://maplibre.org/maplibre-gl-js/docs/examples/add-a-generated-icon-to-the-map/)\n\n - [Create a time slider](https://maplibre.org/maplibre-gl-js/docs/examples/create-a-time-slider/)\n\n - [Use a fallback image](https://maplibre.org/maplibre-gl-js/docs/examples/use-a-fallback-image/)\n\n - [Variable label placement](https://maplibre.org/maplibre-gl-js/docs/examples/variable-label-placement/)",
         "syntax": {
           "overloads": [
             {
@@ -5693,7 +6122,7 @@
         }
       },
       "resolved-locale": {
-        "doc": "Returns the IETF language tag of the locale being used by the provided `collator`. This can be used to determine the default system locale, or to determine if a requested locale was successfully loaded.",
+        "doc": "Returns the IETF language tag of the locale being used by the provided [`collator`](expressions/#collator). This can be used to determine the default system locale, or to determine if a requested locale was successfully loaded.",
         "syntax": {
           "overloads": [
             {
@@ -5746,8 +6175,8 @@
         "sdk-support": {
           "basic functionality": {
             "js": "5.20.0",
-            "android": "https://github.com/maplibre/maplibre-native/issues/4133",
-            "ios": "https://github.com/maplibre/maplibre-native/issues/4133"
+            "android": "13.5.0",
+            "ios": "6.29.0"
           }
         }
       },
@@ -5776,8 +6205,8 @@
         "sdk-support": {
           "basic functionality": {
             "js": "5.20.0",
-            "android": "https://github.com/maplibre/maplibre-native/issues/4133",
-            "ios": "https://github.com/maplibre/maplibre-native/issues/4133"
+            "android": "13.5.0",
+            "ios": "6.29.0"
           }
         }
       }
@@ -5810,6 +6239,11 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       }
     },
@@ -5830,7 +6264,7 @@
           "zoom"
         ]
       },
-      "doc": "Position of the light source relative to lit (extruded) geometries, in [r radial coordinate, a azimuthal angle, p polar angle] where r indicates the distance from the center of the base of an object to its light, a indicates the position of the light relative to 0° (0° when `light.anchor` is set to `viewport` corresponds to the top of the viewport, or 0° when `light.anchor` is set to `map` corresponds to due north, and degrees proceed clockwise), and p indicates the height of the light (from 0°, directly above, to 180°, directly below).",
+      "doc": "Position of the light source relative to lit (extruded) geometries, in `[r radial coordinate, a azimuthal angle, p polar angle]` where r indicates the distance from the center of the base of an object to its light, a indicates the position of the light relative to 0° (0° when `light.anchor` is set to `viewport` corresponds to the top of the viewport, or 0° when `light.anchor` is set to `map` corresponds to due north, and degrees proceed clockwise), and p indicates the height of the light (from 0°, directly above, to 180°, directly below).",
       "example": [
         1.5,
         90,
@@ -5841,6 +6275,11 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       }
     },
@@ -5861,6 +6300,11 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       }
     },
@@ -5883,6 +6327,11 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       }
     }
@@ -5899,7 +6348,19 @@
         ]
       },
       "transition": true,
-      "doc": "The base color for the sky."
+      "doc": "The base color for the sky.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     },
     "horizon-color": {
       "type": "color",
@@ -5912,7 +6373,19 @@
         ]
       },
       "transition": true,
-      "doc": "The base color at the horizon."
+      "doc": "The base color at the horizon.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     },
     "fog-color": {
       "type": "color",
@@ -5925,7 +6398,19 @@
         ]
       },
       "transition": true,
-      "doc": "The base color for the fog. Requires 3D terrain."
+      "doc": "The base color for the fog. Requires 3D terrain.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     },
     "fog-ground-blend": {
       "type": "number",
@@ -5940,7 +6425,19 @@
         ]
       },
       "transition": true,
-      "doc": "How to blend the fog over the 3D terrain. Where 0 is the map center and 1 is the horizon."
+      "doc": "How to blend the fog over the 3D terrain. Where 0 is the map center and 1 is the horizon.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     },
     "horizon-fog-blend": {
       "type": "number",
@@ -5955,7 +6452,19 @@
         ]
       },
       "transition": true,
-      "doc": "How to blend the fog color and the horizon color. Where 0 is using the horizon color only and 1 is using the fog color only."
+      "doc": "How to blend the fog color and the horizon color. Where 0 is using the horizon color only and 1 is using the fog color only.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     },
     "sky-horizon-blend": {
       "type": "number",
@@ -5970,7 +6479,19 @@
         ]
       },
       "transition": true,
-      "doc": "How to blend the sky color and the horizon color. Where 1 is blending the color at the middle of the sky and 0 is not blending at all and using the sky color only."
+      "doc": "How to blend the sky color and the horizon color. Where 1 is blending the color at the middle of the sky and 0 is not blending at all and using the sky color only.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     },
     "atmosphere-blend": {
       "type": "number",
@@ -5985,7 +6506,19 @@
         ]
       },
       "transition": true,
-      "doc": "How to blend the atmosphere. Where 1 is visible atmosphere and 0 is hidden. It is best to interpolate this expression when using globe projection."
+      "doc": "How to blend the atmosphere. Where 1 is visible atmosphere and 0 is hidden. It is best to interpolate this expression when using globe projection.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "4.5.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.1.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4414",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4414"
+        }
+      }
     }
   },
   "terrain": {
@@ -6052,6 +6585,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6067,7 +6605,7 @@
       "default": 1,
       "minimum": 0,
       "maximum": 1,
-      "doc": "The opacity of the entire fill layer. In contrast to the `fill-color`, this value will also affect the 1px stroke around the fill, if the stroke is used.",
+      "doc": "The opacity of the entire fill layer. In contrast to the [`fill-color`](layers/#fill-color), this value will also affect the 1px stroke around the fill, if the stroke is used.",
       "transition": true,
       "sdk-support": {
         "basic functionality": {
@@ -6079,6 +6617,11 @@
           "js": "0.21.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6090,6 +6633,71 @@
         ]
       },
       "property-type": "data-driven"
+    },
+    "fill-layer-opacity": {
+      "type": "number",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 1,
+      "doc": "Opacity applied to the layer as a whole. Unlike [`fill-opacity`](layers/#fill-opacity) and alpha values in [`fill-color`](layers/#fill-color), which are applied per feature and accumulate where fills overlap, `fill-layer-opacity` is applied once so overlapping fills appear as a single surface at the given opacity. When both `fill-opacity` and `fill-layer-opacity` are set, the per-feature, overlap accumulation is preserved, then `fill-layer-opacity` composites the result. This property affects only the layer it is set on and cannot be used to composite multiple layers together or control how this layer blends with layers above or below it.\n\n![fill-opacity vs. fill-layer-opacity](assets/fill-layer-opacity.svg)",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "6.0.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4298",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4298"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.0.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4298",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4298"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom",
+          "global-state"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "fill-layer-blend": {
+      "type": "enum",
+      "values": {
+        "normal": {
+          "doc": "[Normal](https://www.w3.org/TR/compositing-1/#blendingnormal) blending. The layer is drawn on top of existing content using standard alpha compositing."
+        },
+        "multiply": {
+          "doc": "[Multiply](https://www.w3.org/TR/compositing-1/#blendingmultiply) blending. The layer color is multiplied with the colors underneath, producing darker results. Useful for textures, hillshades, and combining raster and vector content."
+        },
+        "color": {
+          "doc": "[Color](https://www.w3.org/TR/compositing-1/#blendingcolor) blending. Creates a color with the hue and saturation of the layer and the luminosity of the content underneath, preserving its gray levels. Useful for tinting monochrome content such as a hillshade."
+        },
+        "luminosity": {
+          "doc": "[Luminosity](https://www.w3.org/TR/compositing-1/#blendingluminosity) blending. Creates a color with the luminosity of the layer and the hue and saturation of the content underneath. The inverse of `color`."
+        },
+        "plus-lighter": {
+          "doc": "[Plus-lighter](https://www.w3.org/TR/compositing-1/#porterduffcompositingoperators_plus) blending. Additive blending. The layer color is added to the colors underneath, producing brighter results. Useful for glow and heat accumulation effects."
+        },
+        "screen": {
+          "doc": "[Screen](https://www.w3.org/TR/compositing-1/#blendingscreen) blending. The inverse of the colors is multiplied, producing lighter results. Useful for glow, heatmap, and light-based effects."
+        },
+        "overlay": {
+          "doc": "[Overlay](https://www.w3.org/TR/compositing-1/#blendingoverlay) blending. Multiplies or screens colors depending on the colors underneath, preserving highlights and shadows while adding contrast."
+        }
+      },
+      "default": "normal",
+      "doc": "Controls how the layer is composited with the content already rendered beneath it. Unlike per-feature opacity properties such as `fill-opacity`, this property affects the final composited layer output and determines how it interacts with the existing map contents.\n\n![fill-layer-blend examples](assets/fill-layer-blend.svg)",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/48",
+          "android": "https://github.com/maplibre/maplibre-native/issues/2963",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/2963"
+        }
+      },
+      "property-type": "constant",
+      "transition": false
     },
     "fill-color": {
       "type": "color",
@@ -6106,6 +6714,16 @@
           "js": "0.19.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "SDF fill pattern colorization": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/8342",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4526",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4526"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6120,7 +6738,7 @@
     },
     "fill-outline-color": {
       "type": "color",
-      "doc": "The outline color of the fill. Matches the value of `fill-color` if unspecified.",
+      "doc": "The outline color of the fill. Matches the value of [`fill-color`](layers/#fill-color) if unspecified.",
       "transition": true,
       "requires": [
         {
@@ -6140,6 +6758,11 @@
           "js": "0.19.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6162,12 +6785,17 @@
       ],
       "transition": true,
       "units": "pixels",
-      "doc": "The geometry's offset. Values are [x, y] where negatives indicate left and up, respectively.",
+      "doc": "The geometry's offset. Values are `[x, y]` where negatives indicate left and up, respectively.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6188,7 +6816,7 @@
           "doc": "The fill is translated relative to the viewport."
         }
       },
-      "doc": "Controls the frame of reference for `fill-translate`.",
+      "doc": "Controls the frame of reference for [`fill-translate`](layers/#fill-translate).",
       "default": "map",
       "requires": [
         "fill-translate"
@@ -6198,6 +6826,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6222,6 +6855,11 @@
           "js": "0.49.0",
           "android": "6.5.0",
           "ios": "4.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6247,6 +6885,11 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6260,7 +6903,7 @@
     "fill-extrusion-color": {
       "type": "color",
       "default": "#000000",
-      "doc": "The base color of the extruded fill. The extrusion's surfaces will be shaded differently based on this color in combination with the root `light` settings. If this color is specified as `rgba` with an alpha component, the alpha component will be ignored; use `fill-extrusion-opacity` to set layer opacity.",
+      "doc": "The base color of the extruded fill. The extrusion's surfaces will be shaded differently based on this color in combination with the root `light` settings. If this color is specified as `rgba` with an alpha component, the alpha component will be ignored; use [`fill-extrusion-opacity`](layers/#fill-extrusion-opacity) to set layer opacity.",
       "transition": true,
       "requires": [
         {
@@ -6277,6 +6920,16 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        },
+        "[`elevation`](expressions/#elevation) expression": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/8799",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4787",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4787"
         }
       },
       "expression": {
@@ -6284,7 +6937,8 @@
         "parameters": [
           "zoom",
           "feature",
-          "feature-state"
+          "feature-state",
+          "elevation"
         ]
       },
       "property-type": "data-driven"
@@ -6299,12 +6953,17 @@
       ],
       "transition": true,
       "units": "pixels",
-      "doc": "The geometry's offset. Values are [x, y] where negatives indicate left and up (on the flat plane), respectively.",
+      "doc": "The geometry's offset. Values are `[x, y]` where negatives indicate left and up (on the flat plane), respectively.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6325,7 +6984,7 @@
           "doc": "The fill extrusion is translated relative to the viewport."
         }
       },
-      "doc": "Controls the frame of reference for `fill-extrusion-translate`.",
+      "doc": "Controls the frame of reference for [`fill-extrusion-translate`](layers/#fill-extrusion-translate).",
       "default": "map",
       "requires": [
         "fill-extrusion-translate"
@@ -6335,6 +6994,11 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6359,6 +7023,11 @@
           "js": "0.49.0",
           "android": "6.5.0",
           "ios": "4.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6373,9 +7042,8 @@
     "fill-extrusion-height": {
       "type": "number",
       "default": 0,
-      "minimum": 0,
       "units": "meters",
-      "doc": "The height with which to extrude this layer.",
+      "doc": "The height with which to extrude this layer. Negative values extrude below ground level, so a floor that is entirely underground can be expressed.",
       "transition": true,
       "sdk-support": {
         "basic functionality": {
@@ -6387,6 +7055,16 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        },
+        "negative values": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/8051",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4455",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4455"
         }
       },
       "expression": {
@@ -6402,9 +7080,8 @@
     "fill-extrusion-base": {
       "type": "number",
       "default": 0,
-      "minimum": 0,
       "units": "meters",
-      "doc": "The height with which to extrude the base of this layer. Must be less than or equal to `fill-extrusion-height`.",
+      "doc": "The height with which to extrude the base of this layer. Must be less than or equal to [`fill-extrusion-height`](layers/#fill-extrusion-height). Negative values extrude below ground level, e.g. underground floors.",
       "transition": true,
       "requires": [
         "fill-extrusion-height"
@@ -6419,6 +7096,16 @@
           "js": "0.27.0",
           "android": "5.1.0",
           "ios": "3.6.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        },
+        "negative values": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/8051",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4455",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4455"
         }
       },
       "expression": {
@@ -6441,6 +7128,11 @@
           "js": "0.50.0",
           "ios": "4.7.0",
           "android": "7.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6470,6 +7162,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6481,6 +7178,71 @@
         ]
       },
       "property-type": "data-driven"
+    },
+    "line-layer-opacity": {
+      "type": "number",
+      "default": 1,
+      "minimum": 0,
+      "maximum": 1,
+      "doc": "Opacity applied to the layer as a whole. Unlike [`line-opacity`](layers/#line-opacity) and alpha values in [`line-color`](layers/#line-color), which are applied per feature and accumulate where lines overlap, `line-layer-opacity` is applied once so overlapping lines appear as a single surface at the given opacity. When both `line-opacity` and `line-layer-opacity` are set, the per-feature, overlap accumulation is preserved, then layer-opacity composites the result. This property affects only the layer it is set on and cannot be used to composite multiple layers together or control how this layer blends with layers above or below it.\n\n![line-opacity vs. line-layer-opacity](assets/line-layer-opacity.svg)",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "6.0.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4298",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4298"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "6.0.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4298",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4298"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom",
+          "global-state"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "line-layer-blend": {
+      "type": "enum",
+      "values": {
+        "normal": {
+          "doc": "[Normal](https://www.w3.org/TR/compositing-1/#blendingnormal) blending. The layer is drawn on top of existing content using standard alpha compositing."
+        },
+        "multiply": {
+          "doc": "[Multiply](https://www.w3.org/TR/compositing-1/#blendingmultiply) blending. The layer color is multiplied with the colors underneath, producing darker results. Useful for textures, hillshades, and combining raster and vector content."
+        },
+        "color": {
+          "doc": "[Color](https://www.w3.org/TR/compositing-1/#blendingcolor) blending. Creates a color with the hue and saturation of the layer and the luminosity of the content underneath, preserving its gray levels. Useful for tinting monochrome content such as a hillshade."
+        },
+        "luminosity": {
+          "doc": "[Luminosity](https://www.w3.org/TR/compositing-1/#blendingluminosity) blending. Creates a color with the luminosity of the layer and the hue and saturation of the content underneath. The inverse of `color`."
+        },
+        "plus-lighter": {
+          "doc": "[Plus-lighter](https://www.w3.org/TR/compositing-1/#porterduffcompositingoperators_plus) blending. Additive blending. The layer color is added to the colors underneath, producing brighter results. Useful for glow and heat accumulation effects."
+        },
+        "screen": {
+          "doc": "[Screen](https://www.w3.org/TR/compositing-1/#blendingscreen) blending. The inverse of the colors is multiplied, producing lighter results. Useful for glow, heatmap, and light-based effects."
+        },
+        "overlay": {
+          "doc": "[Overlay](https://www.w3.org/TR/compositing-1/#blendingoverlay) blending. Multiplies or screens colors depending on the colors underneath, preserving highlights and shadows while adding contrast."
+        }
+      },
+      "default": "normal",
+      "doc": "Controls how the layer is composited with the content already rendered beneath it. Unlike per-feature opacity properties such as [`line-opacity`](#line-opacity), this property affects the final composited layer output and determines how it interacts with the existing map contents.\n\n![line-layer-blend examples](assets/line-layer-blend.svg)",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/48",
+          "android": "https://github.com/maplibre/maplibre-native/issues/2963",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/2963"
+        }
+      },
+      "property-type": "constant",
+      "transition": false
     },
     "line-color": {
       "type": "color",
@@ -6502,6 +7264,11 @@
           "js": "0.23.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6524,12 +7291,17 @@
       ],
       "transition": true,
       "units": "pixels",
-      "doc": "The geometry's offset. Values are [x, y] where negatives indicate left and up, respectively.",
+      "doc": "The geometry's offset. Values are `[x, y]` where negatives indicate left and up, respectively.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6550,7 +7322,7 @@
           "doc": "The line is translated relative to the viewport."
         }
       },
-      "doc": "Controls the frame of reference for `line-translate`.",
+      "doc": "Controls the frame of reference for [`line-translate`](layers/#line-translate).",
       "default": "map",
       "requires": [
         "line-translate"
@@ -6560,6 +7332,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6587,6 +7364,11 @@
           "js": "0.39.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6616,6 +7398,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6644,6 +7431,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6673,6 +7465,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6688,7 +7485,7 @@
     "line-dasharray": {
       "type": "array",
       "value": "number",
-      "doc": "Specifies the lengths of the alternating dashes and gaps that form the dash pattern. The lengths are later scaled by the line width. To convert a dash length to pixels, multiply the length by the current line width. Note that GeoJSON sources with `lineMetrics: true` specified won't render dashed lines to the expected scale. Also note that zoom-dependent expressions will be evaluated only at integer zoom levels.",
+      "doc": "Specifies the lengths of the alternating dashes and gaps that form the dash pattern. The lengths are later scaled by the line width. To convert a dash length to pixels, multiply the length by the current line width. GeoJSON sources with `lineMetrics: true` specified won't render dashed lines to the expected scale. Zoom-dependent expressions will be evaluated only at integer zoom levels. The only way to create an array value is using `[\"literal\", [...]]`; arrays cannot be read from or derived from feature properties.",
       "minimum": 0,
       "transition": true,
       "units": "line widths",
@@ -6703,15 +7500,25 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "data-driven styling": {}
+        "data-driven styling": {
+          "js": "5.8.0",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/744",
+          "android": "https://github.com/maplibre/maplibre-native/issues/744"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
       },
       "expression": {
         "interpolated": false,
         "parameters": [
-          "zoom"
+          "zoom",
+          "feature"
         ]
       },
-      "property-type": "cross-faded"
+      "property-type": "cross-faded-data-driven"
     },
     "line-pattern": {
       "type": "resolvedImage",
@@ -6727,6 +7534,11 @@
           "js": "0.49.0",
           "android": "6.5.0",
           "ios": "4.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6762,7 +7574,12 @@
           "android": "6.5.0",
           "ios": "4.4.0"
         },
-        "data-driven styling": {}
+        "data-driven styling": {},
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
       },
       "expression": {
         "interpolated": true,
@@ -6791,6 +7608,11 @@
           "js": "0.18.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6818,6 +7640,11 @@
           "js": "0.18.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6845,6 +7672,11 @@
           "js": "0.20.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6874,6 +7706,11 @@
           "js": "0.20.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6896,12 +7733,17 @@
       ],
       "transition": true,
       "units": "pixels",
-      "doc": "The geometry's offset. Values are [x, y] where negatives indicate left and up, respectively.",
+      "doc": "The geometry's offset. Values are `[x, y]` where negatives indicate left and up, respectively.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6922,7 +7764,7 @@
           "doc": "The circle is translated relative to the viewport."
         }
       },
-      "doc": "Controls the frame of reference for `circle-translate`.",
+      "doc": "Controls the frame of reference for [`circle-translate`](layers/#circle-translate).",
       "default": "map",
       "requires": [
         "circle-translate"
@@ -6932,6 +7774,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6959,6 +7806,11 @@
           "js": "0.21.0",
           "android": "4.2.0",
           "ios": "3.4.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -6986,6 +7838,11 @@
           "js": "0.39.0",
           "android": "5.2.0",
           "ios": "3.7.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7002,7 +7859,7 @@
       "minimum": 0,
       "transition": true,
       "units": "pixels",
-      "doc": "The width of the circle's stroke. Strokes are placed outside of the `circle-radius`.",
+      "doc": "The width of the circle's stroke. Strokes are placed outside of the [`circle-radius`](layers/#circle-radius).",
       "sdk-support": {
         "basic functionality": {
           "js": "0.29.0",
@@ -7013,6 +7870,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7040,6 +7902,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7069,6 +7936,11 @@
           "js": "0.29.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7100,6 +7972,11 @@
           "js": "0.43.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7128,6 +8005,11 @@
           "js": "0.41.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7145,12 +8027,17 @@
       "default": 1,
       "minimum": 0,
       "transition": true,
-      "doc": "Similar to `heatmap-weight` but controls the intensity of the heatmap globally. Primarily used for adjusting the heatmap based on zoom level.",
+      "doc": "Similar to [`heatmap-weight`](layers/#heatmap-weight) but controls the intensity of the heatmap globally. Primarily used for adjusting the heatmap based on zoom level.",
       "sdk-support": {
         "basic functionality": {
           "js": "0.41.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7192,7 +8079,12 @@
           "android": "6.0.0",
           "ios": "4.0.0"
         },
-        "data-driven styling": {}
+        "data-driven styling": {},
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
       },
       "expression": {
         "interpolated": true,
@@ -7214,6 +8106,11 @@
           "js": "0.41.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7246,6 +8143,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7276,6 +8178,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7306,6 +8213,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7338,6 +8250,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7370,6 +8287,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7401,6 +8323,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7421,7 +8348,7 @@
           "doc": "Icons are translated relative to the viewport."
         }
       },
-      "doc": "Controls the frame of reference for `icon-translate`.",
+      "doc": "Controls the frame of reference for [`icon-translate`](layers/#icon-translate).",
       "default": "map",
       "requires": [
         "icon-image",
@@ -7432,6 +8359,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7462,6 +8394,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7493,6 +8430,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7523,6 +8465,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7555,6 +8502,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7587,6 +8539,11 @@
           "js": "0.33.0",
           "android": "5.0.0",
           "ios": "3.5.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7618,6 +8575,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7638,7 +8600,7 @@
           "doc": "The text is translated relative to the viewport."
         }
       },
-      "doc": "Controls the frame of reference for `text-translate`.",
+      "doc": "Controls the frame of reference for [`text-translate`](layers/#text-translate).",
       "default": "map",
       "requires": [
         "text-field",
@@ -7649,6 +8611,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7673,6 +8640,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7682,6 +8654,43 @@
         ]
       },
       "property-type": "data-constant"
+    },
+    "raster-layer-blend": {
+      "type": "enum",
+      "values": {
+        "normal": {
+          "doc": "[Normal](https://www.w3.org/TR/compositing-1/#blendingnormal) blending. The layer is drawn on top of existing content using standard alpha compositing."
+        },
+        "multiply": {
+          "doc": "[Multiply](https://www.w3.org/TR/compositing-1/#blendingmultiply) blending. The layer color is multiplied with the colors underneath, producing darker results. Useful for textures, hillshades, and combining raster and vector content."
+        },
+        "color": {
+          "doc": "[Color](https://www.w3.org/TR/compositing-1/#blendingcolor) blending. Creates a color with the hue and saturation of the layer and the luminosity of the content underneath, preserving its gray levels. Useful for tinting monochrome content such as a hillshade."
+        },
+        "luminosity": {
+          "doc": "[Luminosity](https://www.w3.org/TR/compositing-1/#blendingluminosity) blending. Creates a color with the luminosity of the layer and the hue and saturation of the content underneath. The inverse of `color`."
+        },
+        "plus-lighter": {
+          "doc": "[Plus-lighter](https://www.w3.org/TR/compositing-1/#porterduffcompositingoperators_plus) blending. Additive blending. The layer color is added to the colors underneath, producing brighter results. Useful for glow and heat accumulation effects."
+        },
+        "screen": {
+          "doc": "[Screen](https://www.w3.org/TR/compositing-1/#blendingscreen) blending. The inverse of the colors is multiplied, producing lighter results. Useful for glow, heatmap, and light-based effects."
+        },
+        "overlay": {
+          "doc": "[Overlay](https://www.w3.org/TR/compositing-1/#blendingoverlay) blending. Multiplies or screens colors depending on the colors underneath, preserving highlights and shadows while adding contrast."
+        }
+      },
+      "default": "normal",
+      "doc": "Controls how the layer is composited with the content already rendered beneath it. Unlike [`raster-opacity`](#raster-opacity), which only fades the layer, this property determines how its colors interact with the existing map contents.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "https://github.com/maplibre/maplibre-gl-js/issues/48",
+          "android": "https://github.com/maplibre/maplibre-native/issues/2963",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/2963"
+        }
+      },
+      "property-type": "constant",
+      "transition": false
     },
     "raster-hue-rotate": {
       "type": "number",
@@ -7695,6 +8704,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7717,6 +8731,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7739,6 +8758,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7761,6 +8785,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7783,6 +8812,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7793,9 +8827,41 @@
       },
       "property-type": "data-constant"
     },
+    "resampling": {
+      "type": "enum",
+      "doc": "The resampling/interpolation method to use for overscaling, also known as texture magnification filter.\n![Visual comparison of linear resampling versus nearest resampling](assets/resampling.png)",
+      "values": {
+        "linear": {
+          "doc": "(Bi)linear filtering interpolates pixel values using the weighted average of the four closest original source pixels creating a smooth but blurry look when overscaled"
+        },
+        "nearest": {
+          "doc": "Nearest neighbor filtering interpolates pixel values using the nearest original source pixel creating a sharp but pixelated look when overscaled"
+        }
+      },
+      "default": "linear",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "5.20.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4117",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4117"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4117",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4117"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
     "raster-resampling": {
       "type": "enum",
-      "doc": "The resampling/interpolation method to use for overscaling, also known as texture magnification filter",
+      "doc": "The resampling/interpolation method to use for overscaling, also known as texture magnification filter. It is advised to use the generic `resampling` paint property instead.",
       "values": {
         "linear": {
           "doc": "(Bi)linear filtering interpolates pixel values using the weighted average of the four closest original source pixels creating a smooth but blurry look when overscaled"
@@ -7810,6 +8876,11 @@
           "js": "0.47.0",
           "android": "6.3.0",
           "ios": "4.2.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7832,6 +8903,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7849,7 +8925,7 @@
       "default": 335,
       "minimum": 0,
       "maximum": 359,
-      "doc": "The direction of the light source(s) used to generate the hillshading with 0 as the top of the viewport if `hillshade-illumination-anchor` is set to `viewport` and due north if `hillshade-illumination-anchor` is set to `map`. Only when `hillshade-method` is set to `multidirectional` can you specify multiple light sources.",
+      "doc": "The direction of the light source(s) used to generate the hillshading with 0 as the top of the viewport if [`hillshade-illumination-anchor`](layers/#hillshade-illumination-anchor) is set to `viewport` and due north if `hillshade-illumination-anchor` is set to `map`. Only when [`hillshade-method`](layers/#hillshade-method) is set to `multidirectional` can you specify multiple light sources.",
       "transition": false,
       "sdk-support": {
         "basic functionality": {
@@ -7859,8 +8935,13 @@
         },
         "multidirectional": {
           "js": "5.5.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+          "android": "13.0.0",
+          "ios": "6.24.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7876,18 +8957,23 @@
       "default": 45,
       "minimum": 0,
       "maximum": 90,
-      "doc": "The altitude of the light source(s) used to generate the hillshading with 0 as sunset and 90 as noon. Only when `hillshade-method` is set to `multidirectional` can you specify multiple light sources.",
+      "doc": "The altitude of the light source(s) used to generate the hillshading with 0 as sunset and 90 as noon. Only when [`hillshade-method`](layers/#hillshade-method) is set to `multidirectional` can you specify multiple light sources.",
       "transition": false,
       "sdk-support": {
         "basic functionality": {
           "js": "5.5.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+          "android": "13.0.0",
+          "ios": "6.24.0"
         },
         "multidirectional": {
           "js": "5.5.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+          "android": "13.0.0",
+          "ios": "6.24.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7915,6 +9001,11 @@
           "js": "0.43.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7937,6 +9028,11 @@
           "js": "0.43.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7950,7 +9046,7 @@
     "hillshade-shadow-color": {
       "type": "colorArray",
       "default": "#000000",
-      "doc": "The shading color of areas that face away from the light source(s). Only when `hillshade-method` is set to `multidirectional` can you specify multiple light sources.",
+      "doc": "The shading color of areas that face away from the light source(s). Only when [`hillshade-method`](layers/#hillshade-method) is set to `multidirectional` can you specify multiple light sources.",
       "transition": true,
       "sdk-support": {
         "basic functionality": {
@@ -7960,8 +9056,13 @@
         },
         "multidirectional": {
           "js": "5.5.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+          "android": "13.0.0",
+          "ios": "6.24.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -7975,7 +9076,7 @@
     "hillshade-highlight-color": {
       "type": "colorArray",
       "default": "#FFFFFF",
-      "doc": "The shading color of areas that faces towards the light source(s). Only when `hillshade-method` is set to `multidirectional` can you specify multiple light sources.",
+      "doc": "The shading color of areas that faces towards the light source(s). Only when [`hillshade-method`](layers/#hillshade-method) is set to `multidirectional` can you specify multiple light sources.",
       "transition": true,
       "sdk-support": {
         "basic functionality": {
@@ -7985,8 +9086,13 @@
         },
         "multidirectional": {
           "js": "5.5.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+          "android": "13.0.0",
+          "ios": "6.24.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -8007,6 +9113,11 @@
           "js": "0.43.0",
           "android": "6.0.0",
           "ios": "4.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -8037,12 +9148,49 @@
         }
       },
       "default": "standard",
-      "doc": "The hillshade algorithm to use, one of `standard`, `basic`, `combined`, `igor`, or `multidirectional`. ![image](assets/hillshade_methods.png)",
+      "doc": "The hillshade algorithm to use, one of `standard`, `basic`, `combined`, `igor`, or `multidirectional`.\n![Visual comparison of standard, basic, igor, combined, and multidirectional hillshade-method](assets/hillshade_methods.png)",
       "sdk-support": {
         "basic functionality": {
           "js": "5.5.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3396",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3396"
+          "android": "13.0.0",
+          "ios": "6.24.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "resampling": {
+      "type": "enum",
+      "doc": "The resampling/interpolation method to use for overscaling, also known as texture magnification filter.\n![Visual comparison of linear resampling versus nearest resampling](assets/resampling.png)",
+      "values": {
+        "linear": {
+          "doc": "(Bi)linear filtering interpolates pixel values using the weighted average of the four closest original source pixels creating a smooth but blurry look when overscaled"
+        },
+        "nearest": {
+          "doc": "Nearest neighbor filtering interpolates pixel values using the nearest original source pixel creating a sharp but pixelated look when overscaled"
+        }
+      },
+      "default": "linear",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "5.20.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4117",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4117"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4117",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4117"
         }
       },
       "expression": {
@@ -8065,8 +9213,13 @@
       "sdk-support": {
         "basic functionality": {
           "js": "5.6.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3408",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3408"
+          "android": "13.0.0",
+          "ios": "6.24.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -8079,7 +9232,7 @@
     },
     "color-relief-color": {
       "type": "color",
-      "doc": "Defines the color of each pixel based on its elevation. Should be an expression that uses `[\"elevation\"]` as input.",
+      "doc": "Defines the color of each pixel based on its elevation. Should be an expression that uses the [`elevation`](expressions/#elevation) expression as input.",
       "example": [
         "interpolate",
         ["linear"],
@@ -8091,10 +9244,15 @@
       "sdk-support": {
         "basic functionality": {
           "js": "5.6.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/3408",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/3408"
+          "android": "13.0.0",
+          "ios": "6.24.0"
         },
-        "data-driven styling": {}
+        "data-driven styling": {},
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
       },
       "expression": {
         "interpolated": true,
@@ -8103,6 +9261,38 @@
         ]
       },
       "property-type": "color-ramp"
+    },
+    "resampling": {
+      "type": "enum",
+      "doc": "The resampling/interpolation method to use for overscaling, also known as texture magnification filter.\n![Visual comparison of linear resampling versus nearest resampling](assets/resampling.png)",
+      "values": {
+        "linear": {
+          "doc": "(Bi)linear filtering interpolates pixel values using the weighted average of the four closest original source pixels creating a smooth but blurry look when overscaled"
+        },
+        "nearest": {
+          "doc": "Nearest neighbor filtering interpolates pixel values using the nearest original source pixel creating a sharp but pixelated look when overscaled"
+        }
+      },
+      "default": "linear",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "5.20.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4117",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4117"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "https://github.com/maplibre/maplibre-native/issues/4117",
+          "ios": "https://github.com/maplibre/maplibre-native/issues/4117"
+        }
+      },
+      "expression": {
+        "interpolated": false,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
     }
   },
   "paint_background": {
@@ -8121,6 +9311,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {
@@ -8141,7 +9336,12 @@
           "android": "2.0.1",
           "ios": "2.0.0"
         },
-        "data-driven styling": {}
+        "data-driven styling": {},
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
+        }
       },
       "expression": {
         "interpolated": false,
@@ -8163,6 +9363,11 @@
           "js": "0.10.0",
           "android": "2.0.1",
           "ios": "2.0.0"
+        },
+        "[`global-state`](expressions/#global-state) expression": {
+          "js": "5.6.0",
+          "android": "13.7.1",
+          "ios": "7.0.0"
         }
       },
       "expression": {

@@ -1,11 +1,10 @@
 //! Fails when the checked-in generated style code (crates/mln_style/src)
-//! differs from what the generator writes for the C++ repo's v8.json (the
-//! copy in testdata/).
+//! differs from what the generator writes for the style spec in v8.json.
 
 use std::path::{Path, PathBuf};
 
 fn spec_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/scripts/style-spec-reference/v8.json")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("v8.json")
 }
 
 #[test]
