@@ -41,9 +41,9 @@ impl Drop for Paint {
 
 /// The overlay that paints the controls on WebGPU: egui's renderer on the
 /// map's device, made with the first frame.
-pub(crate) fn webgpu_overlay(paint: Rc<RefCell<Paint>>) -> mln_webgpu::surface_backend::Overlay {
+pub(crate) fn webgpu_overlay(paint: Rc<RefCell<Paint>>) -> mln_webgpu::surface_target::Overlay {
     let mut renderer: Option<egui_wgpu::Renderer> = None;
-    Box::new(move |target: &mln_webgpu::surface_backend::OverlayTarget<'_>| {
+    Box::new(move |target: &mln_webgpu::surface_target::OverlayTarget<'_>| {
         let renderer = renderer.get_or_insert_with(|| {
             egui_wgpu::Renderer::new(target.device, target.format, egui_wgpu::RendererOptions::default())
         });

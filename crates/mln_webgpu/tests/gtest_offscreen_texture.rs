@@ -14,7 +14,7 @@ use mln_image::decode_image;
 use mln_util::Color;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_webgpu::HeadlessBackend;
+use mln_webgpu::{Device, RendererBackend};
 
 fn read_fixture(path: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(path);
@@ -60,7 +60,7 @@ fn render_to_texture() {}
 // gtest: OffscreenTexture.ClearRenderPassColor
 #[test]
 fn clear_render_pass_color() {
-    let backend = HeadlessBackend::create(Size::new(128, 256));
+    let backend = RendererBackend::new(&Device::new(None).expect("device"));
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
     let context = backend.get_context();
     let encoder = context.create_command_encoder();
@@ -68,7 +68,7 @@ fn clear_render_pass_color() {
     let render_pass = encoder.create_render_pass(
         "offscreen texture",
         &RenderPassDescriptor {
-            renderable: &*offscreen_texture,
+            target: offscreen_texture.draw_target(),
             clear_color: Some(Color::new(1.0, 0.0, 0.0, 1.0)),
             clear_depth: None,
             clear_stencil: None,
@@ -77,9 +77,9 @@ fn clear_render_pass_color() {
     drop(render_pass);
     // The OpenGL encoder runs the clear immediately; a WebGPU command
     // encoder records it, and releasing it (C++ `encoder.reset()`) submits
-    // nothing. `present` submits the command buffer, as the renderer does at
-    // the end of a frame.
-    encoder.present(&*offscreen_texture);
+    // nothing. `submit` submits the command buffer, as the renderer does
+    // after the texture's passes.
+    offscreen_texture.submit(&*encoder);
     drop(encoder);
 
     let image = offscreen_texture.read_still_image();

@@ -13,8 +13,7 @@ use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer_backend::RendererBackend;
 use mln_gfx::shader_group::GLOBE_DEFINE;
-use mln_util::size::Size;
-use mln_webgpu::HeadlessBackend;
+use mln_webgpu::Device;
 use mln_webgpu::shaders::shader_program::ShaderProgram;
 use mln_webgpu::shaders::shader_source::{WgslShaderSource, prelude};
 use mln_webgpu::shaders::wgsl_preprocessor::preprocess_wgsl;
@@ -36,7 +35,7 @@ fn assemble(source: &WgslShaderSource, stage: &str) -> String {
 
 #[test]
 fn all_extracted_wgsl_compiles() {
-    let backend = HeadlessBackend::create(Size { width: 4, height: 4 });
+    let backend = mln_webgpu::RendererBackend::new(&Device::new(None).expect("device"));
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
     let context = backend.get_context().as_any().downcast_ref::<mln_webgpu::Context>().unwrap();
 
@@ -88,7 +87,7 @@ fn conditional_symbols(source: &str) -> Vec<String> {
 /// when all data-driven properties are constant). Reported, not asserted.
 #[test]
 fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {
-    let backend = HeadlessBackend::create(Size { width: 4, height: 4 });
+    let backend = mln_webgpu::RendererBackend::new(&Device::new(None).expect("device"));
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
     let context = backend.get_context().as_any().downcast_ref::<mln_webgpu::Context>().unwrap();
     let mut failed = Vec::new();

@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use feature::{Value, ValueObject};
 use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
-use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_renderer::query::SourceQueryOptions;
+use mln_runtime::Device;
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
@@ -189,14 +189,8 @@ impl Scene {
             PathBuf::from,
         );
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
-        let frontend = HeadlessFrontend::with_glyph_cache(
-            size,
-            1.0,
-            SwapBehaviour::NoFlush,
-            ContextMode::Unique,
-            mode != Mode::OnDemand,
-            glyph_cache,
-        );
+        let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache)
+            .expect("a headless frontend");
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let map = Map::with_resource_options(
@@ -315,7 +309,8 @@ impl Scene {
     /// returns (their swap waits for the frame's commands); WebGPU's is left
     /// to the device.
     fn wait_for_gpu(&self) {
-        if let Some(device) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_device) {
+        if let Device::WebGpu(device) = self.frontend.device() {
+            let device = device.device();
             // PowerVR's Vulkan driver on Android ends a wait shortly before
             // wgpu sees the submission finished, which wgpu reports as a
             // timeout; waiting again returns at once then.
@@ -461,25 +456,27 @@ impl Scene {
         })
     }
 
-    /// The WebGPU backend, unless the frontend renders through Metal or
-    /// Vulkan.
-    fn webgpu(&self) -> Option<&mln_webgpu::HeadlessBackend> {
-        self.frontend.get_backend().as_any().downcast_ref::<mln_webgpu::HeadlessBackend>()
-    }
-
     /// The GPU's description, and whether it is a software rasterizer.
     pub fn gpu(&self) -> (String, bool) {
+        let backend = self.frontend.get_backend().as_any();
         #[cfg(target_vendor = "apple")]
-        if let Some(metal) = self.frontend.get_backend().as_any().downcast_ref::<mln_mtl::HeadlessBackend>() {
-            return (format!("{} (Metal)", metal.get_device_name()), false);
+        if let Device::Metal(metal) = self.frontend.device() {
+            return (format!("{} (Metal)", metal.name()), false);
         }
         #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-        if let Some(vulkan) = self.frontend.get_backend().as_any().downcast_ref::<mln_vulkan::HeadlessBackend>() {
+        if let Some(vulkan) = backend.downcast_ref::<mln_vulkan::RendererBackend>() {
             return (format!("{} (Vulkan)", vulkan.get_device_name()), vulkan.is_software_device());
         }
-        let Some(info) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_adapter_info) else {
+        if let Some(gl) = backend.downcast_ref::<mln_gl::RendererBackend>() {
+            let _scope = mln_gfx::BackendScope::new(gl, mln_gfx::ScopeType::Explicit);
+            let name = gl.get_renderer_name();
+            let software = ["llvmpipe", "softpipe", "swiftshader"].iter().any(|s| name.to_lowercase().contains(s));
+            return (format!("{name} (OpenGL ES)"), software);
+        }
+        let Device::WebGpu(device) = self.frontend.device() else {
             return ("no adapter".to_string(), true);
         };
+        let info = device.adapter_info();
         let name = info.name.to_lowercase();
         let software = info.device_type == wgpu::DeviceType::Cpu
             || ["llvmpipe", "lavapipe", "swiftshader", "software", "warp"].iter().any(|s| name.contains(s));

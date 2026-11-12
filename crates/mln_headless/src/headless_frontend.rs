@@ -1,27 +1,26 @@
 // Ports platform/default/include/mln/gfx/headless_frontend.hpp and
-// platform/default/src/mln/gfx/headless_frontend.cpp.
+// platform/default/src/mln/gfx/headless_frontend.cpp: a map's renderer
+// drawing into an offscreen target on the calling thread, for tests, tools
+// and snapshots.
 //
-// C++ renders with the one backend it was built with. The port renders with
-// WebGPU, or with another backend the environment variable
-// MLN_RENDER_BACKEND names: `metal` on Apple platforms, `vulkan` on the
-// others, and `gl` (OpenGL ES 3.0 through EGL) in a build with the `gl`
-// feature.
+// C++ renders with the one backend it was built with. The frontend renders
+// on the device it is given, or on WebGPU, or on the backend the
+// environment variable MLN_RENDER_BACKEND names for the test harness:
+// `webgpu`, `metal`, `vulkan` or `gl`.
 
 use std::cell::{Cell, RefCell, RefMut};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use mln_actor::{AsyncTask, RunLoop};
-use mln_gfx::headless_backend::HeadlessBackend as GfxHeadlessBackend;
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::{BackendScope, ContextMode, RendererBackend, ScopeType, SwapBehaviour};
+use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{CameraOptions, Map, TransformState};
 use mln_renderer::{Renderer, UpdateParameters, UpdateReader};
+use mln_runtime::{BackendType, Device, DeviceOptions, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
-#[cfg(not(target_family = "wasm"))]
-use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 /// `HeadlessFrontend::RenderResult`.
@@ -34,9 +33,9 @@ struct Shared {
     size: Cell<Size>,
     pixel_ratio: Cell<f32>,
     frame_time: Cell<f64>,
-    backend: Rc<dyn GfxHeadlessBackend>,
-    /// `backend` as the renderer's backend.
-    renderer_backend: Rc<dyn RendererBackend>,
+    target: LocalTarget,
+    /// The target's backend, which the renderer draws with.
+    backend: Rc<dyn RendererBackend>,
     async_invalidate: RefCell<Option<AsyncTask>>,
     invalidate_on_update: bool,
     glyph_cache: Arc<GlyphCache>,
@@ -59,45 +58,17 @@ pub struct HeadlessFrontend {
     shared: Rc<Shared>,
 }
 
-/// The headless backend MLN_RENDER_BACKEND asks for (`gfx::Backend::Create`),
-/// as the gfx headless backend and as the renderer's backend.
-fn create_backend(
-    size: Size,
-    swap_behavior: SwapBehaviour,
-    context_mode: ContextMode,
-) -> (Rc<dyn GfxHeadlessBackend>, Rc<dyn RendererBackend>) {
-    #[cfg(target_vendor = "apple")]
-    if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("metal")) {
-        match mln_mtl::HeadlessBackend::new(size, swap_behavior, context_mode) {
-            Ok(backend) => {
-                let backend = Rc::new(backend);
-                return (backend.clone(), backend);
-            }
-            Err(e) => Log::error(Event::Render, format!("{e}; rendering with WebGPU instead")),
-        }
-    }
-    #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-    if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("vulkan")) {
-        match mln_vulkan::HeadlessBackend::new(size, swap_behavior, context_mode) {
-            Ok(backend) => {
-                let backend = Rc::new(backend);
-                return (backend.clone(), backend);
-            }
-            Err(e) => Log::error(Event::Render, format!("{e}; rendering with WebGPU instead")),
-        }
-    }
-    #[cfg(all(feature = "gl", not(target_arch = "wasm32")))]
-    if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("gl")) {
-        match mln_gl::HeadlessBackend::new(size, swap_behavior, context_mode) {
-            Ok(backend) => {
-                let backend = Rc::new(backend);
-                return (backend.clone(), backend);
-            }
-            Err(e) => Log::error(Event::Render, format!("{e}; rendering with WebGPU instead")),
-        }
-    }
-    let backend = Rc::new(mln_webgpu::HeadlessBackend::new(size, swap_behavior, context_mode));
-    (backend.clone(), backend)
+/// The device a frontend renders on without one of its own: on the backend
+/// MLN_RENDER_BACKEND names, or on WebGPU.
+pub fn harness_device() -> Result<Device, Error> {
+    let backend = match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
+        Ok("metal") => BackendType::Metal,
+        Ok("vulkan") => BackendType::Vulkan,
+        Ok("gl") => BackendType::OpenGL,
+        Ok("webgpu") | Err(_) => BackendType::WebGPU,
+        Ok(other) => return Err(Error::invalid_argument(format!("MLN_RENDER_BACKEND names no backend: {other}"))),
+    };
+    Device::with_backend(backend, DeviceOptions::default())
 }
 
 /// `{static_cast<uint32_t>(size.width * pixelRatio), static_cast<uint32_t>(size.height * pixelRatio)}`.
@@ -106,73 +77,54 @@ fn physical_size(size: Size, pixel_ratio: f32) -> Size {
 }
 
 impl HeadlessFrontend {
-    /// `HeadlessFrontend(Size, float pixelRatio)` with the default swap
-    /// behaviour (NoFlush), context mode (Unique), no local font family and
-    /// `invalidateOnUpdate = true`.
-    pub fn new(size: Size, pixel_ratio: f32) -> Self {
-        Self::with_options(size, pixel_ratio, SwapBehaviour::NoFlush, ContextMode::Unique, true)
+    /// `HeadlessFrontend(Size, float pixelRatio)` with
+    /// `invalidateOnUpdate = true`, on [`harness_device`].
+    ///
+    /// Fails as [`harness_device`] does, and with the backend's error when
+    /// it can't render on the device.
+    pub fn new(size: Size, pixel_ratio: f32) -> Result<Self, Error> {
+        Self::with_options(size, pixel_ratio, true)
     }
 
-    /// `HeadlessFrontend(Size, float pixelRatio, SwapBehaviour, ContextMode,
-    /// localFontFamily, invalidateOnUpdate)`: its renderer has a glyph cache
-    /// of its own.
+    /// `HeadlessFrontend(Size, float pixelRatio, ..., invalidateOnUpdate)`:
+    /// its renderer has a glyph cache of its own.
     // TODO(port): localFontFamily.
-    pub fn with_options(
-        size: Size,
-        pixel_ratio: f32,
-        swap_behavior: SwapBehaviour,
-        context_mode: ContextMode,
-        invalidate_on_update: bool,
-    ) -> Self {
-        Self::with_glyph_cache(size, pixel_ratio, swap_behavior, context_mode, invalidate_on_update, Arc::default())
+    pub fn with_options(size: Size, pixel_ratio: f32, invalidate_on_update: bool) -> Result<Self, Error> {
+        Self::with_glyph_cache(size, pixel_ratio, invalidate_on_update, Arc::default())
     }
 
-    /// `HeadlessFrontend(Size, float pixelRatio, SwapBehaviour, ContextMode,
-    /// localFontFamily, invalidateOnUpdate, std::shared_ptr<GlyphCache>)`:
-    /// frontends given the same `GlyphCache` share the glyphs their
-    /// renderers parse from glyph PBFs, also across threads.
+    /// `HeadlessFrontend(Size, float pixelRatio, ..., invalidateOnUpdate,
+    /// std::shared_ptr<GlyphCache>)`: frontends given the same `GlyphCache`
+    /// share the glyphs their renderers parse from glyph PBFs, also across
+    /// threads.
     pub fn with_glyph_cache(
         size: Size,
         pixel_ratio: f32,
-        swap_behavior: SwapBehaviour,
-        context_mode: ContextMode,
         invalidate_on_update: bool,
         glyph_cache: Arc<GlyphCache>,
-    ) -> Self {
-        let (backend, renderer_backend) = create_backend(physical_size(size, pixel_ratio), swap_behavior, context_mode);
-        Self::with_backends(backend, renderer_backend, size, pixel_ratio, invalidate_on_update, glyph_cache)
+    ) -> Result<Self, Error> {
+        Self::with_device(harness_device()?, size, pixel_ratio, invalidate_on_update, glyph_cache)
     }
 
-    /// Port-only: a frontend that renders through `backend`, such as one
-    /// on a device other backends share (`HeadlessBackend::with_device`),
-    /// which it sizes for `size` at `pixel_ratio`.
-    pub fn with_backend(
-        backend: mln_webgpu::HeadlessBackend,
+    /// Port-only: a frontend that renders on `device`, such as one that other
+    /// frontends or the host share.
+    ///
+    /// Fails with the backend's error when it can't render on the device.
+    pub fn with_device(
+        device: Device,
         size: Size,
         pixel_ratio: f32,
         invalidate_on_update: bool,
         glyph_cache: Arc<GlyphCache>,
-    ) -> Self {
-        backend.set_size(physical_size(size, pixel_ratio));
-        let backend = Rc::new(backend);
-        Self::with_backends(backend.clone(), backend, size, pixel_ratio, invalidate_on_update, glyph_cache)
-    }
-
-    /// A frontend on `backend`, which is also the renderer's backend.
-    fn with_backends(
-        backend: Rc<dyn GfxHeadlessBackend>,
-        renderer_backend: Rc<dyn RendererBackend>,
-        size: Size,
-        pixel_ratio: f32,
-        invalidate_on_update: bool,
-        glyph_cache: Arc<GlyphCache>,
-    ) -> Self {
+    ) -> Result<Self, Error> {
+        let target = LocalTarget::offscreen(Some(device), physical_size(size, pixel_ratio))?;
+        let backend = target.backend();
         let shared = Rc::new(Shared {
             size: Cell::new(size),
             pixel_ratio: Cell::new(pixel_ratio),
             frame_time: Cell::new(0.0),
+            target,
             backend,
-            renderer_backend,
             async_invalidate: RefCell::new(None),
             invalidate_on_update,
             glyph_cache,
@@ -185,11 +137,11 @@ impl HeadlessFrontend {
                 Shared::on_wake(&shared);
             }
         }));
-        HeadlessFrontend { shared }
+        Ok(HeadlessFrontend { shared })
     }
 
     /// `HeadlessFrontend(float pixelRatio, ...)`: a 256x256 frontend.
-    pub fn with_pixel_ratio(pixel_ratio: f32) -> Self {
+    pub fn with_pixel_ratio(pixel_ratio: f32) -> Result<Self, Error> {
         Self::new(Size::new(256, 256), pixel_ratio)
     }
 
@@ -204,7 +156,7 @@ impl HeadlessFrontend {
     pub fn set_size(&mut self, size: Size) {
         if self.shared.size.get() != size {
             self.shared.size.set(size);
-            self.shared.backend.set_size(physical_size(size, self.shared.pixel_ratio.get()));
+            self.shared.resize_target();
         }
     }
 
@@ -218,7 +170,7 @@ impl HeadlessFrontend {
     pub fn set_pixel_ratio(&mut self, pixel_ratio: f32) {
         if self.shared.pixel_ratio.get() != pixel_ratio {
             self.shared.pixel_ratio.set(pixel_ratio);
-            self.shared.backend.set_size(physical_size(self.shared.size.get(), pixel_ratio));
+            self.shared.resize_target();
             if let Some(renderer) = self.shared.renderer.borrow_mut().as_mut() {
                 renderer.set_pixel_ratio(pixel_ratio);
             }
@@ -251,7 +203,12 @@ impl HeadlessFrontend {
 
     /// `getBackend()`.
     pub fn get_backend(&self) -> &dyn RendererBackend {
-        self.shared.backend.get_renderer_backend()
+        &*self.shared.backend
+    }
+
+    /// The device the frontend renders on.
+    pub fn device(&self) -> &Device {
+        self.shared.target.device()
     }
 
     /// `getCameraOptions()`.
@@ -323,17 +280,18 @@ impl HeadlessFrontend {
         }
     }
 
+    /// The last frame's pixels, or an empty image without one.
     pub fn read_still_image(&self) -> PremultipliedImage {
-        self.shared.backend.read_still_image()
+        self.shared.read_image().unwrap_or_else(|_| PremultipliedImage::new(Size::default()))
     }
 
     /// `render(Map&)`: renders a still image, or fails with the map's still
     /// image error. The map handles its renderer's events meanwhile, and
     /// keeps its own events for its owner.
     pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
-        self.attach(map);
         let backend = self.shared.backend.clone();
-        let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
+        self.attach(map);
+        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
 
         let outcome: Rc<RefCell<Option<Result<(), Error>>>> = Rc::new(RefCell::new(None));
         let o = outcome.clone();
@@ -351,7 +309,7 @@ impl HeadlessFrontend {
             // C++ reads the image inside the callback, which runs at the end
             // of the frame; nothing renders in between.
             match outcome.borrow_mut().take() {
-                Some(Ok(())) => image = backend.read_still_image(),
+                Some(Ok(())) => image = self.shared.read_image()?,
                 Some(Err(e)) => return Err(e),
                 None => {}
             }
@@ -365,7 +323,7 @@ impl HeadlessFrontend {
             }
         }
 
-        let stats = backend.get_renderer_backend().get_context().rendering_stats().clone();
+        let stats = backend.get_context().rendering_stats().clone();
         Ok(RenderResult { image, stats })
     }
 
@@ -380,6 +338,12 @@ impl HeadlessFrontend {
         Shared::render_frame(&self.shared);
     }
 
+    /// Port-only: draws `parameters` into the target now, in place of the
+    /// map's latest update.
+    pub fn render_update(&self, parameters: &Arc<UpdateParameters>) {
+        Shared::render(&self.shared, parameters);
+    }
+
     pub fn get_transform_state(&self) -> Option<TransformState> {
         self.shared.latest_parameters().map(|p| p.transform_state.clone())
     }
@@ -389,14 +353,20 @@ impl Shared {
     fn renderer(&self) -> RefMut<'_, Renderer> {
         RefMut::map(self.renderer.borrow_mut(), |renderer| {
             renderer.get_or_insert_with(|| {
-                Renderer::with_glyph_cache(
-                    self.renderer_backend.clone(),
-                    self.pixel_ratio.get(),
-                    None,
-                    self.glyph_cache.clone(),
-                )
+                Renderer::with_glyph_cache(self.backend.clone(), self.pixel_ratio.get(), None, self.glyph_cache.clone())
             })
         })
+    }
+
+    /// Sizes the target for the frontend's size and pixel ratio.
+    fn resize_target(&self) {
+        self.target.resize(physical_size(self.size.get(), self.pixel_ratio.get()));
+    }
+
+    /// The last frame's pixels.
+    fn read_image(&self) -> Result<PremultipliedImage, Error> {
+        let _guard = BackendScope::new(&*self.backend, ScopeType::Explicit);
+        self.target.read_image()
     }
 
     /// The map published an update or went.
@@ -418,12 +388,18 @@ impl Shared {
 
     fn render_frame(shared: &Rc<Shared>) {
         if let Some(update_parameters) = shared.latest_parameters() {
-            let start_time = mln_util::time::Instant::now();
-            let backend = shared.backend.clone();
-            let _guard = BackendScope::new(backend.get_renderer_backend(), ScopeType::Explicit);
-            shared.renderer().render(&update_parameters);
-            shared.frame_time.set(start_time.elapsed().as_secs_f64());
+            Shared::render(shared, &update_parameters);
         }
+    }
+
+    fn render(shared: &Rc<Shared>, update_parameters: &Arc<UpdateParameters>) {
+        let start_time = mln_util::time::Instant::now();
+        let backend = shared.backend.clone();
+        let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
+        if let Some(frames) = shared.target.frames() {
+            shared.renderer().render(update_parameters, frames);
+        }
+        shared.frame_time.set(start_time.elapsed().as_secs_f64());
     }
 }
 

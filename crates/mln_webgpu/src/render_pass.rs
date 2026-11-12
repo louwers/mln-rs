@@ -3,7 +3,7 @@
 // The C++ pass keeps the descriptor (with a `Renderable&`); drawables read
 // `getDescriptor().renderable` for its size (and pass it, unused, to
 // `getRenderPipeline`). The port keeps the size and an identity of the
-// renderable instead of the reference.
+// draw target instead of the reference.
 //
 // Drawables encode through a `StateFilter`, which drops the commands that set
 // state the pass already has, as the Metal backend's render pass does.
@@ -22,7 +22,7 @@ use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::renderable_resource::as_webgpu;
+use crate::draw_target::as_webgpu;
 
 pub struct RenderPass {
     context: Rc<Context>,
@@ -52,7 +52,7 @@ impl RenderPass {
         let backend = context.get_backend().clone();
         let mut pass = RenderPass {
             context: context.clone(),
-            renderable_size: descriptor.renderable.get_size(),
+            renderable_size: descriptor.target.size(),
             renderable_id: 0,
             encoder: RefCell::new(None),
             state: RefCell::new(PassState::default()),
@@ -69,20 +69,16 @@ impl RenderPass {
             return pass;
         };
 
-        // Access the renderable resource associated with this pass
-        let Some(resource) = descriptor.renderable.get_resource() else {
-            eprintln!("WebGPU: No renderable resource available");
+        // Access the draw target associated with this pass
+        let Some(target) = as_webgpu(descriptor.target) else {
+            eprintln!("WebGPU: The pass's draw target is not a WebGPU one");
             return pass;
         };
-        pass.renderable_id = Rc::as_ptr(&resource) as *const () as usize;
-        let Some(renderable_resource) = as_webgpu(&*resource) else {
-            eprintln!("WebGPU: No renderable resource available");
-            return pass;
-        };
+        pass.renderable_id = std::ptr::from_ref(target) as usize;
+        let renderable_resource = target.resource();
         renderable_resource.bind();
 
-        // Resolve the color attachment view, preferring the renderable's
-        // texture view. TODO(port): fall back to backend.getCurrentTextureView().
+        // Resolve the color attachment view.
         let Some(color_view) = renderable_resource.get_color_texture_view() else {
             eprintln!("WebGPU: Failed to acquire color attachment view");
             return pass;
@@ -105,7 +101,6 @@ impl RenderPass {
             store: wgpu::StoreOp::Store,
         };
 
-        // TODO(port): fall back to backend.getDepthStencilView().
         let depth_view = renderable_resource.get_depth_stencil_texture_view();
         if depth_view.is_some()
             && let Some(depth_format) = renderable_resource.get_depth_stencil_texture_format()

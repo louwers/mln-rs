@@ -17,19 +17,19 @@ use mln_gfx::render_pass::{self, RenderPassDescriptor};
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::renderable_resource::as_vulkan;
+use crate::draw_target::as_vulkan;
 
 pub struct RenderPass {
     context: Rc<Context>,
     command_buffer: vk::CommandBuffer,
     render_pass: vk::RenderPass,
     extent: vk::Extent2D,
-    /// Whether the pass began: its renderable has a framebuffer.
+    /// Whether the pass began: its draw target has a framebuffer.
     encoding: bool,
 }
 
 impl RenderPass {
-    /// Begins a pass over `descriptor`'s renderable. Without a framebuffer
+    /// Begins a pass over `descriptor`'s draw target. Without a framebuffer
     /// to draw into, as in a frame that acquired no image, the pass isn't
     /// encoding (`is_encoding`) and what is drawn in it is skipped.
     pub fn new(command_encoder: &CommandEncoder, name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
@@ -45,8 +45,7 @@ impl RenderPass {
 
         pass.push_debug_group(name);
 
-        let resource = descriptor.renderable.get_resource();
-        if let Some(resource) = resource.as_deref().and_then(as_vulkan) {
+        if let Some(resource) = as_vulkan(descriptor.target).map(|target| target.resource()) {
             resource.bind();
             pass.render_pass = resource.get_render_pass();
             pass.extent = resource.get_extent();
@@ -94,12 +93,12 @@ impl RenderPass {
         self.command_buffer
     }
 
-    /// The render pass of the renderable, which pipelines are made for.
+    /// The render pass of the draw target, which pipelines are made for.
     pub fn get_vulkan_render_pass(&self) -> vk::RenderPass {
         self.render_pass
     }
 
-    /// The extent of the renderable's attachments.
+    /// The extent of the draw target's attachments.
     pub fn get_extent(&self) -> vk::Extent2D {
         self.extent
     }

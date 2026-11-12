@@ -5,23 +5,21 @@
 // Here the `Impl` is shared (`Rc<BackendImpl>`) by the backend and the
 // context, and resources hold an `Rc<Context>`.
 //
-// `getDefaultRenderable()` is pure virtual and implemented by the platform
-// backends (HeadlessBackend), which embed this struct.
-//
-// TODO(port): `setSurface` (window surfaces) and the `getCurrentTextureView`
-// / `getDepthStencilView` / `getFramebufferSize` virtuals used as render pass
-// fallbacks when a renderable has no views of its own; the headless
-// renderable always provides them.
+// What the backend draws into is a target built on it (`OffscreenTarget`,
+// `SurfaceTarget`), whose draw targets give the render passes their views.
 
+use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
+use mln_gfx::context::Context as GfxContext;
+use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
 
 use crate::context::Context;
+use crate::device::Device;
 use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
 use crate::writes::Writes;
@@ -172,11 +170,11 @@ impl BackendImpl {
     }
 }
 
-/// `webgpu::RendererBackend`: embedded by the platform backends, which
-/// implement `gfx::RendererBackend` by delegating to it.
+/// `webgpu::RendererBackend`: a renderer's context on a [`Device`].
 pub struct RendererBackend {
-    pub base: RendererBackendBase,
+    base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
+    device: Device,
 }
 
 /// The shader types registered by `initShaders`, in the C++ order, with the
@@ -221,8 +219,27 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 ];
 
 impl RendererBackend {
-    pub fn new(context_mode: ContextMode) -> Self {
-        RendererBackend { base: RendererBackendBase::new(context_mode), impl_: Rc::new(BackendImpl::default()) }
+    /// A backend on `device`. Backends on one device render independently,
+    /// each submitting to the device's queue.
+    pub fn new(device: &Device) -> Self {
+        let impl_ = BackendImpl::default();
+        impl_.set_instance(device.instance().cloned());
+        impl_.set_adapter(device.adapter().cloned());
+        impl_.set_device(Some(device.device().clone()));
+        impl_.set_queue(Some(device.queue().clone()));
+        RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(impl_), device: device.clone() }
+    }
+
+    /// The device the backend renders on.
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    /// The backend's context, made on first use. Call inside a
+    /// `BackendScope`.
+    pub fn webgpu_context(&self) -> Option<Rc<Context>> {
+        let context = renderer_backend::RendererBackend::get_context(self);
+        context.as_any().downcast_ref::<Context>().map(Context::rc)
     }
 
     pub fn backend_impl(&self) -> &Rc<BackendImpl> {
@@ -244,10 +261,6 @@ impl RendererBackend {
         Context::new(self.impl_.clone())
     }
 
-    /// `activate()` / `deactivate()`: activation logic if needed (none).
-    pub fn activate(&self) {}
-    pub fn deactivate(&self) {}
-
     /// `initShaders`: register one `webgpu::ShaderGroup` per built-in shader.
     ///
     /// C++ registers all 31 types; a type whose WGSL is not part of this
@@ -266,15 +279,6 @@ impl RendererBackend {
         }
     }
 
-    pub fn set_instance(&self, instance: Option<wgpu::Instance>) {
-        self.impl_.set_instance(instance);
-    }
-    pub fn set_device(&self, device: Option<wgpu::Device>) {
-        self.impl_.set_device(device);
-    }
-    pub fn set_queue(&self, queue: Option<wgpu::Queue>) {
-        self.impl_.set_queue(queue);
-    }
     pub fn get_instance(&self) -> Option<wgpu::Instance> {
         self.impl_.get_instance()
     }
@@ -296,6 +300,28 @@ impl RendererBackend {
     pub fn get_color_format(&self) -> Option<wgpu::TextureFormat> {
         self.impl_.get_color_format()
     }
+}
+
+impl renderer_backend::RendererBackend for RendererBackend {
+    fn renderer_backend_base(&self) -> &RendererBackendBase {
+        &self.base
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
+        RendererBackend::init_shaders(self, registry, parameters);
+    }
+
+    fn create_context(&self) -> Rc<dyn GfxContext> {
+        RendererBackend::create_context(self)
+    }
+
+    /// WebGPU has no context to make current.
+    fn activate(&self) {}
+    fn deactivate(&self) {}
 }
 
 impl Drop for RendererBackend {

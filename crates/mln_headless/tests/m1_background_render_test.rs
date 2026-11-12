@@ -10,12 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
-use mln_gfx::ContextMode;
 use mln_headless::HeadlessFrontend;
 use mln_image::decode_image;
 use mln_map::{Map, MapMode, MapOptions};
 use mln_util::size::Size;
-use mln_webgpu::HeadlessBackend;
 
 fn render_tests_dir() -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics/integration/render-tests")
@@ -23,7 +21,7 @@ fn render_tests_dir() -> PathBuf {
 
 /// Returns (difference, allowed).
 fn run(test: &str) -> (f64, f64) {
-    run_on(test, HeadlessFrontend::new)
+    run_on(test, |size, pixel_ratio| HeadlessFrontend::new(size, pixel_ratio).expect("a headless frontend"))
 }
 
 /// `run` with the frontend `frontend` makes for the size and pixel ratio.
@@ -128,10 +126,10 @@ fn background_visibility_visible() {
 /// one device, in turn.
 #[test]
 fn frontends_on_one_device_render_in_turn() {
-    let (device, queue) = HeadlessBackend::request_device(None).expect("device");
+    let device = mln_headless::headless_frontend::harness_device().expect("device");
     let on_shared_device = |size, pixel_ratio| {
-        let backend = HeadlessBackend::with_device(device.clone(), queue.clone(), Size::default(), ContextMode::Unique);
-        HeadlessFrontend::with_backend(backend, size, pixel_ratio, true, Arc::default())
+        HeadlessFrontend::with_device(device.clone(), size, pixel_ratio, true, Arc::default())
+            .expect("a headless frontend")
     };
     for test in ["background-color/literal", "background-color/function", "background-color/literal"] {
         let (difference, allowed) = run_on(test, on_shared_device);

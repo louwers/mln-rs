@@ -12,7 +12,7 @@ fn pixel(image: &PremultipliedImage, x: u32, y: u32) -> [u8; 4] {
 
 fn render_style(style: &str, size: Size, pixel_ratio: f32) -> PremultipliedImage {
     let _run_loop = RunLoop::new();
-    let mut frontend = HeadlessFrontend::new(size, pixel_ratio);
+    let mut frontend = HeadlessFrontend::new(size, pixel_ratio).expect("a headless frontend");
     let mut map =
         Map::new(MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio))
             .unwrap();
@@ -33,7 +33,7 @@ fn render_still_returns_image_of_physical_size() {
 fn render_still_in_continuous_mode_is_an_error() {
     let _run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let mut frontend = HeadlessFrontend::new(size, 1.0);
+    let mut frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
     let mut map = Map::new(MapOptions::new().with_size(size)).unwrap();
     frontend.attach(&map);
     let error = frontend.render(&mut map).err().expect("error");
@@ -49,7 +49,7 @@ fn frames(map: &mut Map) -> usize {
 fn draws_each_update_of_the_attached_map_on_the_run_loop() {
     let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let frontend = HeadlessFrontend::new(size, 1.0);
+    let frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
     let mut map = Map::new(MapOptions::new().with_size(size)).unwrap();
     map.style_mut().load_json(
         r#"{"version": 8, "sources": {}, "layers": [{"id": "background", "type": "background", "paint": {"background-color": "red"}}]}"#,
@@ -71,7 +71,7 @@ fn draws_each_update_of_the_attached_map_on_the_run_loop() {
 fn attaching_another_map_renders_that_map() {
     let run_loop = RunLoop::new();
     let size = Size::new(16, 16);
-    let frontend = HeadlessFrontend::new(size, 1.0);
+    let frontend = HeadlessFrontend::new(size, 1.0).expect("a headless frontend");
     let mut first = Map::new(MapOptions::new().with_size(size)).unwrap();
     let mut second = Map::new(MapOptions::new().with_size(size)).unwrap();
     first.jump_to(&CameraOptions::default().with_zoom(Some(1.0)));

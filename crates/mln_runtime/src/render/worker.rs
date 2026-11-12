@@ -8,7 +8,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use mln_actor::RunLoopHandle;
-use mln_gfx::headless_backend::HeadlessBackend as _;
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::{MapView, RenderMode};
 use mln_renderer::{Renderer, RendererEvent, RendererEvents, Update, UpdateReader};
@@ -20,11 +19,11 @@ use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
-use mln_webgpu::{HeadlessBackend, SurfaceBackend};
 
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
+use super::local::LocalTarget;
 use super::session::{RenderSessionState, SessionShared, WorkId, physical_size};
-use super::target::{Driver, HostDevice, OffscreenDevice, Surface};
+use super::target::{Device, Driver, Surface};
 use crate::completion::Resolver;
 use crate::runtime::Outbox;
 
@@ -117,8 +116,8 @@ pub(crate) struct Init {
 
 /// What a session renders into, before its thread builds it.
 pub(crate) enum TargetInit {
-    Offscreen(Option<OffscreenDevice>),
-    Surface { surface: Surface, device: Option<HostDevice> },
+    Offscreen(Option<Device>),
+    Surface { surface: Surface, device: Option<Device> },
 }
 
 /// Builds the session's renderer into `slot`, on the thread that runs the
@@ -135,148 +134,54 @@ pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
     outbox.deliver();
 }
 
-/// What a session draws into.
-enum Backend {
-    Offscreen(Rc<HeadlessBackend>),
-    Surface(Rc<SurfaceBackend>),
-}
-
 /// The renderer and what it draws into.
 struct Gfx {
     renderer: Renderer,
-    backend: Backend,
+    target: LocalTarget,
+    /// The target's backend, which the renderer draws with.
+    backend: Rc<dyn RendererBackend>,
+    glyph_cache: Arc<GlyphCache>,
 }
 
 impl Gfx {
-    /// How many graphics objects a `Gfx` holds: the renderer and its backend.
+    /// How many graphics objects a `Gfx` holds: the renderer and its target.
     const OBJECTS: u32 = 2;
 
     fn new(init: Init) -> Result<Gfx, Error> {
         let Init { target, size, pixel_ratio, glyph_cache, tile_cache_enabled } = init;
         let size = physical_size(size, pixel_ratio);
-        let (backend, renderer_backend): (Backend, Rc<dyn RendererBackend>) = match target {
-            TargetInit::Offscreen(device) => {
-                let device = match device {
-                    Some(device) => device,
-                    None => OffscreenDevice::new(Default::default())?,
-                };
-                let backend = Rc::new(offscreen_backend(device, size)?);
-                (Backend::Offscreen(backend.clone()), backend)
-            }
-            TargetInit::Surface { surface, device } => {
-                let backend = Rc::new(surface_backend(surface, device, size)?);
-                (Backend::Surface(backend.clone()), backend)
-            }
+        let target = match target {
+            TargetInit::Offscreen(device) => LocalTarget::offscreen(device, size)?,
+            TargetInit::Surface { surface, device } => LocalTarget::surface(surface, device, size)?,
         };
-        let mut renderer = Renderer::with_glyph_cache(renderer_backend, pixel_ratio, None, glyph_cache);
+        let backend = target.backend();
+        let mut renderer = Renderer::with_glyph_cache(backend.clone(), pixel_ratio, None, glyph_cache.clone());
         renderer.set_tile_cache_enabled(tile_cache_enabled);
-        Ok(Gfx { renderer, backend })
-    }
-
-    fn renderer_backend(&self) -> &dyn RendererBackend {
-        match &self.backend {
-            Backend::Offscreen(backend) => backend.get_renderer_backend(),
-            Backend::Surface(backend) => &**backend,
-        }
+        Ok(Gfx { renderer, target, backend, glyph_cache })
     }
 
     fn scope(&self) -> BackendScope<'_> {
-        BackendScope::new(self.renderer_backend(), ScopeType::Explicit)
+        BackendScope::new(&*self.backend, ScopeType::Explicit)
     }
 
-    /// Whether the target can take a frame now: a surface needs a texture.
+    /// Whether the target can take a frame now: it begins one, which a
+    /// surface needs a texture for.
     fn ready_for_frame(&self) -> bool {
-        match &self.backend {
-            Backend::Offscreen(_) => true,
-            Backend::Surface(backend) => backend.has_surface() && backend.acquire_next_texture(),
-        }
+        let _scope = self.scope();
+        self.target.frames().is_some_and(|frames| frames.begin_frame().is_some())
     }
 
-    fn resize(&self, size: Size) {
-        match &self.backend {
-            Backend::Offscreen(backend) => backend.set_size(size),
-            Backend::Surface(backend) => backend.set_framebuffer_size(size),
-        }
+    /// Makes the renderer again on the target's backend, which replaced the
+    /// one it drew with, with what the session set on it.
+    fn renew_renderer(&mut self, events: &RendererEvents) {
+        self.backend = self.target.backend();
+        let pixel_ratio = self.renderer.get_pixel_ratio();
+        let mut renderer =
+            Renderer::with_glyph_cache(self.backend.clone(), pixel_ratio, None, self.glyph_cache.clone());
+        renderer.set_tile_cache_enabled(self.renderer.get_tile_cache_enabled());
+        renderer.set_event_queue(Some(events.clone()));
+        self.renderer = renderer;
     }
-}
-
-/// An offscreen backend on `device`, of `size` pixels.
-#[cfg(not(target_family = "wasm"))]
-fn offscreen_backend(device: OffscreenDevice, size: Size) -> Result<HeadlessBackend, Error> {
-    Ok(HeadlessBackend::with_device(device.device, device.queue, size, mln_gfx::ContextMode::Unique))
-}
-
-#[cfg(target_family = "wasm")]
-fn offscreen_backend(_: OffscreenDevice, _: Size) -> Result<HeadlessBackend, Error> {
-    Err(Error::unsupported("the browser has no offscreen devices"))
-}
-
-/// A surface backend that presents to `surface`, of `size` pixels, on
-/// `device` or on a device of its own.
-#[cfg(not(target_family = "wasm"))]
-fn surface_backend(surface: Surface, device: Option<HostDevice>, size: Size) -> Result<SurfaceBackend, Error> {
-    use super::target::SurfaceKind;
-    match (surface.kind, device) {
-        (SurfaceKind::Window(window), None) => {
-            SurfaceBackend::new(move |instance| window_surface(instance, window), size, true)
-        }
-        (SurfaceKind::Wgpu(_), None) => {
-            Err(Error::invalid_argument("a surface that the host made needs the host's device"))
-        }
-        (kind, Some(host)) => {
-            let surface = match kind {
-                SurfaceKind::Window(window) => window_surface(&host.instance, window)?,
-                SurfaceKind::Wgpu(surface) => surface,
-            };
-            Ok(SurfaceBackend::from_host(
-                host.instance,
-                host.device,
-                host.queue,
-                surface,
-                host.format,
-                wgpu::TextureUsages::RENDER_ATTACHMENT,
-                size,
-            ))
-        }
-    }
-}
-
-#[cfg(target_family = "wasm")]
-fn surface_backend(surface: Surface, _: Option<HostDevice>, _: Size) -> Result<SurfaceBackend, Error> {
-    match surface.kind {}
-}
-
-/// A surface on `window`, made with `instance`.
-#[cfg(not(target_family = "wasm"))]
-fn window_surface(
-    instance: &wgpu::Instance,
-    window: Arc<dyn wgpu::DisplayAndWindowHandle>,
-) -> Result<wgpu::Surface<'static>, Error> {
-    instance
-        .create_surface(window)
-        .map_err(|error| Error::native(format!("can't make a surface on the window: {error}")))
-}
-
-/// Has `backend` present to `surface` from now on, at `size` pixels.
-#[cfg(not(target_family = "wasm"))]
-fn replace_surface(backend: &SurfaceBackend, surface: Surface, size: Size) -> Result<(), Error> {
-    use super::target::SurfaceKind;
-    let surface = match surface.kind {
-        SurfaceKind::Window(window) => {
-            let instance = backend
-                .webgpu_backend()
-                .get_instance()
-                .ok_or_else(|| Error::native("the session's device has no instance to make a surface with"))?;
-            window_surface(&instance, window)?
-        }
-        SurfaceKind::Wgpu(surface) => surface,
-    };
-    backend.set_surface(surface, size)
-}
-
-#[cfg(target_family = "wasm")]
-fn replace_surface(_: &SurfaceBackend, surface: Surface, _: Size) -> Result<(), Error> {
-    match surface.kind {}
 }
 
 /// A host's frame demand on its way, and the last command sent before it.
@@ -607,14 +512,10 @@ impl Worker {
             return self.publish(result, outbox);
         }
         {
-            let _scope = BackendScope::new(
-                match &gfx.backend {
-                    Backend::Offscreen(backend) => backend.get_renderer_backend(),
-                    Backend::Surface(backend) => &**backend,
-                },
-                ScopeType::Explicit,
-            );
-            gfx.renderer.render(&update.parameters);
+            let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
+            if let Some(frames) = gfx.target.frames() {
+                gfx.renderer.render(&update.parameters, frames);
+            }
         }
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
@@ -714,7 +615,7 @@ impl Worker {
     /// Resizes the target, after the map resized.
     pub(crate) fn resize(&mut self, size: Size) -> Result<(), Error> {
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        gfx.resize(physical_size(size, self.pixel_ratio));
+        gfx.target.resize(physical_size(size, self.pixel_ratio));
         self.target_changed(size, None);
         Ok(())
     }
@@ -734,10 +635,10 @@ impl Worker {
     /// Lets go of a surface session's surface, and ends the demands on their
     /// way.
     pub(crate) fn release_target(&mut self, outbox: &mut Outbox) -> Result<(), Error> {
-        let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        if let Backend::Surface(backend) = &gfx.backend {
-            backend.release_surface();
-        }
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
+        let backend = gfx.backend.clone();
+        let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
+        gfx.target.release_surface();
         self.has_frame = false;
         self.shared.state.lock_unpoisoned().has_target = false;
         self.end_demands(FrameDisposition::TargetNotReady, outbox);
@@ -748,15 +649,22 @@ impl Worker {
     /// the map resized. On failure the session keeps the surface that it
     /// had, if any, at the new size.
     pub(crate) fn set_surface(&mut self, size: Size, surface: Surface, outbox: &mut Outbox) -> Result<(), Error> {
-        let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        let Backend::Surface(backend) = &gfx.backend else {
+        let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
+        if gfx.target.is_offscreen() {
             return Err(Error::unsupported("an offscreen session keeps its target"));
-        };
-        let physical = physical_size(size, self.pixel_ratio);
-        let replaced = replace_surface(backend, surface, physical);
-        if replaced.is_err() {
-            backend.set_framebuffer_size(physical);
         }
+        let physical = physical_size(size, self.pixel_ratio);
+        let backend = gfx.backend.clone();
+        let replaced = {
+            let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
+            gfx.target.set_surface(surface, physical)
+        };
+        match replaced {
+            Ok(true) => gfx.renew_renderer(&self.renderer_events),
+            Ok(false) => {}
+            Err(_) => gfx.target.resize(physical),
+        }
+        let replaced = replaced.map(drop);
         self.target_changed(size, replaced.is_ok().then_some(true));
         if replaced.is_ok() {
             self.wake_for_redraw(outbox);
@@ -783,14 +691,14 @@ impl Worker {
 
     pub(crate) fn read_texture(&mut self) -> Result<PremultipliedImage, Error> {
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        let Backend::Offscreen(backend) = &gfx.backend else {
+        if !gfx.target.is_offscreen() {
             return Err(Error::unsupported("a surface session can't read its frames back"));
-        };
+        }
         if !self.has_frame {
             return Err(Error::invalid_state("the render session has no rendered frame since it attached or resized"));
         }
         let _scope = gfx.scope();
-        Ok(backend.read_still_image())
+        gfx.target.read_image()
     }
 
     /// Runs `read` on the data of the clustered GeoJSON source `source_id`
@@ -852,7 +760,7 @@ impl Worker {
         }
     }
 
-    /// Lets go of the renderer and its backend: frees them, unless the
+    /// Lets go of the renderer and its target: frees them, unless the
     /// session keeps them until the process exits.
     fn drop_gfx(&mut self) {
         let Some(gfx) = self.gfx.take() else { return };

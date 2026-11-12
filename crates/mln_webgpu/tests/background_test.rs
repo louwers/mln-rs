@@ -16,15 +16,14 @@ use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
+use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::headless_backend::HeadlessBackend as _;
 use mln_gfx::paint_parameters::PaintParameters;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::render_pass::{RenderPass as GfxRenderPass, RenderPassDescriptor};
-use mln_gfx::renderable::SwapBehaviour;
 use mln_gfx::renderer::layer_group::{LayerGroupBasePtr, visit_layer_group_drawables};
 use mln_gfx::renderer::render_pass::RenderPass;
-use mln_gfx::renderer_backend::{ContextMode, RendererBackend};
+use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::background_layer_ubo::{BackgroundDrawableUBO, BackgroundDrawableUnionUBO, BackgroundPropsUBO};
@@ -42,7 +41,34 @@ use mln_tile_id::{OverscaledTileID, UnwrappedTileID};
 use mln_util::Color;
 use mln_util::range::Range;
 use mln_util::size::Size;
-use mln_webgpu::HeadlessBackend;
+use mln_webgpu::{Device, OffscreenTarget, RendererBackend};
+
+/// A backend on a device of its own, and an offscreen target on it.
+struct Headless {
+    backend: std::rc::Rc<RendererBackend>,
+    target: OffscreenTarget,
+}
+
+impl Headless {
+    fn new(size: Size) -> Headless {
+        let device = Device::new(None).expect("WebGPU device");
+        let backend = std::rc::Rc::new(RendererBackend::new(&device));
+        Headless { target: OffscreenTarget::new(backend.clone(), size), backend }
+    }
+
+    /// The last frame's pixels.
+    fn read_still_image(&self) -> mln_util::image::PremultipliedImage {
+        self.target.read_image().expect("a frame")
+    }
+}
+
+impl std::ops::Deref for Headless {
+    type Target = RendererBackend;
+
+    fn deref(&self) -> &RendererBackend {
+        &self.backend
+    }
+}
 
 const EXTENT: i16 = 8192;
 
@@ -213,7 +239,7 @@ fn left_half_matrix() -> [f32; 16] {
 
 /// One frame as renderer_impl.cpp runs it; returns the readback.
 fn render_frame(
-    backend: &HeadlessBackend,
+    backend: &Headless,
     registry: &ShaderRegistry,
     passes: RenderPass,
     bg: &Background,
@@ -221,11 +247,11 @@ fn render_frame(
 ) -> mln_util::image::PremultipliedImage {
     let context = backend.get_context();
     let layer_group = build_layer_group(context, registry, passes);
-    let renderable = backend.get_default_renderable();
-    renderable.wait();
+    let image = backend.target.begin_frame().expect("a frame");
+    let renderable = &*image;
     context.begin_frame();
 
-    let size = renderable.get_size();
+    let size = renderable.size();
     let mut parameters = TestPaintParameters {
         context,
         encoder: context.create_command_encoder(),
@@ -245,7 +271,12 @@ fn render_frame(
 
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
-        &RenderPassDescriptor { renderable, clear_color: Some(clear), clear_depth: Some(1.0), clear_stencil: Some(0) },
+        &RenderPassDescriptor {
+            target: renderable,
+            clear_color: Some(clear),
+            clear_depth: Some(1.0),
+            clear_stencil: Some(0),
+        },
     ));
     context.bind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
 
@@ -258,7 +289,7 @@ fn render_frame(
 
     context.unbind_global_uniform_buffers(parameters.render_pass.as_deref().unwrap());
     parameters.render_pass = None;
-    parameters.encoder.present(renderable);
+    backend.target.end_frame(&*parameters.encoder);
     context.end_frame();
     backend.read_still_image()
 }
@@ -291,11 +322,10 @@ fn check_halves(img: &mln_util::image::PremultipliedImage, left: [u8; 4], right:
 
 #[test]
 fn background_shader_opaque_and_translucent() {
-    let backend = HeadlessBackend::new(Size { width: 64, height: 32 }, SwapBehaviour::NoFlush, ContextMode::Unique);
-    if let Some(info) = backend.get_adapter_info() {
-        eprintln!("adapter: {} ({:?})", info.name, info.backend);
-    }
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let backend = Headless::new(Size { width: 64, height: 32 });
+    let info = backend.device().adapter_info();
+    eprintln!("adapter: {} ({:?})", info.name, info.backend);
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
 
     let registry = ShaderRegistry::new();
     backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
@@ -333,23 +363,24 @@ fn background_shader_opaque_and_translucent() {
 fn clear_only_frame_reads_back_clear_color() {
     // The path most M1 tests take: a main render pass with the background
     // color as clear color, no drawables, present, read back.
-    let backend = HeadlessBackend::create(Size { width: 16, height: 8 });
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let backend = Headless::new(Size { width: 16, height: 8 });
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let context = backend.get_context();
-    let renderable = backend.get_default_renderable();
+    let image = backend.target.begin_frame().expect("a frame");
+    let renderable = &*image;
     context.begin_frame();
     let encoder = context.create_command_encoder();
     let pass = encoder.create_render_pass(
         "main buffer",
         &RenderPassDescriptor {
-            renderable,
+            target: renderable,
             clear_color: Some(Color::new(0.25, 0.5, 0.75, 1.0)),
             clear_depth: Some(1.0),
             clear_stencil: Some(0),
         },
     );
     drop(pass);
-    encoder.present(renderable);
+    backend.target.end_frame(&*encoder);
     context.end_frame();
     let img = backend.read_still_image();
     assert_eq!(img.data.len(), 16 * 8 * 4);
@@ -387,8 +418,8 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
     // clip "tile" covering the left half; a full-viewport background
     // drawable with stencil enabled and PaintParameters::stencilModeForClipping
     // (Equal 1, as paint_parameters.cpp builds it) only lands there.
-    let backend = HeadlessBackend::create(Size { width: 32, height: 16 });
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let backend = Headless::new(Size { width: 32, height: 16 });
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
     let registry = ShaderRegistry::new();
     backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
     let context = backend.get_context();
@@ -396,9 +427,10 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
     let layer_group = build_layer_group(context, &registry, RenderPass::Opaque | RenderPass::Translucent);
     visit_layer_group_drawables(&mut *layer_group.borrow_mut(), |d| d.set_enable_stencil(true));
 
-    let renderable = backend.get_default_renderable();
+    let image = backend.target.begin_frame().expect("a frame");
+    let renderable = &*image;
     context.begin_frame();
-    let size = renderable.get_size();
+    let size = renderable.size();
     let mut parameters = TestPaintParameters {
         context,
         encoder: context.create_command_encoder(),
@@ -429,7 +461,7 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
     parameters.render_pass = Some(parameters.encoder.create_render_pass(
         "main buffer",
         &RenderPassDescriptor {
-            renderable,
+            target: renderable,
             clear_color: Some(Color::new(0.0, 0.0, 0.0, 1.0)),
             clear_depth: Some(1.0),
             clear_stencil: Some(0),
@@ -442,18 +474,17 @@ fn tile_clipping_masks_limit_stenciled_drawables() {
         layer_group.borrow_mut().render(&mut parameters);
     }
     parameters.render_pass = None;
-    parameters.encoder.present(renderable);
+    backend.target.end_frame(&*parameters.encoder);
     context.end_frame();
 
     let img = backend.read_still_image();
     check_halves(&img, [255, 255, 0, 255], [0, 0, 0, 255]);
 }
 
-// Port-only: a zero-size headless backend makes zero-size offscreen
-// textures, a validation error. Dawn (C++) logs it, and so does the port's
-// handler, where wgpu's default one panics.
+// Port-only: a zero-size target has no frame to draw into, where C++ makes
+// zero-size offscreen textures, a validation error.
 #[test]
-fn zero_size_backend_logs_the_validation_error() {
-    let backend = HeadlessBackend::new(Size { width: 0, height: 0 }, SwapBehaviour::NoFlush, ContextMode::Unique);
-    assert!(backend.get_device().is_some(), "no adapter");
+fn zero_size_target_has_no_frame() {
+    let backend = Headless::new(Size { width: 0, height: 0 });
+    assert!(backend.target.begin_frame().is_none());
 }

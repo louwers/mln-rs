@@ -15,30 +15,18 @@ name = "mln_headless"
 # The doc comments have no examples to run.
 doctest = false
 
-[features]
-# The OpenGL backend (crates/mln_gl), which MLN_RENDER_BACKEND=gl then picks
-# (headless_frontend.rs).
-gl = ["dep:mln_gl"]
-
 [dependencies]
 mln_actor.workspace = true
 mln_gfx.workspace = true
-mln_gl = { workspace = true, optional = true }
 mln_map.workspace = true
 mln_renderer.workspace = true
+# The devices and offscreen targets the frontend renders on, of every
+# backend.
+mln_runtime.workspace = true
 mln_storage.workspace = true
 mln_style.workspace = true
 mln_text.workspace = true
 mln_util.workspace = true
-mln_webgpu.workspace = true
-
-# The Metal backend, which MLN_RENDER_BACKEND=metal picks (headless_frontend.rs).
-[target.'cfg(target_vendor = "apple")'.dependencies]
-mln_mtl.workspace = true
-
-# The Vulkan backend, which MLN_RENDER_BACKEND=vulkan picks (headless_frontend.rs).
-[target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
-mln_vulkan.workspace = true
 
 # The M1 background render tests through Map -> HeadlessFrontend, without the
 # render-test runner (see the file comment).

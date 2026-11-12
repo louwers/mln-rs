@@ -53,7 +53,7 @@ fn render_without_callback() {
 fn grid() {
     let _loop = RunLoop::new();
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
     let mut map = Map::with_resource_options(
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
         &FileSourceManager::new(),
@@ -136,7 +136,7 @@ fn renders_after_leaving_zoom_range() {
 fn recycle_map_update_images() {
     let _loop = RunLoop::new();
 
-    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+    let mut frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
     let mut map = Map::with_file_source(
         Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
         MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),

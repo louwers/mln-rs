@@ -12,7 +12,6 @@ use std::rc::Rc;
 
 use mln_gfx::offscreen_texture::OffscreenTexture;
 use mln_gfx::render_pass::RenderPassDescriptor;
-use mln_gfx::renderable::Renderable;
 use mln_gfx::scissor_rect::ScissorRect;
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::TextureChannelDataType;
@@ -112,13 +111,13 @@ impl RenderTarget {
     /// Render the layer groups. `renderTree` is only passed on to
     /// `runTweakers` in C++; the orchestrator runs them here.
     pub fn render(&self, orchestrator: &mut RenderOrchestrator, parameters: &mut PaintParameters<'_>) {
-        let renderable: &dyn Renderable = &*self.offscreen_texture;
+        let target = self.offscreen_texture.draw_target();
         {
             let encoder = parameters.encoder.as_ref().expect("encoder");
             parameters.render_pass = Some(encoder.create_render_pass(
                 "render target",
                 &RenderPassDescriptor {
-                    renderable,
+                    target,
                     clear_color: Some(Color::new(0.0, 0.0, 0.0, 1.0)),
                     clear_depth: Some(1.0),
                     clear_stencil: None,
@@ -165,7 +164,7 @@ impl RenderTarget {
         }
 
         parameters.render_pass = None;
-        parameters.encoder.as_ref().expect("encoder").present(renderable);
+        self.offscreen_texture.submit(&**parameters.encoder.as_ref().expect("encoder"));
 
         parameters.scissor_rect = prev_scissor_rect;
     }

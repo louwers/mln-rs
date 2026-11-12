@@ -7,7 +7,7 @@
 //   every attachment it doesn't clear.
 // - The pass keeps the attachments' pixel formats, which pipeline states
 //   and depth-stencil states are made for (C++ reads them from the
-//   renderable's descriptor where it needs them).
+//   draw target's descriptor where it needs them).
 // - A cached binding remembers the buffer's version, so the same buffer is
 //   bound again only after it changes (C++ records version 0, so it binds
 //   again after any update).
@@ -29,11 +29,11 @@ use objc2_metal::{
 use crate::buffer_resource::{BufferResource, VersionType};
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
+use crate::draw_target::as_mtl;
 use crate::mtl_fwd::{
     MTLBufferPtr, MTLCommandBufferPtr, MTLDepthStencilStatePtr, MTLRenderCommandEncoderPtr, MTLRenderPipelineStatePtr,
     MTLSamplerStatePtr, MTLTexturePtr,
 };
-use crate::renderable_resource::as_mtl;
 
 const MAX_BINDS: usize = 32;
 
@@ -111,8 +111,7 @@ impl RenderPass {
         let mut formats = AttachmentFormats { color: MTLPixelFormat::BGRA8Unorm, depth: None, stencil: None };
         let (mut width, mut height) = (0, 0);
 
-        let resource = descriptor.renderable.get_resource();
-        if let Some(resource) = resource.as_deref().and_then(as_mtl) {
+        if let Some(resource) = as_mtl(descriptor.target).map(|target| target.resource()) {
             resource.bind();
             if let (Some(buffer), Some(rpd)) = (resource.get_command_buffer(), resource.get_render_pass_descriptor()) {
                 let rpd = rpd.copy();

@@ -29,7 +29,7 @@ struct TileLODTest {
 impl TileLODTest {
     fn new(camera_options: &CameraOptions) -> Self {
         let run_loop = RunLoop::new();
-        let frontend = HeadlessFrontend::with_pixel_ratio(1.0);
+        let frontend = HeadlessFrontend::with_pixel_ratio(1.0).expect("a headless frontend");
         let mut map = Map::with_resource_options(
             MapOptions::new().with_map_mode(MapMode::Static).with_size(frontend.get_size()),
             &FileSourceManager::new(),

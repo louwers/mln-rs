@@ -1,26 +1,24 @@
 // Ports the window-surface part of platform/glfw/glfw_webgpu_backend.hpp and
 // platform/glfw/glfw_webgpu_backend_impl.ipp (the Linux, wgpu-native branch):
-// a `webgpu::RendererBackend` that is its own default `gfx::Renderable` and
-// presents to a `wgpu::Surface`. The window stays with the host (such as
-// examples/desktop), which creates the surface and reports framebuffer
-// resizes through `set_framebuffer_size`.
+// frames presented to a `wgpu::Surface`. The window stays with the host,
+// which makes the surface, or hands its window over for the target to make
+// one, and reports framebuffer resizes through `resize`.
 //
 // Differences from C++, all structural:
 // - The C++ backend reads `glfwGetFramebufferSize` where it needs the size;
-//   here the window reports it (`set_framebuffer_size`, also what C++'s
+//   here the host reports it (`resize`, also what C++'s
 //   `onFramebufferResize` calls), so `reconfigureSurface` and the depth
 //   texture use the size last reported.
 // - C++ reconfigures a resized surface in `swap()`, after rendering one
 //   frame into the old-size swapchain texture with the new-size viewport
 //   (Dawn logs a validation error for it). The port also reconfigures
 //   before acquiring the next texture when a reconfigure is pending.
-// - The surface comes before the adapter, so the adapter is one that can
-//   present to it: one that can't would fail to configure the surface.
-// - Single-threaded (the renderer runs on the main thread): the spin lock,
+// - The surface is configured with the first frame, so a target that
+//   replaces another on the same window configures it after the other one
+//   let go of it.
+// - Single-threaded (the renderer runs on one thread): the spin lock,
 //   `frameInProgress` (never set in C++) and `isShuttingDown` atomics are
 //   plain cells, and `waitForFrame` always succeeds immediately as in C++.
-// - wgpu's default uncaptured-error handler panics; like the C++ Dawn
-//   branch (`logUncapturedError`), errors are logged instead.
 // - Port-only: `request_readback` copies the next presented frame into a
 //   `PremultipliedImage` (the surface is configured with COPY_SRC when the
 //   surface supports it), so a frame can be checked without screenshots.
@@ -35,18 +33,16 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mln_gfx::context::Context as GfxContext;
-use mln_gfx::renderable::{Renderable, RenderableBase};
-use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
+use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox};
+use crate::command_encoder::CommandEncoder;
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::renderer_backend::RendererBackend;
 
 /// `maxConsecutiveErrors`
@@ -64,15 +60,6 @@ fn backend_type_to_string(backend: wgpu::Backend) -> &'static str {
     }
 }
 
-/// The instance backends, as the headless backend picks them: `WGPU_BACKEND`
-/// if set, else Vulkan on Linux (C++ wgpu-native: the default instance).
-fn instance_backends() -> wgpu::Backends {
-    if let Some(backends) = wgpu::Backends::from_env() {
-        return backends;
-    }
-    if cfg!(target_os = "linux") { wgpu::Backends::VULKAN } else { wgpu::Backends::all() }
-}
-
 /// The usages and vsync'ed present mode to configure a surface with: COPY_SRC
 /// for readback where the surface has it, and MAILBOX where it has it (see
 /// `SurfaceState::vsync_present_mode`).
@@ -85,7 +72,7 @@ fn surface_options(capabilities: &wgpu::SurfaceCapabilities) -> (wgpu::TextureUs
     };
     (usage, present_mode)
 }
-/// Port-only: what an overlay draws into (`SurfaceBackend::set_overlay`):
+/// Port-only: what an overlay draws into (`SurfaceTarget::set_overlay`):
 /// the frame's swapchain texture, after the map and before it is presented.
 pub struct OverlayTarget<'a> {
     pub device: &'a wgpu::Device,
@@ -96,7 +83,7 @@ pub struct OverlayTarget<'a> {
     pub size: Size,
 }
 
-/// Port-only: draws over a frame (`SurfaceBackend::set_overlay`). It submits
+/// Port-only: draws over a frame (`SurfaceTarget::set_overlay`). It submits
 /// its own commands to the queue.
 pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
@@ -107,16 +94,15 @@ struct CurrentTexture {
     view: wgpu::TextureView,
 }
 
-/// The members of `GLFWWebGPUBackend` that the renderable resource reaches
-/// through its `backend` reference in C++.
-pub struct SurfaceState {
-    /// `None` from `SurfaceBackend::release_surface` until `set_surface`.
+/// The members of `GLFWWebGPUBackend` that the draw target reaches through
+/// its `backend` reference in C++.
+struct SurfaceState {
     surface: RefCell<Option<wgpu::Surface<'static>>>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     swap_chain_format: wgpu::TextureFormat,
     surface_usage: Cell<wgpu::TextureUsages>,
-    depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
+    depth_stencil_format: wgpu::TextureFormat,
 
     current: RefCell<Option<CurrentTexture>>,
     depth_stencil: RefCell<Option<(wgpu::Texture, wgpu::TextureView)>>,
@@ -175,7 +161,9 @@ impl SurfaceState {
     }
 
     /// `swap()`: presents the current frame.
-    fn swap(&self) {
+    /// Presents the current frame. Returns whether there was one.
+    fn swap(&self) -> bool {
+        let mut presented = false;
         let now = Instant::now();
         let time_since_last_swap = now.duration_since(self.last_swap_time.get());
 
@@ -223,6 +211,7 @@ impl SurfaceState {
                     drop(current.view);
                     self.queue.present(current.texture);
                     self.frame_presented.set(true);
+                    presented = true;
                 }
             }
 
@@ -231,7 +220,8 @@ impl SurfaceState {
         }
 
         // signalFrameComplete(): `frameInProgress` is never set (see the
-        // file comment). C++ calls glfwPollEvents here; the GLFW wrapper does.
+        // file comment). C++ calls glfwPollEvents here; the host does.
+        presented
     }
 
     /// `getCurrentTextureView()`
@@ -356,9 +346,7 @@ impl SurfaceState {
     fn create_depth_stencil_texture(&self, width: u32, height: u32) {
         self.depth_stencil.borrow_mut().take();
 
-        let Some(format) = self.depth_stencil_format.get() else {
-            return;
-        };
+        let format = self.depth_stencil_format;
         if width == 0 || height == 0 {
             return;
         }
@@ -465,29 +453,26 @@ impl SurfaceState {
     }
 }
 
-/// `WebGPURenderableResource`: the swapchain as a renderable resource.
-struct SurfaceRenderableResource {
+/// `WebGPURenderableResource`: the swapchain's texture as a draw target.
+struct SurfaceResource {
     state: Rc<SurfaceState>,
 }
 
-impl RenderableResource for SurfaceRenderableResource {
-    fn bind(&self) {
-        // Nothing to do here for WebGPU as command encoder is managed by
-        // CommandEncoder class
-    }
-
-    fn swap(&self) {
-        // The command buffer submission happens in CommandEncoder::present()
-        // Here we just present the surface
-        self.state.swap();
-    }
-
+impl TargetResource for SurfaceResource {
     fn get_color_texture_view(&self) -> Option<wgpu::TextureView> {
         self.state.get_current_texture_view()
     }
 
+    fn get_color_texture_format(&self) -> Option<wgpu::TextureFormat> {
+        Some(self.state.swap_chain_format)
+    }
+
     fn get_depth_stencil_texture_view(&self) -> Option<wgpu::TextureView> {
         self.state.get_depth_stencil_view()
+    }
+
+    fn get_depth_stencil_texture_format(&self) -> Option<wgpu::TextureFormat> {
+        Some(self.state.depth_stencil_format)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -495,199 +480,119 @@ impl RenderableResource for SurfaceRenderableResource {
     }
 }
 
-/// What `SurfaceBackend::finish` builds on.
-struct Parts {
-    instance: wgpu::Instance,
-    adapter: Option<wgpu::Adapter>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    surface: Option<wgpu::Surface<'static>>,
+/// How a [`SurfaceTarget`] presents.
+#[derive(Clone, Copy, Debug)]
+pub struct SurfaceOptions {
+    /// Present in step with the display. Off, frames are presented at once,
+    /// tearing.
+    pub cap_frame_rate: bool,
+    /// The usages the surface supports, where the host knows them better
+    /// than the device's adapter does, as for a browser's canvas, or where
+    /// the device has no adapter. Frames can be read back when they have
+    /// COPY_SRC.
+    pub usages: Option<wgpu::TextureUsages>,
 }
 
-/// The surface configuration `SurfaceBackend::finish` uses.
-struct SurfaceChoice {
-    swap_chain_format: wgpu::TextureFormat,
-    surface_usage: wgpu::TextureUsages,
-    present_mode: wgpu::PresentMode,
-    depth_stencil_format: wgpu::TextureFormat,
-}
-
-/// `GLFWWebGPUBackend` without the window: a `webgpu::RendererBackend` and
-/// `gfx::Renderable` presenting to a surface.
-pub struct SurfaceBackend {
-    renderer_backend: RendererBackend,
-    renderable: RenderableBase,
-    state: Rc<SurfaceState>,
-    adapter_info: wgpu::AdapterInfo,
-}
-
-impl SurfaceBackend {
-    /// The constructor of `GLFWWebGPUBackend(window, capFrameRate)` from the
-    /// instance on: surface (made by `create_surface` from the window's
-    /// handles), an adapter that can present to it, device, format selection
-    /// and configuration.
-    ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
-    /// WebGPU adapter that can present to the surface, with
-    /// [`ErrorKind::Native`](mln_util::ErrorKind) when the adapter can't
-    /// create a device, and with `create_surface`'s error.
-    pub fn new(
-        create_surface: impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface<'static>, Error>,
-        framebuffer_size: Size,
-        cap_frame_rate: bool,
-    ) -> Result<SurfaceBackend, Error> {
-        let renderer_backend = RendererBackend::new(ContextMode::Unique);
-
-        // Create the instance
-        let instance = crate::headless_backend::create_instance(instance_backends());
-
-        // Create surface for WebGPU
-        let surface = create_surface(&instance)?;
-
-        // Request an adapter that can present to the surface
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            ..Default::default()
-        }))
-        .map_err(|e| Error::unsupported(format!("No WebGPU adapter found: {e}")))?;
-        let capabilities = surface.get_capabilities(&adapter);
-        if capabilities.formats.is_empty() {
-            return Err(Error::unsupported("The WebGPU adapter can't present to the surface"));
-        }
-
-        // Log adapter info
-        let adapter_info = adapter.get_info();
-        Log::info(
-            Event::Render,
-            format!(
-                "WebGPU: Selected adapter backend = {}, name = {}",
-                backend_type_to_string(adapter_info.backend),
-                if adapter_info.name.is_empty() { "<unknown>" } else { &adapter_info.name }
-            ),
-        );
-
-        let has_depth32_stencil = adapter.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8);
-        let (required_features, depth_stencil_format) = if has_depth32_stencil {
-            (wgpu::Features::DEPTH32FLOAT_STENCIL8, wgpu::TextureFormat::Depth32FloatStencil8)
-        } else {
-            (wgpu::Features::empty(), wgpu::TextureFormat::Depth24PlusStencil8)
-        };
-
-        // The WebGPU default limits, lowered to what the adapter supports, as
-        // the headless backend requests them.
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("MapLibre WebGPU Device"),
-            required_features,
-            required_limits: wgpu::Limits::default().or_worse_values_from(&adapter.limits()),
-            ..Default::default()
-        }))
-        .map_err(|e| Error::native(format!("Failed to create WebGPU device: {e}")))?;
-
-        // Dawn's logUncapturedError instead of wgpu's panicking default.
-        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
-            Log::error(Event::Render, format!("WebGPU validation error: {error}"));
-        }));
-
-        renderer_backend.set_depth_stencil_format(Some(depth_stencil_format));
-
-        // Process device events to ensure it's ready
-        let _ = device.poll(wgpu::PollType::Poll);
-
-        let (surface_usage, present_mode) = surface_options(&capabilities);
-        let preferred_formats = [
-            wgpu::TextureFormat::Bgra8Unorm,
-            wgpu::TextureFormat::Bgra8UnormSrgb,
-            wgpu::TextureFormat::Rgba8Unorm,
-            wgpu::TextureFormat::Rgba8UnormSrgb,
-        ];
-        let swap_chain_format = preferred_formats
-            .into_iter()
-            .find(|f| capabilities.formats.contains(f))
-            .or_else(|| capabilities.formats.first().copied())
-            .unwrap_or(wgpu::TextureFormat::Bgra8Unorm);
-        Ok(Self::finish(
-            renderer_backend,
-            Parts { instance, adapter: Some(adapter), device, queue, surface: Some(surface) },
-            SurfaceChoice { swap_chain_format, surface_usage, present_mode, depth_stencil_format },
-            framebuffer_size,
-            cap_frame_rate,
-            adapter_info,
-        ))
+impl Default for SurfaceOptions {
+    fn default() -> Self {
+        SurfaceOptions { cap_frame_rate: true, usages: None }
     }
+}
 
-    /// Port-only: a backend on a device and surface that the host created,
-    /// as maplibre-native-ffi's `mln_map_attach_web_gpu_surface` passes them,
-    /// or the browser's WebGPU (wgpu's `webgpu` backend, examples/web).
-    /// There is no adapter: the surface is configured with `format`, for
-    /// rendering, and for readback too if `usages` (what the surface
-    /// supports) has COPY_SRC; it presents in FIFO order, which every
-    /// surface supports.
-    pub fn from_host(
-        instance: wgpu::Instance,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
+/// `GLFWWebGPUBackend`'s surface without the window: frames presented to a
+/// `wgpu::Surface`.
+pub struct SurfaceTarget {
+    backend: Rc<RendererBackend>,
+    state: Rc<SurfaceState>,
+    image: Rc<DrawTarget>,
+}
+
+impl SurfaceTarget {
+    /// A target on `backend` that presents to `surface`, made with the
+    /// instance of the backend's device, at `framebuffer_size` physical
+    /// pixels. The surface is configured with the device's surface format,
+    /// or with the first of BGRA8 and RGBA8 that the surface supports.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device's adapter can't present to the surface or the surface supports
+    /// none of those formats, and with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when the device
+    /// has neither an adapter to ask nor a surface format.
+    pub fn new(
+        backend: Rc<RendererBackend>,
         surface: wgpu::Surface<'static>,
-        format: wgpu::TextureFormat,
-        usages: wgpu::TextureUsages,
         framebuffer_size: Size,
-    ) -> SurfaceBackend {
-        let renderer_backend = RendererBackend::new(ContextMode::Unique);
-        let adapter_info = device.adapter_info();
-        let depth_stencil_format = if device.features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
+        options: SurfaceOptions,
+    ) -> Result<SurfaceTarget, Error> {
+        let device = backend.device();
+        let (swap_chain_format, mut surface_usage, present_mode) = match device.adapter() {
+            Some(adapter) => {
+                let capabilities = surface.get_capabilities(adapter);
+                if capabilities.formats.is_empty() {
+                    return Err(Error::unsupported("The WebGPU adapter can't present to the surface"));
+                }
+                let format = match device.surface_format() {
+                    Some(format) if capabilities.formats.contains(&format) => format,
+                    Some(format) => {
+                        return Err(Error::unsupported(format!("The surface does not take the {format:?} format")));
+                    }
+                    None => [
+                        wgpu::TextureFormat::Bgra8Unorm,
+                        wgpu::TextureFormat::Bgra8UnormSrgb,
+                        wgpu::TextureFormat::Rgba8Unorm,
+                        wgpu::TextureFormat::Rgba8UnormSrgb,
+                    ]
+                    .into_iter()
+                    .find(|f| capabilities.formats.contains(f))
+                    .ok_or_else(|| Error::unsupported("The surface takes none of the formats the map renders in"))?,
+                };
+                let (usage, present_mode) = surface_options(&capabilities);
+                (format, usage, present_mode)
+            }
+            None => {
+                let format = device.surface_format().ok_or_else(|| {
+                    Error::invalid_argument(
+                        "A surface on a device without an adapter needs the device's surface format",
+                    )
+                })?;
+                (format, wgpu::TextureUsages::RENDER_ATTACHMENT, wgpu::PresentMode::Fifo)
+            }
+        };
+        if let Some(usages) = options.usages {
+            surface_usage = wgpu::TextureUsages::RENDER_ATTACHMENT | (usages & wgpu::TextureUsages::COPY_SRC);
+        }
+        let depth_stencil_format = if device.device().features().contains(wgpu::Features::DEPTH32FLOAT_STENCIL8) {
             wgpu::TextureFormat::Depth32FloatStencil8
         } else {
             wgpu::TextureFormat::Depth24PlusStencil8
         };
-        device.on_uncaptured_error(std::sync::Arc::new(|error: wgpu::Error| {
-            Log::error(Event::Render, format!("WebGPU validation error: {error}"));
-        }));
-        renderer_backend.set_depth_stencil_format(Some(depth_stencil_format));
-        Self::finish(
-            renderer_backend,
-            Parts { instance, adapter: None, device, queue, surface: Some(surface) },
-            SurfaceChoice {
-                swap_chain_format: format,
-                surface_usage: wgpu::TextureUsages::RENDER_ATTACHMENT | (usages & wgpu::TextureUsages::COPY_SRC),
-                present_mode: wgpu::PresentMode::Fifo,
-                depth_stencil_format,
-            },
-            framebuffer_size,
-            true,
-            adapter_info,
-        )
-    }
 
-    /// The rest of the construction, once the device, surface and formats
-    /// are there.
-    fn finish(
-        renderer_backend: RendererBackend,
-        parts: Parts,
-        choice: SurfaceChoice,
-        framebuffer_size: Size,
-        cap_frame_rate: bool,
-        adapter_info: wgpu::AdapterInfo,
-    ) -> SurfaceBackend {
-        let Parts { instance, adapter, device, queue, surface } = parts;
-        let SurfaceChoice { swap_chain_format, surface_usage, present_mode, depth_stencil_format } = choice;
-        renderer_backend.set_color_format(Some(swap_chain_format));
+        let info = device.adapter_info();
+        Log::info(
+            Event::Render,
+            format!(
+                "WebGPU: Selected adapter backend = {}, name = {}",
+                backend_type_to_string(info.backend),
+                if info.name.is_empty() { "<unknown>" } else { &info.name }
+            ),
+        );
 
-        let backend_impl = renderer_backend.backend_impl().clone();
         let state = Rc::new(SurfaceState {
-            surface: RefCell::new(surface),
-            device: device.clone(),
-            queue: queue.clone(),
+            surface: RefCell::new(Some(surface)),
+            device: device.device().clone(),
+            queue: device.queue().clone(),
             swap_chain_format,
             surface_usage: Cell::new(surface_usage),
-            depth_stencil_format: Cell::new(Some(depth_stencil_format)),
+            depth_stencil_format,
             current: RefCell::new(None),
             depth_stencil: RefCell::new(None),
             frame_presented: Cell::new(true),
             surface_configured: Cell::new(false),
-            surface_needs_reconfigure: Cell::new(false),
+            // Configured with the first frame (see the file comment).
+            surface_needs_reconfigure: Cell::new(true),
             last_configured_size: Cell::new(Size::default()),
             consecutive_errors: Cell::new(0),
-            enable_vsync: cap_frame_rate,
+            enable_vsync: options.cap_frame_rate,
             vsync_present_mode: Cell::new(present_mode),
             framebuffer_size: Cell::new(framebuffer_size),
             last_swap_time: Cell::new(Instant::now()),
@@ -696,71 +601,37 @@ impl SurfaceBackend {
             readback: RefCell::new(None),
             overlay: RefCell::new(None),
         });
-
-        // Configure surface
-        state.surface_needs_reconfigure.set(true);
-        state.reconfigure_surface();
-
-        // Store WebGPU instance, device and queue in the base class
-        backend_impl.set_instance(Some(instance));
-        backend_impl.set_adapter(adapter);
-        backend_impl.set_device(Some(device));
-        backend_impl.set_queue(Some(queue));
-
-        let resource = RenderableResourceBox::new_rc(SurfaceRenderableResource { state: state.clone() });
-        SurfaceBackend {
-            renderer_backend,
-            renderable: RenderableBase::new(framebuffer_size, Some(resource)),
-            state,
-            adapter_info,
-        }
+        let image = Rc::new(DrawTarget::new(framebuffer_size, SurfaceResource { state: state.clone() }));
+        Ok(SurfaceTarget { backend, state, image })
     }
 
-    pub fn webgpu_backend(&self) -> &RendererBackend {
-        &self.renderer_backend
+    /// The backend the target draws on.
+    pub fn backend(&self) -> &Rc<RendererBackend> {
+        &self.backend
     }
 
-    /// The adapter in use (name, backend, driver).
-    pub fn get_adapter_info(&self) -> &wgpu::AdapterInfo {
-        &self.adapter_info
-    }
-
-    /// The swapchain format picked from the surface capabilities.
-    pub fn get_swap_chain_format(&self) -> wgpu::TextureFormat {
+    /// The format the surface is configured with.
+    pub fn format(&self) -> wgpu::TextureFormat {
         self.state.swap_chain_format
     }
 
-    /// `getFramebufferSize()`
-    pub fn get_framebuffer_size(&self) -> Size {
-        self.get_size()
+    /// The size of the frames, in physical pixels.
+    pub fn size(&self) -> Size {
+        self.state.framebuffer_size.get()
     }
 
-    /// `setFramebufferSize(Size)`
-    pub fn set_framebuffer_size(&self, new_size: Size) {
-        self.state.framebuffer_size.set(new_size);
-        // Update swap chain size if needed
-        if self.get_size() != new_size {
-            self.set_renderable_size(new_size);
+    /// `setFramebufferSize(Size)`: draws the next frame at `size` physical
+    /// pixels.
+    pub fn resize(&self, size: Size) {
+        if self.state.framebuffer_size.replace(size) != size {
+            self.image.set_size(size);
             self.state.surface_needs_reconfigure.set(true);
         }
-    }
-
-    /// `swap()`
-    pub fn swap(&self) {
-        self.state.swap();
     }
 
     /// `processEvents()`
     pub fn process_events(&self) {
         self.state.process_events();
-    }
-
-    /// Port-only: acquires the next swapchain texture ahead of a frame;
-    /// false when the surface has none right now (timeout, occluded,
-    /// outdated). The caller skips the frame: a render pass without a color
-    /// attachment trips the drawables' debug assertions.
-    pub fn acquire_next_texture(&self) -> bool {
-        self.state.get_current_texture_view().is_some()
     }
 
     /// Port-only: copy the next presented frame (see `take_readback`).
@@ -776,66 +647,6 @@ impl SurfaceBackend {
         self.state.readback.borrow_mut().take()
     }
 
-    /// The device, for tests and tools.
-    pub fn get_device(&self) -> wgpu::Device {
-        self.state.device.clone()
-    }
-
-    /// Port-only: whether the backend has a surface to present to.
-    pub fn has_surface(&self) -> bool {
-        self.state.surface.borrow().is_some()
-    }
-
-    /// Port-only: drops the surface, so the host can destroy what it was
-    /// made from, and keeps the device and everything built on it. Until
-    /// `set_surface`, `acquire_next_texture` returns false and `swap`
-    /// presents nothing.
-    pub fn release_surface(&self) {
-        let state = &self.state;
-        // The swapchain texture goes before the surface it came from.
-        state.current.borrow_mut().take();
-        state.depth_stencil.borrow_mut().take();
-        state.frame_presented.set(true);
-        state.surface_configured.set(false);
-        state.surface_needs_reconfigure.set(false);
-        state.consecutive_errors.set(0);
-        state.surface.borrow_mut().take();
-    }
-
-    /// Port-only: presents to `surface` from now on, at `framebuffer_size`,
-    /// in place of the surface the backend has, if any, which it drops.
-    /// The surface is configured with the backend's swapchain format.
-    ///
-    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind), keeping
-    /// the current surface, when the backend's adapter can't present to
-    /// `surface` in that format: pipelines are built for it, so a new format
-    /// needs a new backend. A backend `from_host` has no adapter to check
-    /// with, and uses the usages it was made with.
-    pub fn set_surface(&self, surface: wgpu::Surface<'static>, framebuffer_size: Size) -> Result<(), Error> {
-        let state = &self.state;
-        if let Some(adapter) = self.renderer_backend.backend_impl().get_adapter() {
-            let capabilities = surface.get_capabilities(&adapter);
-            if !capabilities.formats.contains(&state.swap_chain_format) {
-                return Err(Error::unsupported(format!(
-                    "The surface does not take the {:?} format the backend renders in",
-                    state.swap_chain_format
-                )));
-            }
-            let (usage, present_mode) = surface_options(&capabilities);
-            state.surface_usage.set(usage);
-            state.vsync_present_mode.set(present_mode);
-        }
-        self.release_surface();
-        *state.surface.borrow_mut() = Some(surface);
-        state.framebuffer_size.set(framebuffer_size);
-        if self.get_size() != framebuffer_size {
-            self.set_renderable_size(framebuffer_size);
-        }
-        state.surface_needs_reconfigure.set(true);
-        state.reconfigure_surface();
-        Ok(())
-    }
-
     /// Port-only: draws `overlay` over each frame from now on, after the map
     /// and before the frame is presented (and read back), or stops with
     /// `None`.
@@ -844,117 +655,31 @@ impl SurfaceBackend {
     }
 }
 
-impl Drop for SurfaceBackend {
+impl FrameTarget for SurfaceTarget {
+    /// Acquires the surface's next texture, unless the frame has one. A
+    /// frame without one is skipped: a render pass without a color
+    /// attachment trips the drawables' debug assertions.
+    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+        self.state.get_current_texture_view()?;
+        Some(self.image.clone())
+    }
+
+    fn end_frame(&self, encoder: &dyn GfxCommandEncoder) -> Handoff {
+        if let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() {
+            encoder.submit_frame(Some(self.image.resource()));
+        }
+        if self.state.swap() { Handoff::Presented } else { Handoff::Dropped }
+    }
+}
+
+impl Drop for SurfaceTarget {
     fn drop(&mut self) {
-        // ~GLFWWebGPUBackend: context.reset(), release the textures, pump
-        // outstanding callbacks; the surface goes before the device.
-        self.renderer_backend.reset_context();
+        // ~GLFWWebGPUBackend: release the textures and pump outstanding
+        // callbacks; the swapchain texture goes before the surface.
         self.state.current.borrow_mut().take();
         self.state.depth_stencil.borrow_mut().take();
         self.state.overlay.borrow_mut().take();
         self.state.process_events();
-        self.set_resource(None);
-    }
-}
-
-impl Renderable for SurfaceBackend {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
-    }
-}
-
-impl renderer_backend::RendererBackend for SurfaceBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.renderer_backend.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn get_default_renderable(&self) -> &dyn Renderable {
-        // We directly inherit from gfx::Renderable
-        self
-    }
-
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        self.renderer_backend.init_shaders(registry, parameters);
-    }
-
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        self.renderer_backend.create_context()
-    }
-
-    fn activate(&self) {
-        // WebGPU doesn't need explicit context activation like OpenGL
-    }
-
-    fn deactivate(&self) {
-        // WebGPU doesn't need explicit context deactivation like OpenGL
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use mln_gfx::backend_scope::{BackendScope, ScopeType};
-    use mln_gfx::renderer_backend::RendererBackend as _;
-
-    use super::*;
-
-    /// A backend whose surface is released, on a headless device: the
-    /// tests have no window to make a surface from.
-    fn released_backend(framebuffer_size: Size) -> SurfaceBackend {
-        let (device, queue) = crate::HeadlessBackend::request_device(None).expect("device");
-        let adapter_info = device.adapter_info();
-        let format = wgpu::TextureFormat::Bgra8Unorm;
-        SurfaceBackend::finish(
-            RendererBackend::new(ContextMode::Unique),
-            Parts {
-                instance: crate::headless_backend::create_instance(instance_backends()),
-                adapter: None,
-                device,
-                queue,
-                surface: None,
-            },
-            SurfaceChoice {
-                swap_chain_format: format,
-                surface_usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                present_mode: wgpu::PresentMode::Fifo,
-                depth_stencil_format: wgpu::TextureFormat::Depth24PlusStencil8,
-            },
-            framebuffer_size,
-            true,
-            adapter_info,
-        )
-    }
-
-    #[test]
-    fn a_backend_without_a_surface_has_no_frame_to_render() {
-        let backend = released_backend(Size::new(32, 16));
-        assert!(!backend.has_surface());
-        assert!(!backend.acquire_next_texture());
-        backend.swap();
-        assert!(!backend.acquire_next_texture());
-        assert!(!backend.state.surface_configured.get());
-    }
-
-    #[test]
-    fn a_released_backend_takes_resizes_for_its_next_surface() {
-        let backend = released_backend(Size::new(32, 16));
-        backend.release_surface();
-        backend.set_framebuffer_size(Size::new(64, 48));
-        assert_eq!(backend.get_framebuffer_size(), Size::new(64, 48));
-        assert!(!backend.acquire_next_texture());
-        assert!(!backend.has_surface());
-    }
-
-    #[test]
-    fn a_released_backend_keeps_its_context() {
-        let backend = released_backend(Size::new(32, 16));
-        let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-        let context = backend.get_context_ptr().clone();
-        backend.release_surface();
-        assert!(Rc::ptr_eq(&context, backend.get_context_ptr()));
-        assert!(backend.state.depth_stencil.borrow().is_none());
+        self.state.surface.borrow_mut().take();
     }
 }

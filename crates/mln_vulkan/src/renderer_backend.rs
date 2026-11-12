@@ -5,11 +5,10 @@
 // reaches them through `Context& -> getBackend()`, and destroys the device
 // with the backend; here the device goes with its last user.
 //
-// `getDefaultRenderable()` is implemented by the platform backends
-// (HeadlessBackend, SurfaceBackend), which embed this struct. Where C++ asks
-// the default renderable's resource for the platform's surface and
-// extensions through virtual calls, the platform backend passes a
-// `SurfaceProvider`.
+// What the backend draws into is a target built on it (`OffscreenTarget`,
+// `SurfaceTarget`). Where C++ asks the default renderable's resource for the
+// platform's surface and extensions through virtual calls, a window target
+// passes a `SurfaceProvider`.
 //
 // Differences from C++:
 // - C++ turns the validation layer on in debug builds and logs an error when
@@ -26,6 +25,7 @@
 // - The device needs `VK_KHR_storage_buffer_storage_class`, for the SPIR-V
 //   naga writes (`shaders::compiler`).
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::{CStr, c_char, c_void};
 use std::io::Write as _;
@@ -35,7 +35,8 @@ use std::rc::Rc;
 use ash::vk;
 use gpu_allocator::vulkan::{Allocator, AllocatorCreateDesc};
 use gpu_allocator::{AllocationSizes, AllocatorDebugSettings};
-use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
+use mln_gfx::context::Context as GfxContext;
+use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
@@ -43,6 +44,7 @@ use mln_util::error::Error;
 use mln_util::logging::{Event, EventSeverity, Log};
 
 use crate::context::Context;
+use crate::device::Device;
 use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
 
@@ -53,7 +55,7 @@ const VALIDATION_LAYER: &CStr = c"VK_LAYER_KHRONOS_validation";
 const STORAGE_BUFFER_STORAGE_CLASS: &CStr = c"VK_KHR_storage_buffer_storage_class";
 
 /// The platform's part of a backend that renders to a window: what C++'s
-/// `SurfaceRenderableResource::createPlatformSurface` and the platform's
+/// `SurfaceResource::createPlatformSurface` and the platform's
 /// `getInstanceExtensions` do.
 pub trait SurfaceProvider {
     /// The instance extensions the surface needs.
@@ -216,9 +218,13 @@ fn compatible_queues(
 
 impl BackendImpl {
     /// `init()`: the instance, the debug messenger, the platform's surface,
-    /// the device, the allocator and the command pool. Returns the surface
-    /// for the renderable resource to own.
-    fn new(provider: Option<&dyn SurfaceProvider>) -> Result<(BackendImpl, Option<vk::SurfaceKHR>), Error> {
+    /// the device (on the GPU at `adapter_index`, or the first that can
+    /// render), the allocator and the command pool. Returns the surface for
+    /// the target to own.
+    fn new(
+        adapter_index: Option<usize>,
+        provider: Option<&dyn SurfaceProvider>,
+    ) -> Result<(BackendImpl, Option<vk::SurfaceKHR>), Error> {
         // SAFETY: the Vulkan library's initializers have no preconditions.
         let entry = unsafe { ash::Entry::load() }.map_err(|e| Error::unsupported(format!("No Vulkan library: {e}")))?;
 
@@ -323,7 +329,17 @@ impl BackendImpl {
             if physical_devices.is_empty() {
                 return Err(Error::unsupported("No Vulkan compatible GPU found"));
             }
-            let (physical_device, graphics_queue_index, present_queue_index) = physical_devices
+            let candidates = match adapter_index {
+                Some(index) => {
+                    let count = physical_devices.len();
+                    let candidate = *physical_devices
+                        .get(index)
+                        .ok_or_else(|| Error::not_found(format!("adapter_index {index} is past the {count} GPUs")))?;
+                    vec![candidate]
+                }
+                None => physical_devices,
+            };
+            let (physical_device, graphics_queue_index, present_queue_index) = candidates
                 .iter()
                 .find_map(|&candidate| {
                     compatible_queues(&instance, &surface_loader, candidate, &device_extensions, surface)
@@ -639,14 +655,13 @@ impl Drop for BackendImpl {
     }
 }
 
-/// `vulkan::RendererBackend`: embedded by the platform backends, which
-/// implement `gfx::RendererBackend` by delegating to it.
+/// `vulkan::RendererBackend`: a renderer's instance, device and context.
 pub struct RendererBackend {
-    pub base: RendererBackendBase,
+    base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
     /// The context, made with the backend so that failing to make it is the
-    /// backend's error, until `create_context` hands it out.
-    context: RefCell<Option<Rc<Context>>>,
+    /// backend's error.
+    context: Rc<Context>,
 }
 
 /// The shader types registered by `initShaders`, in the C++ order.
@@ -692,20 +707,37 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 ];
 
 impl RendererBackend {
-    /// `RendererBackend(contextMode)` and `init()`: a device that renders to
-    /// the surface `provider` makes, or offscreen without one. Returns the
-    /// surface.
+    /// `RendererBackend()` and `init()`: a backend on `device` for offscreen
+    /// targets.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
+    /// Vulkan library, a device that can render, or what
+    /// MLN_VULKAN_VALIDATION=abort needs of the instance, and on the host's
+    /// device, with [`ErrorKind::NotFound`](mln_util::ErrorKind) when the
+    /// device's adapter index names no GPU, and with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan call fails.
+    pub fn new(device: &Device) -> Result<Self, Error> {
+        Self::with_surface(device, None).map(|(backend, _)| backend)
+    }
+
+    /// `RendererBackend()` and `init()`: a backend on `device` that also
+    /// presents to the surface `provider` makes, and to other surfaces of
+    /// the platform's windows. Returns the surface.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library, a device that can render (and present to the
     /// surface), or what the surface or MLN_VULKAN_VALIDATION=abort needs of
-    /// the instance, with [`ErrorKind::Native`](mln_util::ErrorKind) when a
-    /// Vulkan call fails, and with `provider`'s error.
-    pub fn new(
-        context_mode: ContextMode,
+    /// the instance, and on the host's device, with
+    /// [`ErrorKind::NotFound`](mln_util::ErrorKind) when the device's
+    /// adapter index names no GPU, with
+    /// [`ErrorKind::Native`](mln_util::ErrorKind) when a Vulkan call fails,
+    /// and with `provider`'s error.
+    pub(crate) fn with_surface(
+        device: &Device,
         provider: Option<&dyn SurfaceProvider>,
     ) -> Result<(Self, Option<vk::SurfaceKHR>), Error> {
-        let (impl_, surface) = BackendImpl::new(provider)?;
+        let adapter_index = device.library_adapter_index()?;
+        let (impl_, surface) = BackendImpl::new(adapter_index, provider)?;
         let impl_ = Rc::new(impl_);
         let context = match Context::new(impl_.clone()) {
             Ok(context) => context,
@@ -717,34 +749,42 @@ impl RendererBackend {
                 return Err(Error::native(error));
             }
         };
-        let backend = RendererBackend {
-            base: RendererBackendBase::new(context_mode),
-            impl_,
-            context: RefCell::new(Some(context)),
-        };
-        Ok((backend, surface))
+        Ok((RendererBackend { base: RendererBackendBase::new(), impl_, context }, surface))
     }
 
     pub fn backend_impl(&self) -> &Rc<BackendImpl> {
         &self.impl_
     }
 
+    /// The backend's context.
+    pub fn vulkan_context(&self) -> &Rc<Context> {
+        &self.context
+    }
+
+    /// The name of the GPU.
+    pub fn get_device_name(&self) -> String {
+        self.impl_
+            .get_device_properties()
+            .device_name_as_c_str()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
+
+    /// Whether the device renders on the CPU, as lavapipe does.
+    pub fn is_software_device(&self) -> bool {
+        self.impl_.get_device_properties().device_type == vk::PhysicalDeviceType::CPU
+    }
+
     /// `context.reset()`, which also releases what the context holds
     /// (`Context::destroy_resources`).
     pub(crate) fn reset_context(&mut self) {
-        if let Some(context) = self.context.borrow_mut().take() {
-            context.destroy_resources();
-        }
-        if let Some(context) = self.base.reset_context()
-            && let Some(context) = context.as_any().downcast_ref::<Context>()
-        {
-            context.destroy_resources();
-        }
+        self.base.reset_context();
+        self.context.destroy_resources();
     }
 
     /// `createContext()`: the context made with the backend.
     pub fn create_context(&self) -> Rc<Context> {
-        self.context.borrow_mut().take().expect("a backend creates its context once")
+        self.context.clone()
     }
 
     /// `initShaders`: register one `vulkan::ShaderGroup` per built-in
@@ -762,6 +802,28 @@ impl RendererBackend {
             }
         }
     }
+}
+
+impl renderer_backend::RendererBackend for RendererBackend {
+    fn renderer_backend_base(&self) -> &RendererBackendBase {
+        &self.base
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
+        RendererBackend::init_shaders(self, registry, parameters);
+    }
+
+    fn create_context(&self) -> Rc<dyn GfxContext> {
+        RendererBackend::create_context(self)
+    }
+
+    /// Vulkan has no context to make current.
+    fn activate(&self) {}
+    fn deactivate(&self) {}
 }
 
 impl Drop for RendererBackend {

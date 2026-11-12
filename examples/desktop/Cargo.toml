@@ -55,8 +55,7 @@ objc2-metal.workspace = true
 objc2-quartz-core.workspace = true
 raw-window-metal.workspace = true
 
-# The Vulkan backend, the window's surface for it (vulkan_surface.rs) and the
-# controls drawn on Vulkan (vulkan_overlay.rs).
+# The Vulkan backend and the controls drawn on Vulkan (vulkan_overlay.rs).
 [target.'cfg(not(any(target_vendor = "apple", target_family = "wasm")))'.dependencies]
 ash.workspace = true
 mln_vulkan.workspace = true

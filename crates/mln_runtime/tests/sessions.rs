@@ -12,9 +12,9 @@ use std::sync::mpsc::channel;
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
-    AttachOptions, DemandMode, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult, Map, MapOptions,
-    OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
-    RenderedQueryOptions, Runtime, SourceQueryOptions,
+    AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
+    Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry, RenderedQueryOptions,
+    Runtime, SourceQueryOptions,
 };
 use mln_util::geo::ScreenCoordinate;
 use mln_util::size::Size;
@@ -636,7 +636,7 @@ fn maintenance_work_runs_in_order_with_frames() {
 
 #[test]
 fn sessions_on_two_maps_share_one_device() {
-    let device = OffscreenDevice::new(OffscreenDeviceOptions::default()).unwrap();
+    let device = Device::new(DeviceOptions::default()).unwrap();
     let runtime = runtime();
     let (red, green) = (red_map(&runtime), map_in_mode(&runtime, MapMode::Continuous));
     wait(green.set_style_json(style("#00ff00")));
@@ -660,7 +660,7 @@ fn sessions_on_two_maps_share_one_device() {
 
 #[test]
 fn a_device_reports_a_missing_adapter() {
-    let error = OffscreenDevice::new(OffscreenDeviceOptions { adapter_index: Some(usize::MAX) }).unwrap_err();
+    let error = Device::new(DeviceOptions { adapter_index: Some(usize::MAX) }).unwrap_err();
     assert_eq!(ErrorKind::NotFound, error.kind);
 }
 

@@ -39,7 +39,7 @@ fn prefetch_tiles() {
         observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
     }
 
-    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     let map = Map::with_file_source(
         file_source.clone(),
         MapOptions::new().with_map_mode(MapMode::Continuous).with_size(frontend.get_size()),

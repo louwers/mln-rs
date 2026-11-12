@@ -1,5 +1,6 @@
-// The backend of a native window: an OpenGL ES 3.0 context that presents to
-// an EGL window surface on a Wayland surface or an X11 window. After the
+// The target of a native window: frames presented to an EGL window surface
+// on a Wayland surface or an X11 window, from an OpenGL ES 3.0 context of
+// the window's display. After the
 // GLFW app's backend (platform/glfw/glfw_gl_backend.cpp), which gets its
 // context and its buffer swaps from GLFW; here they are EGL's.
 //
@@ -13,23 +14,21 @@ use std::ffi::{c_int, c_ulong, c_void};
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use glow::HasContext;
 use khronos_egl as egl;
+use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as GfxContext;
-use mln_gfx::renderable::{Renderable, RenderableBase};
-use mln_gfx::renderer_backend::{self, ContextMode, RendererBackendBase};
-use mln_gfx::shader_registry::ShaderRegistry;
-use mln_gfx::shaders::program_parameters::ProgramParameters;
+use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::stencil_mode::StencilMode;
+use mln_gfx::window::raw_window_handle::{RawDisplayHandle, RawWindowHandle};
+use mln_gfx::{BackendScope, ScopeType, Window};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
-use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 
 use crate::context::Context;
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::egl::{Egl, library};
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox};
 use crate::renderer_backend::{PlatformContext, RendererBackend};
 use crate::types::Gl;
 
@@ -44,7 +43,7 @@ enum WindowHandle {
 }
 
 impl WindowHandle {
-    fn of(window: &(impl HasWindowHandle + HasDisplayHandle)) -> Result<WindowHandle, String> {
+    fn of(window: &dyn Window) -> Result<WindowHandle, String> {
         let display = window.display_handle().map_err(|e| format!("The window has no display: {e}"))?;
         let handle = window.window_handle().map_err(|e| format!("The window has no handle: {e}"))?;
         match (display.as_raw(), handle.as_raw()) {
@@ -91,16 +90,12 @@ struct EglWindow {
     surface: Cell<Option<egl::Surface>>,
     wl_egl_window: Cell<*mut c_void>,
     /// What `handle` names, which stays open until the context is gone.
-    _window: Box<dyn Any>,
+    _window: Arc<dyn Window>,
 }
 
 impl EglWindow {
-    fn new(
-        window: impl HasWindowHandle + HasDisplayHandle + 'static,
-        size: Size,
-        cap_frame_rate: bool,
-    ) -> Result<Self, String> {
-        let handle = WindowHandle::of(&window)?;
+    fn new(window: Arc<dyn Window>, size: Size, cap_frame_rate: bool) -> Result<Self, String> {
+        let handle = WindowHandle::of(&*window)?;
         let egl = library()?;
         let (platform, native_display, wayland) = match handle {
             WindowHandle::Wayland { display, .. } => (PLATFORM_WAYLAND_KHR, display, true),
@@ -183,7 +178,7 @@ impl EglWindow {
             presenting: Cell::new(false),
             surface: Cell::new(None),
             wl_egl_window: Cell::new(std::ptr::null_mut()),
-            _window: Box::new(window),
+            _window: window,
         })
     }
 
@@ -319,7 +314,7 @@ pub struct OverlayTarget<'a> {
 /// behind but the framebuffer binding: the context forgets what it had set.
 pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 
-/// What the backend shares with its renderable resource.
+/// What the target shares with its draw target.
 #[derive(Default)]
 struct Presentation {
     overlay: RefCell<Option<Overlay>>,
@@ -328,38 +323,16 @@ struct Presentation {
 }
 
 /// The window's framebuffer.
-struct WindowRenderableResource {
+struct WindowResource {
     context: Weak<Context>,
-    window: Rc<EglWindow>,
-    presentation: Rc<Presentation>,
-    size: Size,
+    size: Rc<Cell<Size>>,
 }
 
-impl RenderableResource for WindowRenderableResource {
+impl TargetResource for WindowResource {
     fn bind(&self) {
         if let Some(context) = self.context.upgrade() {
-            context.bind_framebuffer(None, self.size, true);
+            context.bind_framebuffer(None, self.size.get(), true);
         }
-    }
-
-    /// Presents the frame, with the overlay over it.
-    fn swap(&self) {
-        let Some(context) = self.context.upgrade() else {
-            return;
-        };
-        if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
-            context.bind_framebuffer(None, self.size, true);
-            context.set_stencil_mode(&StencilMode::disabled());
-            overlay(&OverlayTarget { gl: context.get_backend().gl_shared(), size: self.size });
-            GfxContext::set_dirty_state(&*context);
-        }
-        if self.presentation.readback_requested.replace(false) {
-            context.bind_framebuffer(None, self.size, true);
-            let mut image = PremultipliedImage::new(self.size);
-            image.data = context.read_framebuffer(self.size);
-            *self.presentation.readback.borrow_mut() = Some(image);
-        }
-        self.window.swap();
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -367,27 +340,31 @@ impl RenderableResource for WindowRenderableResource {
     }
 }
 
-/// A `gl::RendererBackend` that presents to a window.
-pub struct SurfaceBackend {
-    renderer_backend: RendererBackend,
-    renderable: RenderableBase,
+/// Frames presented to a window, from a GL context of the window's own.
+pub struct SurfaceTarget {
+    backend: Rc<RendererBackend>,
     window: Rc<EglWindow>,
-    presentation: Rc<Presentation>,
-    renderer_name: String,
+    presentation: Presentation,
+    size: Rc<Cell<Size>>,
+    /// Made with the first frame.
+    image: RefCell<Option<Rc<DrawTarget>>>,
 }
 
-impl SurfaceBackend {
-    /// A backend that presents frames of `framebuffer_size` pixels to
-    /// `window`, a Wayland surface or an Xlib window, which it keeps; or why
-    /// EGL has no OpenGL ES 3.0 context for it. It takes the window over
-    /// with `acquire_next_texture`, not before: until then another backend
-    /// may present to it. With `cap_frame_rate`, presenting to an X11 window
+impl SurfaceTarget {
+    /// A backend on a context of `window`'s display, and a target that
+    /// presents frames of `framebuffer_size` pixels to `window`, a Wayland
+    /// surface or an Xlib window, which it keeps. It takes the window over
+    /// with its first frame, not before: until then another target may
+    /// present to it. With `cap_frame_rate`, presenting to an X11 window
     /// waits for the display.
-    pub fn new(
-        window: impl HasWindowHandle + HasDisplayHandle + 'static,
+    ///
+    /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL has no
+    /// OpenGL ES 3.0 context for the window.
+    pub fn with_backend(
+        window: Arc<dyn Window>,
         framebuffer_size: Size,
         cap_frame_rate: bool,
-    ) -> Result<Self, Error> {
+    ) -> Result<(Rc<RendererBackend>, SurfaceTarget), Error> {
         let window = Rc::new(EglWindow::new(window, framebuffer_size, cap_frame_rate).map_err(Error::native)?);
         // glow asks the context what it is, so it has to be current: without
         // a surface where EGL can, which leaves the window alone.
@@ -397,55 +374,38 @@ impl SurfaceBackend {
         }
         // SAFETY: the context is current, and EGL gives the functions of its
         // API.
-        let (gl, renderer_name) = unsafe {
-            let gl = glow::Context::from_loader_function(|name| {
+        let gl = unsafe {
+            glow::Context::from_loader_function(|name| {
                 window.egl.get_proc_address(name).map_or(std::ptr::null(), |function| function as *const _)
-            });
-            let renderer_name = gl.get_parameter_string(glow::RENDERER);
-            (gl, renderer_name)
+            })
         };
         let _ = window.egl.make_current(window.display, None, None, None);
-        Ok(SurfaceBackend {
-            renderer_backend: RendererBackend::new(ContextMode::Unique, gl, Box::new(WindowContext(window.clone()))),
-            renderable: RenderableBase::new(framebuffer_size, None),
+        let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(window.clone()))));
+        let target = SurfaceTarget {
+            backend: backend.clone(),
             window,
-            presentation: Rc::default(),
-            renderer_name,
-        })
+            presentation: Presentation::default(),
+            size: Rc::new(Cell::new(framebuffer_size)),
+            image: RefCell::new(None),
+        };
+        Ok((backend, target))
     }
 
-    pub fn gl_backend(&self) -> &RendererBackend {
-        &self.renderer_backend
-    }
-
-    /// `GL_RENDERER`: the name of the GL implementation.
-    pub fn get_renderer_name(&self) -> &str {
-        &self.renderer_name
-    }
-
-    pub fn get_framebuffer_size(&self) -> Size {
-        self.get_size()
+    /// The size of the frames, in physical pixels.
+    pub fn size(&self) -> Size {
+        self.size.get()
     }
 
     /// The window has `size` pixels from now on.
-    pub fn set_framebuffer_size(&self, size: Size) {
-        if size == self.get_size() {
-            return;
+    pub fn resize(&self, size: Size) {
+        if size != self.size.replace(size) {
+            self.window.resize(size);
         }
-        self.window.resize(size);
-        self.set_renderable_size(size);
-        self.set_resource(None);
-    }
-
-    /// Takes the window ahead of a frame: call it before each. The window's
-    /// framebuffer is always there to draw into.
-    pub fn acquire_next_texture(&self) -> bool {
-        self.window.presenting.set(true);
-        true
     }
 
     /// Draws `overlay` over each frame from now on, or nothing.
     pub fn set_overlay(&self, overlay: Option<Overlay>) {
+        let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
         *self.presentation.overlay.borrow_mut() = overlay;
     }
 
@@ -458,71 +418,60 @@ impl SurfaceBackend {
     pub fn take_readback(&self) -> Option<PremultipliedImage> {
         self.presentation.readback.borrow_mut().take()
     }
-
-    /// Stops presenting to the window, so that another backend can, until
-    /// the next `acquire_next_texture`.
-    pub fn release_surface(&self) {
-        self.window.release_surface();
-    }
 }
 
-impl Drop for SurfaceBackend {
-    fn drop(&mut self) {
-        // The overlay's and the renderable's GL objects go with the context
-        // current, before it. Without a surface, unless the window has this
-        // context's still: another backend may present to it by now.
-        self.window.presenting.set(self.window.surface.get().is_some());
-        self.renderer_backend.activate();
-        self.presentation.overlay.borrow_mut().take();
-        self.set_resource(None);
-        self.renderer_backend.reset_context();
-    }
-}
-
-impl Renderable for SurfaceBackend {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
-    }
-}
-
-impl renderer_backend::RendererBackend for SurfaceBackend {
-    fn renderer_backend_base(&self) -> &RendererBackendBase {
-        &self.renderer_backend.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    /// `getDefaultRenderable()`: creates the resource first.
-    fn get_default_renderable(&self) -> &dyn Renderable {
-        if !self.has_resource()
-            && let Some(context) =
-                <Self as renderer_backend::RendererBackend>::get_context(self).as_any().downcast_ref::<Context>()
-        {
-            self.set_resource(Some(RenderableResourceBox::new_rc(WindowRenderableResource {
-                context: context.weak(),
-                window: self.window.clone(),
-                presentation: self.presentation.clone(),
-                size: self.get_size(),
-            })));
+impl FrameTarget for SurfaceTarget {
+    /// Takes the window over. Its framebuffer is always there to draw into.
+    fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
+        if !self.window.presenting.replace(true) {
+            // The context is current without a surface: make it current on
+            // the window's.
+            self.backend.activate();
         }
-        self
+        let mut image = self.image.borrow_mut();
+        if image.is_none() {
+            let resource = WindowResource { context: self.backend.gl_context()?.weak(), size: self.size.clone() };
+            *image = Some(Rc::new(DrawTarget::new(self.size.get(), resource)));
+        }
+        let image = image.clone()?;
+        image.set_size(self.size.get());
+        Some(image)
     }
 
-    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
-        self.renderer_backend.init_shaders(registry, parameters);
+    /// Presents the frame, with the overlay over it.
+    fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
+        let Some(context) = self.backend.gl_context() else {
+            return Handoff::Dropped;
+        };
+        let size = self.size.get();
+        if let Some(overlay) = self.presentation.overlay.borrow_mut().as_mut() {
+            context.bind_framebuffer(None, size, true);
+            context.set_stencil_mode(&StencilMode::disabled());
+            overlay(&OverlayTarget { gl: context.get_backend().gl_shared(), size });
+            GfxContext::set_dirty_state(&*context);
+        }
+        if self.presentation.readback_requested.replace(false) {
+            context.bind_framebuffer(None, size, true);
+            let mut image = PremultipliedImage::new(size);
+            image.data = context.read_framebuffer(size);
+            *self.presentation.readback.borrow_mut() = Some(image);
+        }
+        self.window.swap();
+        Handoff::Presented
     }
+}
 
-    fn create_context(&self) -> Rc<dyn GfxContext> {
-        self.renderer_backend.create_context()
-    }
-
-    fn activate(&self) {
-        self.renderer_backend.activate();
-    }
-
-    fn deactivate(&self) {
-        self.renderer_backend.deactivate();
+impl Drop for SurfaceTarget {
+    fn drop(&mut self) {
+        // The overlay's GL objects go with the context current: without a
+        // surface, unless the window has this context's still.
+        self.window.presenting.set(self.window.surface.get().is_some());
+        {
+            let _scope = BackendScope::new(&*self.backend, ScopeType::Explicit);
+            self.presentation.overlay.borrow_mut().take();
+            self.image.borrow_mut().take();
+        }
+        // The backend's context stays, current without a surface from now on.
+        self.window.release_surface();
     }
 }

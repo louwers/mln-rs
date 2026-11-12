@@ -135,7 +135,7 @@ pollster = { version = "1.0.1" }
 postcard = { version = "1.1.3", default-features = false, features = ["alloc"] }
 # The difftests' property tests.
 proptest = { version = "1.12.0" }
-# crates/mln_gl's window backend: the window, as winit and others hand it out.
+# The windows of window targets (mln_gfx::Window), as winit and others hand them out.
 raw-window-handle = { version = "0.6.2" }
 regex = { version = "1.13.1" }
 # tools/render-test's JSON (with serde_json), and the types that cross to a
@@ -314,11 +314,6 @@ include = ["/src", "/LICENSE.md"]
 keywords = ["maplibre", "map", "vector-tiles", "gis", "rendering"]
 categories = ["graphics", "rendering::engine", "science::geo"]
 
-[features]
-# The OpenGL backend (crates/mln_gl): OpenGL ES 3.0 natively, where
-# mln_headless then renders with it on request, and WebGL2 in a browser.
-gl = ["dep:mln_gl", "mln_headless/gl"]
-
 [dependencies]
 cheap_ruler.workspace = true
 csscolorparser.workspace = true
@@ -333,7 +328,7 @@ mln_conversion.workspace = true
 mln_expression.workspace = true
 mln_gestures.workspace = true
 mln_gfx.workspace = true
-mln_gl = { workspace = true, optional = true }
+mln_gl.workspace = true
 mln_headless.workspace = true
 mln_image.workspace = true
 mln_map.workspace = true
