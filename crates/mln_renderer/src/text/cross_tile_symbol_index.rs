@@ -149,6 +149,21 @@ fn is_in_viewport(projector: &TileProjector<'_>, point: Point<f32>) -> bool {
     !projected.occluded && (p.x > -EDGE && p.y > -EDGE && p.x < EDGE && p.y < EDGE)
 }
 
+/// `removeBucketCrossTileIDs(zoom, removedBucket)`. A free function over the
+/// used-ID sets so callers can pass an index that is still borrowed from
+/// `CrossTileSymbolLayerIndex::indexes`.
+fn remove_bucket_cross_tile_ids(
+    used_cross_tile_ids: &mut VecMap<u8, BTreeSet<u32>>,
+    zoom: u8,
+    removed_bucket: &TileLayerIndex,
+) {
+    for indexed in removed_bucket.indexed_symbol_instances.values() {
+        for indexed_symbol_instance in indexed {
+            used_cross_tile_ids.entry(zoom).or_default().remove(&indexed_symbol_instance.cross_tile_id);
+        }
+    }
+}
+
 /// `CrossTileSymbolLayerIndex`.
 #[derive(Debug)]
 pub struct CrossTileSymbolLayerIndex {
@@ -219,9 +234,8 @@ impl CrossTileSymbolLayerIndex {
             }
         }
 
-        let previous = this_zoom_indexes.get(tile_id).map(|index| (index.bucket_instance_id, index.clone()));
-        if let Some((previous_bucket_instance_id, previous_index)) = previous {
-            if previous_bucket_instance_id == bucket.bucket_instance_id && !state.has_uninitialized_symbols {
+        if let Some(previous_index) = this_zoom_indexes.get(tile_id) {
+            if previous_index.bucket_instance_id == bucket.bucket_instance_id && !state.has_uninitialized_symbols {
                 return false;
             } else {
                 // We're replacing this bucket with an updated version
@@ -229,7 +243,7 @@ impl CrossTileSymbolLayerIndex {
                 // bucket can claim them. We have to keep the old index entries
                 // themselves until the end of 'addBucket' so that we can copy them
                 // with 'findMatches'.
-                self.remove_bucket_cross_tile_ids(tile_id.overscaled_z, &previous_index);
+                remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, tile_id.overscaled_z, previous_index);
             }
         }
 
@@ -302,14 +316,6 @@ impl CrossTileSymbolLayerIndex {
         true
     }
 
-    fn remove_bucket_cross_tile_ids(&mut self, zoom: u8, removed_bucket: &TileLayerIndex) {
-        for indexed in removed_bucket.indexed_symbol_instances.values() {
-            for indexed_symbol_instance in indexed {
-                self.used_cross_tile_ids.entry(zoom).or_default().remove(&indexed_symbol_instance.cross_tile_id);
-            }
-        }
-    }
-
     /// `removeStaleBuckets(currentIDs)`.
     pub fn remove_stale_buckets(&mut self, current_ids: &HashSet<u32>) -> bool {
         let mut tiles_changed = false;
@@ -322,7 +328,7 @@ impl CrossTileSymbolLayerIndex {
                 .collect();
             for id in stale {
                 let removed = self.indexes.get_mut(&zoom).expect("zoom").remove(&id).expect("stale index");
-                self.remove_bucket_cross_tile_ids(zoom, &removed);
+                remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, zoom, &removed);
                 tiles_changed = true;
             }
         }
