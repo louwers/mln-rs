@@ -243,8 +243,8 @@ impl Resource {
                 "x" => Some(to_string_i32(x)),
                 "y" => Some(to_string_i32(y)),
                 "quadkey" => Some(get_quad_key(x, y, z)),
-                // The spec defines `{bbox}` as `{bbox-epsg-3857}` under the mercator
-                // and globe projections, the only ones mln-rs has.
+                // The spec defines `{bbox}` as `{bbox-epsg-3857}` under every
+                // projection mln-rs has: mercator, globe and vertical-perspective.
                 "bbox" | "bbox-epsg-3857" => Some(get_tile_bbox(x, y, z)),
                 // C++ indexes with `x % 16` (UB for negative x).
                 "prefix" => Some(
