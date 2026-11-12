@@ -535,9 +535,18 @@ fn attach_rejects_an_empty_target() {
 fn a_demand_made_while_attaching_renders_after_the_attach() {
     let runtime = runtime();
     let map = red_map(&runtime);
+    // The held thread binds the session only after the demand reached it.
+    let open = hold_runtime(&map);
     let (session, attached) = map.attach(offscreen(SIZE), AttachOptions::default()).unwrap();
     demand(&session, DemandMode::Force, 5);
-    attached.wait().unwrap();
+    let (sender, completed) = channel();
+    let drained = session.clone();
+    attached.on_complete(move |result| {
+        let _ = sender.send(result.map(|()| drained.drain_frame_results().unwrap().len()));
+    });
+    drop(open);
+    // The attach completes before the demand renders.
+    assert_eq!(0, completed.recv_timeout(TIMEOUT).unwrap().unwrap());
     let result = take_one(&session);
     assert_eq!((5, FrameDisposition::Rendered), (result.token.unwrap(), result.disposition));
 }

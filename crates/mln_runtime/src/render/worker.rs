@@ -370,7 +370,10 @@ impl Worker {
         if let Some(attach) = attach {
             outbox.resolve(attach, Ok(()));
         }
-        self.pump(outbox);
+        // The demands that came while the session attached wait for the
+        // attach to complete, which the outbox delivers once this task ends,
+        // so they render in a task of their own.
+        post(&self.shared.run_loop, |worker, outbox| worker.pump(outbox));
     }
 
     /// The map couldn't bind the session.
