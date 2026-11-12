@@ -1361,7 +1361,11 @@ mod metal {
             metal.device().newTextureWithDescriptor(&descriptor).unwrap()
         };
         let textures = vec![texture(), texture()];
-        let ring = BorrowedRing::metal(mln_mtl::BorrowedTextures { textures: textures.clone(), size: SIZE });
+        let ring = BorrowedRing::metal(mln_mtl::BorrowedTextures {
+            textures: textures.clone(),
+            size: SIZE,
+            depth_textures: Vec::new(),
+        });
         let runtime = runtime();
         let map = map_of(&runtime, "#ff0000");
         let target = RenderTarget::Borrowed { size: SIZE, ring, device: device.clone() };
