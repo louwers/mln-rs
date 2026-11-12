@@ -677,9 +677,17 @@ mod vulkan {
             let instance = ash::Instance::load(entry.static_fn(), raw.instance);
             (entry, instance)
         };
+        // The library's instance enables VK_EXT_headless_surface where the
+        // loader has it, which its function tells: Wine's loader, for one,
+        // has only the platform's surfaces.
+        // SAFETY: the device's live instance, and a function name.
+        let create = unsafe { (raw.get_instance_proc_addr)(raw.instance, c"vkCreateHeadlessSurfaceEXT".as_ptr()) };
+        if create.is_none() {
+            eprintln!("skipped: the instance has no VK_EXT_headless_surface");
+            return;
+        }
         let headless = ash::ext::headless_surface::Instance::new(&entry, &instance);
-        // SAFETY: the library's instance enables VK_EXT_headless_surface where
-        // the loader has it, which the device's presenting tells.
+        // SAFETY: the instance has the extension, as above.
         let Ok(surface) =
             (unsafe { headless.create_headless_surface(&vk::HeadlessSurfaceCreateInfoEXT::default(), None) })
         else {

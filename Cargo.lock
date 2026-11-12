@@ -2577,6 +2577,7 @@ dependencies = [
  "pollster",
  "serde_json",
  "wgpu",
+ "windows",
  "winit",
 ]
 
@@ -2822,6 +2823,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
+ "windows",
 ]
 
 [[package]]

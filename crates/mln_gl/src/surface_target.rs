@@ -1,6 +1,7 @@
 // The target of a native window: frames presented to an EGL window surface
-// on a Wayland surface, an X11 window or an Android `ANativeWindow`, from an
-// OpenGL ES 3.0 context of the window's display. After the
+// on a Wayland surface, an X11 window, an Android `ANativeWindow` or an
+// OpenHarmony window, from an OpenGL ES 3.0 context of the window's display.
+// After the
 // GLFW app's backend (platform/glfw/glfw_gl_backend.cpp), which gets its
 // context and its buffer swaps from GLFW; here they are EGL's.
 //
@@ -43,6 +44,8 @@ enum WindowHandle {
     /// An `ANativeWindow`, on Android's one display.
     #[cfg(target_os = "android")]
     Android { window: *mut c_void },
+    /// An `OpenHarmony` `OHNativeWindow`, which EGL's default display draws.
+    Ohos { window: *mut c_void },
 }
 
 impl WindowHandle {
@@ -65,7 +68,10 @@ impl WindowHandle {
             (RawDisplayHandle::Android(_), RawWindowHandle::AndroidNdk(window)) => {
                 Ok(WindowHandle::Android { window: window.a_native_window.as_ptr() })
             }
-            _ => Err("The window is neither a Wayland surface, an Xlib window nor an Android window.".to_owned()),
+            (RawDisplayHandle::Ohos(_), RawWindowHandle::OhosNdk(window)) => {
+                Ok(WindowHandle::Ohos { window: window.native_window.as_ptr() })
+            }
+            _ => Err("The window is no Wayland surface, Xlib window, Android window or OpenHarmony window.".to_owned()),
         }
     }
 }
@@ -82,6 +88,35 @@ type WlEglWindowDestroy = unsafe extern "C" fn(*mut c_void);
 #[link(name = "android")]
 unsafe extern "C" {
     fn ANativeWindow_getFormat(window: *mut c_void) -> i32;
+}
+
+#[cfg(target_env = "ohos")]
+#[link(name = "native_window")]
+unsafe extern "C" {
+    fn OH_NativeWindow_NativeWindowHandleOpt(window: *mut c_void, code: c_int, ...) -> i32;
+}
+
+/// Gives an OpenHarmony window's buffers `size`, which EGL draws the window's
+/// surface at. A window's own geometry is its consumer's default size, which
+/// may differ from the frames' or be none, and EGL makes no surface of a
+/// window without one.
+#[cfg(target_env = "ohos")]
+fn set_ohos_buffer_geometry(window: *mut c_void, size: Size) {
+    /// `SET_BUFFER_GEOMETRY`, of `NativeWindowOperation`.
+    const SET_BUFFER_GEOMETRY: c_int = 0;
+    let dimension = |pixels: u32| c_int::try_from(pixels.max(1)).unwrap_or(c_int::MAX);
+    // SAFETY: the live window, and the operation's two `int32_t` arguments.
+    let status = unsafe {
+        OH_NativeWindow_NativeWindowHandleOpt(
+            window,
+            SET_BUFFER_GEOMETRY,
+            dimension(size.width),
+            dimension(size.height),
+        )
+    };
+    if status != 0 {
+        Log::error(Event::GraphicsBackend, format!("Setting the window's buffer geometry failed: {status}"));
+    }
 }
 
 /// The context, and the window surface it is current on.
@@ -101,6 +136,10 @@ struct EglWindow {
     presenting: Cell<bool>,
     /// Made when the context is first made current to present.
     surface: Cell<Option<egl::Surface>>,
+    /// Whether the context is current on `surface`. It isn't when EGL can
+    /// make no surface of the window, or when the window went away under
+    /// the surface, as an `OpenHarmony` window does with its consumer.
+    on_surface: Cell<bool>,
     wl_egl_window: Cell<*mut c_void>,
     /// What `handle` names, which stays open until the context is gone.
     _window: Arc<dyn Window>,
@@ -115,13 +154,15 @@ impl EglWindow {
             WindowHandle::Xlib { display, .. } => (Some(PLATFORM_X11_KHR), display, false),
             #[cfg(target_os = "android")]
             WindowHandle::Android { .. } => (None, egl::DEFAULT_DISPLAY, false),
+            // OpenHarmony's windows are all of EGL's default display.
+            WindowHandle::Ohos { .. } => (None, egl::DEFAULT_DISPLAY, false),
         };
         // SAFETY: the native display is the live one of `window`, or EGL's
         // default one.
         let display = unsafe {
-            platform
-                .and_then(|platform| {
-                    let egl15 = egl.upcast::<egl::EGL1_5>()?;
+            egl.upcast::<egl::EGL1_5>()
+                .zip(platform)
+                .and_then(|(egl15, platform)| {
                     egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok()
                 })
                 .or_else(|| egl.get_display(native_display))
@@ -163,7 +204,7 @@ impl EglWindow {
             // SAFETY: the window is the live one of `window`.
             #[cfg(target_os = "android")]
             WindowHandle::Android { window } => Some(unsafe { ANativeWindow_getFormat(window) }),
-            WindowHandle::Wayland { .. } => None,
+            WindowHandle::Wayland { .. } | WindowHandle::Ohos { .. } => None,
         };
         let of_visual = visual_id.filter(|visual_id| *visual_id > 0).and_then(|visual_id| {
             configs.iter().find(|&&config| attribute(config, egl::NATIVE_VISUAL_ID) == Some(visual_id))
@@ -198,10 +239,12 @@ impl EglWindow {
             size: Cell::new(size),
             // A Wayland compositor shows whole frames whenever they come,
             // and a swap that waits for it would wait forever on a hidden
-            // window.
-            swap_interval: egl::Int::from(cap_frame_rate && !wayland),
+            // window. OpenHarmony's compositor queues them as Android's does,
+            // and the host paces its frames to the display.
+            swap_interval: egl::Int::from(cap_frame_rate && matches!(handle, WindowHandle::Xlib { .. })),
             presenting: Cell::new(false),
             surface: Cell::new(None),
+            on_surface: Cell::new(false),
             wl_egl_window: Cell::new(std::ptr::null_mut()),
             _window: window,
         })
@@ -228,6 +271,11 @@ impl EglWindow {
             WindowHandle::Xlib { window, .. } => window as *mut c_void,
             #[cfg(target_os = "android")]
             WindowHandle::Android { window } => window,
+            WindowHandle::Ohos { window } => {
+                #[cfg(target_env = "ohos")]
+                set_ohos_buffer_geometry(window, size);
+                window
+            }
         };
         // SAFETY: the native window is the live one of `_window`, or the
         // `wl_egl_window` just made of it.
@@ -247,12 +295,14 @@ impl EglWindow {
     /// is the context's to present to, and without a surface while it isn't
     /// (which needs `EGL_KHR_surfaceless_context`).
     fn make_current(&self) -> Result<(), egl::Error> {
+        self.on_surface.set(false);
         if !self.presenting.get() {
             return self.egl.make_current(self.display, None, None, Some(self.context));
         }
         let first = self.surface.get().is_none();
         let surface = self.surface();
         self.egl.make_current(self.display, surface, surface, Some(self.context))?;
+        self.on_surface.set(surface.is_some());
         if first && surface.is_some() {
             let _ = self.egl.swap_interval(self.display, self.swap_interval);
         }
@@ -261,6 +311,12 @@ impl EglWindow {
 
     fn resize(&self, size: Size) {
         self.size.set(size);
+        // The surface takes the new geometry with its next buffer. A surface
+        // not made yet sets it when it is.
+        #[cfg(target_env = "ohos")]
+        if let (WindowHandle::Ohos { window }, Some(_)) = (self.handle, self.surface.get()) {
+            set_ohos_buffer_geometry(window, size);
+        }
         let window = self.wl_egl_window.get();
         if !window.is_null()
             && let Some(library) = &self.wayland_egl
@@ -282,10 +338,16 @@ impl EglWindow {
         }
     }
 
+    /// Makes no context current on this thread.
+    fn clear_current(&self) -> Result<(), egl::Error> {
+        self.on_surface.set(false);
+        self.egl.make_current(self.display, None, None, None)
+    }
+
     /// Stops presenting to the window: destroys the surface.
     fn release_surface(&self) {
         self.presenting.set(false);
-        let _ = self.egl.make_current(self.display, None, None, None);
+        let _ = self.clear_current();
         if let Some(surface) = self.surface.take() {
             let _ = self.egl.destroy_surface(self.display, surface);
         }
@@ -322,8 +384,7 @@ impl PlatformContext for WindowContext {
     }
 
     fn done_current(&self) {
-        let window = &self.0;
-        if let Err(e) = window.egl.make_current(window.display, None, None, None) {
+        if let Err(e) = self.0.clear_current() {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
         }
     }
@@ -375,15 +436,20 @@ pub struct SurfaceTarget {
     size: Rc<Cell<Size>>,
     /// Made with the first frame.
     image: RefCell<Option<Rc<DrawTarget>>>,
+    /// Whether a frame began and hasn't ended. Until it ends, each
+    /// `begin_frame` returns its image, as [`FrameTarget`] asks, even when
+    /// the window went away in between.
+    in_frame: Cell<bool>,
 }
 
 impl SurfaceTarget {
     /// A backend on a context of `window`'s display, and a target that
     /// presents frames of `framebuffer_size` pixels to `window`, a Wayland
-    /// surface, an Xlib window or an Android window, which it keeps. It
-    /// takes the window over with its first frame, not before: until then
-    /// another target may present to it. With `cap_frame_rate`, presenting
-    /// to an X11 or Android window waits for the display.
+    /// surface, an Xlib window, an Android window or an `OpenHarmony`
+    /// window, which it keeps. It takes the window over with its first frame,
+    /// not before: until then another target may present to it. With
+    /// `cap_frame_rate`, presenting to an X11 or Android window waits for the
+    /// display.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL has no
     /// OpenGL ES 3.0 context for the window.
@@ -406,7 +472,7 @@ impl SurfaceTarget {
                 window.egl.get_proc_address(name).map_or(std::ptr::null(), |function| function as *const _)
             })
         };
-        let _ = window.egl.make_current(window.display, None, None, None);
+        let _ = window.clear_current();
         let backend = Rc::new(RendererBackend::from_parts(gl, Box::new(WindowContext(window.clone()))));
         let target = SurfaceTarget {
             backend: backend.clone(),
@@ -414,6 +480,7 @@ impl SurfaceTarget {
             presentation: Presentation::default(),
             size: Rc::new(Cell::new(framebuffer_size)),
             image: RefCell::new(None),
+            in_frame: Cell::new(false),
         };
         Ok((backend, target))
     }
@@ -448,12 +515,17 @@ impl SurfaceTarget {
 }
 
 impl FrameTarget for SurfaceTarget {
-    /// Takes the window over. Its framebuffer is always there to draw into.
+    /// Takes the window over. A frame begins while the context is current
+    /// on the window's surface, and not when EGL makes no surface of the
+    /// window or the window went away.
     fn begin_frame(&self) -> Option<Rc<dyn frame::DrawTarget>> {
         if !self.window.presenting.replace(true) {
             // The context is current without a surface: make it current on
             // the window's.
             self.backend.activate();
+        }
+        if !self.in_frame.get() && !self.window.on_surface.get() {
+            return None;
         }
         let mut image = self.image.borrow_mut();
         if image.is_none() {
@@ -462,11 +534,13 @@ impl FrameTarget for SurfaceTarget {
         }
         let image = image.clone()?;
         image.set_size(self.size.get());
+        self.in_frame.set(true);
         Some(image)
     }
 
     /// Presents the frame, with the overlay over it.
     fn end_frame(&self, _encoder: &dyn CommandEncoder) -> Handoff {
+        self.in_frame.set(false);
         let Some(context) = self.backend.gl_context() else {
             return Handoff::Dropped;
         };

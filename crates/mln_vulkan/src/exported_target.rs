@@ -1,14 +1,16 @@
 // A ring of the target's own images whose memory it exports to the host:
 // as dmabufs with a DRM format modifier, as opaque file descriptors for
-// another API of the same driver, or as Android hardware buffers. Frames
-// draw into the images as into a borrowed ring's, and are queued for the
-// host to acquire.
+// another API of the same driver, as Android hardware buffers, or on Windows
+// as D3D11 textures. Frames draw into the images as into a borrowed ring's,
+// and are queued for the host to acquire.
 //
 // Each image has memory of its own (a dedicated allocation), which the
 // exported file descriptor names. A hardware buffer goes the other way: the
 // target allocates it, with the usage bits that the host's reads need, which
 // an export of Vulkan memory can't add, and imports it as the image's
-// memory.
+// memory. So does a D3D11 texture's image, since Vulkan exports no memory
+// that D3D11 opens as a texture: a D3D11 device on the GPU's adapter makes
+// the texture and its NT handle.
 //
 // A resize makes a new generation of images; the frames that the host holds
 // keep the old generation's images until they are given back.
@@ -55,6 +57,11 @@ const HARDWARE_BUFFER_USAGE: vk::ImageUsageFlags = DMA_BUF_USAGE;
 /// `AHARDWAREBUFFER_FORMAT_R8G8B8A8_UNORM` is.
 #[cfg(target_os = "android")]
 const HARDWARE_BUFFER_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
+/// What a D3D11 texture's image renders and samples, as the texture binds as
+/// a render target and a shader resource.
+const DXGI_USAGE: vk::ImageUsageFlags = DMA_BUF_USAGE;
+/// The format of a D3D11 texture's image, `DXGI_FORMAT_B8G8R8A8_UNORM`'s.
+const DXGI_FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;
 
 fn dma_buf_vk_format(fourcc: u32) -> vk::Format {
     if fourcc == DRM_FORMAT_ARGB8888 { vk::Format::B8G8R8A8_UNORM } else { vk::Format::R8G8B8A8_UNORM }
@@ -77,6 +84,8 @@ enum Layout {
     AndroidHardwareBuffer {
         usage: u64,
     },
+    /// A D3D11 texture, whose memory the image imports.
+    Dxgi,
 }
 
 impl Layout {
@@ -86,6 +95,7 @@ impl Layout {
             Layout::OpaqueFd => OPAQUE_FD_FORMAT,
             #[cfg(target_os = "android")]
             Layout::AndroidHardwareBuffer { .. } => HARDWARE_BUFFER_FORMAT,
+            Layout::Dxgi => DXGI_FORMAT,
         }
     }
 
@@ -95,6 +105,7 @@ impl Layout {
             Layout::OpaqueFd => vk::ExternalMemoryHandleTypeFlags::OPAQUE_FD,
             #[cfg(target_os = "android")]
             Layout::AndroidHardwareBuffer { .. } => vk::ExternalMemoryHandleTypeFlags::ANDROID_HARDWARE_BUFFER_ANDROID,
+            Layout::Dxgi => vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE,
         }
     }
 
@@ -104,6 +115,7 @@ impl Layout {
             Layout::OpaqueFd => OPAQUE_FD_USAGE,
             #[cfg(target_os = "android")]
             Layout::AndroidHardwareBuffer { .. } => HARDWARE_BUFFER_USAGE,
+            Layout::Dxgi => DXGI_USAGE,
         }
     }
 }
@@ -148,9 +160,8 @@ fn exports(
     shares(device, format, usage, handle_type, modifier, vk::ExternalMemoryFeatureFlags::EXPORTABLE)
 }
 
-/// Whether the device has the external memory `feature` for an image of
-/// `format` and `usage` in memory of `handle_type`, with `modifier` for a
-/// dmabuf.
+/// Whether the device shares an image as [`exports`] says, in the way that
+/// `feature` names: exporting its memory, or importing it.
 fn shares(
     device: &Device,
     format: vk::Format,
@@ -254,6 +265,15 @@ pub(crate) fn probe(device: &Device) -> ExportKinds {
             Err(error) => Log::info(Event::Render, format!("The Vulkan device exports no hardware buffers: {error}")),
         }
     }
+    let d3d11 = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
+    if device.features().external_memory_win32
+        && shares(device, DXGI_FORMAT, DXGI_USAGE, d3d11, None, vk::ExternalMemoryFeatureFlags::IMPORTABLE)
+    {
+        match ExportedMemory::new(device, extent, &Layout::Dxgi) {
+            Ok(_) => kinds = kinds.with(ExportKind::DxgiSharedHandle),
+            Err(error) => Log::info(Event::Render, format!("The Vulkan device shares no D3D11 textures: {error}")),
+        }
+    }
     kinds
 }
 
@@ -284,6 +304,10 @@ struct ExportedMemory {
     /// the memory, which `drop` frees.
     #[cfg(target_os = "android")]
     _buffer: Option<crate::android_hardware_buffer::HardwareBuffer>,
+    /// The D3D11 texture whose memory the image imported, and whose NT
+    /// handle `export` names. It goes after the image and its memory.
+    #[cfg(windows)]
+    _texture: Option<crate::win32::SharedTexture>,
     export: ExportedImage,
 }
 
@@ -302,6 +326,8 @@ impl ExportedMemory {
             _fd: None,
             #[cfg(target_os = "android")]
             _buffer: None,
+            #[cfg(windows)]
+            _texture: None,
             export: ExportedImage::OpaqueFd { fd: -1, allocation_size: 0, dedicated: true, format: 0 },
         };
         let format = layout.format();
@@ -373,28 +399,33 @@ impl ExportedMemory {
 
         // SAFETY: the image is the device's.
         let requirements = unsafe { vk_device.get_image_memory_requirements(this.image) };
-        // SAFETY: a plain query of the GPU.
-        let types =
-            unsafe { device.shared.instance().get_physical_device_memory_properties(device.shared.physical_device()) };
-        let linear = matches!(layout, Layout::DmaBuf { .. }) && modifier == DRM_FORMAT_MOD_LINEAR;
-        let memory_type = memory_type(requirements.memory_type_bits, &types, linear)
-            .ok_or_else(|| Error::native("No memory type takes the exported image"))?;
-        // The image's memory is its own, so that the descriptor names it
-        // alone.
-        let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(this.image);
-        let mut export = vk::ExportMemoryAllocateInfo::default().handle_types(layout.handle_type());
-        let allocate = vk::MemoryAllocateInfo::default()
-            .allocation_size(requirements.size)
-            .memory_type_index(memory_type)
-            .push_next(&mut export)
-            .push_next(&mut dedicated);
-        // SAFETY: the allocate info is valid for the device.
-        this.memory =
-            unsafe { vk_device.allocate_memory(&allocate, None) }.map_err(native("Allocating exported memory"))?;
-        // SAFETY: the memory was made for the image, which has none.
-        unsafe { vk_device.bind_image_memory(this.image, this.memory, 0) }
-            .map_err(native("Binding exported memory"))?;
-        this.export_fd(device, layout, requirements.size, modifier, &planes)?;
+        if let Layout::Dxgi = layout {
+            this.import_dxgi(device, extent, requirements)?;
+        } else {
+            // SAFETY: a plain query of the GPU.
+            let types = unsafe {
+                device.shared.instance().get_physical_device_memory_properties(device.shared.physical_device())
+            };
+            let linear = matches!(layout, Layout::DmaBuf { .. }) && modifier == DRM_FORMAT_MOD_LINEAR;
+            let memory_type = memory_type(requirements.memory_type_bits, &types, linear)
+                .ok_or_else(|| Error::native("No memory type takes the exported image"))?;
+            // The image's memory is its own, so that the descriptor names it
+            // alone.
+            let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(this.image);
+            let mut export = vk::ExportMemoryAllocateInfo::default().handle_types(layout.handle_type());
+            let allocate = vk::MemoryAllocateInfo::default()
+                .allocation_size(requirements.size)
+                .memory_type_index(memory_type)
+                .push_next(&mut export)
+                .push_next(&mut dedicated);
+            // SAFETY: the allocate info is valid for the device.
+            this.memory =
+                unsafe { vk_device.allocate_memory(&allocate, None) }.map_err(native("Allocating exported memory"))?;
+            // SAFETY: the memory was made for the image, which has none.
+            unsafe { vk_device.bind_image_memory(this.image, this.memory, 0) }
+                .map_err(native("Binding exported memory"))?;
+            this.export_fd(device, layout, requirements.size, modifier, &planes)?;
+        }
         this.create_view(format)?;
         Ok(this)
     }
@@ -501,8 +532,63 @@ impl ExportedMemory {
     }
 
     #[cfg(not(unix))]
+    #[expect(clippy::unused_self, reason = "the stand-in for a method of another platform")]
     fn export_fd(&mut self, _: &Device, _: &Layout, _: u64, _: u64, _: &[(u32, u32)]) -> Result<(), Error> {
         Err(Error::unsupported("this platform shares no memory as file descriptors"))
+    }
+
+    /// Binds the image to the memory of a D3D11 texture of `extent` that the
+    /// device's D3D11 device makes, which the image keeps, and names the
+    /// texture's NT handle in `export`. `requirements` are the image's.
+    #[cfg(windows)]
+    fn import_dxgi(
+        &mut self,
+        device: &Device,
+        extent: vk::Extent2D,
+        requirements: vk::MemoryRequirements,
+    ) -> Result<(), Error> {
+        let handle_type = vk::ExternalMemoryHandleTypeFlags::D3D11_TEXTURE;
+        let loader = device
+            .shared
+            .memory_win32()
+            .ok_or_else(|| Error::unsupported("the Vulkan device imports no D3D11 textures"))?;
+        let texture = device.shared.dxgi()?.texture(extent.width, extent.height)?;
+        let mut properties = vk::MemoryWin32HandlePropertiesKHR::default();
+        // SAFETY: the texture's live NT handle, of a handle type that isn't
+        // opaque.
+        unsafe { loader.get_memory_win32_handle_properties(handle_type, texture.handle(), &mut properties) }
+            .map_err(|e| Error::native(format!("Reading the D3D11 texture's memory types failed: {e}")))?;
+        // SAFETY: a plain query of the GPU.
+        let types =
+            unsafe { device.shared.instance().get_physical_device_memory_properties(device.shared.physical_device()) };
+        let memory_type = memory_type(requirements.memory_type_bits & properties.memory_type_bits, &types, false)
+            .ok_or_else(|| Error::native("No memory type imports the D3D11 texture"))?;
+        // Vulkan imports a D3D11 texture only into memory of the image's own.
+        let mut dedicated = vk::MemoryDedicatedAllocateInfo::default().image(self.image);
+        let mut import =
+            vk::ImportMemoryWin32HandleInfoKHR::default().handle_type(handle_type).handle(texture.handle());
+        let allocate = vk::MemoryAllocateInfo::default()
+            .allocation_size(requirements.size)
+            .memory_type_index(memory_type)
+            .push_next(&mut import)
+            .push_next(&mut dedicated);
+        // SAFETY: the allocate info is valid for the device, and an import of
+        // an NT handle leaves the handle to the texture.
+        self.memory = unsafe { self.device.allocate_memory(&allocate, None) }
+            .map_err(|e| Error::native(format!("Importing the D3D11 texture's memory failed: {e}")))?;
+        // SAFETY: the memory was imported for the image, which has none.
+        unsafe { self.device.bind_image_memory(self.image, self.memory, 0) }
+            .map_err(|e| Error::native(format!("Binding the D3D11 texture's memory failed: {e}")))?;
+        self.export =
+            ExportedImage::DxgiSharedTexture { handle: texture.handle() as u64, format: crate::win32::FORMAT };
+        self._texture = Some(texture);
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    #[expect(clippy::unused_self, reason = "the stand-in for a method of another platform")]
+    fn import_dxgi(&mut self, _: &Device, _: vk::Extent2D, _: vk::MemoryRequirements) -> Result<(), Error> {
+        Err(Error::unsupported("this platform has no D3D11 textures"))
     }
 }
 
@@ -567,11 +653,12 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
 
 /// The kinds of sync with which the host waits for an exported image's
 /// frame (the producer's), and the target for the host's reads (the
-/// consumer's): a finished frame, or a sync file, which crosses APIs.
+/// consumer's): a finished frame, or the sync that crosses APIs on the
+/// platform: a sync file, or on Windows, a D3D12 fence.
 #[must_use]
 pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
     let (producer, consumer) = device.sync_kinds();
-    let crossing = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::SyncFd]);
+    let crossing = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::SyncFd, SyncKind::D3d12Fence]);
     let keep = |kinds: SyncKinds| {
         crossing.iter().filter(|kind| kinds.contains(*kind)).fold(SyncKinds::NONE, mln_gfx::SyncKinds::with)
     };
@@ -666,6 +753,7 @@ impl ExportedTarget {
             ExportKind::AndroidHardwareBuffer => {
                 Layout::AndroidHardwareBuffer { usage: ring.android_hardware_buffer_usage }
             }
+            ExportKind::DxgiSharedHandle => Layout::Dxgi,
             _ => return Err(Error::unsupported(format!("the Vulkan device exports no {kind:?}"))),
         };
         let current = Generation::new(&backend, &layout, ring.depth, size, producer)?;

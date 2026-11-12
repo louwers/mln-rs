@@ -470,6 +470,8 @@ pub enum SurfaceType {
     Wayland,
     /// An Android `ANativeWindow`.
     AndroidNdk,
+    /// An `OpenHarmony` `OHNativeWindow`.
+    OhosNdk,
 }
 
 impl SurfaceType {
@@ -481,9 +483,10 @@ impl SurfaceType {
             SurfaceType::MetalLayer => false,
             SurfaceType::Win32 => cfg!(windows),
             SurfaceType::Xlib | SurfaceType::Xcb | SurfaceType::Wayland => {
-                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android")))
+                cfg!(all(unix, not(target_vendor = "apple"), not(target_os = "android"), not(target_env = "ohos")))
             }
             SurfaceType::AndroidNdk => cfg!(target_os = "android"),
+            SurfaceType::OhosNdk => cfg!(target_env = "ohos"),
         };
         match backend {
             BackendType::Metal => {
@@ -495,11 +498,33 @@ impl SurfaceType {
             BackendType::OpenGL => {
                 cfg!(all(feature = "gl", unix, not(target_vendor = "apple")))
                     && windowing
-                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk)
+                    && matches!(
+                        self,
+                        SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk | SurfaceType::OhosNdk
+                    )
             }
-            BackendType::WebGPU => cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing,
+            // wgpu's Vulkan backend makes no OpenHarmony surface, and this
+            // build has no wgpu GLES backend.
+            BackendType::WebGPU => {
+                cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing && self != SurfaceType::OhosNdk
+            }
             #[allow(unreachable_patterns)]
             _ => false,
+        }
+    }
+
+    /// The Vulkan instance extension that makes the surfaces of this type.
+    #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+    fn vulkan_extension(self) -> Option<&'static std::ffi::CStr> {
+        use mln_vulkan::ash::khr;
+        match self {
+            SurfaceType::MetalLayer => None,
+            SurfaceType::Win32 => Some(khr::win32_surface::NAME),
+            SurfaceType::Xlib => Some(khr::xlib_surface::NAME),
+            SurfaceType::Xcb => Some(khr::xcb_surface::NAME),
+            SurfaceType::Wayland => Some(khr::wayland_surface::NAME),
+            SurfaceType::AndroidNdk => Some(khr::android_surface::NAME),
+            SurfaceType::OhosNdk => Some(mln_vulkan::device::OHOS_SURFACE),
         }
     }
 
@@ -762,10 +787,19 @@ impl Device {
     }
 
     /// Whether sessions on the device present to the surfaces of
-    /// `surface`'s type.
+    /// `surface`'s type: a Vulkan device's instance needs the type's surface
+    /// extension, which the loader may lack.
     #[must_use]
     pub fn presents_to(&self, surface: SurfaceType) -> bool {
-        surface.presents_with(self.backend())
+        if !surface.presents_with(self.backend()) {
+            return false;
+        }
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => surface.vulkan_extension().is_some_and(|name| device.presents_through(name)),
+            #[allow(unreachable_patterns)]
+            _ => true,
+        }
     }
 
     /// The backends [`new`](Self::new) tries, in order.
