@@ -116,6 +116,9 @@ pub type DeletionTask = Box<dyn FnOnce(&Context)>;
 struct FrameResources {
     command_buffer: vk::CommandBuffer,
     flight_frame_fence: vk::Fence,
+    /// The frame recorded here (`Context::frame_serial`) until it has been
+    /// waited for; 0 without one.
+    serial: u64,
     deletion_queue: Vec<DeletionTask>,
 }
 
@@ -332,6 +335,7 @@ impl Context {
             self.frame_resources.borrow_mut().push(FrameResources {
                 command_buffer,
                 flight_frame_fence,
+                serial: 0,
                 deletion_queue: Vec::new(),
             });
             if flight_frame_fence == vk::Fence::null() {
@@ -575,16 +579,26 @@ impl Context {
         self.surface_update_requested.set(false);
     }
 
-    /// `waitFrame()`: waits for the frame of the current frame resources.
+    /// `waitFrame()`: waits for the frame of the current frame resources,
+    /// which is done afterwards (`frame_is_done`).
     pub fn wait_frame(&self) -> bool {
-        let fence = self
-            .frame_resources
-            .borrow()
-            .get(usize::from(self.frame_resource_index.get()))
-            .map(|frame| frame.flight_frame_fence);
+        let index = usize::from(self.frame_resource_index.get());
+        let fence = self.frame_resources.borrow().get(index).map(|frame| frame.flight_frame_fence);
         // SAFETY: the fence is the device's.
-        fence
-            .is_some_and(|fence| unsafe { self.backend.get_device().wait_for_fences(&[fence], true, u64::MAX) }.is_ok())
+        let waited = fence.is_some_and(|fence| {
+            unsafe { self.backend.get_device().wait_for_fences(&[fence], true, u64::MAX) }.is_ok()
+        });
+        if waited && let Some(frame) = self.frame_resources.borrow_mut().get_mut(index) {
+            frame.serial = 0;
+        }
+        waited
+    }
+
+    /// Whether the GPU has finished the frame `serial` (`frame_serial`):
+    /// nothing reads what the frame bound any more. False for the frame
+    /// being recorded, and for a submitted frame until it is waited for.
+    pub(crate) fn frame_is_done(&self, serial: u64) -> bool {
+        serial == 0 || self.frame_resources.borrow().iter().all(|frame| frame.serial != serial)
     }
 
     /// `submitFrame()`: ends the frame's command buffer, submits it and,
@@ -1374,6 +1388,9 @@ impl GfxContext for Context {
             }
         }
         self.frame_serial.set(self.frame_serial.get() + 1);
+        if let Some(frame) = self.frame_resources.borrow_mut().get_mut(usize::from(self.frame_resource_index.get())) {
+            frame.serial = self.frame_serial.get();
+        }
         self.frame_recording.set(true);
         self.render_pass_active.set(false);
     }

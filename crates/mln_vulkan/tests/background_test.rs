@@ -243,12 +243,52 @@ fn left_half_matrix() -> [f32; 16] {
     ]
 }
 
+/// `left_half_matrix`, for the right half: clip x in [0, 1].
+fn right_half_matrix() -> [f32; 16] {
+    let mut matrix = left_half_matrix();
+    matrix[12] = 0.0;
+    matrix
+}
+
+/// Writes `bg` and `matrix` into the uniform buffers `tweak` gave the layer
+/// group.
+fn update_uniforms(context: &dyn Context, layer_group: &LayerGroupBasePtr, bg: &Background, matrix: [f32; 16]) {
+    let mut group = layer_group.borrow_mut();
+    let props_ubo = BackgroundPropsUBO {
+        color: [bg.color.r, bg.color.g, bg.color.b, bg.color.a],
+        opacity: bg.opacity,
+        pad1: 0.0,
+        pad2: 0.0,
+        pad3: 0.0,
+    };
+    let buffers = group.mutable_uniform_buffers();
+    buffers.create_or_update_pod(ID_BACKGROUND_PROPS_UBO, &props_ubo, context);
+    let drawable = BackgroundDrawableUnionUBO::from_drawable(&BackgroundDrawableUBO { matrix });
+    let projection = ProjectionUBO { matrix, fallback_matrix: matrix, ..ProjectionUBO::default() };
+    buffers.get(ID_BACKGROUND_DRAWABLE_UBO).expect("the drawable buffer").update(bytemuck::bytes_of(&drawable));
+    buffers.get(ID_PROJECTION_UBO).expect("the projection buffer").update(bytemuck::bytes_of(&projection));
+}
+
 /// One frame as renderer_impl.cpp runs it; returns the readback.
 fn render_frame(
     backend: &Headless,
     registry: &ShaderRegistry,
     passes: RenderPass,
     bg: &Background,
+    clear: Color,
+) -> mln_util::image::PremultipliedImage {
+    render_frame_changing_between_passes(backend, registry, passes, bg, None, clear)
+}
+
+/// `render_frame`, with `between` written into the layer group's uniform
+/// buffers, for the right half, after the opaque pass has drawn and before
+/// the translucent pass draws.
+fn render_frame_changing_between_passes(
+    backend: &Headless,
+    registry: &ShaderRegistry,
+    passes: RenderPass,
+    bg: &Background,
+    between: Option<&Background>,
     clear: Color,
 ) -> mln_util::image::PremultipliedImage {
     let context = backend.get_context();
@@ -288,6 +328,11 @@ fn render_frame(
 
     // drawableOpaquePass + drawableTranslucentPass
     for pass in [RenderPass::Opaque, RenderPass::Translucent] {
+        if pass == RenderPass::Translucent
+            && let Some(between) = between
+        {
+            update_uniforms(context, &layer_group, between, right_half_matrix());
+        }
         parameters.pass = pass;
         parameters.current_layer = 0;
         layer_group.borrow_mut().render(&mut parameters);
@@ -361,6 +406,28 @@ fn background_shader_opaque_and_translucent() {
     let a = context.get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator).unwrap();
     let b = context.get_generic_shader(&registry, "BackgroundShader", ProjectionVariant::Mercator).unwrap();
     assert!(std::rc::Rc::ptr_eq(&a, &b));
+}
+
+#[test]
+fn an_update_between_draws_leaves_the_earlier_draw() {
+    let backend = headless_backend(Size { width: 64, height: 32 });
+    let _scope = BackendScope::new(&*backend.backend, ScopeType::Explicit);
+    let registry = ShaderRegistry::new();
+    backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
+
+    // The left half is drawn in green, and then the right half in red with
+    // the uniform buffers the left half's draw reads.
+    let green = Color::new(0.0, 1.0, 0.0, 1.0);
+    let red = Color::new(1.0, 0.0, 0.0, 1.0);
+    let img = render_frame_changing_between_passes(
+        &backend,
+        &registry,
+        RenderPass::Opaque | RenderPass::Translucent,
+        &Background { color: green, opacity: 1.0 },
+        Some(&Background { color: red, opacity: 1.0 }),
+        Color::new(0.0, 0.0, 1.0, 1.0),
+    );
+    check_halves(&img, [0, 255, 0, 255], [255, 0, 0, 255]);
 }
 
 #[test]
