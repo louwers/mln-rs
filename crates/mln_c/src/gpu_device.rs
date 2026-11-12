@@ -6,11 +6,11 @@ use mln_util::ErrorKind;
 use crate::abi::{self, Fields};
 use crate::buffer;
 use crate::error::Error;
+use crate::generated::types;
 use crate::generated::types::{
     MLN_GPU_DEVICE_OPTION_ADAPTER_INDEX, MLN_GPU_DEVICE_OPTION_ADAPTER_LUID, MLN_GPU_DEVICE_OPTION_ADAPTER_UUID,
     MLN_GPU_DEVICE_OPTION_BACKEND, MLN_GPU_DEVICE_OPTION_OPEN_GL_CLIENT_API,
     MLN_GPU_DEVICE_OPTION_OPEN_GL_SINGLE_CONTEXT, MLN_OPEN_GL_CLIENT_API_GL, MLN_OPEN_GL_CLIENT_API_GLES,
-    MLN_RENDER_BACKEND_FLAG_OPEN_GL, MLN_RENDER_BACKEND_FLAG_VULKAN, MLN_RENDER_BACKEND_FLAG_WEB_GPU,
     MLN_RENDER_BACKEND_OPEN_GL, MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_BACKEND_WEB_GPU,
     MLN_RENDER_TARGET_KIND_FLAG_METAL_LAYER, MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN,
     MLN_RENDER_TARGET_KIND_FLAG_WAYLAND_SURFACE, MLN_RENDER_TARGET_KIND_FLAG_WIN32_WINDOW,
@@ -28,18 +28,14 @@ static DEVICES: HandleTable<Device> = HandleTable::new(HandleKind::GpuDevice);
 /// `mln_render_backend` and its flag.
 pub(crate) const BACKENDS: &[(BackendType, mln_render_backend, mln_render_backend_flags)] = &[
     #[cfg(target_vendor = "apple")]
-    (
-        BackendType::Metal,
-        crate::generated::types::MLN_RENDER_BACKEND_METAL,
-        crate::generated::types::MLN_RENDER_BACKEND_FLAG_METAL,
-    ),
+    (BackendType::Metal, types::MLN_RENDER_BACKEND_METAL, types::MLN_RENDER_BACKEND_FLAG_METAL),
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-    (BackendType::Vulkan, MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_BACKEND_FLAG_VULKAN),
+    (BackendType::Vulkan, MLN_RENDER_BACKEND_VULKAN, types::MLN_RENDER_BACKEND_FLAG_VULKAN),
     // OpenGL ES comes through EGL.
     #[cfg(all(unix, not(target_vendor = "apple")))]
-    (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, MLN_RENDER_BACKEND_FLAG_OPEN_GL),
+    (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, types::MLN_RENDER_BACKEND_FLAG_OPEN_GL),
     #[cfg(not(target_family = "wasm"))]
-    (BackendType::WebGPU, MLN_RENDER_BACKEND_WEB_GPU, MLN_RENDER_BACKEND_FLAG_WEB_GPU),
+    (BackendType::WebGPU, MLN_RENDER_BACKEND_WEB_GPU, types::MLN_RENDER_BACKEND_FLAG_WEB_GPU),
 ];
 
 /// The window and layer kinds that this library takes, each with its
