@@ -709,7 +709,11 @@ pub unsafe extern "C" fn mln_map_attach(
                 if !presents {
                     return Err(unsupported(format!("the device presents to no {kind:?} surface")));
                 }
-                options.require_core_worker("a window session renders on a core worker")?;
+                // A layer is the host's to present to from its own thread,
+                // and a window the library's.
+                if kind != SurfaceType::MetalLayer {
+                    options.require_core_worker("a window session renders on a core worker")?;
+                }
                 RenderTarget::Surface { size, surface, device }
             }
             Target::HostSurface { size, surface } => {
@@ -718,14 +722,12 @@ pub unsafe extern "C" fn mln_map_attach(
                 }) else {
                     return Err(unsupported("only a device of the surface's instance or share group presents to it"));
                 };
-                options.require_core_worker("this library drives a surface session on a core worker")?;
                 RenderTarget::Surface { size, surface, device: Some(device) }
             }
             Target::Borrowed { size, ring } => {
                 let Some(device) = device else {
                     return Err(unsupported("a borrowed ring renders on the device of its textures"));
                 };
-                options.require_core_worker("this library drives a borrowed ring on a core worker")?;
                 RenderTarget::Borrowed { size, ring, device }
             }
             Target::Exported { size, ring } => {

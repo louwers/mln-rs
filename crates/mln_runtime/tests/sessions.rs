@@ -600,6 +600,26 @@ fn abandon_ends_pending_work_and_frees_the_map_at_once() {
 }
 
 #[test]
+fn an_abandon_from_a_completion_that_the_worker_delivers_is_busy() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    demand(&session, DemandMode::Force, 1);
+    take_one(&session);
+    let (sender, receiver) = channel();
+    let abandoned = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
+    });
+    let (result, abandon) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(Err(ErrorKind::Busy), abandon);
+    assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
+    // Off the worker's thread, the abandon waits for its call.
+    assert_eq!(0, session.abandon().unwrap());
+}
+
+#[test]
 fn an_abandon_that_keeps_graphics_counts_the_renderer_and_its_backend() {
     let runtime = runtime();
     let map = red_map(&runtime);
@@ -676,6 +696,30 @@ fn maintenance_work_runs_in_order_with_frames() {
     assert_eq!(1, result.len());
     assert_eq!((2, FrameDisposition::Rendered), (result[0].token.unwrap(), result[0].disposition));
     assert_eq!(ErrorKind::Unsupported, session.release_target().unwrap_err().kind);
+}
+
+#[test]
+fn maintenance_work_waits_behind_a_demand_for_map_commands() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+    let open = hold_runtime(&map);
+    let zoomed = zoom(&map, 2.0);
+    demand(&session, DemandMode::Force, 1);
+    // The work completes once the demand rendered, which waits for the zoom
+    // that the held runtime hasn't applied yet.
+    let (sender, receiver) = channel();
+    let drained = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, drained.drain_frame_results().unwrap()));
+    });
+    drop(open);
+    zoomed.wait().unwrap();
+    let (result, results) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(1, results.len(), "{results:?}");
+    assert_eq!((1, FrameDisposition::Rendered), (results[0].token.unwrap(), results[0].disposition));
 }
 
 #[test]

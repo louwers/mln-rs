@@ -2,11 +2,15 @@
 //! results, and the work it runs on its driver.
 
 use core::ffi::c_char;
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 
 use ::mln_runtime::{
-    AttachOptions, DemandMode, Driver, FrameDemand, FrameDisposition, FrameResult, LogicalExtent, RenderSession,
-    RenderSessionState, RenderTarget,
+    AttachOptions, DemandMode, Driver, DriverWork, FrameDemand, FrameDisposition, FrameResult, LogicalExtent,
+    RenderSession, RenderSessionState, RenderTarget,
 };
 use mln_util::size::Size;
 
@@ -32,7 +36,7 @@ use crate::generated::types::{
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::map::{self, MapObject};
-use crate::{buffer, events, projection, render_target};
+use crate::{buffer, events, lock, projection, render_target};
 
 abi::versioned!(
     mln_render_session_attach_options,
@@ -53,7 +57,8 @@ pub(crate) struct SessionObject {
     pub(crate) initial_scale_factor: f64,
     has_redraw_wake: bool,
     /// Held so that its user data lives as long as the session's handle: a
-    /// core worker never runs it.
+    /// core worker never runs it, and a caller-driven session lets go of it
+    /// once its driver work finishes.
     _driver_work_wake: Arc<Wake>,
 }
 
@@ -604,8 +609,67 @@ pub unsafe extern "C" fn mln_render_session_dump_debug_logs(
     })
 }
 
-/// `mln_render_session_service_driver_work()`: every session that this
-/// library attaches renders on a core worker, which needs no service.
+// MARK: - Driver work
+
+thread_local! {
+    /// The driver work of the caller-driven sessions that this thread
+    /// services, from its first service of each until the work finishes.
+    static DRIVERS: Drivers = Drivers::default();
+}
+
+/// A thread's driver work, which stays on the thread: the sessions'
+/// renderers and graphics objects live there. A thread that ends with work
+/// it didn't finish leaks it, with the graphics objects, since freeing them
+/// needs the thread's other locals, which may be gone by then.
+#[derive(Default)]
+struct Drivers(RefCell<HashMap<mln_render_session, Rc<DriverWork>>>);
+
+impl Drop for Drivers {
+    fn drop(&mut self) {
+        for (_, work) in self.0.get_mut().drain() {
+            std::mem::forget(work);
+        }
+    }
+}
+
+/// The thread that services each caller-driven session, from its first
+/// service until its driver work finishes, which outlasts a release of the
+/// handle.
+static SERVICING: Mutex<BTreeMap<mln_render_session, ThreadId>> = Mutex::new(BTreeMap::new());
+
+/// Fails unless `session`'s driver work is this thread's, or no thread's yet.
+fn check_servicing_thread(
+    servicing: &BTreeMap<mln_render_session, ThreadId>,
+    session: mln_render_session,
+) -> Result<(), Error> {
+    match servicing.get(&session) {
+        Some(thread) if *thread != std::thread::current().id() => {
+            Err(Error::wrong_thread("render session driver work belongs to the thread that first serviced it"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Takes `session`'s driver work for this thread, at its first service.
+fn take_driver_work(session: mln_render_session) -> Result<Rc<DriverWork>, Error> {
+    check_servicing_thread(&lock(&SERVICING), session)?;
+    let object = resolve(session)?;
+    if object.session.capabilities()?.driver == Driver::CoreWorker {
+        return Err(Error::invalid_state("render session is driven by its own core worker"));
+    }
+    let mut servicing = lock(&SERVICING);
+    // Another thread may have taken it meanwhile.
+    check_servicing_thread(&servicing, session)?;
+    let work = Rc::new(object.session.take_driver_work()?);
+    servicing.insert(session, std::thread::current().id());
+    drop(servicing);
+    DRIVERS.with(|drivers| drivers.0.borrow_mut().insert(session, Rc::clone(&work)));
+    Ok(work)
+}
+
+/// `mln_render_session_service_driver_work()`: the first service on a
+/// thread takes the session's driver work, and the thread keeps it until it
+/// finishes, through a release of the handle.
 ///
 /// # Safety
 ///
@@ -616,8 +680,18 @@ pub unsafe extern "C" fn mln_render_session_service_driver_work(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        resolve(session)?;
-        Err(Error::invalid_state("render session is driven by its own core worker"))
+        let work = match DRIVERS.with(|drivers| drivers.0.borrow().get(&session).cloned()) {
+            Some(work) => work,
+            None => take_driver_work(session)?,
+        };
+        // The service may run the host's callbacks, which may service
+        // sessions of this thread: nothing here is borrowed meanwhile.
+        let serviced = work.service();
+        if work.is_finished() {
+            DRIVERS.with(|drivers| drivers.0.borrow_mut().remove(&session));
+            lock(&SERVICING).remove(&session);
+        }
+        Ok(serviced?)
     })
 }
 
@@ -646,8 +720,8 @@ pub unsafe extern "C" fn mln_render_session_detach(
     })
 }
 
-/// `mln_render_session_abandon()`: this library's sessions keep no graphics
-/// objects past an abandon.
+/// `mln_render_session_abandon()`: a session keeps its graphics objects
+/// only when it is driven by the caller's thread and abandoned on another.
 ///
 /// # Safety
 ///
@@ -662,8 +736,9 @@ pub unsafe extern "C" fn mln_render_session_abandon(
         // Checked before the abandon, which can't be undone.
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &abandon_result(0)) }?;
-        resolve(session)?.session.abandon()?;
-        Ok(())
+        let kept = resolve(session)?.session.abandon()?;
+        // SAFETY: the caller's contract, checked above.
+        unsafe { abi::write_sized(out_result, &abandon_result(kept)) }
     })
 }
 
@@ -1021,5 +1096,178 @@ pub(crate) mod tests {
         let fields = (converted.disposition, converted.token, converted.map_update_generation);
         assert_eq!(fields, (MLN_RENDER_RESULT_SUPERSEDED, 3, 4));
         assert_eq!(converted.view.size, 0);
+    }
+}
+
+#[cfg(test)]
+mod driver_tests {
+    use core::ffi::c_void;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    use super::tests::{attach_options, demand, offscreen_target, sized, snapshot, wait_for_result};
+    use super::*;
+    use crate::diagnostic::tests::{diagnostic, message};
+    use crate::generated::types::{
+        MLN_STATUS_INVALID_STATE, MLN_STATUS_UNSUPPORTED, MLN_STATUS_WRONG_THREAD, mln_map, mln_wake,
+    };
+    use crate::map::tests::{create_map, options, release_map};
+    use crate::render_target::mln_map_attach;
+    use crate::runtime::tests::{Waiter, create, release};
+
+    const NO_DIAGNOSTIC: *mut mln_diagnostic = core::ptr::null_mut();
+
+    unsafe extern "C" fn count(user_data: *mut c_void) {
+        // SAFETY: the test's counter, which outlives the session.
+        unsafe { &*user_data.cast::<AtomicUsize>() }.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn service(session: mln_render_session) -> mln_status {
+        // SAFETY: a null diagnostic.
+        unsafe { mln_render_session_service_driver_work(session, NO_DIAGNOSTIC) }
+    }
+
+    /// Services `session` until `done` holds.
+    fn service_until(session: mln_render_session, mut done: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !done() {
+            assert_eq!(service(session), MLN_STATUS_OK);
+            assert!(Instant::now() < deadline, "the session never got there");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// The status and message of a service of `session` on another thread.
+    fn service_elsewhere(session: mln_render_session) -> (mln_status, String) {
+        std::thread::spawn(move || {
+            let mut out = diagnostic();
+            // SAFETY: a local diagnostic.
+            let status = unsafe { mln_render_session_service_driver_work(session, &raw mut *out) };
+            (status, message(&out).to_owned())
+        })
+        .join()
+        .unwrap()
+    }
+
+    /// A caller-driven offscreen session of `map`, whose driver-work wake
+    /// counts into `wakes`. The C API drives an offscreen session on a core
+    /// worker only, so this attaches it as `mln_map_attach()` does past that
+    /// check.
+    fn attach_caller_driven(
+        map: mln_map,
+        wakes: &'static AtomicUsize,
+    ) -> (mln_render_session, ::mln_runtime::Completion<()>) {
+        let wake = mln_wake {
+            callback: Some(count),
+            user_data: core::ptr::from_ref(wakes).cast_mut().cast(),
+            release_user_data: None,
+            queue: 0,
+        };
+        let options = mln_render_session_attach_options {
+            driver: MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD,
+            driver_work_wake: wake,
+            ..attach_options()
+        };
+        // SAFETY: local options.
+        let request = unsafe { super::attach_options(&raw const options) }.unwrap();
+        let target = RenderTarget::Offscreen { size: Size::new(16, 16), device: None };
+        attach(&map::resolve(map).unwrap(), target, &request).unwrap()
+    }
+
+    #[test]
+    fn a_caller_driven_session_runs_on_the_thread_that_services_it() {
+        static WAKES: AtomicUsize = AtomicUsize::new(0);
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let (session, attached) = attach_caller_driven(map, &WAKES);
+        // The attach waits for a service, and woke the host for it.
+        assert_eq!(snapshot(session).unwrap().state, MLN_RENDER_SESSION_STATE_ATTACHING);
+        assert_eq!(WAKES.load(Ordering::SeqCst), 1);
+        service_until(session, || attached.is_complete());
+        assert_eq!(snapshot(session).unwrap().state, MLN_RENDER_SESSION_STATE_ATTACHED);
+        let mut capabilities = sized::<mln_render_session_capabilities>();
+        // SAFETY: local capabilities.
+        unsafe { mln_render_session_get_capabilities(session, &raw mut capabilities, NO_DIAGNOSTIC) };
+        assert_eq!(capabilities.driver, MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD);
+
+        assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, 1), MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_OK);
+        assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED);
+
+        // Another thread can't take the work over, before or after a release.
+        let (status, text) = service_elsewhere(session);
+        assert_eq!(status, MLN_STATUS_WRONG_THREAD);
+        assert!(text.contains("first serviced"), "{text}");
+
+        // The release detaches the session at its next service, which still
+        // takes the released handle, until the release completes.
+        let released = Waiter::new();
+        // SAFETY: a local completion.
+        let status = unsafe { mln_render_session_release(session, &raw const released.descriptor, NO_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+        assert_eq!(service_elsewhere(session).0, MLN_STATUS_WRONG_THREAD);
+        assert_eq!(service(session), MLN_STATUS_OK);
+        assert_eq!(released.status(), MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_INVALID_STATE);
+        assert_eq!(service_elsewhere(session).0, MLN_STATUS_INVALID_STATE);
+        release_map(map);
+        release(runtime);
+    }
+
+    #[test]
+    fn an_abandon_reports_the_graphics_objects_that_a_caller_driven_session_keeps() {
+        static WAKES: AtomicUsize = AtomicUsize::new(0);
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let (session, attached) = attach_caller_driven(map, &WAKES);
+        service_until(session, || attached.is_complete());
+        assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, 1), MLN_STATUS_OK);
+        assert_eq!(service(session), MLN_STATUS_OK);
+        wait_for_result(session);
+
+        // Off the servicing thread, the session keeps its renderer and its
+        // target until the process exits.
+        let abandoned = std::thread::spawn(move || {
+            let mut result = sized::<mln_render_abandon_result>();
+            // SAFETY: a local result.
+            let status = unsafe { mln_render_session_abandon(session, &raw mut result, NO_DIAGNOSTIC) };
+            (status, result.disposition, result.quarantined_resource_count)
+        })
+        .join()
+        .unwrap();
+        assert_eq!(abandoned, (MLN_STATUS_OK, MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED, 2));
+        // The next service lets go of the session, and takes no more.
+        assert_eq!(service(session), MLN_STATUS_INVALID_STATE);
+        assert_eq!(service(session), MLN_STATUS_INVALID_STATE);
+        // SAFETY: a null diagnostic.
+        assert_eq!(unsafe { mln_render_session_dispose(session, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        release_map(map);
+        release(runtime);
+    }
+
+    #[test]
+    fn an_offscreen_session_refuses_the_callers_thread() {
+        let runtime = create();
+        let map = create_map(runtime, &options(1.0));
+        let target = offscreen_target(16, 16);
+        let options =
+            mln_render_session_attach_options { driver: MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD, ..attach_options() };
+        let (mut session, attached) = (0, Waiter::new());
+        // SAFETY: local arguments.
+        let status = unsafe {
+            mln_map_attach(
+                map,
+                &raw const target,
+                0,
+                &raw const options,
+                &raw mut session,
+                &raw const attached.descriptor,
+                NO_DIAGNOSTIC,
+            )
+        };
+        assert_eq!(status, MLN_STATUS_UNSUPPORTED);
+        attached.unused();
+        release_map(map);
+        release(runtime);
     }
 }

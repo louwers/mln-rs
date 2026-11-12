@@ -13,12 +13,14 @@
 // renderer forgets its cached GL state when another one had the context
 // since its last turn (`PlatformContext::take_state_lost`).
 //
+// Every context, and every turn in a single one, gives the thread back the
+// context it had current when it is done: a host's thread that services a
+// caller-driven session may have its own context current.
+//
 // The library's display is Mesa's surfaceless platform where the library has
 // it, so that no window system is needed; elsewhere it is the default
 // display, as in C++ (platform/linux/src/headless_backend_egl.cpp). A host's
-// group is on the host's display and config, and a renderer's context in it
-// makes the host's context current again when it is done, since it may be
-// current on the host's thread.
+// group is on the host's display and config.
 //
 // EGL binds a client API to each thread, and makes and releases the current
 // context of the bound one, so a context binds its API around its use and
@@ -297,6 +299,10 @@ struct Turn {
     depth: u32,
     /// The renderer that last had the turn, or 0 for none known.
     last_user: u64,
+    /// What the holder's thread had current before the turn, which it gets
+    /// back after: a host's thread that services a session has its own
+    /// context current.
+    previous: Previous,
     /// The thread's client API before the turn, which it gets back after.
     previous_api: Option<egl::Enum>,
 }
@@ -336,6 +342,7 @@ impl SingleContext {
         turn.last_user = user;
         if turn.depth == 0 {
             let egl = self.display.egl;
+            turn.previous = current_other_than(egl, self.context);
             let previous = egl.query_api();
             if previous != self.api.egl()
                 && let Err(e) = egl.bind_api(self.api.egl())
@@ -372,7 +379,7 @@ impl SingleContext {
             return;
         }
         let egl = self.display.egl;
-        if let Err(e) = egl.make_current(self.display.display, None, None, None) {
+        if let Err(e) = restore(egl, self.display.display, turn.previous.take()) {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
         }
         if let Some(previous) = turn.previous_api.take()
@@ -768,6 +775,22 @@ impl PlatformContext for SingleContextTurns {
 /// The context that was current on the thread before a renderer's.
 type Previous = Option<(egl::Display, Option<egl::Surface>, Option<egl::Surface>, egl::Context)>;
 
+/// The context current on the thread, with its display and surfaces, unless
+/// it is `own`. EGL answers for the thread's bound client API.
+fn current_other_than(egl: &Egl, own: egl::Context) -> Previous {
+    let context = egl.get_current_context().filter(|context| *context != own)?;
+    Some((egl.get_current_display()?, egl.get_current_surface(egl::DRAW), egl.get_current_surface(egl::READ), context))
+}
+
+/// Makes `previous` current on the thread again, or, with none, releases
+/// the context current on `display`.
+fn restore(egl: &Egl, display: egl::Display, previous: Previous) -> Result<(), egl::Error> {
+    match previous {
+        Some((display, draw, read, context)) => egl.make_current(display, draw, read, Some(context)),
+        None => egl.make_current(display, None, None, None),
+    }
+}
+
 /// `EGLBackendImpl`: an OpenGL ES 3.0 or desktop OpenGL context, and the 1x1
 /// pbuffer it is current on, or the host's surface it presents to, or none.
 struct EglContext {
@@ -778,10 +801,10 @@ struct EglContext {
     surface: Option<egl::Surface>,
     /// Whether the surface is the context's own, which it destroys.
     owns_surface: bool,
-    /// What a host's thread had current, which the context makes current
-    /// again when it is done.
+    /// What the thread had current, which the context makes current again
+    /// when it is done: a host's thread that services a session has its own
+    /// context current.
     previous: Cell<Previous>,
-    restores: bool,
     /// The thread's client API before the context was made current.
     previous_api: Cell<Option<egl::Enum>>,
     /// The share group, which outlives its contexts.
@@ -810,7 +833,6 @@ impl EglContext {
             surface: Some(surface),
             owns_surface: true,
             previous: Cell::new(None),
-            restores: false,
             previous_api: Cell::new(None),
             _device: device,
         })
@@ -847,7 +869,6 @@ impl EglContext {
             surface,
             owns_surface,
             previous: Cell::new(None),
-            restores: true,
             previous_api: Cell::new(None),
             _device: device,
         })
@@ -857,6 +878,9 @@ impl EglContext {
 impl PlatformContext for EglContext {
     fn make_current(&self) {
         let egl = self.egl;
+        // What the thread had current, asked before the API changes, since
+        // EGL answers for the bound one.
+        self.previous.set(current_other_than(egl, self.context));
         let previous_api = egl.query_api();
         if previous_api != self.api.egl()
             && let Err(e) = egl.bind_api(self.api.egl())
@@ -864,17 +888,6 @@ impl PlatformContext for EglContext {
             Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API: {e}"));
         }
         self.previous_api.set(Some(previous_api));
-        if self.restores {
-            let previous = egl.get_current_context().filter(|context| *context != self.context).and_then(|context| {
-                Some((
-                    egl.get_current_display()?,
-                    egl.get_current_surface(egl::DRAW),
-                    egl.get_current_surface(egl::READ),
-                    context,
-                ))
-            });
-            self.previous.set(previous);
-        }
         if let Err(e) = egl.make_current(self.display, self.surface, self.surface, Some(self.context)) {
             Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
         }
@@ -882,11 +895,7 @@ impl PlatformContext for EglContext {
 
     fn done_current(&self) {
         let egl = self.egl;
-        let result = match self.previous.take() {
-            Some((display, draw, read, context)) => egl.make_current(display, draw, read, Some(context)),
-            None => egl.make_current(self.display, None, None, None),
-        };
-        if let Err(e) = result {
+        if let Err(e) = restore(egl, self.display, self.previous.take()) {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
         }
         if let Some(previous) = self.previous_api.take()

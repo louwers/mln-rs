@@ -342,14 +342,7 @@ impl Group {
             create_shared_context(dc, self.root)
                 .map_err(|e| Error::native(format!("Error creating a WGL context that shares the host's: {e}")))?
         };
-        let context = GroupContext {
-            dc,
-            context,
-            _window: window,
-            previous: Cell::new(None),
-            restores: !self.owns_root,
-            _keep: keep,
-        };
+        let context = GroupContext { dc, context, _window: window, previous: Cell::new(None), _keep: keep };
         context.make_current();
         let gl = functions(self.loader);
         context.done_current();
@@ -372,18 +365,16 @@ struct GroupContext {
     context: HGLRC,
     /// Before what it keeps: the window goes after the context.
     _window: Option<HiddenWindow>,
-    /// What the host's thread had current, which the context makes current
-    /// again when it is done.
+    /// What the thread had current, which the context makes current again
+    /// when it is done: a host's thread that services a session has its own
+    /// context current.
     previous: Cell<Option<(HDC, HGLRC)>>,
-    restores: bool,
     _keep: Box<dyn Any>,
 }
 
 impl PlatformContext for GroupContext {
     fn make_current(&self) {
-        if self.restores {
-            self.previous.set(current().filter(|(_, context)| *context != self.context));
-        }
+        self.previous.set(current().filter(|(_, context)| *context != self.context));
         if let Err(e) = make_current(self.dc, self.context) {
             Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
         }

@@ -52,7 +52,8 @@ impl DriverWork {
     /// Runs the session's work that is ready, and returns once none is: the
     /// attach, frames, the work that the handle sent, and the detach. The
     /// first service builds the session's renderer. The session's
-    /// completions and wakes may run inside it, on this thread.
+    /// completions and wakes may run inside it, on this thread. Work that
+    /// becomes ready after it runs the wake again.
     ///
     /// Fails with [`ErrorKind::Busy`](mln_util::ErrorKind) inside a service
     /// that is running, which takes the work instead, and with
@@ -68,12 +69,23 @@ impl DriverWork {
             return Err(Error::busy("the render session's driver work is running on this thread"));
         }
         let abandoned = self.shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned;
-        self.shared.driver_armed.store(true, Ordering::SeqCst);
+        let armed = &self.shared.driver_armed;
+        armed.store(true, Ordering::SeqCst);
         {
+            let _call = self.shared.enter_call();
             let _current = self.run_loop.enter();
             let _worker = worker::enter(&self.slot);
             worker::build(&self.shared, &self.slot);
-            while self.run_loop.run_once() {}
+            // Work that came during the service may have taken the wake, and
+            // the service ran it: the wake is armed again for what comes
+            // once the loop is empty.
+            loop {
+                while self.run_loop.run_once() {}
+                armed.store(true, Ordering::SeqCst);
+                if !self.run_loop.run_once() {
+                    break;
+                }
+            }
             if abandoned || self.slot.borrow().as_ref().is_some_and(Worker::is_done) {
                 self.end();
             }
@@ -88,10 +100,10 @@ impl DriverWork {
     }
 
     /// Lets go of the session's renderer and graphics objects, with the
-    /// session's loop current.
+    /// session's loop current, then of the driver-work wake: its release
+    /// tells the host that the session makes no more graphics calls.
     fn end(&self) {
         self.finished.set(true);
-        self.shared.run_loop.set_waker(None);
         let mut outbox = Outbox::default();
         let gate = self.shared.gate.lock_unpoisoned();
         let worker = self.slot.borrow_mut().take();
@@ -99,6 +111,7 @@ impl DriverWork {
             worker.close(&mut outbox);
         }
         drop(gate);
+        self.shared.run_loop.set_waker(None);
         outbox.deliver();
     }
 }
