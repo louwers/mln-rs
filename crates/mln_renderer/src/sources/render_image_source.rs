@@ -261,7 +261,9 @@ impl RenderSource for RenderImageSource {
     }
 
     fn is_loaded(&self) -> bool {
-        self.bucket.is_some()
+        // Unlike C++, a source without an image (one made without a url) has
+        // nothing to load, so a still render of it finishes.
+        self.bucket.is_some() || self.impl_().get_image().is_none()
     }
 
     fn update(

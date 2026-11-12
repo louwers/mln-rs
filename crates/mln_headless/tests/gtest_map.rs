@@ -1745,6 +1745,38 @@ fn image_source_beyond_mercator_latitudes() {
     test.frontend.render_frame();
 }
 
+// An image source without a url starts empty: it requests nothing and draws
+// nothing until it gets an image or a url.
+#[test]
+fn an_image_source_without_a_url_draws_once_it_has_an_image() {
+    let log = FixtureLog::new();
+    let test = MapTest::fake();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "image": {"type": "image", "coordinates": [[-180, 80], [180, 80], [180, -80], [-180, -80]]}
+      },
+      "layers": [{"id": "image", "type": "raster", "source": "image"}]
+    }"#,
+    );
+    assert!(test.map().style().get_source("image").is_some());
+
+    assert_eq!(center_pixel(&test.render().image), [0, 0, 0, 0]);
+    assert_eq!(test.file_source.requests_len(), 0);
+
+    let mut red = PremultipliedImage::new(Size::new(1, 1));
+    red.data.copy_from_slice(&[255, 0, 0, 255]);
+    let image_source =
+        |map: &Map| map.style().get_source("image").unwrap().as_any().downcast_ref::<ImageSource>().cloned().unwrap();
+    image_source(&test.map()).set_image(red);
+    assert_eq!(center_pixel(&test.render().image), [255, 0, 0, 255]);
+
+    image_source(&test.map()).set_url("fixture://image.png");
+    assert_eq!(test.file_source.requests_len(), 1);
+    assert!(log.unchecked().is_empty(), "{:?}", log.unchecked());
+}
+
 // https://github.com/mapbox/mapbox-gl-native/issues/15342
 // Tests the fix for constant repaint caused by `RenderSource::hasFadingTiles()`
 // returning `true` all the time.
