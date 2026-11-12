@@ -888,17 +888,14 @@ impl RenderSymbolLayer {
 
     /// `removeTile(renderPass, tileID)`: the symbol and the collision
     /// drawables of the tile.
-    fn remove_tile_all(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) -> usize {
-        let mut removed = self.remove_tile(render_pass, tile_id);
+    fn remove_tile_all(&mut self, render_pass: RenderPass, tile_id: &OverscaledTileID) {
+        self.remove_tile(render_pass, tile_id);
         if let Some(group) = &self.collision_tile_layer_group {
             let mut group = group.borrow_mut();
             if let Some(tile_group) = group.as_tile_layer_group_mut() {
-                let n = tile_group.remove_drawables(render_pass, tile_id).len();
-                self.base.stats.drawables_removed += n;
-                removed += n;
+                tile_group.remove_drawables(render_pass, tile_id);
             }
         }
-        removed
     }
 
     /// `getCollisionTileLayerGroup()`.
@@ -1016,7 +1013,6 @@ impl RenderSymbolLayer {
                 translate_anchor: values.translate_anchor,
             })));
             tile_group.add_drawable(passes, &tile_id, drawable);
-            self.base.stats.drawables_added += 1;
         }
     }
 }
@@ -1143,20 +1139,14 @@ impl RenderLayer for RenderSymbolLayer {
         change_layer_index(&self.collision_tile_layer_group, new_layer_index, changes);
     }
 
-    fn remove_all_drawables(&mut self) -> usize {
-        let old_value = self.base.stats.drawables_removed;
+    fn remove_all_drawables(&mut self) {
         if let Some(group) = &self.base.layer_group {
-            let count = group.borrow().get_drawable_count();
-            self.base.stats.drawables_removed += count;
             group.borrow_mut().clear_drawables();
         }
         if let Some(group) = &self.collision_tile_layer_group {
-            let count = group.borrow().get_drawable_count();
-            self.base.stats.drawables_removed += count;
             group.borrow_mut().clear_drawables();
         }
         self.tile_bucket_versions.clear();
-        self.base.stats.drawables_removed - old_value
     }
 
     /// `prepare(const LayerPrepareParameters&)`.
@@ -1331,23 +1321,21 @@ impl RenderLayer for RenderSymbolLayer {
             let mut group = layer_group.borrow_mut();
             let tile_layer_group = group.as_tile_layer_group_mut().expect("symbol layer group is a TileLayerGroup");
             let base = &self.base;
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 // If the render pass has changed or the tile has dropped out
                 // of the cover set, remove it.
                 drawable.get_render_pass() != passes
                     || drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
         }
         if let Some(collision_group) = self.collision_tile_layer_group.clone() {
             let mut group = collision_group.borrow_mut();
             if let Some(tile_layer_group) = group.as_tile_layer_group_mut() {
                 let base = &self.base;
-                let removed = tile_layer_group.remove_drawables_if(|drawable| {
+                tile_layer_group.remove_drawables_if(|drawable| {
                     drawable.get_render_pass() != passes
                         || drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
                 });
-                self.base.stats.drawables_removed += removed;
             }
         }
         let render_tile_ids = &self.base.render_tile_ids;
@@ -1724,7 +1712,6 @@ impl RenderLayer for RenderSymbolLayer {
                     drawable.set_enabled(visible);
 
                     tile_layer_group.add_drawable(passes, &tile_id, drawable);
-                    self.base.stats.drawables_added += 1;
                 }
             };
 

@@ -7,7 +7,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
-use mln_actor::TaggedScheduler;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode};
 use mln_style::layer::layer_type_info;
 use mln_style::layer_properties::LayerProperties;
@@ -164,13 +163,20 @@ where
     }
 }
 
+impl Default for TilePyramid {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TilePyramid {
-    /// `TilePyramid(const TaggedScheduler&)`.
+    /// `TilePyramid(const TaggedScheduler&)`, without the thread pool (see
+    /// `TileCache::new`).
     #[must_use]
-    pub fn new(thread_pool: TaggedScheduler) -> Self {
+    pub fn new() -> Self {
         TilePyramid {
             tiles: BTreeMap::new(),
-            cache: TileCache::new(thread_pool, 0),
+            cache: TileCache::new(0),
             rendered_tiles: BTreeMap::new(),
             observer: Rc::new(NullTileObserver),
             prev_lng: 0.0,
@@ -266,7 +272,7 @@ impl TilePyramid {
             tile_lod_pitch_threshold: parameters.tile_lod_pitch_threshold,
             tile_lod_mode: parameters.tile_lod_mode,
             requested_zoom: Some(zoom + mln_math::log2(constants::TILE_SIZE_D / f64::from(tile_size))),
-            round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM || type_ == SourceType::Video,
+            round_zoom: type_ == SourceType::Raster || type_ == SourceType::RasterDEM,
         };
 
         if overscaled_zoom >= i32::from(zoom_range.min) {
@@ -278,10 +284,7 @@ impl TilePyramid {
             }
 
             // Only attempt prefetching in continuous mode.
-            if parameters.mode == MapMode::Continuous
-                && type_ != SourceType::GeoJSON
-                && type_ != SourceType::Annotations
-            {
+            if parameters.mode == MapMode::Continuous && type_ != SourceType::GeoJSON {
                 // Request lower zoom level tiles (if configured to do so) in
                 // an attempt to show something on the screen faster at the
                 // cost of a little of bandwidth.
@@ -398,7 +401,7 @@ impl TilePyramid {
         }
         drop(ctx);
 
-        if type_ != SourceType::Annotations && self.cache_enabled {
+        if self.cache_enabled {
             let size = parameters.transform_state.get_size();
             let conservative_cache_size = (f64::max(f64::from(size.width) / f64::from(tile_size), 1.0)
                 * f64::max(f64::from(size.height) / f64::from(tile_size), 1.0)

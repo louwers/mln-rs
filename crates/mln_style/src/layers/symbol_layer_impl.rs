@@ -1,7 +1,6 @@
 // Ports src/mln/style/layers/symbol_layer_impl.hpp +
-// src/mln/style/layers/symbol_layer_impl.cpp. `staticTypeInfo()` and
-// `stringifyLayout` are generated in C++ (layer.cpp.ejs); the first is in
-// symbol_layer.rs.
+// src/mln/style/layers/symbol_layer_impl.cpp. `staticTypeInfo()` is generated
+// in C++ (layer.cpp.ejs); here it is in symbol_layer.rs.
 //
 // `FormatSectionOverrides` is split: the parts the style uses
 // (`hasOverrides`, `hasOverride`, `hasPaintPropertyDifference`) and
@@ -241,12 +240,6 @@ impl layer::Impl for Impl {
             || self.paint.has_data_driven_property_difference(&impl_.paint)
             || (self.has_format_section_overrides()
                 && SymbolLayerPaintPropertyOverrides::has_paint_property_difference(&self.paint, &impl_.paint))
-    }
-
-    fn stringify_layout(&self, _writer: &mut String) {
-        // Generated in C++ (layer.cpp.ejs): `layout.stringify(writer)`.
-        // TODO(port): conversion/stringify.hpp; nothing in the C++ core
-        // calls stringifyLayout.
     }
 
     fn get_type_info(&self) -> &'static LayerTypeInfo {

@@ -463,7 +463,7 @@ fn loading_corrupted() {
         Some(response)
     });
 
-    let called = expect_error(&test, "unknown pbf field type exception");
+    let called = expect_error(&test, "invalid wire type: 7");
 
     test.run("test/fixtures/resources/glyphs.pbf", dependencies(&['a', 'å']));
     assert!(called.get());

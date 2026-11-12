@@ -7,8 +7,6 @@
 // (with the base-class behaviour as default where C++ has one).
 
 use std::any::Any;
-use std::cell::RefCell;
-use std::cmp::Ordering;
 use std::rc::Rc;
 
 use geometry::Point;
@@ -21,7 +19,7 @@ use crate::cull_face_mode::CullFaceMode;
 use crate::draw_mode::DrawMode;
 use crate::drawable_tweaker::DrawableTweakerPtr;
 use crate::gfx_types::AttributeDataType;
-use crate::index_vector::{IndexVectorBase, IndexVectorBasePtr};
+use crate::index_vector::IndexVectorBasePtr;
 use crate::paint_parameters::PaintParameters;
 use crate::renderer::render_pass::RenderPass;
 use crate::shaders::segment::SegmentBase;
@@ -71,7 +69,6 @@ pub struct DrawableBase {
     pub enable_stencil: bool,
     pub enable_depth: bool,
     pub is_3d: bool,
-    pub is_custom: bool,
     pub name: String,
     pub unique_id: SimpleIdentity,
     pub shader: Option<ShaderProgramBasePtr>,
@@ -118,7 +115,6 @@ impl DrawableBase {
             enable_stencil: false,
             enable_depth: true,
             is_3d: false,
-            is_custom: false,
             name,
             unique_id: SimpleIdentity::new(),
             shader: None,
@@ -175,8 +171,7 @@ pub trait Drawable: Any {
     /// Set shared indexes and segments
     fn set_index_data(&mut self, indexes: Option<IndexVectorBasePtr>, segments: Vec<UniqueDrawSegment>);
 
-    /// Get the uniform buffers attached to this drawable
-    fn get_uniform_buffers(&self) -> &UniformBufferArray;
+    /// The uniform buffers attached to this drawable, to write
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray;
 
     // --- virtuals with a base implementation ---
@@ -228,9 +223,6 @@ pub trait Drawable: Any {
     fn get_name(&self) -> &str {
         &self.base().name
     }
-    fn set_name(&mut self, value: String) {
-        self.base_mut().name = value;
-    }
     fn get_shader(&self) -> &Option<ShaderProgramBasePtr> {
         &self.base().shader
     }
@@ -244,14 +236,6 @@ pub trait Drawable: Any {
     fn has_render_pass(&self, value: RenderPass) -> bool {
         (self.base().render_pass.underlying_type() & value.underlying_type()) != 0
     }
-    /// If multiple render pass bits are set, all must be present.
-    fn has_all_render_passes(&self, value: RenderPass) -> bool {
-        let v = value.underlying_type();
-        (self.base().render_pass.underlying_type() & v) == v
-    }
-    fn get_line_width(&self) -> i32 {
-        self.base().line_width
-    }
     fn get_texture(&self, id: usize) -> Option<&Texture2DPtr> {
         self.base().textures.get(id).and_then(Option::as_ref)
     }
@@ -260,9 +244,6 @@ pub trait Drawable: Any {
     }
     fn set_enabled(&mut self, value: bool) {
         self.base_mut().enabled = value;
-    }
-    fn get_enable_color(&self) -> bool {
-        self.base().enable_color
     }
     fn get_enable_stencil(&self) -> bool {
         self.base().enable_stencil
@@ -276,9 +257,6 @@ pub trait Drawable: Any {
     fn get_enable_depth(&self) -> bool {
         self.base().enable_depth
     }
-    fn get_sub_layer_index(&self) -> i32 {
-        self.base().sub_layer_index
-    }
     fn get_depth_type(&self) -> DepthMaskType {
         self.base().depth_type
     }
@@ -288,23 +266,11 @@ pub trait Drawable: Any {
     fn set_is_3d(&mut self, value: bool) {
         self.base_mut().is_3d = value;
     }
-    fn get_is_custom(&self) -> bool {
-        self.base().is_custom
-    }
-    fn set_is_custom(&mut self, value: bool) {
-        self.base_mut().is_custom = value;
-    }
     fn get_tile_id(&self) -> Option<OverscaledTileID> {
         self.base().tile_id
     }
     fn set_tile_id(&mut self, value: OverscaledTileID) {
         self.base_mut().tile_id = Some(value);
-    }
-    fn get_cull_face_mode(&self) -> &CullFaceMode {
-        &self.base().cull_face_mode
-    }
-    fn get_color_mode(&self) -> &ColorMode {
-        &self.base().color_mode
     }
     fn get_vertex_attributes(&self) -> Option<&VertexAttributeArrayPtr> {
         self.base().vertex_attributes.as_ref()
@@ -317,27 +283,14 @@ pub trait Drawable: Any {
         // recently.
         base.attribute_update_time = None;
     }
-    fn get_instance_attributes(&self) -> Option<&VertexAttributeArrayPtr> {
-        self.base().instance_attributes.as_ref()
-    }
     fn set_instance_attributes(&mut self, value: Option<VertexAttributeArrayPtr>) {
         self.base_mut().instance_attributes = value;
-    }
-    /// Provide raw indexes and segments
-    fn set_index_data_vec(&mut self, indexes: Vec<u16>, segments: Vec<UniqueDrawSegment>) {
-        self.set_index_data(Some(Rc::new(RefCell::new(IndexVectorBase::new(indexes)))), segments);
     }
     fn get_tweakers(&self) -> &Vec<DrawableTweakerPtr> {
         &self.base().tweakers
     }
-    fn add_tweaker(&mut self, value: DrawableTweakerPtr) {
-        self.base_mut().tweakers.push(value);
-    }
     fn set_tweakers(&mut self, value: Vec<DrawableTweakerPtr>) {
         self.base_mut().tweakers = value;
-    }
-    fn clear_tweakers(&mut self) {
-        self.base_mut().tweakers.clear();
     }
     fn get_data(&self) -> Option<&dyn Any> {
         self.base().drawable_data.as_deref()
@@ -353,9 +306,6 @@ pub trait Drawable: Any {
     }
     fn set_ubo_index(&mut self, ubo_index: u32) {
         self.base_mut().ubo_index = ubo_index;
-    }
-    fn get_ubo_index(&self) -> u32 {
-        self.base().ubo_index
     }
     /// Associate the drawable with a layer tweaker (lifetime management).
     fn set_layer_tweaker(&mut self, tweaker: Option<Rc<dyn Any>>) {
@@ -386,23 +336,6 @@ pub trait Drawable: Any {
     fn set_origin(&mut self, p: Option<Point<f64>>) {
         self.base_mut().origin = p;
     }
-    fn get_attribute_update_time(&self) -> Option<Instant> {
-        self.base().attribute_update_time
-    }
 }
 
 pub type UniqueDrawable = Box<dyn Drawable>;
-
-/// `DrawableLessByPriority`: primarily by draw priority, then by id.
-pub fn drawable_less_by_priority(left: &dyn Drawable, right: &dyn Drawable, descending: bool) -> bool {
-    drawable_cmp_by_priority(left, right, descending) == Ordering::Less
-}
-
-/// The ordering behind `DrawableLessByPriority`.
-pub fn drawable_cmp_by_priority(left: &dyn Drawable, right: &dyn Drawable, descending: bool) -> Ordering {
-    let (a, b) = if descending { (right, left) } else { (left, right) };
-    if a.get_draw_priority() != b.get_draw_priority() {
-        return a.get_draw_priority().cmp(&b.get_draw_priority());
-    }
-    a.get_id().cmp(&b.get_id())
-}

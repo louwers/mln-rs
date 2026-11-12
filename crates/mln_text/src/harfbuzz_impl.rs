@@ -267,19 +267,6 @@ impl Impl {
         harfrust::shape(&shaper_font, &mut buffer, options).ok()?;
         Some(buffer)
     }
-
-    /// `shape_part` left to right in HarfBuzz units, for tests: per glyph
-    /// [glyph, cluster, `x_advance`, `y_advance`, `x_offset`, `y_offset`].
-    pub fn shape_part_raw(&self, text: &[u16], script: [u8; 4]) -> Vec<[i32; 6]> {
-        let Some(font) = &self.font else { return Vec::new() };
-        let Some(buffer) = self.shape_part(font, text, script, false) else { return Vec::new() };
-        buffer
-            .glyph_infos()
-            .iter()
-            .zip(buffer.glyph_positions())
-            .map(|(i, p)| [i.glyph_id as i32, i.cluster as i32, p.x_advance, p.y_advance, p.x_offset, p.y_offset])
-            .collect()
-    }
 }
 
 /// `rtl ? HB_DIRECTION_RTL : HB_DIRECTION_LTR`.

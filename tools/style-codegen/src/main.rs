@@ -1,7 +1,5 @@
 //! `style-codegen --spec <v8.json> --out <crates/mln_style/src> [--check]`
-//! writes (or with `--check` compares) the generated style code;
-//! `style-codegen --spec <v8.json> --difftest <reference.cpp> <cases.rs>`
-//! writes the `//difftest/style_codegen` sources.
+//! writes (or with `--check` compares) the generated style code.
 //!
 //! `just generate-style-code` regenerates the checked-in files.
 
@@ -9,7 +7,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn usage() -> ExitCode {
-    eprintln!("usage: style-codegen --spec <v8.json> (--out <dir> [--check] | --difftest <reference.cpp> <cases.rs>)");
+    eprintln!("usage: style-codegen --spec <v8.json> --out <dir> [--check]");
     ExitCode::from(2)
 }
 
@@ -18,16 +16,11 @@ fn main() -> ExitCode {
     let mut spec = None;
     let mut out = None;
     let mut check = false;
-    let mut difftest = None;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--spec" => spec = args.next().map(PathBuf::from),
             "--out" => out = args.next().map(PathBuf::from),
             "--check" => check = true,
-            "--difftest" => match (args.next(), args.next()) {
-                (Some(cpp), Some(rs)) => difftest = Some((PathBuf::from(cpp), PathBuf::from(rs))),
-                _ => return usage(),
-            },
             _ => return usage(),
         }
     }
@@ -39,23 +32,6 @@ fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-
-    if let Some((cpp, rs)) = difftest {
-        let (cpp_text, rs_text) = match style_codegen::difftest::generate(&spec_text) {
-            Ok(texts) => texts,
-            Err(e) => {
-                eprintln!("{e}");
-                return ExitCode::FAILURE;
-            }
-        };
-        for (path, text) in [(cpp, cpp_text), (rs, rs_text)] {
-            if let Err(e) = std::fs::write(&path, text) {
-                eprintln!("{}: {e}", path.display());
-                return ExitCode::FAILURE;
-            }
-        }
-        return ExitCode::SUCCESS;
-    }
 
     let Some(out) = out else { return usage() };
     if check {

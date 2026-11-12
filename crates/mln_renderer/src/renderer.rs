@@ -64,10 +64,6 @@ impl Renderer {
         self.impl_ref().pixel_ratio()
     }
 
-    pub fn mark_context_lost(&mut self) {
-        self.impl_mut().orchestrator.mark_context_lost();
-    }
-
     /// Port-only: the transport that creates the tile workers of tiles
     /// created from now on (by default on the map's thread pool). Set it
     /// before the first render so that every tile uses it.

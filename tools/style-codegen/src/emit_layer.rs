@@ -91,12 +91,13 @@ fn emit_accessors(w: &mut Writer, layer: &LayerSpec, property: &Property, paint:
     let pv = property_value_type(property);
     let member = if paint { "paint" } else { "layout" };
 
-    w.line("    #[must_use]");
-
-    w.line(&format!("    pub fn get_default_{snake_name}() -> {pv} {{"));
+    // The renderer falls back to these two color ramps' defaults when the
+    // style leaves them undefined; no other property's default has a caller.
     if property.name == "heatmap-color" {
         let raw = crate::json::js_stringify(property.default().expect("heatmap-color default"));
         assert!(!raw.contains("\"#"), "raw string delimiter in {raw}");
+        w.line("    #[must_use]");
+        w.line(&format!("    pub fn get_default_{snake_name}() -> {pv} {{"));
         w.line("        let mut error = Error::default();");
         w.line("        let raw_value: serde_json::Value = serde_json::from_str(");
         w.line(&format!("            r#\"{raw}\"#,"));
@@ -105,13 +106,15 @@ fn emit_accessors(w: &mut Writer, layer: &LayerSpec, property: &Property, paint:
         w.line("        // `*conversion::convertJSON<ColorRampPropertyValue>(rawValue, error)`.");
         w.line("        convert_color_ramp_property_value(&Convertible::from(&raw_value), &mut error, false, false)");
         w.line("            .expect(\"the heatmap-color default converts\")");
-    } else if is_color_ramp(property) {
+        w.line("    }");
+        w.blank();
+    } else if property.name == "color-relief-color" {
+        w.line("    #[must_use]");
+        w.line(&format!("    pub fn get_default_{snake_name}() -> {pv} {{"));
         w.line("        ColorRampPropertyValue::default()");
-    } else {
-        w.line(&format!("        PropertyValue::Constant({name}::default_value())"));
+        w.line("    }");
+        w.blank();
     }
-    w.line("    }");
-    w.blank();
 
     if paint {
         w.line("    #[must_use]");
@@ -225,7 +228,6 @@ pub fn emit(layer: &LayerSpec) -> String {
     tags.push(format!("{t}PaintProperties"));
     imports.push(format!("crate::layers::{file}_layer_properties::{{{}}}", tags.join(", ")));
     if any_plain {
-        imports.push("crate::properties::Property as _".into());
         imports.push("crate::property_value::PropertyValue".into());
     }
     imports.push("crate::style_property::{Kind, StyleProperty}".into());

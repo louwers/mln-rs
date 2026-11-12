@@ -658,6 +658,12 @@ impl OnlineFileSource {
     pub fn new(resource_options: &ResourceOptions) -> Self {
         OnlineFileSource { impl_: Impl::new(resource_options) }
     }
+
+    /// Holds the online thread until the guard drops (`crate::tests::pause`).
+    #[cfg(test)]
+    pub(crate) fn pause(&self) -> crate::tests::Paused {
+        crate::tests::pause(&self.impl_.thread.actor())
+    }
 }
 
 impl FileSource for OnlineFileSource {
@@ -695,14 +701,6 @@ impl FileSource for OnlineFileSource {
         resource.has_loading_method(crate::resource::LoadingMethod::Network)
             && !resource.url.starts_with(ASSET_PROTOCOL)
             && !resource.url.starts_with(FILE_PROTOCOL)
-    }
-
-    fn pause(&self) {
-        self.impl_.thread.pause();
-    }
-
-    fn resume(&self) {
-        self.impl_.thread.resume();
     }
 
     fn set_property(&self, key: &str, value: &Value) {

@@ -25,8 +25,9 @@ mod sqlite;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, mpsc};
 
+use mln_actor::ActorRef;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 
 use crate::AsyncRequest;
@@ -44,6 +45,27 @@ pub fn req() -> Req {
 pub fn serial() -> MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Holds `actor`'s thread in a message, after the messages already sent to
+/// it, until the returned guard drops. It returns once the thread is held, so
+/// the messages sent meanwhile queue up and run in one go after the drop. Drop
+/// the guard before the actor's `Thread`, whose drop waits for its queue.
+pub fn pause<O: 'static>(actor: &ActorRef<O>) -> Paused {
+    let (paused, is_paused) = mpsc::channel();
+    let (resume, resumed) = mpsc::channel::<()>();
+    actor.invoke(move |_| {
+        let _ = paused.send(());
+        // Returns once `Paused` drops its sender.
+        let _ = resumed.recv();
+    });
+    is_paused.recv().expect("the thread holds");
+    Paused { _resume: resume }
+}
+
+/// Resumes the thread that [`pause`] holds when it drops.
+pub struct Paused {
+    _resume: mpsc::Sender<()>,
 }
 
 /// A path of the C++ repository, in the copy of its files these tests read

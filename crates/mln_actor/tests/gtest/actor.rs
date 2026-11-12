@@ -6,7 +6,6 @@ use std::time::Duration;
 
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler::{self, Scheduler, SchedulerPtr, Task};
-use mln_actor::{AspiringActor, EstablishedActor, RunLoop};
 
 use crate::{get, wait, wait_for};
 
@@ -353,55 +352,4 @@ fn no_self_actor_ref() {
     let with_arguments = Actor::new(scheduler::get_background(), move |_| WithArguments { promise });
     with_arguments.self_ref().invoke(WithArguments::receive);
     wait(&future);
-}
-
-// gtest: Actor.TwoPhaseConstruction
-#[test]
-fn two_phase_construction() {
-    // This test mimics, in simplified form, the approach used by the
-    // Thread<Object> to construct its actor in two parts so that the
-    // Thread<Object> instance can be created without waiting for the target
-    // thread to be up and running.
-    struct TestActor {
-        destroyed: Arc<AtomicBool>,
-    }
-    impl Drop for TestActor {
-        fn drop(&mut self) {
-            self.destroyed.store(true, Ordering::SeqCst);
-        }
-    }
-    impl TestActor {
-        fn call_me(p: &mpsc::Sender<()>) {
-            p.send(()).unwrap();
-        }
-        fn stop() {
-            RunLoop::get().stop();
-        }
-    }
-
-    let parent = AspiringActor::<TestActor>::new();
-
-    let destroyed = Arc::new(AtomicBool::new(false));
-
-    let (queue_executed, queue_executed_future) = mpsc::channel();
-
-    parent.self_ref().invoke(move |_: &TestActor| TestActor::call_me(&queue_executed));
-    parent.self_ref().invoke(|_: &TestActor| TestActor::stop());
-
-    std::thread::scope(|s| {
-        let captured = destroyed.clone();
-        let parent = &parent;
-        let thread = s.spawn(move || {
-            let run_loop = RunLoop::new();
-            let _test =
-                EstablishedActor::new(&scheduler::get_current(), parent, move |_| TestActor { destroyed: captured });
-            run_loop.run();
-        });
-
-        // should not hang
-        wait(&queue_executed_future);
-        thread.join().unwrap();
-    });
-
-    assert!(destroyed.load(Ordering::SeqCst));
 }

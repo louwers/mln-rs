@@ -28,7 +28,6 @@ use crate::writes::Writes;
 #[derive(Default)]
 pub struct BackendImpl {
     instance: RefCell<Option<wgpu::Instance>>,
-    adapter: RefCell<Option<wgpu::Adapter>>,
     device: RefCell<Option<wgpu::Device>>,
     queue: RefCell<Option<wgpu::Queue>>,
     /// `wgpu::TextureFormat::Undefined` is `None`.
@@ -47,9 +46,6 @@ impl BackendImpl {
     pub fn set_instance(&self, instance: Option<wgpu::Instance>) {
         *self.instance.borrow_mut() = instance;
     }
-    pub fn set_adapter(&self, adapter: Option<wgpu::Adapter>) {
-        *self.adapter.borrow_mut() = adapter;
-    }
     pub fn set_device(&self, device: Option<wgpu::Device>) {
         *self.device.borrow_mut() = device;
         *self.writes.borrow_mut() = Writes::default();
@@ -60,9 +56,6 @@ impl BackendImpl {
     }
     pub fn get_instance(&self) -> Option<wgpu::Instance> {
         self.instance.borrow().clone()
-    }
-    pub fn get_adapter(&self) -> Option<wgpu::Adapter> {
-        self.adapter.borrow().clone()
     }
     pub fn get_device(&self) -> Option<wgpu::Device> {
         self.device.borrow().clone()
@@ -225,7 +218,6 @@ impl RendererBackend {
     pub fn new(device: &Device) -> Self {
         let impl_ = BackendImpl::default();
         impl_.set_instance(device.instance().cloned());
-        impl_.set_adapter(device.adapter().cloned());
         impl_.set_device(Some(device.device().clone()));
         impl_.set_queue(Some(device.queue().clone()));
         RendererBackend { base: RendererBackendBase::new(), impl_: Rc::new(impl_), device: device.clone() }

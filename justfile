@@ -81,8 +81,8 @@ check:
 # (`cc`) that would need that clang, or if the module that draws with WebGPU gets the OpenGL backend (mln_gl and its
 # GL bindings), which only the `webgl` module needs.
 [doc('Check that the libraries and examples/web build for wasm32-unknown-unknown, as CI does')]
-check-wasm:
-    cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
+check-wasm:  _dev-shell
+    {{dev_shell}} cargo clippy --target wasm32-unknown-unknown -p {{main_crate}}
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web -p mln-rs-web-shaper
     cargo clippy --target wasm32-unknown-unknown -p mln-rs-web --features webgl
     ! cargo tree --target wasm32-unknown-unknown -p mln-rs-web --edges normal --prefix none | grep -q '^rusqlite '

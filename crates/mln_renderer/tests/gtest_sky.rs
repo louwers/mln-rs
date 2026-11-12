@@ -37,16 +37,8 @@ fn sky_defaults() {
     let mut render_sky = RenderSky::new(sky.impl_.clone());
     render_sky.evaluate(&PropertyEvaluationParameters::new(0.0));
 
-    assert_eq!(Color::new(136.0 / 255.0, 198.0 / 255.0, 252.0 / 255.0, 1.0), Sky::get_default_sky_color());
-    assert_eq!(Color::white(), Sky::get_default_horizon_color());
-    assert_eq!(Color::white(), Sky::get_default_fog_color());
-    assert_float_eq(0.5, Sky::get_default_fog_ground_blend());
-    assert_float_eq(0.8, Sky::get_default_horizon_fog_blend());
-    assert_float_eq(0.8, Sky::get_default_sky_horizon_blend());
-    assert_float_eq(0.8, Sky::get_default_atmosphere_blend());
-
     let evaluated = render_sky.get_evaluated();
-    assert_eq!(Sky::get_default_sky_color(), *evaluated.get::<SkyColor>());
+    assert_eq!(Color::new(136.0 / 255.0, 198.0 / 255.0, 252.0 / 255.0, 1.0), *evaluated.get::<SkyColor>());
     assert_eq!(Color::white(), *evaluated.get::<SkyHorizonColor>());
     assert_eq!(Color::white(), *evaluated.get::<SkyFogColor>());
     assert_float_eq(0.5, *evaluated.get::<SkyFogGroundBlend>());

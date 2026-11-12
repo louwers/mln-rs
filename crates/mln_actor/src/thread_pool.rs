@@ -3,9 +3,7 @@
 // `ThreadPool` (= `ParallelScheduler(3)`, 4 threads).
 //
 // TODO(port): `runOnRenderThread`/`runRenderJobs`, thread names/priorities
-// from platform settings. (gtests-core added `SequencedScheduler` and the
-// exception handler: a panicking task is caught and passed to the handler,
-// as C++ catches the exception; without a handler the panic continues.)
+// from platform settings.
 
 use std::cell::Cell;
 use std::collections::{HashMap, VecDeque};
@@ -16,7 +14,7 @@ use std::thread::JoinHandle;
 use mln_util::identity::SimpleIdentity;
 use mln_util::sync::{CondvarExt, MutexExt};
 
-use crate::scheduler::{ExceptionHandler, Scheduler, Task};
+use crate::scheduler::{Scheduler, Task};
 
 #[derive(Default)]
 struct Queue {
@@ -34,8 +32,6 @@ struct Shared {
     worker_mutex: Mutex<bool>, // terminated
     tagged_queue: Mutex<HashMap<SimpleIdentity, Arc<Queue>>>,
     task_count: AtomicUsize,
-    /// `Scheduler::handler` (gtests-core).
-    handler: Mutex<Option<Arc<ExceptionHandler>>>,
 }
 
 thread_local! {
@@ -58,7 +54,6 @@ impl ThreadedScheduler {
             worker_mutex: Mutex::new(false),
             tagged_queue: Mutex::new(HashMap::new()),
             task_count: AtomicUsize::new(0),
-            handler: Mutex::new(None),
         });
         let threads = (0..n).map(|index| make_scheduler_thread(shared.clone(), index)).collect();
         ThreadedScheduler { shared, threads }
@@ -104,37 +99,21 @@ fn make_scheduler_thread(shared: Arc<Shared>, index: usize) -> JoinHandle<()> {
 
                     shared.task_count.fetch_sub(1, Ordering::SeqCst);
 
-                    // gtests-core: C++ `try { ... } catch (...)`.
-                    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(tasklet)) {
-                        Ok(()) => {
-                            // The function and its captures are gone before
-                            // unblocking `waitForEmpty`.
+                    // A task that panics still counts as done, so that
+                    // `waitForEmpty` returns before the panic ends this
+                    // worker.
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(tasklet));
 
-                            if q.running_count.fetch_sub(1, Ordering::SeqCst) == 1 {
-                                let queue = q.queue.lock_unpoisoned();
-                                if queue.is_empty() {
-                                    q.cv.notify_all();
-                                }
-                            }
+                    // The function and its captures are gone before
+                    // unblocking `waitForEmpty`.
+                    if q.running_count.fetch_sub(1, Ordering::SeqCst) == 1 {
+                        let queue = q.queue.lock_unpoisoned();
+                        if queue.is_empty() {
+                            q.cv.notify_all();
                         }
-                        Err(payload) => {
-                            let queue = q.queue.lock_unpoisoned();
-                            let handler = shared.handler.lock_unpoisoned().clone();
-                            let payload = match &handler {
-                                Some(handler) => {
-                                    handler(payload);
-                                    None
-                                }
-                                None => Some(payload),
-                            };
-                            if q.running_count.fetch_sub(1, Ordering::SeqCst) == 1 && queue.is_empty() {
-                                q.cv.notify_all();
-                            }
-                            drop(queue);
-                            if let Some(payload) = payload {
-                                std::panic::resume_unwind(payload);
-                            }
-                        }
+                    }
+                    if let Err(payload) = result {
+                        std::panic::resume_unwind(payload);
                     }
                 }
             }
@@ -168,10 +147,6 @@ impl Scheduler for ThreadedScheduler {
 
     fn wait_for_empty(&self) {
         self.wait_for_empty_tagged(SimpleIdentity::EMPTY);
-    }
-
-    fn set_exception_handler(&self, handler: ExceptionHandler) {
-        *self.shared.handler.lock_unpoisoned() = Some(Arc::new(handler));
     }
 
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
@@ -243,12 +218,9 @@ impl Scheduler for ThreadPool {
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
         self.scheduler.wait_for_empty_tagged(tag);
     }
-    fn set_exception_handler(&self, handler: ExceptionHandler) {
-        self.scheduler.set_exception_handler(handler);
-    }
 }
 
-/// `SequencedScheduler`: `ThreadedScheduler(1)` (gtests-core).
+/// `SequencedScheduler`: `ThreadedScheduler(1)`.
 pub struct SequencedScheduler {
     scheduler: ThreadedScheduler,
 }
@@ -278,9 +250,6 @@ impl Scheduler for SequencedScheduler {
     }
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
         self.scheduler.wait_for_empty_tagged(tag);
-    }
-    fn set_exception_handler(&self, handler: ExceptionHandler) {
-        self.scheduler.set_exception_handler(handler);
     }
 }
 

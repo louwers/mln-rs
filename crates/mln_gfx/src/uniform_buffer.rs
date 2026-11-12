@@ -16,7 +16,6 @@ pub trait UniformBuffer: Any {
 }
 
 pub type UniformBufferPtr = Rc<dyn UniformBuffer>;
-pub type UniqueUniformBufferArray = Box<UniformBufferArray>;
 
 /// `gfx::UniformBufferArray`: a collection of uniform buffers by id.
 ///

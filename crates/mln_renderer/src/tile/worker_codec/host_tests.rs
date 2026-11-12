@@ -7,14 +7,13 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use mln_actor::{RunLoop, TaggedScheduler, scheduler};
+use mln_actor::RunLoop;
 use mln_map_types::{MapDebugOptions, MapMode, TileLodMode, TransformState};
 use mln_style::conversion::{Convertible, Error as ConversionError, convert_layer};
 use mln_style::layer_properties::LayerProperties;
 use mln_style::renderer::property_evaluation_parameters::PropertyEvaluationParameters;
 use mln_tile_id::{CanonicalTileID, OverscaledTileID};
 use mln_util::error::Error;
-use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
 use mln_util::subdivision_granularity::SubdivisionGranularitySetting;
 
@@ -84,7 +83,6 @@ impl Test {
         let transport = SerializingTransport::new(move |replies| {
             Box::new(Corrupting { instances: ThreadWorkerInstances::new(1, &replies), next })
         });
-        let thread_pool = TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new());
         let transform_state = TransformState::default();
         let parameters = TileParameters {
             pixel_ratio: 1.0,
@@ -93,7 +91,6 @@ impl Test {
             file_source: None,
             mode,
             prefetch_zoom_delta: 0,
-            thread_pool,
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,

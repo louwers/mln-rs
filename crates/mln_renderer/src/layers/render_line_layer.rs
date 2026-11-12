@@ -297,7 +297,6 @@ impl RenderLineLayer {
 
             // delete all gradient drawables
             if let Some(layer_group) = &self.base.layer_group {
-                self.base.stats.drawables_removed += layer_group.borrow().get_drawable_count();
                 layer_group.borrow_mut().clear_drawables();
             }
         }
@@ -576,11 +575,10 @@ impl RenderLayer for RenderLineLayer {
             let passes = self.base.passes;
             // If the render pass has changed or the tile has dropped out of
             // the cover set, remove it.
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 drawable.get_render_pass() != passes
                     || drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
 
             tile_layer_group.set_stencil_tiles(Some(Rc::new(render_tiles.iter().map(|tile| tile.id).collect())));
         }
@@ -724,8 +722,7 @@ impl RenderLayer for RenderLineLayer {
 
             let round_cap = *bucket.layout.get::<LineCap>() == LineCapType::Round;
             let cap_type = if round_cap { LinePatternCap::Round } else { LinePatternCap::Square };
-            let stats = &mut self.base.stats;
-            let mut add_drawable = |mut drawable: mln_gfx::UniqueDrawable, type_: LineType| {
+            let add_drawable = |mut drawable: mln_gfx::UniqueDrawable, type_: LineType| {
                 drawable.set_tile_id(tile_id);
                 drawable.set_type(type_ as usize);
                 drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
@@ -737,7 +734,6 @@ impl RenderLayer for RenderLineLayer {
                 let mut group = layer_group.borrow_mut();
                 let tile_layer_group = group.as_tile_layer_group_mut().expect("TileLayerGroup");
                 tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-                stats.drawables_added += 1;
             };
 
             properties_as_uniforms.0.clear();

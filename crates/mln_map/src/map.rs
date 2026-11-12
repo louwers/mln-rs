@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use mln_actor::{TaggedScheduler, scheduler};
 use mln_map_types::{
-    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraMomentum, CameraOptions, CameraUpdate,
-    ConstrainMode, MapDebugOptions, MapMode, MapView, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
+    AnimationOptions, BoundOptions, CameraDelta, CameraError, CameraOptions, CameraUpdate, ConstrainMode,
+    MapDebugOptions, MapMode, MapView, NorthOrientation, ProjectionMode, TileLodMode, TransformState,
     VerticalPerspectiveProjection, ViewportMode,
 };
 use mln_renderer::{
@@ -617,21 +617,6 @@ impl Map {
         self.on_update();
     }
 
-    /// `renderStill(const CameraOptions&, MapDebugOptions, StillImageCallback)`.
-    pub fn render_still_with_camera(
-        &mut self,
-        camera: &CameraOptions,
-        debug_options: MapDebugOptions,
-        callback: StillImageCallback,
-    ) {
-        self.process_events();
-        self.changed();
-        self.camera_mutated = true;
-        self.debug_options = debug_options;
-        self.transform.jump_to(camera);
-        self.render_still(callback);
-    }
-
     /// Triggers a repaint.
     pub fn trigger_repaint(&mut self) {
         self.process_events();
@@ -693,32 +678,6 @@ impl Map {
         self.process_events();
         self.camera_mutated = true;
         self.transform.update_camera(update);
-        self.on_update();
-    }
-
-    /// Continues a gesture with momentum, which moves the camera on each
-    /// frame until its parts end. See [`CameraMomentum`].
-    ///
-    /// A low-level call, kept for parity with the C++ core's: it doesn't end
-    /// a gesture or report the change as momentum. Gestures end with an
-    /// `End` delta that carries their momentum
-    /// ([`apply_camera_delta`](Self::apply_camera_delta)).
-    pub fn start_momentum(&mut self, momentum: &CameraMomentum, animation: &AnimationOptions) {
-        self.process_events();
-        self.camera_mutated = true;
-        self.transform.start_momentum(momentum, animation);
-        self.on_update();
-    }
-
-    /// `setGestureInProgress`. A low-level call, kept for parity with the
-    /// C++ core's: the gesture phases of
-    /// [`apply_camera_delta`](Self::apply_camera_delta) and
-    /// [`update_camera`](Self::update_camera) set it for a gesture and its
-    /// momentum, and setting it directly while one runs gets out of step with
-    /// them.
-    pub fn set_gesture_in_progress(&mut self, in_progress: bool) {
-        self.process_events();
-        self.transform.set_gesture_in_progress(in_progress);
         self.on_update();
     }
 
@@ -809,20 +768,6 @@ impl Map {
         ))
     }
 
-    pub fn ease_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) {
-        self.process_events();
-        self.camera_mutated = true;
-        self.transform.ease_to(camera, animation);
-        self.on_update();
-    }
-
-    pub fn fly_to(&mut self, camera: &CameraOptions, animation: &AnimationOptions) {
-        self.process_events();
-        self.camera_mutated = true;
-        self.transform.fly_to(camera, animation, false);
-        self.on_update();
-    }
-
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or infinite
     /// point.
     pub fn move_by(&mut self, point: &ScreenCoordinate, animation: &AnimationOptions) -> Result<(), Error> {
@@ -831,44 +776,6 @@ impl Map {
         self.transform.move_by(point, animation)?;
         self.on_update();
         Ok(())
-    }
-
-    /// `moveBy(offset, anchor, animation)`: move by `offset` as a drag that
-    /// holds `anchor`, the cursor: on the globe the location under it follows
-    /// it. Fails as [`move_by`](Self::move_by) does.
-    pub fn move_by_with_anchor(
-        &mut self,
-        offset: &ScreenCoordinate,
-        anchor: Option<ScreenCoordinate>,
-        animation: &AnimationOptions,
-    ) -> Result<(), Error> {
-        self.process_events();
-        self.camera_mutated = true;
-        self.transform.move_by_with_anchor(offset, anchor, animation)?;
-        self.on_update();
-        Ok(())
-    }
-
-    pub fn pitch_by(&mut self, pitch: f64, animation: &AnimationOptions) {
-        self.process_events();
-        let current = mln_math::rad2deg(self.transform.get_pitch());
-        self.ease_to(&CameraOptions::default().with_pitch(Some(current - pitch)), animation);
-    }
-
-    pub fn scale_by(&mut self, scale: f64, anchor: Option<ScreenCoordinate>, animation: &AnimationOptions) {
-        self.process_events();
-        let zoom = {
-            let transform = &self.transform;
-            transform.get_zoom() + transform.get_state().scale_zoom(scale)
-        };
-        self.ease_to(&CameraOptions::default().with_zoom(Some(zoom)).with_anchor(anchor), animation);
-    }
-
-    pub fn rotate_by(&mut self, first: &ScreenCoordinate, second: &ScreenCoordinate, animation: &AnimationOptions) {
-        self.process_events();
-        self.camera_mutated = true;
-        self.transform.rotate_by(first, second, animation);
-        self.on_update();
     }
 
     // gtests-core: cameraForLatLngBounds, cameraForLatLngs,
@@ -1024,19 +931,6 @@ impl Map {
         Ok(())
     }
 
-    /// Returns the current map bound options. All optional fields in
-    /// `BoundOptions` are set.
-    pub fn get_bounds(&self) -> BoundOptions {
-        let transform = &self.transform;
-        let state = transform.get_state();
-        BoundOptions::default()
-            .with_lat_lng_bounds(state.get_lat_lng_bounds())
-            .with_min_zoom(state.get_min_zoom())
-            .with_max_zoom(state.get_max_zoom())
-            .with_min_pitch(mln_math::rad2deg(state.get_min_pitch()))
-            .with_max_pitch(mln_math::rad2deg(state.get_max_pitch()))
-    }
-
     // MARK: - Map options
 
     pub fn set_north_orientation(&mut self, orientation: NorthOrientation) {
@@ -1142,10 +1036,6 @@ impl Map {
         self.on_update();
     }
 
-    pub fn get_tile_lod_min_radius(&self) -> f64 {
-        self.tile_lod_min_radius
-    }
-
     pub fn set_tile_lod_scale(&mut self, scale: f64) {
         self.process_events();
         if self.tile_lod_scale == scale {
@@ -1153,10 +1043,6 @@ impl Map {
         }
         self.tile_lod_scale = scale;
         self.on_update();
-    }
-
-    pub fn get_tile_lod_scale(&self) -> f64 {
-        self.tile_lod_scale
     }
 
     pub fn set_tile_lod_pitch_threshold(&mut self, threshold: f64) {
@@ -1181,10 +1067,6 @@ impl Map {
         self.on_update();
     }
 
-    pub fn get_tile_lod_zoom_shift(&self) -> f64 {
-        self.tile_lod_zoom_shift
-    }
-
     pub fn set_tile_lod_mode(&mut self, mode: TileLodMode) {
         self.process_events();
         if self.tile_lod_mode == mode {
@@ -1192,10 +1074,6 @@ impl Map {
         }
         self.tile_lod_mode = mode;
         self.on_update();
-    }
-
-    pub fn get_tile_lod_mode(&self) -> TileLodMode {
-        self.tile_lod_mode
     }
 
     // MARK: - Rendered features
@@ -1311,11 +1189,6 @@ impl Map {
         self.transform.get_state().is_globe_rendering()
     }
 
-    /// `pixelsForLatLngs(latLngs)`.
-    pub fn pixels_for_lat_lngs(&self, lat_lngs: &[LatLng]) -> Vec<ScreenCoordinate> {
-        lat_lngs.iter().map(|lat_lng| self.pixel_for_lat_lng(lat_lng)).collect()
-    }
-
     /// `latLngsForPixels(screenCoords, wrapMode)`.
     pub fn lat_lngs_for_pixels(
         &self,
@@ -1338,11 +1211,6 @@ impl Map {
     /// `getPrefetchZoomDelta()`.
     pub fn get_prefetch_zoom_delta(&self) -> u8 {
         self.prefetch_zoom_delta
-    }
-
-    /// `getFreeCameraOptions()`.
-    pub fn get_free_camera_options(&self) -> mln_map_types::FreeCameraOptions {
-        self.transform.get_free_camera_options()
     }
 
     /// `setFreeCameraOptions(camera)`: places the camera by its position

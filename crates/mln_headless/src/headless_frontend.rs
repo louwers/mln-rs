@@ -15,7 +15,7 @@ use std::sync::Arc;
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
-use mln_map::{CameraOptions, Map, TransformState};
+use mln_map::Map;
 use mln_renderer::{Renderer, UpdateParameters, UpdateReader};
 use mln_runtime::{BackendType, Device, DeviceOptions, LocalTarget};
 use mln_text::GlyphCache;
@@ -32,7 +32,6 @@ pub struct RenderResult {
 struct Shared {
     size: Cell<Size>,
     pixel_ratio: Cell<f32>,
-    frame_time: Cell<f64>,
     target: LocalTarget,
     /// The target's backend, which the renderer draws with.
     backend: Rc<dyn RendererBackend>,
@@ -122,7 +121,6 @@ impl HeadlessFrontend {
         let shared = Rc::new(Shared {
             size: Cell::new(size),
             pixel_ratio: Cell::new(pixel_ratio),
-            frame_time: Cell::new(0.0),
             target,
             backend,
             async_invalidate: RefCell::new(None),
@@ -146,11 +144,6 @@ impl HeadlessFrontend {
     }
 
     #[must_use]
-    pub fn get_frame_time(&self) -> f64 {
-        self.shared.frame_time.get()
-    }
-
-    #[must_use]
     pub fn get_size(&self) -> Size {
         self.shared.size.get()
     }
@@ -160,11 +153,6 @@ impl HeadlessFrontend {
             self.shared.size.set(size);
             self.shared.resize_target();
         }
-    }
-
-    #[must_use]
-    pub fn get_pixel_ratio(&self) -> f32 {
-        self.shared.pixel_ratio.get()
     }
 
     /// Renders at `pixel_ratio` from now on, which should be the map's
@@ -216,80 +204,6 @@ impl HeadlessFrontend {
         self.shared.target.device()
     }
 
-    /// `getCameraOptions()`.
-    #[must_use]
-    pub fn get_camera_options(&self) -> CameraOptions {
-        match self.shared.latest_parameters().as_ref() {
-            // RendererState::getCameraOptions(updateParameters, padding = {})
-            Some(parameters) => {
-                parameters.transform_state.get_camera_options(Some(mln_util::geo::EdgeInsets::default()))
-            }
-            None => CameraOptions::default(),
-        }
-    }
-
-    /// `hasLayer(id)` (`RendererState::hasLayer`).
-    #[must_use]
-    pub fn has_layer(&self, id: &str) -> bool {
-        match self.shared.latest_parameters().as_ref() {
-            Some(parameters) => parameters.layers.iter().any(|layer| layer.id == id),
-            None => false,
-        }
-    }
-
-    /// `hasSource(id)` (`RendererState::hasSource`).
-    #[must_use]
-    pub fn has_source(&self, id: &str) -> bool {
-        match self.shared.latest_parameters().as_ref() {
-            Some(parameters) => parameters.sources.iter().any(|source| source.base().id == id),
-            None => false,
-        }
-    }
-
-    /// `hasImage(id)` (`RendererState::hasImage`).
-    #[must_use]
-    pub fn has_image(&self, id: &str) -> bool {
-        match self.shared.latest_parameters().as_ref() {
-            Some(parameters) => parameters.images.iter().any(|image| image.id == id),
-            None => false,
-        }
-    }
-
-    // gtests-core: pixelForLatLng/latLngForPixel (test/map Map.RendererState),
-    // with RendererState::pixelForLatLng/latLngForPixel inlined.
-    /// `pixelForLatLng(coordinate)`.
-    #[must_use]
-    pub fn pixel_for_lat_lng(&self, coordinate: &mln_util::geo::LatLng) -> mln_util::geo::ScreenCoordinate {
-        match self.shared.latest_parameters().as_ref() {
-            Some(parameters) => {
-                let state = &parameters.transform_state;
-                // C++ computes the unwrapped LatLng but projects `latLng`
-                // (renderer_state.cpp); kept.
-                let mut unwrapped_lat_lng = coordinate.wrapped();
-                unwrapped_lat_lng.unwrap_for_shortest_path(&state.get_lat_lng(mln_util::geo::WrapMode::Wrapped));
-                let _ = unwrapped_lat_lng;
-                let point = state.lat_lng_to_screen_coordinate(coordinate);
-                mln_util::geo::ScreenCoordinate::new(point.x, f64::from(state.get_size().height) - point.y)
-            }
-            None => mln_util::geo::ScreenCoordinate::default(),
-        }
-    }
-
-    /// `latLngForPixel(point)`. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a NaN or
-    /// infinite point.
-    pub fn lat_lng_for_pixel(&self, point: &mln_util::geo::ScreenCoordinate) -> Result<mln_util::geo::LatLng, Error> {
-        match self.shared.latest_parameters().as_ref() {
-            Some(parameters) => {
-                let state = &parameters.transform_state;
-                let mut flipped_point = *point;
-                flipped_point.y = f64::from(state.get_size().height) - flipped_point.y;
-                state.screen_coordinate_to_lat_lng(&flipped_point, mln_util::geo::WrapMode::Wrapped)
-            }
-            None => Ok(mln_util::geo::LatLng::default()),
-        }
-    }
-
     /// The last frame's pixels, or an empty image without one.
     #[must_use]
     pub fn read_still_image(&self) -> PremultipliedImage {
@@ -339,21 +253,8 @@ impl HeadlessFrontend {
         Ok(RenderResult { image, stats })
     }
 
-    /// `renderOnce(Map&)`.
-    pub fn render_once(&mut self, map: &mut Map) {
-        self.attach(map);
-        RunLoop::get().run_once();
-        map.process_events();
-    }
-
     pub fn render_frame(&self) {
         Shared::render_frame(&self.shared);
-    }
-
-    /// Port-only: draws `parameters` into the target now, in place of the
-    /// map's latest update.
-    pub fn render_update(&self, parameters: &Arc<UpdateParameters>) {
-        Shared::render(&self.shared, parameters);
     }
 
     /// Port-only: the target the frontend draws into, so a host can reach
@@ -362,11 +263,6 @@ impl HeadlessFrontend {
     #[must_use]
     pub fn target(&self) -> &LocalTarget {
         &self.shared.target
-    }
-
-    #[must_use]
-    pub fn get_transform_state(&self) -> Option<TransformState> {
-        self.shared.latest_parameters().map(|p| p.transform_state.clone())
     }
 }
 
@@ -414,13 +310,11 @@ impl Shared {
     }
 
     fn render(shared: &Rc<Shared>, update_parameters: &Arc<UpdateParameters>) {
-        let start_time = mln_util::time::Instant::now();
         let backend = shared.backend.clone();
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
         if let Some(frames) = shared.target.frames() {
             shared.renderer().render(update_parameters, frames);
         }
-        shared.frame_time.set(start_time.elapsed().as_secs_f64());
     }
 }
 

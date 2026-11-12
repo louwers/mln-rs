@@ -173,12 +173,8 @@ impl LayerTweaker for FillExtrusionLayerTweaker {
                 texture_size = tex.borrow().get_size();
             }
 
-            let has_pattern = drawable.get_type() != 0;
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));
             let pattern_pos_b = tile.and_then(|t| t.get_pattern(fill_pattern_value.to.id()));
-            if has_pattern {
-                binders.set_pattern_parameters(pattern_pos_a.as_ref(), pattern_pos_b.as_ref(), &crossfade);
-            }
 
             let pattern_t = binders.fill_extrusion_pattern.interpolation_factor(zoom).0;
             drawable_ubo_vector[i as usize] = FillExtrusionDrawableUBO {

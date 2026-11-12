@@ -8,10 +8,13 @@
 // them (`ease_to`/`update_transitions` hold it mutably), so they record that
 // they ran (`CallbackLog`) and the test asserts on the Transform right after
 // the call that ran them. Nothing changes the state between a callback and
-// the return of that call: after `transition_frame_fn` the frame closure only
-// calls `on_camera_is_changing`, after `transition_end_fn` the end
-// closure only calls `on_camera_did_change`, and `update_transitions` only
-// moves the closures back.
+// the return of that call: after `transition_end_fn` the end closure only
+// calls `on_camera_did_change`, and `update_transitions` only moves the
+// closures back. The checks of the C++ frame callbacks run after each
+// `update_transitions` that leaves the command running.
+//
+// Commands start at the frame time that `start_clock` sets, so a test steps
+// them from a start it knows.
 
 use std::cell::{Cell, RefCell};
 use std::sync::{Arc, Mutex};
@@ -22,7 +25,7 @@ use mln_map_types::{MercatorProjection, TileProjector, TransitionEndFn};
 use mln_style_types::ProjectionType;
 use mln_tile_id::{CanonicalTileID, UnwrappedTileID};
 use mln_util::UnitBezier;
-use mln_util::chrono::{milliseconds, seconds};
+use mln_util::chrono::{Clock, TimePoint, milliseconds, seconds};
 use mln_util::constants::{EXTENT, LATITUDE_MAX, LONGITUDE_MAX, MAX_ZOOM, TILE_SIZE_D};
 use mln_util::mat4::{Mat4, matrix};
 use mln_util::quaternion::Quaternion;
@@ -137,25 +140,25 @@ fn rotated_frame(quaternion: &Vec4) -> (Vec3, Vec3, Vec3) {
     (q.transform(&[1.0, 0.0, 0.0]), q.transform(&[0.0, -1.0, 0.0]), q.transform(&[0.0, 0.0, -1.0]))
 }
 
-/// Records the `AnimationOptions` callbacks (see the file comment).
+/// Starts the commands made after it at the returned time: a frame time an
+/// hour ahead of the clock, which stays fresh.
+fn start_clock(transform: &mut Transform) -> TimePoint {
+    let start = Clock::now() + seconds(3600);
+    transform.set_frame_time(Some(start));
+    start
+}
+
+/// Records the `AnimationOptions` end callback (see the file comment).
 struct CallbackLog {
-    frames: Arc<Mutex<Vec<f64>>>,
     finishes: Arc<SyncCell<u32>>,
 }
 
 impl CallbackLog {
     fn install(options: &mut AnimationOptions) -> CallbackLog {
-        let log = CallbackLog { frames: Arc::default(), finishes: Arc::default() };
-        let frames = log.frames.clone();
-        options.transition_frame_fn = Some(Arc::new(move |t: f64| frames.lock().unwrap().push(t)));
+        let log = CallbackLog { finishes: Arc::default() };
         let finishes = log.finishes.clone();
         options.transition_end_fn = Some(Arc::new(move |_: &TransitionEnd| finishes.set(finishes.get() + 1)));
         log
-    }
-
-    /// The `t` arguments of the frame callbacks since the last call.
-    fn take_frames(&self) -> Vec<f64> {
-        std::mem::take(&mut *self.frames.lock().unwrap())
     }
 
     /// Whether the finish callback ran since the last call.
@@ -198,26 +201,27 @@ fn invalid_zoom() {
 
     // Executing flyTo with an empty size causes frameZoom to be NaN.
     let max_zoom = transform.get_state().get_max_zoom();
+    let start = start_clock(&mut transform);
     transform.fly_to(
         &cam().with_center(Some(ll(LATITUDE_MAX, LONGITUDE_MAX))).with_zoom(Some(max_zoom)),
         &AnimationOptions::default(),
         false,
     );
-    let now = transform.get_latest_transition_start() + transform.get_latest_transition_duration();
-    transform.update_transitions(now);
+    run_to_end(&mut transform, start);
     assert_double_eq(transform.get_zoom(), transform.get_state().get_max_zoom());
 
     // Executing flyTo with maximum zoom level to the same zoom level causes
     // frameZoom to be bigger than maximum zoom.
     transform.resize(Size::new(100, 100)).unwrap();
     let max_zoom = transform.get_state().get_max_zoom();
+    let start = start_clock(&mut transform);
     transform.fly_to(
         &cam().with_center(Some(ll(LATITUDE_MAX, LONGITUDE_MAX))).with_zoom(Some(max_zoom)),
         &AnimationOptions::default(),
         false,
     );
-    let now = transform.get_latest_transition_start() + transform.get_latest_transition_duration();
-    transform.update_transitions(now);
+    run_to_end(&mut transform, start);
+    assert!(!transform.in_transition());
 
     assert!(transform.get_state().valid());
     assert_double_eq(transform.get_state().get_max_zoom(), transform.get_zoom());
@@ -733,8 +737,7 @@ fn camera() {
     let mut ease_options = AnimationOptions::new(seconds(1));
     let ease_log = CallbackLog::install(&mut ease_options);
     let check_ease = |transform: &Transform| {
-        for t in ease_log.take_frames() {
-            assert!((0.0..=1.0).contains(&t), "t = {t}");
+        if transform.in_transition() {
             assert!(lat_lng1.latitude() >= transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert!(lat_lng1.longitude() <= transform.get_lat_lng(WrapMode::Wrapped).longitude());
         }
@@ -745,24 +748,23 @@ fn camera() {
         }
     };
 
+    let start = start_clock(&mut transform);
     transform.ease_to(&camera_options1, &ease_options);
-    check_ease(&transform);
     assert!(transform.in_transition());
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(250));
     check_ease(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
+    transform.update_transitions(start + milliseconds(500));
     check_ease(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
+    transform.update_transitions(start + milliseconds(750));
     check_ease(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
+    transform.update_transitions(start + seconds(1));
     check_ease(&transform);
     assert!(!transform.in_transition());
 
     let mut fly_options = AnimationOptions::new(seconds(1));
     let fly_log = CallbackLog::install(&mut fly_options);
     let check_fly = |transform: &Transform| {
-        for t in fly_log.take_frames() {
-            assert!((0.0..=1.0).contains(&t), "t = {t}");
+        if transform.in_transition() {
             assert!(lat_lng2.latitude() <= transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert!(lat_lng2.longitude() >= transform.get_lat_lng(WrapMode::Unwrapped).longitude());
         }
@@ -775,16 +777,16 @@ fn camera() {
         }
     };
 
+    let start = start_clock(&mut transform);
     transform.fly_to(&camera_options2, &fly_options, false);
-    check_fly(&transform);
     assert!(transform.in_transition());
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(250));
     check_fly(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
+    transform.update_transitions(start + milliseconds(500));
     check_fly(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
+    transform.update_transitions(start + milliseconds(750));
     check_fly(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
+    transform.update_transitions(start + seconds(1));
     check_fly(&transform);
     assert!(!transform.in_transition());
 
@@ -795,11 +797,12 @@ fn camera() {
         zoom: Some(transform.get_state().get_max_zoom()),
         ..CameraOptions::default()
     };
+    let start = start_clock(&mut transform);
     transform.ease_to(&camera, &AnimationOptions::new(seconds(1)));
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
-    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
+    transform.update_transitions(start + milliseconds(250));
+    transform.update_transitions(start + milliseconds(500));
+    transform.update_transitions(start + milliseconds(750));
+    transform.update_transitions(start + seconds(1));
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).latitude(), 0.0);
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), 0.0);
 }
@@ -825,22 +828,22 @@ fn is_panning() {
     let mut ease_options = AnimationOptions::new(seconds(1));
     let log = CallbackLog::install(&mut ease_options);
     let check = |transform: &Transform| {
-        for _ in log.take_frames() {
+        if transform.in_transition() {
             assert!(transform.get_state().is_panning());
         }
         log.take_finish();
     };
 
     transform.resize(Size::new(1000, 1000)).unwrap();
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(0.0, 360.0))), &ease_options);
+    transform.update_transitions(start + milliseconds(250));
     check(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(500));
     check(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
+    transform.update_transitions(start + milliseconds(750));
     check(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
-    check(&transform);
-    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
+    transform.update_transitions(start + seconds(1));
     check(&transform);
 }
 
@@ -911,9 +914,10 @@ fn default_transform() {
 
     // Request impossible zoom
     let ease_options = AnimationOptions::new(seconds(1));
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(56.0, 11.0))).with_zoom(Some(1.0)), &ease_options);
     assert!(transform.in_transition());
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(250));
 
     // Rotate the screen during a transition (resize it)
     transform.resize(Size::new(500, 1000)).unwrap();
@@ -1037,25 +1041,25 @@ fn lat_lng_bounds() {
     let mut ease_options = AnimationOptions::new(seconds(1));
     let log = CallbackLog::install(&mut ease_options);
     let check_swipe = |transform: &Transform, longitude: f64| {
-        for _ in log.take_frames() {
+        if transform.in_transition() {
             assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), longitude, 1e-4);
         }
         if log.take_finish() {
             assert_near(transform.get_lat_lng(WrapMode::Wrapped).longitude(), longitude, 1e-4);
         }
     };
+    let start = start_clock(&mut transform);
     transform.move_by(&sc(-500.0, -500.0), &ease_options).unwrap();
-    check_swipe(&transform, 120.0);
 
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(0));
+    transform.update_transitions(start);
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(250));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
+    transform.update_transitions(start + milliseconds(500));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
+    transform.update_transitions(start + milliseconds(750));
     check_swipe(&transform, 120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
+    transform.update_transitions(start + seconds(1));
     check_swipe(&transform, 120.0);
 
     // Constrain to the right edge.
@@ -1063,18 +1067,18 @@ fn lat_lng_bounds() {
     assert_double_eq(transform.get_lat_lng(WrapMode::Wrapped).longitude(), -120.0);
 
     // Simulate swipe to the right.
+    let start = start_clock(&mut transform);
     transform.move_by(&sc(500.0, 500.0), &ease_options).unwrap();
-    check_swipe(&transform, -120.0);
 
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(0));
+    transform.update_transitions(start);
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(250));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
+    transform.update_transitions(start + milliseconds(500));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(750));
+    transform.update_transitions(start + milliseconds(750));
     check_swipe(&transform, -120.0);
-    transform.update_transitions(transform.get_latest_transition_start() + transform.get_latest_transition_duration());
+    transform.update_transitions(start + seconds(1));
     check_swipe(&transform, -120.0);
 
     //    -1   |   0   |  +1
@@ -1810,6 +1814,7 @@ fn animation_into_the_globe_takes_the_globes_minimum_zoom() {
                 transform.jump_to(&cam().with_center(Some(center)).with_zoom(Some(5.0)));
                 let camera = cam().with_center(Some(center)).with_zoom(Some(zoom));
                 let animation = AnimationOptions::new(milliseconds(1000));
+                let start = start_clock(&mut transform);
                 if fly {
                     transform.fly_to(&camera, &animation, false);
                 } else {
@@ -1817,7 +1822,7 @@ fn animation_into_the_globe_takes_the_globes_minimum_zoom() {
                 }
                 // As the map does each frame, the projection follows the zoom.
                 for frame in 1..=20 {
-                    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(50 * frame));
+                    transform.update_transitions(start + milliseconds(50 * frame));
                     let definition = projection_for_zoom(transform.get_zoom());
                     transform.set_projection_definition(&definition);
                 }
@@ -1880,8 +1885,22 @@ fn linear_second() -> AnimationOptions {
     }
 }
 
-fn run_to(transform: &mut Transform, k: f64) {
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds((k * 1000.0) as i64));
+/// The globe's radius in pixels for `state`'s camera.
+fn globe_radius(state: &TransformState) -> f64 {
+    VerticalPerspectiveProjection::globe_radius_pixels(
+        Projection::world_size(state.get_scale()),
+        state.get_lat_lng(WrapMode::Unwrapped).latitude(),
+    )
+}
+
+/// Steps the commands started at `start` to `k` seconds in.
+fn run_to(transform: &mut Transform, start: TimePoint, k: f64) {
+    transform.update_transitions(start + milliseconds((k * 1000.0) as i64));
+}
+
+/// Steps the commands started at `start` past the end of any of them.
+fn run_to_end(transform: &mut Transform, start: TimePoint) {
+    transform.update_transitions(start + seconds(86_400));
 }
 
 // gtest: VerticalPerspectiveProjection.CenterProjectsToScreenCenter
@@ -1920,7 +1939,6 @@ fn cached_view_state_follows_the_camera() {
             Projection::world_size(state.get_scale()),
             state.get_lat_lng(WrapMode::Unwrapped).latitude(),
         );
-        assert_double_eq(radius, state.get_globe_radius_pixels());
         let expected = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
         let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
         let camera = VerticalPerspectiveProjection::camera_position(state, radius);
@@ -2042,7 +2060,7 @@ fn zooming_out_around_an_anchor_near_the_horizon_stays_continuous() {
     let mut transform = new_transform();
     set_up_globe(&mut transform, &ll(48.0, 10.0), 6.0, 0.0, 0.0);
     let anchor = sc(600.0, 200.0);
-    let mut last_radius = transform.get_state().get_globe_radius_pixels();
+    let mut last_radius = globe_radius(transform.get_state());
     let mut last_center = transform.get_lat_lng(WrapMode::Wrapped);
     for i in 1..=60 {
         transform.ease_to(
@@ -2052,7 +2070,7 @@ fn zooming_out_around_an_anchor_near_the_horizon_stays_continuous() {
         if i % 3 == 0 {
             transform.move_by(&sc(-7.0, 4.0), &AnimationOptions::default()).unwrap();
         }
-        let radius = transform.get_state().get_globe_radius_pixels();
+        let radius = globe_radius(transform.get_state());
         let center = transform.get_lat_lng(WrapMode::Wrapped);
         assert!(radius <= last_radius * 1.005, "step {i}");
         assert!((center.latitude() - last_center.latitude()).abs() < 5.0, "step {i}");
@@ -2076,9 +2094,10 @@ fn animated_zoom_around_a_point_near_the_limb_moves_like_a_jump() {
 
     let mut animated = new_transform();
     set_up_globe_camera(&mut animated, &ll(0.0, 0.0), 1.0);
+    let start = start_clock(&mut animated);
     animated.ease_to(&cam().with_zoom(Some(2.0)).with_anchor(Some(anchor)), &linear_second());
     for frame in 1..=10 {
-        run_to(&mut animated, f64::from(frame) / 10.0);
+        run_to(&mut animated, start, f64::from(frame) / 10.0);
     }
     assert_near(2.0, animated.get_zoom(), 1e-9);
     let animated_move = animated.get_lat_lng(WrapMode::Wrapped).longitude();
@@ -2107,9 +2126,10 @@ fn animations_around_an_anchor_end_like_a_jump() {
 
         let mut animated = new_transform();
         set_up_globe_camera(&mut animated, &ll(45.0, 0.0), 3.0);
+        let start = start_clock(&mut animated);
         animated.ease_to(&change, &linear_second());
         for frame in 1..=10 {
-            run_to(&mut animated, f64::from(frame) / 10.0);
+            run_to(&mut animated, start, f64::from(frame) / 10.0);
         }
         assert_near(
             jumped.get_lat_lng(WrapMode::Wrapped).latitude(),
@@ -2130,14 +2150,14 @@ fn animations_around_an_anchor_end_like_a_jump() {
 fn poles_are_reachable_and_zoom_follows_latitude() {
     let mut transform = new_transform();
     set_up_globe(&mut transform, &ll(0.0, 0.0), 0.0, 0.0, 0.0);
-    let radius_at_equator = transform.get_state().get_globe_radius_pixels();
+    let radius_at_equator = globe_radius(transform.get_state());
     transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))));
     assert_near(80.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     // Moving the center towards the pole lowers the zoom by log2(cos 80),
     // below the map's minimum zoom of 0, so the planet keeps its size on
     // screen.
     assert_near(VerticalPerspectiveProjection::zoom_adjustment(0.0, 80.0), transform.get_zoom(), 1e-9);
-    assert_near(radius_at_equator, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    assert_near(radius_at_equator, globe_radius(transform.get_state()), 1e-6);
     transform.jump_to(&cam().with_center(Some(ll(80.0, 0.0))).with_zoom(Some(3.0)));
     transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))));
     assert_near(3.0 + VerticalPerspectiveProjection::zoom_adjustment(80.0, 0.0), transform.get_zoom(), 1e-9);
@@ -2147,14 +2167,14 @@ fn poles_are_reachable_and_zoom_follows_latitude() {
     // the planet keeps its size. A drag over the pole stops where the zoom
     // lets the center go. GL JS: 89 at zoom 1.9907089805355933, then
     // 89.50632407943635.
-    let radius_before = transform.get_state().get_globe_radius_pixels();
+    let radius_before = globe_radius(transform.get_state());
     transform.jump_to(&cam().with_center(Some(ll(89.0, 0.0))));
     assert_near(89.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(1.990_708_980_535_593_3, transform.get_zoom(), 1e-6);
-    assert_near(radius_before, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    assert_near(radius_before, globe_radius(transform.get_state()), 1e-6);
     transform.move_by(&sc(0.0, 300.0), &AnimationOptions::default()).unwrap();
     assert_near(89.506_324_079_436_35, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
-    assert_near(radius_before, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    assert_near(radius_before, globe_radius(transform.get_state()), 1e-6);
 }
 
 // gtest: GlobeTransform.BoundsKeepTheCenterInside
@@ -2255,8 +2275,9 @@ fn zoom_adjustment() {
 fn ease_adjusts_the_zoom_to_the_new_latitude() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 1.0);
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(40.0, 0.0))), &linear_second());
-    run_to(&mut transform, 1.0);
+    run_to(&mut transform, start, 1.0);
     assert!(!transform.in_transition());
     assert_near(40.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(0.615_499_999_622_363_8, transform.get_zoom(), 1e-9);
@@ -2267,11 +2288,12 @@ fn ease_adjusts_the_zoom_to_the_new_latitude() {
 fn fly_adjusts_the_zoom_to_the_new_latitude() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 1.0);
+    let start = start_clock(&mut transform);
     transform.fly_to(&cam().with_center(Some(ll(40.0, 0.0))), &linear_second(), false);
-    run_to(&mut transform, 0.5);
+    run_to(&mut transform, start, 0.5);
     assert_near(20.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(0.874_931_581_462_772_6, transform.get_zoom(), 1e-9);
-    run_to(&mut transform, 1.0);
+    run_to(&mut transform, start, 1.0);
     assert!(!transform.in_transition());
     assert_near(40.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(0.615_499_999_622_363_8, transform.get_zoom(), 1e-9);
@@ -2282,17 +2304,18 @@ fn fly_adjusts_the_zoom_to_the_new_latitude() {
 fn ease_keeps_the_planet_size_across_latitudes() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
-    let radius = transform.get_state().get_globe_radius_pixels();
+    let radius = globe_radius(transform.get_state());
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(60.0, 0.0))), &linear_second());
-    run_to(&mut transform, 0.5);
+    run_to(&mut transform, start, 0.5);
     assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(0.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(2.792_481_250_360_578, transform.get_zoom(), 1e-9);
-    assert_near(radius, transform.get_state().get_globe_radius_pixels(), 1e-6);
-    run_to(&mut transform, 1.0);
+    assert_near(radius, globe_radius(transform.get_state()), 1e-6);
+    run_to(&mut transform, start, 1.0);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(2.0, transform.get_zoom(), 1e-9);
-    assert_near(radius, transform.get_state().get_globe_radius_pixels(), 1e-6);
+    assert_near(radius, globe_radius(transform.get_state()), 1e-6);
 }
 
 // gtest: GlobeTransform.EaseFollowsTheLongitudeSpeedCurve
@@ -2300,12 +2323,13 @@ fn ease_keeps_the_planet_size_across_latitudes() {
 fn ease_follows_the_longitude_speed_curve() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(60.0, 60.0))), &linear_second());
-    run_to(&mut transform, 0.5);
+    run_to(&mut transform, start, 0.5);
     assert_near(25.026_136_930_423_718, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(2.792_481_250_360_578, transform.get_zoom(), 1e-9);
-    run_to(&mut transform, 1.0);
+    run_to(&mut transform, start, 1.0);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(2.0, transform.get_zoom(), 1e-9);
@@ -2316,11 +2340,12 @@ fn ease_follows_the_longitude_speed_curve() {
 fn ease_with_zoom_speeds_up_the_center() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(60.0, 0.0))).with_zoom(Some(5.0)), &linear_second());
-    run_to(&mut transform, 0.5);
+    run_to(&mut transform, start, 0.5);
     assert_near(42.426_406_871_192_85, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(4.061_975_143_542_488_5, transform.get_zoom(), 1e-9);
-    run_to(&mut transform, 1.0);
+    run_to(&mut transform, start, 1.0);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(5.0, transform.get_zoom(), 1e-9);
 }
@@ -2331,12 +2356,13 @@ fn fly_follows_the_globe_path() {
     {
         let mut transform = new_transform();
         set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+        let start = start_clock(&mut transform);
         transform.fly_to(&cam().with_center(Some(ll(60.0, 60.0))), &linear_second(), false);
-        run_to(&mut transform, 0.5);
+        run_to(&mut transform, start, 0.5);
         assert_near(25.026_136_930_425_196, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
         assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
         assert_near(1.817_620_920_971_708_5, transform.get_zoom(), 1e-9);
-        run_to(&mut transform, 1.0);
+        run_to(&mut transform, start, 1.0);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-8);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
         assert_near(2.0, transform.get_zoom(), 1e-9);
@@ -2344,12 +2370,13 @@ fn fly_follows_the_globe_path() {
     {
         let mut transform = new_transform();
         set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
+        let start = start_clock(&mut transform);
         transform.fly_to(&cam().with_center(Some(ll(60.0, 60.0))).with_zoom(Some(6.0)), &linear_second(), false);
-        run_to(&mut transform, 0.5);
+        run_to(&mut transform, start, 0.5);
         assert_near(54.663_652_625_664_554, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
         assert_near(56.470_588_235_293_114, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
         assert_near(2.404_575_237_295_786, transform.get_zoom(), 1e-9);
-        run_to(&mut transform, 1.0);
+        run_to(&mut transform, start, 1.0);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-8);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
         assert_near(6.0, transform.get_zoom(), 1e-9);
@@ -2363,10 +2390,11 @@ fn fly_stays_above_the_minimum_zoom() {
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 20.0);
     let mut animation = linear_second();
     animation.min_zoom = Some(10.0);
+    let start = start_clock(&mut transform);
     transform.fly_to(&cam().with_center(Some(ll(0.0, 1.0))).with_zoom(Some(20.0)), &animation, false);
     let mut lowest = 20.0;
     for frame in 1..=10 {
-        run_to(&mut transform, f64::from(frame) / 10.0);
+        run_to(&mut transform, start, f64::from(frame) / 10.0);
         lowest = std_min(lowest, transform.get_zoom());
     }
     // GL JS bottoms out at 9.9999993 on the same frames.
@@ -2751,8 +2779,9 @@ fn globe_fling_ends_at_gljs_inertia_center() {
         let _trace = ScopedTrace(format!("zoom {}", std_to_string(pan.zoom)));
         let mut transform = new_transform();
         set_up_globe(&mut transform, &pan.center, pan.zoom, pan.bearing, 0.0);
+        let start = start_clock(&mut transform);
         transform.move_by(&pan.offset, &linear_second()).unwrap();
-        transform.update_transitions(transform.get_latest_transition_start() + milliseconds(1000));
+        transform.update_transitions(start + milliseconds(1000));
         assert_near(pan.expected.latitude(), transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
         assert_near(pan.expected.longitude(), transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
         assert_near(
@@ -2786,10 +2815,11 @@ fn globe_fling_toward_a_pole_stays_on_its_meridian() {
         let _trace = ScopedTrace(format!("zoom {}", std_to_string(fling.zoom)));
         let mut transform = new_transform();
         set_up_globe(&mut transform, &ll(60.0, 10.0), fling.zoom, 0.0, 0.0);
+        let start = start_clock(&mut transform);
         transform.move_by(&sc(0.0, 3000.0), &linear_second()).unwrap();
         let mut latitude = 60.0;
         for frame in 1..=20 {
-            transform.update_transitions(transform.get_latest_transition_start() + milliseconds(50 * frame));
+            transform.update_transitions(start + milliseconds(50 * frame));
             assert_near(10.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
             assert!(transform.get_lat_lng(WrapMode::Wrapped).latitude() >= latitude - 1e-9, "frame {frame}");
             latitude = transform.get_lat_lng(WrapMode::Wrapped).latitude();
@@ -2810,10 +2840,11 @@ fn globe_fling_toward_a_pole_stays_on_its_meridian() {
 fn globe_fling_stops_short_of_half_a_turn() {
     let mut transform = new_transform();
     set_up_globe(&mut transform, &ll(0.0, 0.0), 0.5, 0.0, 0.0);
+    let start = start_clock(&mut transform);
     transform.move_by(&sc(-5000.0, 0.0), &linear_second()).unwrap();
     let mut longitude = 0.0;
     for frame in 1..=20 {
-        transform.update_transitions(transform.get_latest_transition_start() + milliseconds(50 * frame));
+        transform.update_transitions(start + milliseconds(50 * frame));
         assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() >= longitude - 1e-9, "frame {frame}");
         longitude = transform.get_lat_lng(WrapMode::Unwrapped).longitude();
     }
@@ -3525,10 +3556,11 @@ fn free_bearing_fling_carries_on_over_the_pole() {
         set_up_globe(&mut transform, &ll(85.0, -100.0), 1.0, 0.0, 0.0);
         transform.set_globe_free_bearing(free_bearing);
         let start = VerticalPerspectiveProjection::surface_vector(&transform.get_lat_lng(WrapMode::Wrapped));
+        let begin = start_clock(&mut transform);
         transform.move_by(&sc(0.0, 400.0), &linear_second()).unwrap();
         let mut previous = 0.0;
         for frame in 1..=20 {
-            transform.update_transitions(transform.get_latest_transition_start() + milliseconds(50 * frame));
+            transform.update_transitions(begin + milliseconds(50 * frame));
             let center = VerticalPerspectiveProjection::surface_vector(&transform.get_lat_lng(WrapMode::Wrapped));
             let distance =
                 std_clamp(start[0] * center[0] + start[1] * center[1] + start[2] * center[2], -1.0, 1.0).acos();
@@ -3649,20 +3681,22 @@ fn jump_bounds_the_pole_by_the_zoom_it_lands_on() {
 
     let mut ease = new_transform();
     set_up_globe_camera(&mut ease, &ll(10.0, 0.0), 3.0);
+    let start = start_clock(&mut ease);
     ease.ease_to(&cam().with_center(Some(ll(89.0, 30.0))), &linear_second());
-    run_to(&mut ease, 0.5);
+    run_to(&mut ease, start, 0.5);
     assert_near(47.994_753_684_245_89, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(7.785_022_180_215_378, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
     assert_near(2.442_592_415_258_865, ease.get_zoom(), 1e-6);
-    run_to(&mut ease, 1.0);
+    run_to(&mut ease, start, 1.0);
     assert_near(85.989_507_368_491_77, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(30.0, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(landing_zoom, ease.get_zoom(), 1e-6);
 
     let mut fly = new_transform();
     set_up_globe_camera(&mut fly, &ll(10.0, 0.0), 3.0);
+    let start = start_clock(&mut fly);
     fly.fly_to(&cam().with_center(Some(ll(89.0, 30.0))), &linear_second(), false);
-    run_to(&mut fly, 1.0);
+    run_to(&mut fly, start, 1.0);
     assert_near(85.989_507_368_491_32, fly.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(landing_zoom, fly.get_zoom(), 1e-6);
 }
@@ -3734,9 +3768,10 @@ fn eases_onto_and_off_the_pole() {
         let _trace = ScopedTrace(ease.name.to_owned());
         let mut transform = new_transform();
         set_up_globe_camera(&mut transform, &ease.start, ease.start_zoom);
+        let start = start_clock(&mut transform);
         transform.ease_to(&ease.camera, &linear_second());
         for half in 1..=2 {
-            run_to(&mut transform, f64::from(half) / 2.0);
+            run_to(&mut transform, start, f64::from(half) / 2.0);
             let expected = &ease.halves[(half - 1) as usize];
             assert_near(expected.latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
             assert_near(expected.longitude, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
@@ -3755,16 +3790,18 @@ fn eases_onto_and_off_the_pole() {
 fn flies_onto_the_pole() {
     let mut transform = new_transform();
     set_up_globe_camera(&mut transform, &ll(60.2, 0.0), 8.0);
+    let start = start_clock(&mut transform);
     transform.fly_to(&cam().with_center(Some(ll(90.0, 0.0))).with_zoom(Some(0.0)), &linear_second(), false);
-    run_to(&mut transform, 1.0);
+    run_to(&mut transform, start, 1.0);
     assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
     assert_near(0.0, transform.get_zoom(), 1e-9);
 
     set_up_globe_camera(&mut transform, &ll(60.0, 20.0), 2.0);
+    let start = start_clock(&mut transform);
     transform.fly_to(&cam().with_center(Some(ll(89.9, 20.0))).with_zoom(Some(0.0)), &linear_second(), false);
     for (k, latitude, zoom) in [(0.5, 77.690_906_278_984_27, 0.685_984_191_097_479_1), (1.0, 89.9, 0.0)] {
         let _trace = ScopedTrace(format!("k {}", std_to_string(k)));
-        run_to(&mut transform, k);
+        run_to(&mut transform, start, k);
         assert_near(latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
         assert_near(20.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
         assert_near(zoom, transform.get_zoom(), 1e-6);
@@ -3820,8 +3857,9 @@ fn mercator_camera_center_is_on_the_transforms_world_copy() {
     transform.jump_to(&cam().with_center(Some(ll(0.0, 179.0))).with_zoom(Some(5.0)));
     let degree = 512.0 * 32.0 / 360.0;
     transform.set_gesture_in_progress(true);
+    let start = start_clock(&mut transform);
     transform.move_by(&sc(-2.0 * degree, 0.0), &AnimationOptions::new(seconds(10))).unwrap();
-    transform.update_transitions(transform.get_latest_transition_start());
+    transform.update_transitions(start);
     assert!(transform.get_lat_lng(WrapMode::Unwrapped).longitude() < -180.0);
     let center = transform.get_camera_options(None).center.unwrap();
     assert_near(transform.get_lat_lng(WrapMode::Unwrapped).longitude(), center.longitude(), 1e-9);
@@ -3934,15 +3972,15 @@ fn independent_camera_tracks() {
     transform.jump_to(&cam().with_zoom(Some(8.0)).with_center_altitude(Some(120.0)));
     let mut zoom = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(2)) };
     let zoom_finished = counting_end(&mut zoom);
+    let zoom_start = start_clock(&mut transform);
     transform.ease_to(&cam().with_zoom(Some(12.0)), &zoom);
-    let zoom_start = transform.get_latest_transition_start();
     transform.update_transitions(zoom_start + milliseconds(500));
     assert_near(transform.get_zoom(), 9.0, 1e-5);
 
     let mut center = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(8)) };
     let center_finished = counting_end(&mut center);
+    let center_start = start_clock(&mut transform);
     transform.ease_to(&cam().with_center(Some(ll(20.0, 30.0))), &center);
-    let center_start = transform.get_latest_transition_start();
     assert_eq!(zoom_finished.get(), 0);
     transform.update_transitions(zoom_start + seconds(2));
     assert_near(transform.get_zoom(), 12.0, 1e-5);
@@ -3970,8 +4008,8 @@ fn partial_replacement_keeps_command_and_timing() {
     transform.jump_to(&cam().with_zoom(Some(8.0)));
     let mut animation = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
     let finished = counting_end(&mut animation);
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_zoom(Some(12.0)).with_bearing(Some(80.0)), &animation);
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + seconds(1));
     assert_near(transform.get_zoom(), 9.0, 1e-5);
     assert_near(bearing_degrees(&transform), 20.0, 1e-5);
@@ -3997,12 +4035,12 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     transform.jump_to(&cam().with_zoom(Some(8.0)));
     let mut flight = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
     let flight_finished = counting_end(&mut flight);
+    let start = start_clock(&mut transform);
     transform.fly_to(
         &cam().with_center(Some(ll(20.0, 30.0))).with_zoom(Some(12.0)).with_roll(Some(20.0)),
         &flight,
         false,
     );
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + seconds(1));
     assert_near(mln_math::rad2deg(transform.get_roll()), 5.0, 1e-5);
     let center = transform.get_lat_lng(WrapMode::Wrapped);
@@ -4019,8 +4057,9 @@ fn flight_and_anchor_couple_center_with_their_properties() {
     let anchor_finished = counting_end(&mut anchor_animation);
     let anchor = sc(200.0, 300.0);
     let fixed = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped).unwrap();
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_zoom(Some(12.0)).with_anchor(Some(anchor)), &anchor_animation);
-    transform.update_transitions(transform.get_latest_transition_start() + seconds(1));
+    transform.update_transitions(start + seconds(1));
     let pixel = transform.lat_lng_to_screen_coordinate(&fixed);
     assert_near(pixel.x, anchor.x, 1e-5);
     assert_near(pixel.y, anchor.y, 1e-5);
@@ -4048,9 +4087,10 @@ fn compose_padding_pitch_and_field_of_view() {
     transform.resize(Size::new(1000, 1000)).unwrap();
     transform.jump_to(&cam().with_zoom(Some(8.0)));
     let animation = AnimationOptions { easing: Some(LINEAR), ..AnimationOptions::new(seconds(4)) };
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_padding(Some(insets(300.0, 20.0, 0.0, 0.0))), &animation);
     transform.ease_to(&cam().with_pitch(Some(60.0)).with_fov(Some(45.0)), &animation);
-    let end = transform.get_latest_transition_start() + seconds(4);
+    let end = start + seconds(4);
     transform.update_transitions(end);
     assert_eq!(transform.get_state().get_edge_insets(), insets(300.0, 20.0, 0.0, 0.0));
     assert_near(mln_math::rad2deg(transform.get_field_of_view()), 45.0, 1e-5);
@@ -4123,9 +4163,9 @@ fn cancel_transitions_by_id_leaves_others_running() {
     let zoom_finished = counting_end(&mut zoom);
     let mut bearing = AnimationOptions { transition_id: Some(2), ..AnimationOptions::new(seconds(4)) };
     let bearing_finished = counting_end(&mut bearing);
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_zoom(Some(12.0)), &zoom);
     transform.ease_to(&cam().with_bearing(Some(80.0)), &bearing);
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + seconds(1));
     let zoom_at_cancel = transform.get_zoom();
     observer.changes.set(0);
@@ -4177,7 +4217,6 @@ fn fly_duration_range() {
     transform.jump_to(&cam().with_zoom(Some(0.0)));
     let animation = AnimationOptions { velocity: Some(1e-9), ..AnimationOptions::default() };
     transform.fly_to(&camera, &animation, false);
-    assert!(transform.get_latest_transition_duration() > Duration::zero());
     assert!(transform.in_transition());
     transform.cancel_transitions();
 
@@ -4199,20 +4238,20 @@ fn fly_past_max_duration_jumps() {
     let mut transform = new_transform();
     transform.resize(Size::new(512, 512)).unwrap();
     let target = cam().with_center(Some(ll(40.0, -74.0))).with_zoom(Some(10.0));
-    let derived = || {
-        let mut transform = new_transform();
-        transform.resize(Size::new(512, 512)).unwrap();
-        transform.fly_to(&target, &AnimationOptions::default(), false);
-        transform.get_latest_transition_duration()
+    let flight = |animation: AnimationOptions| {
+        duration_of(move |transform| {
+            transform.resize(Size::new(512, 512)).unwrap();
+            transform.fly_to(&target, &animation, false);
+        })
     };
-    let natural = derived();
+    let natural = flight(AnimationOptions::default());
     assert!(natural > seconds(1));
 
     // Under the cap: the same flight.
+    let capped = AnimationOptions { max_duration: Some(natural + milliseconds(1)), ..AnimationOptions::default() };
+    assert_eq!(flight(capped.clone()), natural);
     let (animation, ended) = record_end();
-    let capped = AnimationOptions { max_duration: Some(natural + milliseconds(1)), ..animation };
-    transform.fly_to(&target, &capped, false);
-    assert_eq!(transform.get_latest_transition_duration(), natural);
+    transform.fly_to(&target, &AnimationOptions { transition_end_fn: animation.transition_end_fn, ..capped }, false);
     assert!(transform.in_transition());
     transform.cancel_transitions();
     assert_eq!(outcome(&ended), Some(TransitionOutcome::Cancelled));
@@ -4233,13 +4272,15 @@ fn fly_past_max_duration_jumps() {
     }
 
     // An ease that reuses the flight keeps its duration.
-    transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
-    transform.ease_to(
-        &target,
-        &AnimationOptions { max_duration: Some(milliseconds(1)), ..AnimationOptions::new(seconds(2)) },
-    );
-    assert_eq!(transform.get_latest_transition_duration(), seconds(2));
-    assert!(transform.in_transition());
+    let ease = duration_of(|transform| {
+        transform.resize(Size::new(512, 512)).unwrap();
+        transform.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
+        transform.ease_to(
+            &target,
+            &AnimationOptions { max_duration: Some(milliseconds(1)), ..AnimationOptions::new(seconds(2)) },
+        );
+    });
+    assert_eq!(ease, seconds(2));
 }
 
 /// The friction decay rate per second for a half-life.
@@ -4265,6 +4306,35 @@ fn header_momentum() -> CameraMomentum {
 }
 
 /// Animation options whose end function keeps how the command ended.
+/// How long the command that `command` starts on a new transform runs: the
+/// least time after its start at which it has ended.
+fn duration_of(command: impl Fn(&mut Transform)) -> Duration {
+    let runs_at = |elapsed: Duration| {
+        let mut transform = new_transform();
+        let start = start_clock(&mut transform);
+        command(&mut transform);
+        transform.update_transitions(start + elapsed);
+        transform.in_transition()
+    };
+    let (mut low, mut high) = (Duration::zero(), seconds(1));
+    if !runs_at(low) {
+        return low;
+    }
+    while runs_at(high) {
+        low = high;
+        high = high + high;
+    }
+    while (high - low).count() > 1 {
+        let middle = low + Duration::from_nanos((high - low).count() / 2);
+        if runs_at(middle) {
+            low = middle;
+        } else {
+            high = middle;
+        }
+    }
+    high
+}
+
 fn record_end() -> (AnimationOptions, Arc<SyncCell<Option<TransitionEnd>>>) {
     let ended = Arc::new(SyncCell::new(None));
     let record = ended.clone();
@@ -4297,8 +4367,8 @@ fn momentum_slows_each_part_by_friction() {
         ..header_momentum()
     };
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
-    let start = transform.get_latest_transition_start();
     assert!(transform.in_transition());
 
     // A speed v that decays at rate k has moved (v / k)(1 - e^(-kt)).
@@ -4329,8 +4399,8 @@ fn momentum_pans_its_distance_on_screen() {
     transform.jump_to(&cam().with_center(Some(ll(10.0, 20.0))).with_zoom(Some(8.0)));
     let center = transform.get_lat_lng(WrapMode::Wrapped);
     let momentum = CameraMomentum { pan_velocity: Some(sc(1200.0, -500.0)), ..header_momentum() };
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
-    let start = transform.get_latest_transition_start();
     let rate = friction_rate(milliseconds(140));
 
     transform.update_transitions(start + milliseconds(100));
@@ -4355,8 +4425,8 @@ fn momentum_pans_the_globe_as_a_drag_does() {
     set_up_globe_camera(&mut transform, &ll(10.0, 20.0), 3.0);
     let start = transform.get_lat_lng(WrapMode::Wrapped);
     let momentum = CameraMomentum { pan_velocity: Some(sc(0.0, 800.0)), ..header_momentum() };
+    let begin = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
-    let begin = transform.get_latest_transition_start();
     transform.update_transitions(begin + seconds(3));
     assert!(!transform.in_transition());
     let end = transform.get_lat_lng(WrapMode::Wrapped);
@@ -4378,8 +4448,8 @@ fn momentum_zoom_keeps_the_globes_minimum_at_the_latitude() {
         let start = transform.get_zoom();
         assert!(start < 0.0, "{start}");
         let momentum = CameraMomentum { zoom_velocity: Some(zoom_velocity), ..header_momentum() };
+        let begin = start_clock(&mut transform);
         transform.start_momentum(&momentum, &AnimationOptions::default());
-        let begin = transform.get_latest_transition_start();
         transform.update_transitions(begin + milliseconds(16));
         let zoom = transform.get_zoom();
         let min_zoom =
@@ -4410,14 +4480,16 @@ fn momentum_follows_an_eased_glide() {
         ..header_momentum()
     };
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
+    transform.update_transitions(start + milliseconds(250));
     assert_near(transform.get_zoom(), 8.0 - 0.5, 1e-6);
     transform.cancel_transitions();
     assert_near(ended.get().expect("the momentum ended").velocity.zoom, -2.0, 1e-6);
 
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
-    transform.update_transitions(transform.get_latest_transition_start() + seconds(1));
+    transform.update_transitions(start + seconds(1));
     assert_near(transform.get_zoom(), 8.0 - 0.5 - 2.0, 1e-9);
     assert!(!transform.in_transition());
 }
@@ -4437,8 +4509,9 @@ fn momentum_keeps_its_anchor_in_place() {
     let anchor = sc(800.0, 300.0);
     let ground = transform.screen_coordinate_to_lat_lng(&anchor, WrapMode::Wrapped).unwrap();
     let momentum = CameraMomentum { pitch_velocity: Some(20.0), pitch_anchor: Some(anchor), ..header_momentum() };
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
-    transform.update_transitions(transform.get_latest_transition_start() + seconds(3));
+    transform.update_transitions(start + seconds(3));
     assert!(pitch_degrees(&transform) > 20.0);
     let point = transform.lat_lng_to_screen_coordinate(&ground);
     // Restoring the altitude after the correction moves the view by far
@@ -4459,8 +4532,9 @@ fn momentum_caps_its_distance() {
         zoom_decay: MomentumDecay { max_distance: 2.5, ..MomentumDecay::default() },
         ..header_momentum()
     };
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &AnimationOptions::default());
-    transform.update_transitions(transform.get_latest_transition_start() + seconds(3));
+    transform.update_transitions(start + seconds(3));
     assert_near(transform.get_zoom(), 10.5, 1e-9);
     assert!(!transform.in_transition());
 }
@@ -4478,8 +4552,9 @@ fn momentum_reports_its_speed_when_cancelled() {
         ..header_momentum()
     };
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
-    transform.update_transitions(transform.get_latest_transition_start() + seconds(1));
+    transform.update_transitions(start + seconds(1));
     transform.cancel_transitions();
     let ended = ended.get().expect("the momentum ended");
     assert_eq!(ended.outcome, TransitionOutcome::Cancelled);
@@ -4504,8 +4579,8 @@ fn momentum_parts_give_way_to_commands() {
         ..header_momentum()
     };
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
-    let start = transform.get_latest_transition_start();
     assert!(transform.is_panning());
     assert!(transform.is_scaling());
 
@@ -4538,8 +4613,8 @@ fn momentum_settles_on_targets() {
     };
     let mut animation = AnimationOptions::default();
     let finished = counting_end(&mut animation);
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + seconds(1));
     assert_near(bearing_degrees(&transform), 88.0, 1e-9);
     assert_eq!(finished.get(), 0);
@@ -4590,8 +4665,9 @@ fn momentum_stops_a_part_that_limits_hold() {
         ..header_momentum()
     };
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.start_momentum(&momentum, &animation);
-    transform.update_transitions(transform.get_latest_transition_start() + milliseconds(20));
+    transform.update_transitions(start + milliseconds(20));
     assert!(!transform.in_transition());
     assert_eq!(ended.get().expect("the momentum ended").velocity.zoom, 0.0);
     assert_near(transform.get_zoom(), 10.0, 1e-9);
@@ -4667,8 +4743,8 @@ fn outcome(ended: &Arc<SyncCell<Option<TransitionEnd>>>) -> Option<TransitionOut
 fn an_ease_that_runs_to_its_end_completes() {
     let mut transform = outcome_transform();
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.ease_to(&cam().with_zoom(Some(10.0)), &AnimationOptions { duration: Some(seconds(1)), ..animation });
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + milliseconds(500));
     assert_eq!(outcome(&ended), None);
     transform.update_transitions(start + seconds(1));
@@ -4707,11 +4783,11 @@ fn a_command_that_keeps_some_fields_completes_or_is_cancelled() {
     // Losing the zoom leaves the bearing animating to its end: completed.
     let mut transform = outcome_transform();
     let (both, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform.ease_to(
         &cam().with_zoom(Some(10.0)).with_bearing(Some(90.0)),
         &AnimationOptions { duration: Some(seconds(1)), ..both.clone() },
     );
-    let start = transform.get_latest_transition_start();
     transform.jump_to(&cam().with_zoom(Some(6.0)));
     assert_eq!(outcome(&ended), None);
     transform.update_transitions(start + seconds(1));
@@ -4788,8 +4864,8 @@ fn camera_changes_report_whether_a_command_or_a_momentum_made_them() {
 
     // An ease and a momentum run together; each change that ends one
     // reports that one's source.
+    let ease_start = start_clock(&mut transform);
     transform.ease_to(&cam().with_zoom(Some(10.0)), &AnimationOptions::new(seconds(1)));
-    let ease_start = transform.get_latest_transition_start();
     transform.start_momentum(
         // A 1.4 s glide, which outlasts the ease.
         &CameraMomentum { pan_velocity: Some(sc(10_000.0, 0.0)), ..CameraMomentum::default() },
@@ -4850,6 +4926,7 @@ fn a_gesture_reports_gesture_then_momentum_and_lasts_until_its_glide_ends() {
 #[test]
 fn a_new_gesture_catches_the_last_ones_glide_and_keeps_the_gesture_going() {
     let mut transform = outcome_transform();
+    let start = start_clock(&mut transform);
     transform.apply_camera_delta(&CameraDelta { offset: Some(sc(10.0, 0.0)), ..delta(GesturePhase::Begin) }).unwrap();
     let (animation, ended) = record_end();
     transform
@@ -4859,7 +4936,6 @@ fn a_new_gesture_catches_the_last_ones_glide_and_keeps_the_gesture_going() {
             ..delta(GesturePhase::End)
         })
         .unwrap();
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + milliseconds(100));
 
     // A press mid-glide: the glide is cancelled, with its speed, and the new
@@ -4947,6 +5023,7 @@ fn a_delta_pans_and_zooms_around_its_anchor_and_ends_once() {
 
     // Animated, both commands end the delta's one end function together.
     let (animation, ended) = record_end();
+    let start = start_clock(&mut transform);
     transform
         .apply_camera_delta(&CameraDelta {
             offset: Some(sc(10.0, 0.0)),
@@ -4955,7 +5032,6 @@ fn a_delta_pans_and_zooms_around_its_anchor_and_ends_once() {
             ..CameraDelta::default()
         })
         .unwrap();
-    let start = transform.get_latest_transition_start();
     transform.update_transitions(start + milliseconds(500));
     assert_eq!(outcome(&ended), None);
     transform.update_transitions(start + seconds(1));
@@ -5107,22 +5183,29 @@ fn with_a_frame_time_commands_start_at_the_latest_frame() {
         &cam().with_zoom(Some(9.0)),
         &AnimationOptions { duration: Some(milliseconds(160)), easing: Some(linear), ..AnimationOptions::default() },
     );
-    assert_eq!(transform.get_latest_transition_start(), frame);
     transform.update_transitions(frame + milliseconds(16));
     assert_near(transform.get_zoom(), 8.1, 1e-4);
 
-    // A momentum starts there too.
+    // A momentum starts there too: from a frame an hour ahead, it still
+    // glides one frame after that frame.
+    let frame = start_clock(&mut transform);
     transform.start_momentum(
         &CameraMomentum { pan_velocity: Some(sc(1000.0, 0.0)), ..CameraMomentum::default() },
         &AnimationOptions::default(),
     );
-    assert_eq!(transform.get_latest_transition_start(), frame);
+    transform.update_transitions(frame + milliseconds(16));
+    assert!(transform.in_transition());
+    transform.cancel_transitions();
 
-    // Without one, commands start at Clock::now().
+    // Without one, commands start at Clock::now(): neither earlier nor at the
+    // last frame's time, an hour ahead.
     transform.set_frame_time(None);
     let before = Clock::now();
     transform.ease_to(&cam().with_bearing(Some(10.0)), &AnimationOptions::new(seconds(1)));
-    assert!(transform.get_latest_transition_start() >= before);
+    transform.update_transitions(before);
+    assert_near(bearing_degrees(&transform), 0.0, 1e-12);
+    transform.update_transitions(Clock::now() + seconds(1));
+    assert_near(bearing_degrees(&transform), 10.0, 1e-9);
 }
 
 #[test]
@@ -5133,10 +5216,9 @@ fn a_stale_frame_time_doesnt_start_commands_in_the_past() {
     assert_eq!(transform.frame_time(), None);
     let before = Clock::now();
     transform.ease_to(&cam().with_zoom(Some(9.0)), &AnimationOptions::new(milliseconds(300)));
-    let start = transform.get_latest_transition_start();
-    assert!(start >= before, "{start:?} before {before:?}");
-    // So the ease hasn't run its course by the next frame.
-    transform.update_transitions(start + milliseconds(16));
+    // It starts no earlier than now, so it hasn't run its course by the next
+    // frame.
+    transform.update_transitions(before + milliseconds(16));
     assert!(transform.in_transition());
     assert!(transform.get_zoom() < 9.0);
 

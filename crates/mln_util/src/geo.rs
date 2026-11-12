@@ -282,11 +282,6 @@ impl LatLngBounds {
         );
     }
 
-    pub fn extend_bounds(&mut self, bounds: &LatLngBounds) {
-        self.extend(&bounds.sw);
-        self.extend(&bounds.ne);
-    }
-
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sw.latitude() > self.ne.latitude() || self.sw.longitude() > self.ne.longitude()
@@ -454,11 +449,6 @@ impl EdgeInsets {
     #[must_use]
     pub fn right(&self) -> f64 {
         self.right
-    }
-
-    #[must_use]
-    pub fn is_flush(&self) -> bool {
-        self.top == 0.0 && self.left == 0.0 && self.bottom == 0.0 && self.right == 0.0
     }
 
     #[must_use]

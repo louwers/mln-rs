@@ -9,7 +9,6 @@
 //! generator output.
 
 pub mod defaults;
-pub mod difftest;
 pub mod emit_layer;
 pub mod emit_properties;
 pub mod emit_root_properties;

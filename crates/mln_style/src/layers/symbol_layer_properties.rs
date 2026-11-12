@@ -366,7 +366,7 @@ crate::data_driven_paint_property!(
     /// `struct TextColor : DataDrivenPaintProperty<Color, attributes::fill_color, uniforms::fill_color, true>`:
     /// `static Color defaultValue() { return Color::black(); }`,
     /// `static constexpr const char *name() { return "text-color"; }`, ...
-    pub struct TextColor: Color = Color::black(), overridable = true
+    pub struct TextColor: Color = Color::black()
 );
 
 impl TextColor {

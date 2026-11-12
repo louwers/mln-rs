@@ -158,7 +158,7 @@ impl RenderRasterLayer {
         changes: &mut UniqueChangeRequestVec,
     ) {
         if let Some(group) = &self.image_layer_group {
-            self.base.stats.drawables_removed += group.borrow_mut().clear_drawables();
+            group.borrow_mut().clear_drawables();
         }
 
         // C++ dereferences the bucket unconditionally; it is missing until
@@ -226,7 +226,6 @@ impl RenderRasterLayer {
                 drawable.set_tile_id(OverscaledTileID::new(tile_id.canonical.z, tile_id.wrap, tile_id.canonical));
                 drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
                 layer_group.add_drawable(drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
     }
@@ -327,7 +326,7 @@ impl RenderLayer for RenderRasterLayer {
     fn release_render_data(&mut self) {
         crate::render_layer::release_render_data_base(self);
         if let Some(layer_group) = &self.image_layer_group {
-            self.base.stats.drawables_removed += layer_group.borrow_mut().clear_drawables();
+            layer_group.borrow_mut().clear_drawables();
         }
         self.textures.clear();
         self.image_data = None;
@@ -372,10 +371,10 @@ impl RenderLayer for RenderRasterLayer {
         let image_data = self.image_data.clone();
         if render_tiles.is_none() && image_data.is_none() {
             if let Some(layer_group) = &self.base.layer_group {
-                self.base.stats.drawables_removed += layer_group.borrow_mut().clear_drawables();
+                layer_group.borrow_mut().clear_drawables();
             }
             if let Some(layer_group) = &self.image_layer_group {
-                self.base.stats.drawables_removed += layer_group.borrow_mut().clear_drawables();
+                layer_group.borrow_mut().clear_drawables();
             }
             self.textures.clear();
             return;
@@ -417,10 +416,9 @@ impl RenderLayer for RenderRasterLayer {
             let mut group = layer_group.borrow_mut();
             if let Some(tile_layer_group) = group.as_tile_layer_group_mut() {
                 let base = &self.base;
-                let removed = tile_layer_group.remove_drawables_if(|drawable| {
+                tile_layer_group.remove_drawables_if(|drawable| {
                     drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
                 });
-                self.base.stats.drawables_removed += removed;
             }
         } else {
             // Set up a tile layer group
@@ -608,7 +606,6 @@ impl RenderLayer for RenderRasterLayer {
                 drawable.set_tile_id(tile_id);
                 drawable.set_layer_tweaker(layer_tweaker.as_ref().and_then(layer_tweaker_slot));
                 tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
     }

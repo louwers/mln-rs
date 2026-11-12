@@ -569,10 +569,9 @@ impl RenderLayer for RenderCircleLayer {
             let mut group = layer_group.borrow_mut();
             let tile_layer_group = group.as_tile_layer_group_mut().expect("circle layer group is a TileLayerGroup");
             let base = &self.base;
-            let removed = tile_layer_group.remove_drawables_if(|drawable| {
+            tile_layer_group.remove_drawables_if(|drawable| {
                 drawable.get_tile_id().is_some_and(|id| !base.render_tile_ids.contains_key(&id))
             });
-            self.base.stats.drawables_removed += removed;
         }
 
         let evaluated_properties = self.base.evaluated_properties.clone();
@@ -713,7 +712,6 @@ impl RenderLayer for RenderCircleLayer {
                 drawable.set_render_tile(drawable_render_tile_slot(render_tiles.owner(), tile));
 
                 tile_layer_group.add_drawable(render_pass, &tile_id, drawable);
-                self.base.stats.drawables_added += 1;
             }
         }
     }

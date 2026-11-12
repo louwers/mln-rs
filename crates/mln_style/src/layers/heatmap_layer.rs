@@ -12,7 +12,6 @@ use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serial
 use crate::layers::heatmap_layer_properties::{
     HeatmapColor, HeatmapIntensity, HeatmapOpacity, HeatmapPaintProperties, HeatmapRadius, HeatmapWeight,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -118,11 +117,6 @@ impl HeatmapLayer {
     }
 
     #[must_use]
-    pub fn get_default_heatmap_intensity() -> PropertyValue<f32> {
-        PropertyValue::Constant(HeatmapIntensity::default_value())
-    }
-
-    #[must_use]
     pub fn get_heatmap_intensity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HeatmapIntensity>().value
     }
@@ -145,11 +139,6 @@ impl HeatmapLayer {
     #[must_use]
     pub fn get_heatmap_intensity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapIntensity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_heatmap_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(HeatmapOpacity::default_value())
     }
 
     #[must_use]
@@ -178,11 +167,6 @@ impl HeatmapLayer {
     }
 
     #[must_use]
-    pub fn get_default_heatmap_radius() -> PropertyValue<f32> {
-        PropertyValue::Constant(HeatmapRadius::default_value())
-    }
-
-    #[must_use]
     pub fn get_heatmap_radius(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HeatmapRadius>().value
     }
@@ -205,11 +189,6 @@ impl HeatmapLayer {
     #[must_use]
     pub fn get_heatmap_radius_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HeatmapRadius>().options
-    }
-
-    #[must_use]
-    pub fn get_default_heatmap_weight() -> PropertyValue<f32> {
-        PropertyValue::Constant(HeatmapWeight::default_value())
     }
 
     #[must_use]

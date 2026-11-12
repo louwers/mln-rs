@@ -12,7 +12,6 @@ use crate::layers::raster_layer_properties::{
     RasterBrightnessMax, RasterBrightnessMin, RasterContrast, RasterFadeDuration, RasterHueRotate, RasterOpacity,
     RasterPaintProperties, RasterResampling, RasterSaturation, Resampling,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -82,11 +81,6 @@ impl RasterLayer {
     // Paint properties
 
     #[must_use]
-    pub fn get_default_raster_brightness_max() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterBrightnessMax::default_value())
-    }
-
-    #[must_use]
     pub fn get_raster_brightness_max(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterBrightnessMax>().value
     }
@@ -109,11 +103,6 @@ impl RasterLayer {
     #[must_use]
     pub fn get_raster_brightness_max_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterBrightnessMax>().options
-    }
-
-    #[must_use]
-    pub fn get_default_raster_brightness_min() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterBrightnessMin::default_value())
     }
 
     #[must_use]
@@ -142,11 +131,6 @@ impl RasterLayer {
     }
 
     #[must_use]
-    pub fn get_default_raster_contrast() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterContrast::default_value())
-    }
-
-    #[must_use]
     pub fn get_raster_contrast(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterContrast>().value
     }
@@ -169,11 +153,6 @@ impl RasterLayer {
     #[must_use]
     pub fn get_raster_contrast_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterContrast>().options
-    }
-
-    #[must_use]
-    pub fn get_default_raster_fade_duration() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterFadeDuration::default_value())
     }
 
     #[must_use]
@@ -202,11 +181,6 @@ impl RasterLayer {
     }
 
     #[must_use]
-    pub fn get_default_raster_hue_rotate() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterHueRotate::default_value())
-    }
-
-    #[must_use]
     pub fn get_raster_hue_rotate(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterHueRotate>().value
     }
@@ -229,11 +203,6 @@ impl RasterLayer {
     #[must_use]
     pub fn get_raster_hue_rotate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterHueRotate>().options
-    }
-
-    #[must_use]
-    pub fn get_default_raster_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterOpacity::default_value())
     }
 
     #[must_use]
@@ -262,11 +231,6 @@ impl RasterLayer {
     }
 
     #[must_use]
-    pub fn get_default_raster_resampling() -> PropertyValue<RasterResamplingType> {
-        PropertyValue::Constant(RasterResampling::default_value())
-    }
-
-    #[must_use]
     pub fn get_raster_resampling(&self) -> &PropertyValue<RasterResamplingType> {
         &self.impl_().paint.get::<RasterResampling>().value
     }
@@ -292,11 +256,6 @@ impl RasterLayer {
     }
 
     #[must_use]
-    pub fn get_default_raster_saturation() -> PropertyValue<f32> {
-        PropertyValue::Constant(RasterSaturation::default_value())
-    }
-
-    #[must_use]
     pub fn get_raster_saturation(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<RasterSaturation>().value
     }
@@ -319,11 +278,6 @@ impl RasterLayer {
     #[must_use]
     pub fn get_raster_saturation_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<RasterSaturation>().options
-    }
-
-    #[must_use]
-    pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
-        PropertyValue::Constant(Resampling::default_value())
     }
 
     #[must_use]

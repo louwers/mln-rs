@@ -50,8 +50,6 @@ fn a_thread_keeps_its_object_on_the_creating_threads_loop() {
     let thread = Thread::new("Test", move |_| Counter { count: Cell::new(0), total: t });
     let main = std::thread::current().id();
     let seen = Arc::new(Mutex::new(Vec::new()));
-    // Pausing would block the only thread; it does nothing.
-    thread.pause();
     for i in 0..10 {
         let seen = seen.clone();
         thread.actor().invoke(move |counter: &Counter| {
@@ -60,7 +58,6 @@ fn a_thread_keeps_its_object_on_the_creating_threads_loop() {
             seen.lock().unwrap().push(i);
         });
     }
-    thread.resume();
     assert!(seen.lock().unwrap().is_empty());
     run_loop.wait_for_empty();
     assert_eq!(*seen.lock().unwrap(), (0..10).collect::<Vec<_>>());

@@ -16,14 +16,12 @@ name = "mln_actor"
 doctest = false
 
 [dependencies]
-feature.workspace = true
 mln_util.workspace = true
 
-# One test at a time (RUST_TEST_THREADS in .cargo/config.toml).
-# Ported C++ gtests (test/actor, test/platform and the thread/loop parts of
-# test/util); markers `// gtest: Group.Name`. One test at a time
-# (.cargo/config.toml), as gtest runs them: they share the background pool,
-# the sequenced schedulers and its exception handler.
+# Ported C++ gtests (test/actor and the thread/loop parts of test/util);
+# markers `// gtest: Group.Name`. One test at a time (RUST_TEST_THREADS in
+# .cargo/config.toml), as gtest runs them: they share the background pool and
+# the sequenced schedulers.
 [[test]]
 name = "mln_actor_gtest"
 path = "tests/gtest/main.rs"

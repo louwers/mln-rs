@@ -2,11 +2,9 @@
 // src/mln/renderer/sources/render_custom_vector_source.cpp, with ffi patch
 // 0052's FastPFOR option for MLT tiles.
 
-use std::any::Any;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use mln_actor::TaggedScheduler;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source::{self, static_immutable_cast};
 use mln_style::source_impl::Impl as _;
@@ -31,9 +29,9 @@ pub struct RenderCustomVectorSource {
 impl RenderCustomVectorSource {
     /// `RenderCustomVectorSource(Immutable<style::CustomVectorSource::Impl>, const TaggedScheduler&)`.
     #[must_use]
-    pub fn new(impl_: Arc<custom_vector_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
+    pub fn new(impl_: Arc<custom_vector_source::Impl>) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
-        RenderCustomVectorSource { tile_source: RenderTileSource::new(impl_, thread_pool), fast_pfor_enabled: false }
+        RenderCustomVectorSource { tile_source: RenderTileSource::new(impl_), fast_pfor_enabled: false }
     }
 
     /// `impl()`.
@@ -53,10 +51,6 @@ impl RenderSource for RenderCustomVectorSource {
 
     fn base_mut(&mut self) -> &mut RenderSourceBase {
         &mut self.tile_source.base
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 
     fn is_loaded(&self) -> bool {

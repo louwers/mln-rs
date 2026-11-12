@@ -12,7 +12,6 @@ use crate::layers::circle_layer_properties::{
     CircleBlur, CircleColor, CircleOpacity, CirclePaintProperties, CirclePitchAlignment, CirclePitchScale, CircleRadius,
     CircleSortKey, CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate, CircleTranslateAnchor,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -83,11 +82,6 @@ impl CircleLayer {
     // Layout properties
 
     #[must_use]
-    pub fn get_default_circle_sort_key() -> PropertyValue<f32> {
-        PropertyValue::Constant(CircleSortKey::default_value())
-    }
-
-    #[must_use]
     pub fn get_circle_sort_key(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<CircleSortKey>()
     }
@@ -102,11 +96,6 @@ impl CircleLayer {
     }
 
     // Paint properties
-
-    #[must_use]
-    pub fn get_default_circle_blur() -> PropertyValue<f32> {
-        PropertyValue::Constant(CircleBlur::default_value())
-    }
 
     #[must_use]
     pub fn get_circle_blur(&self) -> &PropertyValue<f32> {
@@ -131,11 +120,6 @@ impl CircleLayer {
     #[must_use]
     pub fn get_circle_blur_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleBlur>().options
-    }
-
-    #[must_use]
-    pub fn get_default_circle_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(CircleColor::default_value())
     }
 
     #[must_use]
@@ -164,11 +148,6 @@ impl CircleLayer {
     }
 
     #[must_use]
-    pub fn get_default_circle_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(CircleOpacity::default_value())
-    }
-
-    #[must_use]
     pub fn get_circle_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleOpacity>().value
     }
@@ -191,11 +170,6 @@ impl CircleLayer {
     #[must_use]
     pub fn get_circle_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleOpacity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_circle_pitch_alignment() -> PropertyValue<AlignmentType> {
-        PropertyValue::Constant(CirclePitchAlignment::default_value())
     }
 
     #[must_use]
@@ -224,11 +198,6 @@ impl CircleLayer {
     }
 
     #[must_use]
-    pub fn get_default_circle_pitch_scale() -> PropertyValue<CirclePitchScaleType> {
-        PropertyValue::Constant(CirclePitchScale::default_value())
-    }
-
-    #[must_use]
     pub fn get_circle_pitch_scale(&self) -> &PropertyValue<CirclePitchScaleType> {
         &self.impl_().paint.get::<CirclePitchScale>().value
     }
@@ -251,11 +220,6 @@ impl CircleLayer {
     #[must_use]
     pub fn get_circle_pitch_scale_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CirclePitchScale>().options
-    }
-
-    #[must_use]
-    pub fn get_default_circle_radius() -> PropertyValue<f32> {
-        PropertyValue::Constant(CircleRadius::default_value())
     }
 
     #[must_use]
@@ -284,11 +248,6 @@ impl CircleLayer {
     }
 
     #[must_use]
-    pub fn get_default_circle_stroke_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(CircleStrokeColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_circle_stroke_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<CircleStrokeColor>().value
     }
@@ -311,11 +270,6 @@ impl CircleLayer {
     #[must_use]
     pub fn get_circle_stroke_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleStrokeColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_circle_stroke_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(CircleStrokeOpacity::default_value())
     }
 
     #[must_use]
@@ -344,11 +298,6 @@ impl CircleLayer {
     }
 
     #[must_use]
-    pub fn get_default_circle_stroke_width() -> PropertyValue<f32> {
-        PropertyValue::Constant(CircleStrokeWidth::default_value())
-    }
-
-    #[must_use]
     pub fn get_circle_stroke_width(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleStrokeWidth>().value
     }
@@ -374,11 +323,6 @@ impl CircleLayer {
     }
 
     #[must_use]
-    pub fn get_default_circle_translate() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(CircleTranslate::default_value())
-    }
-
-    #[must_use]
     pub fn get_circle_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<CircleTranslate>().value
     }
@@ -401,11 +345,6 @@ impl CircleLayer {
     #[must_use]
     pub fn get_circle_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleTranslate>().options
-    }
-
-    #[must_use]
-    pub fn get_default_circle_translate_anchor() -> PropertyValue<TranslateAnchorType> {
-        PropertyValue::Constant(CircleTranslateAnchor::default_value())
     }
 
     #[must_use]

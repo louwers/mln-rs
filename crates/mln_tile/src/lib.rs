@@ -1,8 +1,8 @@
 //! Ports the tile data side of `src/mln/tile`:
 //!
 //! - `vector_mvt_tile_data.{hpp,cpp}` → [`vector_mvt_tile_data`]
-//!   (`VectorMVTTileData`, `VectorMVTTileLayer`, `VectorMVTTileFeature` on
-//!   `//vendor/vector-tile`),
+//!   (`VectorMVTTileData`, `VectorMVTTileLayer`, `VectorMVTTileFeature`) on
+//!   the fast-mvt reader,
 //! - `vector_mlt_tile_data.{hpp,cpp}` → [`vector_mlt_tile_data`]
 //!   (`VectorMLTTileData`, `VectorMLTTileLayer`, `VectorMLTTileFeature`) on
 //!   [`mlt`], the C++ MLT decoder's output model filled by the mlt-core crate,
@@ -17,19 +17,20 @@
 //! the geometry functions. The rest of `tile/` (Tile, `GeometryTile`, the
 //! workers, ...) depends on the renderer and goes into a higher crate.
 
+mod error;
 pub mod geometry_tile_data;
 pub mod mlt;
 pub mod stl_algo;
 pub mod vector_mlt_tile_data;
 pub mod vector_mvt_tile_data;
 
+pub use error::Error;
 pub use geometry_tile_data::{
     classify_rings, convert_feature, convert_geometry, convert_geometry_to_tile, fixup_polygons, limit_holes,
     round_polygon_corners, to_geometry_collection,
 };
 pub use vector_mlt_tile_data::{VectorMLTTileData, VectorMLTTileFeature, VectorMLTTileLayer};
 pub use vector_mvt_tile_data::{VectorMVTTileData, VectorMVTTileFeature, VectorMVTTileLayer};
-pub use vector_tile::Error;
 
 #[cfg(test)]
 mod malformed_tile_test;

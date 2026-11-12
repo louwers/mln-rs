@@ -12,7 +12,6 @@ use crate::layer::{self, ImplBase, Layer, LayerTypeInfo, layer_type_info, serial
 use crate::layers::background_layer_properties::{
     BackgroundColor, BackgroundOpacity, BackgroundPaintProperties, BackgroundPattern,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -82,11 +81,6 @@ impl BackgroundLayer {
     // Paint properties
 
     #[must_use]
-    pub fn get_default_background_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(BackgroundColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_background_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<BackgroundColor>().value
     }
@@ -112,11 +106,6 @@ impl BackgroundLayer {
     }
 
     #[must_use]
-    pub fn get_default_background_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(BackgroundOpacity::default_value())
-    }
-
-    #[must_use]
     pub fn get_background_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<BackgroundOpacity>().value
     }
@@ -139,11 +128,6 @@ impl BackgroundLayer {
     #[must_use]
     pub fn get_background_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<BackgroundOpacity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_background_pattern() -> PropertyValue<Image> {
-        PropertyValue::Constant(BackgroundPattern::default_value())
     }
 
     #[must_use]

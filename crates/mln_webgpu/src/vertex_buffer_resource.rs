@@ -5,7 +5,7 @@
 // updated in place, so the buffer sits behind a `RefCell`.
 
 use std::any::Any;
-use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::cell::{Cell, Ref, RefCell};
 
 use mln_gfx::vertex_buffer;
 use mln_util::time::Instant;
@@ -33,9 +33,6 @@ impl VertexBufferResource {
     }
     pub fn get_buffer(&self) -> Ref<'_, BufferResource> {
         self.buffer.borrow()
-    }
-    pub fn get_buffer_mut(&self) -> RefMut<'_, BufferResource> {
-        self.buffer.borrow_mut()
     }
     /// `std::chrono::duration<double> lastUpdated` is value-initialized
     /// (zero) in C++: "never" is `None` here, earlier than any `Instant`.
@@ -92,14 +89,6 @@ impl IndexBufferResource {
     }
     pub fn get_buffer(&self) -> Ref<'_, BufferResource> {
         self.buffer.borrow()
-    }
-    pub fn update(&self, data: &[u8]) {
-        let mut buffer = self.buffer.borrow_mut();
-        buffer.update(data, 0);
-        if buffer.is_valid() {
-            let mut stats = buffer.get_context().rendering_stats_mut();
-            stats.index_update_bytes = stats.index_update_bytes.wrapping_add(data.len());
-        }
     }
 }
 

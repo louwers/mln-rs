@@ -15,7 +15,6 @@ use crate::layers::line_layer_properties::{
     LineOffset, LineOpacity, LinePaintProperties, LinePattern, LineRoundLimit, LineSortKey, LineTranslate,
     LineTranslateAnchor, LineWidth,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -86,11 +85,6 @@ impl LineLayer {
     // Layout properties
 
     #[must_use]
-    pub fn get_default_line_cap() -> PropertyValue<LineCapType> {
-        PropertyValue::Constant(LineCap::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_cap(&self) -> &PropertyValue<LineCapType> {
         self.impl_().layout.get::<LineCap>()
     }
@@ -102,11 +96,6 @@ impl LineLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<LineCap>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_line_join() -> PropertyValue<LineJoinType> {
-        PropertyValue::Constant(LineJoin::default_value())
     }
 
     #[must_use]
@@ -124,11 +113,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_miter_limit() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineMiterLimit::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_miter_limit(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<LineMiterLimit>()
     }
@@ -140,11 +124,6 @@ impl LineLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<LineMiterLimit>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_line_round_limit() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineRoundLimit::default_value())
     }
 
     #[must_use]
@@ -162,11 +141,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_sort_key() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineSortKey::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_sort_key(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<LineSortKey>()
     }
@@ -181,11 +155,6 @@ impl LineLayer {
     }
 
     // Paint properties
-
-    #[must_use]
-    pub fn get_default_line_blur() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineBlur::default_value())
-    }
 
     #[must_use]
     pub fn get_line_blur(&self) -> &PropertyValue<f32> {
@@ -210,11 +179,6 @@ impl LineLayer {
     #[must_use]
     pub fn get_line_blur_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineBlur>().options
-    }
-
-    #[must_use]
-    pub fn get_default_line_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(LineColor::default_value())
     }
 
     #[must_use]
@@ -243,11 +207,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_dasharray() -> PropertyValue<Vec<f32>> {
-        PropertyValue::Constant(LineDasharray::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_dasharray(&self) -> &PropertyValue<Vec<f32>> {
         &self.impl_().paint.get::<LineDasharray>().value
     }
@@ -270,11 +229,6 @@ impl LineLayer {
     #[must_use]
     pub fn get_line_dasharray_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineDasharray>().options
-    }
-
-    #[must_use]
-    pub fn get_default_line_gap_width() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineGapWidth::default_value())
     }
 
     #[must_use]
@@ -303,11 +257,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_gradient() -> ColorRampPropertyValue {
-        ColorRampPropertyValue::default()
-    }
-
-    #[must_use]
     pub fn get_line_gradient(&self) -> &ColorRampPropertyValue {
         &self.impl_().paint.get::<LineGradient>().value
     }
@@ -330,11 +279,6 @@ impl LineLayer {
     #[must_use]
     pub fn get_line_gradient_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineGradient>().options
-    }
-
-    #[must_use]
-    pub fn get_default_line_offset() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineOffset::default_value())
     }
 
     #[must_use]
@@ -363,11 +307,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineOpacity::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<LineOpacity>().value
     }
@@ -390,11 +329,6 @@ impl LineLayer {
     #[must_use]
     pub fn get_line_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineOpacity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_line_pattern() -> PropertyValue<Image> {
-        PropertyValue::Constant(LinePattern::default_value())
     }
 
     #[must_use]
@@ -423,11 +357,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_translate() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(LineTranslate::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<LineTranslate>().value
     }
@@ -453,11 +382,6 @@ impl LineLayer {
     }
 
     #[must_use]
-    pub fn get_default_line_translate_anchor() -> PropertyValue<TranslateAnchorType> {
-        PropertyValue::Constant(LineTranslateAnchor::default_value())
-    }
-
-    #[must_use]
     pub fn get_line_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<LineTranslateAnchor>().value
     }
@@ -480,11 +404,6 @@ impl LineLayer {
     #[must_use]
     pub fn get_line_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<LineTranslateAnchor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_line_width() -> PropertyValue<f32> {
-        PropertyValue::Constant(LineWidth::default_value())
     }
 
     #[must_use]

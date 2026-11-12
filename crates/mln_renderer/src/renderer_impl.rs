@@ -156,8 +156,6 @@ impl RendererImpl {
         parameters.evaluated_light = render_tree_parameters.light.clone(); // conformance
         parameters.opaque_pass_cutoff = render_tree_parameters.opaque_pass_cut_off;
 
-        let layer_render_items = render_tree.get_layer_render_item_map();
-
         // - UPLOAD PASS ---------------------------------------------------
         // Uploads all required buffers and images before we do any actual
         // rendering.
@@ -168,9 +166,6 @@ impl RendererImpl {
             // Update all clipping IDs + upload buckets.
             for item in render_tree.get_source_render_items() {
                 item.upload(&*upload_pass);
-            }
-            for item in layer_render_items.values() {
-                item.layer.borrow_mut().upload(&*upload_pass);
             }
             static_data.upload(&*upload_pass);
             parameters.line_atlas.borrow_mut().upload(&*upload_pass);
@@ -365,22 +360,6 @@ impl RendererImpl {
                     parameters.current_layer -= 1;
                 }
             });
-
-            // Finally, render any legacy layers which have not been converted
-            // to drawables. Note that they may be out of order, this is just
-            // a temporary fix for `RenderLocationIndicatorLayer` (#2216)
-            parameters.depth_range_size = 1.0 - ((layer_render_items.len() + 2) * num_sublayers) as f32 * depth_epsilon;
-            let mut i: i32 = layer_render_items.len() as i32 - 1;
-            for item in layer_render_items.values() {
-                if i < 0 {
-                    break;
-                }
-                parameters.current_layer = i as u32;
-                if item.has_render_pass(parameters.pass) {
-                    item.layer.borrow_mut().render(&mut parameters);
-                }
-                i -= 1;
-            }
         }
 
         // drawableAtmospherePass

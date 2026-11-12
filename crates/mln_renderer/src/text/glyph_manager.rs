@@ -672,11 +672,6 @@ impl GlyphManager {
         let faces = self.font_faces.borrow();
         faces.as_ref()?.iter().find(|face| face.type_ == type_)?.data.clone()
     }
-
-    /// The glyph ids a requestor asked for (helper for tests).
-    pub fn has_glyph(&self, font_stack: &FontStack, glyph_id: GlyphID) -> bool {
-        self.entries.borrow().get(font_stack).is_some_and(|entry| entry.find_glyph(glyph_id).is_some())
-    }
 }
 
 /// `GlyphIDs` of a dependency set (re-export for the worker).

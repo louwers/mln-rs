@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::spec::Property;
-use crate::types::{EvaluatedType, evaluated_type, is_color_ramp};
+use crate::types::{evaluated_type, is_color_ramp};
 
 /// The line width the templates wrap at (`split120Line`, `reduceConditions`).
 pub const MAX_WIDTH: usize = 120;
@@ -158,13 +158,4 @@ fn type_path(name: &str) -> String {
         "Image" | "Formatted" => format!("crate::expression::{name}"),
         _ => format!("mln_style_types::{name}"),
     }
-}
-
-/// The value types of a property list, for `EvaluatedType`s the caller
-/// mentions directly.
-#[must_use]
-pub fn imports_for_type(t: &EvaluatedType) -> Vec<String> {
-    let mut names = Vec::new();
-    t.named_types(&mut names);
-    names.iter().map(|n| type_path(n)).collect()
 }

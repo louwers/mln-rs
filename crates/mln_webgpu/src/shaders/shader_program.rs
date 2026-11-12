@@ -345,10 +345,6 @@ impl ShaderProgram {
         pipeline
     }
 
-    pub fn get_binding_infos(&self) -> &[BindingInfo] {
-        &self.binding_infos
-    }
-
     pub fn get_binding_infos_for_group(&self, group: u32) -> &[BindingInfo] {
         for (i, &g) in self.bind_group_order.iter().enumerate() {
             if g == group {
@@ -360,10 +356,6 @@ impl ShaderProgram {
 
     pub fn get_bind_group_layout(&self, group: u32) -> Option<&wgpu::BindGroupLayout> {
         self.bind_group_order.iter().position(|&g| g == group).map(|i| &self.bind_group_layouts[i])
-    }
-
-    pub fn get_bind_group_layouts(&self) -> &[wgpu::BindGroupLayout] {
-        &self.bind_group_layouts
     }
 
     pub fn get_bind_group_order(&self) -> &[u32] {

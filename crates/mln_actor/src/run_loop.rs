@@ -36,23 +36,11 @@ use crate::timer::TimerHandle;
 
 type Task = Box<dyn FnOnce() + Send + 'static>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Priority {
-    Default,
-    High,
-}
-
-#[derive(Default)]
-struct Queues {
-    default_queue: VecDeque<Task>,
-    high_priority_queue: VecDeque<Task>,
-}
-
-/// The thread-safe part of a `RunLoop`: the task queues (`defaultQueue`,
-/// `highPriorityQueue` and their mutex in C++), the pending flag of the
-/// loop's own async handle, and the wake-up a blocking `run()` waits on.
+/// The thread-safe part of a `RunLoop`: the task queue (`defaultQueue` and
+/// its mutex in C++), the pending flag of the loop's own async handle, and
+/// the wake-up a blocking `run()` waits on.
 pub(crate) struct Core {
-    queues: Mutex<Queues>,
+    queue: Mutex<VecDeque<Task>>,
     /// The `RunLoop`'s own async handle (`impl->async`), which runs `process`.
     queue_pending: AtomicBool,
     /// Set by every wake-up; `run()` sleeps until it is set.
@@ -70,7 +58,7 @@ pub(crate) struct Core {
 impl Core {
     fn new() -> Self {
         Core {
-            queues: Mutex::new(Queues::default()),
+            queue: Mutex::new(VecDeque::new()),
             queue_pending: AtomicBool::new(false),
             signal: Mutex::new(false),
             condvar: Condvar::new(),
@@ -80,14 +68,8 @@ impl Core {
         }
     }
 
-    fn push(&self, priority: Priority, task: Task) {
-        {
-            let mut queues = self.queues.lock_unpoisoned();
-            match priority {
-                Priority::High => queues.high_priority_queue.push_back(task),
-                Priority::Default => queues.default_queue.push_back(task),
-            }
-        }
+    fn push(&self, task: Task) {
+        self.queue.lock_unpoisoned().push_back(task);
         // wake()
         self.queue_pending.store(true, Ordering::SeqCst);
         self.wake();
@@ -129,23 +111,15 @@ impl Core {
 
     fn process(&self) {
         loop {
-            let task = {
-                let mut queues = self.queues.lock_unpoisoned();
-                if let Some(task) = queues.high_priority_queue.pop_front() {
-                    task
-                } else if let Some(task) = queues.default_queue.pop_front() {
-                    task
-                } else {
-                    break;
-                }
+            let Some(task) = self.queue.lock_unpoisoned().pop_front() else {
+                break;
             };
             task();
         }
     }
 
     fn remaining(&self) -> usize {
-        let queues = self.queues.lock_unpoisoned();
-        queues.default_queue.len() + queues.high_priority_queue.len()
+        self.queue.lock_unpoisoned().len()
     }
 }
 
@@ -273,11 +247,7 @@ impl RunLoop {
 
     /// Invoke `task` on this `RunLoop`.
     pub fn invoke(&self, task: impl FnOnce() + Send + 'static) {
-        self.invoke_with_priority(Priority::Default, task);
-    }
-
-    pub fn invoke_with_priority(&self, priority: Priority, task: impl FnOnce() + Send + 'static) {
-        self.inner.core.push(priority, Box::new(task));
+        self.inner.core.push(Box::new(task));
     }
 
     /// Calls `waker`, from the waking thread, whenever this loop
@@ -367,10 +337,6 @@ impl RunLoop {
         self.inner.timers.borrow_mut().push(Rc::downgrade(timer));
     }
 
-    /// `updateTime()`: libuv caches the loop time; this loop reads the clock
-    /// whenever it needs it, so there is nothing to update.
-    pub fn update_time(&self) {}
-
     /// `stop()`: `invoke([&] { uv_unref(holder) })`.
     pub fn stop(&self) {
         self.handle().stop();
@@ -403,7 +369,7 @@ impl Default for RunLoop {
 
 impl Scheduler for RunLoop {
     fn schedule(&self, task: Box<dyn FnOnce() + Send + 'static>) {
-        self.inner.core.push(Priority::Default, task);
+        self.inner.core.push(task);
     }
 
     fn wait_for_empty(&self) {
@@ -433,11 +399,7 @@ impl RunLoopHandle {
 
     /// `RunLoop::invoke` from any thread.
     pub fn invoke(&self, task: impl FnOnce() + Send + 'static) {
-        self.core.push(Priority::Default, Box::new(task));
-    }
-
-    pub fn invoke_with_priority(&self, priority: Priority, task: impl FnOnce() + Send + 'static) {
-        self.core.push(priority, Box::new(task));
+        self.core.push(Box::new(task));
     }
 
     /// `RunLoop::stop()`.
@@ -453,7 +415,7 @@ impl RunLoopHandle {
 
 impl Scheduler for RunLoopHandle {
     fn schedule(&self, task: Box<dyn FnOnce() + Send + 'static>) {
-        self.core.push(Priority::Default, task);
+        self.core.push(task);
     }
 
     /// Must be called on the loop's own thread (as in C++, where it calls
@@ -490,17 +452,6 @@ mod tests {
         assert_eq!(count.load(Ordering::SeqCst), 1);
         run_loop.run_once();
         assert_eq!(count.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn high_priority_first() {
-        let run_loop = RunLoop::new();
-        let order = Arc::new(Mutex::new(Vec::new()));
-        let (a, b) = (order.clone(), order.clone());
-        run_loop.invoke(move || a.lock().unwrap().push(1));
-        run_loop.invoke_with_priority(Priority::High, move || b.lock().unwrap().push(2));
-        run_loop.wait_for_empty();
-        assert_eq!(*order.lock().unwrap(), vec![2, 1]);
     }
 
     #[test]

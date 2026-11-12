@@ -15,7 +15,6 @@ use crate::layers::location_indicator_layer_properties::{
     ImageTiltDisplacement, Location, LocationIndicatorPaintProperties, PerspectiveCompensation, ShadowImage,
     ShadowImageSize, TopImage, TopImageSize,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -86,11 +85,6 @@ impl LocationIndicatorLayer {
     // Layout properties
 
     #[must_use]
-    pub fn get_default_bearing_image() -> PropertyValue<Image> {
-        PropertyValue::Constant(BearingImage::default_value())
-    }
-
-    #[must_use]
     pub fn get_bearing_image(&self) -> &PropertyValue<Image> {
         self.impl_().layout.get::<BearingImage>()
     }
@@ -102,11 +96,6 @@ impl LocationIndicatorLayer {
         let mut impl_ = self.mutable_impl();
         *impl_.layout.get_mut::<BearingImage>() = value.clone();
         self.set_impl(impl_);
-    }
-
-    #[must_use]
-    pub fn get_default_shadow_image() -> PropertyValue<Image> {
-        PropertyValue::Constant(ShadowImage::default_value())
     }
 
     #[must_use]
@@ -124,11 +113,6 @@ impl LocationIndicatorLayer {
     }
 
     #[must_use]
-    pub fn get_default_top_image() -> PropertyValue<Image> {
-        PropertyValue::Constant(TopImage::default_value())
-    }
-
-    #[must_use]
     pub fn get_top_image(&self) -> &PropertyValue<Image> {
         self.impl_().layout.get::<TopImage>()
     }
@@ -143,11 +127,6 @@ impl LocationIndicatorLayer {
     }
 
     // Paint properties
-
-    #[must_use]
-    pub fn get_default_accuracy_radius() -> PropertyValue<f32> {
-        PropertyValue::Constant(AccuracyRadius::default_value())
-    }
 
     #[must_use]
     pub fn get_accuracy_radius(&self) -> &PropertyValue<f32> {
@@ -172,11 +151,6 @@ impl LocationIndicatorLayer {
     #[must_use]
     pub fn get_accuracy_radius_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<AccuracyRadius>().options
-    }
-
-    #[must_use]
-    pub fn get_default_accuracy_radius_border_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(AccuracyRadiusBorderColor::default_value())
     }
 
     #[must_use]
@@ -205,11 +179,6 @@ impl LocationIndicatorLayer {
     }
 
     #[must_use]
-    pub fn get_default_accuracy_radius_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(AccuracyRadiusColor::default_value())
-    }
-
-    #[must_use]
     pub fn get_accuracy_radius_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<AccuracyRadiusColor>().value
     }
@@ -232,11 +201,6 @@ impl LocationIndicatorLayer {
     #[must_use]
     pub fn get_accuracy_radius_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<AccuracyRadiusColor>().options
-    }
-
-    #[must_use]
-    pub fn get_default_bearing() -> PropertyValue<Rotation> {
-        PropertyValue::Constant(Bearing::default_value())
     }
 
     #[must_use]
@@ -265,11 +229,6 @@ impl LocationIndicatorLayer {
     }
 
     #[must_use]
-    pub fn get_default_bearing_image_size() -> PropertyValue<f32> {
-        PropertyValue::Constant(BearingImageSize::default_value())
-    }
-
-    #[must_use]
     pub fn get_bearing_image_size(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<BearingImageSize>().value
     }
@@ -292,11 +251,6 @@ impl LocationIndicatorLayer {
     #[must_use]
     pub fn get_bearing_image_size_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<BearingImageSize>().options
-    }
-
-    #[must_use]
-    pub fn get_default_image_tilt_displacement() -> PropertyValue<f32> {
-        PropertyValue::Constant(ImageTiltDisplacement::default_value())
     }
 
     #[must_use]
@@ -325,11 +279,6 @@ impl LocationIndicatorLayer {
     }
 
     #[must_use]
-    pub fn get_default_location() -> PropertyValue<[f64; 3]> {
-        PropertyValue::Constant(Location::default_value())
-    }
-
-    #[must_use]
     pub fn get_location(&self) -> &PropertyValue<[f64; 3]> {
         &self.impl_().paint.get::<Location>().value
     }
@@ -352,11 +301,6 @@ impl LocationIndicatorLayer {
     #[must_use]
     pub fn get_location_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<Location>().options
-    }
-
-    #[must_use]
-    pub fn get_default_perspective_compensation() -> PropertyValue<f32> {
-        PropertyValue::Constant(PerspectiveCompensation::default_value())
     }
 
     #[must_use]
@@ -385,11 +329,6 @@ impl LocationIndicatorLayer {
     }
 
     #[must_use]
-    pub fn get_default_shadow_image_size() -> PropertyValue<f32> {
-        PropertyValue::Constant(ShadowImageSize::default_value())
-    }
-
-    #[must_use]
     pub fn get_shadow_image_size(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<ShadowImageSize>().value
     }
@@ -412,11 +351,6 @@ impl LocationIndicatorLayer {
     #[must_use]
     pub fn get_shadow_image_size_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<ShadowImageSize>().options
-    }
-
-    #[must_use]
-    pub fn get_default_top_image_size() -> PropertyValue<f32> {
-        PropertyValue::Constant(TopImageSize::default_value())
     }
 
     #[must_use]
