@@ -276,10 +276,11 @@ release:
 
 # The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan
 # or gl.
-[doc("Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`")]
+# A test that hangs is ended after ten minutes (.config/nextest.toml).
+[doc("Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo nextest run`")]
 [positional-arguments]
-test *args:  _dev-shell
-    {{dev_shell}} cargo test --workspace "$@"
+test *args:  _dev-shell (cargo-install 'cargo-nextest')
+    {{dev_shell}} cargo nextest run --workspace "$@"
 
 # Test documentation generation
 test-doc:  (docs '')
@@ -351,9 +352,9 @@ update-ffi-abi checkout=ffi:
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
-_coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
+_coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov') (cargo-install 'cargo-nextest')
     cargo llvm-cov clean --workspace
-    {{dev_shell}} cargo llvm-cov --no-report --workspace
+    {{dev_shell}} cargo llvm-cov nextest --no-report --workspace
     cargo llvm-cov report --workspace {{report_args}}
 
 # The dev shell flake (flake.nix), used from a copy in .nix-shell: `nix develop` on the repository copies its tracked files into
