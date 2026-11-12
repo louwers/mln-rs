@@ -164,6 +164,7 @@ impl RendererBackend {
         self.impl_.make_current();
         if self.impl_.take_state_lost()
             && let Some(context) = self.base.existing_context()
+            && let Some(context) = context.as_any().downcast_ref::<Context>()
         {
             context.set_dirty_state();
         }
