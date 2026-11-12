@@ -89,9 +89,6 @@ impl CameraOptions {
     }
 }
 
-/// [`AnimationOptions::transition_frame_fn`].
-pub type TransitionFrameFn = std::sync::Arc<dyn Fn(f64) + Send + Sync>;
-
 /// [`AnimationOptions::transition_end_fn`].
 pub type TransitionEndFn = std::sync::Arc<dyn Fn(&TransitionEnd) + Send + Sync>;
 
@@ -121,10 +118,6 @@ pub struct AnimationOptions {
     pub max_duration: Option<Duration>,
     /// The easing timing curve of the transition.
     pub easing: Option<UnitBezier>,
-    /// A function that is called on each frame of the transition, just before
-    /// a screen update, except on the last frame. The first parameter
-    /// indicates the elapsed time as a percentage of the duration.
-    pub transition_frame_fn: Option<TransitionFrameFn>,
     /// Called once when every field of the command has ended, with how it
     /// ended: completed, cancelled, replaced by later commands, or closed with
     /// the map. Other commands may still be animating when this callback runs.
@@ -348,7 +341,6 @@ impl CameraDelta {
                 || a.min_zoom.is_some()
                 || a.max_duration.is_some()
                 || a.easing.is_some()
-                || a.transition_frame_fn.is_some()
             {
                 return Err(CameraError::MomentumWithAnimation);
             }
