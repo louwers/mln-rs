@@ -1,36 +1,5 @@
-//! `platform/android.h`'s pacer, on the `AChoreographer` of the thread that
+//! The pacer's source on Android: the `AChoreographer` of the thread that
 //! creates it.
-
-use crate::generated::types::{mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options, mln_status};
-
-/// `mln_android_frame_pacer_create()`: fails with `MLN_STATUS_UNSUPPORTED`
-/// outside Android.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_android_frame_pacer_create(
-    options: *const mln_frame_pacer_options,
-    out_pacer: *mut mln_frame_pacer,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        #[cfg(target_os = "android")]
-        {
-            // SAFETY: the caller's contract.
-            unsafe { super::create(options, out_pacer, choreographer::ChoreographerSource::new) }
-        }
-        #[cfg(not(target_os = "android"))]
-        {
-            let _ = (options, out_pacer);
-            Err(crate::error::Error::new(
-                mln_util::ErrorKind::Unsupported,
-                "mln_android_frame_pacer_create needs Android",
-            ))
-        }
-    })
-}
 
 /// `AChoreographer` works only on its looper's thread, so a request from
 /// another thread signals an eventfd that the looper watches, and the watch's
@@ -114,19 +83,20 @@ pub(crate) mod choreographer {
     fn monotonic_now() -> Duration {
         let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
         // SAFETY: a local timespec.
-        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &raw mut now) };
         Duration::new(now.tv_sec as u64, now.tv_nsec as u32)
     }
 
     /// Arms `timer_fd` to expire once after `delay`, or disarms it for a zero
     /// `delay`.
+    #[allow(clippy::cast_lossless, reason = "`c_long` takes the nanoseconds without loss only where it has 64 bits")]
     fn arm_timer(timer_fd: c_int, delay: Duration) {
         let spec = libc::itimerspec {
             it_interval: libc::timespec { tv_sec: 0, tv_nsec: 0 },
             it_value: libc::timespec { tv_sec: delay.as_secs() as _, tv_nsec: delay.subsec_nanos() as _ },
         };
         // SAFETY: a local spec, and no old value to write.
-        unsafe { libc::timerfd_settime(timer_fd, 0, &spec, core::ptr::null_mut()) };
+        unsafe { libc::timerfd_settime(timer_fd, 0, &raw const spec, core::ptr::null_mut()) };
     }
 
     /// Reads the 8-byte counter of an eventfd or a timerfd, and whether there
@@ -459,7 +429,7 @@ pub(crate) mod choreographer {
         use std::sync::mpsc;
 
         use super::*;
-        use crate::frame_pacer::android::mln_android_frame_pacer_create;
+        use crate::frame_pacer::mln_frame_pacer_create;
         use crate::frame_pacer::tests::expect_paced_frames;
         use crate::generated::types::{MLN_STATUS_INVALID_STATE, MLN_STATUS_OK, mln_frame_pacer, mln_status};
         use crate::handles;
@@ -493,8 +463,7 @@ pub(crate) mod choreographer {
         fn create_pacer() -> (mln_status, mln_frame_pacer) {
             let mut pacer = handles::NULL;
             // SAFETY: null options, a local out-handle and a null diagnostic.
-            let status =
-                unsafe { mln_android_frame_pacer_create(core::ptr::null(), &mut pacer, core::ptr::null_mut()) };
+            let status = unsafe { mln_frame_pacer_create(core::ptr::null(), &raw mut pacer, core::ptr::null_mut()) };
             (status, pacer)
         }
 

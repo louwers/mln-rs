@@ -1,35 +1,4 @@
-//! `platform/apple.h`'s pacer, on a `CADisplayLink`.
-
-use crate::generated::types::{mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options, mln_status};
-
-/// `mln_apple_frame_pacer_create()`: fails with `MLN_STATUS_UNSUPPORTED`
-/// outside macOS, iOS and tvOS.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_apple_frame_pacer_create(
-    options: *const mln_frame_pacer_options,
-    out_pacer: *mut mln_frame_pacer,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-        {
-            // SAFETY: the caller's contract.
-            unsafe { super::create(options, out_pacer, display_link::DisplayLinkSource::new) }
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
-        {
-            let _ = (options, out_pacer);
-            Err(crate::error::Error::new(
-                mln_util::ErrorKind::Unsupported,
-                "mln_apple_frame_pacer_create needs macOS, iOS or tvOS",
-            ))
-        }
-    })
-}
+//! The pacer's source on macOS, iOS and tvOS: a `CADisplayLink`.
 
 /// Every pacer's display link runs on one thread that the library starts for
 /// them, on a run loop that runs for the rest of the process, so a pacer
@@ -39,7 +8,7 @@ pub unsafe extern "C" fn mln_apple_frame_pacer_create(
 /// until it is invalidated, so the target reaches the pacer through
 /// [`Vsyncs`], which holds it weakly.
 #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
-mod display_link {
+pub(super) mod display_link {
     use core::ffi::{c_int, c_void};
     use std::collections::VecDeque;
     use std::sync::{Mutex, mpsc};
@@ -326,9 +295,11 @@ mod display_link {
 
 #[cfg(all(test, any(target_os = "macos", target_os = "ios", target_os = "tvos")))]
 mod tests {
-    use super::*;
+    use crate::frame_pacer::mln_frame_pacer_create;
     use crate::frame_pacer::tests::expect_paced_frames;
-    use crate::generated::types::{MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, MLN_STATUS_OK};
+    use crate::generated::types::{
+        MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, MLN_STATUS_OK, mln_frame_pacer, mln_frame_pacer_options,
+    };
     use crate::render_session::tests::sized;
 
     fn create(options: Option<&mln_frame_pacer_options>) -> mln_frame_pacer {
@@ -336,7 +307,7 @@ mod tests {
         let mut pacer = crate::handles::NULL;
         // SAFETY: the caller's options, a local out-handle and a null
         // diagnostic.
-        let status = unsafe { mln_apple_frame_pacer_create(options, &mut pacer, core::ptr::null_mut()) };
+        let status = unsafe { mln_frame_pacer_create(options, &raw mut pacer, core::ptr::null_mut()) };
         assert_eq!(status, MLN_STATUS_OK);
         pacer
     }

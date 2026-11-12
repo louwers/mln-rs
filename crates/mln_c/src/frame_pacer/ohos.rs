@@ -1,45 +1,14 @@
-//! `platform/ohos.h`'s pacer, on an `OH_NativeVSync` of its own.
+//! The pacer's source on `OpenHarmony`: an `OH_NativeVSync` of its own.
 
-use crate::generated::types::{mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options, mln_status};
-
-/// `mln_ohos_frame_pacer_create()`: fails with `MLN_STATUS_UNSUPPORTED`
-/// outside `OpenHarmony`.
-///
-/// # Safety
-///
-/// Each pointer is null or valid for the header's use of it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_ohos_frame_pacer_create(
-    options: *const mln_frame_pacer_options,
-    out_pacer: *mut mln_frame_pacer,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    export!(out_diagnostic, {
-        #[cfg(target_env = "ohos")]
-        {
-            // SAFETY: the caller's contract.
-            unsafe { super::create(options, out_pacer, native_vsync::NativeVsyncSource::new) }
-        }
-        #[cfg(not(target_env = "ohos"))]
-        {
-            let _ = (options, out_pacer);
-            Err(crate::error::Error::new(
-                mln_util::ErrorKind::Unsupported,
-                "mln_ohos_frame_pacer_create needs OpenHarmony",
-            ))
-        }
-    })
-}
-
-/// The native VSync calls back on a thread that it creates, so a request
+/// The `OH_NativeVSync` calls back on a thread that it creates, so a request
 /// can come from any thread and needs no event loop of the host's. A request
-/// can't be cancelled, and destroying the native VSync while its callback
+/// can't be cancelled, and destroying the `OH_NativeVSync` while its callback
 /// runs would free what the callback uses, so each request holds the
 /// [`VsyncSide`] until its callback has run. When that callback lets go of it
-/// last, the native VSync is destroyed on its own thread, which its event
+/// last, the `OH_NativeVSync` is destroyed on its own thread, which its event
 /// runner allows.
 #[cfg(target_env = "ohos")]
-mod native_vsync {
+pub(super) mod native_vsync {
     use core::ffi::{c_char, c_int, c_longlong, c_uint, c_void};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
@@ -63,7 +32,7 @@ mod native_vsync {
         -> c_int;
     }
 
-    /// What the native VSync's callback shares with the pacer. A waiting
+    /// What the `OH_NativeVSync`'s callback shares with the pacer. A waiting
     /// request holds it until its callback runs, so it can outlive the pacer.
     struct VsyncSide {
         vsync: *mut OH_NativeVSync,
@@ -85,7 +54,7 @@ mod native_vsync {
         }
     }
 
-    /// The native VSync's callback. The timestamp is in nanoseconds on
+    /// The `OH_NativeVSync`'s callback. The timestamp is in nanoseconds on
     /// `CLOCK_MONOTONIC`.
     unsafe extern "C" fn on_frame(timestamp: c_longlong, data: *mut c_void) {
         // SAFETY: the request hold keeps the side until this takes it.
@@ -95,7 +64,7 @@ mod native_vsync {
         side.vsyncs.vsync(Duration::from_nanos(timestamp.max(0) as u64));
     }
 
-    /// A pacer's native VSync.
+    /// A pacer's `OH_NativeVSync`.
     pub(crate) struct NativeVsyncSource {
         side: Arc<VsyncSide>,
     }
@@ -130,14 +99,14 @@ mod native_vsync {
 
 #[cfg(all(test, target_env = "ohos"))]
 mod tests {
-    use super::*;
+    use crate::frame_pacer::mln_frame_pacer_create;
     use crate::frame_pacer::tests::expect_paced_frames;
-    use crate::generated::types::MLN_STATUS_OK;
+    use crate::generated::types::{MLN_STATUS_OK, mln_frame_pacer};
 
     fn create() -> mln_frame_pacer {
         let mut pacer = crate::handles::NULL;
         // SAFETY: null options, a local out-handle and a null diagnostic.
-        let status = unsafe { mln_ohos_frame_pacer_create(core::ptr::null(), &mut pacer, core::ptr::null_mut()) };
+        let status = unsafe { mln_frame_pacer_create(core::ptr::null(), &raw mut pacer, core::ptr::null_mut()) };
         assert_eq!(status, MLN_STATUS_OK);
         pacer
     }

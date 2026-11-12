@@ -70,16 +70,6 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::acquired_frame::mln_acquired_frame_view_begin;
 const _: unsafe extern "C" fn(*mut ::core::ffi::c_void) = crate::acquired_frame::mln_acquired_frame_view_end;
 const _: unsafe extern "C" fn(
-    *const mln_frame_pacer_options,
-    *mut mln_frame_pacer,
-    *mut mln_diagnostic,
-) -> mln_status = crate::frame_pacer::android::mln_android_frame_pacer_create;
-const _: unsafe extern "C" fn(
-    *const mln_frame_pacer_options,
-    *mut mln_frame_pacer,
-    *mut mln_diagnostic,
-) -> mln_status = crate::frame_pacer::apple::mln_apple_frame_pacer_create;
-const _: unsafe extern "C" fn(
     *mut ::core::ffi::c_void,
     i64,
     *mut mln_wake,
@@ -107,6 +97,11 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::delivery::mln_delivery_queue_create;
 const _: unsafe extern "C" fn(mln_delivery_queue, *mut mln_diagnostic) -> mln_status = crate::delivery::mln_delivery_queue_dispatch;
 const _: unsafe extern "C" fn(mln_delivery_queue) = crate::delivery::mln_delivery_queue_release;
+const _: unsafe extern "C" fn(
+    *const mln_frame_pacer_options,
+    *mut mln_frame_pacer,
+    *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::mln_frame_pacer_create;
 const _: unsafe extern "C" fn(mln_frame_pacer) = crate::render_session::mln_frame_pacer_release;
 const _: unsafe extern "C" fn(
     *const mln_gpu_device_options,
@@ -759,11 +754,6 @@ const _: unsafe extern "C" fn(
     *mut mln_diagnostic,
 ) -> mln_status = crate::runtime::mln_network_get_status;
 const _: unsafe extern "C" fn(mln_network_status, *mut mln_diagnostic) -> mln_status = crate::runtime::mln_network_set_status;
-const _: unsafe extern "C" fn(
-    *const mln_frame_pacer_options,
-    *mut mln_frame_pacer,
-    *mut mln_diagnostic,
-) -> mln_status = crate::frame_pacer::ohos::mln_ohos_frame_pacer_create;
 const _: unsafe extern "C" fn() -> mln_open_gl_context_provider_flags = crate::render_target::mln_open_gl_supported_context_provider_mask;
 const _: unsafe extern "C" fn(
     *const mln_plugin_descriptor_v1,

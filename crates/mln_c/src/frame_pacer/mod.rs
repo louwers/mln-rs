@@ -1,5 +1,5 @@
-//! Frame pacers: the part that every platform shares, and each platform's
-//! source of display refreshes.
+//! Frame pacers: `mln_frame_pacer_create()`, the part that every platform
+//! shares, and each platform's source of display refreshes.
 //!
 //! A [`Pacer`] keeps the render sessions that have something new to draw, and
 //! at the next display refresh that its frame rate limit allows, demands a
@@ -33,7 +33,8 @@ use std::time::Duration;
 use crate::abi::{self, Fields};
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, mln_frame_pacer, mln_frame_pacer_options, mln_render_session,
+    MLN_FRAME_PACER_OPTION_MAXIMUM_FRAMES_PER_SECOND, mln_diagnostic, mln_frame_pacer, mln_frame_pacer_options,
+    mln_render_session, mln_status,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{lock, render_session};
@@ -55,9 +56,57 @@ pub(crate) fn release(pacer: mln_frame_pacer) {
     }
 }
 
-/// What a platform's create function shares: checks `options` and
-/// `out_pacer`, builds the platform's source with the limit that `options`
-/// sets, and writes the new pacer's handle to `out_pacer`.
+/// `mln_frame_pacer_create()`: a pacer on the platform's source of display
+/// refreshes, which is a `CADisplayLink` on macOS, iOS and tvOS, the calling
+/// thread's `AChoreographer` on Android, and an `OH_NativeVSync` on
+/// `OpenHarmony`. It fails with `MLN_STATUS_UNSUPPORTED` elsewhere.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_frame_pacer_create(
+    options: *const mln_frame_pacer_options,
+    out_pacer: *mut mln_frame_pacer,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, {
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "tvos"))]
+        {
+            // SAFETY: the caller's contract.
+            unsafe { create(options, out_pacer, apple::display_link::DisplayLinkSource::new) }
+        }
+        #[cfg(target_os = "android")]
+        {
+            // SAFETY: the caller's contract.
+            unsafe { create(options, out_pacer, android::choreographer::ChoreographerSource::new) }
+        }
+        #[cfg(target_env = "ohos")]
+        {
+            // SAFETY: the caller's contract.
+            unsafe { create(options, out_pacer, ohos::native_vsync::NativeVsyncSource::new) }
+        }
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "android",
+            target_env = "ohos"
+        )))]
+        {
+            let _ = (options, out_pacer);
+            Err(Error::new(
+                mln_util::ErrorKind::Unsupported,
+                "mln_frame_pacer_create needs macOS, iOS, tvOS, Android or OpenHarmony",
+            ))
+        }
+    })
+}
+
+/// What `mln_frame_pacer_create()` does on each platform with a source:
+/// checks `options` and `out_pacer`, builds the platform's source with the
+/// limit that `options` sets, and writes the new pacer's handle to
+/// `out_pacer`.
 ///
 /// # Safety
 ///
