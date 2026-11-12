@@ -65,20 +65,29 @@ mod window {
     }
 }
 
-// Windows made without Java: an `AImageReader`'s window, whose images the
-// tests read back.
+// Windows and hardware buffers made without Java: an `AImageReader`'s
+// window, whose images the tests read back, and the hardware buffers of
+// exported rings, which they lock.
 #[cfg(all(test, target_os = "android"))]
 mod tests {
     use core::ffi::{c_int, c_void};
     use std::time::{Duration, Instant};
 
+    use crate::acquired_frame::{
+        mln_acquired_frame_get_android_hardware_buffer, mln_acquired_frame_get_dma_buf,
+        mln_acquired_frame_get_producer_sync, mln_acquired_frame_release, mln_render_session_acquire_frame,
+    };
     use crate::generated::types::{
-        MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_RESULT_RENDERED,
-        MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION,
-        MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, MLN_STATUS_OK,
-        mln_android_window_target, mln_gpu_device, mln_gpu_device_capabilities, mln_gpu_device_options,
-        mln_logical_size, mln_map, mln_render_session, mln_render_session_capabilities, mln_render_target,
-        mln_render_target_data,
+        MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER,
+        MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER, MLN_GPU_SYNC_CPU_COMPLETE,
+        MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_SYNC_FD, MLN_GPU_SYNC_SYNC_FD,
+        MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_RESULT_RENDERED, MLN_RENDER_RESULT_TARGET_NOT_READY,
+        MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION,
+        MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_EXPORTED_RING,
+        MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, MLN_STATUS_OK, MLN_STATUS_UNSUPPORTED,
+        mln_android_hardware_buffer_frame, mln_android_window_target, mln_dma_buf_frame, mln_exported_ring_target,
+        mln_gpu_device, mln_gpu_device_capabilities, mln_gpu_device_options, mln_gpu_sync, mln_logical_size, mln_map,
+        mln_render_session, mln_render_session_capabilities, mln_render_target, mln_render_target_data,
     };
     use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities, mln_gpu_device_release};
     use crate::map::mln_map_set_style_json;
@@ -106,6 +115,33 @@ mod tests {
         fn AImage_getPlaneData(image: *const c_void, plane: i32, data: *mut *mut u8, length: *mut c_int) -> c_int;
         fn AImage_getPlaneRowStride(image: *const c_void, plane: i32, stride: *mut i32) -> c_int;
         fn AImage_delete(image: *mut c_void);
+    }
+
+    /// `AHardwareBuffer_Desc`.
+    #[repr(C)]
+    #[derive(Default)]
+    struct Desc {
+        width: u32,
+        height: u32,
+        layers: u32,
+        format: u32,
+        usage: u64,
+        stride: u32,
+        rfu0: u32,
+        rfu1: u64,
+    }
+
+    #[link(name = "nativewindow")]
+    unsafe extern "C" {
+        fn AHardwareBuffer_describe(buffer: *const c_void, desc: *mut Desc);
+        fn AHardwareBuffer_lock(
+            buffer: *mut c_void,
+            usage: u64,
+            fence: c_int,
+            rect: *const c_void,
+            address: *mut *mut c_void,
+        ) -> c_int;
+        fn AHardwareBuffer_unlock(buffer: *mut c_void, fence: *mut c_int) -> c_int;
     }
 
     const RED: [u8; 4] = [255, 0, 0, 255];
@@ -279,6 +315,105 @@ mod tests {
             release_session(session);
         }
         mln_gpu_device_release(vulkan);
+        release_map(map);
+        release(runtime);
+    }
+
+    /// Waits for a frame's producer sync file, if it has one.
+    fn wait_for_producer(sync: &mln_gpu_sync) {
+        if sync.kind != MLN_GPU_SYNC_SYNC_FD || (sync.handle as i64) < 0 {
+            return;
+        }
+        let mut waiting = libc::pollfd { fd: sync.handle as i32, events: libc::POLLIN, revents: 0 };
+        // SAFETY: a poll of the frame's live sync file.
+        assert_eq!(unsafe { libc::poll(&mut waiting, 1, 10_000) }, 1, "the frame's sync file signals");
+    }
+
+    /// Acquires the session's frame, checks that its hardware buffer is red
+    /// and of the host's usage, and returns it and its slot.
+    fn read_frame(
+        session: mln_render_session,
+        capabilities: &mln_render_session_capabilities,
+    ) -> (crate::generated::types::mln_acquired_frame, u32) {
+        let mut frame = 0;
+        // SAFETY: a local output.
+        assert_eq!(unsafe { mln_render_session_acquire_frame(session, &mut frame, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        let mut buffer = sized::<mln_android_hardware_buffer_frame>();
+        // SAFETY: a local output.
+        let status = unsafe { mln_acquired_frame_get_android_hardware_buffer(frame, &mut buffer, NO_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_OK);
+        assert_eq!((buffer.width, buffer.height, buffer.scale_factor), (64, 48, 1.0));
+        let mut dma_buf = sized::<mln_dma_buf_frame>();
+        // SAFETY: a local output.
+        let status = unsafe { mln_acquired_frame_get_dma_buf(frame, &mut dma_buf, NO_DIAGNOSTIC) };
+        assert_eq!(status, MLN_STATUS_UNSUPPORTED);
+        let mut sync = sized::<mln_gpu_sync>();
+        // SAFETY: a local output.
+        assert_eq!(unsafe { mln_acquired_frame_get_producer_sync(frame, &mut sync, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(sync.kind, capabilities.producer_sync_kind);
+        wait_for_producer(&sync);
+        let mut desc = Desc::default();
+        // SAFETY: the frame's live buffer, locked around the read.
+        let center = unsafe {
+            AHardwareBuffer_describe(buffer.buffer, &mut desc);
+            assert_eq!((desc.width, desc.height, desc.layers, desc.format), (64, 48, 1, 1));
+            assert_eq!(desc.usage & CPU_READ_OFTEN, CPU_READ_OFTEN);
+            let mut data = core::ptr::null_mut();
+            assert_eq!(AHardwareBuffer_lock(buffer.buffer, CPU_READ_OFTEN, -1, core::ptr::null(), &mut data), 0);
+            let offset = (24 * desc.stride as usize + 32) * 4;
+            let mut pixel = [0u8; 4];
+            core::ptr::copy_nonoverlapping(data.cast::<u8>().add(offset), pixel.as_mut_ptr(), 4);
+            assert_eq!(AHardwareBuffer_unlock(buffer.buffer, core::ptr::null_mut()), 0);
+            pixel
+        };
+        assert_eq!(center, RED, "slot {}", buffer.slot);
+        (frame, buffer.slot)
+    }
+
+    // An exported ring of a session that makes its own device hands out
+    // hardware buffers with the host's usage bits, which the CPU reads.
+    #[test]
+    fn an_exported_ring_hands_out_hardware_buffers() {
+        let runtime = create();
+        let map = red_map(runtime);
+        let ring = mln_exported_ring_target {
+            logical_size: mln_logical_size { width: 64, height: 48 },
+            texture_count: 3,
+            export_kinds: MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER,
+            dma_buf_formats: core::ptr::null(),
+            dma_buf_format_count: 0,
+            android_hardware_buffer_usage: CPU_READ_OFTEN,
+        };
+        let target = mln_render_target {
+            kind: MLN_RENDER_TARGET_KIND_EXPORTED_RING,
+            data: mln_render_target_data { exported_ring: ring },
+            ..sized()
+        };
+        let producer = MLN_GPU_SYNC_KIND_FLAG_SYNC_FD | MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE;
+        let session = attach(map, &target, 0, producer);
+        let capabilities = capabilities(session);
+        assert_eq!(capabilities.export_kind, MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER);
+        assert_eq!(capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION);
+        // A sync file where the device has them.
+        assert!(matches!(capabilities.producer_sync_kind, MLN_GPU_SYNC_SYNC_FD | MLN_GPU_SYNC_CPU_COMPLETE));
+        // Two rounds of a frame in each buffer, which the host holds until
+        // the round ends.
+        for round in 0..2 {
+            let mut frames = Vec::new();
+            for token in 1..=3 {
+                rendered(session, 10 * round + token);
+                frames.push(read_frame(session, &capabilities));
+            }
+            let mut slots: Vec<u32> = frames.iter().map(|(_, slot)| *slot).collect();
+            slots.sort_unstable();
+            assert_eq!(slots, [0, 1, 2], "round {round}");
+            for (frame, _) in frames {
+                let done = mln_gpu_sync { kind: MLN_GPU_SYNC_CPU_COMPLETE, ..sized() };
+                // SAFETY: a local sync.
+                assert_eq!(unsafe { mln_acquired_frame_release(frame, &done, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+            }
+        }
+        release_session(session);
         release_map(map);
         release(runtime);
     }

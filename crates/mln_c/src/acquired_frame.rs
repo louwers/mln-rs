@@ -622,8 +622,7 @@ pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
     })
 }
 
-/// `mln_acquired_frame_get_android_hardware_buffer()`: no ring of this
-/// library shares hardware buffers yet.
+/// `mln_acquired_frame_get_android_hardware_buffer()`.
 ///
 /// # Safety
 ///
@@ -637,8 +636,20 @@ pub unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
     export!(out_diagnostic, non_null(out_frame), {
         // SAFETY: the caller's contract.
         unsafe { abi::check_out_size(out_frame) }?;
-        exported_image(frame)?;
-        Err(other_export())
+        let (texture, scale_factor, slot, _) = exported_image(frame)?;
+        let FrameTextureKind::Exported(ExportedImage::AndroidHardwareBuffer { buffer }) = texture.kind else {
+            return Err(other_export());
+        };
+        let record = mln_android_hardware_buffer_frame {
+            size: size_of::<mln_android_hardware_buffer_frame>() as u32,
+            width: texture.size.width,
+            height: texture.size.height,
+            scale_factor,
+            slot,
+            buffer: buffer as usize as *mut c_void,
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
     })
 }
 
