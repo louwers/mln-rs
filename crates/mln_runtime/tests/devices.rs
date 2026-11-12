@@ -131,6 +131,7 @@ mod vulkan {
             queue_family_index: raw.queue_family_index,
             queue: raw.queue,
             queue_lock: lock,
+            enabled_extensions: library.enabled_extensions().to_vec(),
         };
         // SAFETY: the library device's live handles, which outlive the wrap:
         // the test drops the wrap's sessions first.

@@ -455,6 +455,39 @@ mod linux {
         map
     }
 
+    /// A wrap of the host's device offers sync files and exports only
+    /// through the extensions that the host lists, since Vulkan can't say
+    /// which it enabled.
+    #[cfg(feature = "vulkan")]
+    #[test]
+    fn a_wrapped_device_exports_through_the_extensions_that_the_host_lists() {
+        let Some(Device::Vulkan(library)) = device_of(BackendType::Vulkan) else { return };
+        let wrap = |enabled_extensions: Vec<std::ffi::CString>| {
+            let raw = library.raw();
+            let host = mln_vulkan::HostDevice {
+                get_instance_proc_addr: Some(raw.get_instance_proc_addr),
+                get_device_proc_addr: Some(raw.get_device_proc_addr),
+                instance: raw.instance,
+                physical_device: raw.physical_device,
+                device: raw.device,
+                queue_family_index: raw.queue_family_index,
+                queue: raw.queue,
+                queue_lock: None,
+                enabled_extensions,
+            };
+            // SAFETY: the library device's live handles, which outlive the
+            // wrap.
+            unsafe { mln_vulkan::Device::from_raw(host) }.unwrap()
+        };
+        let unlisted = wrap(Vec::new());
+        assert_eq!(ExportKinds::NONE, unlisted.export_kinds());
+        let (producer, consumer) = unlisted.sync_kinds();
+        assert!(!producer.contains(SyncKind::SyncFd) && !consumer.contains(SyncKind::SyncFd));
+        let listed = wrap(library.enabled_extensions().to_vec());
+        assert_eq!(library.export_kinds(), listed.export_kinds());
+        assert_eq!(library.sync_kinds(), listed.sync_kinds());
+    }
+
     #[cfg(feature = "vulkan")]
     #[test]
     fn an_opaque_fd_imports_into_another_device_of_the_driver() {

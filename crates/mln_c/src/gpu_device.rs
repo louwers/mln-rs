@@ -453,6 +453,9 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
                 return Err(Error::invalid_argument(format!("{name}.{field} must not be null")));
             }
         }
+        // SAFETY: the caller's contract.
+        let enabled_extensions =
+            unsafe { vulkan_extensions(descriptor.enabled_extensions, descriptor.enabled_extension_count) }?;
         let lock = HostQueueLock::new(&descriptor.queue_lock)?;
         // SAFETY: the caller's contract.
         let out_device = unsafe { handles::out_handle(out_device, "out_device") }?;
@@ -481,6 +484,7 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
                 queue_family_index: context.graphics_queue_family_index,
                 queue: vk::Queue::from_raw(context.graphics_queue as u64),
                 queue_lock,
+                enabled_extensions,
             };
             // SAFETY: the host's live objects, which outlive the device and
             // its sessions (the header's contract).
@@ -494,10 +498,41 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_vulkan(
         }
         #[cfg(any(target_vendor = "apple", target_family = "wasm"))]
         {
-            let _ = (lock, out_device);
+            let _ = (lock, out_device, enabled_extensions);
             Err(Error::new(ErrorKind::Unsupported, "this build draws with no Vulkan"))
         }
     })
+}
+
+/// The names of the device extensions that a host lists: `count` views at
+/// `extensions`, each the text of a name.
+///
+/// # Safety
+///
+/// `extensions` is null or points to `count` readable views, whose data is
+/// readable.
+unsafe fn vulkan_extensions(
+    extensions: *const crate::generated::types::mln_buffer_view,
+    count: usize,
+) -> Result<Vec<std::ffi::CString>, Error> {
+    let name = "mln_vulkan_device_descriptor.enabled_extensions";
+    if count == 0 {
+        return Ok(Vec::new());
+    }
+    if extensions.is_null() {
+        return Err(Error::invalid_argument(format!("{name} must not be null")));
+    }
+    // SAFETY: the caller's contract.
+    let views = unsafe { core::slice::from_raw_parts(extensions, count) };
+    views
+        .iter()
+        .map(|view| {
+            // SAFETY: the caller's contract.
+            let text = unsafe { crate::buffer::text(*view, name) }?;
+            std::ffi::CString::new(text)
+                .map_err(|_| Error::invalid_argument(format!("{name} must not hold a NUL character")))
+        })
+        .collect()
 }
 
 /// `mln_gpu_device_wrap_metal()`.

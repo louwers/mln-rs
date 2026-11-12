@@ -2886,7 +2886,9 @@ pub struct mln_exported_ring_target {
  dmabufs only of one of them. The library renders only DRM_FORMAT_ABGR8888
  and DRM_FORMAT_ARGB8888. A modifier can give a buffer more planes than its
  format has, such as a plane of compression metadata, and the library takes
- any such modifier that its GPU can render into and share.*/
+ any such modifier that its GPU can render into and share. The library
+ takes no implicit modifier: it skips DRM_FORMAT_MOD_INVALID, so a list of
+ only that one gets no dmabuf.*/
     pub dma_buf_formats: *const mln_dma_buf_format,
     pub dma_buf_format_count: usize,
     /** More `AHARDWAREBUFFER_USAGE_*` bits that your reads of a hardware buffer
@@ -3005,8 +3007,9 @@ pub struct mln_gpu_device_capabilities {
  `VK_KHR_external_semaphore_fd` for MLN_GPU_SYNC_SYNC_FD,
  `VK_KHR_external_memory_fd` for MLN_GPU_EXPORT_KIND_OPAQUE_FD, and that with
  `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier` for
- MLN_GPU_EXPORT_KIND_DMA_BUF. When the GPU supports timeline semaphores, also
- enable the `timelineSemaphore` feature, of Vulkan 1.2 or
+ MLN_GPU_EXPORT_KIND_DMA_BUF. List the ones you enabled in
+ `enabled_extensions`. When the GPU supports timeline semaphores, also enable
+ the `timelineSemaphore` feature, of Vulkan 1.2 or
  `VK_KHR_timeline_semaphore`: the device offers
  MLN_GPU_SYNC_VULKAN_TIMELINE_SEMAPHORE wherever the GPU supports it.*/
 #[repr(C)]
@@ -3017,6 +3020,13 @@ pub struct mln_vulkan_device_descriptor {
     /** Your lock on `context.graphics_queue`, when you submit to it yourself.
  Give every device that wraps the queue the same lock.*/
     pub queue_lock: mln_queue_lock,
+    /** The names of the device extensions that you enabled on `context.device`,
+ such as "VK_KHR_external_semaphore_fd". Vulkan offers no way to ask a
+ device which extensions it has, so the device offers the export kinds and
+ MLN_GPU_SYNC_SYNC_FD only when the extensions that they need are listed
+ here, and none of them when the list is empty.*/
+    pub enabled_extensions: *const mln_buffer_view,
+    pub enabled_extension_count: usize,
 }
 /// Your Metal device and command queue, for mln_gpu_device_wrap_metal().
 #[repr(C)]

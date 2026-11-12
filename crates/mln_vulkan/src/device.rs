@@ -12,7 +12,7 @@
 // queue shares, then the host's queue lock where the host gave one.
 
 use std::collections::HashMap;
-use std::ffi::{CStr, c_char, c_void};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::io::Write as _;
 use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
 
@@ -158,6 +158,10 @@ pub struct HostDevice {
     pub queue: vk::Queue,
     /// The host's lock on `queue`, when the host submits to it too.
     pub queue_lock: Option<Arc<dyn QueueLock>>,
+    /// The device extensions that the host enabled on `device`. Vulkan has
+    /// no way to ask a device for them, so renderers export memory and use
+    /// sync files only through the ones listed here.
+    pub enabled_extensions: Vec<CString>,
 }
 
 /// `VK_EXT_debug_utils`, loaded when the validation layer is on.
@@ -232,6 +236,9 @@ pub(crate) struct Shared {
     /// The extensions of the library's instance. A host's instance has those
     /// whose functions it looks up.
     instance_extensions: Option<Vec<&'static CStr>>,
+    /// The extensions enabled on the device: the library's, or those the
+    /// host listed.
+    device_extensions: Vec<CString>,
     /// Whether the library made the instance and device, and destroys them.
     owned: bool,
 }
@@ -487,6 +494,7 @@ impl Device {
                 get_instance_proc_addr,
                 get_device_proc_addr,
                 instance_extensions: Some(extensions),
+                device_extensions: device_extensions.iter().map(|name| (*name).to_owned()).collect(),
                 owned: true,
             }),
         })
@@ -643,8 +651,11 @@ impl Device {
     /// The host's instance, device and queue, which renderers on the device
     /// render on and submit to, under the host's queue lock. A renderer uses
     /// the extensions the host enabled on the device: `VK_KHR_swapchain` to
-    /// present, timeline semaphores, `VK_KHR_external_semaphore_fd`
-    /// for sync files.
+    /// present, and timeline semaphores, and those of `enabled_extensions`
+    /// that it lists: `VK_KHR_external_semaphore_fd` for sync files,
+    /// `VK_KHR_external_memory_fd` for opaque file descriptors, and that with
+    /// `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier`
+    /// for dmabufs.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library to look the functions up in, with
@@ -670,7 +681,9 @@ impl Device {
             queue_family_index,
             queue,
             queue_lock,
+            enabled_extensions,
         } = host;
+        let enabled = |name: &CStr| enabled_extensions.iter().any(|enabled| enabled.as_c_str() == name);
         let entry = match get_instance_proc_addr {
             // SAFETY: the host's function looks up the functions of its
             // instance (the caller's contract).
@@ -733,15 +746,13 @@ impl Device {
             .then(|| ash::khr::surface::Instance::new(&entry, &instance));
         let swapchain =
             device_lookup(c"vkCreateSwapchainKHR").then(|| ash::khr::swapchain::Device::new(&instance, &ash_device));
-        let semaphore_fd = (device_lookup(c"vkGetSemaphoreFdKHR") || device_lookup(c"vkImportSemaphoreFdKHR"))
-            .then(|| ash::khr::external_semaphore_fd::Device::new(&instance, &ash_device));
-        // VK_EXT_external_memory_dma_buf has no functions to look up: the
-        // export probe finds whether the host enabled it.
-        let external_memory_fd = device_lookup(c"vkGetMemoryFdKHR");
-        let dma_buf = external_memory_fd && device_lookup(c"vkGetImageDrmFormatModifierPropertiesEXT");
-        let memory_fd = external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &ash_device));
-        let drm_format_modifier =
-            dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &ash_device));
+        // A device's functions may look up whether or not the host enabled
+        // their extensions, so its list says which ones a renderer uses.
+        let sync_files = enabled(ash::khr::external_semaphore_fd::NAME);
+        let semaphore_fd = (sync_files
+            && (device_lookup(c"vkGetSemaphoreFdKHR") || device_lookup(c"vkImportSemaphoreFdKHR")))
+        .then(|| ash::khr::external_semaphore_fd::Device::new(&instance, &ash_device));
+        let external_memory_fd = enabled(ash::khr::external_memory_fd::NAME) && device_lookup(c"vkGetMemoryFdKHR");
         // SAFETY: plain queries of the host's GPU.
         let (properties, supported) = unsafe {
             (
@@ -755,11 +766,21 @@ impl Device {
             // SAFETY: a plain query of the GPU.
             unsafe { instance.get_physical_device_features2(physical_device, &mut features) };
         }
-        let (export_sync_fd, import_sync_fd) = if instance_has(c"vkGetPhysicalDeviceExternalSemaphoreProperties") {
-            sync_fd_support(&instance, physical_device)
-        } else {
-            (false, false)
-        };
+        // DRM format modifiers need VK_KHR_image_format_list before Vulkan 1.2.
+        let dma_buf = external_memory_fd
+            && enabled(ash::ext::external_memory_dma_buf::NAME)
+            && enabled(ash::ext::image_drm_format_modifier::NAME)
+            && (properties.api_version >= vk::API_VERSION_1_2 || enabled(ash::khr::image_format_list::NAME))
+            && device_lookup(c"vkGetImageDrmFormatModifierPropertiesEXT");
+        let memory_fd = external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &ash_device));
+        let drm_format_modifier =
+            dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &ash_device));
+        let (export_sync_fd, import_sync_fd) =
+            if sync_files && instance_has(c"vkGetPhysicalDeviceExternalSemaphoreProperties") {
+                sync_fd_support(&instance, physical_device)
+            } else {
+                (false, false)
+            };
         let features = Features {
             // Vulkan 1.2's, or VK_KHR_timeline_semaphore's: renderers only
             // create timelines and submit with them, which both share.
@@ -803,6 +824,7 @@ impl Device {
                 get_instance_proc_addr,
                 get_device_proc_addr,
                 instance_extensions: None,
+                device_extensions: enabled_extensions,
                 owned: false,
             }),
         })
@@ -871,6 +893,12 @@ impl Device {
             consumer = consumer.with(SyncKind::SyncFd);
         }
         (producer, consumer)
+    }
+
+    /// The device extensions enabled on the device: the library's, or the
+    /// ones the host listed.
+    pub fn enabled_extensions(&self) -> &[CString] {
+        &self.shared.device_extensions
     }
 
     /// The kinds of exported ring that the device shares its images in: those
