@@ -29,7 +29,7 @@ use mln_util::time::Instant;
 use super::frame::{DemandMode, FrameDemand, FrameDisposition, FrameResult};
 use super::local::{LocalTarget, Pending, PendingReads};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
-use super::target::{BorrowedRing, Device, Driver, Surface};
+use super::target::{BorrowedRing, Device, Driver, ExportKind, ExportedRing, Surface};
 use crate::completion::Resolver;
 use crate::runtime::Outbox;
 
@@ -125,6 +125,7 @@ pub(crate) enum TargetInit {
     Offscreen(Option<Device>),
     Surface { surface: Surface, device: Option<Device> },
     Borrowed { ring: BorrowedRing, device: Device, producer: SyncKind },
+    Exported { ring: ExportedRing, device: Device, kind: ExportKind, producer: SyncKind },
 }
 
 /// Builds the session's renderer into `slot`, on the thread that runs the
@@ -162,6 +163,9 @@ impl Gfx {
             TargetInit::Offscreen(device) => LocalTarget::offscreen(device, size)?,
             TargetInit::Surface { surface, device } => LocalTarget::surface(surface, device, size)?,
             TargetInit::Borrowed { ring, device, producer } => LocalTarget::borrowed(device, ring, producer)?,
+            TargetInit::Exported { ring, device, kind, producer } => {
+                LocalTarget::exported(device, &ring, kind, size, producer)?
+            }
         };
         let backend = target.backend();
         let mut renderer = Renderer::with_glyph_cache(backend.clone(), pixel_ratio, None, glyph_cache.clone());
@@ -686,6 +690,10 @@ impl Worker {
                     let texture = self.ring.as_ref().zip(device).and_then(|(ring, device)| ring.texture(slot, &device));
                     Some(Published { result, sync, texture })
                 }
+                Some(Handoff::Queued { slot: given, sync }) if given == slot && result.view.is_some() => {
+                    let texture = self.gfx.as_ref().and_then(|gfx| gfx.target.exported_texture(slot));
+                    Some(Published { result, sync, texture })
+                }
                 _ => None,
             };
             self.end_slot(slot, published);
@@ -920,7 +928,25 @@ impl Worker {
     pub(crate) fn resize(&mut self, size: Size, scale_factor: f64) -> Result<(), Error> {
         self.set_scale_factor(scale_factor)?;
         let gfx = self.gfx.as_ref().ok_or_else(target_lost)?;
-        gfx.target.resize(physical_size(size, scale_factor as f32));
+        let physical = physical_size(size, scale_factor as f32);
+        if gfx.target.is_exported() {
+            // The frames that the host holds keep their images, and every
+            // slot gets a new one. The frames it didn't acquire go first, in
+            // the same step as the snapshot, so that none is acquired with
+            // an image that the resize lets go of.
+            let held: Vec<usize> = {
+                let mut state = self.shared.state.lock_unpoisoned();
+                for slot in state.ring.iter_mut().filter(|slot| !slot.acquired) {
+                    slot.frame = None;
+                    slot.quarantined = false;
+                }
+                state.ring.iter().enumerate().filter(|(_, slot)| slot.acquired).map(|(index, _)| index).collect()
+            };
+            let _scope = gfx.scope();
+            gfx.target.resize_exported(physical, &held)?;
+        } else {
+            gfx.target.resize(physical);
+        }
         self.target_changed(size, None);
         Ok(())
     }

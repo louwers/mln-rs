@@ -4,7 +4,10 @@ use std::sync::Arc;
 
 use mln_gfx::Window;
 pub use mln_gfx::backend::Type as BackendType;
-pub use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
+pub use mln_gfx::{
+    ConsumerSync, DmaBufFormat, DmaBufPlane, ExportKind, ExportKinds, ExportedImage, ExportedRing, GpuSync, SyncKind,
+    SyncKinds,
+};
 use mln_util::error::Error;
 use mln_util::size::Size;
 
@@ -83,6 +86,17 @@ pub enum RenderTarget {
     /// size in pixels, and [`set_ring`](crate::RenderSession::set_ring)
     /// gives the session new ones.
     Borrowed { size: Size, ring: BorrowedRing, device: Device },
+    /// A ring of images of `size` logical pixels, rendered at the map's
+    /// pixel ratio, that the session allocates on `device` and shares with
+    /// the host in a kind of `ring.kinds`: the first, by
+    /// [`ExportKind::BY_PREFERENCE`], that the device exports. Without a
+    /// device, the session renders on the first of [`Device::new`]'s
+    /// backends whose device exports one. Each frame goes to the host, which
+    /// takes it with [`acquire_frame`](crate::RenderSession::acquire_frame)
+    /// and gives it back once it has read it.
+    /// [`resize`](crate::RenderSession::resize) gives the ring images of a
+    /// new size, and the frames that the host holds keep theirs.
+    Exported { size: Size, ring: ExportedRing, device: Option<Device> },
 }
 
 /// A ring of the host's textures, of one backend.
@@ -124,6 +138,8 @@ pub enum FrameTextureKind {
     OpenGl { texture: u32, target: u32 },
     /// A WebGPU texture: the host's at the frame's slot of its ring.
     WebGpu,
+    /// An image of an exported ring, and its shared memory.
+    Exported(ExportedImage),
 }
 
 impl BorrowedRing {
@@ -614,6 +630,102 @@ impl Device {
                 self.backend(),
                 ring.backend()
             ))),
+        }
+    }
+
+    /// The kinds of exported ring that sessions on the device share their
+    /// images in: those that the device has exported an image of.
+    pub fn export_kinds(&self) -> ExportKinds {
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => device.export_kinds(),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
+            #[allow(unreachable_patterns)]
+            _ => ExportKinds::NONE,
+        }
+    }
+
+    /// The kind that a session on the device shares `ring`'s images in, and
+    /// the kinds of sync with which the host can wait for a frame (the
+    /// producer's) and a session for the host's reads (the consumer's).
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device exports none of the ring's kinds.
+    pub fn export_plan(&self, ring: &ExportedRing) -> Result<(ExportKind, SyncKinds, SyncKinds), Error> {
+        #[allow(unreachable_patterns)]
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => {
+                let kind = mln_vulkan::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_vulkan::exported_target::sync_kinds(device);
+                Ok((kind, producer, consumer))
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => {
+                let kind = mln_mtl::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_mtl::exported_target::sync_kinds(device);
+                Ok((kind, producer, consumer))
+            }
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Device::Gl(device) => {
+                let kind = mln_gl::exported_target::plan(device, ring)?;
+                let (producer, consumer) = mln_gl::exported_target::sync_kinds();
+                Ok((kind, producer, consumer))
+            }
+            _ => {
+                let _ = ring;
+                Err(Error::unsupported(format!("a {:?} device exports no ring", self.backend())))
+            }
+        }
+    }
+
+    /// The kinds of sync with which the host can wait for an exported
+    /// ring's frame (the producer's) and a session for the host's reads (the
+    /// consumer's), on a device that exports a ring.
+    pub fn export_sync_kinds(&self) -> (SyncKinds, SyncKinds) {
+        if self.export_kinds().is_empty() {
+            return (SyncKinds::NONE, SyncKinds::NONE);
+        }
+        #[allow(unreachable_patterns)]
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(device) => mln_vulkan::exported_target::sync_kinds(device),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Device::Gl(_) => mln_gl::exported_target::sync_kinds(),
+            _ => (SyncKinds::NONE, SyncKinds::NONE),
+        }
+    }
+
+    /// The library's device for `ring`: on the first of [`new`](Self::new)'s
+    /// backends whose device exports one of the ring's kinds.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no
+    /// backend's device does, and as [`new`](Self::new) does.
+    pub fn for_exported_ring(ring: &ExportedRing) -> Result<Device, Error> {
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = ring;
+            Err(Error::unsupported("the browser has no library devices"))
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let mut error = Error::unsupported("no backend of this build exports the ring's kinds of image");
+            for backend in Self::native_order() {
+                match Self::with_backend(*backend, DeviceOptions::default()) {
+                    Ok(device) => match device.export_plan(ring) {
+                        Ok(_) => return Ok(device),
+                        Err(e) => error = e,
+                    },
+                    Err(e) if missing(&e) => {}
+                    Err(e) => return Err(e),
+                }
+            }
+            Err(error)
         }
     }
 

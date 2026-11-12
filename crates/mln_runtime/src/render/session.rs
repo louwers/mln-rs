@@ -22,8 +22,8 @@ use super::frame::{FrameDemand, FrameResult};
 use super::local::Pending;
 use super::query::RenderedQueryGeometry;
 use super::target::{
-    AttachOptions, BorrowedRing, ConsumerSync, Driver, FrameTexture, GpuSync, RenderTarget, Surface, SyncKind,
-    SyncKinds, Wake,
+    AttachOptions, BorrowedRing, ConsumerSync, Device, Driver, ExportKind, FrameTexture, GpuSync, RenderTarget,
+    Surface, SyncKind, SyncKinds, Wake,
 };
 use super::worker::{self, Init, TargetInit, Worker};
 use crate::completion::{Completion, Home, Resolver};
@@ -85,6 +85,8 @@ pub struct RenderSessionCapabilities {
     pub producer_sync_kind: Option<SyncKind>,
     /// The kinds of sync that [`AcquiredFrame::release`] takes.
     pub consumer_sync_kinds: SyncKinds,
+    /// How an exported ring shares its images, for an exported ring.
+    pub export_kind: Option<ExportKind>,
 }
 
 /// A frame of a borrowed ring that the session published, and what the
@@ -575,6 +577,7 @@ pub(crate) fn attach(
 ) -> Result<(RenderSession, Completion<()>), Error> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);
     let mut ring = None;
+    let mut export_kind = None;
     let (size, target) = match target {
         RenderTarget::Offscreen { size, device } => (size, TargetInit::Offscreen(device)),
         RenderTarget::Surface { size, surface, device } => {
@@ -593,6 +596,28 @@ pub(crate) fn attach(
             }
             ring = Some((borrowed.depth(), picked, consumer));
             (size, TargetInit::Borrowed { ring: borrowed, device, producer: picked })
+        }
+        RenderTarget::Exported { size, ring: exported, device } => {
+            if exported.depth == 0 {
+                return Err(Error::invalid_argument("an exported ring needs at least one image"));
+            }
+            if exported.kinds.is_empty() {
+                return Err(Error::invalid_argument("an exported ring needs a kind of image to share"));
+            }
+            if size.is_empty() {
+                return Err(Error::invalid_argument("the target's size must not be empty"));
+            }
+            let device = match device {
+                Some(device) => device,
+                None => Device::for_exported_ring(&exported)?,
+            };
+            let (kind, producer, consumer) = device.export_plan(&exported)?;
+            let picked = options.producer_sync_kinds.pick(producer).ok_or_else(|| {
+                Error::unsupported("render target supports none of the requested producer sync kinds")
+            })?;
+            ring = Some((exported.depth, picked, consumer));
+            export_kind = Some(kind);
+            (size, TargetInit::Exported { ring: exported, device, kind, producer: picked })
         }
     };
     if size.is_empty() {
@@ -665,6 +690,7 @@ pub(crate) fn attach(
             presentation,
             producer_sync_kind: ring.map(|(_, producer, _)| producer),
             consumer_sync_kinds: ring.map_or(SyncKinds::NONE, |(_, _, consumer)| consumer),
+            export_kind,
         },
         driver_work_taken: AtomicBool::new(false),
         driver_armed,
@@ -864,7 +890,7 @@ impl RenderSession {
     /// it meanwhile.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
-    /// session without a ring, with
+    /// session without a borrowed ring, with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for another number
     /// of textures, and with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// while the host holds one of the ring's frames. Completes with
@@ -880,6 +906,9 @@ impl RenderSession {
             }
             if !shared.capabilities.frame_acquisition {
                 return Err(Error::unsupported("a surface session takes no caller-owned texture"));
+            }
+            if shared.capabilities.export_kind.is_some() {
+                return Err(Error::unsupported("an exported ring resizes instead of taking new textures"));
             }
             if state.acquired_frames != 0 {
                 return Err(Error::invalid_state("cannot replace the render target while a texture frame is acquired"));
@@ -945,12 +974,16 @@ impl RenderSession {
     /// as when a window moves to a display of another density. The map keeps
     /// its tiles, and the renderer draws the next frame at the new scale
     /// factor. A later demand shows the new extent, and one sent before
-    /// shows the old.
+    /// shows the old. An exported ring gets images of the new size, and the
+    /// frames that the host holds keep theirs until it gives them back.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, or a scale factor that isn't finite and positive.
+    /// empty size, or a scale factor that isn't finite and positive, and
+    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed
+    /// ring, which [`set_ring`](Self::set_ring) resizes.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
-        if self.shared().capabilities.frame_acquisition {
+        let capabilities = self.shared().capabilities;
+        if capabilities.frame_acquisition && capabilities.export_kind.is_none() {
             return Err(Error::unsupported("a borrowed ring is sized by its owner: give it new textures instead"));
         }
         let LogicalExtent { size, scale_factor } = extent;
@@ -1027,8 +1060,11 @@ impl RenderSession {
     /// has again starts fresh, even one that the host gave up.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
-    /// offscreen session, whose target is its own.
+    /// offscreen session or an exported ring, whose targets are their own.
     pub fn release_target(&self) -> Result<Completion<()>, Error> {
+        if self.shared().capabilities.export_kind.is_some() {
+            return Err(Error::unsupported("an exported ring keeps its images until the session ends"));
+        }
         let shared = self.shared().clone();
         let capabilities = shared.capabilities;
         if !capabilities.presentation && !capabilities.frame_acquisition {

@@ -9,12 +9,14 @@
 
 use std::rc::Rc;
 
-use mln_gfx::{ConsumerSync, FrameTarget, RendererBackend, SyncKind};
+use mln_gfx::{ConsumerSync, ExportKind, ExportedImage, ExportedRing, FrameTarget, RendererBackend, SyncKind};
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 
-use super::target::{BorrowedRing, Device, DeviceOptions, RingKind, Surface, SurfaceKind};
+use super::target::{
+    BorrowedRing, Device, DeviceOptions, FrameTexture, FrameTextureKind, RingKind, Surface, SurfaceKind,
+};
 
 /// Frames read back: an offscreen target.
 trait Offscreen: FrameTarget {
@@ -122,6 +124,45 @@ impl PendingReads for mln_vulkan::PendingReads {
         mln_vulkan::PendingReads::poll(self)
     }
 }
+
+/// Frames queued for the host: a ring of the target's own images, which it
+/// exports.
+trait Exported: FrameTarget {
+    fn select(&self, slot: usize);
+    fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
+    fn discard(&self, slot: usize);
+    fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error>;
+    fn image(&self, slot: usize) -> Option<(Size, ExportedImage)>;
+}
+
+macro_rules! exported {
+    ($type:ty) => {
+        impl Exported for $type {
+            fn select(&self, slot: usize) {
+                <$type>::select(self, slot);
+            }
+            fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+                <$type>::release(self, slot, consumer)
+            }
+            fn discard(&self, slot: usize) {
+                <$type>::discard(self, slot);
+            }
+            fn resize(&self, size: Size, held: &[usize]) -> Result<(), Error> {
+                <$type>::resize(self, size, held)
+            }
+            fn image(&self, slot: usize) -> Option<(Size, ExportedImage)> {
+                <$type>::image(self, slot)
+            }
+        }
+    };
+}
+
+#[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+exported!(mln_vulkan::ExportedTarget);
+#[cfg(all(feature = "metal", target_vendor = "apple"))]
+exported!(mln_mtl::ExportedTarget);
+#[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+exported!(mln_gl::ExportedTarget);
 
 macro_rules! offscreen {
     ($type:ty) => {
@@ -275,6 +316,41 @@ impl Backend {
         }
     }
 
+    /// A target on the backend that renders into a ring of `ring.depth`
+    /// images of `size` pixels, which it exports as `kind`, and hands frames
+    /// over with sync of the kind `producer`.
+    fn exported(
+        &self,
+        device: &Device,
+        ring: &ExportedRing,
+        kind: ExportKind,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<Box<dyn Exported>, Error> {
+        #[allow(unreachable_patterns)]
+        match self {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Backend::Vulkan(backend) => {
+                Ok(Box::new(mln_vulkan::ExportedTarget::new(backend.clone(), ring, kind, size, producer)?))
+            }
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Backend::Metal(backend) => {
+                Ok(Box::new(mln_mtl::ExportedTarget::new(backend.clone(), ring, kind, size, producer)?))
+            }
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            Backend::Gl(backend) => {
+                let Device::Gl(device) = device else {
+                    return Err(Error::unsupported("an OpenGL backend renders on an OpenGL device"));
+                };
+                Ok(Box::new(mln_gl::ExportedTarget::new(backend.clone(), device, ring, kind, size, producer)?))
+            }
+            _ => {
+                let _ = (device, ring, kind, size, producer);
+                Err(Error::unsupported("the session's backend exports no ring"))
+            }
+        }
+    }
+
     /// An offscreen target of `size` pixels on the backend.
     fn offscreen(&self, size: Size) -> Box<dyn Offscreen> {
         match *self {
@@ -389,6 +465,7 @@ enum Frames {
         target: Option<Box<dyn Borrowed>>,
         producer: SyncKind,
     },
+    Exported(Box<dyn Exported>),
 }
 
 /// A render target built on this thread: the backend that a renderer draws
@@ -445,6 +522,30 @@ impl LocalTarget {
         Ok(LocalTarget { device, backend, frames })
     }
 
+    /// A target on `device` that renders into a ring of `ring.depth` images
+    /// of `size` pixels, which it exports as `kind`, one that
+    /// [`Device::export_plan`] picked, and hands each frame over with sync of
+    /// the kind `producer`.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the
+    /// device can't export `kind` or hand frames over with `producer`, and
+    /// with the backend's error.
+    pub fn exported(
+        device: Device,
+        ring: &ExportedRing,
+        kind: ExportKind,
+        size: Size,
+        producer: SyncKind,
+    ) -> Result<LocalTarget, Error> {
+        let backend = Backend::new(&device)?;
+        let frames = {
+            let scoped = backend.as_dyn();
+            let _scope = mln_gfx::BackendScope::new(&*scoped, mln_gfx::ScopeType::Explicit);
+            Frames::Exported(backend.exported(&device, ring, kind, size, producer)?)
+        };
+        Ok(LocalTarget { device, backend, frames })
+    }
+
     /// The device the target renders on.
     pub fn device(&self) -> &Device {
         &self.device
@@ -462,7 +563,13 @@ impl LocalTarget {
             Frames::Offscreen(target) => Some(&**target),
             Frames::Presenting(target) => target.as_deref().map(|target| target as &dyn FrameTarget),
             Frames::Borrowed { target, .. } => target.as_deref().map(|target| target as &dyn FrameTarget),
+            Frames::Exported(target) => Some(&**target),
         }
+    }
+
+    /// Whether frames go to the host in images of the target's own.
+    pub fn is_exported(&self) -> bool {
+        matches!(self.frames, Frames::Exported(_))
     }
 
     /// Whether frames go to the host's ring.
@@ -485,6 +592,10 @@ impl LocalTarget {
 
     /// Has the next frame render into the ring's texture at `slot`.
     pub fn select_slot(&self, slot: usize) -> Result<(), Error> {
+        if let Frames::Exported(target) = &self.frames {
+            target.select(slot);
+            return Ok(());
+        }
         self.ring()?.select(slot);
         Ok(())
     }
@@ -492,14 +603,43 @@ impl LocalTarget {
     /// The host gave the ring's texture at `slot` back: the next frame
     /// rendered into it waits for `consumer`.
     pub fn release_slot(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
+        if let Frames::Exported(target) = &self.frames {
+            return target.release(slot, consumer);
+        }
         self.ring()?.release(slot, consumer)
     }
 
     /// The host gave up the ring's texture at `slot`, which the target
     /// renders into no more.
     pub fn discard_slot(&self, slot: usize) -> Result<(), Error> {
+        if let Frames::Exported(target) = &self.frames {
+            target.discard(slot);
+            return Ok(());
+        }
         self.ring()?.discard(slot);
         Ok(())
+    }
+
+    /// Renders an exported ring's next frames into images of `size` pixels.
+    /// The frames that the host holds, at `held` slots, keep their images.
+    ///
+    /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
+    /// target that isn't an exported ring, and with the backend's error.
+    pub fn resize_exported(&self, size: Size, held: &[usize]) -> Result<(), Error> {
+        match &self.frames {
+            Frames::Exported(target) => target.resize(size, held),
+            _ => Err(Error::unsupported("the target exports no ring")),
+        }
+    }
+
+    /// The exported image of the frame at `slot`, of the size it has.
+    pub fn exported_texture(&self, slot: usize) -> Option<FrameTexture> {
+        match &self.frames {
+            Frames::Exported(target) => {
+                target.image(slot).map(|(size, image)| FrameTexture { size, kind: FrameTextureKind::Exported(image) })
+            }
+            _ => None,
+        }
     }
 
     /// Renders into `ring` from now on, in place of the ring's textures, and
@@ -530,7 +670,7 @@ impl LocalTarget {
         match &self.frames {
             Frames::Offscreen(target) => target.resize(size),
             Frames::Presenting(Some(target)) => target.resize(size),
-            Frames::Presenting(None) | Frames::Borrowed { .. } => {}
+            Frames::Presenting(None) | Frames::Borrowed { .. } | Frames::Exported(_) => {}
         }
     }
 
@@ -545,7 +685,9 @@ impl LocalTarget {
                 .read_image()
                 .ok_or_else(|| Error::invalid_state("the target has no frame since it was made or resized")),
             Frames::Presenting(_) => Err(Error::unsupported("a surface session can't read its frames back")),
-            Frames::Borrowed { .. } => Err(Error::unsupported("a borrowed ring's frames are the host's to read")),
+            Frames::Borrowed { .. } | Frames::Exported(_) => {
+                Err(Error::unsupported("a ring's frames are the host's to read"))
+            }
         }
     }
 
@@ -559,7 +701,7 @@ impl LocalTarget {
                 None
             }
             Frames::Borrowed { target, .. } => target.take().and_then(|target| target.take_pending()),
-            Frames::Offscreen(_) => None,
+            Frames::Offscreen(_) | Frames::Exported(_) => None,
         }
     }
 
