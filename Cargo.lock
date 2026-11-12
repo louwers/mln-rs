@@ -2805,6 +2805,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "naga",
+ "windows",
 ]
 
 [[package]]

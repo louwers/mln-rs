@@ -249,6 +249,8 @@ wgpu = { version = "30.0.1", default-features = false, features = ["std", "parki
 # end, at wgpu's versions. naga's GLSL front end needs a module that only
 # `wgsl-in` or `spv-in` builds.
 ash = { version = "0.38.0" }
+# The Vulkan backend's D3D12 fences on Windows, at wgpu's version.
+windows = { version = "0.62.2", features = ["Win32_Foundation"] }
 gpu-allocator = { version = "0.28.0", default-features = false, features = ["std", "vulkan"] }
 naga = { version = "30.0.1", features = ["glsl-in", "spv-out", "wgsl-in"] }
 # examples/desktop: the CAMetalLayer of the window's view on macOS.

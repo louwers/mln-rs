@@ -443,10 +443,11 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
 
 /// The kinds of sync with which the host waits for an exported image's
 /// frame (the producer's), and the target for the host's reads (the
-/// consumer's): a finished frame, or a sync file, which crosses APIs.
+/// consumer's): a finished frame, or the sync that crosses APIs on the
+/// platform: a sync file, or on Windows, a D3D12 fence.
 pub fn sync_kinds(device: &Device) -> (SyncKinds, SyncKinds) {
     let (producer, consumer) = device.sync_kinds();
-    let crossing = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::SyncFd]);
+    let crossing = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::SyncFd, SyncKind::D3d12Fence]);
     let keep = |kinds: SyncKinds| {
         crossing.iter().filter(|kind| kinds.contains(*kind)).fold(SyncKinds::NONE, |kinds, kind| kinds.with(kind))
     };

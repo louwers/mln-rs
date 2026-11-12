@@ -220,6 +220,11 @@ pub struct Features {
     /// `VK_EXT_external_memory_dma_buf` and
     /// `VK_EXT_image_drm_format_modifier` with `VK_KHR_external_memory_fd`.
     pub dma_buf: bool,
+    /// Exporting a timeline semaphore as a D3D12 fence's NT handle, of
+    /// `VK_KHR_external_semaphore_win32`.
+    pub export_d3d12_fence: bool,
+    /// Importing a D3D12 fence's NT handle into a timeline semaphore.
+    pub import_d3d12_fence: bool,
 }
 
 pub(crate) struct Shared {
@@ -232,6 +237,8 @@ pub(crate) struct Shared {
     #[cfg_attr(not(unix), allow(dead_code))]
     memory_fd: Option<ash::khr::external_memory_fd::Device>,
     drm_format_modifier: Option<ash::ext::image_drm_format_modifier::Device>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    semaphore_win32: Option<ash::khr::external_semaphore_win32::Device>,
     /// The kinds that the device has exported an image of, probed once.
     export_kinds: OnceLock<ExportKinds>,
     physical_device: vk::PhysicalDevice,
@@ -321,6 +328,24 @@ fn graphics_queue_family(instance: &ash::Instance, candidate: vk::PhysicalDevice
 fn sync_fd_support(instance: &ash::Instance, physical_device: vk::PhysicalDevice) -> (bool, bool) {
     let info =
         vk::PhysicalDeviceExternalSemaphoreInfo::default().handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD);
+    let mut properties = vk::ExternalSemaphoreProperties::default();
+    // SAFETY: a plain query of a physical device of the instance, which is
+    // of Vulkan 1.1.
+    unsafe { instance.get_physical_device_external_semaphore_properties(physical_device, &info, &mut properties) };
+    let features = properties.external_semaphore_features;
+    (
+        features.contains(vk::ExternalSemaphoreFeatureFlags::EXPORTABLE),
+        features.contains(vk::ExternalSemaphoreFeatureFlags::IMPORTABLE),
+    )
+}
+
+/// Whether `physical_device` exports (`export`) or imports timeline
+/// semaphores as D3D12 fences.
+fn d3d12_fence_support(instance: &ash::Instance, physical_device: vk::PhysicalDevice) -> (bool, bool) {
+    let mut timeline = vk::SemaphoreTypeCreateInfo::default().semaphore_type(vk::SemaphoreType::TIMELINE);
+    let info = vk::PhysicalDeviceExternalSemaphoreInfo::default()
+        .handle_type(vk::ExternalSemaphoreHandleTypeFlags::D3D12_FENCE)
+        .push_next(&mut timeline);
     let mut properties = vk::ExternalSemaphoreProperties::default();
     // SAFETY: a plain query of a physical device of the instance, which is
     // of Vulkan 1.1.
@@ -477,6 +502,8 @@ impl Device {
             features.external_memory_fd.then(|| ash::khr::external_memory_fd::Device::new(&instance, &device));
         let drm_format_modifier =
             features.dma_buf.then(|| ash::ext::image_drm_format_modifier::Device::new(&instance, &device));
+        let semaphore_win32 = (features.export_d3d12_fence || features.import_d3d12_fence)
+            .then(|| ash::khr::external_semaphore_win32::Device::new(&instance, &device));
         // SAFETY: the device was made with a queue of the family; plain
         // queries of the physical device.
         let (queue, properties) = unsafe {
@@ -494,6 +521,7 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                semaphore_win32,
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device,
@@ -578,8 +606,13 @@ impl Device {
             )
         };
         let available = extension_names(&available);
-        let optional: &[&'static CStr] =
-            &[ash::khr::swapchain::NAME, ash::khr::external_semaphore_fd::NAME, ash::ext::queue_family_foreign::NAME];
+        // Windows' drivers have the win32 extensions: D3D12 fences.
+        let optional: &[&'static CStr] = &[
+            ash::khr::swapchain::NAME,
+            ash::khr::external_semaphore_fd::NAME,
+            ash::ext::queue_family_foreign::NAME,
+            ash::khr::external_semaphore_win32::NAME,
+        ];
         let mut extensions: Vec<&'static CStr> = vec![STORAGE_BUFFER_STORAGE_CLASS];
         extensions.extend(optional.iter().filter(|name| available.contains(name)));
         // Exported rings: opaque file descriptors, and dmabufs, whose
@@ -650,6 +683,12 @@ impl Device {
         } else {
             (false, false)
         };
+        let (export_d3d12_fence, import_d3d12_fence) =
+            if timeline && extensions.contains(&ash::khr::external_semaphore_win32::NAME) {
+                d3d12_fence_support(instance, physical_device)
+            } else {
+                (false, false)
+            };
         let features = Features {
             timeline_semaphores: timeline,
             export_sync_fd,
@@ -657,6 +696,8 @@ impl Device {
             foreign_queue_family: extensions.contains(&ash::ext::queue_family_foreign::NAME),
             external_memory_fd,
             dma_buf,
+            export_d3d12_fence,
+            import_d3d12_fence,
         };
         Ok((physical_device, queue_family_index, device, enabled, features, extensions))
     }
@@ -668,7 +709,7 @@ impl Device {
     /// that it lists: `VK_KHR_external_semaphore_fd` for sync files,
     /// `VK_KHR_external_memory_fd` for opaque file descriptors, and that with
     /// `VK_EXT_external_memory_dma_buf` and `VK_EXT_image_drm_format_modifier`
-    /// for dmabufs.
+    /// for dmabufs, and `VK_KHR_external_semaphore_win32` for D3D12 fences.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without a
     /// Vulkan library to look the functions up in, with
@@ -792,11 +833,25 @@ impl Device {
             } else {
                 (false, false)
             };
+        // Vulkan 1.2's, or VK_KHR_timeline_semaphore's: renderers only create
+        // timelines and submit with them, which both share.
+        let timeline_semaphores = timeline_supported.timeline_semaphore == vk::TRUE
+            && (device_lookup(c"vkGetSemaphoreCounterValue") || device_lookup(c"vkGetSemaphoreCounterValueKHR"));
+        // A D3D12 fence is a timeline.
+        let (export_d3d12_fence, import_d3d12_fence) = if timeline_semaphores
+            && enabled(ash::khr::external_semaphore_win32::NAME)
+            && instance_has(c"vkGetPhysicalDeviceExternalSemaphoreProperties")
+        {
+            let (export, import) = d3d12_fence_support(&instance, physical_device);
+            (
+                export && device_lookup(c"vkGetSemaphoreWin32HandleKHR"),
+                import && device_lookup(c"vkImportSemaphoreWin32HandleKHR"),
+            )
+        } else {
+            (false, false)
+        };
         let features = Features {
-            // Vulkan 1.2's, or VK_KHR_timeline_semaphore's: renderers only
-            // create timelines and submit with them, which both share.
-            timeline_semaphores: timeline_supported.timeline_semaphore == vk::TRUE
-                && (device_lookup(c"vkGetSemaphoreCounterValue") || device_lookup(c"vkGetSemaphoreCounterValueKHR")),
+            timeline_semaphores,
             export_sync_fd: export_sync_fd && device_lookup(c"vkGetSemaphoreFdKHR"),
             import_sync_fd: import_sync_fd && device_lookup(c"vkImportSemaphoreFdKHR"),
             // The host may not have enabled VK_EXT_queue_family_foreign, and
@@ -804,7 +859,11 @@ impl Device {
             foreign_queue_family: false,
             external_memory_fd,
             dma_buf,
+            export_d3d12_fence,
+            import_d3d12_fence,
         };
+        let semaphore_win32 = (export_d3d12_fence || import_d3d12_fence)
+            .then(|| ash::khr::external_semaphore_win32::Device::new(&instance, &ash_device));
         // The features the library would enable, where the GPU has them. A
         // host that didn't enable one gets the validation layer's warning.
         let enabled_features = vk::PhysicalDeviceFeatures {
@@ -822,6 +881,7 @@ impl Device {
                 semaphore_fd,
                 memory_fd,
                 drm_format_modifier,
+                semaphore_win32,
                 export_kinds: OnceLock::new(),
                 physical_device,
                 device: ash_device,
@@ -903,6 +963,12 @@ impl Device {
         if features.import_sync_fd && cfg!(unix) {
             consumer = consumer.with(SyncKind::SyncFd);
         }
+        if features.export_d3d12_fence && cfg!(windows) {
+            producer = producer.with(SyncKind::D3d12Fence);
+        }
+        if features.import_d3d12_fence && cfg!(windows) {
+            consumer = consumer.with(SyncKind::D3d12Fence);
+        }
         (producer, consumer)
     }
 
@@ -976,6 +1042,11 @@ impl Shared {
 
     pub(crate) fn semaphore_fd(&self) -> Option<&ash::khr::external_semaphore_fd::Device> {
         self.semaphore_fd.as_ref()
+    }
+
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn semaphore_win32(&self) -> Option<&ash::khr::external_semaphore_win32::Device> {
+        self.semaphore_win32.as_ref()
     }
 
     /// Whether the instance has the surface extension `name`. A host's
