@@ -42,6 +42,7 @@ impl Default for CooperativeScheduler {
 }
 
 impl CooperativeScheduler {
+    #[must_use]
     pub fn new() -> Self {
         CooperativeScheduler {
             unique_id: SimpleIdentity::new(),
@@ -130,7 +131,7 @@ impl Scheduler for CooperativeScheduler {
 
     /// Runs the tag's tasks here, as there is no worker to wait for. Called
     /// from one of the tag's own tasks, it runs the ones queued after it but
-    /// can't wait for itself (a ThreadedScheduler asserts there instead).
+    /// can't wait for itself (a `ThreadedScheduler` asserts there instead).
     fn wait_for_empty_tagged(&self, tag: SimpleIdentity) {
         let tag_to_find = if tag.is_empty() { self.unique_id } else { tag };
         let Some(queue) = self.queues.lock_unpoisoned().get(&tag_to_find).cloned() else {
@@ -275,7 +276,7 @@ mod tests {
         let caught = Arc::new(Mutex::new(None));
         let c = caught.clone();
         scheduler.set_exception_handler(Box::new(move |payload| {
-            *c.lock().unwrap() = payload.downcast_ref::<&str>().map(|s| s.to_string());
+            *c.lock().unwrap() = payload.downcast_ref::<&str>().map(std::string::ToString::to_string);
         }));
         scheduler.schedule(Box::new(|| panic!("boom")));
         let order = Arc::new(Mutex::new(Vec::new()));

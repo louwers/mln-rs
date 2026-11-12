@@ -44,6 +44,7 @@ pub struct TileMesh {
 /// A grid mesh covering one tile, optionally with borders and pole caps; port
 /// of GL JS `util/create_tile_mesh.ts`. Triangles are counter-clockwise in
 /// tile space.
+#[must_use]
 pub fn create_tile_mesh(options: &TileMeshOptions) -> TileMesh {
     // Capped first so the product cannot wrap; every granularity past the
     // vertex limit fails the check anyway.

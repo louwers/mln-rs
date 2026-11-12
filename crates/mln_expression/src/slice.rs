@@ -4,7 +4,7 @@
 use mln_conversion::Convertible;
 
 use crate::expression::{
-    EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
+    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
 };
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_;
@@ -16,9 +16,9 @@ fn normalize_index(index: i32, length: i32) -> i32 {
 }
 
 /// `static_cast<int>(double)` as clang compiles it on x86-64: out of range
-/// and NaN give INT_MIN.
+/// and NaN give `INT_MIN`.
 fn static_cast_int(f: f64) -> i32 {
-    if f > -2147483649.0 && f < 2147483648.0 { f as i32 } else { i32::MIN }
+    if f > -2_147_483_649.0 && f < 2_147_483_648.0 { f as i32 } else { i32::MIN }
 }
 
 pub struct Slice {
@@ -29,6 +29,7 @@ pub struct Slice {
 }
 
 impl Slice {
+    #[must_use]
     pub fn new(
         input: Box<dyn Expression>,
         from_index: Box<dyn Expression>,
@@ -36,16 +37,11 @@ impl Slice {
     ) -> Self {
         let deps = input.dependencies()
             | from_index.dependencies()
-            | to_index.as_ref().map_or(Default::default(), |e| e.dependencies());
+            | to_index.as_ref().map_or(Dependency::NONE, |e| e.dependencies());
         Slice { base: ExpressionBase::new(Kind::Slice, input.get_type().clone(), deps), input, from_index, to_index }
     }
 
-    fn evaluate_for_array_input(
-        &self,
-        array: &[Value],
-        from_index_value: i32,
-        to_index_value: i32,
-    ) -> EvaluationResult {
+    fn evaluate_for_array_input(array: &[Value], from_index_value: i32, to_index_value: i32) -> Value {
         let length = array.len() as i32;
         let mut to_index_value = to_index_value;
         if to_index_value == i32::MAX {
@@ -55,7 +51,7 @@ impl Slice {
         to_index_value = normalize_index(to_index_value, length);
 
         if from_index_value >= to_index_value {
-            return Ok(Value::Array(Vec::new()));
+            return Value::Array(Vec::new());
         }
         to_index_value = to_index_value.min(length);
 
@@ -65,10 +61,10 @@ impl Slice {
         for index in from_index_value.max(0)..to_index_value {
             result.push(array[index as usize].clone());
         }
-        Ok(Value::Array(result))
+        Value::Array(result)
     }
 
-    fn evaluate_for_string_input(&self, string: &str, from_index_value: i32, to_index_value: i32) -> EvaluationResult {
+    fn evaluate_for_string_input(string: &str, from_index_value: i32, to_index_value: i32) -> Value {
         let length_bytes = string.len();
         let length = unicode_length_on_validated_utf8(string) as i32;
         let to_index_value_bytes = if to_index_value == i32::MAX {
@@ -83,10 +79,10 @@ impl Slice {
             get_unicode_character_offset_on_validated_utf8(string, from_index_value_chars as isize as usize);
 
         if from_index_value_bytes >= length_bytes || from_index_value_bytes >= to_index_value_bytes {
-            return Ok(Value::String(String::new()));
+            return Value::String(String::new());
         }
 
-        Ok(Value::String(string[from_index_value_bytes..to_index_value_bytes].to_owned()))
+        Value::String(string[from_index_value_bytes..to_index_value_bytes].to_owned())
     }
 
     pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -145,8 +141,8 @@ impl Expression for Slice {
         }
 
         match &evaluated_input {
-            Value::String(s) => self.evaluate_for_string_input(s, from_index_value, to_index_value),
-            Value::Array(v) => self.evaluate_for_array_input(v, from_index_value, to_index_value),
+            Value::String(s) => Ok(Self::evaluate_for_string_input(s, from_index_value, to_index_value)),
+            Value::Array(v) => Ok(Self::evaluate_for_array_input(v, from_index_value, to_index_value)),
             _ => Err(EvaluationError::new(format!(
                 "Expected first argument to be of type array or string, but found {} instead.",
                 type_::to_string(&type_of(&evaluated_input))

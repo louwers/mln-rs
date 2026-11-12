@@ -105,32 +105,42 @@ fn invalid_stretch_y() {
     );
 }
 
-fn content(left: f32, top: f32, right: f32, bottom: f32) -> Option<ImageContent> {
-    Some(ImageContent { left, top, right, bottom })
+fn content(left: f32, top: f32, right: f32, bottom: f32) -> ImageContent {
+    ImageContent { left, top, right, bottom }
 }
 
 // gtest: StyleImage.InvalidContent
 #[test]
 fn invalid_content() {
     // bottom right out of bounds
-    expect_exception(image((16, 16), 1.0, vec![], vec![], content(0.0, 0.0, 24.0, 28.0)), "content area is invalid");
+    expect_exception(
+        image((16, 16), 1.0, vec![], vec![], Some(content(0.0, 0.0, 24.0, 28.0))),
+        "content area is invalid",
+    );
 
     // bottom right < top left
-    expect_exception(image((16, 16), 1.0, vec![], vec![], content(14.0, 14.0, 12.0, 10.0)), "content area is invalid");
+    expect_exception(
+        image((16, 16), 1.0, vec![], vec![], Some(content(14.0, 14.0, 12.0, 10.0))),
+        "content area is invalid",
+    );
 
     // top left out of bounds
-    expect_exception(image((16, 16), 1.0, vec![], vec![], content(-2.0, -8.0, 12.0, 10.0)), "content area is invalid");
+    expect_exception(
+        image((16, 16), 1.0, vec![], vec![], Some(content(-2.0, -8.0, 12.0, 10.0))),
+        "content area is invalid",
+    );
 }
 
 // gtest: StyleImage.StretchContent
 #[test]
 fn stretch_content() {
     let image =
-        image((16, 16), 1.0, vec![(2.0, 14.0)], vec![(0.0, 4.0), (12.0, 16.0)], content(2.0, 2.0, 14.0, 14.0)).unwrap();
+        image((16, 16), 1.0, vec![(2.0, 14.0)], vec![(0.0, 4.0), (12.0, 16.0)], Some(content(2.0, 2.0, 14.0, 14.0)))
+            .unwrap();
     assert_eq!(16, image.get_image().size.width);
     assert_eq!(16, image.get_image().size.height);
     assert_eq!(1.0, image.get_pixel_ratio());
     assert_eq!(&vec![(2.0_f32, 14.0_f32)], image.get_stretch_x());
     assert_eq!(&vec![(0.0_f32, 4.0_f32), (12.0, 16.0)], image.get_stretch_y());
-    assert_eq!(&content(2.0, 2.0, 14.0, 14.0), image.get_content());
+    assert_eq!(&Some(content(2.0, 2.0, 14.0, 14.0)), image.get_content());
 }

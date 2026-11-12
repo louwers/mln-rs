@@ -5,8 +5,8 @@
 // destroyed when dropped, instead of through the context's deletion queue.
 //
 // C++ reaches the default renderable's resource through its backend
-// (`backend.getDefaultRenderable()`); the platform backend of the port hands
-// it to the context when it makes it (`set_surface`).
+// (`backend.getDefaultRenderable()`); here the frame target hands its images
+// to the context when a frame begins (`set_surface`).
 //
 // Differences from C++:
 // - The render passes are the context's, one for each set of attachment
@@ -25,10 +25,7 @@
 // - Errors C++ throws (a failed wait for a frame, a surface that stays out
 //   of date) are logged. A frame that acquires no image, for a swapchain or
 //   a surface that couldn't be made again, is recorded without a
-//   framebuffer for the default renderable, and submitted without
-//   presenting.
-// - Port-only: `request_surface_recreation` has the platform surface made
-//   again without it being lost (`SurfaceBackend::restore_surface`).
+//   framebuffer for the frame target, and submitted without presenting.
 //
 // TODO(port): `createDynamicTexture`, `createRenderTarget`,
 // `createRenderbufferResource` and the render jobs of the backend thread
@@ -37,6 +34,7 @@
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::rc::{Rc, Weak};
 
 use ash::vk;
@@ -47,7 +45,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::AttributeDataType;
-use mln_gfx::globe_clip_mask::GlobeClipMask;
+use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::scissor_rect::ScissorRect;
@@ -61,7 +59,6 @@ use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_tile_id::CanonicalTileID;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
@@ -73,7 +70,6 @@ use crate::layer_group::LayerGroup;
 use crate::offscreen_texture::OffscreenTexture;
 use crate::pipeline::PipelineInfo;
 use crate::render_pass::RenderPass;
-use crate::renderable_resource::SurfaceRenderableResource;
 use crate::renderer_backend::BackendImpl;
 use crate::shaders::compiler::{self, Stage};
 use crate::shaders::layout::{
@@ -81,14 +77,15 @@ use crate::shaders::layout::{
     image_sampler_binding, image_texture_binding,
 };
 use crate::shaders::shader_program::{ShaderProgram, as_vulkan_shader};
-use crate::shaders::shader_source::shader_source;
+use crate::shaders::shader_source::{GlslShaderSource, shader_source};
+use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 use crate::uniform_buffer::UniformBuffer;
 
 /// Maximum number of vertex attributes, per vertex descriptor: 32 on most
 /// devices (~30% Android use 16), per
-/// https://vulkan.gpuinfo.org/displaydevicelimit.php?name=maxVertexInputBindings
+/// <https://vulkan.gpuinfo.org/displaydevicelimit.php?name=maxVertexInputBindings>
 /// this can be queried at runtime
 /// (VkPhysicalDeviceLimits.maxVertexInputBindings).
 const MAXIMUM_VERTEX_BINDING_COUNT: u32 = 16;
@@ -190,7 +187,7 @@ pub struct Context {
     /// acquired from the swapchain.
     frame_image_acquired: Cell<bool>,
 
-    surface: RefCell<Weak<SurfaceRenderableResource>>,
+    surface: RefCell<Weak<SurfaceResource>>,
     surface_update_requested: Cell<bool>,
     /// The platform surface must be recreated before the swapchain is
     /// rebuilt.
@@ -382,10 +379,15 @@ impl Context {
         &self.backend
     }
 
-    /// Makes `surface` the resource of the default renderable, which frames
-    /// are acquired from and presented to.
-    pub fn set_surface(&self, surface: &Rc<SurfaceRenderableResource>) {
-        *self.surface.borrow_mut() = Rc::downgrade(surface);
+    /// Makes `surface` the images that frames are acquired from and
+    /// presented to, from the next frame on.
+    pub fn set_surface(&self, surface: &Rc<SurfaceResource>) {
+        let surface = Rc::downgrade(surface);
+        if !self.surface.borrow().ptr_eq(&surface) {
+            *self.surface.borrow_mut() = surface;
+            self.surface_update_requested.set(false);
+            self.surface_lost.set(false);
+        }
     }
 
     /// `destroyResources()`: waits for the device, runs the deletion queues
@@ -452,12 +454,11 @@ impl Context {
     pub fn enqueue_deletion(&self, function: DeletionTask) {
         let index = usize::from(self.frame_resource_index.get());
         let mut frames = self.frame_resources.borrow_mut();
-        match frames.get_mut(index) {
-            Some(frame) => frame.deletion_queue.push(function),
-            None => {
-                drop(frames);
-                function(self);
-            }
+        if let Some(frame) = frames.get_mut(index) {
+            frame.deletion_queue.push(function);
+        } else {
+            drop(frames);
+            function(self);
         }
     }
 
@@ -550,13 +551,6 @@ impl Context {
         }
         self.surface_update_requested.set(true);
         self.surface_update_latency.set(if use_delay { self.backend.get_max_frames() as i32 * 3 } else { 0 });
-    }
-
-    /// Has the platform surface made again, as a lost one is, and its
-    /// swapchain with it, before the next frame.
-    pub fn request_surface_recreation(&self) {
-        self.surface_lost.set(true);
-        self.request_surface_update(false);
     }
 
     /// `updateSurface()`
@@ -680,15 +674,13 @@ impl Context {
     }
 
     /// `createProgram(shaderID, name, vertex, fragment, programParameters,
-    /// additionalDefines)`: compiles the two stages with the program's
-    /// defines and `additional_defines`.
+    /// additionalDefines)`, with `source`'s stages and prelude: compiles the
+    /// two stages with the program's defines and `additional_defines`.
     pub fn create_program(
         &self,
         shader_id: BuiltIn,
         name: String,
-        shader_prelude: &str,
-        vertex: &str,
-        fragment: &str,
+        source: &GlslShaderSource,
         program_parameters: &ProgramParameters,
         additional_defines: &HashMap<String, String>,
     ) -> Option<ShaderProgram> {
@@ -696,15 +688,15 @@ impl Context {
         let mut additional: Vec<_> = additional_defines.iter().collect();
         additional.sort();
         for (key, value) in additional {
-            define_str.push_str(&format!("#define {key} {value}\n"));
+            let _ = writeln!(define_str, "#define {key} {value}");
         }
 
         let observer = self.get_observer();
         if let Some(observer) = &observer {
             observer.on_pre_compile_shader(shader_id, BackendType::Vulkan, &define_str);
         }
-        let compile = |stage: Stage, source: &str| {
-            let spirv = compiler::compile(stage, &compiler::compose(stage, &define_str, shader_prelude, source))
+        let compile = |stage: Stage, stage_source: &str| {
+            let spirv = compiler::compile(stage, &compiler::compose(stage, &define_str, source.prelude, stage_source))
                 .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
                 .ok()?;
             let create_info = vk::ShaderModuleCreateInfo::default().code(&spirv);
@@ -713,8 +705,8 @@ impl Context {
                 .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
                 .ok()
         };
-        let vertex_shader = compile(Stage::Vertex, vertex);
-        let fragment_shader = compile(Stage::Fragment, fragment);
+        let vertex_shader = compile(Stage::Vertex, source.vertex);
+        let fragment_shader = compile(Stage::Fragment, source.fragment);
         let (Some(vertex_shader), Some(fragment_shader)) = (vertex_shader, fragment_shader) else {
             // SAFETY: nothing uses the stage that did compile.
             unsafe {
@@ -761,16 +753,15 @@ impl Context {
     /// `getDummyTexture()`: bound where a shader's texture has no image.
     pub fn get_dummy_texture(&self) -> Option<ImageBinding> {
         let mut dummy = self.dummy_texture.borrow_mut();
-        let texture = match dummy.as_mut() {
-            Some(texture) => texture,
-            None => {
-                let size = Size::new(2, 2);
-                let data = vec![0xFFu8; 4 * size.width as usize * size.height as usize];
-                let mut texture = Texture2D::new(self);
-                texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-                texture.upload_data(Some(&data), size);
-                dummy.insert(texture)
-            }
+        let texture = if let Some(texture) = dummy.as_mut() {
+            texture
+        } else {
+            let size = Size::new(2, 2);
+            let data = vec![0xFFu8; 4 * size.width as usize * size.height as usize];
+            let mut texture = Texture2D::new(self);
+            texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
+            texture.upload_data(Some(&data), size);
+            dummy.insert(texture)
         };
         let image_view = texture.get_vulkan_image_view();
         let sampler = texture.get_vulkan_sampler();
@@ -832,7 +823,7 @@ impl Context {
     ///
     /// A pass clears its attachments, unless it loads the color
     /// (`RenderPassKey::color_load`). A pass with depth and stencil
-    /// (`SurfaceRenderableResource::initRenderPass`) keeps the color only; a
+    /// (`SurfaceResource::initRenderPass`) keeps the color only; a
     /// pass without (`OffscreenTextureResource::createRenderPass`) leaves
     /// the color attachment ready to be sampled.
     pub fn get_render_pass(&self, key: RenderPassKey) -> vk::RenderPass {
@@ -1108,7 +1099,7 @@ impl Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         let mut globe_clipping = self.globe_clipping.borrow_mut();
         let globe_clipping = &mut *globe_clipping;
@@ -1465,15 +1456,12 @@ impl GfxContext for Context {
         data: &[u8],
         persistent: bool,
     ) -> bool {
-        match ptr {
-            Some(buffer) => {
-                buffer.update(data);
-                false
-            }
-            None => {
-                *ptr = Some(self.create_uniform_buffer(data, persistent, false));
-                true
-            }
+        if let Some(buffer) = ptr {
+            buffer.update(data);
+            false
+        } else {
+            *ptr = Some(self.create_uniform_buffer(data, persistent, false));
+            true
         }
     }
 
@@ -1515,7 +1503,7 @@ impl GfxContext for Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
     }

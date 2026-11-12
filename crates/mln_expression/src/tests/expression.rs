@@ -28,7 +28,10 @@ fn read_file(relative: &str) -> String {
 // gtest: Expression.IsExpression
 #[test]
 fn is_expression_() {
-    let spec: serde_json::Value = serde_json::from_str(&read_file("scripts/style-spec-reference/v8.json")).unwrap();
+    // The style spec copy that style-codegen generates from.
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tools/style-codegen/v8.json");
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    let spec: serde_json::Value = serde_json::from_str(&text).unwrap();
     let all_expressions = spec["expression_name"]["values"].as_object().expect("expression_name.values");
 
     for name in all_expressions.keys() {
@@ -37,7 +40,7 @@ fn is_expression_() {
     }
 }
 
-/// `parse(filename, error)` of ExpressionEquality.
+/// `parse(filename, error)` of `ExpressionEquality`.
 fn parse(filename: &str) -> Result<Box<dyn Expression>, String> {
     let document: serde_json::Value = serde_json::from_str(&read_file(filename)).unwrap();
     let mut ctx = ParsingContext::new();
@@ -85,13 +88,13 @@ fn expression_equality_case(param: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// TEST_P(ExpressionEqualityTest, ExpressionEquality), instantiated over
+/// `TEST_P(ExpressionEqualityTest`, `ExpressionEquality`), instantiated over
 /// every fixture.
 // gtest: ExpressionEqualityTest.ExpressionEquality
 #[test]
 fn expression_equality() {
     let names = populate_names();
-    assert!(!names.is_empty());
+    assert_ne!(names, Vec::<String>::new());
     let failures: Vec<String> = names.iter().filter_map(|name| expression_equality_case(name).err()).collect();
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

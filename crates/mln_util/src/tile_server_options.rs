@@ -16,14 +16,17 @@ impl DefaultStyle {
         DefaultStyle { url: url.into(), name: name.into(), current_version }
     }
 
+    #[must_use]
     pub fn get_url(&self) -> &str {
         &self.url
     }
 
+    #[must_use]
     pub fn get_name(&self) -> &str {
         &self.name
     }
 
+    #[must_use]
     pub fn get_current_version(&self) -> i32 {
         self.current_version
     }
@@ -67,6 +70,7 @@ pub struct TileServerOptions {
 
 macro_rules! template_accessors {
     ($with:ident, $template:ident, $domain:ident, $prefix:ident) => {
+        #[must_use]
         pub fn $with(
             mut self,
             template: impl Into<String>,
@@ -91,33 +95,40 @@ macro_rules! template_accessors {
 }
 
 impl TileServerOptions {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn with_base_url(mut self, url: impl Into<String>) -> Self {
         self.base_url = url.into();
         self
     }
 
+    #[must_use]
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
+    #[must_use]
     pub fn with_version_prefix(mut self, version_prefix: Option<String>) -> Self {
         self.version_prefix = version_prefix;
         self
     }
 
+    #[must_use]
     pub fn version_prefix(&self) -> &Option<String> {
         &self.version_prefix
     }
 
+    #[must_use]
     pub fn with_uri_scheme_alias(mut self, alias: impl Into<String>) -> Self {
         self.uri_scheme_alias = alias.into();
         self
     }
 
+    #[must_use]
     pub fn uri_scheme_alias(&self) -> &str {
         &self.uri_scheme_alias
     }
@@ -128,48 +139,58 @@ impl TileServerOptions {
     template_accessors!(with_glyphs_template, glyphs_template, glyphs_domain_name, glyphs_version_prefix);
     template_accessors!(with_tile_template, tile_template, tile_domain_name, tile_version_prefix);
 
+    #[must_use]
     pub fn with_api_key_parameter_name(mut self, name: impl Into<String>) -> Self {
         self.api_key_parameter_name = name.into();
         self
     }
 
+    #[must_use]
     pub fn api_key_parameter_name(&self) -> &str {
         &self.api_key_parameter_name
     }
 
+    #[must_use]
     pub fn set_requires_api_key(mut self, api_key_required: bool) -> Self {
         self.api_key_required = api_key_required;
         self
     }
 
+    #[must_use]
     pub fn requires_api_key(&self) -> bool {
         self.api_key_required
     }
 
+    #[must_use]
     pub fn default_styles(&self) -> Vec<DefaultStyle> {
         self.default_styles.clone()
     }
 
+    #[must_use]
     pub fn with_default_styles(mut self, styles: Vec<DefaultStyle>) -> Self {
         self.default_styles = styles;
         self
     }
 
+    #[must_use]
     pub fn with_default_style(mut self, default_style: impl Into<String>) -> Self {
         self.default_style = default_style.into();
         self
     }
 
+    #[must_use]
     pub fn default_style(&self) -> &str {
         &self.default_style
     }
 
     /// `DefaultConfiguration()`.
+    #[must_use]
     pub fn default_configuration() -> Self {
         Self::maplibre_configuration()
     }
 
     /// `MapLibreConfiguration()`.
+    #[must_use]
     pub fn maplibre_configuration() -> Self {
         // https://demotiles.maplibre.org/style.json
         let styles = vec![DefaultStyle::new("maplibre://maps/style", "Basic", 1)];
@@ -189,6 +210,7 @@ impl TileServerOptions {
     }
 
     /// `MapboxConfiguration()`.
+    #[must_use]
     pub fn mapbox_configuration() -> Self {
         let styles = vec![
             DefaultStyle::new("mapbox://styles/mapbox/streets-v11", "Streets", 11),
@@ -214,6 +236,7 @@ impl TileServerOptions {
     }
 
     /// `MapTilerConfiguration()`.
+    #[must_use]
     pub fn map_tiler_configuration() -> Self {
         let styles = vec![
             DefaultStyle::new("maptiler://maps/streets", "Streets", 1),

@@ -52,7 +52,7 @@ fn on_error() {
 fn on_parsed() {
     let test = RasterTileTest::new();
     let tile = tile(&test);
-    let bucket = HillshadeBucket::new(PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox)
+    let bucket = HillshadeBucket::new(&PremultipliedImage::new(Size::new(16, 16)), RasterEncoding::Mapbox)
         .expect("HillshadeBucket");
     tile.inner().on_parsed(Some(Arc::new(bucket)), 0);
     assert!(tile.is_renderable());
@@ -105,7 +105,7 @@ fn parse_and_backfill_through_the_codec() {
     for tile in &tiles {
         tile.inner().set_data(Some(png(16, 16)), VectorTileEncoding::Mvt);
     }
-    while !tiles.iter().all(|tile| tile.is_complete()) {
+    while !tiles.iter().all(mln_renderer::tile::Tile::is_complete) {
         test.run_loop.run_once();
     }
     for tile in &tiles {

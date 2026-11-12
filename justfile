@@ -9,8 +9,8 @@ binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-tele
 # Where `just ci-coverage` writes the LCOV report that CI uploads to Codecov
 coverage_lcov := 'target/llvm-cov/lcov.info'
 
-# The C++ core the port is ported from, for the recipes that read its sources (update-testdata, vendor-shaders, the
-# generate-* and the analysis recipes).
+# The C++ core the port is ported from, for the recipes that read its sources (update-testdata, the generate-* and the
+# analysis recipes).
 cpp := justfile_directory() / '..' / 'maplibre-native'
 # maplibre-native-ffi, whose C headers and ABI suite crates/mln_c and tools/c-abi-test copy (update-ffi-abi).
 ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
@@ -18,14 +18,10 @@ ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
 # The Cargo profile `just desktop` builds the app with, e.g. `just profile=release desktop`
 profile := 'dev'
 
-# On NixOS, the tests and the apps build and run inside the C++ repo's #linux dev shell, extended by nix/flake.nix, which has the
-# libraries they load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
+# On NixOS, the tests and the apps build and run inside flake.nix's dev shell, which has the C toolchain and the libraries they
+# load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
 nixos := path_exists('/etc/NIXOS')
-dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
-
-# The tests render headless with WebGPU, or with the backend MLN_RENDER_BACKEND names. The OpenGL one (crates/mln_gl, OpenGL
-# ES 3.0 through EGL) is a Cargo feature: `MLN_RENDER_BACKEND=gl just test` builds it in.
-gl_features := if env('MLN_RENDER_BACKEND', '') == 'gl' {'--features mln-rs-headless/gl'} else {''}
+dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell') + ' --command'} else {''}
 
 # if running in CI, treat warnings as errors by setting CARGO_BUILD_WARNINGS to 'deny' unless it is already set
 # Use `CI=true just ci-lint` to run the same checks as in GitHub CI.
@@ -172,10 +168,10 @@ generate-icu-tables icu_common:
 generate-nunicode-tables:
     python3 -I vendor/nunicode/tools/gen_tables.py {{quote(cpp / 'vendor/nunicode')}} vendor/nunicode/src/tables
 
-# The spec is the copy of the C++ repo's v8.json in tools/style-codegen/testdata (`just update-testdata` refreshes it).
+# The spec is tools/style-codegen/v8.json, a copy of the MapLibre style spec's (`just update-style-spec` refreshes it).
 [doc("Regenerate crates/mln_style's generated style code from the style spec (checked by style-codegen's generated_code_test)")]
 generate-style-code:
-    cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/testdata/scripts/style-spec-reference/v8.json --out crates/mln_style/src
+    cargo run -p mln-rs-style-codegen -- --spec tools/style-codegen/v8.json --out crates/mln_style/src
 
 # Get a package field from the metadata
 get-crate-field field package=main_crate:  (assert-cmd 'jq')
@@ -259,90 +255,6 @@ include-back-edges:
 include-graph:
     python3 -I tools/cycles/include_graph.py {{quote(cpp)}}
 
-# The views prepared by liberty-references are rendered offline from the C++ cache database and compared with the C++ references
-# (tools/liberty-compare/README.md). `filter` is matched against the test id, e.g. 'liberty/' or 'positron/ams13'. Results:
-# $LIBERTY_COMPARE_DIR/results/manifest.html (+ actual/diff PNGs).
-#
-# Environment:
-#   RENDER_TEST          Rust render-test binary (default: the one this recipe builds, target/debug/render-test)
-#   LIBERTY_COMPARE_DIR  work directory (default ~/.cache/mln-liberty-compare)
-#   VK_DRIVER_FILES      Vulkan ICD (default: lavapipe on NixOS)
-[doc('Render the OpenFreeMap views with the Rust render-test runner and compare them with the C++ references')]
-liberty-compare filter='.':  _dev-shell
-    #!/usr/bin/env bash
-    set -euo pipefail
-    here=tools/liberty-compare
-    work="${LIBERTY_COMPARE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mln-liberty-compare}"
-    icd="${VK_DRIVER_FILES:-/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json}"
-    cargo build -p mln-rs-render-test --bin render-test
-    binary="${RENDER_TEST:-target/debug/render-test}"
-    if [ ! -f "$work/cache.db" ] || [ ! -d "$work/tests/render-tests" ]; then
-        echo "no references in $work: run just liberty-references first" >&2
-        exit 1
-    fi
-    # A private copy, so a concurrent build can't replace it mid-run.
-    mkdir -p "$work/bin" "$work/results"
-    install -m 755 "$binary" "$work/bin/render-test"
-    sed "s#@WORK_DIR@#$work#g" "$here/manifest.template.json" >"$work/manifest.json"
-    cd "$work"
-    exec {{dev_shell}} env VK_DRIVER_FILES="$icd" \
-        "$work/bin/render-test" -p "$work/manifest.json" -f {{quote(filter)}} --output "$work/results"
-
-# For every view in views.txt whose "style/name" matches `filter`, run the C++ mbgl-render against https://tiles.openfreemap.org/styles/<style>, write the PNG as the view's expected.png and
-# create the matching style.json (the OpenFreeMap style with the view's camera and test metadata) for the Rust render-test runner. Every
-# resource mbgl-render downloads lands in the C++ cache database $LIBERTY_COMPARE_DIR/cache.db, which liberty-compare then reads offline.
-#
-# Environment:
-#   MBGL_RENDER            path to a C++ mbgl-render binary (required; see README.md)
-#   LIBERTY_COMPARE_DIR    work directory (default ~/.cache/mln-liberty-compare)
-#   VK_DRIVER_FILES        Vulkan ICD (default: lavapipe on NixOS)
-#   LIBERTY_COMPARE_VIEWS  view list (default: tools/liberty-compare/views.txt)
-[doc('Render the C++ reference images of tools/liberty-compare with mbgl-render (needs MBGL_RENDER and the network)')]
-liberty-references filter='.':  _dev-shell
-    #!/usr/bin/env bash
-    set -euo pipefail
-    work="${LIBERTY_COMPARE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mln-liberty-compare}"
-    icd="${VK_DRIVER_FILES:-/run/opengl-driver/share/vulkan/icd.d/lvp_icd.x86_64.json}"
-    views="${LIBERTY_COMPARE_VIEWS:-tools/liberty-compare/views.txt}"
-    if [ -z "${MBGL_RENDER:-}" ] || [ ! -x "$MBGL_RENDER" ]; then
-        echo "MBGL_RENDER must point to a C++ mbgl-render binary (see tools/liberty-compare/README.md)" >&2
-        exit 1
-    fi
-    mkdir -p "$work/styles" "$work/tests/render-tests"
-    grep -v '^#' "$views" | while read -r style name lon lat zoom bearing pitch ratio width height; do
-        [ -n "$style" ] || continue
-        echo "$style/$name" | grep -Eq -- {{quote(filter)}} || continue
-
-        if [ ! -s "$work/styles/$style.json" ]; then
-            curl -sSf -m 60 -o "$work/styles/$style.json" "https://tiles.openfreemap.org/styles/$style"
-        fi
-
-        dir="$work/tests/render-tests/$style/$name"
-        mkdir -p "$dir"
-        if {{dev_shell}} env VK_DRIVER_FILES="$icd" \
-            "$MBGL_RENDER" -s "https://tiles.openfreemap.org/styles/$style" \
-            -x "$lon" -y "$lat" -z "$zoom" -b "$bearing" -p "$pitch" -r "$ratio" \
-            -w "$width" -h "$height" -o "$dir/expected.png" -c "$work/cache.db" \
-            >"$dir/cpp.log" 2>&1; then
-            echo "rendered $style/$name"
-        else
-            echo "mbgl-render failed for $style/$name (see $dir/cpp.log)" >&2
-        fi
-
-        python3 -I - "$work/styles/$style.json" "$dir/style.json" \
-            "$lon" "$lat" "$zoom" "$bearing" "$pitch" "$ratio" "$width" "$height" <<'EOF'
-    import json, sys
-    src, dst, lon, lat, zoom, bearing, pitch, ratio, width, height = sys.argv[1:]
-    style = json.load(open(src))
-    style["center"] = [float(lon), float(lat)]
-    style["zoom"] = float(zoom)
-    style["bearing"] = float(bearing)
-    style["pitch"] = float(pitch)
-    style["metadata"] = {"test": {"width": int(width), "height": int(height), "pixelRatio": float(ratio)}}
-    json.dump(style, open(dst, "w"), indent=1)
-    EOF
-    done
-
 # The desktop app is never released.
 # The verify step serves the packaged crates to each other from a local registry, and Cargo
 # treats a registry crate's name and version as immutable: it keeps the source it unpacked
@@ -362,10 +274,12 @@ ratchet *args:
 release:
     gh workflow run release.yml --repo louwers/mln-rs --ref main
 
-# Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`.
+# The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan
+# or gl.
+[doc("Run every test: the libraries' tests and the render, query and expression test suites. Arguments go to `cargo test`")]
 [positional-arguments]
 test *args:  _dev-shell
-    {{dev_shell}} cargo test --workspace {{gl_features}} "$@"
+    {{dev_shell}} cargo test --workspace "$@"
 
 # Test documentation generation
 test-doc:  (docs '')
@@ -393,6 +307,11 @@ udeps:  (cargo-install 'cargo-udeps')
 update:
     cargo update
 
+# The version is the @maplibre/maplibre-gl-style-spec npm release the copy is from. Run `just generate-style-code` after.
+[doc("Refresh tools/style-codegen/v8.json from a release of the MapLibre style spec")]
+update-style-spec version='26.6.0':  (assert-cmd 'curl')
+    curl -fsSL https://unpkg.com/@maplibre/maplibre-gl-style-spec@{{version}}/src/reference/v8.json -o tools/style-codegen/v8.json
+
 # The shared suites' directories are copied whole, so new tests come along; every other file that is there, outside
 # tools/c-abi-test (update-ffi-abi), is copied again.
 # The copies are from johncarmack1984/maplibre-native's maplibre-native-next-support-globe-sky branch at d171bf4b9934: the globe branch of maplibre/maplibre-native#4533 (phased/12h), with louwers/maplibre-native's maplibre-native-next-support branch at 4e03abe94cf5 (upstream 8e144d0eca08 plus what mln-rs-difftests needs) and the sky branch of maplibre/maplibre-native#4534 merged in.
@@ -411,8 +330,8 @@ update-testdata checkout=cpp:
 
 # The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
 # builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
-# fix the suite's own bugs, and the declarations are regenerated. The copies are from maplibre/maplibre-native-ffi at
-# eae96a42c493.
+# fix the suite's own bugs, and the declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's
+# t3/gpu-device-targets branch at 0b58d88d556a, which changes the render target headers ahead of their merge.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash
@@ -431,43 +350,22 @@ update-ffi-abi checkout=ffi:
     {{just}} generate-c-abi
     echo "copied from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
 
-# Rerun it when the C++ shaders change, and commit the result.
-[doc("Vendor the C++ core's WGSL shaders, unchanged, into crates/mln_webgpu/src/shaders/wgsl_sources.rs")]
-vendor-shaders checkout=cpp:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    shopt -s nullglob
-    headers=({{quote(checkout)}}/include/mln/shaders/webgpu/*.hpp)
-    if [[ ${#headers[@]} -eq 0 ]]; then
-        echo "no WGSL headers in {{checkout}}/include/mln/shaders/webgpu" >&2
-        exit 1
-    fi
-    tool_dir="$(mktemp -d)"
-    trap 'rm -rf "$tool_dir"' EXIT
-    rustc --edition 2024 -O -o "$tool_dir/extract_wgsl" crates/mln_webgpu/tools/extract_wgsl.rs
-    "$tool_dir/extract_wgsl" crates/mln_webgpu/src/shaders/wgsl_sources.rs "${headers[@]}"
-    echo "vendored ${#headers[@]} headers from {{checkout}} ($(git -C {{quote(checkout)}} describe --always --dirty 2>/dev/null || echo "not a git checkout"))"
-
 # Measure the coverage of the tests (`just test`) from a clean start, then report it with the given arguments
 _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
     cargo llvm-cov clean --workspace
-    {{dev_shell}} cargo llvm-cov --no-report --workspace {{gl_features}}
+    {{dev_shell}} cargo llvm-cov --no-report --workspace
     cargo llvm-cov report --workspace {{report_args}}
 
-# The dev shell flake (nix/flake.nix, which wraps the C++ repo's), used from a copy in .nix-shell: `nix develop path:<repo>` would copy
-# the whole working tree into the store on every call. Nothing to do outside NixOS.
+# The dev shell flake (flake.nix), used from a copy in .nix-shell: `nix develop` on the repository copies its tracked files into
+# the store again after every change to one. Nothing to do outside NixOS.
 _dev-shell:
     #!/usr/bin/env bash
     set -euo pipefail
     [[ "{{nixos}}" == true ]] || exit 0
-    mkdir -p .nix-shell/cpp
-    cmp -s nix/flake.nix .nix-shell/flake.nix || cp nix/flake.nix .nix-shell/flake.nix
-    cmp -s {{quote(cpp)}}/flake.nix .nix-shell/cpp/flake.nix || cp {{quote(cpp)}}/flake.nix .nix-shell/cpp/flake.nix
-    # The wrapper's lock holds a copy of the C++ lock's nixpkgs: relock when that changes.
-    if ! cmp -s {{quote(cpp)}}/flake.lock .nix-shell/cpp/flake.lock; then
-        cp {{quote(cpp)}}/flake.lock .nix-shell/cpp/flake.lock
-        rm -f .nix-shell/flake.lock
-    fi
+    mkdir -p .nix-shell
+    for file in flake.nix flake.lock; do
+        cmp -s "$file" ".nix-shell/$file" || cp "$file" ".nix-shell/$file"
+    done
 
 # Ensure that a certain command is available
 [private]

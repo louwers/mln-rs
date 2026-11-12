@@ -12,7 +12,7 @@ use std::sync::{Arc, OnceLock};
 use mln_map::MapMode;
 use mln_runtime::{
     AttachOptions, Completion, DemandMode, Driver, DriverWork, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
-    Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, Runtime, Wake,
+    LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, Runtime, Wake,
 };
 use mln_util::size::Size;
 use support::{TIMEOUT, runtime, wait};
@@ -367,7 +367,7 @@ fn a_caller_driven_session_resizes_in_order_with_frames() {
     let runtime = runtime();
     let map = map_of(&runtime, "#ff0000");
     let (session, driver) = attach(&map, caller_options());
-    let resized = session.resize(Size::new(32, 48)).unwrap();
+    let resized = session.resize(LogicalExtent::new(Size::new(32, 48), 1.0)).unwrap();
     session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
     let applied = serviced(&driver, resized).unwrap();
     let result = take_one(&driver, &session);

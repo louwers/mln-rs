@@ -79,10 +79,11 @@ pub fn live_heap_mib() -> f64 {
 
 /// The CPU time of every thread of the process so far.
 #[cfg(unix)]
+#[must_use]
 pub fn process_cpu() -> Duration {
     let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
     // SAFETY: `time` is a valid timespec for the call to fill.
-    let status = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &mut time) };
+    let status = unsafe { libc::clock_gettime(libc::CLOCK_PROCESS_CPUTIME_ID, &raw mut time) };
     assert_eq!(status, 0, "clock_gettime(CLOCK_PROCESS_CPUTIME_ID)");
     Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
@@ -109,6 +110,7 @@ pub fn process_cpu() -> Duration {
 /// The instructions and cycles every thread of the process has retired so
 /// far, or `None` where the system doesn't count them.
 #[cfg(target_os = "macos")]
+#[must_use]
 pub fn process_counters() -> Option<Counters> {
     // SAFETY: rusage_info_v4 is plain integers, for which zero is valid.
     let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
@@ -130,6 +132,7 @@ pub fn process_counters() -> Option<Counters> {
 /// The instructions and cycles every thread of the process has retired so
 /// far, or `None` where the system doesn't count them.
 #[cfg(not(target_os = "macos"))]
+#[must_use]
 pub fn process_counters() -> Option<Counters> {
     None
 }
@@ -180,6 +183,7 @@ pub struct Meter {
 impl Meter {
     /// A meter whose peak heap starts from what is live now, after the
     /// case's setup.
+    #[must_use]
     pub fn new() -> Meter {
         reset_peak();
         Meter {
@@ -212,7 +216,7 @@ impl Meter {
         let end = Reading::now();
         let start = self.started.take().expect("no iteration is running");
         self.wall.push(ms(end.wall - start.wall));
-        self.cpu.push(ms(end.cpu - start.cpu));
+        self.cpu.push(ms(end.cpu.checked_sub(start.cpu).unwrap()));
         if let (Some(start), Some(end)) = (start.counters, end.counters) {
             self.instructions.push((end.instructions - start.instructions) as f64 / 1e6);
             self.cycles.push((end.cycles - start.cycles) as f64 / 1e6);
@@ -222,11 +226,13 @@ impl Meter {
     }
 
     /// Each iteration's wall time so far, in ms.
+    #[must_use]
     pub fn times(&self) -> &[f64] {
         &self.wall
     }
 
     /// The iterations' metrics; all but `mcycles` and `alloc_kib` lead.
+    #[must_use]
     pub fn finish(self) -> Metrics {
         let mut metrics = Metrics::default();
         metrics.lead("time_ms", median(&self.wall));
@@ -249,6 +255,7 @@ impl Default for Meter {
     }
 }
 
+#[must_use]
 pub fn ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
 }

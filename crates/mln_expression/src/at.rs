@@ -18,6 +18,7 @@ pub struct At {
 }
 
 impl At {
+    #[must_use]
     pub fn new(index: Box<dyn Expression>, input: Box<dyn Expression>) -> Self {
         let item_type = input.get_type().as_array().expect("array input").item_type.clone();
         At { base: ExpressionBase::new(Kind::At, item_type, index.dependencies() | input.dependencies()), index, input }

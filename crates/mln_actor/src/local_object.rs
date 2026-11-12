@@ -65,11 +65,13 @@ impl<T: 'static> LocalObject<T> {
     }
 
     /// Whether the calling thread is the one that owns the value.
+    #[must_use]
     pub fn is_home_thread(&self) -> bool {
         thread::current().id() == self.thread
     }
 
     /// The value, on its own thread.
+    #[must_use]
     pub fn get(&self) -> Option<Rc<T>> {
         if !self.is_home_thread() {
             return None;
@@ -78,6 +80,7 @@ impl<T: 'static> LocalObject<T> {
     }
 
     /// Removes the value from its thread's registry and returns it.
+    #[must_use]
     pub fn take(&self) -> Option<Rc<T>> {
         if !self.is_home_thread() {
             return None;

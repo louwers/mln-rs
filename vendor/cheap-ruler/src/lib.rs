@@ -16,6 +16,7 @@ pub struct Box {
 }
 
 impl Box {
+    #[must_use]
     pub const fn new(min: Point<f64>, max: Point<f64>) -> Self {
         Box { min, max }
     }
@@ -23,6 +24,7 @@ impl Box {
 
 /// `std::remainder(x, y)`: `x - n * y` with `n` the integer nearest `x / y`
 /// (ties to even), computed exactly; a zero result has the sign of `x`.
+#[must_use]
 pub fn remainder(x: f64, y: f64) -> f64 {
     let r = x % y; // fmod: exact, sign of x, |r| < |y|
     if r.is_nan() {
@@ -85,13 +87,14 @@ pub struct CheapRuler {
 
 // Values that define WGS84 ellipsoid model of the Earth
 const RE: f64 = 6378.137; // equatorial radius
-const FE: f64 = 1.0 / 298.257223563; // flattening
+const FE: f64 = 1.0 / 298.257_223_563; // flattening
 
 const E2: f64 = FE * (2.0 - FE);
 const RAD: f64 = std::f64::consts::PI / 180.0;
 
 impl CheapRuler {
     /// `CheapRuler(latitude, unit)` (C++ default unit: Kilometers).
+    #[must_use]
     pub fn new(latitude: f64, unit: Unit) -> Self {
         let m = match unit {
             Unit::Kilometers => 1.0,
@@ -118,6 +121,7 @@ impl CheapRuler {
     }
 
     /// `fromTile(y, z)` (asserts `z < 32`).
+    #[must_use]
     pub fn from_tile(y: u32, z: u32) -> Self {
         debug_assert!(z < 32);
         let n = std::f64::consts::PI * (1.0 - 2.0 * (f64::from(y) + 0.5) / f64::from(1u32.wrapping_shl(z)));
@@ -126,6 +130,7 @@ impl CheapRuler {
         CheapRuler::new(latitude, Unit::Kilometers)
     }
 
+    #[must_use]
     pub fn square_distance(&self, a: Point<f64>, b: Point<f64>) -> f64 {
         let dx = long_diff(a.x, b.x) * self.kx;
         let dy = (a.y - b.y) * self.ky;
@@ -134,11 +139,13 @@ impl CheapRuler {
 
     /// Given two points of the form [x = longitude, y = latitude], returns
     /// the distance.
+    #[must_use]
     pub fn distance(&self, a: Point<f64>, b: Point<f64>) -> f64 {
         self.square_distance(a, b).sqrt()
     }
 
     /// Returns the bearing between two points in angles.
+    #[must_use]
     pub fn bearing(&self, a: Point<f64>, b: Point<f64>) -> f64 {
         let dx = long_diff(b.x, a.x) * self.kx;
         let dy = (b.y - a.y) * self.ky;
@@ -148,6 +155,7 @@ impl CheapRuler {
 
     /// Returns a new point given distance and bearing from the starting
     /// point.
+    #[must_use]
     pub fn destination(&self, origin: Point<f64>, dist: f64, bearing: f64) -> Point<f64> {
         let a = bearing * RAD;
 
@@ -156,11 +164,13 @@ impl CheapRuler {
 
     /// Returns a new point given easting and northing offsets from the
     /// starting point.
+    #[must_use]
     pub fn offset(&self, origin: Point<f64>, dx: f64, dy: f64) -> Point<f64> {
         Point::new(origin.x + dx / self.kx, origin.y + dy / self.ky)
     }
 
     /// Given a line (an array of points), returns the total line distance.
+    #[must_use]
     pub fn line_distance(&self, points: &LineString<f64>) -> f64 {
         let mut total = 0.0;
 
@@ -173,6 +183,7 @@ impl CheapRuler {
 
     /// Given a polygon (an array of rings, where each ring is an array of
     /// points), returns the area.
+    #[must_use]
     pub fn area(&self, poly: &Polygon<f64>) -> f64 {
         let mut sum = 0.0;
 
@@ -191,6 +202,7 @@ impl CheapRuler {
     }
 
     /// Returns the point at a specified distance along the line.
+    #[must_use]
     pub fn along(&self, line: &LineString<f64>, dist: f64) -> Point<f64> {
         let mut sum = 0.0;
 
@@ -218,6 +230,7 @@ impl CheapRuler {
     }
 
     /// Returns the distance from a point `p` to a line segment `a` to `b`.
+    #[must_use]
     pub fn point_to_segment_distance(&self, p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
         let mut x = a.x;
         let mut y = a.y;
@@ -240,6 +253,7 @@ impl CheapRuler {
     /// Returns `(point, index, t)`: the closest point on the line to `p`,
     /// the start index of its segment, and its position `t` in 0..1 on that
     /// segment.
+    #[must_use]
     pub fn point_on_line(&self, line: &LineString<f64>, p: Point<f64>) -> (Point<f64>, u32, f64) {
         let mut min_dist = f64::INFINITY;
         let (mut min_x, mut min_y, mut min_i, mut min_t) = (0.0, 0.0, 0.0, 0.0);
@@ -284,6 +298,7 @@ impl CheapRuler {
 
     /// Returns a part of the given line between the start and the stop
     /// points (or their closest points on the line).
+    #[must_use]
     pub fn line_slice(&self, start: Point<f64>, stop: Point<f64>, line: &LineString<f64>) -> LineString<f64> {
         let mut p1 = self.point_on_line(line, start);
         let mut p2 = self.point_on_line(line, stop);
@@ -316,6 +331,7 @@ impl CheapRuler {
 
     /// Returns a part of the given line between the start and the stop
     /// points indicated by distance along the line.
+    #[must_use]
     pub fn line_slice_along(&self, start: f64, stop: f64, line: &LineString<f64>) -> LineString<f64> {
         let mut sum = 0.0;
         let mut slice = LineString::new();
@@ -346,6 +362,7 @@ impl CheapRuler {
 
     /// Given a point, returns a bounding box object ([w, s, e, n]) created
     /// from the given point buffered by a given distance.
+    #[must_use]
     pub fn buffer_point(&self, p: Point<f64>, buffer: f64) -> Box {
         let v = buffer / self.ky;
         let h = buffer / self.kx;
@@ -354,6 +371,7 @@ impl CheapRuler {
     }
 
     /// Given a bounding box, returns the box buffered by a given distance.
+    #[must_use]
     pub fn buffer_bbox(&self, bbox: Box, buffer: f64) -> Box {
         let v = buffer / self.ky;
         let h = buffer / self.kx;
@@ -363,10 +381,12 @@ impl CheapRuler {
 
     /// Returns true if the given point is inside in the given bounding box,
     /// otherwise false.
+    #[must_use]
     pub fn inside_bbox(p: Point<f64>, bbox: Box) -> bool {
         p.y >= bbox.min.y && p.y <= bbox.max.y && long_diff(p.x, bbox.min.x) >= 0.0 && long_diff(p.x, bbox.max.x) <= 0.0
     }
 
+    #[must_use]
     pub fn interpolate(a: Point<f64>, b: Point<f64>, t: f64) -> Point<f64> {
         let dx = long_diff(b.x, a.x);
         let dy = b.y - a.y;

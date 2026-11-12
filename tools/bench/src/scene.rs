@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 use feature::{Value, ValueObject};
 use mln_actor::RunLoop;
 use mln_actor::timer::Timer;
-use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions, RenderFrameStatus, RenderMode};
 use mln_renderer::query::SourceQueryOptions;
+use mln_runtime::Device;
 use mln_storage::{FileSource, FileSourceManager, FileSourceType, ResourceOptions};
 use mln_style_types::VisibilityType;
 use mln_text::GlyphCache;
@@ -42,19 +42,21 @@ pub struct RealWorld {
 }
 
 pub const REAL_WORLD: &[RealWorld] = &[
-    RealWorld { name: "chicago", latitude: 41.8703965, longitude: -87.6942445, zoom: 13.0 },
-    RealWorld { name: "sanfrancisco", latitude: 37.7669995, longitude: -122.448635, zoom: 15.0 },
-    RealWorld { name: "norway", latitude: 64.863174, longitude: 10.8181, zoom: 12.0 },
+    RealWorld { name: "chicago", latitude: 41.870_396_5, longitude: -87.694_244_5, zoom: 13.0 },
+    RealWorld { name: "sanfrancisco", latitude: 37.766_999_5, longitude: -122.448_635, zoom: 15.0 },
+    RealWorld { name: "norway", latitude: 64.863_174, longitude: 10.8181, zoom: 12.0 },
 ];
 
 /// The render tests' view, whose 1x sprites the cache database holds.
 pub const REAL_WORLD_SIZE: Size = Size { width: 512, height: 512 };
 
 impl RealWorld {
+    #[must_use]
     pub fn style_url(&self) -> String {
         format!("local://styles/{}.json", self.name)
     }
 
+    #[must_use]
     pub fn center(&self) -> LatLng {
         LatLng::new(self.latitude, self.longitude).expect("a scene's center")
     }
@@ -79,8 +81,9 @@ pub const CJK_STYLE: &str = r#"{
 }"#;
 
 /// The `text-font/chinese` test's camera, at its size.
+#[must_use]
 pub fn cjk_center() -> LatLng {
-    LatLng::new(43.3900489867738, -70.752954126).expect("the CJK view's center")
+    LatLng::new(43.390_048_986_773_8, -70.752_954_126).expect("the CJK view's center")
 }
 pub const CJK_ZOOM: f64 = 11.0;
 pub const CJK_SIZE: Size = Size { width: 512, height: 512 };
@@ -92,6 +95,7 @@ pub const BASEMAP_ZOOM: f64 = 14.0;
 
 /// A point of the basemap's 5 x 5 block of zoom-14 tiles, in tile
 /// coordinates: x from 2618 to 2623, y from 6330 to 6335.
+#[must_use]
 pub fn basemap_point(x: f64, y: f64) -> LatLng {
     let tiles = 16384.0;
     let longitude = x / tiles * 360.0 - 180.0;
@@ -100,17 +104,21 @@ pub fn basemap_point(x: f64, y: f64) -> LatLng {
 }
 
 /// The block's center, and the corners of the views that share no tile.
+#[must_use]
 pub fn basemap_center() -> LatLng {
     basemap_point(2620.5, 6332.5)
 }
+#[must_use]
 pub fn basemap_north_west() -> LatLng {
     basemap_point(2619.0, 6331.0)
 }
+#[must_use]
 pub fn basemap_south_east() -> LatLng {
     basemap_point(2622.0, 6334.0)
 }
 
 /// The basemap's style, its URLs pointing into `fixtures`.
+#[must_use]
 pub fn basemap_style(fixtures: &Path) -> String {
     let style = include_str!("../style.json");
     style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
@@ -175,6 +183,7 @@ pub struct Scene {
 impl Scene {
     /// A map without a style; its GPU device is ready. Its renderer has a
     /// glyph cache of its own.
+    #[must_use]
     pub fn new(size: Size, mode: Mode) -> Scene {
         Scene::with_glyph_cache(size, mode, Arc::default())
     }
@@ -189,14 +198,8 @@ impl Scene {
             PathBuf::from,
         );
         let resource_options = ResourceOptions::default().with_cache_path(cache.display().to_string());
-        let frontend = HeadlessFrontend::with_glyph_cache(
-            size,
-            1.0,
-            SwapBehaviour::NoFlush,
-            ContextMode::Unique,
-            mode != Mode::OnDemand,
-            glyph_cache,
-        );
+        let frontend = HeadlessFrontend::with_glyph_cache(size, 1.0, mode != Mode::OnDemand, glyph_cache)
+            .expect("a headless frontend");
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
         let map_mode = if mode == Mode::Still { MapMode::Static } else { MapMode::Continuous };
         let map = Map::with_resource_options(
@@ -315,7 +318,8 @@ impl Scene {
     /// returns (their swap waits for the frame's commands); WebGPU's is left
     /// to the device.
     fn wait_for_gpu(&self) {
-        if let Some(device) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_device) {
+        if let Device::WebGpu(device) = self.frontend.device() {
+            let device = device.device();
             // PowerVR's Vulkan driver on Android ends a wait shortly before
             // wgpu sees the submission finished, which wgpu reports as a
             // timeout; waiting again returns at once then.
@@ -421,7 +425,7 @@ impl Scene {
     /// Drops every loaded tile and the renderer's other data, as after a
     /// memory warning: the next frames load and lay out again.
     pub fn clear_data(&self) {
-        self.frontend.with_renderer(|renderer| renderer.clear_data());
+        self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
     }
 
     /// Sets `selected` on every other feature of `source_layer` in the
@@ -461,25 +465,27 @@ impl Scene {
         })
     }
 
-    /// The WebGPU backend, unless the frontend renders through Metal or
-    /// Vulkan.
-    fn webgpu(&self) -> Option<&mln_webgpu::HeadlessBackend> {
-        self.frontend.get_backend().as_any().downcast_ref::<mln_webgpu::HeadlessBackend>()
-    }
-
     /// The GPU's description, and whether it is a software rasterizer.
     pub fn gpu(&self) -> (String, bool) {
+        let backend = self.frontend.get_backend().as_any();
         #[cfg(target_vendor = "apple")]
-        if let Some(metal) = self.frontend.get_backend().as_any().downcast_ref::<mln_mtl::HeadlessBackend>() {
-            return (format!("{} (Metal)", metal.get_device_name()), false);
+        if let Device::Metal(metal) = self.frontend.device() {
+            return (format!("{} (Metal)", metal.name()), false);
         }
         #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
-        if let Some(vulkan) = self.frontend.get_backend().as_any().downcast_ref::<mln_vulkan::HeadlessBackend>() {
+        if let Some(vulkan) = backend.downcast_ref::<mln_vulkan::RendererBackend>() {
             return (format!("{} (Vulkan)", vulkan.get_device_name()), vulkan.is_software_device());
         }
-        let Some(info) = self.webgpu().and_then(mln_webgpu::HeadlessBackend::get_adapter_info) else {
+        if let Some(gl) = backend.downcast_ref::<mln_gl::RendererBackend>() {
+            let _scope = mln_gfx::BackendScope::new(gl, mln_gfx::ScopeType::Explicit);
+            let name = gl.get_renderer_name();
+            let software = ["llvmpipe", "softpipe", "swiftshader"].iter().any(|s| name.to_lowercase().contains(s));
+            return (format!("{name} (OpenGL ES)"), software);
+        }
+        let Device::WebGpu(device) = self.frontend.device() else {
             return ("no adapter".to_string(), true);
         };
+        let info = device.adapter_info();
         let name = info.name.to_lowercase();
         let software = info.device_type == wgpu::DeviceType::Cpu
             || ["llvmpipe", "lavapipe", "swiftshader", "software", "warp"].iter().any(|s| name.contains(s));

@@ -10,17 +10,17 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use ash::vk;
+use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as _;
-use mln_gfx::offscreen_texture;
-use mln_gfx::renderable::{Renderable, RenderableBase};
 use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::context::{Context, RenderPassKey};
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox};
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::renderer_backend::BackendImpl;
 use crate::texture2d::{Texture2D, Texture2DUsage};
 
@@ -108,7 +108,7 @@ impl OffscreenTextureResource {
     }
 }
 
-impl RenderableResource for OffscreenTextureResource {
+impl TargetResource for OffscreenTextureResource {
     fn bind(&self) {
         self.color_texture.borrow_mut().create();
         self.create_render_pass();
@@ -152,30 +152,25 @@ impl Drop for OffscreenTextureResource {
     }
 }
 
-/// `vulkan::OffscreenTexture`: a renderable over a color texture, without
+/// `vulkan::OffscreenTexture`: a draw target over a color texture, without
 /// depth or stencil.
 pub struct OffscreenTexture {
-    renderable: RenderableBase,
+    target: DrawTarget,
     resource: Rc<OffscreenTextureResource>,
 }
 
 impl OffscreenTexture {
     pub fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
         let resource = Rc::new(OffscreenTextureResource::new(context, size, type_));
-        OffscreenTexture {
-            renderable: RenderableBase::new(size, Some(RenderableResourceBox::new_rc(resource.clone()))),
-            resource,
-        }
-    }
-}
-
-impl Renderable for OffscreenTexture {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
+        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource }
     }
 }
 
 impl offscreen_texture::OffscreenTexture for OffscreenTexture {
+    fn draw_target(&self) -> &dyn frame::DrawTarget {
+        &self.target
+    }
+
     fn is_renderable(&self) -> bool {
         true
     }
@@ -187,6 +182,10 @@ impl offscreen_texture::OffscreenTexture for OffscreenTexture {
     fn get_texture(&self) -> Texture2DPtr {
         self.resource.get_texture()
     }
+
+    /// The frame's one command buffer orders the passes that sample the
+    /// texture after the pass that drew it.
+    fn submit(&self, _encoder: &dyn CommandEncoder) {}
 
     fn as_any(&self) -> &dyn Any {
         self

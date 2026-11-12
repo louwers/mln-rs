@@ -394,7 +394,7 @@ fn expression_legacy_mix() {
     let filter =
         convert_json(r#"["any", ["all", ["==", ["geometry-type"], "LineString"]], ["==", "x", 1]]"#, &mut error);
     assert!(filter.is_none());
-    assert!(!error.message.is_empty());
+    assert_ne!(error.message, "");
 }
 
 // gtest: Filter.ZoomExpressionNested

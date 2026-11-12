@@ -154,7 +154,7 @@ impl RingManager {
             ring.area_ = area;
             ring.size_ = size;
             ring.bbox = bbox;
-            ring.is_hole_ = !(area > 0.0);
+            ring.is_hole_ = area.is_nan() || area <= 0.0;
         }
     }
 
@@ -163,7 +163,7 @@ impl RingManager {
         ring.bbox = b;
         ring.area_ = a;
         ring.size_ = s;
-        ring.is_hole_ = !(a > 0.0);
+        ring.is_hole_ = a.is_nan() || a <= 0.0;
     }
 
     /// `ring::area()`.
@@ -282,7 +282,7 @@ pub(crate) fn assign_as_sibling(new_ring: RingPtr, sibling: RingPtr, manager: &m
 
 /// `ring1_replaces_ring2`.
 pub(crate) fn ring1_replaces_ring2(ring1: RingPtr, ring2: RingPtr, manager: &mut RingManager) {
-    debug_assert!(ring1 != ring2);
+    debug_assert_ne!(ring1, ring2);
     for i in 0..manager.rings[ring2].children.len() {
         let c = manager.rings[ring2].children[i];
         if c == NIL {

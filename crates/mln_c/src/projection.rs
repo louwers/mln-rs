@@ -562,7 +562,7 @@ mod tests {
     fn create(view: &mln_map_view) -> mln_map_projection {
         let mut projection = handles::NULL;
         // SAFETY: locals, and a null diagnostic.
-        assert_eq!(unsafe { mln_map_projection_create(view, &mut projection, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_map_projection_create(view, &raw mut projection, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
         projection
     }
 
@@ -571,7 +571,7 @@ mod tests {
         let coordinate = mln_lat_lng { latitude, longitude };
         // SAFETY: a local output and a null diagnostic.
         let status =
-            unsafe { mln_map_projection_pixel_for_lat_lng(projection, coordinate, &mut point, NULL_DIAGNOSTIC) };
+            unsafe { mln_map_projection_pixel_for_lat_lng(projection, coordinate, &raw mut point, NULL_DIAGNOSTIC) };
         assert_eq!(status, MLN_STATUS_OK);
         point
     }
@@ -582,7 +582,7 @@ mod tests {
             camera: view().camera,
         };
         // SAFETY: a local output and a null diagnostic.
-        match unsafe { mln_map_projection_get_camera(projection, &mut result, NULL_DIAGNOSTIC) } {
+        match unsafe { mln_map_projection_get_camera(projection, &raw mut result, NULL_DIAGNOSTIC) } {
             MLN_STATUS_OK => Ok(result.camera),
             status => Err(status),
         }
@@ -671,10 +671,10 @@ mod tests {
         let center = mln_screen_point { x: 100.0, y: 50.0 };
         // SAFETY: local outputs and null diagnostics.
         unsafe {
-            let status = mln_map_projection_lat_lng_for_pixel(projection, center, &mut wrapped, NULL_DIAGNOSTIC);
+            let status = mln_map_projection_lat_lng_for_pixel(projection, center, &raw mut wrapped, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_OK);
             let status =
-                mln_map_projection_lat_lng_for_pixel_unwrapped(projection, center, &mut unwrapped, NULL_DIAGNOSTIC);
+                mln_map_projection_lat_lng_for_pixel_unwrapped(projection, center, &raw mut unwrapped, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_OK);
         }
         assert!((wrapped.longitude.abs() - 180.0).abs() < 1e-6, "{wrapped:?}");
@@ -685,7 +685,10 @@ mod tests {
 
     #[test]
     fn creation_rejects_invalid_views() {
-        let cases: [(&str, fn(&mut mln_map_view), &str); 12] = [
+        /// A case's name, how it breaks a valid view, and what the
+        /// diagnostic then says.
+        type InvalidView = (&'static str, fn(&mut mln_map_view), &'static str);
+        let cases: [InvalidView; 12] = [
             ("undersized", |view| view.size -= 1, "size"),
             ("past the pole", |view| view.camera.center.latitude = 90.5, "within [-90, 90]"),
             ("negative padding", |view| view.camera.padding.left = -1.0, "padding"),
@@ -712,7 +715,7 @@ mod tests {
             let mut out = diagnostic();
             let mut projection = handles::NULL;
             // SAFETY: locals.
-            let status = unsafe { mln_map_projection_create(&view, &mut projection, &mut *out) };
+            let status = unsafe { mln_map_projection_create(&raw const view, &raw mut projection, &raw mut *out) };
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT, "{name}");
             assert!(message(&out).contains(expected), "{name}: {}", message(&out));
             assert_eq!(projection, handles::NULL);
@@ -720,7 +723,10 @@ mod tests {
         let mut occupied = 1;
         // SAFETY: locals, and null pointers.
         unsafe {
-            assert_eq!(mln_map_projection_create(&view(), &mut occupied, NULL_DIAGNOSTIC), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(
+                mln_map_projection_create(&view(), &raw mut occupied, NULL_DIAGNOSTIC),
+                MLN_STATUS_INVALID_ARGUMENT
+            );
             assert_eq!(occupied, 1);
             let status = mln_map_projection_create(core::ptr::null(), &mut 0, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
@@ -731,8 +737,9 @@ mod tests {
         let mut occluded = false;
         let coordinate = mln_lat_lng { latitude, longitude };
         // SAFETY: a local output and a null diagnostic.
-        let status =
-            unsafe { mln_map_projection_is_location_occluded(projection, coordinate, &mut occluded, NULL_DIAGNOSTIC) };
+        let status = unsafe {
+            mln_map_projection_is_location_occluded(projection, coordinate, &raw mut occluded, NULL_DIAGNOSTIC)
+        };
         assert_eq!(status, MLN_STATUS_OK);
         occluded
     }
@@ -773,13 +780,14 @@ mod tests {
         let past_the_pole = mln_lat_lng { latitude: 91.0, longitude: 0.0 };
         // SAFETY: locals, nulls and null diagnostics.
         unsafe {
-            let status = mln_map_projection_is_location_occluded(globe, past_the_pole, &mut unchanged, NULL_DIAGNOSTIC);
+            let status =
+                mln_map_projection_is_location_occluded(globe, past_the_pole, &raw mut unchanged, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
             let origin = mln_lat_lng { latitude: 0.0, longitude: 0.0 };
             let status = mln_map_projection_is_location_occluded(globe, origin, core::ptr::null_mut(), NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
             let status =
-                mln_map_projection_is_location_occluded(handles::NULL, origin, &mut unchanged, NULL_DIAGNOSTIC);
+                mln_map_projection_is_location_occluded(handles::NULL, origin, &raw mut unchanged, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
         }
         assert!(unchanged);
@@ -793,7 +801,10 @@ mod tests {
         let projection = create(&view());
         let options = camera_options(MLN_CAMERA_OPTION_CENTER | MLN_CAMERA_OPTION_ZOOM | MLN_CAMERA_OPTION_PITCH);
         // SAFETY: a local camera and a null diagnostic.
-        assert_eq!(unsafe { mln_map_projection_set_camera(projection, &options, NULL_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(
+            unsafe { mln_map_projection_set_camera(projection, &raw const options, NULL_DIAGNOSTIC) },
+            MLN_STATUS_OK
+        );
         let moved = camera(projection).unwrap();
         assert!((moved.zoom - 24.0).abs() < 1e-9 && (moved.pitch - 70.0).abs() < 1e-9, "{moved:?}");
         assert!((moved.center.latitude - 20.0).abs() < 1e-7 && (moved.center.longitude - 40.0).abs() < 1e-7);
@@ -801,25 +812,26 @@ mod tests {
         let mut meters = -1.0;
         // SAFETY: a local output and a null diagnostic.
         unsafe {
-            let status = mln_map_projection_meters_per_pixel_at_latitude(projection, 0.0, &mut meters, NULL_DIAGNOSTIC);
+            let status =
+                mln_map_projection_meters_per_pixel_at_latitude(projection, 0.0, &raw mut meters, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_OK);
             assert!((meters - Projection::get_meters_per_pixel_at_latitude(0.0, 24.0)).abs() < 1e-12);
             let status =
-                mln_map_projection_meters_per_pixel_at_latitude(projection, f64::NAN, &mut meters, NULL_DIAGNOSTIC);
+                mln_map_projection_meters_per_pixel_at_latitude(projection, f64::NAN, &raw mut meters, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
         }
 
         let invalid = mln_camera_options { zoom: f64::NAN, ..camera_options(MLN_CAMERA_OPTION_ZOOM) };
         // SAFETY: a local camera and a null diagnostic.
         assert_eq!(
-            unsafe { mln_map_projection_set_camera(projection, &invalid, NULL_DIAGNOSTIC) },
+            unsafe { mln_map_projection_set_camera(projection, &raw const invalid, NULL_DIAGNOSTIC) },
             MLN_STATUS_INVALID_ARGUMENT
         );
         assert_eq!(camera(projection).unwrap().zoom, moved.zoom);
         let small = mln_camera_options { size: options.size - 1, ..options };
         // SAFETY: as above.
         assert_eq!(
-            unsafe { mln_map_projection_set_camera(projection, &small, NULL_DIAGNOSTIC) },
+            unsafe { mln_map_projection_set_camera(projection, &raw const small, NULL_DIAGNOSTIC) },
             MLN_STATUS_INVALID_ARGUMENT
         );
         mln_map_projection_release(projection);
@@ -835,10 +847,11 @@ mod tests {
         let mut points = [mln_screen_point { x: -1.0, y: -2.0 }; 2];
         // SAFETY: locals, nulls and null diagnostics.
         unsafe {
-            let status = mln_map_projection_pixel_for_lat_lng(projection, coordinates[1], &mut point, NULL_DIAGNOSTIC);
+            let status =
+                mln_map_projection_pixel_for_lat_lng(projection, coordinates[1], &raw mut point, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
             let nan = mln_screen_point { x: 0.0, y: f64::NAN };
-            let status = mln_map_projection_lat_lng_for_pixel(projection, nan, &mut coordinate, NULL_DIAGNOSTIC);
+            let status = mln_map_projection_lat_lng_for_pixel(projection, nan, &raw mut coordinate, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
             let status =
                 mln_map_projection_lat_lng_for_pixel(projection, point, core::ptr::null_mut(), NULL_DIAGNOSTIC);
@@ -889,19 +902,22 @@ mod tests {
         let mut back = mln_lat_lng { latitude: -1.0, longitude: 0.0 };
         // SAFETY: locals, nulls and null diagnostics.
         unsafe {
-            assert_eq!(mln_projected_meters_for_lat_lng(coordinate, &mut meters, NULL_DIAGNOSTIC), MLN_STATUS_OK);
+            assert_eq!(mln_projected_meters_for_lat_lng(coordinate, &raw mut meters, NULL_DIAGNOSTIC), MLN_STATUS_OK);
             assert!(meters.northing > 0.0 && meters.easting < 0.0);
-            assert_eq!(mln_lat_lng_for_projected_meters(meters, &mut back, NULL_DIAGNOSTIC), MLN_STATUS_OK);
+            assert_eq!(mln_lat_lng_for_projected_meters(meters, &raw mut back, NULL_DIAGNOSTIC), MLN_STATUS_OK);
             assert!((back.latitude - coordinate.latitude).abs() < 1e-9);
             assert!((back.longitude - coordinate.longitude).abs() < 1e-9);
 
             let north = mln_lat_lng { latitude: 90.5, longitude: 0.0 };
             let before = meters;
-            let status = mln_projected_meters_for_lat_lng(north, &mut meters, NULL_DIAGNOSTIC);
+            let status = mln_projected_meters_for_lat_lng(north, &raw mut meters, NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(meters.northing, before.northing);
             let nan = mln_projected_meters { northing: f64::NAN, easting: 0.0 };
-            assert_eq!(mln_lat_lng_for_projected_meters(nan, &mut back, NULL_DIAGNOSTIC), MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(
+                mln_lat_lng_for_projected_meters(nan, &raw mut back, NULL_DIAGNOSTIC),
+                MLN_STATUS_INVALID_ARGUMENT
+            );
             let status = mln_lat_lng_for_projected_meters(meters, core::ptr::null_mut(), NULL_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
         }

@@ -84,7 +84,9 @@ trackpad's continuous pixels, which it applies at once, by how browsers
 report each (`wheelDelta` in web/main.ts: Firefox's lines, Safari's
 4.000244 px steps, Chromium's legacy `wheelDeltaY`); those rules aren't
 checked on real hardware yet. A ResizeObserver resizes the map with the
-canvas; the map keeps the pixel ratio it started with.
+window, and the map follows the window's pixel ratio. The canvas covers
+exactly the device pixels the map draws, as GL JS's does, so that the
+browser doesn't resample them at a fractional pixel ratio.
 
 Gestures: drag to pan; right- or Ctrl-drag to rotate and tilt; Shift-drag
 to zoom to a box (Escape cancels it); the wheel (a third of a level a
@@ -184,7 +186,7 @@ parameters (web/main.ts):
 - `compare`: MapLibre GL JS's map beside this one (see above);
 - `freeBearing`: free bearing on the globe (see above);
 - `workers=<n>`: Web Workers for the tiles (default: up to 4);
-- `width`, `height`, `ratio`: a fixed canvas size in CSS pixels and pixel
+- `width`, `height`, `ratio`: a fixed map size in CSS pixels and pixel
   ratio;
 - `localIdeographFontFamily=<CSS font-family list>` (default: `sans-serif`):
   see above; empty or `false` turns it off;
@@ -236,7 +238,7 @@ keep lavapipe for the native runner (`VK_DRIVER_FILES`).
   canvases as white, so a screenshot shows nothing.
   `WebMap::request_pixels` draws the frame again and copies the canvas
   texture into a buffer, which the event loop maps
-  (`SurfaceBackend::take_readback`). A WebGL2 canvas can't be copied from
+  (`SurfaceTarget::take_readback`). A WebGL2 canvas can't be copied from
   on the GPU, so there the map's Web Worker reads the canvas after the
   frame.
 - The frames become the `expected.png` of render tests of the same views,

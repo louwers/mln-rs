@@ -17,16 +17,19 @@ pub struct LRU<Item: Eq + Hash + Clone> {
 }
 
 impl<Item: Eq + Hash + Clone> LRU<Item> {
+    #[must_use]
     pub fn new() -> Self {
         LRU { list: VecDeque::new(), map: HashSet::new() }
     }
 
     /// Number of cached items
+    #[must_use]
     pub fn size(&self) -> usize {
         self.list.len()
     }
 
     /// Check if cache is empty
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.list.is_empty()
     }
@@ -62,10 +65,10 @@ impl<Item: Eq + Hash + Clone> LRU<Item> {
 
     /// remove item from cache if it exists
     pub fn remove(&mut self, x: &Item) {
-        if self.map.remove(x) {
-            if let Some(position) = self.list.iter().position(|item| item == x) {
-                self.list.remove(position);
-            }
+        if self.map.remove(x)
+            && let Some(position) = self.list.iter().position(|item| item == x)
+        {
+            self.list.remove(position);
         }
     }
 }

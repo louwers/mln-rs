@@ -22,8 +22,6 @@ pub use mln_conversion;
 pub use mln_expression;
 pub use mln_gestures;
 pub use mln_gfx;
-/// The OpenGL backend, with the `gl` feature.
-#[cfg(feature = "gl")]
 pub use mln_gl;
 pub use mln_headless;
 pub use mln_image;

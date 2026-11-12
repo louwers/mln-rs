@@ -47,7 +47,7 @@ impl MatchLabel for i64 {
                 // static_cast<int64_t>(std::floor(numeric)) as clang compiles
                 // it (cvttsd2si: out of range and NaN give INT64_MIN).
                 let floored = numeric.floor();
-                let rounded = if floored >= -9223372036854775808.0 && floored < 9223372036854775808.0 {
+                let rounded = if (-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&floored) {
                     floored as i64
                 } else {
                     i64::MIN
@@ -79,6 +79,7 @@ pub struct Match<T: MatchLabel> {
 }
 
 impl<T: MatchLabel> Match<T> {
+    #[must_use]
     pub fn new(type_: Type, input: Box<dyn Expression>, branches: Branches<T>, otherwise: Box<dyn Expression>) -> Self {
         let deps = input.dependencies()
             | otherwise.dependencies()
@@ -96,8 +97,7 @@ impl<T: MatchLabel> Expression for Match<T> {
         let input_value = self.input.evaluate(params)?;
 
         match T::from_input(&input_value) {
-            None => self.otherwise.evaluate(params),
-            Some(None) => self.otherwise.evaluate(params),
+            None | Some(None) => self.otherwise.evaluate(params),
             Some(Some(key)) => match self.branches.get(&key) {
                 Some(branch) => branch.evaluate(params),
                 None => self.otherwise.evaluate(params),
@@ -114,13 +114,13 @@ impl<T: MatchLabel> Expression for Match<T> {
     }
 
     fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Match {
-            if let Some(rhs) = downcast::<Match<T>>(e) {
-                return self.input.equals(&*rhs.input)
-                    && self.otherwise.equals(&*rhs.otherwise)
-                    && self.branches.len() == rhs.branches.len()
-                    && self.branches.iter().zip(&rhs.branches).all(|(l, r)| l.0 == r.0 && l.1.equals(&**r.1));
-            }
+        if e.get_kind() == Kind::Match
+            && let Some(rhs) = downcast::<Match<T>>(e)
+        {
+            return self.input.equals(&*rhs.input)
+                && self.otherwise.equals(&*rhs.otherwise)
+                && self.branches.len() == rhs.branches.len()
+                && self.branches.iter().zip(&rhs.branches).all(|(l, r)| l.0 == r.0 && l.1.equals(&**r.1));
         }
         false
     }
@@ -145,7 +145,7 @@ impl<T: MatchLabel> Expression for Match<T> {
         let mut output_lookup: Vec<(*const (), usize)> = Vec::new();
         let mut grouped_by_output: Vec<(&Arc<dyn Expression>, Vec<MbglValue>)> = Vec::new();
         for (label, output) in &self.branches {
-            let key = Arc::as_ptr(output) as *const ();
+            let key = Arc::as_ptr(output).cast::<()>();
             if let Some((_, index)) = output_lookup.iter().find(|(p, _)| *p == key) {
                 // We've seen this expression before, add the label to that
                 // output's group
@@ -199,19 +199,19 @@ fn parse_input_value(
 
     match input.to_value() {
         Some(MbglValue::Uint(n)) => {
-            if !Value::is_safe_integer_u64(n) {
-                parent_context.error_at(not_safe(), index);
-            } else {
+            if Value::is_safe_integer_u64(n) {
                 type_ = Some(Type::Number);
                 result = Some(InputType::Int(n as i64));
+            } else {
+                parent_context.error_at(not_safe(), index);
             }
         }
         Some(MbglValue::Int(n)) => {
-            if !Value::is_safe_integer_i64(n) {
-                parent_context.error_at(not_safe(), index);
-            } else {
+            if Value::is_safe_integer_i64(n) {
                 type_ = Some(Type::Number);
                 result = Some(InputType::Int(n));
+            } else {
+                parent_context.error_at(not_safe(), index);
             }
         }
         Some(MbglValue::Double(n)) => {
@@ -294,10 +294,10 @@ pub fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseRe
 
     let mut input_type: Option<Type> = None;
     let mut output_type: Option<Type> = None;
-    if let Some(expected) = ctx.get_expected() {
-        if expected != Type::Value {
-            output_type = Some(expected);
-        }
+    if let Some(expected) = ctx.get_expected()
+        && expected != Type::Value
+    {
+        output_type = Some(expected);
     }
 
     let mut branches: ParsedBranches = Vec::with_capacity((length - 3) / 2);
@@ -342,11 +342,11 @@ pub fn parse_match(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseRe
     let input_type = input_type.expect("match input type");
     let output_type = output_type.expect("match output type");
 
-    if *input.get_type() != Type::Value {
-        if let Some(err) = check_subtype(&input_type, input.get_type()) {
-            ctx.error_at(err, 1);
-            return None;
-        }
+    if *input.get_type() != Type::Value
+        && let Some(err) = check_subtype(&input_type, input.get_type())
+    {
+        ctx.error_at(err, 1);
+        return None;
     }
 
     match input_type {

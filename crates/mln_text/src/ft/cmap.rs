@@ -8,7 +8,9 @@
 // The C code reads the cmap through pointers into the font file; reads the
 // C++ does past the end of the file (undefined behaviour) read as 0 here.
 
-/// `FT_Encoding` values that matter here (sfnt_find_encoding).
+use std::cmp::Ordering;
+
+/// `FT_Encoding` values that matter here (`sfnt_find_encoding`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Encoding {
     None,
@@ -23,14 +25,14 @@ pub enum Encoding {
 }
 
 /// `sfnt_find_encoding`.
+#[must_use]
 pub fn sfnt_find_encoding(platform_id: u16, encoding_id: u16) -> Encoding {
     match (platform_id, encoding_id) {
-        (2, _) => Encoding::Unicode,    // TT_PLATFORM_ISO
-        (0, _) => Encoding::Unicode,    // TT_PLATFORM_APPLE_UNICODE
+        // TT_PLATFORM_ISO, TT_PLATFORM_APPLE_UNICODE, TT_MS_ID_UCS_4 and
+        // TT_MS_ID_UNICODE_CS.
+        (2 | 0, _) | (3, 10 | 1) => Encoding::Unicode,
         (1, 0) => Encoding::AppleRoman, // TT_MAC_ID_ROMAN
         (3, 0) => Encoding::MsSymbol,   // TT_MS_ID_SYMBOL_CS
-        (3, 10) => Encoding::Unicode,   // TT_MS_ID_UCS_4
-        (3, 1) => Encoding::Unicode,    // TT_MS_ID_UNICODE_CS
         (3, 2) => Encoding::Sjis,
         (3, 3) => Encoding::Prc,
         (3, 4) => Encoding::Big5,
@@ -63,22 +65,27 @@ pub struct Bytes<'a>(pub &'a [u8]);
 
 impl Bytes<'_> {
     #[inline]
+    #[must_use]
     pub fn u8(&self, p: usize) -> u32 {
-        self.0.get(p).copied().unwrap_or(0) as u32
+        u32::from(self.0.get(p).copied().unwrap_or(0))
     }
     #[inline]
+    #[must_use]
     pub fn u16(&self, p: usize) -> u32 {
         (self.u8(p) << 8) | self.u8(p.wrapping_add(1))
     }
     #[inline]
+    #[must_use]
     pub fn i16(&self, p: usize) -> i32 {
-        self.u16(p) as u16 as i16 as i32
+        i32::from(self.u16(p) as u16 as i16)
     }
     #[inline]
+    #[must_use]
     pub fn u24(&self, p: usize) -> u32 {
         (self.u8(p) << 16) | (self.u8(p.wrapping_add(1)) << 8) | self.u8(p.wrapping_add(2))
     }
     #[inline]
+    #[must_use]
     pub fn u32(&self, p: usize) -> u32 {
         (self.u16(p) << 16) | self.u16(p.wrapping_add(2))
     }
@@ -190,10 +197,10 @@ fn validate4(b: Bytes, table: usize, limit: usize) -> Validation {
         }
         if offset != 0 && offset != 0xFFFF {
             let p = p + offset; // start of glyph ID array
-            if n != num_segs - 1 || !(start == 0xFFFF && end == 0xFFFF) {
-                if p < glyph_ids || p + (end - start + 1) as usize * 2 > limit {
-                    return Err(Invalid);
-                }
+            if (n != num_segs - 1 || !(start == 0xFFFF && end == 0xFFFF))
+                && (p < glyph_ids || p + (end - start + 1) as usize * 2 > limit)
+            {
+                return Err(Invalid);
             }
         } else if offset == 0xFFFF {
             // Some fonts (erroneously?) use a range offset of 0xFFFF to
@@ -332,7 +339,7 @@ fn validate14(b: Bytes, table: usize, limit: usize) -> Validation {
                 let base = b.u24(defp);
                 let cnt = b.u8(defp + 3);
                 defp += 4;
-                if base + cnt >= 0x110000 {
+                if base + cnt >= 0x0011_0000 {
                     return Err(Invalid);
                 }
                 if base < last_base {
@@ -355,7 +362,7 @@ fn validate14(b: Bytes, table: usize, limit: usize) -> Validation {
             for _ in 0..num_mappings {
                 let uni = b.u24(ndp);
                 ndp += 5;
-                if uni >= 0x110000 {
+                if uni >= 0x0011_0000 {
                     return Err(Invalid);
                 }
                 if uni < last_uni {
@@ -371,6 +378,7 @@ fn validate14(b: Bytes, table: usize, limit: usize) -> Validation {
 /// `tt_face_build_cmaps`: the charmaps of a face, in encoding-record order,
 /// for every subtable of a supported format that validates.
 /// `cmap` is the (offset, size) of the `cmap` table, if loaded.
+#[must_use]
 pub fn build_cmaps(data: &[u8], cmap: Option<(usize, usize)>) -> Vec<CharMap> {
     let mut charmaps = Vec::new();
     let Some((table, cmap_size)) = cmap else {
@@ -425,6 +433,7 @@ pub fn build_cmaps(data: &[u8], cmap: Option<(usize, usize)>) -> Vec<CharMap> {
 
 /// `find_unicode_charmap`: the last UCS-4 charmap, else the last Unicode
 /// one (which can be the format 14 subtable: FreeType does not skip it).
+#[must_use]
 pub fn find_unicode_charmap(charmaps: &[CharMap]) -> Option<usize> {
     for (i, cm) in charmaps.iter().enumerate().rev() {
         if cm.encoding == Encoding::Unicode
@@ -437,6 +446,7 @@ pub fn find_unicode_charmap(charmaps: &[CharMap]) -> Option<usize> {
 }
 
 /// `find_variant_selector_charmap`.
+#[must_use]
 pub fn find_variant_selector_charmap(charmaps: &[CharMap]) -> Option<usize> {
     charmaps.iter().position(|cm| cm.platform_id == 0 && cm.encoding_id == 5 && cm.format == 14)
 }
@@ -452,6 +462,7 @@ pub struct LookupContext<'a> {
 }
 
 /// `cmap->clazz->char_index`.
+#[must_use]
 pub fn char_index(ctx: LookupContext, cm: &CharMap, char_code: u32) -> u32 {
     let b = Bytes(ctx.data);
     let table = cm.data;
@@ -583,11 +594,9 @@ fn cmap4_char_map_linear(ctx: LookupContext, table: usize, charcode: u32) -> u32
             r += num_segs2;
             let mut offset = b.u16(r) as usize;
             // Some fonts have an incorrect last segment.
-            if i >= num_segs - 1 && start == 0xFFFF && end == 0xFFFF {
-                if offset != 0 && r + offset + 2 > ctx.cmap_limit {
-                    delta = 1;
-                    offset = 0;
-                }
+            if i >= num_segs - 1 && start == 0xFFFF && end == 0xFFFF && offset != 0 && r + offset + 2 > ctx.cmap_limit {
+                delta = 1;
+                offset = 0;
             }
             if offset == 0xFFFF {
                 continue;
@@ -622,7 +631,7 @@ fn cmap4_char_map_binary(ctx: LookupContext, cm: &CharMap, table: usize, charcod
     let mut max = num_segs;
     let mut gindex = 0;
     loop {
-        let mut mid = (min + max) >> 1;
+        let mut mid = usize::midpoint(min, max);
         let mut p = table + 14 + mid * 2;
         let mut end = b.u16(p);
         p += 2 + num_segs2;
@@ -639,11 +648,10 @@ fn cmap4_char_map_binary(ctx: LookupContext, cm: &CharMap, table: usize, charcod
             let mut offset = b.u16(p) as usize;
 
             // Some fonts have an incorrect last segment.
-            if mid >= num_segs - 1 && start == 0xFFFF && end == 0xFFFF {
-                if offset != 0 && p + offset + 2 > ctx.cmap_limit {
-                    delta = 1;
-                    offset = 0;
-                }
+            if mid >= num_segs - 1 && start == 0xFFFF && end == 0xFFFF && offset != 0 && p + offset + 2 > ctx.cmap_limit
+            {
+                delta = 1;
+                offset = 0;
             }
 
             // Search the first segment containing `charcode'.
@@ -768,7 +776,7 @@ fn cmap12_char_map_binary(b: Bytes, table: usize, char_code: u32, format13: bool
     let mut max = num_groups;
     let mut gindex = 0;
     loop {
-        let mid = (min + max) >> 1;
+        let mid = u32::midpoint(min, max);
         let p = table + 16 + 12 * mid as usize;
         let start = b.u32(p);
         let end = b.u32(p + 4);
@@ -797,6 +805,7 @@ fn cmap12_char_map_binary(b: Bytes, table: usize, char_code: u32, format13: bool
 
 /// `FT_Get_Char_Index`: 0 without a selected charmap, and for glyph
 /// indices outside the face.
+#[must_use]
 pub fn get_char_index(ctx: LookupContext, charmap: Option<&CharMap>, charcode: u32) -> u32 {
     let Some(cm) = charmap else {
         return 0;
@@ -806,6 +815,7 @@ pub fn get_char_index(ctx: LookupContext, charmap: Option<&CharMap>, charcode: u
 }
 
 /// `FT_Face_GetCharVariantIndex` + `tt_cmap14_char_var_index`.
+#[must_use]
 pub fn get_char_variant_index(
     ctx: LookupContext,
     charmaps: &[CharMap],
@@ -831,16 +841,16 @@ pub fn get_char_variant_index(
     let (mut min, mut max) = (0u32, num_var);
     let mut found = None;
     while min < max {
-        let mid = (min + max) >> 1;
+        let mid = u32::midpoint(min, max);
         let p = base + 4 + 11 * mid as usize;
         let var_sel = b.u24(p);
-        if variant_selector < var_sel {
-            max = mid;
-        } else if variant_selector > var_sel {
-            min = mid + 1;
-        } else {
-            found = Some(p + 3);
-            break;
+        match variant_selector.cmp(&var_sel) {
+            Ordering::Less => max = mid,
+            Ordering::Greater => min = mid + 1,
+            Ordering::Equal => {
+                found = Some(p + 3);
+                break;
+            }
         }
     }
     let Some(p) = found else {
@@ -866,7 +876,7 @@ fn cmap14_char_map_def_binary(b: Bytes, base: usize, char_code: u32) -> bool {
     let (mut min, mut max) = (0u32, num_ranges);
     let base = base + 4;
     while min < max {
-        let mid = (min + max) >> 1;
+        let mid = u32::midpoint(min, max);
         let p = base + 4 * mid as usize;
         let start = b.u24(p);
         let cnt = b.u8(p + 3);
@@ -887,15 +897,13 @@ fn cmap14_char_map_nondef_binary(b: Bytes, base: usize, char_code: u32) -> u32 {
     let (mut min, mut max) = (0u32, num_mappings);
     let base = base + 4;
     while min < max {
-        let mid = (min + max) >> 1;
+        let mid = u32::midpoint(min, max);
         let p = base + 5 * mid as usize;
         let uni = b.u24(p);
-        if char_code < uni {
-            max = mid;
-        } else if char_code > uni {
-            min = mid + 1;
-        } else {
-            return b.u16(p + 3);
+        match char_code.cmp(&uni) {
+            Ordering::Less => max = mid,
+            Ordering::Greater => min = mid + 1,
+            Ordering::Equal => return b.u16(p + 3),
         }
     }
     0

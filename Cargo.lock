@@ -2109,20 +2109,20 @@ dependencies = [
  "mln-rs-actor",
  "mln-rs-feature",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-headless",
  "mln-rs-image",
  "mln-rs-map",
- "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-render-test",
  "mln-rs-renderer",
+ "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",
  "mln-rs-text",
  "mln-rs-util",
  "mln-rs-vulkan",
- "mln-rs-webgpu",
  "serde",
  "serde_json",
  "wgpu",
@@ -2139,6 +2139,7 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-map",
  "mln-rs-map-types",
+ "mln-rs-mtl",
  "mln-rs-rapidjson",
  "mln-rs-runtime",
  "mln-rs-storage",
@@ -2148,7 +2149,10 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "raw-window-handle",
  "serde_json",
+ "thiserror 2.0.21",
+ "winit",
 ]
 
 [[package]]
@@ -2176,6 +2180,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2253,6 +2258,7 @@ dependencies = [
  "mln-rs-vec-map",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2288,6 +2294,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-rapidjson",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2326,6 +2333,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "mln-rs-vec-map",
+ "raw-window-handle",
  "serde",
 ]
 
@@ -2353,14 +2361,13 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "mln-rs-gfx",
- "mln-rs-gl",
  "mln-rs-image",
  "mln-rs-map",
  "mln-rs-map-types",
  "mln-rs-math",
- "mln-rs-mtl",
  "mln-rs-pixelmatch",
  "mln-rs-renderer",
+ "mln-rs-runtime",
  "mln-rs-storage",
  "mln-rs-style",
  "mln-rs-style-types",
@@ -2368,8 +2375,6 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
- "mln-rs-vulkan",
- "mln-rs-webgpu",
  "serde_json",
 ]
 
@@ -2419,6 +2424,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2451,6 +2457,9 @@ version = "0.0.11"
 [[package]]
 name = "mln-rs-pmtiles"
 version = "0.0.11"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "mln-rs-polylabel"
@@ -2543,8 +2552,10 @@ dependencies = [
  "mln-rs-geojson",
  "mln-rs-geometry",
  "mln-rs-gfx",
+ "mln-rs-gl",
  "mln-rs-map",
  "mln-rs-math",
+ "mln-rs-mtl",
  "mln-rs-renderer",
  "mln-rs-storage",
  "mln-rs-storage-offline",
@@ -2553,6 +2564,7 @@ dependencies = [
  "mln-rs-text",
  "mln-rs-tile-id",
  "mln-rs-util",
+ "mln-rs-vulkan",
  "mln-rs-webgpu",
  "pollster",
  "serde_json",
@@ -2600,6 +2612,7 @@ dependencies = [
  "rusqlite",
  "rustls",
  "serde_json",
+ "thiserror 2.0.21",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2653,6 +2666,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2708,6 +2722,7 @@ dependencies = [
  "mln-rs-vec-map",
  "serde",
  "skrifa 0.49.0",
+ "thiserror 2.0.21",
  "unicode-bidi",
  "wasm-bindgen",
  "web-sys",
@@ -2729,6 +2744,7 @@ dependencies = [
  "mln-rs-wagyu",
  "mlt-core",
  "proptest",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2763,6 +2779,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "web-time",
 ]
 
@@ -2780,6 +2797,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-protozero",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

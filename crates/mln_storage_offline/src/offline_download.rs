@@ -62,7 +62,7 @@ fn covering_zoom_range(
     definition: &OfflineRegionDefinition,
     type_: SourceType,
     tile_size: u16,
-    zoom_range: &Range<u8>,
+    zoom_range: Range<u8>,
 ) -> Range<u8> {
     // `std::max<double>` / `std::min<double>`.
     let a = f64::from(covering_zoom_level(definition.min_zoom(), type_, tile_size));
@@ -84,7 +84,7 @@ fn tile_cover(
     definition: &OfflineRegionDefinition,
     type_: SourceType,
     tile_size: u16,
-    zoom_range: &Range<u8>,
+    zoom_range: Range<u8>,
     mut f: impl FnMut(CanonicalTileID),
 ) {
     let clamped_zoom_range = covering_zoom_range(definition, type_, tile_size, zoom_range);
@@ -106,7 +106,7 @@ fn tile_cover(
 }
 
 /// `tileCount(definition, type, tileSize, zoomRange)`.
-fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size: u16, zoom_range: &Range<u8>) -> u64 {
+fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size: u16, zoom_range: Range<u8>) -> u64 {
     let clamped_zoom_range = covering_zoom_range(definition, type_, tile_size, zoom_range);
 
     let mut result: u64 = 0;
@@ -120,9 +120,12 @@ fn tile_count(definition: &OfflineRegionDefinition, type_: SourceType, tile_size
     result
 }
 
+/// A task of [`invoke_cancellable`], until it runs or is cancelled.
+type CancellableTask = Rc<RefCell<Option<Box<dyn FnOnce()>>>>;
+
 /// `WorkRequest`: dropping it cancels the task if it has not run.
 struct WorkRequest {
-    task: Rc<RefCell<Option<Box<dyn FnOnce()>>>>,
+    task: CancellableTask,
 }
 
 impl AsyncRequest for WorkRequest {}
@@ -134,10 +137,10 @@ impl Drop for WorkRequest {
 }
 
 /// `util::RunLoop::Get()->invokeCancellable(fn)`: runs `f` on the current
-/// RunLoop unless the returned request is dropped first. The task stays on
+/// `RunLoop` unless the returned request is dropped first. The task stays on
 /// this thread (a `LocalObject`); the loop gets a `Send` handle to it.
 fn invoke_cancellable(f: impl FnOnce() + 'static) -> Box<dyn AsyncRequest> {
-    let task: Rc<RefCell<Option<Box<dyn FnOnce()>>>> = Rc::new(RefCell::new(Some(Box::new(f))));
+    let task: CancellableTask = Rc::new(RefCell::new(Some(Box::new(f))));
     let handle = LocalObject::from_rc(task.clone());
     RunLoop::get().invoke(move || {
         let task = handle.get().and_then(|task| task.borrow_mut().take());
@@ -196,6 +199,7 @@ impl WeakOfflineDownload {
     }
 
     /// `getStatus` of the download, if it still exists.
+    #[must_use]
     pub fn get_status(&self) -> Option<OfflineRegionStatus> {
         self.inner.upgrade().map(|inner| inner.get_status())
     }
@@ -230,6 +234,7 @@ impl OfflineDownload {
     }
 
     /// A weak reference, for observers that call back into the download.
+    #[must_use]
     pub fn downgrade(&self) -> WeakOfflineDownload {
         WeakOfflineDownload { inner: Rc::downgrade(&self.inner) }
     }
@@ -245,6 +250,7 @@ impl OfflineDownload {
     }
 
     /// `getStatus()`.
+    #[must_use]
     pub fn get_status(&self) -> OfflineRegionStatus {
         self.inner.get_status()
     }
@@ -345,7 +351,7 @@ impl Inner {
                 UrlOrTileset::Tileset(tileset) => {
                     // A source without tile URLs has no tiles to download.
                     if !tileset.tiles.is_empty() {
-                        let tile_source_count = tile_count(&self.definition, type_, tile_size, &tileset.zoom_range);
+                        let tile_source_count = tile_count(&self.definition, type_, tile_size, tileset.zoom_range);
                         result.required_tile_count += tile_source_count;
                         result.required_resource_count += tile_source_count;
                     }
@@ -362,7 +368,7 @@ impl Inner {
                     // leave the count imprecise.
                     match tileset {
                         Some(tileset) if !tileset.tiles.is_empty() => {
-                            let tile_source_count = tile_count(&self.definition, type_, tile_size, &tileset.zoom_range);
+                            let tile_source_count = tile_count(&self.definition, type_, tile_size, tileset.zoom_range);
                             result.required_tile_count += tile_source_count;
                             result.required_resource_count += tile_source_count;
                         }
@@ -695,16 +701,13 @@ impl Inner {
         let mut status = *self.status.borrow();
         let result = self.offline_database.borrow_mut().put_region_resources(self.id, &buffer, &mut status);
         *self.status.borrow_mut() = status;
-        match result {
-            Ok(()) => {
-                self.buffer.borrow_mut().clear();
-                self.notify_status_changed();
-                true
-            }
-            Err(_) => {
-                self.on_mapbox_tile_count_limit_exceeded();
-                false
-            }
+        if let Ok(()) = result {
+            self.buffer.borrow_mut().clear();
+            self.notify_status_changed();
+            true
+        } else {
+            self.on_mapbox_tile_count_limit_exceeded();
+            false
         }
     }
 
@@ -726,7 +729,7 @@ impl Inner {
         let Some(url_template) = tileset.tiles.first() else {
             return;
         };
-        tile_cover(&self.definition, type_, tile_size, &tileset.zoom_range, |tile: CanonicalTileID| {
+        tile_cover(&self.definition, type_, tile_size, tileset.zoom_range, |tile: CanonicalTileID| {
             {
                 let mut status = self.status.borrow_mut();
                 status.required_resource_count += 1;
@@ -757,8 +760,8 @@ impl Inner {
     }
 
     fn ensure_resource(self: &Rc<Self>, resource: Resource, callback: Option<ResponseCallback>) {
-        debug_assert!(resource.priority == Priority::Low);
-        debug_assert!(resource.usage == Usage::Offline);
+        debug_assert_eq!(resource.priority, Priority::Low);
+        debug_assert_eq!(resource.usage, Usage::Offline);
 
         // An observer can pause or restart the download from any callback,
         // which ends this traversal. Nothing more of this resource happens

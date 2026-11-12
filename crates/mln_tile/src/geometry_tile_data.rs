@@ -78,6 +78,7 @@ pub fn fixup_polygons(rings: &GeometryCollection) -> Result<GeometryCollection, 
 
 /// `classifyRings`: classifies an array of rings into polygons with outer
 /// rings and holes.
+#[must_use]
 pub fn classify_rings(rings: &GeometryCollection) -> Vec<GeometryCollection> {
     let mut polygons: Vec<GeometryCollection> = Vec::new();
 
@@ -206,7 +207,7 @@ pub fn convert_geometry(
 /// int32 (0x80000000 for NaN and out-of-range values; undefined behaviour in
 /// C++), then the low 16 bits.
 fn int16_cast_x86_64(v: f64) -> i16 {
-    let i = if v.is_nan() || v >= 2147483648.0 || v <= -2147483649.0 { i32::MIN } else { v as i32 };
+    let i = if v.is_nan() || v >= 2_147_483_648.0 || v <= -2_147_483_649.0 { i32::MIN } else { v as i32 };
     i as i16
 }
 
@@ -214,6 +215,7 @@ fn int16_cast_x86_64(v: f64) -> i16 {
 /// longitude/latitude to tile coordinates. The C++ clamps *after* the
 /// narrowing cast, so the clamp has no effect; the cast is reproduced as
 /// x86-64 executes it (see `int16_cast_x86_64`).
+#[must_use]
 pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTileID) -> GeometryCollection {
     let size = f64::from(EXTENT) * 2f64.powi(i32::from(tile_id.z));
     let x0 = f64::from(EXTENT) * f64::from(tile_id.x);
@@ -247,8 +249,8 @@ pub fn convert_geometry_to_tile(geometry: &Geometry<f64>, tile_id: &CanonicalTil
     }
 }
 
-/// `convertFeature`: convert from GeometryTileFeature to Feature
-/// (eventually we should eliminate GeometryTileFeature).
+/// `convertFeature`: convert from `GeometryTileFeature` to Feature
+/// (eventually we should eliminate `GeometryTileFeature`).
 pub fn convert_feature(
     geometry_tile_feature: &dyn GeometryTileFeature,
     tile_id: &CanonicalTileID,
@@ -260,16 +262,16 @@ pub fn convert_feature(
 }
 
 /// `ToGeometryCollection`.
+#[must_use]
 pub fn to_geometry_collection(geom: &Geometry<i16>) -> GeometryCollection {
     match geom {
-        Geometry::Empty => GeometryCollection::new(),
+        Geometry::Empty | Geometry::GeometryCollection(_) => GeometryCollection::new(),
         Geometry::Point(p) => GeometryCollection::from(vec![vec![*p]]),
         Geometry::MultiPoint(g) | Geometry::LineString(g) => GeometryCollection::from(vec![g.clone()]),
         Geometry::MultiLineString(g) | Geometry::Polygon(g) => GeometryCollection::from(g.clone()),
         Geometry::MultiPolygon(g) => {
             GeometryCollection::from(g.iter().flat_map(|polygon| polygon.iter().cloned()).collect::<Vec<_>>())
         }
-        Geometry::GeometryCollection(_) => GeometryCollection::new(),
     }
 }
 
@@ -288,6 +290,7 @@ pub type GeometryCollectionFloat = Vec<GeometryCoordinatesFloat>;
 ///
 /// A ring needs its closing point: the last point is dropped before rounding.
 /// A ring of fewer than two points comes out empty.
+#[must_use]
 pub fn round_polygon_corners(polygon: &GeometryCollection, desired_corner_distance: f64) -> GeometryCollectionFloat {
     const ARC_POINTS: i32 = 3;
     const MAX_EDGE_LEN_PERCENT: f64 = 0.2;
@@ -515,7 +518,7 @@ mod tests {
         let original = polygon.clone();
 
         assert_eq!(polygon.len(), 4);
-        assert_eq!(test_signed_area(&polygon[0]), 515360.0); // exterior
+        assert_eq!(test_signed_area(&polygon[0]), 515_360.0); // exterior
         assert_eq!(test_signed_area(&polygon[1]), -12288.0); // biggest interior ring
         assert_eq!(test_signed_area(&polygon[2]), -2048.0); // smallest interior ring
         assert_eq!(test_signed_area(&polygon[3]), -3072.0); // second largest interior ring

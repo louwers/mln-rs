@@ -43,13 +43,12 @@ pub(crate) enum HandleKind {
     RenderFrameBatch = 21,
     DeliveryQueue = 23,
     StyleExpression = 25,
-    OffscreenDevice = 26,
-    VulkanDevice = 27,
+    GpuDevice = 26,
     FramePacer = 28,
 }
 
 impl HandleKind {
-    const ALL: [Self; 13] = [
+    const ALL: [Self; 12] = [
         Self::Runtime,
         Self::Map,
         Self::MapProjection,
@@ -60,8 +59,7 @@ impl HandleKind {
         Self::RenderFrameBatch,
         Self::DeliveryQueue,
         Self::StyleExpression,
-        Self::OffscreenDevice,
-        Self::VulkanDevice,
+        Self::GpuDevice,
         Self::FramePacer,
     ];
 
@@ -83,8 +81,7 @@ impl HandleKind {
             Self::RenderFrameBatch => "mln_render_frame_batch",
             Self::DeliveryQueue => "mln_delivery_queue",
             Self::StyleExpression => "mln_style_expression",
-            Self::OffscreenDevice => "mln_offscreen_device",
-            Self::VulkanDevice => "mln_vulkan_device",
+            Self::GpuDevice => "mln_gpu_device",
             Self::FramePacer => "mln_frame_pacer",
         }
     }
@@ -303,7 +300,7 @@ mod tests {
         lock(&table.slots).slots[0].generation = MAX_GENERATION;
         let last = encode(HandleKind::Map, 0, MAX_GENERATION);
         table.remove(last).unwrap();
-        assert!(lock(&table.slots).free.is_empty());
+        assert_eq!(lock(&table.slots).free, Vec::<u32>::new());
         let next = table.insert(Arc::new(())).unwrap();
         assert_eq!(index_of(next), 1);
         assert_eq!(table.get(last).unwrap_err().status(), MLN_STATUS_INVALID_STATE);
@@ -315,9 +312,9 @@ mod tests {
         let mut empty = 0;
         // SAFETY: each pointer is null or to a local.
         unsafe {
-            assert!(out_handle(&mut empty, "out_map").is_ok());
+            assert!(out_handle(&raw mut empty, "out_map").is_ok());
             let mut occupied = 5;
-            let error = out_handle(&mut occupied, "out_map").unwrap_err();
+            let error = out_handle(&raw mut occupied, "out_map").unwrap_err();
             assert_eq!(error.message(), "out_map must point to the null handle");
             assert!(out_handle(core::ptr::null_mut(), "out_map").is_err());
         }

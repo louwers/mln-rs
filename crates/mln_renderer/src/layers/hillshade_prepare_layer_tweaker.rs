@@ -74,7 +74,7 @@ impl LayerTweaker for HillshadePrepareLayerTweaker {
 
             let drawable_ubo = HillshadePrepareDrawableUBO { matrix: cast_matrix(&m) };
             let tile_props_ubo = HillshadePrepareTilePropsUBO {
-                unpack: *get_unpack_vector(drawable_data.encoding),
+                unpack: get_unpack_vector(drawable_data.encoding),
                 dimension: [drawable_data.stride as f32, drawable_data.stride as f32],
                 zoom: f32::from(tile_id.canonical.z),
                 maxzoom: f32::from(drawable_data.maxzoom),

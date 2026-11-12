@@ -15,7 +15,7 @@ use mln_tile_id::CanonicalTileID;
 use mln_util::geo::LatLng;
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
-use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
+use mln_util::tileset::{EmptyResponse, RasterEncoding, Tileset, VectorEncoding};
 
 use super::util::parse_json;
 use crate::conversion::Error;
@@ -27,13 +27,19 @@ use crate::sources::geojson_source::{GeoJSONOptions, GeoJSONSource};
 use crate::sources::image_source::ImageSource;
 use crate::sources::tile_source::{RasterDEMSource, RasterSource, UrlOrTileset, VectorSource};
 
-/// `StubStyleObserver` (test/src/mln/test/stub_style_observer.hpp), the
-/// SourceObserver half.
+/// A test's handler for a source event.
+type SourceHandler = Box<dyn Fn(&dyn Source)>;
+
+/// A test's handler for a source error.
+type SourceErrorHandler = Box<dyn Fn(&dyn Source, mln_util::Error)>;
+
+/// `StubStyleObserver` (`test/src/mln/test/stub_style_observer.hpp`), the
+/// `SourceObserver` half.
 #[derive(Default)]
 struct StubStyleObserver {
-    source_loaded: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
-    source_changed: RefCell<Option<Box<dyn Fn(&dyn Source)>>>,
-    source_error: RefCell<Option<Box<dyn Fn(&dyn Source, mln_util::Error)>>>,
+    source_loaded: RefCell<Option<SourceHandler>>,
+    source_changed: RefCell<Option<SourceHandler>>,
+    source_error: RefCell<Option<SourceErrorHandler>>,
 }
 
 impl SourceObserver for StubStyleObserver {
@@ -229,7 +235,7 @@ fn geojson_source_keeps_the_style_attribution() {
     assert!(*loaded.borrow());
 }
 
-/// A FeatureCollection of `count` points at 0, 0.
+/// A `FeatureCollection` of `count` points at 0, 0.
 fn geojson_points(count: usize) -> Arc<Vec<u8>> {
     let feature = r#"{"type": "Feature", "properties": {}, "geometry": {"type": "Point", "coordinates": [0, 0]}}"#;
     let features = vec![feature; count].join(",");
@@ -526,4 +532,37 @@ fn image_source_image_update() {
 
     run_loop.run();
     assert!(*changed.borrow());
+}
+
+/// The source the style JSON `json` converts to.
+fn converted_source(json: &str) -> Result<Box<dyn Source>, String> {
+    let mut error = Error::default();
+    convert_source(&Convertible::from(&parse_json(json)), &mut error, "source").ok_or(error.message)
+}
+
+// A tile source's tileset takes the style's emptyResponse, over a TileJSON or inline.
+#[test]
+fn tile_sources_take_the_style_empty_response() {
+    for type_ in ["vector", "raster", "raster-dem"] {
+        let source = converted_source(&format!(r#"{{"type": "{type_}", "url": "url", "emptyResponse": "missing"}}"#))
+            .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(EmptyResponse::Missing, tileset_loaded_from_tilejson(&*source).empty_response, "{type_}");
+
+        let source = converted_source(&format!(r#"{{"type": "{type_}", "url": "url"}}"#)).unwrap();
+        assert_eq!(EmptyResponse::Blank, tileset_loaded_from_tilejson(&*source).empty_response, "{type_}");
+
+        let source =
+            converted_source(&format!(r#"{{"type": "{type_}", "tiles": ["tiles"], "emptyResponse": "missing"}}"#))
+                .unwrap();
+        source.load_description(&StubFileSource::new(ResponseType::Asynchronous));
+        let impl_ = source.base_impl();
+        let impl_ = impl_.as_any().downcast_ref::<crate::sources::tile_source::Impl>().expect("a TileSource");
+        assert_eq!(EmptyResponse::Missing, impl_.tileset.as_ref().unwrap().empty_response, "{type_}");
+
+        let Err(error) = converted_source(&format!(r#"{{"type": "{type_}", "url": "url", "emptyResponse": "none"}}"#))
+        else {
+            panic!("{type_}: an invalid emptyResponse converts");
+        };
+        assert!(error.contains("emptyResponse"), "{type_}: {error}");
+    }
 }

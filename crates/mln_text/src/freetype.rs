@@ -9,15 +9,16 @@ use std::sync::{Arc, OnceLock};
 use crate::ft;
 use crate::glyph::{FontData, Glyph, GlyphID};
 
-/// `SDF_FONT_SIZE`: glyphs are loaded at 24 px (FT_Set_Char_Size at 72 dpi).
+/// `SDF_FONT_SIZE`: glyphs are loaded at 24 px (`FT_Set_Char_Size` at 72 dpi).
 pub const SDF_FONT_SIZE: i64 = 24;
 
-/// `FreeTypeLibrary` (FT_Init_FreeType / FT_Done_FreeType). The port has no
+/// `FreeTypeLibrary` (`FT_Init_FreeType` / `FT_Done_FreeType`). The port has no
 /// library state; the type is kept because the C++ API passes it around.
 #[derive(Debug, Default)]
 pub struct FreeTypeLibrary;
 
 impl FreeTypeLibrary {
+    #[must_use]
     pub fn new() -> Self {
         FreeTypeLibrary
     }
@@ -30,13 +31,14 @@ pub struct FreeTypeFace {
     /// handed it over (such as the response it arrived in).
     memory_file: FontData,
     face: Option<ft::face::Face>,
-    /// The hinted glyph loader (FT_Load_Glyph at 24 px), made on first use.
+    /// The hinted glyph loader (`FT_Load_Glyph` at 24 px), made on first use.
     scaler: Arc<OnceLock<Option<skrifa::ScalerFont>>>,
 }
 
 impl FreeTypeFace {
     /// `FreeTypeFace(const std::string& fontFileName, const FreeTypeLibrary&)`
     /// (`FT_New_Face` on a file).
+    #[must_use]
     pub fn from_file(font_file_name: &str, lib: &FreeTypeLibrary) -> Self {
         match std::fs::read(font_file_name) {
             Ok(data) => Self::from_memory(data, lib),
@@ -64,7 +66,7 @@ impl FreeTypeFace {
     }
 
     /// `force_ucs2_charmap`: select the first (0, 3) or (3, 1) charmap, if
-    /// any; otherwise FreeType's default (find_unicode_charmap) stays.
+    /// any; otherwise FreeType's default (`find_unicode_charmap`) stays.
     fn force_ucs2_charmap(face: &mut ft::face::Face) -> i32 {
         for i in 0..face.charmaps.len() {
             let cm = &face.charmaps[i];
@@ -79,21 +81,25 @@ impl FreeTypeFace {
     }
 
     /// `isValid()`.
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         self.face.is_some()
     }
 
     /// `getFace()`: the FreeType face state (None when not valid).
+    #[must_use]
     pub fn get_face(&self) -> Option<&ft::face::Face> {
         self.face.as_ref()
     }
 
     /// The font data the face reads from.
+    #[must_use]
     pub fn data(&self) -> &FontData {
         &self.memory_file
     }
 
     /// `FT_Get_Char_Index` on the selected charmap.
+    #[must_use]
     pub fn get_char_index(&self, charcode: u32) -> u32 {
         let Some(face) = &self.face else { return 0 };
         let cm = face.charmap.map(|i| &face.charmaps[i]);
@@ -101,6 +107,7 @@ impl FreeTypeFace {
     }
 
     /// `FT_Face_GetCharVariantIndex`.
+    #[must_use]
     pub fn get_char_variant_index(&self, charcode: u32, variant_selector: u32) -> u32 {
         let Some(face) = &self.face else { return 0 };
         ft::cmap::get_char_variant_index(
@@ -114,6 +121,7 @@ impl FreeTypeFace {
 
     /// `FT_Get_Advance(face, glyph, FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING)`:
     /// the 16.16 advance, `None` on error.
+    #[must_use]
     pub fn get_advance(&self, glyph: u32) -> Option<i64> {
         self.face.as_ref()?.get_advance(self.memory_file.as_bytes(), glyph)
     }
@@ -125,12 +133,14 @@ impl FreeTypeFace {
     }
 
     /// The hinting engine `rasterize_glyph` uses (for tests and reports).
+    #[must_use]
     pub fn hint_engine(&self) -> Option<skrifa::HintEngine> {
         self.scaler()?.hint_engine()
     }
 
     /// `rasterizeGlyph`.
+    #[must_use]
     pub fn rasterize_glyph(&self, glyph: &GlyphID) -> Glyph {
-        crate::rasterize::rasterize_glyph(self, glyph)
+        crate::rasterize::rasterize_glyph(self, *glyph)
     }
 }

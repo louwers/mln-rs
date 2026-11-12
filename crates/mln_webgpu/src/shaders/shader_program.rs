@@ -42,7 +42,7 @@ pub enum BindingType {
     StorageBuffer,
     Sampler,
     Texture,
-    /// For RGBA32Float textures that require textureLoad instead of textureSample
+    /// For `RGBA32Float` textures that require textureLoad instead of textureSample
     UnfilterableTexture,
 }
 
@@ -69,6 +69,35 @@ fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, 
         None => Ok(value),
         Some(error) => Err(error),
     }
+}
+
+/// `source` for wgpu: natively, the module naga parses it to. Parsing the
+/// WGSL is most of what creating a shader costs, and every renderer creates
+/// the same shaders, so the process parses each source once. A source that
+/// doesn't parse goes as WGSL, for wgpu to report its error.
+#[cfg(not(target_family = "wasm"))]
+fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
+    use std::sync::Mutex;
+
+    use mln_util::sync::MutexExt;
+
+    static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
+    let cached = PARSED.lock_unpoisoned().get_or_insert_default().get(source).cloned();
+    let module = if let Some(module) = cached {
+        module
+    } else {
+        let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
+            return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
+        };
+        PARSED.lock_unpoisoned().get_or_insert_default().insert(source.to_owned(), module.clone());
+        module
+    };
+    wgpu::ShaderSource::Naga(Cow::Owned(module))
+}
+
+#[cfg(target_family = "wasm")]
+fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
+    wgpu::ShaderSource::Wgsl(Cow::Borrowed(source))
 }
 
 fn is_space(b: u8) -> bool {
@@ -101,10 +130,8 @@ fn webgpu_blend_factor(factor: ColorBlendFactorType) -> wgpu::BlendFactor {
         F::DstColor => wgpu::BlendFactor::Dst,
         F::OneMinusDstColor => wgpu::BlendFactor::OneMinusDst,
         F::SrcAlphaSaturate => wgpu::BlendFactor::SrcAlphaSaturated,
-        F::ConstantColor => wgpu::BlendFactor::Constant,
-        F::OneMinusConstantColor => wgpu::BlendFactor::OneMinusConstant,
-        F::ConstantAlpha => wgpu::BlendFactor::Constant,
-        F::OneMinusConstantAlpha => wgpu::BlendFactor::OneMinusConstant,
+        F::ConstantColor | F::ConstantAlpha => wgpu::BlendFactor::Constant,
+        F::OneMinusConstantColor | F::OneMinusConstantAlpha => wgpu::BlendFactor::OneMinusConstant,
     }
 }
 
@@ -115,8 +142,7 @@ fn to_primitive_topology(draw_mode_type: DrawModeType) -> wgpu::PrimitiveTopolog
         DrawModeType::LineStrip => wgpu::PrimitiveTopology::LineStrip,
         DrawModeType::TriangleStrip => wgpu::PrimitiveTopology::TriangleStrip,
         // WebGPU does not support triangle fan directly; approximate with triangle list
-        DrawModeType::TriangleFan => wgpu::PrimitiveTopology::TriangleList,
-        DrawModeType::Triangles => wgpu::PrimitiveTopology::TriangleList,
+        DrawModeType::TriangleFan | DrawModeType::Triangles => wgpu::PrimitiveTopology::TriangleList,
     }
 }
 
@@ -178,6 +204,9 @@ pub struct ShaderProgram {
     fragment_shader_module: Option<wgpu::ShaderModule>,
     bind_group_layouts: Vec<wgpu::BindGroupLayout>,
     bind_group_order: Vec<u32>,
+    /// The group that holds only `globalIndex` (see
+    /// [`get_index_group`](Self::get_index_group)).
+    index_group: Option<u32>,
     pipeline_layout: Option<wgpu::PipelineLayout>,
     render_pipeline_cache: RefCell<HashMap<u64, wgpu::RenderPipeline>>,
     vertex_attributes: VertexAttributeArray,
@@ -217,8 +246,17 @@ impl ShaderProgram {
     }
 
     /// `ShaderProgram(Context&, vertexSource, fragmentSource)` (minimal
-    /// constructor; name "ContextShader").
+    /// constructor; name "`ContextShader`").
+    ///
+    /// A `globalIndex` the sources declare in group 0 moves to a group of its
+    /// own (see [`get_index_group`](Self::get_index_group)).
     pub fn from_sources(context: &Context, vertex_source: &str, fragment_source: &str) -> Self {
+        let index_group = index_group_of(&[vertex_source, fragment_source]);
+        let (vertex_source, fragment_source) = match index_group {
+            Some(group) => (move_global_index(vertex_source, group), move_global_index(fragment_source, group)),
+            None => (Cow::Borrowed(vertex_source), Cow::Borrowed(fragment_source)),
+        };
+        let (vertex_source, fragment_source) = (vertex_source.as_ref(), fragment_source.as_ref());
         let mut program = ShaderProgram {
             shader_program_id: SimpleIdentity::new(),
             shader_name: "ContextShader".to_owned(),
@@ -227,6 +265,7 @@ impl ShaderProgram {
             fragment_shader_module: None,
             bind_group_layouts: Vec::new(),
             bind_group_order: Vec::new(),
+            index_group,
             pipeline_layout: None,
             render_pipeline_cache: RefCell::new(HashMap::new()),
             vertex_attributes: VertexAttributeArray::new(),
@@ -249,7 +288,7 @@ impl ShaderProgram {
             let module = validated(&device, || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some(label),
-                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
+                    source: shader_source(source),
                 })
             });
             module.map_err(|error| eprintln!("{error}")).ok()
@@ -298,7 +337,7 @@ impl ShaderProgram {
         }
         // Create new pipeline
         let pipeline =
-            self.create_pipeline(vertex_layouts, color_mode, depth_mode, stencil_mode, draw_mode_type, cull_mode);
+            self.create_pipeline(vertex_layouts, color_mode, depth_mode, stencil_mode, draw_mode_type, *cull_mode);
         // Cache the pipeline if we have a reuse hash
         if let (Some(hash), Some(p)) = (reuse_hash, &pipeline) {
             self.render_pipeline_cache.borrow_mut().insert(hash, p.clone());
@@ -331,6 +370,16 @@ impl ShaderProgram {
         &self.bind_group_order
     }
 
+    /// The group that holds only `globalIndex`, the index of the draw's
+    /// entries in the layer's UBO vectors, at binding `ID_GLOBAL_UBO_INDEX`.
+    /// Its layout is the context's index group layout, and a draw binds it
+    /// with the dynamic offset of its index (`Context::index_bind_group`),
+    /// so its other groups bind only what it shares with the layer's other
+    /// draws.
+    pub fn get_index_group(&self) -> Option<u32> {
+        self.index_group
+    }
+
     pub fn get_shader_name(&self) -> &str {
         &self.shader_name
     }
@@ -346,8 +395,8 @@ impl ShaderProgram {
         // array in the shader
         #[cfg(debug_assertions)]
         {
-            self.vertex_attributes.visit_attributes(|a| debug_assert!(a.get_index() != index));
-            self.instance_attributes.visit_attributes(|a| debug_assert!(a.get_index() != index));
+            self.vertex_attributes.visit_attributes(|a| debug_assert_ne!(a.get_index(), index));
+            self.instance_attributes.visit_attributes(|a| debug_assert_ne!(a.get_index(), index));
         }
         self.vertex_attributes.set(info.id, index, info.data_type, 1);
     }
@@ -356,7 +405,7 @@ impl ShaderProgram {
         // Index is the block index of the instance attribute
         let index = info.index as i32;
         #[cfg(debug_assertions)]
-        self.vertex_attributes.visit_attributes(|a| debug_assert!(a.get_index() != index));
+        self.vertex_attributes.visit_attributes(|a| debug_assert_ne!(a.get_index(), index));
         self.instance_attributes.set(info.id, index, info.data_type, 1);
     }
 
@@ -522,6 +571,14 @@ impl ShaderProgram {
 
         for (group, mut infos) in grouped {
             infos.sort_by_key(|info| info.binding);
+            if Some(group) == self.index_group
+                && let Some(layout) = self.context.index_bind_group_layout()
+            {
+                self.bind_group_order.push(group);
+                self.bindings_per_group.push(infos);
+                self.bind_group_layouts.push(layout);
+                continue;
+            }
             let layout_entries: Vec<wgpu::BindGroupLayoutEntry> = infos
                 .iter()
                 .map(|info| wgpu::BindGroupLayoutEntry {
@@ -576,7 +633,7 @@ impl ShaderProgram {
         depth_mode: &DepthMode,
         stencil_mode: &StencilMode,
         draw_mode_type: DrawModeType,
-        cull_mode: &CullFaceMode,
+        cull_mode: CullFaceMode,
     ) -> Option<wgpu::RenderPipeline> {
         let device = self.context.get_backend().get_device();
         if !self.has_vertex_entry_point || !self.has_fragment_entry_point {
@@ -735,7 +792,7 @@ impl ShaderProgram {
                 vertex: wgpu::VertexState {
                     module: vertex_module,
                     entry_point: Some("main"),
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                     buffers: &buffers,
                 },
                 primitive,
@@ -744,7 +801,7 @@ impl ShaderProgram {
                 fragment: Some(wgpu::FragmentState {
                     module: fragment_module,
                     entry_point: Some("main"),
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
                     targets: &targets,
                 }),
                 multiview_mask: None,
@@ -782,4 +839,51 @@ impl ShaderProgramBase for ShaderProgram {
 /// Downcast a shader handle to the WebGPU program (C++ `static_cast`).
 pub fn as_webgpu_shader(shader: &Rc<dyn ShaderProgramBase>) -> Option<&ShaderProgram> {
     shader.as_any().downcast_ref::<ShaderProgram>()
+}
+
+/// How the vendored sources declare `globalIndex`.
+const GLOBAL_INDEX_DECLARATION: &str = "@group(0) @binding(1) var<uniform> globalIndex:";
+
+/// The group after the last one `sources` use, if they declare `globalIndex`
+/// in group 0.
+fn index_group_of(sources: &[&str]) -> Option<u32> {
+    if !sources.iter().any(|source| source.contains(GLOBAL_INDEX_DECLARATION)) {
+        return None;
+    }
+    let last = sources
+        .iter()
+        .flat_map(|source| source.split("@group(").skip(1))
+        .filter_map(|rest| rest.split(')').next()?.trim().parse::<u32>().ok())
+        .max()?;
+    Some(last + 1)
+}
+
+/// `source` with its `globalIndex` declaration in `group`.
+fn move_global_index(source: &str, group: u32) -> Cow<'_, str> {
+    if source.contains(GLOBAL_INDEX_DECLARATION) {
+        let declaration = GLOBAL_INDEX_DECLARATION.replacen("@group(0)", &format!("@group({group})"), 1);
+        Cow::Owned(source.replacen(GLOBAL_INDEX_DECLARATION, &declaration, 1))
+    } else {
+        Cow::Borrowed(source)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_index_moves_to_the_group_after_the_last() {
+        let vertex = "@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;\n\
+                      @group(0) @binding(2) var<storage, read> drawableVector: array<U>;";
+        let fragment = "@group(1) @binding(0) var image_sampler: sampler;";
+        assert_eq!(index_group_of(&[vertex, fragment]), Some(2));
+        assert_eq!(index_group_of(&[fragment]), None);
+        assert_eq!(
+            move_global_index(vertex, 2),
+            "@group(2) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;\n\
+             @group(0) @binding(2) var<storage, read> drawableVector: array<U>;"
+        );
+        assert!(matches!(move_global_index(fragment, 2), Cow::Borrowed(_)));
+    }
 }

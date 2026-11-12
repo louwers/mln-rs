@@ -39,11 +39,21 @@ use crate::type_::Type;
 use crate::value::Value;
 use crate::within::Within;
 
-/// `expression::ParsingError`.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// `expression::ParsingError`. `Display` writes `key: message`, or the
+/// message alone when the key is empty, as `getCombinedErrors` does.
+#[derive(Clone, Debug, Default, PartialEq, Eq, thiserror::Error)]
 pub struct ParsingError {
     pub message: String,
     pub key: String,
+}
+
+impl std::fmt::Display for ParsingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.key.is_empty() {
+            write!(f, "{}: ", self.key)?;
+        }
+        f.write_str(&self.message)
+    }
 }
 
 /// `expression::ParseResult` (`std::optional<std::unique_ptr<Expression>>`).
@@ -59,10 +69,12 @@ pub struct Scope {
 }
 
 impl Scope {
+    #[must_use]
     pub fn new(bindings: Bindings, parent: Option<Rc<Scope>>) -> Self {
         Scope { bindings, parent }
     }
 
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<dyn Expression>> {
         if let Some(binding) = self.bindings.get(name) {
             Some(binding.clone())
@@ -154,16 +166,15 @@ fn is_constant(expression: &dyn Expression) -> bool {
 
 type ParseFunction = fn(&Convertible<'_>, &mut ParsingContext) -> ParseResult;
 
-/// The `expressionRegistry` of parsing_context.cpp.
+/// The `expressionRegistry` of `parsing_context.cpp`.
 fn expression_registry(name: &str) -> Option<ParseFunction> {
     Some(match name {
         "==" | "!=" | ">" | "<" | ">=" | "<=" => parse_comparison,
         "all" => All::parse,
         "any" => Any::parse,
-        "array" => Assertion::parse,
+        "array" | "boolean" | "number" | "object" | "string" => Assertion::parse,
         "at" => At::parse,
         "in" => In::parse,
-        "boolean" => Assertion::parse,
         "case" => Case::parse,
         "coalesce" => Coalesce::parse,
         "collator" => CollatorExpression::parse,
@@ -175,11 +186,8 @@ fn expression_registry(name: &str) -> Option<ParseFunction> {
         "let" => Let::parse,
         "literal" => Literal::parse,
         "match" => parse_match,
-        "number" => Assertion::parse,
         "number-format" => NumberFormat::parse,
-        "object" => Assertion::parse,
         "step" => Step::parse,
-        "string" => Assertion::parse,
         "to-boolean" | "to-color" | "to-padding" | "to-number" | "to-string" => Coercion::parse,
         "var" => Var::parse,
         "within" => Within::parse,
@@ -192,11 +200,13 @@ fn expression_registry(name: &str) -> Option<ParseFunction> {
 
 /// `isExpression(const std::string&)`: whether `name` is in the expression
 /// registry (not the compound-expression registry).
+#[must_use]
 pub fn is_expression_name(name: &str) -> bool {
     expression_registry(name).is_some()
 }
 
 impl ParsingContext {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -207,6 +217,7 @@ impl ParsingContext {
     }
 
     /// `explicit ParsingContext(type::Type expected)`.
+    #[must_use]
     pub fn with_expected(expected: Type) -> Self {
         ParsingContext { expected: Some(expected), ..Default::default() }
     }
@@ -220,35 +231,29 @@ impl ParsingContext {
         ParsingContext { key, expected, scope, errors }
     }
 
+    #[must_use]
     pub fn get_key(&self) -> String {
         self.key.clone()
     }
 
+    #[must_use]
     pub fn get_expected(&self) -> Option<Type> {
         self.expected.clone()
     }
 
+    #[must_use]
     pub fn get_errors(&self) -> Vec<ParsingError> {
         self.errors.borrow().clone()
     }
 
+    #[must_use]
     pub fn has_errors(&self) -> bool {
         !self.errors.borrow().is_empty()
     }
 
+    #[must_use]
     pub fn get_combined_errors(&self) -> String {
-        let mut combined_error = String::new();
-        for parsing_error in self.errors.borrow().iter() {
-            if !combined_error.is_empty() {
-                combined_error.push('\n');
-            }
-            if !parsing_error.key.is_empty() {
-                combined_error += &parsing_error.key;
-                combined_error += ": ";
-            }
-            combined_error += &parsing_error.message;
-        }
-        combined_error
+        self.errors.borrow().iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
     }
 
     /// Parse the given style-spec JSON value as an expression.
@@ -292,7 +297,7 @@ impl ParsingContext {
         parsed
     }
 
-    /// Parse a child expression. For use by individual Expression::parse()
+    /// Parse a child expression. For use by individual `Expression::parse()`
     /// methods.
     pub fn parse(
         &mut self,
@@ -338,6 +343,7 @@ impl ParsingContext {
         err
     }
 
+    #[must_use]
     pub fn get_binding(&self, name: &str) -> Option<Arc<dyn Expression>> {
         self.scope.as_ref()?.get(name)
     }
@@ -356,7 +362,7 @@ impl ParsingContext {
             .push(ParsingError { message, key: format!("{}[{}][{}]", self.key, child, grandchild) });
     }
 
-    pub fn append_errors(&mut self, ctx: ParsingContext) {
+    pub fn append_errors(&mut self, ctx: &ParsingContext) {
         let mut theirs = ctx.errors.borrow_mut();
         self.errors.borrow_mut().append(&mut theirs);
     }
@@ -368,8 +374,8 @@ impl ParsingContext {
     /// Parse the given style-spec JSON value into an Expression object.
     /// Specifically, this function is responsible for determining the
     /// expression type (either Literal, or the one named in value[0]) and
-    /// dispatching to the appropriate ParseXxxx::parse(const V&,
-    /// ParsingContext) method.
+    /// dispatching to the appropriate `ParseXxxx::parse(const` V&,
+    /// `ParsingContext`) method.
     fn parse_value(
         &mut self,
         value: &Convertible<'_>,
@@ -433,19 +439,13 @@ impl ParsingContext {
                 && actual == Type::Value
             {
                 expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Assert));
-            } else if (expected == Type::Color || expected == Type::Formatted || expected == Type::Image)
-                && (actual == Type::Value || actual == Type::String)
+            } else if ((expected == Type::Color || expected == Type::Formatted || expected == Type::Image)
+                && (actual == Type::Value || actual == Type::String))
+                || (expected == Type::Padding && (actual == Type::Value || actual == Type::Number || actual.is_array()))
+                || (expected == Type::ProjectionDefinition
+                    && (actual == Type::Value || actual == Type::String || actual.is_array()))
+                || (expected == Type::VariableAnchorOffsetCollection && (actual == Type::Value || actual.is_array()))
             {
-                expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
-            } else if expected == Type::Padding
-                && (actual == Type::Value || actual == Type::Number || actual.is_array())
-            {
-                expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
-            } else if expected == Type::ProjectionDefinition
-                && (actual == Type::Value || actual == Type::String || actual.is_array())
-            {
-                expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
-            } else if expected == Type::VariableAnchorOffsetCollection && (actual == Type::Value || actual.is_array()) {
                 expr = annotate(expr, expected, type_annotation_option.unwrap_or(TypeAnnotationOption::Coerce));
             } else {
                 let t = expr.get_type().clone();
@@ -481,9 +481,8 @@ impl ParsingContext {
                     panic!("array-typed expression evaluated to a non-array");
                 };
                 return Some(Box::new(Literal::with_array_type(*array, items)));
-            } else {
-                return Some(Box::new(Literal::new(evaluated)));
             }
+            return Some(Box::new(Literal::new(evaluated)));
         }
 
         parsed

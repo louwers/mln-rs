@@ -43,10 +43,10 @@ pub type BBox = GeometryBox<f32>;
 /// `GridIndex<T>::BCircle`.
 pub type BCircle = Circle<f32>;
 
-/// GridIndex is a data structure for testing the intersection of
+/// `GridIndex` is a data structure for testing the intersection of
 /// circles and rectangles in a 2d plane.
 /// It is optimized for rapid insertion and querying.
-/// GridIndex splits the plane into a set of "cells" and keeps track
+/// `GridIndex` splits the plane into a set of "cells" and keeps track
 /// of which geometries intersect with each cell. At query time,
 /// full geometry comparisons are only done for items that share
 /// at least one cell. As long as the geometries are relatively
@@ -73,14 +73,15 @@ pub struct GridIndex<T> {
 
 impl<T: Clone> GridIndex<T> {
     /// `GridIndex(float width, float height, uint32_t cellSize)`.
+    #[must_use]
     pub fn new(width: f32, height: f32, cell_size: u32) -> Self {
         // `std::ceil(width / cellSize_)`: float division (the cell size is
         // converted to float), ceilf.
         let x_cell_count = (width / cell_size as f32).ceil() as usize;
         let y_cell_count = (height / cell_size as f32).ceil() as usize;
         // `xCellCount / width` is a float division, stored as double.
-        let x_scale = (x_cell_count as f32 / width) as f64;
-        let y_scale = (y_cell_count as f32 / height) as f64;
+        let x_scale = f64::from(x_cell_count as f32 / width);
+        let y_scale = f64::from(y_cell_count as f32 / height);
         debug_assert!(width > 0.0);
         debug_assert!(height > 0.0);
         GridIndex {
@@ -106,12 +107,14 @@ impl<T: Clone> GridIndex<T> {
 
     /// Port-only: the inserted boxes, in insertion order. Inserting them
     /// again into an empty index of the same size rebuilds this one.
+    #[must_use]
     pub fn box_elements(&self) -> &[(T, BBox)] {
         &self.box_elements
     }
 
     /// Port-only: whether circles were inserted (`box_elements` doesn't
     /// list them).
+    #[must_use]
     pub fn has_circles(&self) -> bool {
         !self.circle_elements.is_empty()
     }
@@ -163,6 +166,7 @@ impl<T: Clone> GridIndex<T> {
     }
 
     /// `query(const BBox&)`.
+    #[must_use]
     pub fn query(&self, query_bbox: &BBox) -> Vec<T> {
         let mut result = Vec::new();
         self.query_box_fn(query_bbox, &mut |t: &T, _: &BBox| -> bool {
@@ -173,6 +177,7 @@ impl<T: Clone> GridIndex<T> {
     }
 
     /// `queryWithBoxes(const BBox&)`.
+    #[must_use]
     pub fn query_with_boxes(&self, query_bbox: &BBox) -> Vec<(T, BBox)> {
         let mut result = Vec::new();
         self.query_box_fn(query_bbox, &mut |t: &T, bbox: &BBox| -> bool {
@@ -183,6 +188,7 @@ impl<T: Clone> GridIndex<T> {
     }
 
     /// `hitTest(const BBox&, std::optional<std::function<bool(const T&)>>)`.
+    #[must_use]
     pub fn hit_test(&self, query_bbox: &BBox, predicate: Option<&dyn Fn(&T) -> bool>) -> bool {
         let mut hit = false;
         self.query_box_fn(query_bbox, &mut |t: &T, _: &BBox| -> bool {
@@ -197,6 +203,7 @@ impl<T: Clone> GridIndex<T> {
     }
 
     /// `hitTest(const BCircle&, std::optional<std::function<bool(const T&)>>)`.
+    #[must_use]
     pub fn hit_test_circle(&self, query_bcircle: &BCircle, predicate: Option<&dyn Fn(&T) -> bool>) -> bool {
         let mut hit = false;
         self.query_circle_fn(query_bcircle, &mut |t: &T, _: &BBox| -> bool {
@@ -211,6 +218,7 @@ impl<T: Clone> GridIndex<T> {
     }
 
     /// `empty()`.
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.box_elements.is_empty() && self.circle_elements.is_empty()
     }
@@ -362,12 +370,12 @@ impl<T: Clone> GridIndex<T> {
     /// `convertToXCellCoord`: `util::max(0.0, util::min(xCellCount - 1.0,
     /// std::floor(x * xScale)))` in double (fmax/fmin).
     fn convert_to_x_cell_coord(&self, x: f32) -> usize {
-        fmax(0.0, fmin(self.x_cell_count as f64 - 1.0, (x as f64 * self.x_scale).floor())) as usize
+        fmax(0.0, fmin(self.x_cell_count as f64 - 1.0, (f64::from(x) * self.x_scale).floor())) as usize
     }
 
     /// `convertToYCellCoord`.
     fn convert_to_y_cell_coord(&self, y: f32) -> usize {
-        fmax(0.0, fmin(self.y_cell_count as f64 - 1.0, (y as f64 * self.y_scale).floor())) as usize
+        fmax(0.0, fmin(self.y_cell_count as f64 - 1.0, (f64::from(y) * self.y_scale).floor())) as usize
     }
 
     fn boxes_collide(first: &BBox, second: &BBox) -> bool {
@@ -438,8 +446,8 @@ mod tests {
     // gtest: GridIndex.DuplicateKeys
     #[test]
     fn duplicate_keys() {
-        let mut grid: GridIndex<i16> = GridIndex::new(100.0, 100.0, 10);
         const KEY: i16 = 123;
+        let mut grid: GridIndex<i16> = GridIndex::new(100.0, 100.0, 10);
         grid.insert(KEY, &bbox(3.0, 4.0, 4.0, 4.0));
         grid.insert(KEY, &bbox(13.0, 13.0, 14.0, 14.0));
         grid.insert(KEY, &bbox(23.0, 23.0, 24.0, 24.0));

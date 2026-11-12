@@ -1,5 +1,5 @@
 // Ports the map side of render-test/runner.{hpp,cpp}: `TestRunner::Impl`
-// (HeadlessFrontend, Map), `swapBehavior`,
+// (HeadlessFrontend, Map),
 // `resetContext` and the map/style calls of the operations, over mln_map and
 // mln_headless.
 
@@ -8,7 +8,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::RunLoop;
-use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_headless::HeadlessFrontend;
 use mln_map::{BoundOptions, Map, MapOptions, ProjectionMode};
 use mln_renderer::tile::worker_codec::{SerializingTransport, ThreadWorkerInstances};
@@ -30,16 +29,11 @@ fn map_mode(mode: MapMode) -> mln_map::MapMode {
     }
 }
 
-/// `swapBehavior(mode)` (runner.cpp).
-fn swap_behavior(mode: MapMode) -> SwapBehaviour {
-    if mode == MapMode::Continuous { SwapBehaviour::Flush } else { SwapBehaviour::NoFlush }
-}
-
 /// `TestRunner::Impl`.
 pub struct Impl {
     pub frontend: HeadlessFrontend,
-    /// `std::shared_ptr<FileSource> fileSource`: the ProxyFileSource over
-    /// the cache database of ResourceOptions::cachePath.
+    /// `std::shared_ptr<FileSource> fileSource`: the `ProxyFileSource` over
+    /// the cache database of `ResourceOptions::cachePath`.
     pub file_source: Option<Arc<dyn FileSource>>,
     pub map: Map,
 }
@@ -56,16 +50,11 @@ impl Impl {
         let resource_options = mln_storage::ResourceOptions::default()
             .with_cache_path(resource_options.cache_path.clone())
             .with_api_key(resource_options.api_key.clone());
-        let frontend = HeadlessFrontend::with_options(
-            metadata.size,
-            metadata.pixel_ratio,
-            swap_behavior(metadata.map_mode),
-            ContextMode::Unique,
-            true,
-        );
+        let frontend =
+            HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)));
+            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)));
             frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
         }
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
@@ -89,7 +78,7 @@ impl Impl {
 
 impl TestRunnerImpl for Impl {
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError> {
-        self.frontend.with_renderer(|renderer| renderer.clear_data());
+        self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
         self.frontend.set_size(metadata.size);
         self.map.set_size(metadata.size).map_err(|e| MapError::Exception(e.to_string()))?;
         self.map.set_projection_mode(

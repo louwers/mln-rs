@@ -15,15 +15,15 @@ use mln_util::logging::{Event, Log};
 use crate::util::AsAny;
 
 /// `WarnIfOverscaleFactorCapsPrefetchDelta`.
-fn warn_if_overscale_factor_caps_prefetch_delta(overscale: &Option<u8>, prefetch: &Option<u8>) {
+fn warn_if_overscale_factor_caps_prefetch_delta(overscale: Option<u8>, prefetch: Option<u8>) {
     let prefetch_delta = std::cmp::max(constants::DEFAULT_PREFETCH_ZOOM_DELTA, prefetch.unwrap_or(0));
-    if let Some(overscale) = overscale {
-        if *overscale < prefetch_delta {
-            Log::warning(
-                Event::Style,
-                format!("Parent tile overscale factor will cap prefetch delta to {}", i32::from(*overscale)),
-            );
-        }
+    if let Some(overscale) = overscale
+        && overscale < prefetch_delta
+    {
+        Log::warning(
+            Event::Style,
+            format!("Parent tile overscale factor will cap prefetch delta to {}", i32::from(overscale)),
+        );
     }
 }
 
@@ -40,6 +40,7 @@ pub struct ImplBase {
 
 impl ImplBase {
     /// `Impl(SourceType, std::string)`.
+    #[must_use]
     pub fn new(type_: SourceType, id: String) -> Self {
         ImplBase {
             type_,
@@ -53,9 +54,10 @@ impl ImplBase {
 
     pub fn set_prefetch_zoom_delta(&mut self, delta: Option<u8>) {
         self.prefetch_zoom_delta = delta;
-        warn_if_overscale_factor_caps_prefetch_delta(&self.max_overscale_factor, &self.prefetch_zoom_delta);
+        warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
     }
 
+    #[must_use]
     pub fn get_prefetch_zoom_delta(&self) -> Option<u8> {
         self.prefetch_zoom_delta
     }
@@ -64,19 +66,22 @@ impl ImplBase {
         self.minimum_tile_update_interval = interval;
     }
 
+    #[must_use]
     pub fn get_minimum_tile_update_interval(&self) -> Duration {
         self.minimum_tile_update_interval
     }
 
     pub fn set_max_overscale_factor_for_parent_tiles(&mut self, overscale_factor: Option<u8>) {
         self.max_overscale_factor = overscale_factor;
-        warn_if_overscale_factor_caps_prefetch_delta(&self.max_overscale_factor, &self.prefetch_zoom_delta);
+        warn_if_overscale_factor_caps_prefetch_delta(self.max_overscale_factor, self.prefetch_zoom_delta);
     }
 
+    #[must_use]
     pub fn get_max_overscale_factor_for_parent_tiles(&self) -> Option<u8> {
         self.max_overscale_factor
     }
 
+    #[must_use]
     pub fn is_volatile(&self) -> bool {
         self.volatile_flag
     }
@@ -105,7 +110,7 @@ impl std::ops::Deref for dyn Impl {
     }
 }
 
-/// `staticImmutableCast<T>(impl)` for source impls. C++ static_casts; this
+/// `staticImmutableCast<T>(impl)` for source impls. C++ uses `static_cast`; this
 /// panics on a type mismatch.
 pub fn static_immutable_cast<T: Impl>(impl_: &Immutable<dyn Impl>) -> Arc<T> {
     impl_.clone().into_any_arc().downcast::<T>().unwrap_or_else(|_| panic!("source impl type mismatch"))

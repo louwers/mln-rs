@@ -2,6 +2,8 @@
 // src/mln/style/expression/formatted.cpp (incl.
 // `Converter<expression::Formatted>`).
 
+use std::fmt;
+
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::{Convertible, Error};
 use mln_util::Color;
@@ -13,12 +15,13 @@ pub const K_FORMATTED_SECTION_FONT_SCALE: &str = "font-scale";
 pub const K_FORMATTED_SECTION_TEXT_FONT: &str = "text-font";
 pub const K_FORMATTED_SECTION_TEXT_COLOR: &str = "text-color";
 
-/// `mln::FontStack` (include/mln/util/font_stack.hpp): an array of font
+/// `mln::FontStack` (`include/mln/util/font_stack.hpp)`: an array of font
 /// names.
 // TODO(port): move to mln_util with the rest of util/font_stack.hpp.
 pub type FontStack = Vec<String>;
 
 /// `mln::fontStackToString`.
+#[must_use]
 pub fn font_stack_to_string(font_stack: &FontStack) -> String {
     font_stack.join(",")
 }
@@ -34,6 +37,7 @@ pub struct FormattedSection {
 }
 
 impl FormattedSection {
+    #[must_use]
     pub fn new(
         text: String,
         font_scale: Option<f64>,
@@ -43,6 +47,7 @@ impl FormattedSection {
         FormattedSection { text, image: None, font_scale, font_stack, text_color }
     }
 
+    #[must_use]
     pub fn from_image(image: Image) -> Self {
         FormattedSection { image: Some(image), ..Default::default() }
     }
@@ -73,22 +78,26 @@ impl PartialEq for Formatted {
     }
 }
 
+/// The sections' text, concatenated.
+impl fmt::Display for Formatted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for section in &self.sections {
+            f.write_str(&section.text)?;
+        }
+        Ok(())
+    }
+}
+
 impl Formatted {
     /// `Formatted(const char* plainU8String)`.
+    #[must_use]
     pub fn from_plain(plain_u8_string: &str) -> Self {
         Formatted { sections: vec![FormattedSection::new(plain_u8_string.to_owned(), None, None, None)] }
     }
 
+    #[must_use]
     pub fn new(sections: Vec<FormattedSection>) -> Self {
         Formatted { sections }
-    }
-
-    pub fn to_string(&self) -> String {
-        let mut result = String::new();
-        for section in &self.sections {
-            result += &section.text;
-        }
-        result
     }
 
     pub fn to_object(&self) -> MbglValue {
@@ -113,6 +122,7 @@ impl Formatted {
         MbglValue::Object(result)
     }
 
+    #[must_use]
     pub fn empty(&self) -> bool {
         if self.sections.is_empty() {
             return true;

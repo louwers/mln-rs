@@ -61,10 +61,12 @@ impl<T: CollectionElement + ?Sized> Default for CollectionBase<T> {
 }
 
 impl<T: CollectionElement + ?Sized> CollectionBase<T> {
+    #[must_use]
     pub fn size(&self) -> usize {
         self.wrappers.len()
     }
 
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&T> {
         let i = self.index(id);
         if i < self.size() { Some(self.wrappers[i].as_ref()) } else { None }
@@ -76,19 +78,20 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
     }
 
     pub fn get_wrappers(&self) -> Vec<&T> {
-        self.wrappers.iter().map(|w| w.as_ref()).collect()
+        self.wrappers.iter().map(std::convert::AsRef::as_ref).collect()
     }
 
     pub fn get_wrappers_mut(&mut self) -> Vec<&mut T> {
-        self.wrappers.iter_mut().map(|w| w.as_mut()).collect()
+        self.wrappers.iter_mut().map(std::convert::AsMut::as_mut).collect()
     }
 
+    #[must_use]
     pub fn get_impls(&self) -> ImmutableVector<T::Impl> {
         self.impls.clone()
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &T> {
-        self.wrappers.iter().map(|w| w.as_ref())
+        self.wrappers.iter().map(std::convert::AsRef::as_ref)
     }
 
     pub fn clear(&mut self) {
@@ -97,6 +100,7 @@ impl<T: CollectionElement + ?Sized> CollectionBase<T> {
         self.wrappers.clear();
     }
 
+    #[must_use]
     pub fn index(&self, id: &str) -> usize {
         self.wrappers.iter().position(|e| e.get_id() == id).unwrap_or(self.wrappers.len())
     }

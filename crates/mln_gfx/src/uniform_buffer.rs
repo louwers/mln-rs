@@ -29,11 +29,13 @@ pub struct UniformBufferArray {
 }
 
 impl UniformBufferArray {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Number of maximum allocated elements
+    #[must_use]
     pub fn allocated_size(&self) -> usize {
         self.uniform_buffer_vector.len()
     }

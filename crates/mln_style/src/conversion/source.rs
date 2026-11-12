@@ -59,7 +59,10 @@ fn convert_raster_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
         }
     }
 
-    Some(Box::new(RasterSource::new(id, url_or_tileset, tile_size, SourceType::Raster, zooms[0], zooms[1])))
+    let empty_response = crate::conversion::tileset::empty_response_member(value, error).ok()?;
+    let source = RasterSource::new(id, url_or_tileset, tile_size, SourceType::Raster, zooms[0], zooms[1]);
+    source.tile_source().set_empty_response(empty_response);
+    Some(Box::new(source))
 }
 
 // dem-heatmap
@@ -94,7 +97,10 @@ fn convert_raster_dem_source(id: &str, value: &Convertible<'_>, error: &mut Erro
         return None;
     }
 
-    Some(Box::new(crate::sources::tile_source::RasterDEMSource::new(id, url_or_tileset, tile_size, options)))
+    let empty_response = crate::conversion::tileset::empty_response_member(value, error).ok()?;
+    let source = crate::sources::tile_source::RasterDEMSource::new(id, url_or_tileset, tile_size, options);
+    source.tile_source().set_empty_response(empty_response);
+    Some(Box::new(source))
 }
 
 /// `convertVectorSource(id, value, error)`.
@@ -131,7 +137,10 @@ fn convert_vector_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
             }
         }
     }
-    Some(Box::new(VectorSource::new(id, url_or_tileset, maxzoom, minzoom, encoding)))
+    let empty_response = crate::conversion::tileset::empty_response_member(value, error).ok()?;
+    let source = VectorSource::new(id, url_or_tileset, maxzoom, minzoom, encoding);
+    source.tile_source().set_empty_response(empty_response);
+    Some(Box::new(source))
 }
 
 /// `convertGeoJSONSource(id, value, error)`.
@@ -168,14 +177,16 @@ fn convert_geojson_source(id: &str, value: &Convertible<'_>, error: &mut Error) 
 
 /// `convertImageSource(id, value, error)` (conformance).
 fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) -> Option<Box<dyn Source>> {
-    let Some(url_value) = value.object_member("url") else {
-        error.message = "Image source must have a url value".to_owned();
-        return None;
-    };
-
-    let Some(url_string) = url_value.to_string() else {
-        error.message = "Image url must be a URL string".to_owned();
-        return None;
+    // A source without a url starts empty, until it gets an image or a url.
+    let url_string = match value.object_member("url") {
+        Some(url_value) => {
+            let Some(url_string) = url_value.to_string() else {
+                error.message = "Image url must be a URL string".to_owned();
+                return None;
+            };
+            Some(url_string)
+        }
+        None => None,
     };
 
     let Some(coordinates_value) = value.object_member("coordinates") else {
@@ -194,7 +205,9 @@ fn convert_image_source(id: &str, value: &Convertible<'_>, error: &mut Error) ->
         *coordinate = lat_lng;
     }
     let result = crate::sources::image_source::ImageSource::new(id, coordinates);
-    result.set_url(&url_string);
+    if let Some(url_string) = url_string {
+        result.set_url(&url_string);
+    }
 
     Some(Box::new(result))
 }

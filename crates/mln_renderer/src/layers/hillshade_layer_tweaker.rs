@@ -13,7 +13,11 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_math::deg2radf;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::hillshade_layer_properties::*;
+use mln_style::layers::hillshade_layer_properties::{
+    HillshadeAccentColor, HillshadeExaggeration, HillshadeHighlightColor, HillshadeIlluminationAltitude,
+    HillshadeIlluminationAnchor, HillshadeIlluminationDirection, HillshadeLayerProperties, HillshadeMethod,
+    HillshadePaintProperties, HillshadeShadowColor,
+};
 use mln_style_types::{HillshadeIlluminationAnchorType, HillshadeMethodType, TranslateAnchorType};
 use mln_tile_id::UnwrappedTileID;
 use mln_util::Color;
@@ -79,10 +83,11 @@ fn get_illumination_properties(evaluated: &HillshadePaintProperties::PossiblyEva
 
 /// Pack illumination properties into the UBO format
 fn pack_evaluated_props(illumination: &IlluminationProperties, accent_color: &Color) -> HillshadeEvaluatedPropsUBO {
-    let mut ubo = HillshadeEvaluatedPropsUBO::default();
-
-    // Pack accent color
-    ubo.accent = [accent_color.r, accent_color.g, accent_color.b, accent_color.a];
+    let mut ubo = HillshadeEvaluatedPropsUBO {
+        // Pack accent color
+        accent: [accent_color.r, accent_color.g, accent_color.b, accent_color.a],
+        ..HillshadeEvaluatedPropsUBO::default()
+    };
 
     // Pack altitudes (up to 4)
     for (i, &altitude) in illumination.altitude_radians.iter().take(4).enumerate() {
@@ -113,7 +118,7 @@ fn pack_evaluated_props(illumination: &IlluminationProperties, accent_color: &Co
     ubo
 }
 
-/// Convert HillshadeMethodType enum to int for shader
+/// Convert `HillshadeMethodType` enum to int for shader
 fn method_to_int(method: HillshadeMethodType) -> i32 {
     method as i32
 }

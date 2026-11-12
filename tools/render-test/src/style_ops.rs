@@ -20,6 +20,7 @@ pub fn load_url(style: &mut Style, url: &str) {
 }
 
 /// `map.getStyle().getDefaultCamera()`.
+#[must_use]
 pub fn default_camera(style: &Style) -> CameraOptions {
     style.get_default_camera()
 }

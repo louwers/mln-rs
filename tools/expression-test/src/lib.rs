@@ -12,6 +12,7 @@ use runner::{TestRunOutput, TestStats, run_expression_test};
 
 /// The copy of the C++ repository's metrics directory (testdata/metrics):
 /// the expression tests and the ignore list they use.
+#[must_use]
 pub fn find_metrics_dir() -> Option<PathBuf> {
     let metrics = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/metrics");
     metrics.join("integration/expression-tests").exists().then_some(metrics)
@@ -19,6 +20,7 @@ pub fn find_metrics_dir() -> Option<PathBuf> {
 
 /// Runs the tests (the loop of expression-test/main.cpp). `verbose` prints
 /// each result like the C++ runner.
+#[must_use]
 pub fn run(metrics: &Path, test_names: &[String], filter: Option<&str>, verbose: bool) -> TestStats {
     let root_path = metrics.join("integration/expression-tests");
     let test_paths = collect_test_paths(&root_path, test_names, filter);
@@ -95,7 +97,7 @@ pub fn run(metrics: &Path, test_names: &[String], filter: Option<&str>, verbose:
     stats
 }
 
-/// `printStats` (expression_test_logger.cpp).
+/// `printStats` (`expression_test_logger.cpp`).
 pub fn print_stats(stats: &TestStats) {
     let count = stats.test_count();
     let pct = |n: usize| if count == 0 { 0.0 } else { 100.0 * n as f64 / count as f64 };

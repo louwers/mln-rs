@@ -35,7 +35,7 @@ pub trait CustomTileSubscriber<D>: Send {
 }
 
 /// Identifies a tile to the loader. Wrapped and overscaled tiles share their
-/// canonical tile's data, and TilePyramid changes the wrap of a tile's ID,
+/// canonical tile's data, and `TilePyramid` changes the wrap of a tile's ID,
 /// so a tile is identified by this key rather than by its ID.
 pub type SubscriberKey = u64;
 
@@ -83,6 +83,7 @@ pub struct CustomTileLoader<D: Clone> {
 
 impl<D: Clone> CustomTileLoader<D> {
     /// `CustomTileLoader(fetchTileFn, cancelTileFn)`.
+    #[must_use]
     pub fn new(fetch_tile_function: Option<TileFunction>, cancel_tile_function: Option<TileFunction>) -> Self {
         CustomTileLoader {
             fetch_tile_function,
@@ -103,15 +104,12 @@ impl<D: Clone> CustomTileLoader<D> {
     ) {
         let canonical = tile_id.canonical;
         let state = self.tile_states.entry(canonical).or_default();
-        let index = match state.subscribers.iter().position(|subscriber| subscriber.key == key) {
-            Some(index) => {
-                state.subscribers[index].required = true;
-                index
-            }
-            None => {
-                state.subscribers.push(Subscriber { key, tile, required: true });
-                state.subscribers.len() - 1
-            }
+        let index = if let Some(index) = state.subscribers.iter().position(|subscriber| subscriber.key == key) {
+            state.subscribers[index].required = true;
+            index
+        } else {
+            state.subscribers.push(Subscriber { key, tile, required: true });
+            state.subscribers.len() - 1
         };
         if let Some(cached) = self.data_cache.get(&canonical) {
             state.subscribers[index].tile.set_tile_data(cached.clone());
@@ -184,7 +182,7 @@ impl<D: Clone> CustomTileLoader<D> {
     /// `setTileError(tileID, error)`: the host failed to load a tile. The
     /// tiles stay subscribed, so invalidating the failed tile or needing it
     /// again fetches it again.
-    pub fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: Error) {
+    pub fn set_tile_error(&mut self, tile_id: &CanonicalTileID, error: &Error) {
         let Some(state) = self.tile_states.get_mut(tile_id) else {
             return;
         };
@@ -201,7 +199,7 @@ impl<D: Clone> CustomTileLoader<D> {
     /// `invalidateTile(tileID)`.
     pub fn invalidate_tile(&mut self, tile_id: &CanonicalTileID) {
         if let Some(state) = self.tile_states.remove(tile_id) {
-            self.invalidate(tile_id, state);
+            self.invalidate(tile_id, &state);
         }
     }
 
@@ -227,7 +225,7 @@ impl<D: Clone> CustomTileLoader<D> {
 
     /// Makes every subscriber fetch the tile again when it next needs it, and
     /// drops the tile's cached data.
-    fn invalidate(&mut self, tile_id: &CanonicalTileID, state: TileState<D>) {
+    fn invalidate(&mut self, tile_id: &CanonicalTileID, state: &TileState<D>) {
         for subscriber in &state.subscribers {
             subscriber.tile.invalidate_tile_data();
         }

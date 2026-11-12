@@ -19,7 +19,7 @@
 //! `byteswap.hpp` (fixed-size values are always decoded little-endian, which
 //! is what protozero's byte swapping achieves on big-endian machines).
 //!
-//! `protozero_assert`: the "call next() before accessing field value"
+//! `protozero_assert`: the "call `next()` before accessing field value"
 //! preconditions are `debug_assert!`s, and in debug builds `skip_bytes`
 //! resets the tag to 0 exactly as the C++ does without `NDEBUG`. The
 //! wire-type preconditions ("not a varint", ...) are not checked: they depend

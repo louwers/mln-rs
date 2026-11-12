@@ -120,7 +120,7 @@ impl Converter for GeoJSONOptions {
                 return None;
             }
             let mut result = ClusterProperties::new();
-            debug_assert!(error.message.is_empty());
+            debug_assert_eq!(error.message, "");
             cluster_properties.each_member(|k, v| -> Option<Error> {
                 // Each property shall be formed as ["key" : [operator,
                 // [mapExpression]]] or ["key" : [[operator, ['accumulated'],

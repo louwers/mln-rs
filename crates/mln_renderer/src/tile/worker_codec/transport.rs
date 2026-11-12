@@ -159,7 +159,7 @@ impl SerializingTransport {
         self.tiles.borrow().get(&tile).map(|route| route.instance)
     }
 
-    fn send(&self, tile: u64, message: WorkerMessage) {
+    fn send(&self, tile: u64, message: &WorkerMessage) {
         let Some(instance) = self.instance(tile) else {
             return;
         };
@@ -169,19 +169,19 @@ impl SerializingTransport {
             Ok(request) => self.instances.post(instance, request),
             // As a worker reports what it can't parse.
             Err(error) => {
-                self.deliver(tile, Reply::Geometry(TileMessage::Error { error: Error::native(error), correlation_id }))
+                self.deliver(tile, Reply::Geometry(TileMessage::Error { error: Error::native(error), correlation_id }));
             }
         }
     }
 
-    fn send_raster(&self, tile: u64, message: RasterWorkerMessage) {
+    fn send_raster(&self, tile: u64, message: &RasterWorkerMessage) {
         if let Some(instance) = self.instance(tile) {
             let request = self.codecs[instance].borrow_mut().raster_message(tile, message);
             self.instances.post(instance, request);
         }
     }
 
-    fn send_raster_dem(&self, tile: u64, message: RasterDEMWorkerMessage) {
+    fn send_raster_dem(&self, tile: u64, message: &RasterDEMWorkerMessage) {
         if let Some(instance) = self.instance(tile) {
             let request = self.codecs[instance].borrow_mut().raster_dem_message(tile, message);
             self.instances.post(instance, request);
@@ -242,19 +242,19 @@ struct RemoteWorker {
 
 impl WorkerEndpoint for RemoteWorker {
     fn send(&self, message: WorkerMessage) {
-        self.transport.send(self.tile, message);
+        self.transport.send(self.tile, &message);
     }
 }
 
 impl WorkerEndpoint<RasterWorkerMessage> for RemoteWorker {
     fn send(&self, message: RasterWorkerMessage) {
-        self.transport.send_raster(self.tile, message);
+        self.transport.send_raster(self.tile, &message);
     }
 }
 
 impl WorkerEndpoint<RasterDEMWorkerMessage> for RemoteWorker {
     fn send(&self, message: RasterDEMWorkerMessage) {
-        self.transport.send_raster_dem(self.tile, message);
+        self.transport.send_raster_dem(self.tile, &message);
     }
 }
 
@@ -265,14 +265,15 @@ impl Drop for RemoteWorker {
 }
 
 /// Worker instances on threads of this process: a `TileWorkerHost` on each
-/// thread, with its workers on the thread's RunLoop.
+/// thread, with its workers on the thread's `RunLoop`.
 pub struct ThreadWorkerInstances {
     threads: Vec<Thread<TileWorkerHost>>,
 }
 
 impl ThreadWorkerInstances {
     /// `count` instances that send their replies to `replies`.
-    pub fn new(count: usize, replies: ReplySink) -> Self {
+    #[must_use]
+    pub fn new(count: usize, replies: &ReplySink) -> Self {
         let threads = (0..count)
             .map(|instance| {
                 let replies = replies.clone();

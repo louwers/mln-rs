@@ -69,7 +69,7 @@ fn downcast_properties<'a, D: LayerProperties>(properties: &'a Immutable<dyn Lay
     }
 }
 
-/// `getEvaluated<Derived>(properties)`. C++ static_casts; this panics on a
+/// `getEvaluated<Derived>(properties)`. C++ uses `static_cast`; this panics on a
 /// type mismatch.
 pub fn get_evaluated<D: HasEvaluated>(properties: &Immutable<dyn LayerProperties>) -> &D::Evaluated {
     downcast_properties::<D>(properties, "get_evaluated").evaluated()

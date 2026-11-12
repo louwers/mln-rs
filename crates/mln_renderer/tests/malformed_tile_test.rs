@@ -75,9 +75,9 @@ struct AnswerMissingImages;
 impl ImageManagerObserver for AnswerMissingImages {}
 
 /// A layer of the given style JSON, as the worker gets it.
-fn layer(json: serde_json::Value) -> Immutable<dyn LayerProperties> {
+fn layer(json: &serde_json::Value) -> Immutable<dyn LayerProperties> {
     let mut error = ConversionError::default();
-    let layer = convert_layer(&Convertible::from(&json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
+    let layer = convert_layer(&Convertible::from(json), &mut error).unwrap_or_else(|| panic!("{}", error.message));
     let base_impl = layer.base_impl();
     match json["type"].as_str().unwrap() {
         "line" => Arc::new(LineLayerProperties::new(static_immutable_cast(&base_impl))),
@@ -268,7 +268,7 @@ fn tile_with_bad_value() -> Vec<u8> {
 }
 
 fn fill_layer() -> Immutable<dyn LayerProperties> {
-    layer(json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" }))
+    layer(&json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" }))
 }
 
 fn line_layer(filter: Option<serde_json::Value>) -> Immutable<dyn LayerProperties> {
@@ -276,7 +276,7 @@ fn line_layer(filter: Option<serde_json::Value>) -> Immutable<dyn LayerPropertie
     if let Some(filter) = filter {
         json["filter"] = filter;
     }
-    layer(json)
+    layer(&json)
 }
 
 /// A layer of each type that has a worker path, reading values in filters,
@@ -284,17 +284,17 @@ fn line_layer(filter: Option<serde_json::Value>) -> Immutable<dyn LayerPropertie
 fn all_layers() -> Vec<Immutable<dyn LayerProperties>> {
     vec![
         line_layer(Some(json!(["==", ["get", "k"], "v"]))),
-        layer(json!({
+        layer(&json!({
             "id": "sorted-line", "type": "line", "source": "source", "source-layer": "l",
             "layout": { "line-sort-key": ["get", "n"] }
         })),
         fill_layer(),
-        layer(json!({ "id": "extrusion", "type": "fill-extrusion", "source": "source", "source-layer": "l" })),
-        layer(json!({
+        layer(&json!({ "id": "extrusion", "type": "fill-extrusion", "source": "source", "source-layer": "l" })),
+        layer(&json!({
             "id": "circle", "type": "circle", "source": "source", "source-layer": "l",
             "layout": { "circle-sort-key": ["get", "n"] }
         })),
-        layer(json!({
+        layer(&json!({
             "id": "symbol", "type": "symbol", "source": "source", "source-layer": "l",
             "layout": { "icon-image": ["get", "k"], "symbol-sort-key": ["get", "n"] }
         })),
@@ -319,7 +319,7 @@ fn truncated_tile_is_a_tile_error() {
 fn bad_value_read_by_a_filter_is_a_tile_error() {
     let mut json = json!({ "id": "fill", "type": "fill", "source": "source", "source-layer": "l" });
     json["filter"] = json!(["==", ["get", "k"], "v"]);
-    let outcome = load(tile_with_bad_value(), &[layer(json)]);
+    let outcome = load(tile_with_bad_value(), &[layer(&json)]);
     assert_eq!(outcome, Outcome::Error("feature referenced out of range value".to_owned()));
 }
 

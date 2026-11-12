@@ -24,12 +24,13 @@ pub struct HbFtFont<'a> {
     symbol: bool,
     /// `font->face->table.OS2->get_font_page ()`.
     font_page: u16,
-    /// `font->x_scale < 0 ? -1 : +1` (HAVE_FT_GET_TRANSFORM is not defined).
+    /// `font->x_scale < 0 ? -1 : +1` (`HAVE_FT_GET_TRANSFORM` is not defined).
     x_mult: f32,
 }
 
 impl<'a> HbFtFont<'a> {
     /// `_hb_ft_font_create` (`hb_ft_font_create` without the scale part).
+    #[must_use]
     pub fn new(face: &'a FreeTypeFace) -> Self {
         let ft = face.get_face().expect("hb-ft needs a valid face");
         let symbol = ft.charmap.is_some_and(|i| ft.charmaps[i].encoding == Encoding::MsSymbol);
@@ -42,9 +43,10 @@ impl<'a> HbFtFont<'a> {
 
     /// `hb_ft_font_changed`: `hb_font_set_scale` from the FreeType size,
     /// `(x_scale * units_per_EM + 2^15) >> 16` in unsigned 64-bit.
+    #[must_use]
     pub fn scale(face: &FreeTypeFace) -> (i32, i32) {
         let ft = face.get_face().expect("hb-ft needs a valid face");
-        let upem = ft.units_per_em as u64;
+        let upem = u64::from(ft.units_per_em);
         let x = ((ft.x_scale as u64).wrapping_mul(upem).wrapping_add(1 << 15) >> 16) as i32;
         let y = ((ft.y_scale as u64).wrapping_mul(upem).wrapping_add(1 << 15) >> 16) as i32;
         (x, y)
@@ -103,7 +105,7 @@ impl FontFuncs for HbFtFont<'_> {
         ((v as f32 * self.x_mult + (1 << 9) as f32) as i32) >> 10
     }
 
-    /// Not used by HB_TINY shaping (see the file comment).
+    /// Not used by `HB_TINY` shaping (see the file comment).
     fn glyph_extents(&self, _font: &ShaperFont, _glyph: GlyphId) -> Option<GlyphExtents> {
         None
     }

@@ -29,11 +29,11 @@ use crate::harfbuzz::HBShapeAdjust;
 use crate::hb_ft::HbFtFont;
 use crate::hb_ucd;
 
-/// Tables HarfBuzz never reads when built with HB_TINY.
+/// Tables HarfBuzz never reads when built with `HB_TINY`.
 const HB_TINY_HIDDEN_TABLES: [&[u8; 4]; 7] = [b"morx", b"mort", b"kerx", b"kern", b"ankr", b"trak", b"feat"];
 
 /// `getDefaultLanguage()`: `hb_language_get_default()`, which with
-/// HB_NO_SETLOCALE is `hb_language_from_string ("C")` = "c".
+/// `HB_NO_SETLOCALE` is `hb_language_from_string ("C")` = "c".
 fn get_default_language() -> Language {
     Language::new("c").expect("non-empty")
 }
@@ -41,6 +41,7 @@ fn get_default_language() -> Language {
 /// `getUnicodeScript(u)`: combining marks inherit the script of their
 /// bases, regardless of their own script. Called on UTF-16 code units, as
 /// in C++ (surrogates are classified on their own).
+#[must_use]
 pub fn get_unicode_script(u: u32) -> [u8; 4] {
     if hb_ucd::general_category(u) == hb_ucd::NON_SPACING_MARK {
         return *b"Zinh"; // HB_SCRIPT_INHERITED
@@ -48,18 +49,21 @@ pub fn get_unicode_script(u: u32) -> [u8; 4] {
     hb_ucd::script(u)
 }
 
+/// Shape plans by script tag and right-to-left direction.
+type ShapePlans = HashMap<([u8; 4], bool), Arc<ShapePlan>>;
+
 /// `HBShaper::Impl`.
 pub struct Impl {
     type_: GlyphIDType,
     face: FreeTypeFace,
-    /// `hb_font_t *font` (its face: the HB_TINY view of the tables).
+    /// `hb_font_t *font` (its face: the `HB_TINY` view of the tables).
     font: Option<Font>,
     /// HarfBuzz caches shape plans per segment properties (script and
     /// direction); so do we.
-    plans: Mutex<HashMap<([u8; 4], bool), Arc<ShapePlan>>>,
+    plans: Mutex<ShapePlans>,
 }
 
-/// The user features that stand in for HB_NO_OT_SHAPE_FRACTIONS.
+/// The user features that stand in for `HB_NO_OT_SHAPE_FRACTIONS`.
 fn hb_tiny_features() -> [Feature; 3] {
     [
         Feature::new(Tag::new(b"frac"), 0, ..),
@@ -81,7 +85,7 @@ impl AsRef<[u8]> for TableBytes {
 }
 
 /// The tables of `face` as HarfBuzz (hb-ft's `_hb_ft_reference_table`, i.e.
-/// `FT_Load_Sfnt_Table`) sees them with HB_TINY.
+/// `FT_Load_Sfnt_Table`) sees them with `HB_TINY`.
 fn hb_tiny_font(face: &FreeTypeFace) -> Option<Font> {
     let ft = face.get_face()?;
     let data = face.data().clone();
@@ -157,6 +161,14 @@ impl Impl {
         glyph_ids: &mut Vec<GlyphID>,
         adjusts: &mut Vec<HBShapeAdjust>,
     ) {
+        struct TextPart {
+            text: Vec<u16>,
+            script: [u8; 4],
+        }
+
+        // HB_SCRIPT_INVALID, for a part that holds no letters yet.
+        const INVALID: [u8; 4] = [0; 4];
+
         if text.is_empty() {
             return;
         }
@@ -166,14 +178,7 @@ impl Impl {
             return;
         };
 
-        struct TextPart {
-            text: Vec<u16>,
-            script: [u8; 4],
-        }
-
         let is_neutral = |script: &[u8; 4]| matches!(script, b"Zyyy" | b"Zinh" | b"Zzzz");
-        // HB_SCRIPT_INVALID, for a part that holds no letters yet.
-        const INVALID: [u8; 4] = [0; 4];
 
         let mut text_parts: Vec<TextPart> = Vec::new();
         if rtl {
@@ -183,7 +188,7 @@ impl Impl {
             // Spaces, punctuation, and marks belong to the letters before
             // them, or to the first letters.
             for &ch in text {
-                let script = get_unicode_script(ch as u32);
+                let script = get_unicode_script(u32::from(ch));
                 let part_script = if is_neutral(&script) { INVALID } else { script };
                 match text_parts.last_mut() {
                     Some(last) if part_script == INVALID || last.script == script || last.script == INVALID => {
@@ -204,9 +209,9 @@ impl Impl {
             // run's later parts lie to the left of its earlier ones.
             text_parts.reverse();
         } else {
-            text_parts.push(TextPart { text: vec![text[0]], script: get_unicode_script(text[0] as u32) });
+            text_parts.push(TextPart { text: vec![text[0]], script: get_unicode_script(u32::from(text[0])) });
             for &ch in &text[1..] {
-                let script = get_unicode_script(ch as u32);
+                let script = get_unicode_script(u32::from(ch));
                 let last = text_parts.last_mut().expect("non-empty");
                 if last.script == script || script == *b"Zinh" {
                     last.text.push(ch);
@@ -264,7 +269,7 @@ impl Impl {
     }
 
     /// `shape_part` left to right in HarfBuzz units, for tests: per glyph
-    /// [glyph, cluster, x_advance, y_advance, x_offset, y_offset].
+    /// [glyph, cluster, `x_advance`, `y_advance`, `x_offset`, `y_offset`].
     pub fn shape_part_raw(&self, text: &[u16], script: [u8; 4]) -> Vec<[i32; 6]> {
         let Some(font) = &self.font else { return Vec::new() };
         let Some(buffer) = self.shape_part(font, text, script, false) else { return Vec::new() };
@@ -294,13 +299,13 @@ fn add_utf16(buffer: &mut Buffer, text: &[u16]) {
     let mut i = 0;
     while i < text.len() {
         let cluster = i as u32;
-        let c = text[i] as u32;
+        let c = u32::from(text[i]);
         i += 1;
         let u = if (0xD800..=0xDBFF).contains(&c) {
             match text.get(i) {
-                Some(&l) if (0xDC00..=0xDFFF).contains(&(l as u32)) => {
+                Some(&l) if (0xDC00..=0xDFFF).contains(&u32::from(l)) => {
                     i += 1;
-                    (c << 10) + l as u32 - ((0xD800 << 10) - 0x10000 + 0xDC00)
+                    (c << 10) + u32::from(l) - ((0xD800 << 10) - 0x10000 + 0xDC00)
                 }
                 _ => 0xFFFD,
             }

@@ -35,7 +35,7 @@ impl Style {
         let value = parse(json, &context)?;
         let mut error = mln_conversion::Error::default();
         let Some(source) = convert_source(&Convertible::from(&value), &mut error, id) else {
-            return Err(conversion_error(&context, error));
+            return Err(conversion_error(&context, &error));
         };
         self.add_source(source)
     }
@@ -61,7 +61,7 @@ impl Style {
         let value = parse(json, "style layer")?;
         let mut error = mln_conversion::Error::default();
         let Some(layer) = convert_layer(&Convertible::from(&value), &mut error) else {
-            return Err(conversion_error("style layer", error));
+            return Err(conversion_error("style layer", &error));
         };
 
         let id = layer.get_id();
@@ -119,6 +119,7 @@ impl Style {
     /// [layer](https://maplibre.org/maplibre-style-spec/layers/) object, or
     /// `None` if the style has no such layer. Adding the JSON back gives the
     /// same layer.
+    #[must_use]
     pub fn layer_json(&self, id: &str) -> Option<String> {
         self.get_layer(id).map(|layer| json_text(&layer.serialize()))
     }
@@ -158,7 +159,7 @@ impl Style {
             "maxzoom" if value.is_null() => layer.set_max_zoom(f32::INFINITY),
             _ => {
                 if let Some(error) = layer.set_property(name, &Convertible::from(&value), None) {
-                    return Err(conversion_error(&context, error));
+                    return Err(conversion_error(&context, &error));
                 }
             }
         }
@@ -230,7 +231,7 @@ impl Style {
                 let light = if value.is_null() {
                     Light::default()
                 } else {
-                    Light::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, error))?
+                    Light::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?
                 };
                 self.set_light(light);
             }
@@ -238,7 +239,7 @@ impl Style {
                 let sky = if value.is_null() {
                     None
                 } else {
-                    Some(Sky::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, error))?)
+                    Some(Sky::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?)
                 };
                 self.set_sky(sky);
             }
@@ -246,7 +247,7 @@ impl Style {
                 let projection = if value.is_null() {
                     Projection::default()
                 } else {
-                    Projection::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, error))?
+                    Projection::convert(&convertible, &mut error).ok_or_else(|| conversion_error(&context, &error))?
                 };
                 self.set_projection(projection);
             }
@@ -261,7 +262,7 @@ impl Style {
                     TransitionOptions::with_duration(DEFAULT_TRANSITION_DURATION)
                 } else {
                     TransitionOptions::convert(&convertible, &mut error)
-                        .ok_or_else(|| conversion_error(&context, error))?
+                        .ok_or_else(|| conversion_error(&context, &error))?
                 };
                 transition.enable_placement_transitions = placement;
                 self.set_transition_options(&transition);
@@ -330,7 +331,7 @@ impl Style {
         let value = parse(json, &context)?;
         match self.get_light_mut().set_property(name, &Convertible::from(&value)) {
             None => Ok(()),
-            Some(error) => Err(conversion_error(&context, error)),
+            Some(error) => Err(conversion_error(&context, &error)),
         }
     }
 
@@ -338,6 +339,7 @@ impl Style {
     /// if the light doesn't set it. The value can differ in form from the
     /// value that was set, as with
     /// [`layer_property_json`](Self::layer_property_json).
+    #[must_use]
     pub fn light_property_json(&self, name: &str) -> Option<String> {
         let property = self.get_light().get_property(name);
         (property.get_kind() != Kind::Undefined).then(|| json_text(property.get_value()))
@@ -358,6 +360,7 @@ impl Style {
 
     /// The values that the style's `global-state` expressions read, as a
     /// JSON object.
+    #[must_use]
     pub fn global_state_json(&self) -> String {
         json_text(&Value::Object(self.get_global_state()))
     }
@@ -483,7 +486,7 @@ fn parse(json: &str, context: &str) -> Result<serde_json::Value, Error> {
     serde_json::from_str(json).map_err(|error| Error::invalid_argument(format!("{context} is not valid JSON: {error}")))
 }
 
-fn conversion_error(context: &str, error: mln_conversion::Error) -> Error {
+fn conversion_error(context: &str, error: &mln_conversion::Error) -> Error {
     Error::invalid_argument(format!("{context}: {}", error.message))
 }
 

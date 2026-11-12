@@ -73,6 +73,7 @@ fn stod(s: &str) -> Option<f64> {
     if consumed == 0 || erange { None } else { Some(value) }
 }
 
+#[must_use]
 pub fn deep_equal(a: &Value, b: &Value) -> bool {
     let anum = numeric_value(a);
     let bnum = numeric_value(b);
@@ -125,6 +126,7 @@ pub fn deep_equal(a: &Value, b: &Value) -> bool {
 }
 
 /// `deepEqual(const std::optional<Value>&, const std::optional<Value>&)`.
+#[must_use]
 pub fn deep_equal_opt(a: &Option<Value>, b: &Option<Value>) -> bool {
     match (a, b) {
         (Some(a), Some(b)) => deep_equal(a, b),

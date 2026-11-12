@@ -124,21 +124,19 @@ pub fn update_renderables<C: RenderablesContext>(
 
                     // Request / render parent tile only if it's overscale
                     // factor is less than defined maximum.
-                    if let Some(max_parent_overscale_factor) = max_parent_overscale_factor {
-                        if i32::from(ideal_data_tile_id.overscaled_z) - overscaled_z
+                    if let Some(max_parent_overscale_factor) = max_parent_overscale_factor
+                        && i32::from(ideal_data_tile_id.overscaled_z) - overscaled_z
                             > i32::from(max_parent_overscale_factor)
-                        {
-                            break;
-                        }
+                    {
+                        break;
                     }
 
                     if checked.contains(&parent_data_tile_id) {
                         // Break parent tile ascent, this route has been
                         // checked by another child tile before.
                         break;
-                    } else {
-                        checked.insert(parent_data_tile_id);
                     }
+                    checked.insert(parent_data_tile_id);
 
                     let mut tile = ctx.get_tile(&parent_data_tile_id);
                     if tile.is_none() && (parent_has_tried_optional || parent_is_loaded) {
@@ -146,16 +144,16 @@ pub fn update_renderables<C: RenderablesContext>(
                     }
 
                     if let Some(tile) = tile {
-                        if !parent_is_loaded {
-                            // We haven't completed loading the child, so we
-                            // only do an optional (cache) request in an
-                            // attempt to quickly load data that we can show.
-                            ctx.retain_tile(&tile, TileNecessity::Optional);
-                        } else {
+                        if parent_is_loaded {
                             // Now that we've checked the child and know for
                             // sure that we can't load it, we attempt to load
                             // the parent from the network.
                             ctx.retain_tile(&tile, TileNecessity::Required);
+                        } else {
+                            // We haven't completed loading the child, so we
+                            // only do an optional (cache) request in an
+                            // attempt to quickly load data that we can show.
+                            ctx.retain_tile(&tile, TileNecessity::Optional);
                         }
 
                         // Save the current values, since they're the parent

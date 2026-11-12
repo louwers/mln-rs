@@ -18,7 +18,7 @@ use crate::tile::tile_worker_transport::WorkerParameters;
 use crate::tile::worker_codec::fields;
 
 /// A reply as it crosses between instances: its bytes, and the byte arrays
-/// that travel beside them (mln_util::serialization::payload), which a host
+/// that travel beside them (`mln_util::serialization::payload`), which a host
 /// can transfer rather than copy.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Encoded {
@@ -137,7 +137,7 @@ pub struct TextureUpload {
 }
 
 mod textures {
-    use super::*;
+    use super::{Deserialize, DynamicTexturePtr, Serialize, fields, shared};
 
     #[derive(Serialize, Deserialize)]
     struct Texture(

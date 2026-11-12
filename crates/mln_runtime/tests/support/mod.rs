@@ -13,7 +13,7 @@ pub const TIMEOUT: Duration = Duration::from_secs(10);
 pub const EMPTY_STYLE: &str = r#"{"version":8,"sources":{},"layers":[]}"#;
 
 pub fn runtime() -> TestRuntime {
-    TestRuntime(Runtime::new(RuntimeOptions::default()).unwrap())
+    TestRuntime(Runtime::new(&RuntimeOptions::default()).unwrap())
 }
 
 /// A runtime that shuts down fully when the test ends: once every map, and

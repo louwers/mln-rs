@@ -49,16 +49,20 @@ pub const MLN_RENDER_BACKEND_FLAG_WEB_GPU: mln_render_backend_flag = 8;
 pub type mln_render_backend_flag = u32;
 /// A set of mln_render_backend_flag bits.
 pub type mln_render_backend_flags = u32;
+pub const MLN_RENDER_BACKEND_METAL: mln_render_backend = 1;
+pub const MLN_RENDER_BACKEND_VULKAN: mln_render_backend = 2;
+pub const MLN_RENDER_BACKEND_OPEN_GL: mln_render_backend = 3;
+pub const MLN_RENDER_BACKEND_WEB_GPU: mln_render_backend = 4;
+/// A render backend.
+pub type mln_render_backend = u32;
 /// A runtime owns maps and the network and cache settings that they share.
 pub type mln_runtime = u64;
 /// A map, with its style and camera.
 pub type mln_map = u64;
 /// A parsed style expression.
 pub type mln_style_expression = u64;
-/// A GPU device that the library creates to render maps offscreen.
-pub type mln_offscreen_device = u64;
-/// A Vulkan instance, device, and queue that the library creates and owns.
-pub type mln_vulkan_device = u64;
+/// A GPU, and the queue that render sessions on it share.
+pub type mln_gpu_device = u64;
 /// A camera view for converting between screen points and coordinates.
 pub type mln_map_projection = u64;
 /// A resource load that a resource provider answers.
@@ -1055,8 +1059,9 @@ pub type mln_map_option_fields = u32;
 pub struct mln_map_options {
     pub size: u32,
     pub fields: mln_map_option_fields,
-    /** The map's first size, and its scale factor. The scale factor stays fixed
- for the map's life, and every render session of the map renders at it.*/
+    /** The map's first size, and its scale factor. Render sessions of the map
+ render at its scale factor. mln_map_resize() changes both, or
+ mln_render_session_resize() while a render session is attached.*/
     pub initial_extent: mln_logical_extent,
     pub map_mode: mln_map_mode,
     /** Whether the map decodes MapLibre Tiles (MLT) that use FastPFOR integer
@@ -2211,75 +2216,6 @@ pub struct mln_delivery_queue_options {
  unreleased.*/
     pub release_abandoned_user_data: mln_user_data_release,
 }
-pub const MLN_LOG_SEVERITY_INFO: mln_log_severity = 1;
-pub const MLN_LOG_SEVERITY_WARNING: mln_log_severity = 2;
-pub const MLN_LOG_SEVERITY_ERROR: mln_log_severity = 3;
-/// The severity of a log message.
-pub type mln_log_severity = u32;
-pub const MLN_LOG_SEVERITY_FLAG_INFO: mln_log_severity_flag = 2;
-pub const MLN_LOG_SEVERITY_FLAG_WARNING: mln_log_severity_flag = 4;
-pub const MLN_LOG_SEVERITY_FLAG_ERROR: mln_log_severity_flag = 8;
-/** The severities logged on a background thread until
- mln_log_set_async_severity_mask() changes them.*/
-pub const MLN_LOG_SEVERITY_FLAG_DEFAULT: mln_log_severity_flag = 6;
-/** The severities logged on a background thread until
- mln_log_set_async_severity_mask() changes them.*/
-pub const MLN_LOG_SEVERITY_FLAG_ALL: mln_log_severity_flag = 14;
-/// A log severity, as a bit in a set.
-pub type mln_log_severity_flag = u32;
-/// A set of mln_log_severity_flag bits.
-pub type mln_log_severity_flags = u32;
-pub const MLN_LOG_EVENT_GENERAL: mln_log_event = 0;
-pub const MLN_LOG_EVENT_SETUP: mln_log_event = 1;
-pub const MLN_LOG_EVENT_SHADER: mln_log_event = 2;
-pub const MLN_LOG_EVENT_PARSE_STYLE: mln_log_event = 3;
-pub const MLN_LOG_EVENT_PARSE_TILE: mln_log_event = 4;
-pub const MLN_LOG_EVENT_RENDER: mln_log_event = 5;
-pub const MLN_LOG_EVENT_STYLE: mln_log_event = 6;
-pub const MLN_LOG_EVENT_DATABASE: mln_log_event = 7;
-pub const MLN_LOG_EVENT_HTTP_REQUEST: mln_log_event = 8;
-pub const MLN_LOG_EVENT_SPRITE: mln_log_event = 9;
-pub const MLN_LOG_EVENT_IMAGE: mln_log_event = 10;
-pub const MLN_LOG_EVENT_GRAPHICS_BACKEND: mln_log_event = 11;
-pub const MLN_LOG_EVENT_JNI: mln_log_event = 12;
-pub const MLN_LOG_EVENT_ANDROID: mln_log_event = 13;
-pub const MLN_LOG_EVENT_CRASH: mln_log_event = 14;
-pub const MLN_LOG_EVENT_GLYPH: mln_log_event = 15;
-pub const MLN_LOG_EVENT_TIMING: mln_log_event = 16;
-/// The part of the library that logged a message.
-pub type mln_log_event = u32;
-/** Receives a log message.
-
- Threads:
- Runs on the thread that logged the message, or on a background thread for the
- severities that mln_log_set_async_severity_mask() selects. The callback can't
- call the library.
-
- Lifetimes:
- `message` stays valid until the callback returns.*/
-pub type mln_log_callback = ::core::option::Option<
-    unsafe extern "C" fn(
-        user_data: *mut ::core::ffi::c_void,
-        severity: mln_log_severity,
-        event: mln_log_event,
-        code: i64,
-        message: mln_buffer_view,
-    ),
->;
-/// A log callback, for mln_log_set_callback().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_log_handler {
-    pub size: u32,
-    pub callback: mln_log_callback,
-    pub user_data: *mut ::core::ffi::c_void,
-    pub release_user_data: mln_user_data_release,
-    pub queue: mln_delivery_queue,
-    /** The severities that also go to the platform's log, as they do without a
- callback. 0 sends none. A message of these severities goes to the
- platform's log even when the handler's queue can't accept it.*/
-    pub platform_severities: mln_log_severity_flags,
-}
 /// A Vulkan non-dispatchable handle, such as a `VkImage`, as an integer.
 pub type mln_vulkan_non_dispatchable_handle = u64;
 /// A library thread.
@@ -2361,13 +2297,13 @@ pub struct mln_render_session_attach_options {
     /** The thread that runs the session's graphics work, which depends on the
  target:
 
- - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a shared or dedicated EGL or
-   WGL context, an existing WebGL context, or a browser's WebGPU device.
- - MLN_RENDER_DRIVER_CORE_WORKER for a transferred WebGL canvas, an Android,
-   OpenHarmony, or Win32 window, a Wayland surface, a ring of Android
-   hardware buffers, dmabufs, DXGI shared textures, or IOSurfaces, or an
-   offscreen session.
- - Either one for another Metal or Vulkan target.
+ - MLN_RENDER_DRIVER_CALLER_GRAPHICS_THREAD for a WebGPU surface, or a
+   borrowed ring of OpenGL or WebGPU textures.
+ - MLN_RENDER_DRIVER_CORE_WORKER for an offscreen target, a window, an HTML
+   canvas, or a ring of Android hardware buffers, dmabufs, DXGI shared
+   textures, or IOSurfaces.
+ - Either one for a Metal layer, or a borrowed ring of Metal or Vulkan
+   textures.
 
  An attach with another driver fails with MLN_STATUS_UNSUPPORTED.*/
     pub driver: mln_render_driver_kind,
@@ -2543,6 +2479,328 @@ pub struct mln_open_gl_context_descriptor {
     pub ownership: mln_open_gl_context_ownership,
     pub data: mln_open_gl_context_descriptor_data,
 }
+/// An image that the session allocates, and that you read back.
+pub const MLN_RENDER_TARGET_KIND_OFFSCREEN: mln_render_target_kind = 1;
+/// A `CAMetalLayer`.
+pub const MLN_RENDER_TARGET_KIND_METAL_LAYER: mln_render_target_kind = 2;
+/// A Win32 window.
+pub const MLN_RENDER_TARGET_KIND_WIN32_WINDOW: mln_render_target_kind = 3;
+/// An X11 window, through Xlib.
+pub const MLN_RENDER_TARGET_KIND_XLIB_WINDOW: mln_render_target_kind = 4;
+/// A Wayland surface.
+pub const MLN_RENDER_TARGET_KIND_WAYLAND_SURFACE: mln_render_target_kind = 5;
+/// An Android `ANativeWindow`.
+pub const MLN_RENDER_TARGET_KIND_ANDROID_WINDOW: mln_render_target_kind = 6;
+/// An OpenHarmony `OHNativeWindow`.
+pub const MLN_RENDER_TARGET_KIND_OHOS_WINDOW: mln_render_target_kind = 7;
+/// A WebGPU surface on the device that you wrapped.
+pub const MLN_RENDER_TARGET_KIND_WEB_GPU_SURFACE: mln_render_target_kind = 8;
+/// An HTML canvas in the page.
+pub const MLN_RENDER_TARGET_KIND_HTML_CANVAS: mln_render_target_kind = 9;
+/// The kind of a render target, which says what its descriptor holds.
+pub type mln_render_target_kind = u32;
+pub const MLN_RENDER_TARGET_KIND_FLAG_OFFSCREEN: mln_render_target_kind_flag = 1;
+pub const MLN_RENDER_TARGET_KIND_FLAG_METAL_LAYER: mln_render_target_kind_flag = 2;
+pub const MLN_RENDER_TARGET_KIND_FLAG_WIN32_WINDOW: mln_render_target_kind_flag = 4;
+pub const MLN_RENDER_TARGET_KIND_FLAG_XLIB_WINDOW: mln_render_target_kind_flag = 8;
+pub const MLN_RENDER_TARGET_KIND_FLAG_WAYLAND_SURFACE: mln_render_target_kind_flag = 16;
+pub const MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW: mln_render_target_kind_flag = 32;
+pub const MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW: mln_render_target_kind_flag = 64;
+pub const MLN_RENDER_TARGET_KIND_FLAG_WEB_GPU_SURFACE: mln_render_target_kind_flag = 128;
+pub const MLN_RENDER_TARGET_KIND_FLAG_HTML_CANVAS: mln_render_target_kind_flag = 256;
+/// A render target kind, as a bit in a set.
+pub type mln_render_target_kind_flag = u32;
+/// A set of mln_render_target_kind_flag bits.
+pub type mln_render_target_kind_flags = u32;
+/** An image that the session allocates, renders at the map's scale factor, and
+ reads back with mln_render_session_read_texture().*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_offscreen_target {
+    pub logical_size: mln_logical_size,
+}
+/** A `CAMetalLayer` to present to.
+
+ The session sets the layer's device, pixel format, and drawable size.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_metal_layer_target {
+    pub logical_size: mln_logical_size,
+    /// Your `CAMetalLayer*`.
+    pub layer: *mut ::core::ffi::c_void,
+}
+/** A Win32 window to present to.
+
+ On an OpenGL device, the session sets the window's pixel format, so don't
+ set one yourself. While the window is minimized, frame demands finish with
+ MLN_RENDER_RESULT_TARGET_NOT_READY.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_win32_window_target {
+    pub logical_size: mln_logical_size,
+    /// Your `HWND`.
+    pub window: *mut ::core::ffi::c_void,
+}
+/** An X11 window to present to, through Xlib.
+
+ Keep the display connected until the session's detach completes.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_xlib_window_target {
+    pub logical_size: mln_logical_size,
+    /// Your `Display*`.
+    pub display: *mut ::core::ffi::c_void,
+    /// Your `Window`, on `display`.
+    pub window: u64,
+}
+/** A Wayland surface to present to.
+
+ Keep the display connected until the session's detach completes. On an
+ OpenGL device, if you also use EGL on the display, initialize it before you
+ attach.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_wayland_surface_target {
+    pub logical_size: mln_logical_size,
+    /// Your `wl_display*`.
+    pub display: *mut ::core::ffi::c_void,
+    /// Your `wl_surface*`, on `display`.
+    pub surface: *mut ::core::ffi::c_void,
+}
+/** An Android window to present to.
+
+ The session takes its own reference to the window, so you can release yours
+ once the call returns. When the platform destroys the window, such as in
+ `SurfaceHolder.Callback.surfaceDestroyed`, release the target with
+ mln_render_session_release_target(), or give the session another window
+ with mln_render_session_set_target(), without waiting for that to complete.
+ A frame to the destroyed window finishes with
+ MLN_RENDER_RESULT_TARGET_NOT_READY, or with MLN_RENDER_RESULT_RENDERED if
+ the window went away while the frame was presenting.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_android_window_target {
+    pub logical_size: mln_logical_size,
+    /// Your `ANativeWindow*`.
+    pub window: *mut ::core::ffi::c_void,
+}
+/** An OpenHarmony window to present to.
+
+ The session takes its own reference to the window, so you can release yours
+ once the call returns. When the platform destroys the window, such as in an
+ `XComponent`'s `onSurfaceDestroyed` callback, release the target or give
+ the session another window without waiting, as for an Android window.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_ohos_window_target {
+    pub logical_size: mln_logical_size,
+    /// Your `OHNativeWindow*`.
+    pub window: *mut ::core::ffi::c_void,
+}
+/** A WebGPU surface to present to, which the session configures.
+
+ Make it with the instance of the device that mln_gpu_device_wrap_web_gpu()
+ wrapped, and attach on that device.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_web_gpu_surface_target {
+    pub logical_size: mln_logical_size,
+    /// Your `WGPUSurface`.
+    pub surface: *mut ::core::ffi::c_void,
+    /// The `WGPUTextureFormat` to configure the surface with.
+    pub format: u32,
+}
+/** An HTML canvas to present to.
+
+ The library transfers the canvas to a worker, and makes its context there
+ with the device's backend.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_html_canvas_target {
+    pub logical_size: mln_logical_size,
+    /// The canvas's CSS selector, such as `#map`.
+    pub selector: mln_buffer_view,
+}
+/// The descriptor of each kind of render target.
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union mln_render_target_data {
+    pub offscreen: mln_offscreen_target,
+    pub metal_layer: mln_metal_layer_target,
+    pub win32_window: mln_win32_window_target,
+    pub xlib_window: mln_xlib_window_target,
+    pub wayland_surface: mln_wayland_surface_target,
+    pub android_window: mln_android_window_target,
+    pub ohos_window: mln_ohos_window_target,
+    pub web_gpu_surface: mln_web_gpu_surface_target,
+    pub html_canvas: mln_html_canvas_target,
+}
+/** What a render session renders into: one kind of target, and its
+ descriptor.
+
+ Every target has a size in logical pixels, which sets the map's size. The
+ session renders it at the map's scale factor.
+
+ The session uses the objects that the descriptor names until a replacement
+ or release of the target completes, a detach or release of the session
+ completes, or an abandon of it returns, except as a kind's descriptor says.
+ A window target presents without waiting for the display, so demand at most
+ one frame per display refresh.*/
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct mln_render_target {
+    pub size: u32,
+    pub kind: mln_render_target_kind,
+    pub data: mln_render_target_data,
+}
+pub const MLN_GPU_DEVICE_OPTION_BACKEND: mln_gpu_device_option_field = 1;
+pub const MLN_GPU_DEVICE_OPTION_ADAPTER_INDEX: mln_gpu_device_option_field = 2;
+pub const MLN_GPU_DEVICE_OPTION_ADAPTER_UUID: mln_gpu_device_option_field = 4;
+pub const MLN_GPU_DEVICE_OPTION_ADAPTER_LUID: mln_gpu_device_option_field = 8;
+pub const MLN_GPU_DEVICE_OPTION_OPEN_GL_CLIENT_API: mln_gpu_device_option_field = 16;
+pub const MLN_GPU_DEVICE_OPTION_OPEN_GL_SINGLE_CONTEXT: mln_gpu_device_option_field = 32;
+/// The fields that mln_gpu_device_options sets.
+pub type mln_gpu_device_option_field = u32;
+/// A set of mln_gpu_device_option_field bits.
+pub type mln_gpu_device_option_fields = u32;
+/** Options for mln_gpu_device_create().
+
+ Name the GPU by at most one of `adapter_index`, `adapter_uuid`, and
+ `adapter_luid`. Without one, the device prefers a discrete GPU.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_gpu_device_options {
+    pub size: u32,
+    pub fields: mln_gpu_device_option_fields,
+    /** The backend that the device renders with. By default, the platform's own:
+ Metal on Apple platforms, Vulkan elsewhere, or OpenGL where the system has
+ no Vulkan driver, and WebGPU in a browser, or WebGL where the browser has
+ no WebGPU.*/
+    pub backend: mln_render_backend,
+    /// The GPU to use, as an index into the backend's list of GPUs.
+    pub adapter_index: u32,
+    /** The 16-byte UUID of the GPU to use: Vulkan's
+ `VkPhysicalDeviceIDProperties.deviceUUID`, or OpenGL's
+ `GL_DEVICE_UUID_EXT`.*/
+    pub adapter_uuid: mln_buffer_view,
+    /** The 8-byte LUID of the GPU to use: on Windows, its DXGI adapter LUID,
+ which Vulkan reports as `VkPhysicalDeviceIDProperties.deviceLUID`, and on
+ Apple platforms, its `MTLDevice.registryID`, in the platform's byte order.*/
+    pub adapter_luid: mln_buffer_view,
+    /** The OpenGL API that an OpenGL device renders with. An EGL device
+ defaults to MLN_OPEN_GL_CLIENT_API_GLES, and takes
+ MLN_OPEN_GL_CLIENT_API_GL too on Linux and FreeBSD. A WGL device takes
+ only MLN_OPEN_GL_CLIENT_API_GL, its default, and a WebGL device only
+ MLN_OPEN_GL_CLIENT_API_GLES, its default.*/
+    pub open_gl_client_api: mln_open_gl_client_api,
+    /** Whether the sessions of an EGL device take turns in one OpenGL context
+ instead of having one each.*/
+    pub open_gl_single_context: bool,
+}
+/// An `IOSurfaceRef`.
+pub const MLN_GPU_EXPORT_KIND_FLAG_IO_SURFACE: mln_gpu_export_kind_flag = 1;
+/// A Linux dmabuf, as file descriptors with a DRM format and modifier.
+pub const MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF: mln_gpu_export_kind_flag = 2;
+/// An `AHardwareBuffer*`.
+pub const MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER: mln_gpu_export_kind_flag = 4;
+/// A DXGI shared texture's NT handle.
+pub const MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE: mln_gpu_export_kind_flag = 8;
+/// A Vulkan or OpenGL opaque memory file descriptor.
+pub const MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD: mln_gpu_export_kind_flag = 16;
+/// A way to share a texture's memory with another API or process.
+pub type mln_gpu_export_kind_flag = u32;
+/// A set of mln_gpu_export_kind_flag bits.
+pub type mln_gpu_export_kind_flags = u32;
+/// What a GPU device can do.
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_gpu_device_capabilities {
+    pub size: u32,
+    pub backend: mln_render_backend,
+    /// The kinds of mln_render_target that sessions on the device render to.
+    pub target_kinds: mln_render_target_kind_flags,
+    /// The ways that the device can share the textures it renders.
+    pub export_kinds: mln_gpu_export_kind_flags,
+    /// The kinds of mln_gpu_sync that the device can signal and wait on.
+    pub sync_kinds: mln_gpu_sync_kind_flags,
+}
+/** The Vulkan objects of a device, as mln_gpu_device_get_vulkan_context()
+ reports them.*/
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_gpu_device_vulkan_context_result {
+    pub size: u32,
+    pub context: mln_vulkan_context_descriptor,
+}
+pub const MLN_LOG_SEVERITY_INFO: mln_log_severity = 1;
+pub const MLN_LOG_SEVERITY_WARNING: mln_log_severity = 2;
+pub const MLN_LOG_SEVERITY_ERROR: mln_log_severity = 3;
+/// The severity of a log message.
+pub type mln_log_severity = u32;
+pub const MLN_LOG_SEVERITY_FLAG_INFO: mln_log_severity_flag = 2;
+pub const MLN_LOG_SEVERITY_FLAG_WARNING: mln_log_severity_flag = 4;
+pub const MLN_LOG_SEVERITY_FLAG_ERROR: mln_log_severity_flag = 8;
+/** The severities logged on a background thread until
+ mln_log_set_async_severity_mask() changes them.*/
+pub const MLN_LOG_SEVERITY_FLAG_DEFAULT: mln_log_severity_flag = 6;
+/** The severities logged on a background thread until
+ mln_log_set_async_severity_mask() changes them.*/
+pub const MLN_LOG_SEVERITY_FLAG_ALL: mln_log_severity_flag = 14;
+/// A log severity, as a bit in a set.
+pub type mln_log_severity_flag = u32;
+/// A set of mln_log_severity_flag bits.
+pub type mln_log_severity_flags = u32;
+pub const MLN_LOG_EVENT_GENERAL: mln_log_event = 0;
+pub const MLN_LOG_EVENT_SETUP: mln_log_event = 1;
+pub const MLN_LOG_EVENT_SHADER: mln_log_event = 2;
+pub const MLN_LOG_EVENT_PARSE_STYLE: mln_log_event = 3;
+pub const MLN_LOG_EVENT_PARSE_TILE: mln_log_event = 4;
+pub const MLN_LOG_EVENT_RENDER: mln_log_event = 5;
+pub const MLN_LOG_EVENT_STYLE: mln_log_event = 6;
+pub const MLN_LOG_EVENT_DATABASE: mln_log_event = 7;
+pub const MLN_LOG_EVENT_HTTP_REQUEST: mln_log_event = 8;
+pub const MLN_LOG_EVENT_SPRITE: mln_log_event = 9;
+pub const MLN_LOG_EVENT_IMAGE: mln_log_event = 10;
+pub const MLN_LOG_EVENT_GRAPHICS_BACKEND: mln_log_event = 11;
+pub const MLN_LOG_EVENT_JNI: mln_log_event = 12;
+pub const MLN_LOG_EVENT_ANDROID: mln_log_event = 13;
+pub const MLN_LOG_EVENT_CRASH: mln_log_event = 14;
+pub const MLN_LOG_EVENT_GLYPH: mln_log_event = 15;
+pub const MLN_LOG_EVENT_TIMING: mln_log_event = 16;
+/// The part of the library that logged a message.
+pub type mln_log_event = u32;
+/** Receives a log message.
+
+ Threads:
+ Runs on the thread that logged the message, or on a background thread for the
+ severities that mln_log_set_async_severity_mask() selects. The callback can't
+ call the library.
+
+ Lifetimes:
+ `message` stays valid until the callback returns.*/
+pub type mln_log_callback = ::core::option::Option<
+    unsafe extern "C" fn(
+        user_data: *mut ::core::ffi::c_void,
+        severity: mln_log_severity,
+        event: mln_log_event,
+        code: i64,
+        message: mln_buffer_view,
+    ),
+>;
+/// A log callback, for mln_log_set_callback().
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct mln_log_handler {
+    pub size: u32,
+    pub callback: mln_log_callback,
+    pub user_data: *mut ::core::ffi::c_void,
+    pub release_user_data: mln_user_data_release,
+    pub queue: mln_delivery_queue,
+    /** The severities that also go to the platform's log, as they do without a
+ callback. 0 sends none. A message of these severities goes to the
+ platform's log even when the handler's queue can't accept it.*/
+    pub platform_severities: mln_log_severity_flags,
+}
 pub const MLN_RENDER_RESULT_RENDERED: mln_render_result = 0;
 /// The map had nothing new to draw.
 pub const MLN_RENDER_RESULT_NO_UPDATE: mln_render_result = 1;
@@ -2666,74 +2924,6 @@ pub struct mln_frame_pacer_options {
  frames at every refresh.*/
     pub maximum_frames_per_second: u32,
 }
-pub const MLN_OFFSCREEN_DEVICE_OPTION_ADAPTER_INDEX: mln_offscreen_device_option_field = 1;
-pub const MLN_OFFSCREEN_DEVICE_OPTION_SINGLE_CONTEXT: mln_offscreen_device_option_field = 2;
-pub const MLN_OFFSCREEN_DEVICE_OPTION_CLIENT_API: mln_offscreen_device_option_field = 4;
-/// The fields that mln_offscreen_device_options sets.
-pub type mln_offscreen_device_option_field = u32;
-/// A set of mln_offscreen_device_option_field bits.
-pub type mln_offscreen_device_option_fields = u32;
-/// Options for mln_offscreen_device_create().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_offscreen_device_options {
-    pub size: u32,
-    pub fields: mln_offscreen_device_option_fields,
-    /// The GPU to use, as an index into the platform's list of GPUs.
-    pub adapter_index: u32,
-    /** Whether the device's sessions take turns in one OpenGL context instead of
- having one each. Only an EGL device reads it.*/
-    pub single_context: bool,
-    /** The OpenGL API that the device's sessions render with. An EGL device
- defaults to MLN_OPEN_GL_CLIENT_API_GLES, and takes
- MLN_OPEN_GL_CLIENT_API_GL too on Linux and FreeBSD. A WGL device
- takes only MLN_OPEN_GL_CLIENT_API_GL, its default, and a WebGL device
- only MLN_OPEN_GL_CLIENT_API_GLES, its default. Other devices take
- neither.*/
-    pub client_api: mln_open_gl_client_api,
-}
-/** The image that mln_map_attach_offscreen() renders. The session renders it
- at the map's scale factor.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_offscreen_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-}
-/** An Android window to present to, for mln_map_attach_android_surface().
-
- Name the window by `window`, or by `jni_env` and `surface`. The session takes
- its own reference to the window, so you can release yours once the call
- returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_android_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `ANativeWindow*`, or null to name the window by `surface`.
-    pub window: *mut ::core::ffi::c_void,
-    /// The calling thread's `JNIEnv*`, with `surface`.
-    pub jni_env: *mut ::core::ffi::c_void,
-    /// An `android.view.Surface`, with `jni_env`.
-    pub surface: *mut ::core::ffi::c_void,
-}
-/** A new Android window for mln_render_session_set_android_surface_target().
-
- Name the window by `window`, or by `jni_env` and `surface`. The session takes
- its own reference to the window, so you can release yours once the call
- returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_android_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `ANativeWindow*`, or null to name the window by `surface`.
-    pub window: *mut ::core::ffi::c_void,
-    /// The calling thread's `JNIEnv*`, with `surface`.
-    pub jni_env: *mut ::core::ffi::c_void,
-    /// An `android.view.Surface`, with `jni_env`.
-    pub surface: *mut ::core::ffi::c_void,
-}
 /** A ring of Android hardware buffers that the library allocates, for
  mln_map_attach_android_hardware_buffer_ring().
 
@@ -2852,76 +3042,6 @@ pub struct mln_dma_buf_frame {
  up, or with one `zwp_linux_buffer_params_v1.add` call each.*/
     pub planes: *const mln_dma_buf_plane,
     pub plane_count: usize,
-}
-/** An OpenHarmony window to present to, for mln_map_attach_ohos_surface().
-
- Name the window by `window` or by `surface_id`. The session takes its own
- reference to the window, so you can release yours once the call returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_ohos_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `OHNativeWindow*`, or null to name the window by `surface_id`.
-    pub window: *mut ::core::ffi::c_void,
-    /** The surface ID of a surface in this process, such as the one that
- `XComponentController.getXComponentSurfaceId()` reports, or 0 to name the
- window by `window`.*/
-    pub surface_id: u64,
-}
-/** A new OpenHarmony window for mln_render_session_set_ohos_surface_target().
-
- Name the window by `window` or by `surface_id`. The session takes its own
- reference to the window, so you can release yours once the call returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_ohos_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `OHNativeWindow*`, or null to name the window by `surface_id`.
-    pub window: *mut ::core::ffi::c_void,
-    /** The surface ID of a surface in this process, such as the one that
- `XComponentController.getXComponentSurfaceId()` reports, or 0 to name the
- window by `window`.*/
-    pub surface_id: u64,
-}
-/// A Wayland surface to present to, for mln_map_attach_wayland_surface().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_wayland_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `wl_display*`.
-    pub display: *mut ::core::ffi::c_void,
-    /// Your `wl_surface*`, on `display`.
-    pub surface: *mut ::core::ffi::c_void,
-}
-/// A new Wayland surface for mln_render_session_set_wayland_surface_target().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_wayland_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `wl_surface*`, on the display that the session attached with.
-    pub surface: *mut ::core::ffi::c_void,
-}
-/// A Win32 window to present to, for mln_map_attach_win32_window().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_win32_window_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `HWND`.
-    pub window: *mut ::core::ffi::c_void,
-}
-/// A new Win32 window for mln_render_session_set_win32_window_target().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_win32_window_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your `HWND`.
-    pub window: *mut ::core::ffi::c_void,
 }
 /** A ring of DXGI shared textures that the library allocates, for
  mln_map_attach_dxgi_shared_texture_ring().
@@ -3141,122 +3261,6 @@ pub struct mln_style_expression_info {
     pub is_feature_constant: bool,
     /// True when the result doesn't depend on the zoom level.
     pub is_zoom_constant: bool,
-}
-/** A Metal layer to render to, for mln_map_attach_metal_surface().
-
- The session sets the layer's device, pixel format, and drawable size. It uses
- the layer until a replacement or release of the target completes, a detach
- or release of the session completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_metal_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// The MTLDevice to render with. A null device picks the system's default.
-    pub context: mln_metal_context_descriptor,
-    /// Your CAMetalLayer.
-    pub layer: *mut ::core::ffi::c_void,
-}
-/** A new Metal layer for mln_render_session_set_metal_surface_target().
-
- The session renders to it with the device that it attached with. It uses the
- layer until a replacement or release of the target completes, a detach or
- release of the session completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_metal_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your CAMetalLayer.
-    pub layer: *mut ::core::ffi::c_void,
-}
-/** A Vulkan surface to present to, for mln_map_attach_vulkan_surface().
-
- The device must have VK_KHR_swapchain enabled, and the queue family of
- `graphics_queue_family_index` must support presenting to the surface. The
- session creates the swapchain. It uses the surface until a replacement or
- release of the target completes, a detach or release of the session
- completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub context: mln_vulkan_context_descriptor,
-    /// Your VkSurfaceKHR.
-    pub surface: mln_vulkan_non_dispatchable_handle,
-}
-/** A new Vulkan surface for mln_render_session_set_vulkan_surface_target().
-
- The session presents to it with the context that it attached with, so the
- queue family of that context's `graphics_queue_family_index` must support
- presenting to the surface. It uses the surface until a replacement or
- release of the target completes, a detach or release of the session
- completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your VkSurfaceKHR.
-    pub surface: mln_vulkan_non_dispatchable_handle,
-}
-/** A WebGPU surface to present to, for mln_map_attach_web_gpu_surface().
-
- The session configures the surface. It uses the surface until a replacement
- or release of the target completes, a detach or release of the session
- completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_web_gpu_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub context: mln_web_gpu_context_descriptor,
-    /// Your WGPUSurface.
-    pub surface: *mut ::core::ffi::c_void,
-    /// The WGPUTextureFormat to configure the surface with.
-    pub format: u32,
-}
-/** A new WebGPU surface for mln_render_session_set_web_gpu_surface_target().
-
- The session configures it with the context and format that it attached with.
- It uses the surface until a replacement or release of the target completes,
- a detach or release of the session completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_web_gpu_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /// Your WGPUSurface.
-    pub surface: *mut ::core::ffi::c_void,
-}
-/** An OpenGL surface to present to, for mln_map_attach_open_gl_surface().
-
- The session uses the surface until a replacement or release of the target
- completes, a detach or release of the session completes, or an abandon of it
- returns.*/
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct mln_open_gl_surface_descriptor {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    pub context: mln_open_gl_context_descriptor,
-    /// Your EGLSurface with EGL, or your HDC with WGL. WebGL doesn't use it.
-    pub surface: *mut ::core::ffi::c_void,
-}
-/** A new OpenGL surface for mln_render_session_set_open_gl_surface_target().
-
- The session presents to it with the context that it attached with. It uses
- the surface until a replacement or release of the target completes, a detach
- or release of the session completes, or an abandon of it returns.*/
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_open_gl_surface_replacement {
-    pub size: u32,
-    pub logical_size: mln_logical_size,
-    /** Your EGLSurface with EGL, or your HDC with WGL. WebGL doesn't use it, so
- leave it null.*/
-    pub surface: *mut ::core::ffi::c_void,
 }
 /// A Metal texture of a borrowed ring.
 #[repr(C)]
@@ -3560,38 +3564,6 @@ pub struct mln_texture_readback_result {
  bottom.*/
     pub data: mln_buffer_view,
     pub info: mln_texture_image_info,
-}
-pub const MLN_VULKAN_DEVICE_OPTION_PRESENTATION: mln_vulkan_device_option_field = 1;
-pub const MLN_VULKAN_DEVICE_OPTION_DEVICE_UUID: mln_vulkan_device_option_field = 2;
-pub const MLN_VULKAN_DEVICE_OPTION_DEVICE_LUID: mln_vulkan_device_option_field = 4;
-/// The fields that mln_vulkan_device_options sets.
-pub type mln_vulkan_device_option_field = u32;
-/// A set of mln_vulkan_device_option_field bits.
-pub type mln_vulkan_device_option_fields = u32;
-/// Options for mln_vulkan_device_create().
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_device_options {
-    pub size: u32,
-    pub fields: mln_vulkan_device_option_fields,
-    /** Whether the device can present to a window. The instance then enables
- VK_KHR_surface and the platform's surface extensions, and the device
- enables VK_KHR_swapchain. Defaults to false.*/
-    pub presentation: bool,
-    /** The 16-byte `deviceUUID` of the GPU to use, as
- `VkPhysicalDeviceIDProperties` reports it.*/
-    pub device_uuid: mln_buffer_view,
-    /** The 8-byte `deviceLUID` of the GPU to use, as
- `VkPhysicalDeviceIDProperties` reports it. On Windows, this is the GPU's
- DXGI adapter LUID.*/
-    pub device_luid: mln_buffer_view,
-}
-/// A Vulkan device's context, as mln_vulkan_device_get_context() reports it.
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct mln_vulkan_device_context_result {
-    pub size: u32,
-    pub context: mln_vulkan_context_descriptor,
 }
 pub const MLN_PLUGIN_MAX_VERTEX_ATTRIBUTES: _bindgen_ty_1 = 16;
 pub type _bindgen_ty_1 = ::core::ffi::c_uint;

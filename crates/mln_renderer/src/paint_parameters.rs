@@ -62,7 +62,7 @@ impl TransformParameters {
         // buffer precision on very close empty space, for layer types
         // (fill-extrusion) that use the depth buffer to emulate real-world
         // space.
-        let near_z = (0.1 * state.get_camera_to_center_distance() as f64) as u16;
+        let near_z = (0.1 * f64::from(state.get_camera_to_center_distance())) as u16;
         state.get_proj_matrix(&mut near_clipped_proj_matrix, near_z, false);
 
         TransformParameters { proj_matrix, aligned_proj_matrix, near_clipped_proj_matrix, state }
@@ -164,7 +164,7 @@ impl<'a> PaintParameters<'a> {
             transform_params,
             state,
             static_data,
-            evaluated_light: Default::default(),
+            evaluated_light: crate::render_light::EvaluatedLight::default(),
             line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
             pattern_atlas,
             pass: RenderPass::Opaque,
@@ -194,11 +194,13 @@ impl<'a> PaintParameters<'a> {
     }
 
     /// `matrixForTile(const UnwrappedTileID&, bool aligned = false)`.
+    #[must_use]
     pub fn matrix_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> Mat4 {
         self.projection_data_for_tile(tile_id, aligned).main_matrix
     }
 
     /// `projectionDataForTile(const UnwrappedTileID&, bool aligned = false)`.
+    #[must_use]
     pub fn projection_data_for_tile(&self, tile_id: &UnwrappedTileID, aligned: bool) -> ProjectionData {
         self.state.get_projection_data_with(
             tile_id,
@@ -206,6 +208,7 @@ impl<'a> PaintParameters<'a> {
         )
     }
 
+    #[must_use]
     pub fn depth_mode_for_sublayer(&self, n: u8, mask: DepthMaskType) -> DepthMode {
         // On the globe, 2D layers are ordered by draw order alone; their Z is
         // the back-hemisphere clip.
@@ -220,10 +223,12 @@ impl<'a> PaintParameters<'a> {
         DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(depth, depth) }
     }
 
+    #[must_use]
     pub fn depth_mode_for_3d(&self, mask: DepthMaskType) -> DepthMode {
         DepthMode { func: DepthFunctionType::LessEqual, mask, range: Range::new(0.0, self.depth_range_size) }
     }
 
+    #[must_use]
     pub fn color_mode_for_render_pass(&self) -> ColorMode {
         if self.debug_options.contains(MapDebugOptions::OVERDRAW) {
             let overdraw: f32 = 1.0 / 8.0;
@@ -354,14 +359,15 @@ impl<'a> PaintParameters<'a> {
         true
     }
 
+    #[must_use]
     pub fn stencil_mode_for_clipping(&self, tile_id: &UnwrappedTileID) -> StencilMode {
         let it = self.tile_clipping_mask_ids.get(tile_id);
         debug_assert!(it.is_some());
-        let id = it.copied().unwrap_or(0b00000000);
+        let id = it.copied().unwrap_or(0b0000_0000);
         StencilMode {
-            test: Test::Equal { mask: 0b11111111 },
+            test: Test::Equal { mask: 0b1111_1111 },
             ref_: id,
-            mask: 0b00000000,
+            mask: 0b0000_0000,
             fail: StencilOpType::Keep,
             depth_fail: StencilOpType::Keep,
             pass: StencilOpType::Replace,
@@ -381,9 +387,9 @@ impl<'a> PaintParameters<'a> {
         let id = self.next_stencil_id;
         self.next_stencil_id += 1;
         StencilMode {
-            test: Test::NotEqual { mask: 0b11111111 },
+            test: Test::NotEqual { mask: 0b1111_1111 },
             ref_: id,
-            mask: 0b11111111,
+            mask: 0b1111_1111,
             fail: StencilOpType::Keep,
             depth_fail: StencilOpType::Keep,
             pass: StencilOpType::Replace,

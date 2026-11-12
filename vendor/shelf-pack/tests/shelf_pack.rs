@@ -13,7 +13,7 @@ fn b(sprite: &ShelfPack, r: Option<BinRef>) -> Bin {
 #[test]
 fn test_version() {
     let version = SHELF_PACK_VERSION.to_owned();
-    assert!(!version.is_empty());
+    assert_ne!(version, "");
 }
 
 #[test]
@@ -134,8 +134,7 @@ fn test_pack3() {
 fn test_pack4() {
     let mut sprite = ShelfPack::new(64, 64, ShelfPackOptions::default());
     let mut bins: Vec<Bin> = Vec::new();
-    let mut options = PackOptions::default();
-    options.in_place = true;
+    let options = PackOptions { in_place: true };
     bins.push(Bin::new(-1, 10, 10));
     bins.push(Bin::new(-1, 10, 10));
     bins.push(Bin::new(-1, 10, 10));
@@ -165,8 +164,7 @@ fn test_pack5() {
     let mut sprite = ShelfPack::new(20, 20, ShelfPackOptions::default());
     let mut bins: Vec<Bin> = Vec::new();
     let mut results: Vec<BinRef> = Vec::new();
-    let mut options = PackOptions::default();
-    options.in_place = true;
+    let options = PackOptions { in_place: true };
     bins.push(Bin::new(-1, 10, 10));
     bins.push(Bin::new(-1, 10, 10));
     bins.push(Bin::new(-1, 10, 30)); // should skip
@@ -230,8 +228,7 @@ fn test_pack6() {
     bins.push(Bin::new(-1, 5, 15));
     bins.push(Bin::new(-1, 25, 15));
     bins.push(Bin::new(-1, 10, 20));
-    let mut options = ShelfPackOptions::default();
-    options.auto_resize = true;
+    let options = ShelfPackOptions { auto_resize: true };
     let mut sprite = ShelfPack::new(10, 10, options);
     results = sprite.pack(&mut bins, PackOptions::default());
     //  x: 0, y: 0, w: 10, h: 10
@@ -683,8 +680,7 @@ fn test_resize1() {
 
 #[test]
 fn test_resize2() {
-    let mut options = ShelfPackOptions::default();
-    options.auto_resize = true;
+    let options = ShelfPackOptions { auto_resize: true };
     let mut sprite = ShelfPack::new(10, 10, options);
     let bin1 = sprite.pack_one(1, 10, 10);
     //  x: 0, y: 0, w: 10, h: 10
@@ -745,8 +741,7 @@ fn test_resize2() {
 
 #[test]
 fn test_resize3() {
-    let mut options = ShelfPackOptions::default();
-    options.auto_resize = true;
+    let options = ShelfPackOptions { auto_resize: true };
     let mut sprite = ShelfPack::new(10, 10, options);
     let bin1 = sprite.pack_one(1, 20, 10);
     //  x: 0, y: 0, w: 20, h: 10

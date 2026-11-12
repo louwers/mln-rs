@@ -163,6 +163,7 @@ fn apply_buffer_indexes(bindings: &mut AttributeBindingArray, buffer_index_of: i
 }
 
 impl Drawable {
+    #[must_use]
     pub fn new(name: String) -> Self {
         Drawable {
             base: DrawableBase::new(name),
@@ -316,7 +317,7 @@ impl Drawable {
                             });
                             layout_desc.setStepRate(usize::from(has_buffer));
                         } else {
-                            debug_assert!(layout_desc.stride() == binding.vertex_stride as usize);
+                            debug_assert_eq!(layout_desc.stride(), binding.vertex_stride as usize);
                         }
                     }
                     hash_combine(
@@ -505,7 +506,9 @@ impl drawable::Drawable for Drawable {
         render_pass.set_render_pipeline_state(pipeline_state);
 
         // For 3D mode, stenciling is handled by the layer group.
-        if !self.base.is_3d {
+        if self.base.is_3d {
+            render_pass.set_depth_range(parameters.depth_mode_for_3d(DepthMaskType::ReadWrite).range);
+        } else {
             let mut new_stencil_mode = None;
             let tile_id = self.base.tile_id;
 
@@ -546,8 +549,6 @@ impl drawable::Drawable for Drawable {
             render_pass.set_depth_stencil_state(self.impl_.depth_stencil_state.as_ref());
             render_pass.set_stencil_reference(self.impl_.previous_stencil_mode.ref_);
             render_pass.set_depth_range(depth_mode.range);
-        } else {
-            render_pass.set_depth_range(parameters.depth_mode_for_3d(DepthMaskType::ReadWrite).range);
         }
 
         let base_vertex_supported = context.get_backend().is_base_vertex_instance_drawing_supported();

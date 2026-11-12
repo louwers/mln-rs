@@ -5,7 +5,7 @@ use mln_conversion::Convertible;
 use mln_util::string::to_string_double;
 
 use crate::expression::{
-    EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
+    Dependency, EvaluationContext, EvaluationError, EvaluationResult, Expression, ExpressionBase, Kind, downcast,
 };
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
@@ -20,6 +20,7 @@ pub struct IndexOf {
 }
 
 impl IndexOf {
+    #[must_use]
     pub fn new(
         keyword: Box<dyn Expression>,
         input: Box<dyn Expression>,
@@ -27,30 +28,20 @@ impl IndexOf {
     ) -> Self {
         let deps = keyword.dependencies()
             | input.dependencies()
-            | from_index.as_ref().map_or(Default::default(), |e| e.dependencies());
+            | from_index.as_ref().map_or(Dependency::NONE, |e| e.dependencies());
         IndexOf { base: ExpressionBase::new(Kind::IndexOf, Type::Number, deps), keyword, input, from_index }
     }
 
-    fn evaluate_for_array_input(
-        &self,
-        array: &[Value],
-        keyword_value: &Value,
-        from_index_value: usize,
-    ) -> EvaluationResult {
-        for index in from_index_value..array.len() {
-            if array[index] == *keyword_value {
-                return Ok(Value::Number(index as f64));
+    fn evaluate_for_array_input(array: &[Value], keyword_value: &Value, from_index_value: usize) -> Value {
+        for (index, value) in array.iter().enumerate().skip(from_index_value) {
+            if *value == *keyword_value {
+                return Value::Number(index as f64);
             }
         }
-        Ok(Value::Number(-1.0))
+        Value::Number(-1.0)
     }
 
-    fn evaluate_for_string_input(
-        &self,
-        string: &str,
-        keyword_value: &Value,
-        from_index_value: usize,
-    ) -> EvaluationResult {
+    fn evaluate_for_string_input(string: &str, keyword_value: &Value, from_index_value: usize) -> Value {
         let keyword_string = match keyword_value {
             Value::String(s) => s.clone(),
             Value::Bool(b) => if *b { "true" } else { "false" }.to_owned(),
@@ -67,11 +58,11 @@ impl IndexOf {
         let Some(byte_index) =
             string[from_index_byte_offset..].find(keyword_string.as_str()).map(|i| i + from_index_byte_offset)
         else {
-            return Ok(Value::Number(-1.0));
+            return Value::Number(-1.0);
         };
         let prefix = &string[..byte_index];
         let index = unicode_length_on_validated_utf8(prefix);
-        Ok(Value::Number(index as f64))
+        Value::Number(index as f64)
     }
 
     pub fn parse(value: &Convertible<'_>, ctx: &mut ParsingContext) -> ParseResult {
@@ -129,8 +120,8 @@ impl Expression for IndexOf {
         }
 
         match &evaluated_input {
-            Value::String(s) => self.evaluate_for_string_input(s, &evaluated_keyword, from_index_value),
-            Value::Array(v) => self.evaluate_for_array_input(v, &evaluated_keyword, from_index_value),
+            Value::String(s) => Ok(Self::evaluate_for_string_input(s, &evaluated_keyword, from_index_value)),
+            Value::Array(v) => Ok(Self::evaluate_for_array_input(v, &evaluated_keyword, from_index_value)),
             _ => Err(EvaluationError::new(format!(
                 "Expected second argument to be of type array or string, but found {} instead.",
                 type_::to_string(&type_of(&evaluated_input))

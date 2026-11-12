@@ -49,13 +49,13 @@ pub fn decode_jpeg(data: &[u8]) -> Result<PremultipliedImage, Error> {
     // zune-jpeg caps both dimensions far below u32::MAX.
     let mut image = PremultipliedImage::new(Size::new(width as u32, height as u32));
     let components = output.num_components();
-    for (src, dst) in pixels.chunks_exact(components).zip(image.data.chunks_exact_mut(4)) {
+    for (src, dst) in pixels.chunks_exact(components).zip(image.data.as_chunks_mut::<4>().0) {
         let [r, g, b] = match output {
             ColorSpace::Luma => [src[0]; 3],
             ColorSpace::YCCK => ycck_to_cmy(src[0], src[1], src[2]),
             _ => [src[0], src[1], src[2]],
         };
-        dst.copy_from_slice(&[r, g, b, 0xff]);
+        *dst = [r, g, b, 0xff];
     }
     Ok(image)
 }
@@ -68,7 +68,7 @@ fn ycck_to_cmy(y: u8, cb: u8, cr: u8) -> [u8; 3] {
     const ONE_HALF: i32 = 1 << (SCALEBITS - 1);
     // FIX(x): x in 16.16 fixed point, rounded.
     const FIX_1_40200: i32 = 91881;
-    const FIX_1_77200: i32 = 116130;
+    const FIX_1_77200: i32 = 116_130;
     const FIX_0_71414: i32 = 46802;
     const FIX_0_34414: i32 = 22554;
 
@@ -107,14 +107,14 @@ mod tests {
     #[test]
     fn opaque() {
         let image = decode_jpeg(&tile()).unwrap();
-        assert!(image.data.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(image.data.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     }
 
     #[test]
     fn grayscale_is_replicated() {
         let image = decode_jpeg(&read("tests/fixtures/gray.jpeg")).unwrap();
         assert_eq!(&image.data[..4], &[111, 111, 111, 255]);
-        assert!(image.data.chunks_exact(4).all(|p| p[0] == p[1] && p[1] == p[2]));
+        assert!(image.data.as_chunks::<4>().0.iter().all(|p| p[0] == p[1] && p[1] == p[2]));
     }
 
     // C++ keeps the C, M and Y of libjpeg's CMYK output as R, G and B.

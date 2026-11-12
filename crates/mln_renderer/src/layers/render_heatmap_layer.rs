@@ -14,7 +14,10 @@ use std::sync::Arc;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_HEATMAP_COLOR_RAMP_TEXTURE, ID_HEATMAP_IMAGE_TEXTURE, ID_HEATMAP_POS_VERTEX_ATTRIBUTE,
+    ID_HEATMAP_WEIGHT_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
@@ -28,7 +31,9 @@ use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::HeatmapLayer;
 use mln_style::layers::heatmap_layer_impl::Impl as HeatmapLayerImpl;
-use mln_style::layers::heatmap_layer_properties::*;
+use mln_style::layers::heatmap_layer_properties::{
+    HeatmapColor, HeatmapLayerProperties, HeatmapOpacity, HeatmapPaintProperties, HeatmapRadius, HeatmapWeight,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_tile_id::OverscaledTileID;
 use mln_util::identity::SimpleIdentity;
@@ -64,7 +69,7 @@ const HEATMAP_TEXTURE_SHADER_GROUP_NAME: &str = "HeatmapTextureShader";
 
 /// `activateRenderTarget(renderTarget, activate, changes)`.
 pub(crate) fn activate_render_target(
-    render_target: &Option<RenderTargetPtr>,
+    render_target: Option<&RenderTargetPtr>,
     activate: bool,
     changes: &mut UniqueChangeRequestVec,
 ) {
@@ -272,7 +277,7 @@ impl RenderLayer for RenderHeatmapLayer {
     fn mark_layer_renderable(&mut self, will_render: bool, changes: &mut UniqueChangeRequestVec) {
         crate::render_layer::mark_layer_renderable_base(self, will_render, changes);
 
-        activate_render_target(&self.render_target, will_render, changes);
+        activate_render_target(self.render_target.as_ref(), will_render, changes);
     }
 
     fn remove_all_drawables(&mut self) -> usize {
@@ -316,7 +321,7 @@ impl RenderLayer for RenderHeatmapLayer {
         if self.render_target.is_none() {
             let render_target = RenderTarget::create(context, size, TextureChannelDataType::HalfFloat);
             self.render_target = Some(render_target.clone());
-            activate_render_target(&self.render_target, self.base.is_renderable, changes);
+            activate_render_target(self.render_target.as_ref(), self.base.is_renderable, changes);
 
             // Set up tile layer group
             let Some(tile_layer_group) =

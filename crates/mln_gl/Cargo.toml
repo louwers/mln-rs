@@ -44,7 +44,7 @@ name = "glsl_compile_test"
 path = "tests/glsl_compile_test.rs"
 
 # The background shader end to end on the drawable path (after
-# crates/mln_webgpu/tests/background_test.rs): HeadlessBackend, a
+# crates/mln_webgpu/tests/background_test.rs): an offscreen target, a
 # DrawableBuilder drawable in a TileLayerGroup, tile clipping masks,
 # rendered into the offscreen target and read back.
 [[test]]

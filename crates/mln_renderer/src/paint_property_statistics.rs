@@ -42,6 +42,7 @@ impl<T> Default for PaintPropertyStatistics<T> {
 
 impl<T: StatisticValue> PaintPropertyStatistics<T> {
     /// `max()`: always empty for the primary template.
+    #[must_use]
     pub fn max(&self) -> Option<f32> {
         self.max
     }

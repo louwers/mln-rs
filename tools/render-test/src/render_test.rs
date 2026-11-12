@@ -310,8 +310,8 @@ fn run_with_alternate_sources(
         };
         let swappable = |document: &serde_json::Value| {
             let sources = &document[SOURCES_KEY];
-            sources.get(target_name).is_some_and(|v| v.is_object())
-                && sources.get(source_name).is_some_and(|v| v.is_object())
+            sources.get(target_name).is_some_and(serde_json::Value::is_object)
+                && sources.get(source_name).is_some_and(serde_json::Value::is_object)
         };
         if !swappable(&metadata.document) {
             continue;
@@ -499,6 +499,7 @@ pub struct RunResult {
 
 /// `mln::runRenderTests(argc, argv, testStatus)`. `factory` creates the map
 /// for a test (`None`: only `--self-check` can pass).
+#[must_use]
 pub fn run_render_tests(args: &[String], factory: Option<ImplFactory>) -> i32 {
     // A worker of a `--jobs` run (jobs.rs).
     if let [_, flag, dir] = args

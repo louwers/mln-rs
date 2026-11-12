@@ -42,6 +42,7 @@ pub struct FileSourceRequest {
 impl FileSourceRequest {
     /// `FileSourceRequest(FileSource::Callback&&)`: the mailbox is on the
     /// current thread's scheduler.
+    #[must_use]
     pub fn new(callback: Callback) -> Self {
         let state = Rc::new(FileSourceRequestState { response_callback: Rc::new(RefCell::new(callback)) });
         let mailbox = Mailbox::with_target(&scheduler::get_current(), state as Rc<dyn Any>);
@@ -54,6 +55,7 @@ impl FileSourceRequest {
     }
 
     /// `actor()`.
+    #[must_use]
     pub fn actor(&self) -> ActorRef<FileSourceRequestState> {
         ActorRef::new(&self.mailbox)
     }

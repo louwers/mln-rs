@@ -3,10 +3,14 @@
 // The C++ pass keeps the descriptor (with a `Renderable&`); drawables read
 // `getDescriptor().renderable` for its size (and pass it, unused, to
 // `getRenderPipeline`). The port keeps the size and an identity of the
-// renderable instead of the reference.
+// draw target instead of the reference.
+//
+// Drawables encode through a `StateFilter`, which drops the commands that set
+// state the pass already has, as the Metal backend's render pass does.
 
 use std::any::Any;
 use std::cell::{Cell, Ref, RefCell, RefMut};
+use std::ops::Range;
 use std::rc::Rc;
 use std::sync::OnceLock;
 
@@ -18,7 +22,7 @@ use mln_util::size::Size;
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::renderable_resource::as_webgpu;
+use crate::draw_target::as_webgpu;
 
 pub struct RenderPass {
     context: Rc<Context>,
@@ -26,6 +30,8 @@ pub struct RenderPass {
     /// Address of the renderable's resource (`clipMaskRenderable` compares it).
     renderable_id: usize,
     encoder: RefCell<Option<wgpu::RenderPass<'static>>>,
+    /// The state `encoder` has, as far as [`StateFilter`] knows it.
+    state: RefCell<PassState>,
     global_uniform_buffers_bound: Cell<bool>,
     previous_color_format: Option<wgpu::TextureFormat>,
     previous_depth_stencil_format: Option<wgpu::TextureFormat>,
@@ -46,9 +52,10 @@ impl RenderPass {
         let backend = context.get_backend().clone();
         let mut pass = RenderPass {
             context: context.clone(),
-            renderable_size: descriptor.renderable.get_size(),
+            renderable_size: descriptor.target.size(),
             renderable_id: 0,
             encoder: RefCell::new(None),
+            state: RefCell::new(PassState::default()),
             global_uniform_buffers_bound: Cell::new(false),
             previous_color_format: backend.get_color_format(),
             previous_depth_stencil_format: backend.get_depth_stencil_format(),
@@ -62,20 +69,16 @@ impl RenderPass {
             return pass;
         };
 
-        // Access the renderable resource associated with this pass
-        let Some(resource) = descriptor.renderable.get_resource() else {
-            eprintln!("WebGPU: No renderable resource available");
+        // Access the draw target associated with this pass
+        let Some(target) = as_webgpu(descriptor.target) else {
+            eprintln!("WebGPU: The pass's draw target is not a WebGPU one");
             return pass;
         };
-        pass.renderable_id = Rc::as_ptr(&resource) as *const () as usize;
-        let Some(renderable_resource) = as_webgpu(&*resource) else {
-            eprintln!("WebGPU: No renderable resource available");
-            return pass;
-        };
+        pass.renderable_id = std::ptr::from_ref(target) as usize;
+        let renderable_resource = target.resource();
         renderable_resource.bind();
 
-        // Resolve the color attachment view, preferring the renderable's
-        // texture view. TODO(port): fall back to backend.getCurrentTextureView().
+        // Resolve the color attachment view.
         let Some(color_view) = renderable_resource.get_color_texture_view() else {
             eprintln!("WebGPU: Failed to acquire color attachment view");
             return pass;
@@ -98,7 +101,6 @@ impl RenderPass {
             store: wgpu::StoreOp::Store,
         };
 
-        // TODO(port): fall back to backend.getDepthStencilView().
         let depth_view = renderable_resource.get_depth_stencil_texture_view();
         if depth_view.is_some()
             && let Some(depth_format) = renderable_resource.get_depth_stencil_texture_format()
@@ -139,18 +141,29 @@ impl RenderPass {
             .forget_lifetime();
         drop(encoder_guard);
 
-        let mut encoder = encoder;
         context.perform_cleanup();
-        let size = pass.renderable_size;
-        encoder.set_viewport(0.0, 0.0, size.width as f32, size.height as f32, 0.0, 1.0);
-        encoder.set_scissor_rect(0, 0, size.width, size.height);
         *pass.encoder.borrow_mut() = Some(encoder);
+        if let Some(mut encoder) = pass.state_filter() {
+            let size = pass.renderable_size;
+            encoder.set_viewport(0.0, 0.0, size.width as f32, size.height as f32, 0.0, 1.0);
+            encoder.set_scissor_rect(0, 0, size.width, size.height);
+        }
         pass
     }
 
     /// `getEncoder()`: the wgpu render pass, `None` if it failed to begin.
+    /// Its user may set any state, so [`state_filter`](Self::state_filter)
+    /// forgets the state it knew.
     pub fn get_encoder(&self) -> RefMut<'_, Option<wgpu::RenderPass<'static>>> {
+        *self.state.borrow_mut() = PassState::default();
         self.encoder.borrow_mut()
+    }
+
+    /// The wgpu render pass behind a filter that drops the commands setting
+    /// state the pass already has, `None` if the pass failed to begin.
+    pub fn state_filter(&self) -> Option<StateFilter<'_>> {
+        let encoder = RefMut::filter_map(self.encoder.borrow_mut(), Option::as_mut).ok()?;
+        Some(StateFilter { encoder, state: self.state.borrow_mut() })
     }
 
     pub fn has_encoder(&self) -> bool {
@@ -222,5 +235,124 @@ impl render_pass::RenderPass for RenderPass {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+/// The vertex buffer and bind group slots whose state [`PassState`] tracks.
+/// Commands for higher slots pass through unfiltered.
+const TRACKED_SLOTS: usize = 8;
+
+/// The state a render pass has been given, `None` where it is unknown. It
+/// holds handles rather than addresses, so a resource dropped mid-pass can't
+/// be mistaken for a new one at the same address.
+#[derive(Default)]
+struct PassState {
+    pipeline: Option<wgpu::RenderPipeline>,
+    /// x, y, width, height, min and max depth, as bits.
+    viewport: Option<[u32; 6]>,
+    scissor_rect: Option<[u32; 4]>,
+    stencil_reference: Option<u32>,
+    /// The buffer and byte range bound at each slot.
+    vertex_buffers: [Option<(wgpu::Buffer, Range<u64>)>; TRACKED_SLOTS],
+    index_buffer: Option<(wgpu::Buffer, Range<u64>, wgpu::IndexFormat)>,
+    /// The bind group set at each index, with its dynamic offset if it has one.
+    bind_groups: [Option<(wgpu::BindGroup, Option<u32>)>; TRACKED_SLOTS],
+}
+
+/// Whether a command must set the state `is_set` accepts, which is when
+/// `tracked` holds other or unknown state, or is `None` (untracked). Records
+/// the state `make` returns when it does.
+fn changes<T>(tracked: Option<&mut Option<T>>, is_set: impl FnOnce(&T) -> bool, make: impl FnOnce() -> T) -> bool {
+    let Some(tracked) = tracked else {
+        return true;
+    };
+    if tracked.as_ref().is_some_and(is_set) {
+        return false;
+    }
+    *tracked = Some(make());
+    true
+}
+
+/// A render pass encoder that drops the commands setting state the pass
+/// already has; WebGPU keeps all of it from one draw to the next. What it
+/// knows is the pass's, so it carries over to the pass's next filter.
+pub struct StateFilter<'a> {
+    encoder: RefMut<'a, wgpu::RenderPass<'static>>,
+    state: RefMut<'a, PassState>,
+}
+
+impl StateFilter<'_> {
+    pub fn set_pipeline(&mut self, pipeline: &wgpu::RenderPipeline) {
+        if changes(Some(&mut self.state.pipeline), |set| set == pipeline, || pipeline.clone()) {
+            self.encoder.set_pipeline(pipeline);
+        }
+    }
+
+    pub fn set_viewport(&mut self, x: f32, y: f32, width: f32, height: f32, min_depth: f32, max_depth: f32) {
+        let viewport = [x, y, width, height, min_depth, max_depth].map(f32::to_bits);
+        if changes(Some(&mut self.state.viewport), |set| *set == viewport, || viewport) {
+            self.encoder.set_viewport(x, y, width, height, min_depth, max_depth);
+        }
+    }
+
+    pub fn set_scissor_rect(&mut self, x: u32, y: u32, width: u32, height: u32) {
+        let rect = [x, y, width, height];
+        if changes(Some(&mut self.state.scissor_rect), |set| *set == rect, || rect) {
+            self.encoder.set_scissor_rect(x, y, width, height);
+        }
+    }
+
+    pub fn set_stencil_reference(&mut self, reference: u32) {
+        if changes(Some(&mut self.state.stencil_reference), |set| *set == reference, || reference) {
+            self.encoder.set_stencil_reference(reference);
+        }
+    }
+
+    /// Binds the bytes `range` of `buffer` to vertex buffer `slot`.
+    pub fn set_vertex_buffer(&mut self, slot: u32, buffer: &wgpu::Buffer, range: Range<u64>) {
+        let tracked = self.state.vertex_buffers.get_mut(slot as usize);
+        if changes(tracked, |(b, r)| b == buffer && *r == range, || (buffer.clone(), range.clone())) {
+            self.encoder.set_vertex_buffer(slot, buffer.slice(range));
+        }
+    }
+
+    /// Binds the bytes `range` of `buffer` as the index buffer.
+    pub fn set_index_buffer(&mut self, buffer: &wgpu::Buffer, range: Range<u64>, format: wgpu::IndexFormat) {
+        let tracked = Some(&mut self.state.index_buffer);
+        if changes(
+            tracked,
+            |(b, r, f)| b == buffer && *r == range && *f == format,
+            || (buffer.clone(), range.clone(), format),
+        ) {
+            self.encoder.set_index_buffer(buffer.slice(range), format);
+        }
+    }
+
+    /// Binds `bind_group` at `index`, with `dynamic_offset` if its layout
+    /// has one dynamic offset and `None` if it has none.
+    pub fn set_bind_group(&mut self, index: u32, bind_group: &wgpu::BindGroup, dynamic_offset: Option<u32>) {
+        let tracked = self.state.bind_groups.get_mut(index as usize);
+        if changes(tracked, |(g, o)| g == bind_group && *o == dynamic_offset, || (bind_group.clone(), dynamic_offset)) {
+            self.encoder.set_bind_group(index, bind_group, dynamic_offset.as_slice());
+        }
+    }
+
+    pub fn draw_indexed(&mut self, indices: Range<u32>, base_vertex: i32, instances: Range<u32>) {
+        self.encoder.draw_indexed(indices, base_vertex, instances);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::changes;
+
+    #[test]
+    fn only_new_or_untracked_state_changes() {
+        let mut tracked = None;
+        assert!(changes(Some(&mut tracked), |set| *set == 1, || 1), "unknown state");
+        assert!(!changes(Some(&mut tracked), |set| *set == 1, || 1), "the state already set");
+        assert!(changes(Some(&mut tracked), |set| *set == 2, || 2), "other state");
+        assert_eq!(tracked, Some(2));
+        assert!(changes(None, |set: &i32| *set == 2, || 2), "an untracked slot");
     }
 }

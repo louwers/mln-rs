@@ -33,6 +33,7 @@ pub enum Payload {
 }
 
 impl Payload {
+    #[must_use]
     pub fn len(&self) -> usize {
         match self {
             Payload::Bytes(bytes) => bytes.len(),
@@ -41,11 +42,13 @@ impl Payload {
         }
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 
     /// The bytes in wasm memory: a JS array's, copied.
+    #[must_use]
     pub fn into_vec(self) -> Vec<u8> {
         match self {
             Payload::Bytes(bytes) => bytes,

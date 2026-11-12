@@ -4,7 +4,7 @@
 use feature::{Value as MbglValue, ValueObject};
 use mln_conversion::Convertible;
 
-use crate::expression::{EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
+use crate::expression::{Dependency, EvaluationContext, EvaluationResult, Expression, ExpressionBase, Kind, downcast};
 use crate::parsing_context::{ParseResult, ParsingContext};
 use crate::type_::{self, Type};
 use crate::value::{Value, to_string};
@@ -14,7 +14,7 @@ const CURRENCY_KEY: &str = "currency";
 const MIN_FRACTION_DIGITS_KEY: &str = "min-fraction-digits";
 const MAX_FRACTION_DIGITS_KEY: &str = "max-fraction-digits";
 
-/// `platform::formatNumber` (platform/default/src/mln/i18n/number_format.cpp,
+/// `platform::formatNumber` (`platform/default/src/mln/i18n/number_format.cpp`,
 /// ICU `NumberFormatter`).
 // TODO(port): ICU number formatting. This implements ICU's behaviour for the
 // root/en locales only: the shortest round-trip decimal of the double, rounded
@@ -119,7 +119,7 @@ fn format_number(
     let mut grouped = String::new();
     let int_len = int_part.len();
     for (i, c) in int_part.chars().enumerate() {
-        if i > 0 && (int_len - i) % 3 == 0 {
+        if i > 0 && (int_len - i).is_multiple_of(3) {
             grouped.push(',');
         }
         grouped.push(c);
@@ -144,12 +144,12 @@ fn format_number(
 fn sci_digits(sci: &str) -> (Vec<u8>, i64) {
     let (mantissa, exponent) = sci.split_once('e').unwrap();
     let exponent: i64 = exponent.parse().unwrap();
-    let digits = mantissa.bytes().filter(|b| b.is_ascii_digit()).map(|b| b - b'0').collect();
+    let digits = mantissa.bytes().filter(u8::is_ascii_digit).map(|b| b - b'0').collect();
     (digits, exponent + 1)
 }
 
 /// The shortest round-trip decimal digits of `x`, as double-conversion's
-/// SHORTEST mode (which ICU's DecimalQuantity uses) produces them: when two
+/// SHORTEST mode (which ICU's `DecimalQuantity` uses) produces them: when two
 /// shortest candidates are exactly equally close, the even one (Rust's
 /// formatter may pick the other).
 fn shortest_digits(x: f64) -> (Vec<u8>, i64) {
@@ -160,7 +160,7 @@ fn shortest_digits(x: f64) -> (Vec<u8>, i64) {
     }
     let l = digits.len();
     if exact_point == point && exact.len() == l + 1 && exact[l] == 5 && l <= 17 {
-        let to_int = |d: &[u8]| d.iter().fold(0u64, |a, d| a * 10 + *d as u64);
+        let to_int = |d: &[u8]| d.iter().fold(0u64, |a, d| a * 10 + u64::from(*d));
         let low = to_int(&exact[..l]);
         let shortest = to_int(&digits);
         if shortest == low || shortest == low + 1 {
@@ -191,13 +191,13 @@ pub struct NumberFormat {
     max_fraction_digits: Option<Box<dyn Expression>>,
 }
 
-fn opt_deps(e: &Option<Box<dyn Expression>>) -> crate::expression::Dependency {
-    e.as_ref().map_or(Default::default(), |e| e.dependencies())
+fn opt_deps(e: Option<&dyn Expression>) -> Dependency {
+    e.map_or(Dependency::NONE, Expression::dependencies)
 }
 
-fn opt_equal(l: &Option<Box<dyn Expression>>, r: &Option<Box<dyn Expression>>) -> bool {
+fn opt_equal(l: Option<&dyn Expression>, r: Option<&dyn Expression>) -> bool {
     match (l, r) {
-        (Some(l), Some(r)) => l.equals(&**r),
+        (Some(l), Some(r)) => l.equals(r),
         (None, None) => true,
         _ => false,
     }
@@ -205,10 +205,11 @@ fn opt_equal(l: &Option<Box<dyn Expression>>, r: &Option<Box<dyn Expression>>) -
 
 /// `static_cast<uint8_t>(double)`: through int32 on x86-64.
 fn static_cast_u8(d: f64) -> u8 {
-    (if d > -2147483649.0 && d < 2147483648.0 { d as i32 } else { i32::MIN }) as u8
+    (if d > -2_147_483_649.0 && d < 2_147_483_648.0 { d as i32 } else { i32::MIN }) as u8
 }
 
 impl NumberFormat {
+    #[must_use]
     pub fn new(
         number: Box<dyn Expression>,
         locale: Option<Box<dyn Expression>>,
@@ -217,10 +218,10 @@ impl NumberFormat {
         max_fraction_digits: Option<Box<dyn Expression>>,
     ) -> Self {
         let deps = number.dependencies()
-            | opt_deps(&locale)
-            | opt_deps(&currency)
-            | opt_deps(&min_fraction_digits)
-            | opt_deps(&max_fraction_digits);
+            | opt_deps(locale.as_deref())
+            | opt_deps(currency.as_deref())
+            | opt_deps(min_fraction_digits.as_deref())
+            | opt_deps(max_fraction_digits.as_deref());
         NumberFormat {
             base: ExpressionBase::new(Kind::NumberFormat, Type::String, deps),
             number,
@@ -258,12 +259,11 @@ impl NumberFormat {
 
         let mut parse_option = |key: &str, t: Type, message: &str| -> Result<Option<Box<dyn Expression>>, ()> {
             if let Some(option) = options.object_member(key) {
-                match ctx.parse(&option, 1, Some(t), None) {
-                    Some(r) => Ok(Some(r)),
-                    None => {
-                        ctx.error(message.to_owned());
-                        Err(())
-                    }
+                if let Some(r) = ctx.parse(&option, 1, Some(t), None) {
+                    Ok(Some(r))
+                } else {
+                    ctx.error(message.to_owned());
+                    Err(())
                 }
             } else {
                 Ok(None)
@@ -340,10 +340,10 @@ impl Expression for NumberFormat {
     fn equals(&self, e: &dyn Expression) -> bool {
         if e.get_kind() == Kind::NumberFormat {
             let rhs = downcast::<NumberFormat>(e).expect("NumberFormat");
-            return opt_equal(&self.locale, &rhs.locale)
-                && opt_equal(&self.currency, &rhs.currency)
-                && opt_equal(&self.min_fraction_digits, &rhs.min_fraction_digits)
-                && opt_equal(&self.max_fraction_digits, &rhs.max_fraction_digits)
+            return opt_equal(self.locale.as_deref(), rhs.locale.as_deref())
+                && opt_equal(self.currency.as_deref(), rhs.currency.as_deref())
+                && opt_equal(self.min_fraction_digits.as_deref(), rhs.min_fraction_digits.as_deref())
+                && opt_equal(self.max_fraction_digits.as_deref(), rhs.max_fraction_digits.as_deref())
                 && self.number.equals(&*rhs.number);
         }
         false
@@ -385,11 +385,11 @@ mod tests {
 
     #[test]
     fn icu_like() {
-        assert_eq!(format_number(123456.789, "", "", 0, 3), "123,456.789");
-        assert_eq!(format_number(123456.789, "en-US", "JPY", 0, 3), "¥123,457");
-        assert_eq!(format_number(123456.789, "en-US", "EUR", 0, 3), "€123,456.79");
-        assert_eq!(format_number(987654321.234567, "en-US", "", 15, 20), "987,654,321.234567000000000");
-        assert_eq!(format_number(987654321.234567, "en-US", "", 2, 4), "987,654,321.2346");
+        assert_eq!(format_number(123_456.789, "", "", 0, 3), "123,456.789");
+        assert_eq!(format_number(123_456.789, "en-US", "JPY", 0, 3), "¥123,457");
+        assert_eq!(format_number(123_456.789, "en-US", "EUR", 0, 3), "€123,456.79");
+        assert_eq!(format_number(987_654_321.234_567, "en-US", "", 15, 20), "987,654,321.234567000000000");
+        assert_eq!(format_number(987_654_321.234_567, "en-US", "", 2, 4), "987,654,321.2346");
         assert_eq!(format_number(0.5, "", "", 0, 0), "0");
         assert_eq!(format_number(1.5, "", "", 0, 0), "2");
         assert_eq!(format_number(0.0005, "", "", 0, 3), "0");

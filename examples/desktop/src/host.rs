@@ -80,17 +80,9 @@ pub(crate) enum UserEvent {
     /// thread makes it.
     #[cfg(target_os = "macos")]
     MakeLayer(mpsc::Sender<Result<MetalLayer, String>>),
-    /// The Vulkan instance extensions a surface of the window needs, sent
-    /// back on the channel.
+    /// The window, sent back on the channel, for a backend that makes its
+    /// surface from the window's handles (Vulkan, and OpenGL ES through EGL).
     #[cfg(not(target_vendor = "apple"))]
-    VulkanExtensions(mpsc::Sender<Result<Vec<&'static std::ffi::CStr>, String>>),
-    /// A Vulkan surface for the window, from this instance of this Vulkan
-    /// library, sent back on the channel. The window's thread makes it.
-    #[cfg(not(target_vendor = "apple"))]
-    MakeVulkanSurface(Box<(ash::Entry, ash::Instance)>, mpsc::Sender<Result<ash::vk::SurfaceKHR, String>>),
-    /// The window, sent back on the channel, for a backend that presents to
-    /// it through EGL.
-    #[cfg(target_os = "linux")]
     Window(mpsc::Sender<Arc<Window>>),
     SetTitle(String),
     RequestSize(LogicalSize<f64>),
@@ -101,7 +93,7 @@ pub(crate) enum UserEvent {
 }
 
 /// The messages the render thread hasn't taken yet. Sending one wakes the
-/// render thread's RunLoop.
+/// render thread's `RunLoop`.
 #[derive(Default)]
 pub(crate) struct Inbox {
     messages: Mutex<Vec<Message>>,
@@ -175,13 +167,13 @@ struct Open {
     /// macOS phases each apart, and the map gets one pinch of both.
     pinching: bool,
     rotating: bool,
-    /// The window's CAMetalLayer, made when a backend first asks for it.
+    /// The window's `CAMetalLayer`, made when a backend first asks for it.
     #[cfg(target_os = "macos")]
     metal_layer: Option<MetalLayer>,
 }
 
 impl Open {
-    /// The window's CAMetalLayer, which both backends present to.
+    /// The window's `CAMetalLayer`, which both backends present to.
     #[cfg(target_os = "macos")]
     fn metal_layer(&mut self) -> Result<MetalLayer, String> {
         if let Some(layer) = &self.metal_layer {
@@ -467,15 +459,6 @@ impl ApplicationHandler<UserEvent> for Host {
                 let _ = reply.send(open.metal_layer());
             }
             #[cfg(not(target_vendor = "apple"))]
-            UserEvent::VulkanExtensions(reply) => {
-                let _ = reply.send(crate::vulkan_surface::instance_extensions(&open.window));
-            }
-            #[cfg(not(target_vendor = "apple"))]
-            UserEvent::MakeVulkanSurface(vulkan, reply) => {
-                let (entry, instance) = &*vulkan;
-                let _ = reply.send(crate::vulkan_surface::create_surface(&open.window, entry, instance));
-            }
-            #[cfg(target_os = "linux")]
             UserEvent::Window(reply) => {
                 let _ = reply.send(open.window.clone());
             }

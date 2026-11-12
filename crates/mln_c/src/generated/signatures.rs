@@ -31,6 +31,27 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(mln_delivery_queue, *mut mln_diagnostic) -> mln_status = crate::delivery::mln_delivery_queue_dispatch;
 const _: unsafe extern "C" fn(mln_delivery_queue) = crate::delivery::mln_delivery_queue_release;
 const _: unsafe extern "C" fn(
+    *const mln_gpu_device_options,
+    *mut mln_gpu_device,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_create;
+const _: unsafe extern "C" fn(
+    mln_gpu_device,
+    *mut mln_gpu_device_capabilities,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_get_capabilities;
+const _: unsafe extern "C" fn(
+    mln_gpu_device,
+    *mut mln_gpu_device_vulkan_context_result,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_get_vulkan_context;
+const _: unsafe extern "C" fn(mln_gpu_device) = crate::gpu_device::mln_gpu_device_release;
+const _: unsafe extern "C" fn(
+    *const mln_web_gpu_context_descriptor,
+    *mut mln_gpu_device,
+    *mut mln_diagnostic,
+) -> mln_status = crate::gpu_device::mln_gpu_device_wrap_web_gpu;
+const _: unsafe extern "C" fn(
     *mut mln_http_header_transform_response,
     mln_buffer_view,
     mln_buffer_view,
@@ -109,13 +130,13 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::camera::mln_map_apply_camera_delta;
 const _: unsafe extern "C" fn(
     mln_map,
-    *const mln_offscreen_descriptor,
+    *const mln_render_target,
+    mln_gpu_device,
     *const mln_render_session_attach_options,
-    mln_offscreen_device,
     *mut mln_render_session,
     *const mln_completion,
     *mut mln_diagnostic,
-) -> mln_status = crate::offscreen::mln_map_attach_offscreen;
+) -> mln_status = crate::render_target::mln_map_attach;
 const _: unsafe extern "C" fn(
     mln_map,
     *const mln_completion,
@@ -431,7 +452,7 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::map::mln_map_request_still_image;
 const _: unsafe extern "C" fn(
     mln_map,
-    mln_logical_size,
+    mln_logical_extent,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::map::mln_map_resize;
@@ -645,12 +666,6 @@ const _: unsafe extern "C" fn(
     *mut mln_diagnostic,
 ) -> mln_status = crate::runtime::mln_network_get_status;
 const _: unsafe extern "C" fn(mln_network_status, *mut mln_diagnostic) -> mln_status = crate::runtime::mln_network_set_status;
-const _: unsafe extern "C" fn(
-    *const mln_offscreen_device_options,
-    *mut mln_offscreen_device,
-    *mut mln_diagnostic,
-) -> mln_status = crate::offscreen::mln_offscreen_device_create;
-const _: unsafe extern "C" fn(mln_offscreen_device) = crate::offscreen::mln_offscreen_device_release;
 const _: unsafe extern "C" fn() -> mln_open_gl_context_provider_flags = crate::render_target::mln_open_gl_supported_context_provider_mask;
 const _: unsafe extern "C" fn(
     *const mln_plugin_descriptor_v1,
@@ -776,7 +791,7 @@ const _: unsafe extern "C" fn(
 ) -> mln_status = crate::render_session::mln_render_session_release_target;
 const _: unsafe extern "C" fn(
     mln_render_session,
-    mln_logical_size,
+    mln_logical_extent,
     *const mln_completion,
     *mut mln_diagnostic,
 ) -> mln_status = crate::render_session::mln_render_session_resize;
@@ -786,6 +801,12 @@ const _: unsafe extern "C" fn(
     mln_frame_pacer,
     *mut mln_diagnostic,
 ) -> mln_status = crate::render_session::mln_render_session_set_frame_pacer;
+const _: unsafe extern "C" fn(
+    mln_render_session,
+    *const mln_render_target,
+    *const mln_completion,
+    *mut mln_diagnostic,
+) -> mln_status = crate::render_target::mln_render_session_set_target;
 const _: unsafe extern "C" fn(
     mln_resource_request,
     *const mln_resource_response,

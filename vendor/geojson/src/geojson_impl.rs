@@ -280,7 +280,7 @@ pub fn convert_feature(json: &Json) -> Result<Feature<f64>> {
 }
 
 /// `convert<feature_collection>`: the generic container conversion, i.e. a
-/// JSON array of features (not a "FeatureCollection" object).
+/// JSON array of features (not a "`FeatureCollection`" object).
 pub fn convert_feature_collection(json: &Json) -> Result<FeatureCollection<f64>> {
     convert_container(json, convert_feature)
 }
@@ -462,7 +462,8 @@ fn write_feature(w: &mut Writer, feature: &Feature<f64>) -> bool {
         return false;
     }
 
-    if !matches!(feature.id, Identifier::Null) && !(w.key("id") && write_identifier(w, &feature.id)) {
+    let id_written = matches!(feature.id, Identifier::Null) || (w.key("id") && write_identifier(w, &feature.id));
+    if !id_written {
         return false;
     }
 
@@ -492,6 +493,7 @@ fn write_geojson(w: &mut Writer, geojson: &GeoJSON) -> bool {
 }
 
 /// `stringify(const geojson&)`
+#[must_use]
 pub fn stringify(geojson: &GeoJSON) -> String {
     let mut w = Writer::new();
     write_geojson(&mut w, geojson);
@@ -499,6 +501,7 @@ pub fn stringify(geojson: &GeoJSON) -> String {
 }
 
 /// `stringify<geometry>`
+#[must_use]
 pub fn stringify_geometry(geometry: &Geometry<f64>) -> String {
     let mut w = Writer::new();
     write_geometry(&mut w, geometry);
@@ -506,6 +509,7 @@ pub fn stringify_geometry(geometry: &Geometry<f64>) -> String {
 }
 
 /// `stringify<feature>`
+#[must_use]
 pub fn stringify_feature(feature: &Feature<f64>) -> String {
     let mut w = Writer::new();
     write_feature(&mut w, feature);
@@ -513,6 +517,7 @@ pub fn stringify_feature(feature: &Feature<f64>) -> String {
 }
 
 /// `stringify<feature_collection>`
+#[must_use]
 pub fn stringify_feature_collection(collection: &[Feature<f64>]) -> String {
     let mut w = Writer::new();
     write_feature_collection(&mut w, collection);
@@ -552,6 +557,7 @@ fn json_coordinates_or_geometries(geometry: &Geometry<f64>) -> Json {
 }
 
 /// `convert<geometry>(element, allocator)`
+#[must_use]
 pub fn to_json_geometry(geometry: &Geometry<f64>) -> Json {
     if let Geometry::Empty = geometry {
         return Json::Null;
@@ -591,6 +597,7 @@ fn json_identifier(id: &Identifier) -> Json {
 }
 
 /// `convert<feature>(element, allocator)`
+#[must_use]
 pub fn to_json_feature(feature: &Feature<f64>) -> Json {
     let mut result = serde_json::Map::new();
     result.insert("type".to_owned(), Json::String("Feature".to_owned()));
@@ -611,6 +618,7 @@ pub fn to_json_feature_collection(collection: &[Feature<f64>]) -> Json {
 }
 
 /// `convert(const geojson&, allocator)`
+#[must_use]
 pub fn to_json(geojson: &GeoJSON) -> Json {
     match geojson {
         GeoJSON::Geometry(g) => to_json_geometry(g),

@@ -18,6 +18,8 @@ pub struct Settings {
     pub max_pitch: f64,
     pub debug: u32,
     pub online: bool,
+    /// Drags and zooms on the globe turn the bearing with the planet.
+    pub free_bearing: bool,
 }
 
 impl Default for Settings {
@@ -34,6 +36,7 @@ impl Default for Settings {
             max_pitch: mln_math::rad2deg(DEFAULT_PITCH_MAX),
             debug: 0,
             online: true,
+            free_bearing: false,
         }
     }
 }

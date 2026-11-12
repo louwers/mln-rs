@@ -26,7 +26,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
-use mln_gfx::globe_clip_mask::GlobeClipMask;
+use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::rendering_stats::RenderingStats;
@@ -43,10 +43,10 @@ use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUnifor
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
-use mln_tile_id::CanonicalTileID;
 use mln_util::range::Range;
 use mln_util::size::Size;
 
+use crate::bind_groups::{BindGroupCache, IndexTable};
 use crate::command_encoder::CommandEncoder;
 use crate::drawable_builder::DrawableBuilder;
 use crate::layer_group::LayerGroup;
@@ -92,6 +92,10 @@ pub struct Context {
     dummy_vertex_buffers: RefCell<HashMap<AttributeDataType, (usize, UniqueVertexBufferResource)>>,
     /// Command buffers the command encoders have submitted.
     submissions: Cell<u64>,
+    /// The group of `globalIndex`, made with the first shader that needs it.
+    index_table: RefCell<Option<IndexTable>>,
+    /// The bind groups drawables share.
+    bind_groups: BindGroupCache,
 }
 
 /// `clipMaskStencilMode`
@@ -130,7 +134,37 @@ impl Context {
             globe_clip_mask_pipeline_hash: Cell::new(None),
             globe_clip_meshes: RefCell::new(BTreeMap::new()),
             submissions: Cell::new(0),
+            index_table: RefCell::new(None),
+            bind_groups: BindGroupCache::default(),
         })
+    }
+
+    /// The layout of the group that holds only `globalIndex`, which every
+    /// shader with one shares (see `ShaderProgram::get_index_group`).
+    pub(crate) fn index_bind_group_layout(&self) -> Option<wgpu::BindGroupLayout> {
+        let device = self.backend.get_device()?;
+        let mut table = self.index_table.borrow_mut();
+        Some(table.get_or_insert_with(|| IndexTable::new(&device)).layout().clone())
+    }
+
+    /// The bind group of the index group, and the dynamic offset that
+    /// selects `index`.
+    pub(crate) fn index_bind_group(&self, index: u32) -> Option<(wgpu::BindGroup, u32)> {
+        let device = self.backend.get_device()?;
+        let mut table = self.index_table.borrow_mut();
+        let table = table.get_or_insert_with(|| IndexTable::new(&device));
+        if let Some((replaced, size)) = table.reserve(&device, index) {
+            if replaced > 0 {
+                self.count_buffer_released(replaced);
+            }
+            self.count_buffer_created(size);
+        }
+        table.get(index).map(|(bind_group, offset)| (bind_group.clone(), offset))
+    }
+
+    /// The bind groups drawables share.
+    pub(crate) fn bind_groups(&self) -> &BindGroupCache {
+        &self.bind_groups
     }
 
     /// How many command buffers the command encoders have submitted,
@@ -216,7 +250,7 @@ impl Context {
     }
 
     /// A buffer holding `data` (zero padded to 4 bytes), as `createBuffer`
-    /// makes one (usage | CopyDst, initial queue write).
+    /// makes one (usage | `CopyDst`, initial queue write).
     fn create_raw_buffer(&self, data: &[u8], usage: wgpu::BufferUsages) -> Option<(wgpu::Buffer, u64)> {
         let device = self.backend.get_device()?;
         let padded_size = (data.len() + 3) & !3usize;
@@ -234,7 +268,7 @@ impl Context {
     }
 
     /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four
-    /// corners of the tile extent as short2 (inlined: RenderStaticData is a
+    /// corners of the tile extent as short2 (inlined: `RenderStaticData` is a
     /// renderer type).
     pub fn get_tile_vertex_buffer(&self) -> Option<(wgpu::Buffer, u64)> {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
@@ -306,7 +340,7 @@ impl Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         if masks.is_empty() {
             return true;
@@ -757,7 +791,7 @@ impl GfxContext for Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
     }

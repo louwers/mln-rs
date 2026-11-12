@@ -35,6 +35,7 @@ pub struct IndexVectorBase {
 pub type IndexVectorBasePtr = Rc<RefCell<IndexVectorBase>>;
 
 impl IndexVectorBase {
+    #[must_use]
     pub fn new(indexes: Vec<u16>) -> Self {
         IndexVectorBase {
             v: indexes,
@@ -48,6 +49,7 @@ impl IndexVectorBase {
     }
 
     /// The C++ copy constructor: the buffer is not copied.
+    #[must_use]
     pub fn copy(&self) -> Self {
         IndexVectorBase {
             v: self.v.clone(),
@@ -62,6 +64,7 @@ impl IndexVectorBase {
 
     /// A vector holding `indexes` that will not be updated (`release()`d):
     /// its CPU copy is freed once it is uploaded.
+    #[must_use]
     pub fn new_released(indexes: Vec<u16>) -> Self {
         let mut result = IndexVectorBase::new(indexes);
         result.release();
@@ -72,6 +75,7 @@ impl IndexVectorBase {
     /// upload pass writes to the GPU from there. Released, it frees them once
     /// it is uploaded, so no buffer is ever updated from them.
     #[cfg(target_family = "wasm")]
+    #[must_use]
     pub fn from_host_released(indexes: HostBytes) -> Self {
         debug_assert!(indexes.len().is_multiple_of(size_of::<u16>()));
         let mut result = IndexVectorBase::new(Vec::new());
@@ -83,11 +87,16 @@ impl IndexVectorBase {
     /// Port-only: the indexes while they are in a JS array rather than in
     /// wasm memory (`data` is empty then), until they are freed after upload.
     #[cfg(target_family = "wasm")]
+    #[must_use]
     pub fn host_data(&self) -> Option<&HostBytes> {
         self.host.as_ref()
     }
 
     /// The index count in a JS array.
+    #[cfg_attr(
+        not(target_family = "wasm"),
+        expect(clippy::unused_self, reason = "only the wasm build keeps indexes in a JS array")
+    )]
     fn host_count(&self) -> usize {
         #[cfg(target_family = "wasm")]
         if let Some(bytes) = &self.host {
@@ -96,12 +105,14 @@ impl IndexVectorBase {
         0
     }
 
+    #[must_use]
     pub fn get_buffer(&self) -> Option<&dyn IndexBufferBase> {
         self.buffer.as_deref()
     }
     pub fn set_buffer(&mut self, value: Option<Box<dyn IndexBufferBase>>) {
         self.buffer = value;
     }
+    #[must_use]
     pub fn get_dirty(&self) -> bool {
         self.dirty
     }
@@ -112,6 +123,7 @@ impl IndexVectorBase {
             self.free_raw_data();
         }
     }
+    #[must_use]
     pub fn is_released(&self) -> bool {
         self.released
     }
@@ -128,16 +140,20 @@ impl IndexVectorBase {
         self.dirty = true;
         &mut self.v[n]
     }
+    #[must_use]
     pub fn at(&self, n: usize) -> u16 {
         self.v[n]
     }
     /// The element count, which stays when the CPU copy is freed.
+    #[must_use]
     pub fn elements(&self) -> usize {
         self.v.len() + self.host_count() + self.freed_count
     }
+    #[must_use]
     pub fn bytes(&self) -> usize {
         self.elements() * std::mem::size_of::<u16>()
     }
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.elements() == 0
     }
@@ -169,9 +185,11 @@ impl IndexVectorBase {
     }
     /// The CPU copy of the indexes, empty once it is freed after upload or
     /// while the indexes are in a JS array.
+    #[must_use]
     pub fn data(&self) -> &[u16] {
         &self.v
     }
+    #[must_use]
     pub fn vector(&self) -> &Vec<u16> {
         &self.v
     }
@@ -179,7 +197,7 @@ impl IndexVectorBase {
     /// `IndexVector<DrawMode>::emplace_back(args...)`: the argument count must
     /// be a multiple of the draw mode's group size.
     pub fn emplace_back_group(&mut self, mode: DrawMode, indexes: &[u16]) {
-        debug_assert!(indexes.len() % mode.buffer_group_size() == 0, "wrong buffer element count");
+        debug_assert!(indexes.len().is_multiple_of(mode.buffer_group_size()), "wrong buffer element count");
         debug_assert!(!self.released);
         self.v.extend_from_slice(indexes);
         self.dirty = true;

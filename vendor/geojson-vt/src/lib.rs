@@ -30,6 +30,7 @@ use geojson::{FeatureCollection, GeoJSON};
 pub use tile::Tile;
 
 /// `ToFeatureCollection`
+#[must_use]
 pub fn to_feature_collection(geojson: &GeoJSON) -> FeatureCollection<f64> {
     match geojson {
         GeoJSON::FeatureCollection(value) => value.clone(),
@@ -77,7 +78,7 @@ impl Default for Options {
             tile: TileOptions::default(),
             max_zoom: 18,
             index_max_zoom: 5,
-            index_max_points: 100000,
+            index_max_points: 100_000,
             generate_id: false,
         }
     }
@@ -87,6 +88,7 @@ impl Default for Options {
 pub static EMPTY_TILE: Tile = Tile { features: Vec::new(), num_points: 0, num_simplified: 0 };
 
 /// `toID(z, x, y)`
+#[must_use]
 pub fn to_id(z: u8, x: u32, y: u32) -> u64 {
     1u64.wrapping_shl(u32::from(z))
         .wrapping_mul(u64::from(y))
@@ -96,6 +98,7 @@ pub fn to_id(z: u8, x: u32, y: u32) -> u64 {
 }
 
 /// `geoJSONToTile(geojson, z, x, y, options, wrap, clip)`
+#[must_use]
 pub fn geojson_to_tile(
     geojson: &GeoJSON,
     z: u8,
@@ -148,6 +151,7 @@ pub struct GeoJSONVT {
 
 impl GeoJSONVT {
     /// `GeoJSONVT(const feature_collection&, const Options&)`
+    #[must_use]
     pub fn new(features: &FeatureCollection<f64>, options: Options) -> Self {
         let mut vt = GeoJSONVT { options, stats: BTreeMap::new(), total: 0, tiles: HashMap::new() };
 
@@ -169,6 +173,7 @@ impl GeoJSONVT {
     }
 
     /// `GeoJSONVT(const geojson&, const Options&)`
+    #[must_use]
     pub fn from_geojson(geojson: &GeoJSON, options: Options) -> Self {
         Self::new(&to_feature_collection(geojson), options)
     }
@@ -211,6 +216,7 @@ impl GeoJSONVT {
     }
 
     /// `getInternalTiles()`
+    #[must_use]
     pub fn get_internal_tiles(&self) -> &HashMap<u64, InternalTile> {
         &self.tiles
     }

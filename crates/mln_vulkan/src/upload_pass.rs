@@ -13,7 +13,6 @@ use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescr
 use mln_gfx::debug_group::DebugGroupTarget;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::index_vector::IndexVectorBase;
-use mln_gfx::renderable::Renderable;
 use mln_gfx::types::BufferUsageType;
 use mln_gfx::upload_pass;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
@@ -43,7 +42,8 @@ impl VertexBufferBase for VertexBuffer {
 }
 
 impl UploadPass {
-    pub fn new(_renderable: &dyn Renderable, command_encoder: &CommandEncoder, name: &str) -> Self {
+    #[must_use]
+    pub fn new(command_encoder: &CommandEncoder, name: &str) -> Self {
         let pass = UploadPass {
             context: command_encoder.get_context().clone(),
             command_buffer: command_encoder.get_command_buffer(),
@@ -53,6 +53,7 @@ impl UploadPass {
         pass
     }
 
+    #[must_use]
     pub fn vulkan_context(&self) -> &Rc<Context> {
         &self.context
     }
@@ -67,6 +68,7 @@ impl UploadPass {
     }
 
     /// An index buffer of `indexes`.
+    #[must_use]
     pub fn create_index_buffer_of(&self, indexes: &IndexVectorBase) -> Box<dyn vertex_buffer::IndexBufferResource> {
         upload_pass::UploadPass::create_index_buffer_resource(
             self,
@@ -79,6 +81,7 @@ impl UploadPass {
     /// `getBuffer(const VertexVectorBasePtr&, usage, forceUpdate)`: the
     /// buffer of a shared vertex vector. A vector that changed gets a new
     /// buffer: the frames in flight may still read the old one.
+    #[must_use]
     pub fn get_buffer(&self, vec: Option<&VertexVectorBasePtr>) -> Option<UniqueVertexBufferResource> {
         let vec = vec?;
         let raw_size = vec.get_raw_count() * vec.get_raw_size();

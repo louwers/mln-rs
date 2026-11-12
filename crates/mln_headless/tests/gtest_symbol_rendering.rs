@@ -11,7 +11,7 @@ use std::time::{Duration as StdDuration, Instant};
 
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::{BackendScope, ContextMode, ScopeType, SwapBehaviour};
+use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::UpdateReader;
@@ -103,13 +103,7 @@ struct TimedHeadlessFrontend {
 impl TimedHeadlessFrontend {
     fn new() -> Self {
         TimedHeadlessFrontend {
-            frontend: HeadlessFrontend::with_options(
-                Size::new(256, 256),
-                1.0,
-                SwapBehaviour::NoFlush,
-                ContextMode::Unique,
-                false,
-            ),
+            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false).expect("a headless frontend"),
             updates: Rc::default(),
         }
     }
@@ -119,8 +113,8 @@ impl TimedHeadlessFrontend {
         let mut parameters = (*update.parameters).clone();
         parameters.time_point = time;
         let parameters = Arc::new(parameters);
+        self.frontend.render_update(&parameters);
         let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
-        self.frontend.with_renderer(|renderer| renderer.render(&parameters));
         RenderResult { image: self.frontend.read_still_image(), stats: stats(&self.frontend) }
     }
 }
@@ -159,7 +153,13 @@ struct SymbolRenderingTest<F> {
 
 impl SymbolRenderingTest<HeadlessFrontend> {
     fn new(count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
-        Self::with_frontend(|| HeadlessFrontend::new(Size::new(256, 256), 1.0), count, spacing, kind, mode)
+        Self::with_frontend(
+            || HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend"),
+            count,
+            spacing,
+            kind,
+            mode,
+        )
     }
 
     fn render(&self) -> RenderResult {
@@ -192,8 +192,8 @@ impl<F: Frontend> SymbolRenderingTest<F> {
         map.style_mut().add_image(marker(kind == SymbolKind::SdfIcon));
         map.jump_to(&camera().with_center(Some(lat_lng(5.0, 5.0))).with_zoom(Some(4.0)));
         let map = Rc::new(RefCell::new(map));
-        let _events = observer.observe(&map);
-        SymbolRenderingTest { _events, run_loop, frontend, observer, map }
+        let events = observer.observe(&map);
+        SymbolRenderingTest { _events: events, run_loop, frontend, observer, map }
     }
 
     fn jump_to(&self, camera: CameraOptions) {
@@ -234,7 +234,7 @@ fn collision_visibility_updates_existing_drawables() {
     test.jump_to(camera().with_zoom(Some(4.1)));
     let overlapping_again = test.render();
     assert_eq!(overlapping_again.stats.num_draw_calls, 1);
-    assert!(overlapping.image == overlapping_again.image);
+    assert_eq!(overlapping.image, overlapping_again.image);
 }
 
 /// Runs the loop until `done` or ten seconds pass, so that a test fails
@@ -383,7 +383,7 @@ fn collision_fade_intermediate_frames() {
     assert_eq!(alpha_at_symbol(&fade_out_middle.image, 5.0), 255);
     let hidden = frame(2600);
     assert_eq!(hidden.stats.num_draw_calls, 1);
-    assert!(hidden.image == fade_out_end.image);
+    assert_eq!(hidden.image, fade_out_end.image);
 
     test.jump_to(camera().with_bearing(Some(0.0)));
     let fade_in_start = frame(3000);
@@ -395,7 +395,7 @@ fn collision_fade_intermediate_frames() {
     assert!(alpha_at_symbol(&fade_in_middle.image, 5.5).abs_diff(128) <= 2);
     assert_eq!(alpha_at_symbol(&fade_in_end.image, 5.5), 255);
     assert_eq!(alpha_at_symbol(&fade_in_middle.image, 5.0), 255);
-    assert!(fade_in_end.image == initial.image);
+    assert_eq!(fade_in_end.image, initial.image);
 }
 
 // gtest: SymbolRendering.FullyHiddenLayerCanReappear
@@ -409,7 +409,7 @@ fn fully_hidden_layer_can_reappear() {
     test.map.borrow_mut().style_mut().add_layer(Box::new(blocker), None).unwrap();
     let hidden = test.render();
     assert_eq!(hidden.stats.num_draw_calls, 1);
-    assert!(initial.image == hidden.image);
+    assert_eq!(initial.image, hidden.image);
 
     test.map
         .borrow_mut()
@@ -419,5 +419,5 @@ fn fully_hidden_layer_can_reappear() {
         .set_visibility(VisibilityType::None);
     let visible = test.render();
     assert_eq!(visible.stats.num_draw_calls, 1);
-    assert!(initial.image == visible.image);
+    assert_eq!(initial.image, visible.image);
 }

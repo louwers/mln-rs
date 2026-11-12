@@ -68,10 +68,10 @@ impl ProxyFileSource {
         file_sources: &FileSourceManager,
         resource_options: &ResourceOptions,
     ) -> Self {
-        if OFFLINE.load(Ordering::SeqCst) {
-            if let Some(dbfs) = file_sources.get_file_source(FileSourceType::Database, resource_options) {
-                dbfs.set_property(READ_ONLY_MODE_KEY, &Value::Bool(true));
-            }
+        if OFFLINE.load(Ordering::SeqCst)
+            && let Some(dbfs) = file_sources.get_file_source(FileSourceType::Database, resource_options)
+        {
+            dbfs.set_property(READ_ONLY_MODE_KEY, &Value::Bool(true));
         }
         ProxyFileSource { default_resource_loader, resource_options: Mutex::new(resource_options.clone()) }
     }
@@ -134,18 +134,20 @@ impl FileSource for ProxyFileSource {
         // This is needed for compatibility with the style tests that are
         // using local:// instead of http:// which is the schema we support
         // for cached files.
-        if replace_prefix(&mut transformed.url, "local://") && transformed.kind == Kind::Tile {
-            if let Some(tile_data) = &mut transformed.tile_data {
-                // C++ replaces the first 8 characters unconditionally.
-                tile_data.url_template.replace_range(..8.min(tile_data.url_template.len()), "http://");
-            }
+        if replace_prefix(&mut transformed.url, "local://")
+            && transformed.kind == Kind::Tile
+            && let Some(tile_data) = &mut transformed.tile_data
+        {
+            // C++ replaces the first 8 characters unconditionally.
+            tile_data.url_template.replace_range(..8.min(tile_data.url_template.len()), "http://");
         }
 
-        if replace_prefix(&mut transformed.url, "http://localhost:2900/") && transformed.kind == Kind::Tile {
-            if let Some(tile_data) = &mut transformed.tile_data {
-                // C++ replaces the first 22 characters unconditionally.
-                tile_data.url_template.replace_range(..22.min(tile_data.url_template.len()), "http://");
-            }
+        if replace_prefix(&mut transformed.url, "http://localhost:2900/")
+            && transformed.kind == Kind::Tile
+            && let Some(tile_data) = &mut transformed.tile_data
+        {
+            // C++ replaces the first 22 characters unconditionally.
+            tile_data.url_template.replace_range(..22.min(tile_data.url_template.len()), "http://");
         }
 
         let number = track(&transformed.url);
@@ -190,6 +192,7 @@ impl FileSource for ProxyFileSource {
 
 /// File sources whose `ResourceLoader` is a [`ProxyFileSource`] over the
 /// default one (`TestRunner::registerProxyFileSource()`).
+#[must_use]
 pub fn proxy_file_sources() -> FileSourceManager {
     let file_sources = FileSourceManager::new();
     let resource_loader_factory = file_sources

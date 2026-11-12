@@ -73,7 +73,7 @@ fn compound_read(com: CompoundRead, s: &[u8], encoded: usize, unicode: &mut u32,
 }
 
 /// `_compound_weight`.
-fn _compound_weight(mut w: i32, encoded: &mut usize, s: &[u8], com: CompoundRead, tail: &mut Tail) -> i32 {
+fn compound_weight(mut w: i32, encoded: &mut usize, s: &[u8], com: CompoundRead, tail: &mut Tail) -> i32 {
     let mut tailp = *tail;
 
     let mut p = *encoded;
@@ -130,8 +130,8 @@ fn _compound_weight(mut w: i32, encoded: &mut usize, s: &[u8], com: CompoundRead
     new_w
 }
 
-/// `_nu_strcoll` with NU_UNLIMITED limits and no collated-length outputs.
-fn _nu_strcoll(lhs: &[u8], rhs: &[u8], com1: CompoundRead, com2: CompoundRead) -> i32 {
+/// `_nu_strcoll` with `NU_UNLIMITED` limits and no collated-length outputs.
+fn collate(lhs: &[u8], rhs: &[u8], com1: CompoundRead, com2: CompoundRead) -> i32 {
     let mut cmp = 0;
 
     let (mut lp, mut rp) = (0usize, 0usize);
@@ -149,11 +149,11 @@ fn _nu_strcoll(lhs: &[u8], rhs: &[u8], com1: CompoundRead, com2: CompoundRead) -
         let mut w2 = nu_ducet_weight(u2, None);
 
         if w1 < 0 {
-            w1 = _compound_weight(w1, &mut lp, lhs, com1, &mut ltailp);
+            w1 = compound_weight(w1, &mut lp, lhs, com1, &mut ltailp);
         }
 
         if w2 < 0 {
-            w2 = _compound_weight(w2, &mut rp, rhs, com2, &mut rtailp);
+            w2 = compound_weight(w2, &mut rp, rhs, com2, &mut rtailp);
         }
 
         debug_assert!(w1 >= 0);
@@ -179,12 +179,14 @@ fn _nu_strcoll(lhs: &[u8], rhs: &[u8], com1: CompoundRead, com2: CompoundRead) -
 }
 
 /// `nu_strcoll(s1, s2, nu_utf8_read, nu_utf8_read)` on 0-terminated UTF-8.
+#[must_use]
 pub fn nu_strcoll(s1: &[u8], s2: &[u8]) -> i32 {
-    _nu_strcoll(s1, s2, CompoundRead::Default, CompoundRead::Default)
+    collate(s1, s2, CompoundRead::Default, CompoundRead::Default)
 }
 
 /// `nu_strcasecoll(s1, s2, nu_utf8_read, nu_utf8_read)` on 0-terminated
 /// UTF-8.
+#[must_use]
 pub fn nu_strcasecoll(s1: &[u8], s2: &[u8]) -> i32 {
-    _nu_strcoll(s1, s2, CompoundRead::Nocase, CompoundRead::Nocase)
+    collate(s1, s2, CompoundRead::Nocase, CompoundRead::Nocase)
 }

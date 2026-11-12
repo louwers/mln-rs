@@ -78,6 +78,7 @@ pub struct Drawable {
 }
 
 impl Drawable {
+    #[must_use]
     pub fn new(name: String) -> Self {
         Drawable {
             base: DrawableBase::new(name),
@@ -104,6 +105,8 @@ impl Drawable {
 
     /// `upload(gfx::UploadPass&)`
     pub fn upload(&mut self, upload_pass: &UploadPass) {
+        const USAGE: BufferUsageType = BufferUsageType::StaticDraw;
+
         if self.base.is_custom {
             return;
         }
@@ -119,7 +122,6 @@ impl Drawable {
             return;
         };
         let context = upload_pass.gl_context();
-        const USAGE: BufferUsageType = BufferUsageType::StaticDraw;
 
         // Create an index buffer if necessary
         let Some(indexes) = self.impl_.indexes.clone() else {

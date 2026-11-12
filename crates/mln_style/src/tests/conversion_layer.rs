@@ -93,7 +93,7 @@ fn object_member_len(value: &Value, member: &str) -> usize {
     }
 }
 
-/// `stringifyLayer(value)` (a PrettyWriter in C++; the text only feeds the
+/// `stringifyLayer(value)` (a `PrettyWriter` in C++; the text only feeds the
 /// round trip, so its whitespace does not matter).
 fn stringify_layer(value: &Value) -> String {
     serde_json::to_string_pretty(&value_to_json(value)).unwrap()
@@ -180,11 +180,11 @@ fn set_generic_properties() {
     assert_eq!("poi", layer.get_source_layer());
 
     // `JSValue(1.0f)`: a float widened to double.
-    let new_min_zoom = serde_json::json!(1.0_f32 as f64);
+    let new_min_zoom = serde_json::json!(f64::from(1.0_f32));
     layer.set_property("minzoom", &Convertible::from(&new_min_zoom), None);
     assert_eq!(1.0_f32, layer.get_min_zoom());
 
-    let new_max_zoom = serde_json::json!(22.0_f32 as f64);
+    let new_max_zoom = serde_json::json!(f64::from(22.0_f32));
     layer.set_property("maxzoom", &Convertible::from(&new_max_zoom), None);
     assert_eq!(22.0_f32, layer.get_max_zoom());
 }

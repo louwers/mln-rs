@@ -9,6 +9,7 @@
 // `--self-check` replaces rendering with the test's expected image.
 
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -371,6 +372,7 @@ pub struct TestRunner {
 }
 
 impl TestRunner {
+    #[must_use]
     pub fn new(
         manifest: Manifest,
         update_results: UpdateResults,
@@ -400,6 +402,7 @@ impl TestRunner {
         self.watchdog = limit.map(crate::watchdog::Watchdog::new);
     }
 
+    #[must_use]
     pub fn get_manifest(&self) -> &Manifest {
         &self.manifest
     }
@@ -429,13 +432,13 @@ impl TestRunner {
     /// `checkQueryTestResults`.
     fn check_query_test_results(
         &self,
-        actual_image: PremultipliedImage,
-        features: Vec<Feature>,
+        actual_image: &PremultipliedImage,
+        features: &[Feature],
         metadata: &mut TestMetadata,
     ) {
         let expectations = metadata.paths.expectations.clone();
 
-        metadata.actual = encode_png(&actual_image);
+        metadata.actual = encode_png(actual_image);
 
         if actual_image.size.is_empty() {
             metadata.error_message = "Invalid size for actual image".to_string();
@@ -443,7 +446,7 @@ impl TestRunner {
             return;
         }
 
-        metadata.actual_json = to_json_features(&features);
+        metadata.actual_json = to_json_features(features);
 
         if metadata.actual_json.is_empty() {
             metadata.error_message = "Invalid size for actual JSON".to_string();
@@ -502,11 +505,11 @@ impl TestRunner {
     }
 
     /// `checkRenderTestResults`.
-    pub fn check_render_test_results(&self, actual_image: PremultipliedImage, metadata: &mut TestMetadata) {
+    pub fn check_render_test_results(&self, actual_image: &PremultipliedImage, metadata: &mut TestMetadata) {
         let expectations = metadata.paths.expectations.clone();
 
         if metadata.outputs_image {
-            metadata.actual = encode_png(&actual_image);
+            metadata.actual = encode_png(actual_image);
 
             if actual_image.size.is_empty() {
                 metadata.error_message = "Invalid size for actual image".to_string();
@@ -607,6 +610,14 @@ impl TestRunner {
 
     /// `checkProbingResults`.
     pub fn check_probing_results(&self, result_metadata: &mut TestMetadata) {
+        fn append(metadata: &mut TestMetadata, s: &str) {
+            if metadata.error_message.is_empty() {
+                metadata.error_message += s;
+            } else {
+                let _ = write!(metadata.error_message, "\n{s}");
+            }
+        }
+
         if result_metadata.metrics.is_empty() {
             return;
         }
@@ -660,14 +671,6 @@ impl TestRunner {
             return;
         }
 
-        fn append(metadata: &mut TestMetadata, s: &str) {
-            if metadata.error_message.is_empty() {
-                metadata.error_message += s;
-            } else {
-                metadata.error_message += &format!("\n{s}");
-            }
-        }
-
         // Check file size metrics.
         let check_file_size = |metadata: &mut TestMetadata| {
             if metadata.metrics.file_size.is_empty() {
@@ -713,7 +716,8 @@ impl TestRunner {
                 let mut error_stream = String::new();
                 let (passed, delta) = MemoryProbe::check_peak(&expected, &actual);
                 if !passed {
-                    error_stream += &format!(
+                    let _ = write!(
+                        error_stream,
                         "Allocated memory peak size at probe \"{key}\" is {} bytes, expected is {}±{} bytes.",
                         actual.peak,
                         expected.peak,
@@ -724,7 +728,8 @@ impl TestRunner {
 
                 let (passed, delta) = MemoryProbe::check_allocations(&expected, &actual);
                 if !passed {
-                    error_stream += &format!(
+                    let _ = write!(
+                        error_stream,
                         "Number of allocations at probe \"{key}\" is {}, expected is {}±{} allocations.",
                         actual.allocations,
                         expected.allocations,
@@ -750,14 +755,16 @@ impl TestRunner {
                 };
                 let mut ss = String::new();
                 if actual.requests != expected.requests {
-                    ss += &format!(
+                    let _ = write!(
+                        ss,
                         "Number of requests at probe \"{key}\" is {}, expected is {}. ",
                         actual.requests, expected.requests
                     );
                     metadata.metrics_failed += 1;
                 }
                 if actual.transferred != expected.transferred {
-                    ss += &format!(
+                    let _ = write!(
+                        ss,
                         "Transferred data at probe \"{key}\" is {} bytes, expected is {} bytes.",
                         actual.transferred, expected.transferred
                     );
@@ -779,7 +786,8 @@ impl TestRunner {
                 };
                 let mut ss = String::new();
                 if !check_value(expected.average, actual.average, expected.tolerance).0 {
-                    ss += &format!(
+                    let _ = write!(
+                        ss,
                         "Average fps at probe \"{key}\" is {}, expected to be {} with tolerance of {}",
                         ostream_float(f64::from(actual.average)),
                         ostream_float(f64::from(expected.average)),
@@ -788,7 +796,8 @@ impl TestRunner {
                     metadata.metrics_failed += 1;
                 }
                 if !check_value(expected.min_one_pc, actual.min_one_pc, expected.tolerance).0 {
-                    ss += &format!(
+                    let _ = write!(
+                        ss,
                         "Minimum(1%) fps at probe \"{key}\" is {}, expected to be {} with tolerance of {}",
                         ostream_float(f64::from(actual.min_one_pc)),
                         ostream_float(f64::from(expected.min_one_pc)),
@@ -805,7 +814,7 @@ impl TestRunner {
                 return;
             }
             for (probe_name, expected_value) in metadata.expected_metrics.gfx.clone() {
-                let Some(actual_value) = metadata.metrics.gfx.get(&probe_name).cloned() else {
+                let Some(actual_value) = metadata.metrics.gfx.get(&probe_name).copied() else {
                     metadata.error_message = format!("Failed to find gfx probe: {probe_name}");
                     metadata.metrics_errored += 1;
                     return;
@@ -1053,9 +1062,9 @@ impl TestRunner {
                 self.check_probing_results(metadata);
             }
             Self::append_label_cut_off_results(metadata, &cut_off_labels_report, &duplications_report);
-            self.check_render_test_results(result_image, metadata);
+            self.check_render_test_results(&result_image, metadata);
         } else if metadata.render_errored == 0 {
-            self.check_query_test_results(result_image, features, metadata);
+            self.check_query_test_results(&result_image, &features, metadata);
         }
     }
 }
@@ -1102,12 +1111,11 @@ fn get_tile_screen_pixel_size(pixel_ratio: f32) -> u32 {
 
 /// `getImageTileOffset(dims, dim, pixelRatio)`.
 fn get_image_tile_offset(dims: &std::collections::BTreeSet<u32>, dim: u32, pixel_ratio: f32) -> u32 {
-    match dims.iter().position(|&d| d == dim) {
-        Some(index) => index as u32 * get_tile_screen_pixel_size(pixel_ratio),
-        None => {
-            debug_assert!(false);
-            0
-        }
+    if let Some(index) = dims.iter().position(|&d| d == dim) {
+        index as u32 * get_tile_screen_pixel_size(pixel_ratio)
+    } else {
+        debug_assert!(false);
+        0
     }
 }
 
@@ -1143,13 +1151,13 @@ fn render_tiles(
         Ok(tile_ids) => tile_ids,
         Err(error) => return map_error_image(ctx, error),
     };
-    debug_assert!(!tile_ids.is_empty());
+    debug_assert_ne!(tile_ids, Vec::<TileId>::new());
     let mut x_dims = std::collections::BTreeSet::new();
     let mut y_dims = std::collections::BTreeSet::new();
     for tile_id in &tile_ids {
         x_dims.insert(tile_id.x);
         y_dims.insert(tile_id.y);
-        debug_assert!(tile_id.z == zoom);
+        debug_assert_eq!(tile_id.z, zoom);
     }
     let pixel_ratio = ctx.metadata.pixel_ratio;
     let tile_screen_size = get_tile_screen_pixel_size(pixel_ratio);
@@ -1216,7 +1224,8 @@ fn render_tiles(
             );
             if *tile_id == it.tile_id && is_icon == it.is_icon {
                 metadata.duplications_count += 1;
-                *duplications_report += &format!(
+                let _ = write!(
+                    duplications_report,
                     "\n{}. \"{key}\" {kind} {location} from layer: {} at {}",
                     metadata.duplications_count,
                     placed_symbol.layer,
@@ -1226,7 +1235,8 @@ fn render_tiles(
             }
             if it.placed != placed && is_icon == it.is_icon {
                 metadata.label_cut_off_found += 1;
-                *cut_off_labels_report += &format!(
+                let _ = write!(
+                    cut_off_labels_report,
                     "\n{}. \"{key}\" {kind} {location} from layer: {}{}{} and{}{}",
                     metadata.label_cut_off_found,
                     placed_symbol.layer,
@@ -1436,6 +1446,7 @@ fn get_after_operations(manifest: &Manifest) -> TestOperations {
 
 /// `simpleDiff(result, expected)`: a line diff of the two values' JSON for
 /// the report.
+#[must_use]
 pub fn simple_diff(result: &Value, expected: &Value) -> String {
     let result_tokens = tokenize(&to_json_value(result));
     let expected_tokens = tokenize(&to_json_value(expected));
@@ -1445,7 +1456,7 @@ pub fn simple_diff(result: &Value, expected: &Value) -> String {
     diff += "<pre>\n";
     let flush = |vec: &[String], pos: usize, out: &mut String, separator: &str| {
         for item in &vec[pos..] {
-            *out += &format!("{separator}{item}\n");
+            let _ = writeln!(*out, "{separator}{item}");
         }
     };
 
@@ -1460,11 +1471,11 @@ pub fn simple_diff(result: &Value, expected: &Value) -> String {
             break;
         }
 
-        if result_tokens[i] != expected_tokens[i] {
-            diff += &format!("<b>-{}</b>\n", expected_tokens[i]);
-            diff += &format!("<b>+{}</b>\n", result_tokens[i]);
+        if result_tokens[i] == expected_tokens[i] {
+            let _ = writeln!(diff, "{}", result_tokens[i]);
         } else {
-            diff += &format!("{}\n", result_tokens[i]);
+            let _ = writeln!(diff, "<b>-{}</b>", expected_tokens[i]);
+            let _ = writeln!(diff, "<b>+{}</b>", result_tokens[i]);
         }
     }
     diff += "</pre>\n";
@@ -1472,6 +1483,7 @@ pub fn simple_diff(result: &Value, expected: &Value) -> String {
 }
 
 /// `std::ostream << float` with the default format (`%g`, precision 6).
+#[must_use]
 pub fn ostream_float(v: f64) -> String {
     if v.is_nan() {
         return if v.is_sign_negative() { "-nan" } else { "nan" }.to_string();
@@ -1488,11 +1500,11 @@ pub fn ostream_float(v: f64) -> String {
     let trim = |s: &str| -> String {
         if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s.to_string() }
     };
-    if !(-4..6).contains(&exponent) {
-        format!("{}e{}{:02}", trim(mantissa), if exponent < 0 { '-' } else { '+' }, exponent.abs())
-    } else {
+    if (-4..6).contains(&exponent) {
         let decimals = (5 - exponent) as usize;
         trim(&format!("{v:.decimals$}"))
+    } else {
+        format!("{}e{}{:02}", trim(mantissa), if exponent < 0 { '-' } else { '+' }, exponent.abs())
     }
 }
 
@@ -1506,15 +1518,15 @@ mod tests {
             (0.0, "0"),
             (1.0, "1"),
             (0.5, "0.5"),
-            (123456.0, "123456"),
-            (1234567.0, "1.23457e+06"),
+            (123_456.0, "123456"),
+            (1_234_567.0, "1.23457e+06"),
             (0.0001, "0.0001"),
             (0.00001, "1e-05"),
             (2.5e-7, "2.5e-07"),
-            (1.23456789, "1.23457"),
+            (1.234_567_89, "1.23457"),
             (100.0, "100"),
             (-42.25, "-42.25"),
-            (999999.5, "1e+06"),
+            (999_999.5, "1e+06"),
         ];
         for (v, expected) in cases {
             assert_eq!(ostream_float(v), expected, "{v}");

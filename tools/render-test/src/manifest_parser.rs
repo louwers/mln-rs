@@ -29,32 +29,40 @@ impl Manifest {
         Manifest { api_key: std::env::var("MLN_API_KEY").unwrap_or_default(), ..Default::default() }
     }
 
+    #[must_use]
     pub fn get_ignores(&self) -> &[(String, String)] {
         &self.ignores
     }
+    #[must_use]
     pub fn get_test_paths(&self) -> &[TestPaths] {
         &self.test_paths
     }
+    #[must_use]
     pub fn get_test_root_path(&self) -> &str {
         &self.test_root_path
     }
+    #[must_use]
     pub fn get_manifest_path(&self) -> &str {
         &self.manifest_path
     }
+    #[must_use]
     pub fn get_result_path(&self) -> &str {
         &self.result_path
     }
+    #[must_use]
     pub fn get_cache_path(&self) -> &str {
         &self.cache_path
     }
+    #[must_use]
     pub fn get_api_key(&self) -> &str {
         &self.api_key
     }
+    #[must_use]
     pub fn get_probes(&self) -> &BTreeSet<String> {
         &self.probes
     }
 
-    /// `doShuffle(seed)`: the libstdc++ order (see std_random.rs).
+    /// `doShuffle(seed)`: the libstdc++ order (see `std_random.rs`).
     pub fn do_shuffle(&mut self, seed: u32) {
         let sequence = SeedSeq::new(&[seed]);
         let mut shuffler = Mt19937::from_seed_seq(&sequence);
@@ -244,14 +252,14 @@ impl ManifestParser {
             }
         }
 
-        if test_filter.is_empty() {
-            if let Some(filter_value) = document.get("filter") {
-                let Some(filter) = filter_value.as_str() else {
-                    invalid("filter");
-                    return None;
-                };
-                test_filter = filter.to_string();
-            }
+        if test_filter.is_empty()
+            && let Some(filter_value) = document.get("filter")
+        {
+            let Some(filter) = filter_value.as_str() else {
+                invalid("filter");
+                return None;
+            };
+            test_filter = filter.to_string();
         }
 
         manifest.test_root_path = base_test_path;
@@ -299,10 +307,10 @@ impl ManifestParser {
         let root_length = manifest.test_root_path.len();
         for test_path in entries {
             // Skip paths that fail regexp search.
-            if let Some(filter) = &filter {
-                if !filter.is_match(&test_path) {
-                    continue;
-                }
+            if let Some(filter) = &filter
+                && !filter.is_match(&test_path)
+            {
+                continue;
             }
 
             if filesystem::filename(&test_path) == "style.json" {

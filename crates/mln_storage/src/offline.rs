@@ -136,6 +136,7 @@ impl From<OfflineGeometryRegionDefinition> for OfflineRegionDefinition {
 impl OfflineRegionDefinition {
     // The common members, for the C++ `std::visit([](auto& region) {...})`.
 
+    #[must_use]
     pub fn style_url(&self) -> &str {
         match self {
             OfflineRegionDefinition::TilePyramid(r) => &r.style_url,
@@ -143,6 +144,7 @@ impl OfflineRegionDefinition {
         }
     }
 
+    #[must_use]
     pub fn min_zoom(&self) -> f64 {
         match self {
             OfflineRegionDefinition::TilePyramid(r) => r.min_zoom,
@@ -150,6 +152,7 @@ impl OfflineRegionDefinition {
         }
     }
 
+    #[must_use]
     pub fn max_zoom(&self) -> f64 {
         match self {
             OfflineRegionDefinition::TilePyramid(r) => r.max_zoom,
@@ -157,6 +160,7 @@ impl OfflineRegionDefinition {
         }
     }
 
+    #[must_use]
     pub fn pixel_ratio(&self) -> f32 {
         match self {
             OfflineRegionDefinition::TilePyramid(r) => r.pixel_ratio,
@@ -164,6 +168,7 @@ impl OfflineRegionDefinition {
         }
     }
 
+    #[must_use]
     pub fn include_ideographs(&self) -> bool {
         match self {
             OfflineRegionDefinition::TilePyramid(r) => r.include_ideographs,
@@ -246,6 +251,7 @@ pub fn decode_offline_region_definition(region: &[u8]) -> Result<OfflineRegionDe
 }
 
 /// `encodeOfflineRegionDefinition(const OfflineRegionDefinition&)`.
+#[must_use]
 pub fn encode_offline_region_definition(region: &OfflineRegionDefinition) -> String {
     let mut w = Writer::new();
     w.start_object();
@@ -343,6 +349,7 @@ pub struct OfflineRegionStatus {
 
 impl OfflineRegionStatus {
     /// `complete()`.
+    #[must_use]
     pub fn complete(&self) -> bool {
         self.completed_resource_count >= self.required_resource_count
     }
@@ -380,14 +387,17 @@ impl OfflineRegion {
         OfflineRegion { id, definition, metadata }
     }
 
+    #[must_use]
     pub fn get_id(&self) -> i64 {
         self.id
     }
 
+    #[must_use]
     pub fn get_definition(&self) -> &OfflineRegionDefinition {
         &self.definition
     }
 
+    #[must_use]
     pub fn get_metadata(&self) -> &OfflineRegionMetadata {
         &self.metadata
     }

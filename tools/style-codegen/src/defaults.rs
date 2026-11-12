@@ -61,6 +61,7 @@ impl Init {
 
 /// `Number.prototype.toString()` (shortest round-trip digits, JS exponent
 /// rules), for the doubles the JS prints.
+#[must_use]
 pub fn js_number(value: f64) -> String {
     if value.is_nan() {
         return "NaN".into();
@@ -124,9 +125,9 @@ fn parse_css_color(s: &str) -> [f64; 4] {
     // The JS parser keeps the alpha as a double; the vendored (C++) port
     // keeps a float. They agree for alpha 0 and 1, the only alphas of the
     // spec defaults; refuse others rather than guess.
-    let a = color.a as f64;
+    let a = f64::from(color.a);
     assert!(a == 0.0 || a == 1.0, "CSS color default {s:?} with a fractional alpha");
-    [color.r as f64 / 255.0 * a, color.g as f64 / 255.0 * a, color.b as f64 / 255.0 * a, a]
+    [f64::from(color.r) / 255.0 * a, f64::from(color.g) / 255.0 * a, f64::from(color.b) / 255.0 * a, a]
 }
 
 fn color_init(s: &str, in_array: bool) -> Init {
@@ -148,7 +149,7 @@ fn color_init(s: &str, in_array: bool) -> Init {
 /// The JS truthiness of `property.default`.
 fn truthy(value: Option<&Value>) -> bool {
     match value {
-        None | Some(Value::Null) | Some(Value::Bool(false)) => false,
+        None | Some(Value::Null | Value::Bool(false)) => false,
         Some(Value::String(s)) => !s.is_empty(),
         Some(Value::Number(n)) => n.as_f64() != Some(0.0),
         Some(_) => true,
@@ -251,6 +252,7 @@ fn default_of(q: &DefaultQuery<'_>) -> Init {
 }
 
 /// `defaultValue(property)`.
+#[must_use]
 pub fn default_value(property: &Property) -> Init {
     default_of(&DefaultQuery {
         property: Some(property),
@@ -288,7 +290,7 @@ fn as_f32(init: &Init) -> f32 {
 /// The value for a `double` target: a float literal is a float first.
 fn as_f64(init: &Init) -> f64 {
     match init {
-        Init::FloatLiteral(_) => as_f32(init) as f64,
+        Init::FloatLiteral(_) => f64::from(as_f32(init)),
         Init::Raw(Value::Number(n)) => match n.as_i64() {
             Some(i) => i as f64,
             None => n.as_f64().expect("number"),
@@ -299,6 +301,7 @@ fn as_f64(init: &Init) -> f64 {
 
 /// The Rust expression for `T x = <init>;` (copy-initialization, as in
 /// `static T defaultValue() { return <init>; }`).
+#[must_use]
 pub fn rust_value(init: &Init, t: &EvaluatedType) -> String {
     match (t, init) {
         (_, Init::Empty) => rust_value_initialized(t),
@@ -321,7 +324,6 @@ pub fn rust_value(init: &Init, t: &EvaluatedType) -> String {
             f32_literal(c[2] as f32),
             f32_literal(c[3] as f32)
         ),
-        (EvaluatedType::Color, Init::Braced(items)) if items.len() == 1 => rust_value(&items[0], t),
         // `Formatted(const char*)`, `Image(const char*)`, `std::string`.
         (EvaluatedType::Formatted, Init::Braced(items)) => match items.as_slice() {
             [Init::StringLiteral(s)] => format!("Formatted::from_plain({})", rust_string_literal(s)),
@@ -414,7 +416,7 @@ mod tests {
         assert_eq!(js_number(1e21), "1e+21");
         assert_eq!(js_number(1e20), "100000000000000000000");
         assert_eq!(js_number(1e-7), "1e-7");
-        assert_eq!(js_number(0.000001), "0.000001");
+        assert_eq!(js_number(0.000_001), "0.000001");
         assert_eq!(js_number(-2.5), "-2.5");
         assert_eq!(js_number(123.456e-10), "1.23456e-8");
     }
@@ -425,7 +427,7 @@ mod tests {
         assert_eq!(rust_value(&Init::Raw(Value::from(1)), &EvaluatedType::Float), "1.0_f32");
         assert_eq!(
             rust_value(&Init::FloatLiteral("1.15".into()), &EvaluatedType::Double),
-            format!("{:?}_f64", 1.15_f32 as f64)
+            format!("{:?}_f64", f64::from(1.15_f32))
         );
     }
 

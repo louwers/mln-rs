@@ -119,6 +119,7 @@ impl<N: Index> Default for Earcut<N> {
 }
 
 impl<N: Index> Earcut<N> {
+    #[must_use]
     pub fn new() -> Self {
         Earcut {
             indices: Vec::new(),
@@ -195,7 +196,7 @@ impl<N: Index> Earcut<N> {
             let dx = self.max_x - self.min_x;
             let dy = self.max_y - self.min_y;
             self.inv_size = if dx < dy { dy } else { dx };
-            self.inv_size = if self.inv_size != 0.0 { 1.0 / self.inv_size } else { 0.0 };
+            self.inv_size = if self.inv_size == 0.0 { 0.0 } else { 1.0 / self.inv_size };
         }
 
         self.earcut_linked(outer_node, 0);
@@ -683,11 +684,7 @@ impl<N: Index> Earcut<N> {
                         e = q;
                         q = self.nodes[q].next_z;
                         q_size -= 1;
-                    } else if q_size == 0 || q == NIL {
-                        e = p;
-                        p = self.nodes[p].next_z;
-                        p_size -= 1;
-                    } else if self.nodes[p].z <= self.nodes[q].z {
+                    } else if q_size == 0 || q == NIL || self.nodes[p].z <= self.nodes[q].z {
                         e = p;
                         p = self.nodes[p].next_z;
                         p_size -= 1;
@@ -697,10 +694,10 @@ impl<N: Index> Earcut<N> {
                         q_size -= 1;
                     }
 
-                    if tail != NIL {
-                        self.nodes[tail].next_z = e;
-                    } else {
+                    if tail == NIL {
                         list = e;
+                    } else {
+                        self.nodes[tail].next_z = e;
                     }
 
                     self.nodes[e].prev_z = tail;
@@ -726,15 +723,15 @@ impl<N: Index> Earcut<N> {
         let mut x = (32767.0 * (x_ - self.min_x) * self.inv_size) as i32;
         let mut y = (32767.0 * (y_ - self.min_y) * self.inv_size) as i32;
 
-        x = (x | (x << 8)) & 0x00FF00FF;
-        x = (x | (x << 4)) & 0x0F0F0F0F;
-        x = (x | (x << 2)) & 0x33333333;
-        x = (x | (x << 1)) & 0x55555555;
+        x = (x | (x << 8)) & 0x00FF_00FF;
+        x = (x | (x << 4)) & 0x0F0F_0F0F;
+        x = (x | (x << 2)) & 0x3333_3333;
+        x = (x | (x << 1)) & 0x5555_5555;
 
-        y = (y | (y << 8)) & 0x00FF00FF;
-        y = (y | (y << 4)) & 0x0F0F0F0F;
-        y = (y | (y << 2)) & 0x33333333;
-        y = (y | (y << 1)) & 0x55555555;
+        y = (y | (y << 8)) & 0x00FF_00FF;
+        y = (y | (y << 4)) & 0x0F0F_0F0F;
+        y = (y | (y << 2)) & 0x3333_3333;
+        y = (y | (y << 1)) & 0x5555_5555;
 
         x | (y << 1)
     }
@@ -852,8 +849,8 @@ impl<N: Index> Earcut<N> {
         let (an, bn) = (&self.nodes[a], &self.nodes[b]);
         let mut p = a;
         let mut inside = false;
-        let px = (an.x + bn.x) / 2.0;
-        let py = (an.y + bn.y) / 2.0;
+        let px = f64::midpoint(an.x, bn.x);
+        let py = f64::midpoint(an.y, bn.y);
         loop {
             let pn = &self.nodes[p];
             let nn = &self.nodes[pn.next];
@@ -940,7 +937,7 @@ fn point_in_triangle(ax: f64, ay: f64, bx: f64, by: f64, cx: f64, cy: f64, px: f
 }
 
 fn sign(val: f64) -> i32 {
-    (0.0 < val) as i32 - (val < 0.0) as i32
+    i32::from(0.0 < val) - i32::from(val < 0.0)
 }
 
 /// `std::min<double>(a, b)`

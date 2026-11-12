@@ -61,6 +61,7 @@ pub struct PatternFeature {
 }
 
 impl PatternFeature {
+    #[must_use]
     pub fn get_patterns(&self) -> &PatternLayerMap {
         &self.patterns
     }
@@ -141,7 +142,7 @@ impl<S: PatternLayoutSpec> PatternLayout<S> {
         sorted: bool,
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
-        let zoom = parameters.tile_id.overscaled_z as f32;
+        let zoom = f32::from(parameters.tile_id.overscaled_z);
         let overscaling = parameters.tile_id.overscale_factor();
         let leader_layer_properties = &group[0];
         let mut evaluation_parameters = PropertyEvaluationParameters::new(zoom);
@@ -487,7 +488,7 @@ impl<S: PatternLayoutSpec> Layout for PatternLayout<S> {
             &*layer,
             pattern_positions,
             &mut |geometries, i, source_layer_id, bucket_leader_id| {
-                feature_index.insert(geometries, i, source_layer_id, bucket_leader_id)
+                feature_index.insert(geometries, i, source_layer_id, bucket_leader_id);
             },
             render_data,
             canonical,

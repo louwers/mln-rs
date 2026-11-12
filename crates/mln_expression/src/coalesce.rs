@@ -21,14 +21,17 @@ pub struct Coalesce {
 }
 
 impl Coalesce {
+    #[must_use]
     pub fn new(type_: Type, args: Args) -> Self {
         Coalesce { base: ExpressionBase::new(Kind::Coalesce, type_, collect_dependencies(&args)), args }
     }
 
+    #[must_use]
     pub fn get_length(&self) -> usize {
         self.args.len()
     }
 
+    #[must_use]
     pub fn get_child(&self, i: usize) -> &dyn Expression {
         &*self.args[i]
     }
@@ -43,10 +46,10 @@ impl Coalesce {
 
         let mut output_type: Option<Type> = None;
         let expected_type = ctx.get_expected();
-        if let Some(expected) = &expected_type {
-            if *expected != Type::Value {
-                output_type = Some(expected.clone());
-            }
+        if let Some(expected) = &expected_type
+            && *expected != Type::Value
+        {
+            output_type = Some(expected.clone());
         }
 
         let mut args = Args::with_capacity(length - 1);
@@ -87,20 +90,18 @@ impl Expression for Coalesce {
             // We need to keep track of the first requested image in a
             // coalesce statement. If coalesce can't find a valid image, we
             // return the first requested image.
-            if *self.get_type() == Type::Image {
-                if let Ok(r) = &result {
-                    if let Some(image) = from_expression_value::<Image>(r) {
-                        if !image.is_available() {
-                            if requested_image.is_none() {
-                                requested_image = Some(Image::new(image.id()));
-                            }
-                            if args_count == 0 {
-                                result = Ok(Value::Image(requested_image.clone().unwrap()));
-                            }
-                            continue;
-                        }
-                    }
+            if *self.get_type() == Type::Image
+                && let Ok(r) = &result
+                && let Some(image) = from_expression_value::<Image>(r)
+                && !image.is_available()
+            {
+                if requested_image.is_none() {
+                    requested_image = Some(Image::new(image.id()));
                 }
+                if args_count == 0 {
+                    result = Ok(Value::Image(requested_image.clone().unwrap()));
+                }
+                continue;
             }
 
             match &result {

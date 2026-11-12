@@ -61,6 +61,35 @@ fn mapbox_encoding_parsed() {
     assert!(converted.vector_encoding.is_none());
 }
 
+#[test]
+fn custom_encoding_parsed() {
+    let mut error = Error::default();
+    let converted = convert_json(
+        r#"{"encoding": "custom", "redFactor": 0, "greenFactor": 25.6, "blueFactor": 0.1, "baseShift": 3446.4}"#,
+        &mut error,
+    )
+    .unwrap();
+    assert_eq!(
+        converted.raster_encoding,
+        Some(RasterEncoding::Custom { red_factor: 0.0, green_factor: 25.6, blue_factor: 0.1, base_shift: 3446.4 })
+    );
+    assert!(converted.vector_encoding.is_none());
+
+    // The style spec's defaults.
+    let converted = convert_json(r#"{"encoding": "custom"}"#, &mut error).unwrap();
+    assert_eq!(
+        converted.raster_encoding,
+        Some(RasterEncoding::Custom { red_factor: 1.0, green_factor: 1.0, blue_factor: 1.0, base_shift: 0.0 })
+    );
+
+    // The factors only apply to a custom encoding.
+    let converted = convert_json(r#"{"encoding": "terrarium", "redFactor": 2}"#, &mut error).unwrap();
+    assert_eq!(converted.raster_encoding, Some(RasterEncoding::Terrarium));
+
+    assert!(convert_json(r#"{"encoding": "custom", "baseShift": "1"}"#, &mut error).is_none());
+    assert_eq!(error.message, "invalid baseShift");
+}
+
 // gtest: SourceOptions.MVTEncodingParsed
 #[test]
 fn mvt_encoding_parsed() {

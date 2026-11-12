@@ -140,6 +140,7 @@ impl Inner {
 
 impl SpriteLoader {
     /// `SpriteLoader(float pixelRatio, const TaggedScheduler& threadPool)`.
+    #[must_use]
     pub fn new(pixel_ratio: f32, thread_pool: TaggedScheduler) -> Self {
         SpriteLoader {
             pixel_ratio,

@@ -11,7 +11,7 @@ use crate::varint::{decode_varint, decode_zigzag64, skip_varint};
 /// `protozero::pbf_reader`: reads a protocol buffer message (or part of
 /// one) from a byte buffer it does not own.
 ///
-/// Usage, as in C++: call [`next`](Self::next) until it returns `false`;
+/// Usage: call [`next_field`](Self::next_field) (C++ `next`) until it returns `false`;
 /// for each field look at [`tag`](Self::tag) (and
 /// [`wire_type`](Self::wire_type)) and call one `get_*` function or
 /// [`skip`](Self::skip). Every function that the C++ lets throw returns
@@ -20,7 +20,7 @@ use crate::varint::{decode_varint, decode_zigzag64, skip_varint};
 /// `pbf_reader` messages can be copied trivially (`Copy`).
 #[derive(Clone, Copy, Debug)]
 pub struct PbfReader<'a> {
-    /// [m_data, m_end): the next unread data up to one past the end.
+    /// [`m_data`, `m_end)`: the next unread data up to one past the end.
     data: &'a [u8],
     /// The wire type of the current field.
     wire_type: PbfWireType,
@@ -36,9 +36,10 @@ impl Default for PbfReader<'_> {
 }
 
 impl<'a> PbfReader<'a> {
-    /// Construct a pbf_reader message from a data_view / std::string /
+    /// Construct a `pbf_reader` message from a `data_view` / `std::string` /
     /// (pointer, size) pair: all are a byte slice here. The data is not
     /// copied; it must outlive the reader.
+    #[must_use]
     pub fn new(data: DataView<'a>) -> Self {
         PbfReader { data, wire_type: PbfWireType::Unknown, tag: 0 }
     }
@@ -85,7 +86,7 @@ impl<'a> PbfReader<'a> {
         Ok(())
     }
 
-    /// `get_len_and_skip`, returning the skipped bytes [m_data - len, m_data).
+    /// `get_len_and_skip`, returning the skipped bytes [`m_data` - len, `m_data`).
     fn get_len_and_skip(&mut self) -> Result<&'a [u8], Exception> {
         let len = self.get_length()?;
         let start = self.data;
@@ -110,21 +111,24 @@ impl<'a> PbfReader<'a> {
         std::mem::swap(self, other);
     }
 
-    /// `operator bool`: in a boolean context the pbf_reader class evaluates
+    /// `operator bool`: in a boolean context the `pbf_reader` class evaluates
     /// to true if there are still fields available and to false if the last
     /// field has been read.
+    #[must_use]
     pub fn as_bool(&self) -> bool {
         !self.data.is_empty()
     }
 
     /// Get a view of the not yet read data.
+    #[must_use]
     pub fn data(&self) -> DataView<'a> {
         self.data
     }
 
     /// Return the length in bytes of the current message. If you have
-    /// already called next() and/or any of the get_*() functions, this will
+    /// already called `next_field()` and/or any of the get_*() functions, this will
     /// return the remaining length.
+    #[must_use]
     pub fn length(&self) -> usize {
         self.data.len()
     }
@@ -135,7 +139,7 @@ impl<'a> PbfReader<'a> {
     /// Errors: `InvalidTag` for tag 0 or 19000..=19999,
     /// `UnknownPbfWireType` for wire types 3, 4, 6 and 7 (the tag and wire
     /// type are stored first, as in C++), and the varint errors of the key.
-    pub fn next(&mut self) -> Result<bool, Exception> {
+    pub fn next_field(&mut self) -> Result<bool, Exception> {
         if self.data.is_empty() {
             return Ok(false);
         }
@@ -161,7 +165,7 @@ impl<'a> PbfReader<'a> {
     /// `next(pbf_tag_type next_tag)`: set next field with the given tag as
     /// the current field, skipping all other fields.
     pub fn next_tag(&mut self, next_tag: PbfTagType) -> Result<bool, Exception> {
-        while self.next()? {
+        while self.next_field()? {
             if self.tag == next_tag {
                 return Ok(true);
             }
@@ -173,7 +177,7 @@ impl<'a> PbfReader<'a> {
     /// `next(pbf_tag_type next_tag, pbf_wire_type type)`: set next field with
     /// the given tag and wire type as the current field.
     pub fn next_tag_type(&mut self, next_tag: PbfTagType, type_: PbfWireType) -> Result<bool, Exception> {
-        while self.next()? {
+        while self.next_field()? {
             if self.tag == next_tag && self.wire_type == type_ {
                 return Ok(true);
             }
@@ -183,23 +187,27 @@ impl<'a> PbfReader<'a> {
     }
 
     /// The tag of the current field. The tag is the field number from the
-    /// description in the .proto file. 0 before next() (and, in debug
+    /// description in the .proto file. 0 before `next_field()` (and, in debug
     /// builds, after a get_*() that skipped bytes).
+    #[must_use]
     pub fn tag(&self) -> PbfTagType {
         self.tag
     }
 
     /// Get the wire type of the current field.
+    #[must_use]
     pub fn wire_type(&self) -> PbfWireType {
         self.wire_type
     }
 
     /// Get the tag and wire type of the current field in one integer.
+    #[must_use]
     pub fn tag_and_type(&self) -> u32 {
         tag_and_type(self.tag(), self.wire_type())
     }
 
     /// Check the wire type of the current field.
+    #[must_use]
     pub fn has_wire_type(&self, type_: PbfWireType) -> bool {
         self.wire_type() == type_
     }
@@ -212,7 +220,7 @@ impl<'a> PbfReader<'a> {
             PbfWireType::Fixed64 => self.skip_bytes(8)?,
             PbfWireType::LengthDelimited => {
                 let len = self.get_length()?;
-                self.skip_bytes(len)?
+                self.skip_bytes(len)?;
             }
             PbfWireType::Fixed32 => self.skip_bytes(4)?,
             _ => {}

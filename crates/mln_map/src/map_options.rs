@@ -19,7 +19,7 @@ pub enum UnusedStyleImagePolicy {
 }
 
 /// Holds values for Map options.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct MapOptions {
     map_mode: MapMode,
     constrain_mode: ConstrainMode,
@@ -52,6 +52,7 @@ impl Default for MapOptions {
 
 impl MapOptions {
     /// `MapOptions()`: the defaults above.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -59,105 +60,125 @@ impl MapOptions {
     /// Sets the map rendering mode. By default, it is set to Continuous so
     /// the map will render as data arrives from the network and react
     /// immediately to state changes.
+    #[must_use]
     pub fn with_map_mode(mut self, mode: MapMode) -> Self {
         self.map_mode = mode;
         self
     }
 
+    #[must_use]
     pub fn map_mode(&self) -> MapMode {
         self.map_mode
     }
 
     /// Sets the map constrain mode. This can be used to limit the map to
     /// wrap around the globe horizontally. By default, it is set to
-    /// HeightOnly.
+    /// `HeightOnly`.
+    #[must_use]
     pub fn with_constrain_mode(mut self, mode: ConstrainMode) -> Self {
         self.constrain_mode = mode;
         self
     }
 
+    #[must_use]
     pub fn constrain_mode(&self) -> ConstrainMode {
         self.constrain_mode
     }
 
     /// Sets the viewport mode. This can be used to flip the vertical
     /// orientation of the map as some devices may use inverted orientation.
+    #[must_use]
     pub fn with_viewport_mode(mut self, mode: ViewportMode) -> Self {
         self.viewport_mode = mode;
         self
     }
 
+    #[must_use]
     pub fn viewport_mode(&self) -> ViewportMode {
         self.viewport_mode
     }
 
     /// Enable or disable cross-source symbol collision detection. By
     /// default, it is set to true.
+    #[must_use]
     pub fn with_cross_source_collisions(mut self, enable_collisions: bool) -> Self {
         self.cross_source_collisions = enable_collisions;
         self
     }
 
+    #[must_use]
     pub fn cross_source_collisions(&self) -> bool {
         self.cross_source_collisions
     }
 
     /// Sets the orientation of the Map. By default, it is set to Upwards.
+    #[must_use]
     pub fn with_north_orientation(mut self, orientation: NorthOrientation) -> Self {
         self.orientation = orientation;
         self
     }
 
+    #[must_use]
     pub fn north_orientation(&self) -> NorthOrientation {
         self.orientation
     }
 
     /// Sets the size to resize the map object and renderer backend.
+    #[must_use]
     pub fn with_size(mut self, size: Size) -> Self {
         self.size = size;
         self
     }
 
+    #[must_use]
     pub fn size(&self) -> Size {
         self.size
     }
 
     /// Sets the custom pixel ratio. By default, it is set to 1.
+    #[must_use]
     pub fn with_pixel_ratio(mut self, ratio: f32) -> Self {
         self.pixel_ratio = ratio;
         self
     }
 
+    #[must_use]
     pub fn pixel_ratio(&self) -> f32 {
         self.pixel_ratio
     }
 
     /// Enable or disable capturing of rendered feature information.
+    #[must_use]
     pub fn with_rendered_feature_info(mut self, capture: bool) -> Self {
         self.capture_rendered_features = capture;
         self
     }
 
+    #[must_use]
     pub fn rendered_feature_info(&self) -> bool {
         self.capture_rendered_features
     }
 
+    #[must_use]
     pub fn with_fast_pfor_enabled(mut self, enable: bool) -> Self {
         self.fast_pfor_enabled = enable;
         self
     }
 
+    #[must_use]
     pub fn fast_pfor_enabled(&self) -> bool {
         self.fast_pfor_enabled
     }
 
     /// Sets what the map does with a style image once no layer uses it. By
     /// default, it removes the image.
+    #[must_use]
     pub fn with_unused_style_image_policy(mut self, policy: UnusedStyleImagePolicy) -> Self {
         self.unused_style_image_policy = policy;
         self
     }
 
+    #[must_use]
     pub fn unused_style_image_policy(&self) -> UnusedStyleImagePolicy {
         self.unused_style_image_policy
     }

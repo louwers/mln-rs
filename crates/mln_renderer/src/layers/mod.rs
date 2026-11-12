@@ -129,12 +129,14 @@ pub struct DrawableRenderTile {
 }
 
 impl DrawableRenderTile {
+    #[must_use]
     pub fn tile(&self) -> &RenderTile {
         &self.owner[self.index]
     }
 }
 
 /// The value for `Drawable::set_render_tile`.
+#[must_use]
 pub fn drawable_render_tile_slot(owner: &Rc<Vec<RenderTile>>, tile: &RenderTile) -> Option<Rc<dyn Any>> {
     let index = owner.iter().position(|t| std::ptr::eq(t, tile))?;
     Some(Rc::new(DrawableRenderTile { owner: owner.clone(), index }) as Rc<dyn Any>)
@@ -186,6 +188,7 @@ pub fn render_data_for_pass<'a>(
 }
 
 /// `util::cast<float>(mat4)`.
+#[must_use]
 pub fn cast_matrix(m: &[f64; 16]) -> [f32; 16] {
     std::array::from_fn(|i| m[i] as f32)
 }

@@ -8,17 +8,17 @@ use std::cell::{Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
+use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::context::Context as _;
-use mln_gfx::offscreen_texture;
-use mln_gfx::renderable::{Renderable, RenderableBase};
 use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::context::Context;
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox, downcast_resource};
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::texture2d::Texture2D;
 use crate::types::FramebufferID;
 
@@ -95,7 +95,7 @@ impl Drop for OffscreenTextureResource {
     }
 }
 
-impl RenderableResource for OffscreenTextureResource {
+impl TargetResource for OffscreenTextureResource {
     fn bind(&self) {
         let Some(context) = self.context.upgrade() else {
             return;
@@ -117,50 +117,45 @@ impl RenderableResource for OffscreenTextureResource {
 
 /// `gl::OffscreenTexture`
 pub struct OffscreenTexture {
-    renderable: RenderableBase,
+    target: DrawTarget,
+    resource: Rc<OffscreenTextureResource>,
     /// The resource's color texture.
     texture: Texture2DPtr,
 }
 
 impl OffscreenTexture {
     pub fn new(context: &Context, size: Size, type_: TextureChannelDataType) -> Self {
-        let resource = OffscreenTextureResource::new(context, size, type_);
+        let resource = Rc::new(OffscreenTextureResource::new(context, size, type_));
         let texture = resource.get_texture();
-        OffscreenTexture {
-            renderable: RenderableBase::new(size, Some(RenderableResourceBox::new_rc(resource))),
-            texture,
-        }
+        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource, texture }
     }
 
-    pub fn with_resource<R>(&self, f: impl FnOnce(&OffscreenTextureResource) -> R) -> Option<R> {
-        let resource = self.get_resource()?;
-        downcast_resource::<OffscreenTextureResource>(&*resource).map(f)
-    }
-}
-
-impl Renderable for OffscreenTexture {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
+    pub fn resource(&self) -> &OffscreenTextureResource {
+        &self.resource
     }
 }
 
 impl offscreen_texture::OffscreenTexture for OffscreenTexture {
+    fn draw_target(&self) -> &dyn frame::DrawTarget {
+        &self.target
+    }
+
     fn is_renderable(&self) -> bool {
-        self.with_resource(|resource| {
-            resource.bind();
-            resource.framebuffer.get().is_some()
-        })
-        .unwrap_or(false)
+        let resource = self.resource();
+        resource.bind();
+        resource.framebuffer.get().is_some()
     }
 
     fn read_still_image(&self) -> PremultipliedImage {
-        self.with_resource(OffscreenTextureResource::read_still_image)
-            .unwrap_or_else(|| PremultipliedImage::new(self.get_size()))
+        self.resource().read_still_image()
     }
 
     fn get_texture(&self) -> Texture2DPtr {
         self.texture.clone()
     }
+
+    /// GL runs the commands in the order they come.
+    fn submit(&self, _encoder: &dyn CommandEncoder) {}
 
     fn as_any(&self) -> &dyn Any {
         self

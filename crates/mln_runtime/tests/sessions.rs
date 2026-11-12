@@ -12,8 +12,8 @@ use std::sync::mpsc::channel;
 
 use mln_map::{CameraOptions, CameraUpdate, MapMode};
 use mln_runtime::{
-    AttachOptions, DemandMode, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult, Map, MapOptions,
-    OffscreenDevice, OffscreenDeviceOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
+    AttachOptions, DemandMode, Device, DeviceOptions, Driver, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
+    LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, RenderedQueryGeometry,
     RenderedQueryOptions, Runtime, SourceQueryOptions,
 };
 use mln_util::geo::ScreenCoordinate;
@@ -173,7 +173,7 @@ fn frame_results_wake_the_host_once_until_it_drains() {
     assert_eq!(1, wakes.load(Ordering::SeqCst));
     let tokens: Vec<u64> = session.drain_frame_results().unwrap().iter().map(|result| result.token.unwrap()).collect();
     assert_eq!([1, 2], tokens.as_slice());
-    assert!(session.drain_frame_results().unwrap().is_empty());
+    assert_eq!(session.drain_frame_results().unwrap(), [] as [mln_runtime::FrameResult; 0]);
     demand(&session, DemandMode::Force, 3);
     assert_eq!(3, take_one(&session).token.unwrap());
     assert!(eventually(|| wakes.load(Ordering::SeqCst) == 2));
@@ -206,7 +206,7 @@ fn a_demand_shows_the_commands_sent_before_it() {
     let moved = zoom(&map, 3.0);
     demand(&session, DemandMode::IfChanged, 631);
     std::thread::sleep(std::time::Duration::from_millis(50));
-    assert!(session.drain_frame_results().unwrap().is_empty());
+    assert_eq!(session.drain_frame_results().unwrap(), [] as [mln_runtime::FrameResult; 0]);
     drop(open);
 
     let applied = moved.wait().unwrap();
@@ -246,7 +246,7 @@ fn a_waiting_demand_renders_the_next_map_update() {
     // Work that the session runs after the demand, and that publishes no
     // update.
     wait(session.dump_debug_logs());
-    assert!(session.drain_frame_results().unwrap().is_empty());
+    assert_eq!(session.drain_frame_results().unwrap(), [] as [mln_runtime::FrameResult; 0]);
     zoom(&map, 2.0).wait().unwrap();
     let result = take_one(&session);
     assert_eq!(601, result.token.unwrap());
@@ -369,10 +369,10 @@ fn resizes_apply_in_order_and_publish_generations() {
     demand(&session, DemandMode::Force, 301);
     let old = take_one(&session);
 
-    assert_eq!(ErrorKind::InvalidArgument, session.resize(Size::new(0, 48)).unwrap_err().kind);
+    assert_eq!(ErrorKind::InvalidArgument, session.resize(LogicalExtent::new(Size::new(0, 48), 1.0)).unwrap_err().kind);
     demand(&session, DemandMode::Force, 302);
     let size = Size::new(96, 48);
-    let applied = wait(session.resize(size));
+    let applied = wait(session.resize(LogicalExtent::new(size, 1.0)));
     assert_eq!(old.generation, take_one(&session).generation);
     assert_eq!(ErrorKind::InvalidState, wait_err(session.read_texture()).kind);
 
@@ -403,13 +403,42 @@ fn a_session_renders_at_its_maps_pixel_ratio() {
     assert_eq!([255, 0, 0, 255], center_pixel(&session, Size::new(128, 128)));
 }
 
+// A window that moves to a display of another density keeps its session.
+#[test]
+fn a_resize_changes_the_scale_factor_of_the_map_and_its_next_session() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+    let invalid = |scale_factor| session.resize(LogicalExtent::new(SIZE, scale_factor)).unwrap_err().kind;
+    assert_eq!(ErrorKind::InvalidArgument, invalid(0.0));
+    assert_eq!(ErrorKind::InvalidArgument, invalid(f64::NAN));
+
+    wait(session.resize(LogicalExtent::new(Size::new(32, 16), 2.5)));
+    assert_eq!(LogicalExtent::new(Size::new(32, 16), 2.5), session.snapshot().unwrap().extent);
+    assert_eq!(2.5, map.scale_factor());
+    demand(&session, DemandMode::Force, 1);
+    assert_eq!(2.5, take_one(&session).view.unwrap().extent.scale_factor);
+    assert_eq!([255, 0, 0, 255], center_pixel(&session, Size::new(80, 40)));
+
+    // A resize that keeps the scale factor, and a new target, keep it too.
+    wait(session.resize(LogicalExtent::new(Size::new(16, 16), 2.5)));
+    demand(&session, DemandMode::Force, 2);
+    assert_eq!(2.5, take_one(&session).view.unwrap().extent.scale_factor);
+    wait(session.detach());
+    let next = attach(&map);
+    assert_eq!(2.5, next.snapshot().unwrap().extent.scale_factor);
+    render_until_idle(&map, &next);
+    assert_eq!([255, 0, 0, 255], center_pixel(&next, Size::new(160, 160)));
+}
+
 #[test]
 fn a_resize_applies_while_a_command_group_holds_the_update() {
     let runtime = runtime();
     let map = red_map(&runtime);
     let session = attach(&map);
     wait(map.begin_command_group());
-    wait(session.resize(Size::new(96, 48)));
+    wait(session.resize(LogicalExtent::new(Size::new(96, 48), 1.0)));
     assert_eq!(Size::new(96, 48), map.snapshot().unwrap().view.extent.size);
     assert_eq!(Size::new(96, 48), session.snapshot().unwrap().extent.size);
     wait(session.detach());
@@ -425,7 +454,7 @@ fn work_sent_after_a_resize_waits_for_it() {
     // The resize runs on the map's thread first, and the barrier waits for
     // it to reach the session.
     let open = hold_runtime(&map);
-    drop(session.resize(Size::new(96, 80)).unwrap());
+    drop(session.resize(LogicalExtent::new(Size::new(96, 80), 1.0)).unwrap());
     let barrier = session.barrier().unwrap();
     drop(open);
     barrier.wait().unwrap();
@@ -446,7 +475,7 @@ fn attaching_sizes_the_map_and_holds_it() {
     let second = map.attach(offscreen(SIZE), AttachOptions::default()).unwrap_err();
     assert_eq!(ErrorKind::InvalidState, second.kind);
     assert_eq!(ErrorKind::InvalidState, map.release().unwrap_err().kind);
-    assert_eq!(ErrorKind::InvalidState, map.resize(Size::new(32, 48)).unwrap_err().kind);
+    assert_eq!(ErrorKind::InvalidState, map.resize(LogicalExtent::new(Size::new(32, 48), 1.0)).unwrap_err().kind);
     assert_eq!(SIZE, map.snapshot().unwrap().view.extent.size);
 
     wait(session.release());
@@ -481,7 +510,9 @@ fn a_wait_for_session_work_on_the_runtimes_thread_fails_instead_of_hanging() {
     let session = attach(&map);
     let resizing = session.clone();
     // The resize needs the runtime's thread, which the wait would hold.
-    let waited = wait(map.with_core(move |_| resizing.resize(Size::new(32, 32)).unwrap().wait().map_err(|e| e.kind)));
+    let waited = wait(map.with_core(move |_| {
+        resizing.resize(LogicalExtent::new(Size::new(32, 32), 1.0)).unwrap().wait().map_err(|e| e.kind)
+    }));
     assert_eq!(Err(ErrorKind::InvalidState), waited.map(drop));
     wait(session.release());
 }
@@ -520,7 +551,7 @@ fn a_detached_session_frees_its_map_and_refuses_work() {
     let refused = |error: mln_runtime::Error| assert_eq!(ErrorKind::InvalidState, error.kind);
     refused(session.demand_frame(FrameDemand::default()).unwrap_err());
     refused(session.barrier().unwrap_err());
-    refused(session.resize(SIZE).unwrap_err());
+    refused(session.resize(LogicalExtent::new(SIZE, 1.0)).unwrap_err());
     refused(session.reduce_memory_use().unwrap_err());
     refused(session.clear_data().unwrap_err());
     refused(session.dump_debug_logs().unwrap_err());
@@ -603,7 +634,7 @@ fn work_queued_before_an_abandon_completes_as_target_lost() {
     let open = hold_runtime(&map);
     // The resize waits for the runtime's thread, and reaches the session
     // after the abandon.
-    let resized = session.resize(Size::new(32, 32)).unwrap();
+    let resized = session.resize(LogicalExtent::new(Size::new(32, 32), 1.0)).unwrap();
     session.abandon().unwrap();
     drop(open);
     assert_eq!(ErrorKind::TargetLost, resized.wait().unwrap_err().kind);
@@ -636,7 +667,7 @@ fn maintenance_work_runs_in_order_with_frames() {
 
 #[test]
 fn sessions_on_two_maps_share_one_device() {
-    let device = OffscreenDevice::new(OffscreenDeviceOptions::default()).unwrap();
+    let device = Device::new(DeviceOptions::default()).unwrap();
     let runtime = runtime();
     let (red, green) = (red_map(&runtime), map_in_mode(&runtime, MapMode::Continuous));
     wait(green.set_style_json(style("#00ff00")));
@@ -660,7 +691,7 @@ fn sessions_on_two_maps_share_one_device() {
 
 #[test]
 fn a_device_reports_a_missing_adapter() {
-    let error = OffscreenDevice::new(OffscreenDeviceOptions { adapter_index: Some(usize::MAX) }).unwrap_err();
+    let error = Device::new(DeviceOptions { adapter: Some(mln_runtime::Adapter::Index(usize::MAX)) }).unwrap_err();
     assert_eq!(ErrorKind::NotFound, error.kind);
 }
 
@@ -692,7 +723,7 @@ fn a_tile_map_session_resizes_between_still_images() {
     let session = attach(&map);
     wait(map.request_still_image());
     let size = Size::new(96, 48);
-    wait(session.resize(size));
+    wait(session.resize(LogicalExtent::new(size, 1.0)));
     wait(map.request_still_image());
     assert_eq!([255, 0, 0, 255], center_pixel(&session, size));
 }
@@ -808,7 +839,7 @@ fn rendered_queries_select_by_geometry_and_layer() {
         RenderedQueryGeometry::LineString(vec![ScreenCoordinate::new(10.0, 32.0), ScreenCoordinate::new(26.0, 32.0)]);
     assert_eq!(1, wait(session.query_rendered_features(line, RenderedQueryOptions::default())).len());
     let none = RenderedQueryOptions::new(Some(vec!["missing".into()]), None);
-    assert!(wait(session.query_rendered_features(east, none)).is_empty());
+    assert_eq!(wait(session.query_rendered_features(east, none)), [] as [mln_util::feature::Feature; 0]);
 
     // A box past every edge covers the whole target, and one outside it
     // covers nothing.
@@ -820,7 +851,10 @@ fn rendered_queries_select_by_geometry_and_layer() {
     assert_eq!(2, wait(session.query_rendered_features(beyond, circles)).len());
     let outside =
         RenderedQueryGeometry::Box { min: ScreenCoordinate::new(100.0, 0.0), max: ScreenCoordinate::new(200.0, 64.0) };
-    assert!(wait(session.query_rendered_features(outside, RenderedQueryOptions::default())).is_empty());
+    assert_eq!(
+        wait(session.query_rendered_features(outside, RenderedQueryOptions::default())),
+        [] as [mln_util::feature::Feature; 0]
+    );
 
     let invalid =
         |geometry| session.query_rendered_features(geometry, RenderedQueryOptions::default()).unwrap_err().kind;
@@ -845,7 +879,7 @@ fn cluster_queries_read_a_clustered_source() {
         })
         .unwrap_or_else(|| panic!("no cluster in {clusters:?}"));
 
-    assert!(!wait(session.cluster_children("clustered", cluster_id)).is_empty());
+    assert_ne!(wait(session.cluster_children("clustered", cluster_id)), [] as [feature::Feature; 0]);
     assert_eq!(3, wait(session.cluster_leaves("clustered", cluster_id, 10, 0)).len());
     assert_eq!(1, wait(session.cluster_leaves("clustered", cluster_id, 1, 2)).len());
     assert!(wait(session.cluster_expansion_zoom("clustered", cluster_id)) > 0);

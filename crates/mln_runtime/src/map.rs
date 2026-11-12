@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use mln_actor::RunLoopHandle;
 use mln_map::{
-    AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions,
+    AnimationOptions, BoundOptions, Camera, CameraDelta, CameraOptions, CameraUpdate, FreeCameraOptions, LogicalExtent,
     MapDebugOptions, MapEvent, MapMode, MapSnapshot, ProjectionMode, StyleLoadError, TransitionEnd, TransitionOutcome,
 };
 use mln_text::GlyphCache;
@@ -57,20 +57,24 @@ impl Default for MapOptions {
 }
 
 impl MapOptions {
+    #[must_use]
     pub fn new(map: mln_map::MapOptions) -> Self {
         MapOptions { map, ..Self::default() }
     }
 
+    #[must_use]
     pub fn with_event_mask(mut self, event_mask: EventMask) -> Self {
         self.event_mask = event_mask;
         self
     }
 
+    #[must_use]
     pub fn with_fallback_font_faces(mut self, json: impl Into<String>) -> Self {
         self.fallback_font_faces = Some(json.into());
         self
     }
 
+    #[must_use]
     pub fn with_tile_cache_enabled(mut self, enabled: bool) -> Self {
         self.tile_cache_enabled = enabled;
         self
@@ -120,7 +124,9 @@ pub(crate) struct MapShared {
     id: MapId,
     runtime: Arc<RuntimeShared>,
     mode: MapMode,
-    pixel_ratio: f32,
+    /// The map's scale factor, an `f64`'s bits: the options' pixel ratio,
+    /// until a session's resize sends another.
+    scale_factor: AtomicU64,
     tile_cache_enabled: bool,
     /// The render session attached to the map, from its attach until its
     /// detach completes.
@@ -142,7 +148,7 @@ impl MapShared {
             id,
             runtime,
             mode: options.map.map_mode(),
-            pixel_ratio: options.map.pixel_ratio(),
+            scale_factor: AtomicU64::new(f64::from(options.map.pixel_ratio()).to_bits()),
             tile_cache_enabled: options.tile_cache_enabled,
             session: Mutex::new(None),
             sent: Mutex::new(1),
@@ -257,26 +263,31 @@ impl Map {
         Map { shared: Arc::new(shared) }
     }
 
+    #[must_use]
     pub fn id(&self) -> MapId {
         self.shared.id
     }
 
     /// When the map renders, as its options set it.
+    #[must_use]
     pub fn mode(&self) -> MapMode {
         self.shared.mode
     }
 
     /// The runtime that the map lives on.
+    #[must_use]
     pub fn runtime(&self) -> Runtime {
         Runtime { shared: self.shared.runtime.clone() }
     }
 
     /// The sequence number of the last command sent to the map.
+    #[must_use]
     pub fn sent_sequence(&self) -> u64 {
         *self.shared.sent.lock_unpoisoned()
     }
 
     /// The sequence number of the last command that ran.
+    #[must_use]
     pub fn applied_sequence(&self) -> u64 {
         self.shared.published.applied.load(Ordering::SeqCst)
     }
@@ -296,6 +307,7 @@ impl Map {
     }
 
     /// The events that the map reports, as of the last command that ran.
+    #[must_use]
     pub fn event_mask(&self) -> EventMask {
         EventMask::from_bits(self.shared.published.event_mask.load(Ordering::SeqCst)).unwrap_or_default()
     }
@@ -402,21 +414,32 @@ impl Map {
 
     // MARK: - Map
 
-    /// Sets the map's size. A resize to the size the map has changes
-    /// nothing, so it renders nothing. Fails with
-    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) while a render
-    /// session is attached, since the session sizes the map to its target:
-    /// resize the session instead. Fails with
-    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
-    /// size.
-    pub fn resize(&self, size: Size) -> Result<Completion<Applied>, Error> {
+    /// Sets the map's size and scale factor. The map keeps its tiles, and a
+    /// resize to the extent the map has changes nothing, so it renders
+    /// nothing. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// while a render session is attached, since the session sizes the map
+    /// to its target: resize the session instead. Fails with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size,
+    /// or a scale factor that isn't finite and positive.
+    pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
+        let LogicalExtent { size, scale_factor } = extent;
         if self.shared.session.lock_unpoisoned().is_some() {
             return Err(Error::invalid_state("the map has a render session: resize the session instead"));
         }
         if size.is_empty() {
             return Err(Error::invalid_argument("logical size dimensions must be positive"));
         }
-        self.command(move |map| if map.get_map_options().size() == size { Ok(()) } else { map.set_size(size) })
+        if !scale_factor.is_finite() || scale_factor <= 0.0 {
+            return Err(Error::invalid_argument(format!("scale factor {scale_factor} isn't finite and positive")));
+        }
+        // The scale factor that a session attached later renders at.
+        self.shared.scale_factor.store(scale_factor.to_bits(), Ordering::SeqCst);
+        self.command(move |map| {
+            if map.get_map_options().size() != size {
+                map.set_size(size)?;
+            }
+            map.set_pixel_ratio(scale_factor as f32)
+        })
     }
 
     /// Renders a new frame of a continuous map, even when nothing changed.
@@ -447,7 +470,7 @@ impl Map {
     /// began. Completes with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// when no group is open.
     pub fn end_command_group(&self) -> Result<Completion<Applied>, Error> {
-        self.command(|map| map.end_command_group())
+        self.command(mln_map::Map::end_command_group)
     }
 
     /// Begins a command group that ends when the guard drops, or with
@@ -489,7 +512,7 @@ impl Map {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
     /// target, or a [`Surface::wgpu`](crate::Surface::wgpu) without the
     /// host's device. The completion fails as
-    /// [`OffscreenDevice::new`](crate::OffscreenDevice::new) does when the
+    /// [`Device::new`](crate::Device::new) does when the
     /// session has to create its device and can't, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no GPU can present
     /// to a window, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
@@ -554,8 +577,13 @@ impl Map {
         self.shared.runtime.thread()
     }
 
-    pub(crate) fn pixel_ratio(&self) -> f32 {
-        self.shared.pixel_ratio
+    /// The map's scale factor: device pixels per logical pixel. It is the
+    /// pixel ratio of the map's options until a render session's
+    /// [`resize`](crate::RenderSession::resize) sets another, and the map's
+    /// next session renders at it.
+    #[must_use]
+    pub fn scale_factor(&self) -> f64 {
+        f64::from_bits(self.shared.scale_factor.load(Ordering::SeqCst))
     }
 
     pub(crate) fn tile_cache_enabled(&self) -> bool {
@@ -647,15 +675,18 @@ impl Map {
         );
     }
 
-    /// Sends a command that resizes the map to `size`, then runs `resize`
-    /// with its outcome on the thread of the session that `run_loop` runs,
-    /// before the session learns of any later command.
+    /// Sends a command that resizes the map to `size` at `scale_factor`,
+    /// then runs `resize` with its outcome on the thread of the session that
+    /// `run_loop` runs, before the session learns of any later command.
     pub(crate) fn resize_for_session(
         &self,
         size: Size,
+        scale_factor: f64,
         run_loop: RunLoopHandle,
         resize: impl FnOnce(&mut Worker, Result<Applied, Error>, &mut Outbox) + Send + 'static,
     ) -> Result<(), Error> {
+        // The scale factor that a session attached later renders at.
+        self.shared.scale_factor.store(scale_factor.to_bits(), Ordering::SeqCst);
         let sent = self.shared.send(move |core, outbox, id, sequence, resolver: Resolver<()>| {
             drop(resolver);
             if !core.maps.contains_key(&id) {
@@ -666,7 +697,10 @@ impl Map {
                 id,
                 sequence,
                 outbox,
-                move |entry, _| entry.core.set_size(size),
+                move |entry, _| {
+                    entry.core.set_size(size)?;
+                    entry.core.set_pixel_ratio(scale_factor as f32)
+                },
                 move |_, resized, applied, _| {
                     let result = resized.map(|()| applied);
                     worker_post(&run_loop, move |worker, outbox| resize(worker, result, outbox));
@@ -693,7 +727,7 @@ impl Map {
     /// selector without a feature, or an empty state.
     pub fn set_feature_state(
         &self,
-        selector: FeatureStateSelector,
+        selector: &FeatureStateSelector,
         state: FeatureState,
     ) -> Result<Completion<Applied>, Error> {
         let key = selector.key(true)?;
@@ -712,7 +746,7 @@ impl Map {
     /// The state of the feature that `selector` names, empty when it has
     /// none. Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind)
     /// for a selector without a feature.
-    pub fn feature_state(&self, selector: FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
+    pub fn feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<FeatureState>, Error> {
         let key = selector.key(true)?;
         self.send(move |entry, _| Ok(entry.feature_state.get(&key)), |state, _| state)
     }
@@ -721,7 +755,7 @@ impl Map {
     /// of a feature's state, or that of every feature in a source layer.
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for a
     /// state key without a feature.
-    pub fn remove_feature_state(&self, selector: FeatureStateSelector) -> Result<Completion<Applied>, Error> {
+    pub fn remove_feature_state(&self, selector: &FeatureStateSelector) -> Result<Completion<Applied>, Error> {
         let key = selector.key(false)?;
         self.send(
             move |entry, _| {
@@ -1219,7 +1253,7 @@ impl Ends {
 pub(crate) fn create(
     core: &mut RuntimeCore,
     id: MapId,
-    options: MapOptions,
+    options: &MapOptions,
     published: Arc<Published>,
     resolver: Resolver<Applied>,
     outbox: &mut Outbox,

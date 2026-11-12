@@ -138,7 +138,7 @@ impl BinderValue for f32 {
 /// `packUint8Pair<float>(a, b)`: `static_cast<uint16_t>(a) * 256 +
 /// static_cast<uint16_t>(b)` (an `int`), returned as `uint16_t`.
 fn pack_uint8_pair(a: f32, b: f32) -> u16 {
-    ((a as u16) as i32 * 256 + (b as u16) as i32) as u16
+    (i32::from(a as u16) * 256 + i32::from(b as u16)) as u16
 }
 
 impl BinderValue for Color {
@@ -153,7 +153,10 @@ impl BinderValue for Color {
     ///
     /// Also note that colors come in as floats 0..1, so we scale by 255.
     fn attribute_value(&self) -> [f32; 2] {
-        [pack_uint8_pair(255.0 * self.r, 255.0 * self.g) as f32, pack_uint8_pair(255.0 * self.b, 255.0 * self.a) as f32]
+        [
+            f32::from(pack_uint8_pair(255.0 * self.r, 255.0 * self.g)),
+            f32::from(pack_uint8_pair(255.0 * self.b, 255.0 * self.a)),
+        ]
     }
 }
 
@@ -469,7 +472,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
             let raw_size = buffer.stride as u32;
             let data_type = if self.is_interpolated() { T::INTERPOLATED_DATA_TYPE } else { T::BASE_DATA_TYPE };
 
-            debug_assert!(shared.get_raw_count() / buffer.stride.max(1) == self.get_vertex_count(buffer));
+            debug_assert_eq!(shared.get_raw_count() / buffer.stride.max(1), self.get_vertex_count(buffer));
             attrib.set_shared_raw_data(Some(shared.clone()), self.vertex_offset as u32, 0, raw_size, data_type);
         } else {
             // getVertexCount() is 0 without an interleaved buffer: nothing
@@ -482,7 +485,7 @@ impl<T: BinderValue> PaintPropertyBinder<T> {
 /// The pattern-related state the tweakers update every frame.
 #[derive(Debug, Default)]
 pub struct CrossFadedState {
-    /// `constantPatternPositions` (Constant) as (posB.tlbr(), posA.tlbr()).
+    /// `constantPatternPositions` (Constant) as (`posB.tlbr()`, `posA.tlbr()`).
     pub constant_pattern_positions: ([u16; 4], [u16; 4]),
     /// `crossfade` (Composite).
     pub crossfade: CrossfadeParameters,
@@ -525,6 +528,7 @@ const PATTERN_ZOOM_INTERPOLATED_SIZE: usize = 16;
 
 impl CrossFadedPaintPropertyBinder<Image> {
     /// `PaintPropertyBinder::create(value, zoom, defaultValue)`.
+    #[must_use]
     pub fn create(value: &PossiblyEvaluatedFadedPropertyValue<Image>, zoom: f32, default_value: Image) -> Self {
         let kind = match value {
             PossiblyEvaluatedFadedPropertyValue::Constant(constant) => {

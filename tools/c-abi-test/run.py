@@ -37,9 +37,10 @@ PROCESS_TIMEOUT_SECONDS = 600
 LIST_HEADER = """\
 # The ABI suite's cases (tools/c-abi-test/testdata/tests/native, from
 # maplibre-native-ffi) that fail against crates/mln_c, as <file>:<case>,
-# sorted. `just c-abi-test` fails when another case fails or a listed case
-# passes; implementing a function makes cases pass, and `just c-abi-test
-# --update` then shrinks this list.
+# sorted, each optionally followed by `  # ` and why it fails. `just
+# c-abi-test` fails when another case fails or a listed case passes;
+# implementing a function makes cases pass, and `just c-abi-test --update`
+# then shrinks this list, keeping the reasons of the cases that stay.
 """
 
 
@@ -75,15 +76,16 @@ def main() -> int:
         for key in sorted(failures):
             print(f"  {key}: {failures[key]}")
 
+    expected = read_expected()
     if args.update:
-        EXPECTED.write_text(LIST_HEADER + "".join(f"{key}\n" for key in sorted(failures)))
+        lines = (f"{key}  # {expected[key]}" if expected.get(key) else key for key in sorted(failures))
+        EXPECTED.write_text(LIST_HEADER + "".join(f"{line}\n" for line in lines))
         print(f"wrote {len(failures)} cases to {EXPECTED.relative_to(HERE.parents[1])}")
         return 0
 
-    expected = read_expected()
-    unexpected = sorted(set(failures) - expected)
-    passing = sorted(key for key in expected & set(results) if key not in failures)
-    stale = sorted(expected - set(results))
+    unexpected = sorted(set(failures) - set(expected))
+    passing = sorted(key for key in set(expected) & set(results) if key not in failures)
+    stale = sorted(set(expected) - set(results))
     for key in unexpected:
         print(f"FAILED, not in the list: {key}: {failures[key]}")
     for key in passing:
@@ -159,11 +161,13 @@ def run(binary: pathlib.Path, env: dict[str, str], filter_args: list[str]) -> tu
     return results, died
 
 
-def read_expected() -> set[str]:
+def read_expected() -> dict[str, str]:
+    """The listed cases, each with its reason, or an empty one."""
     if not EXPECTED.exists():
-        return set()
+        return {}
     lines = (line.strip() for line in EXPECTED.read_text().splitlines())
-    return {line for line in lines if line and not line.startswith("#")}
+    entries = (line.partition("#") for line in lines if line and not line.startswith("#"))
+    return {key.strip(): reason.strip() for key, _, reason in entries}
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 use crate::types::VtPoint;
 
 /// square distance from a point to a segment
+#[must_use]
 pub fn get_sq_seg_dist(p: &VtPoint, a: &VtPoint, b: &VtPoint) -> f64 {
     let mut x = a.x;
     let mut y = a.y;
