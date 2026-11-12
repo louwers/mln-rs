@@ -3,7 +3,7 @@
 // decodes what the workers send back.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use mln_style::layer_properties::LayerProperties;
 use mln_style::serialization::{SharedExpression, SharedLayer, SharedLayerProperties};
@@ -165,10 +165,10 @@ impl MapCodec {
     /// The request that sends `message` to the worker of `tile`. Fails for
     /// what can't cross (tile data that no longer has its bytes, say) or an
     /// unknown tile.
-    pub fn message(&mut self, tile: u64, message: WorkerMessage) -> Result<Vec<u8>, String> {
+    pub fn message(&mut self, tile: u64, message: &WorkerMessage) -> Result<Vec<u8>, String> {
         let state = self.tiles.get_mut(&tile).ok_or_else(|| format!("no tile {tile}"))?;
         let correlation_id = message.correlation_id();
-        let kind = match &message {
+        let kind = match message {
             WorkerMessage::SetData { data, .. } => {
                 state.data.push((correlation_id, data.clone()));
                 MessageKind::SetData
@@ -180,7 +180,7 @@ impl MapCodec {
             _ => MessageKind::Other,
         };
         let about = About { correlation_id, kind };
-        let request = self.request(Action::Message { tile, about }, Some(&message));
+        let request = self.request(Action::Message { tile, about }, Some(message));
         // The worker never gets what failed.
         if let (Err(_), Some(state)) = (&request, self.tiles.get_mut(&tile)) {
             match about.kind {
@@ -193,16 +193,16 @@ impl MapCodec {
     }
 
     /// The request that sends `message` to the `RasterTileWorker` of `tile`.
-    pub fn raster_message(&mut self, tile: u64, message: RasterWorkerMessage) -> Vec<u8> {
-        let RasterWorkerMessage::Parse { correlation_id, .. } = message;
-        self.simple_message(tile, correlation_id, &message)
+    pub fn raster_message(&mut self, tile: u64, message: &RasterWorkerMessage) -> Vec<u8> {
+        let &RasterWorkerMessage::Parse { correlation_id, .. } = message;
+        self.simple_message(tile, correlation_id, message)
     }
 
     /// The request that sends `message` to the `RasterDEMTileWorker` of
     /// `tile`.
-    pub fn raster_dem_message(&mut self, tile: u64, message: RasterDEMWorkerMessage) -> Vec<u8> {
-        let RasterDEMWorkerMessage::Parse { correlation_id, .. } = message;
-        self.simple_message(tile, correlation_id, &message)
+    pub fn raster_dem_message(&mut self, tile: u64, message: &RasterDEMWorkerMessage) -> Vec<u8> {
+        let &RasterDEMWorkerMessage::Parse { correlation_id, .. } = message;
+        self.simple_message(tile, correlation_id, message)
     }
 
     /// A message of a raster or raster-dem tile, which refers to nothing
@@ -282,11 +282,11 @@ pub struct AtlasMirror {
 
 impl AtlasMirror {
     fn has_releases(&self) -> bool {
-        !self.released.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+        !self.released.lock().unwrap_or_else(PoisonError::into_inner).is_empty()
     }
 
     fn take_releases(&self) -> Vec<TextureRelease> {
-        let released = std::mem::take(&mut *self.released.lock().unwrap_or_else(|e| e.into_inner()));
+        let released = std::mem::take(&mut *self.released.lock().unwrap_or_else(PoisonError::into_inner));
         released.into_iter().map(|(texture, handles)| TextureRelease { texture: Some(texture), handles }).collect()
     }
 }
@@ -297,7 +297,10 @@ impl TextureAtlas for AtlasMirror {
         if let Some(texture) = dynamic_texture
             && !texture_handles.is_empty()
         {
-            self.released.lock().unwrap_or_else(|e| e.into_inner()).push((texture.clone(), texture_handles.to_vec()));
+            self.released
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push((texture.clone(), texture_handles.to_vec()));
         }
     }
 

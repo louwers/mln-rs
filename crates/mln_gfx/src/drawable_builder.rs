@@ -138,6 +138,7 @@ impl DrawableBuilderImpl {
     }
 
     /// `layoutVertex(p, e, round, up, dir, linesofar)`.
+    #[must_use]
     pub fn layout_vertex(
         p: Point<i16>,
         e: Point<f64>,
@@ -152,15 +153,9 @@ impl DrawableBuilderImpl {
         // the texture normal array, while the extrude normal actually moves
         // the vertex to create the acute/bevelled line join.
         const EXTRUDE_SCALE: f64 = 63.0;
-        let dir_value: i32 = if dir == 0 {
-            0
-        } else if dir < 0 {
-            -1
-        } else {
-            1
-        };
+        let dir_value = i32::from(dir.signum());
         LineLayoutVertex {
-            a1: [((p.x as i32 * 2) | round as i32) as i16, ((p.y as i32 * 2) | up as i32) as i16],
+            a1: [((i32::from(p.x) * 2) | i32::from(round)) as i16, ((i32::from(p.y) * 2) | i32::from(up)) as i16],
             a2: [
                 // add 128 to store a byte in an unsigned byte
                 ((EXTRUDE_SCALE * e.x).round() + 128.0) as u8,
@@ -204,6 +199,7 @@ pub struct DrawableBuilderBase {
 }
 
 impl DrawableBuilderBase {
+    #[must_use]
     pub fn new(name: String) -> Self {
         DrawableBuilderBase {
             name,
@@ -255,15 +251,11 @@ pub trait DrawableBuilder {
     /// Close the current drawable, using a new one for any further work
     fn flush(&mut self, context: &dyn Context) {
         if self.cur_vertex_count() != 0 {
-            match self.base().impl_.get_mode() {
-                Mode::Polylines => {
-                    // setup for polylines
-                    self.setup_for_polylines(context);
-                }
-                Mode::WideVectorLocal | Mode::WideVectorGlobal => {
-                    // TODO(port): impl->setupForWideVectors
-                }
-                _ => {}
+            // TODO(port): impl->setupForWideVectors for `Mode::WideVectorLocal`
+            // and `Mode::WideVectorGlobal`.
+            if self.base().impl_.get_mode() == Mode::Polylines {
+                // setup for polylines
+                self.setup_for_polylines(context);
             }
 
             let new_vertex_attributes =
@@ -495,9 +487,9 @@ pub trait DrawableBuilder {
             {
                 use crate::gfx_types::DrawModeType;
                 if mode.type_ == DrawModeType::Triangles {
-                    debug_assert!(seg.index_length % 3 == 0);
+                    debug_assert_eq!(seg.index_length % 3, 0);
                 } else if mode.type_ == DrawModeType::Lines {
-                    debug_assert!(seg.index_length % 2 == 0);
+                    debug_assert_eq!(seg.index_length % 2, 0);
                 }
                 let shared = self.base().impl_.shared_indexes.as_ref().unwrap().borrow();
                 debug_assert!(vertex_count == 0 || seg.vertex_offset + seg.vertex_length <= vertex_count);
@@ -617,12 +609,12 @@ pub trait DrawableBuilder {
         let mut segments = std::mem::take(&mut impl_.segments);
         let mut indexes = std::mem::take(&mut impl_.polyline_indexes);
         {
-            let create_segment = |vertex_offset: usize, index_offset: usize| {
-                self.create_segment(DrawMode::Triangles(), SegmentBase::new(vertex_offset, index_offset))
-            };
             fn get_segment(segment: &mut UniqueDrawSegment) -> &mut SegmentBase {
                 segment.get_segment_mut()
             }
+            let create_segment = |vertex_offset: usize, index_offset: usize| {
+                self.create_segment(DrawMode::Triangles(), SegmentBase::new(vertex_offset, index_offset))
+            };
             let mut generator = PolylineGenerator::new(
                 &mut vertices,
                 DrawableBuilderImpl::layout_vertex,

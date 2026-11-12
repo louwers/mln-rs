@@ -100,15 +100,14 @@ fn add_round_dash(ranges: &[DashRange], y_offset: u32, stretch: f32, n: i32, ima
             let dist_left = (x as f32 - range.left).abs();
             let dist_right = (x as f32 - range.right).abs();
             let min_dist = mln_math::fminf(dist_left, dist_right);
-            let signed_distance;
 
             let dist_middle = y as f32 / n as f32 * (half_stretch + 1.0);
-            if range.is_dash {
+            let signed_distance = if range.is_dash {
                 let dist_edge = half_stretch - dist_middle.abs();
-                signed_distance = (min_dist * min_dist + dist_edge * dist_edge).sqrt();
+                (min_dist * min_dist + dist_edge * dist_edge).sqrt()
             } else {
-                signed_distance = half_stretch - (min_dist * min_dist + dist_middle * dist_middle).sqrt();
-            }
+                half_stretch - (min_dist * min_dist + dist_middle * dist_middle).sqrt()
+            };
 
             image.data[(index + x) as usize] = to_alpha(signed_distance + 128.0);
         }
@@ -189,14 +188,14 @@ fn add_dash_pattern(
     let mut ranges = get_dash_ranges(dasharray, stretch);
 
     if pattern_cap == LinePatternCap::Round {
-        add_round_dash(&ranges, y_offset, stretch, n as i32, image);
+        add_round_dash(&ranges, y_offset, stretch, i32::from(n), image);
     } else {
         add_regular_dash(&mut ranges, y_offset, image);
     }
 
     LinePatternPos {
-        y: (0.5 + y_offset as f32 + n as f32) / image.size.height as f32,
-        height: (2.0 * n as f32 + 1.0) / image.size.height as f32,
+        y: (0.5 + y_offset as f32 + f32::from(n)) / image.size.height as f32,
+        height: (2.0 * f32::from(n) + 1.0) / image.size.height as f32,
         width: length,
     }
 }
@@ -215,6 +214,7 @@ pub struct DashPatternTexture {
 }
 
 impl DashPatternTexture {
+    #[must_use]
     pub fn new(from: &[f32], to: &[f32], cap: LinePatternCap) -> Self {
         let patterns_identical = from == to;
         let pattern_height: u32 = if cap == LinePatternCap::Round { 15 } else { 1 };
@@ -223,7 +223,7 @@ impl DashPatternTexture {
         // The OpenGL ES 2.0 spec, section 3.8.2: non-power-of-two textures
         // need CLAMP_TO_EDGE; the dash patterns repeat horizontally, so the
         // texture is a power of two (15 -> 16, 30 -> 32).
-        let texture_height = 1u32 << mln_math::ceil_log2(height as u64);
+        let texture_height = 1u32 << mln_math::ceil_log2(u64::from(height));
         let mut image = AlphaImage::new(Size::new(256, texture_height));
 
         let from_pos = add_dash_pattern(&mut image, 0, from, cap);
@@ -256,6 +256,7 @@ impl DashPatternTexture {
     }
 
     /// The uploaded texture, if `upload` ran.
+    #[must_use]
     pub fn get_texture(&self) -> Option<Texture2DPtr> {
         match &self.texture {
             DashTexture::Texture(texture) => Some(texture.clone()),
@@ -264,6 +265,7 @@ impl DashPatternTexture {
     }
 
     /// Returns the size of the texture image.
+    #[must_use]
     pub fn get_size(&self) -> Size {
         match &self.texture {
             DashTexture::Image(image) => image.size,
@@ -271,15 +273,18 @@ impl DashPatternTexture {
         }
     }
 
+    #[must_use]
     pub fn get_from(&self) -> &LinePatternPos {
         &self.from
     }
 
+    #[must_use]
     pub fn get_to(&self) -> &LinePatternPos {
         &self.to
     }
 
     /// The pattern image while it is not uploaded (for tests).
+    #[must_use]
     pub fn get_image(&self) -> Option<&AlphaImage> {
         match &self.texture {
             DashTexture::Image(image) => Some(image),
@@ -303,6 +308,7 @@ pub struct LineAtlas {
 }
 
 impl LineAtlas {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -331,6 +337,7 @@ impl LineAtlas {
         }
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.textures.is_empty()
     }

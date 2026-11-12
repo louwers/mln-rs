@@ -99,7 +99,7 @@ fn invalid(t: &EvaluatedType) -> Vec<String> {
         EvaluatedType::Padding => v.extend(["[]".into(), "[1, 2, 3, 4, 5]".into(), json_string("abc")]),
         EvaluatedType::Array(_, n) => v.extend([format!("[{}]", vec!["1"; n + 1].join(", ")), json_string("abc")]),
         EvaluatedType::VariableAnchorOffsetCollection => {
-            v.extend([r#"["top"]"#.into(), r#"["top", [1]]"#.into(), r#"["nowhere", [0, 0]]"#.into()])
+            v.extend([r#"["top"]"#.into(), r#"["top", [1]]"#.into(), r#"["nowhere", [0, 0]]"#.into()]);
         }
         _ => v.push("5".into()),
     }
@@ -208,7 +208,7 @@ fn rust_str(s: &str) -> String {
     format!("r{hashes}\"{s}\"{hashes}")
 }
 
-/// The `pe_*` helper (style_codegen_difftest.rs) for a property's
+/// The `pe_*` helper (`style_codegen_difftest.rs`) for a property's
 /// `PossiblyEvaluatedType`.
 fn possibly_evaluated_kind(p: &Property, layout: bool) -> &'static str {
     if layout {

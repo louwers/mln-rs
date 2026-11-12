@@ -11,6 +11,7 @@ pub struct SubdivisionGranularityExpression {
 }
 
 impl SubdivisionGranularityExpression {
+    #[must_use]
     pub const fn new(base_zoom_granularity: u32, min_granularity: u32) -> Self {
         debug_assert!(min_granularity <= base_zoom_granularity || base_zoom_granularity == 0);
         SubdivisionGranularityExpression { base_zoom_granularity, min_granularity }
@@ -19,6 +20,7 @@ impl SubdivisionGranularityExpression {
     /// The base granularity halves with every zoom level, down to the
     /// minimum and never below 1. (A C++ build without the globe always
     /// returns 1; the port always builds the globe.)
+    #[must_use]
     pub fn get_granularity_for_zoom_level(&self, zoom: u8) -> u32 {
         let base = if zoom < 32 { self.base_zoom_granularity >> zoom } else { 0 };
         base.max(self.min_granularity).max(1)
@@ -42,6 +44,7 @@ impl Default for SubdivisionGranularitySetting {
 }
 
 impl SubdivisionGranularitySetting {
+    #[must_use]
     pub const fn none() -> Self {
         SubdivisionGranularitySetting {
             fill: SubdivisionGranularityExpression::new(0, 0),
@@ -53,6 +56,7 @@ impl SubdivisionGranularitySetting {
     }
 
     /// GL JS's globe values.
+    #[must_use]
     pub const fn globe() -> Self {
         SubdivisionGranularitySetting {
             fill: SubdivisionGranularityExpression::new(128, 2),

@@ -132,14 +132,14 @@ pub struct MBTilesFileSourceThread {
 impl MBTilesFileSourceThread {
     /// Generate a tilejson resource from .mbtiles file
     pub fn request_tilejson(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
-        let response = match self.tilejson(resource) {
+        let response = match Self::tilejson(resource) {
             Ok(response) => response,
             Err(message) => error_response(Reason::Other, message),
         };
         req.invoke(move |request: &FileSourceRequestState| request.set_response(response));
     }
 
-    fn tilejson(&self, resource: &Resource) -> Result<Response, String> {
+    fn tilejson(resource: &Resource) -> Result<Response, String> {
         let path = url_to_path(&resource.url);
         let path = path_from_utf8(&path)?;
 
@@ -225,9 +225,9 @@ impl MBTilesFileSourceThread {
                     response.error = Some(Box::new(ResourceError::new(Reason::Other, "")));
                     return Ok(response);
                 }
-                let c_lon = (bounds_values[0] + bounds_values[2]) / 2.0;
-                let c_lat = (bounds_values[1] + bounds_values[3]) / 2.0;
-                let c_zoom = (min_zoom + max_zoom) / 2;
+                let c_lon = f64::midpoint(bounds_values[0], bounds_values[2]);
+                let c_lat = f64::midpoint(bounds_values[1], bounds_values[3]);
+                let c_zoom = i32::midpoint(min_zoom, max_zoom);
 
                 if format != "pbf" {
                     doc.add_member("bounds", Json::Array(bounds_values.iter().map(|&v| json_double(v)).collect()));
@@ -310,6 +310,7 @@ pub struct MBTilesFileSource {
 }
 
 impl MBTilesFileSource {
+    #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         MBTilesFileSource {
             thread: Thread::new("MBTilesFileSource", |_| MBTilesFileSourceThread {
@@ -408,6 +409,6 @@ mod tests {
         assert_eq!(0, strtol(""));
         assert_eq!(vec![1.0, 2.0, 3.0, 4.0], split("1,2,3,4", ','));
         assert_eq!(vec![1.0, 2.0], split("1,2,", ','));
-        assert!(split("", ',').is_empty());
+        assert_eq!(split("", ','), Vec::<f64>::new());
     }
 }

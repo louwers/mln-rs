@@ -22,6 +22,7 @@ use serde_json::Value as JSValue;
 /// from the given location. Logs and returns `None` for invalid metrics or
 /// metadata.
 #[allow(clippy::too_many_arguments)]
+#[must_use]
 pub fn create_style_image(
     id: &str,
     image: &PremultipliedImage,
@@ -48,8 +49,8 @@ pub fn create_style_image(
         || ratio > 10.0
         || src_x < 0
         || src_y < 0
-        || (src_x as i64) >= image.size.width as i64
-        || (src_y as i64) >= image.size.height as i64
+        || i64::from(src_x) >= i64::from(image.size.width)
+        || i64::from(src_y) >= i64::from(image.size.height)
         || src_x.wrapping_add(width) > image_width
         || src_y.wrapping_add(height) > image_height
     {
@@ -102,7 +103,7 @@ fn get_u_int16(value: &JSValue, property: &str, name: &str, def: u16) -> u16 {
     if let Some(v) = member(value, property) {
         // rapidjson `IsUint() && GetUint() <= 65535`.
         match v.as_u64() {
-            Some(u) if u <= u16::MAX as u64 => return u as u16,
+            Some(u) if u16::try_from(u).is_ok() => return u as u16,
             _ => Log::warning(
                 Event::Sprite,
                 format!("Invalid sprite image '{name}': value of '{property}' must be an integer between 0 and 65535"),
@@ -211,12 +212,8 @@ fn get_text_fit(value: &JSValue, property: &str, name: &str) -> Option<TextFit> 
                 );
             }
             return text_fit;
-        } else {
-            Log::warning(
-                Event::Sprite,
-                format!("Invalid sprite image '{name}': value of '{property}' must be a string"),
-            );
         }
+        Log::warning(Event::Sprite, format!("Invalid sprite image '{name}': value of '{property}' must be a string"));
     }
 
     None
@@ -231,7 +228,7 @@ pub fn parse_sprite(id: &str, encoded_image: &[u8], json: &[u8]) -> Result<Vec<I
 }
 
 /// Port-only: `parseSprite` after its `decodeImage`, for an image decoded
-/// elsewhere (the SpriteLoader decodes through mln_image's
+/// elsewhere (the `SpriteLoader` decodes through `mln_image`'s
 /// `decoder`, which may answer later).
 pub fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -> Result<Vec<Immutable<Impl>>, Error> {
     // `doc.Parse<0>(json.c_str())`: the string ends at the first NUL.
@@ -247,7 +244,7 @@ pub fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -
 
     let mut images = Vec::with_capacity(properties.len());
     for (name, value) in properties {
-        let complete_name = if id != "default" { format!("{id}:{name}") } else { name.clone() };
+        let complete_name = if id == "default" { name.clone() } else { format!("{id}:{name}") };
 
         if value.is_object() {
             let x = get_u_int16(value, "x", name, 0);
@@ -265,10 +262,10 @@ pub fn parse_sprite_images(id: &str, raster: &PremultipliedImage, json: &[u8]) -
             let image = create_style_image(
                 &complete_name,
                 raster,
-                x as i32,
-                y as i32,
-                width as i32,
-                height as i32,
+                i32::from(x),
+                i32::from(y),
+                i32::from(width),
+                i32::from(height),
                 pixel_ratio,
                 sdf,
                 stretch_x,

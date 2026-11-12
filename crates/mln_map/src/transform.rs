@@ -87,15 +87,15 @@ fn lat_lng(lat: f64, lon: f64) -> LatLng {
 }
 
 /// An animation frame's `EdgeInsets(top, left, bottom, right)`. C++ throws
-/// std::domain_error for NaN (infinite insets interpolate to NaN) out of
+/// `std::domain_error` for NaN (infinite insets interpolate to NaN) out of
 /// the frame, and nothing catches it; the port logs it, and the frame keeps
 /// the insets.
 fn frame_edge_insets(top: f64, left: f64, bottom: f64, right: f64) -> Option<EdgeInsets> {
     EdgeInsets::new(top, left, bottom, right).map_err(|e| Log::error(Event::General, &e.message)).ok()
 }
 
-/// An animation frame's `Projection::unproject`, which constructs a LatLng
-/// and so can throw std::domain_error (NaN); handled as
+/// An animation frame's `Projection::unproject`, which constructs a `LatLng`
+/// and so can throw `std::domain_error` (NaN); handled as
 /// [`frame_edge_insets`]: the frame keeps the center and zoom.
 fn frame_unproject(p: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Option<LatLng> {
     Projection::unproject(p, scale, wrap_mode).map_err(|e| Log::error(Event::General, &e.message)).ok()
@@ -182,9 +182,9 @@ struct Transition {
 }
 
 impl Transition {
+    /// A command without coupled fields, anchor, momentum or gesture.
     fn new(
         fields: u16,
-        coupled_fields: u16,
         moving_fields: u16,
         start: TimePoint,
         duration: Duration,
@@ -194,7 +194,7 @@ impl Transition {
     ) -> Transition {
         Transition {
             fields: Cell::new(fields),
-            coupled_fields,
+            coupled_fields: 0,
             moving_fields: Cell::new(moving_fields),
             start,
             duration: Cell::new(duration),
@@ -210,7 +210,7 @@ impl Transition {
     }
 
     fn mode(&self) -> CameraChangeMode {
-        if self.duration.get() != Duration::zero() { CameraChangeMode::Animated } else { CameraChangeMode::Immediate }
+        if self.duration.get() == Duration::zero() { CameraChangeMode::Immediate } else { CameraChangeMode::Animated }
     }
 
     /// Records why the command stops: `Cancelled` or `Replaced`. A
@@ -227,7 +227,7 @@ impl Transition {
     /// else `Completed`.
     fn end(&self) -> TransitionEnd {
         let (velocity, momentum_replaced) =
-            self.momentum.as_ref().map(|m| m.borrow().end()).unwrap_or((CameraVelocity::default(), false));
+            self.momentum.as_ref().map_or((CameraVelocity::default(), false), |m| m.borrow().end());
         let outcome = self.stopped.get().unwrap_or(if momentum_replaced {
             TransitionOutcome::Replaced
         } else {
@@ -267,7 +267,7 @@ struct Glide {
 impl Glide {
     /// Plans a release at `speed`, or returns nothing when it doesn't move.
     fn plan(speed: f64, decay: &MomentumDecay) -> Option<Glide> {
-        if !(speed > 0.0) || speed < decay.min_speed {
+        if speed.is_nan() || speed <= 0.0 || speed < decay.min_speed {
             return None;
         }
         let mut speed = std_min(speed, decay.max_speed);
@@ -276,7 +276,7 @@ impl Glide {
         match decay.model {
             MomentumDecayModel::Friction => {
                 let half_life = seconds_f64(decay.half_life);
-                if !(half_life > 0.0) || !(decay.stop_speed > 0.0) {
+                if half_life.is_nan() || half_life <= 0.0 || decay.stop_speed.is_nan() || decay.stop_speed <= 0.0 {
                     return None;
                 }
                 glide.rate = std::f64::consts::LN_2 / half_life;
@@ -296,7 +296,12 @@ impl Glide {
         // A glide too long for the clock doesn't move. The bound is
         // exclusive, as in flyTo(), because Duration::max() rounds up as a
         // double.
-        if !(glide.distance > 0.0) || !(seconds > 0.0) || seconds >= seconds_f64(Duration::max()) {
+        if glide.distance.is_nan()
+            || glide.distance <= 0.0
+            || seconds.is_nan()
+            || seconds <= 0.0
+            || seconds >= seconds_f64(Duration::max())
+        {
             return None;
         }
         // duration_cast truncates.
@@ -450,7 +455,7 @@ impl MomentumState {
 /// circular value, the bearing, has its targets within one turn from the
 /// offset, and takes the shorter way around to the nearest.
 fn snap_delta(value: f64, snap: &MomentumSnap, circular: bool) -> f64 {
-    if !(snap.spacing > 0.0) {
+    if snap.spacing.is_nan() || snap.spacing <= 0.0 {
         return 0.0;
     }
     let delta = if circular {
@@ -681,10 +686,10 @@ impl Transform {
         // allows, or else the zoom it starts from, as GL JS's does; its last
         // frame is bounded by the zoom it ends on.
         let lat_lng_end = self.state.constrained_center(
-            &if self.state.get_lat_lng_bounds() != LatLngBounds::default() {
-                unwrapped_lat_lng
-            } else {
+            &if self.state.get_lat_lng_bounds() == LatLngBounds::default() {
                 unwrapped_lat_lng.wrapped()
+            } else {
+                unwrapped_lat_lng
             },
             if camera.zoom.is_some() { zoom } else { self.get_zoom() },
         );
@@ -752,7 +757,7 @@ impl Transform {
         let start_bearing = normalize_angle(self.state.get_bearing(), bearing);
         let start_pitch = self.state.get_pitch();
         let start_roll = self.state.get_roll();
-        let start_fov = self.state.get_field_of_view() as f64;
+        let start_fov = f64::from(self.state.get_field_of_view());
         let start_edge_insets = self.state.get_edge_insets();
 
         // On the globe the zoom is eased in equator terms so the planet holds
@@ -810,11 +815,11 @@ impl Transform {
                         factor,
                     )
                     .wrapped();
-                    frame_zoom = if zoom != start_zoom {
+                    frame_zoom = if zoom == start_zoom {
+                        start_zoom
+                    } else {
                         interpolate(&normalized_start_zoom, &normalized_zoom, t)
                             + VerticalPerspectiveProjection::zoom_adjustment(0.0, frame_lat_lng.latitude())
-                    } else {
-                        start_zoom
                     };
                 }
                 (Some(frame_lat_lng), frame_zoom)
@@ -949,14 +954,14 @@ impl Transform {
         let start_bearing = normalize_angle(self.state.get_bearing(), bearing);
         let start_pitch = self.state.get_pitch();
         let start_roll = self.state.get_roll();
-        let start_fov = self.state.get_field_of_view() as f64;
+        let start_fov = f64::from(self.state.get_field_of_view());
 
         // w₀: Initial visible span, measured in pixels at the initial scale.
         // Known henceforth as a <i>screenful</i>.
         let size = self.state.get_size();
         let w0 = std_max(
-            size.width as f64 - padding.left - padding.right,
-            size.height as f64 - padding.top - padding.bottom,
+            f64::from(size.width) - padding.left - padding.right,
+            f64::from(size.height) - padding.top - padding.bottom,
         );
         // The globe counts zoom in equator terms and distance along the
         // surface, so the arc is the same at any latitude.
@@ -1034,7 +1039,7 @@ impl Transform {
             // w<sub>m</sub>: Maximum visible span, measured in pixels with
             // respect to the initial scale.
             let w_max = w0 / self.state.zoom_scale(min_zoom - start_zoom);
-            rho = if u1 != 0.0 { (w_max / u1 * 2.0).sqrt() } else { 1.0 };
+            rho = if u1 == 0.0 { 1.0 } else { (w_max / u1 * 2.0).sqrt() };
         }
         // ρ²
         let rho2 = rho * rho;
@@ -1044,18 +1049,18 @@ impl Transform {
         // @param i 0 for the ascent or 1 for the descent.
         let r = |i: f64| -> f64 {
             // bᵢ
-            let b = (w1 * w1 - w0 * w0 + (if i != 0.0 { -1.0 } else { 1.0 }) * rho2 * rho2 * u1 * u1)
-                / (2.0 * (if i != 0.0 { w1 } else { w0 }) * rho2 * u1);
+            let b = (w1 * w1 - w0 * w0 + if i == 0.0 { 1.0 } else { -1.0 } * rho2 * rho2 * u1 * u1)
+                / (2.0 * if i == 0.0 { w0 } else { w1 } * rho2 * u1);
             ((b * b + 1.0).sqrt() - b).ln()
         };
 
         // r₀: Zoom-out factor during ascent.
-        let r0 = if u1 != 0.0 { r(0.0) } else { f64::INFINITY }; // Silence division by 0 on sanitize bot.
-        let r1 = if u1 != 0.0 { r(1.0) } else { f64::INFINITY };
+        let r0 = if u1 == 0.0 { f64::INFINITY } else { r(0.0) }; // Silence division by 0 on sanitize bot.
+        let r1 = if u1 == 0.0 { f64::INFINITY } else { r(1.0) };
 
         // When u₀ = u₁, the optimal path doesn’t require both ascent and
         // descent.
-        let is_close = u1.abs() < 0.000001 || !r0.is_finite() || !r1.is_finite();
+        let is_close = u1.abs() < 0.000_001 || !r0.is_finite() || !r1.is_finite();
 
         // w(s): Returns the visible span on the ground, measured in pixels
         // with respect to the initial scale.
@@ -1324,7 +1329,7 @@ impl Transform {
         let offset_length = offset.x.hypot(offset.y);
         if pitch > 0.0 && offset_length > 0.0 {
             let camera_to_center =
-                0.5 * self.state.get_size().height as f64 / (self.state.get_field_of_view() as f64 / 2.0).tan();
+                0.5 * f64::from(self.state.get_size().height) / (f64::from(self.state.get_field_of_view()) / 2.0).tan();
             let pixels_to_horizon = (camera_to_center / pitch.tan()).abs();
             // must be < 1 to keep the offset short of the horizon
             let horizon_factor = 0.75;
@@ -1462,7 +1467,7 @@ impl Transform {
 
     /// Returns `state.getFieldOfView()` (a float) as double.
     pub fn get_field_of_view(&self) -> f64 {
-        self.state.get_field_of_view() as f64
+        f64::from(self.state.get_field_of_view())
     }
 
     // MARK: - Projection
@@ -1578,7 +1583,7 @@ impl Transform {
         let mut anchor = if camera.center.is_some() { None } else { camera.anchor };
         let mut anchor_lat_lng = LatLng::default();
         if let Some(a) = anchor.as_mut() {
-            a.y = self.state.get_size().height as f64 - a.y;
+            a.y = f64::from(self.state.get_size().height) - a.y;
             // C++ throws std::domain_error out of the camera change for an
             // anchor that has no LatLng (NaN or infinite); the port logs it
             // and ignores the anchor.
@@ -1608,9 +1613,10 @@ impl Transform {
         self.latest_transition_start = start;
         self.latest_transition_duration = duration;
         let transition = Rc::new(Transition {
+            coupled_fields,
             anchor,
             anchor_lat_lng,
-            ..Transition::new(fields, coupled_fields, moving_fields, start, duration, animation, frame, self.source)
+            ..Transition::new(fields, moving_fields, start, duration, animation, frame, self.source)
         });
 
         let finished = self.release_fields(fields);
@@ -1850,7 +1856,7 @@ impl Transform {
     /// animations of the fields that it moves, as a camera command does.
     pub fn start_momentum(&mut self, options: &CameraMomentum, animation: &AnimationOptions) {
         self.with_source(CameraChangeSource::Momentum, |transform| {
-            transform.start_momentum_now(options, animation, None)
+            transform.start_momentum_now(options, animation, None);
         });
     }
 
@@ -1945,7 +1951,6 @@ impl Transform {
             gesture,
             ..Transition::new(
                 fields,
-                0,
                 moving,
                 start,
                 motion,
@@ -2052,12 +2057,12 @@ impl Transform {
     }
 
     /// The anchor `anchor` (from the top left) as a state point, from the
-    /// bottom left, with the LatLng under it; `None` without one. C++
-    /// throws std::domain_error for an anchor that has no LatLng; the port
+    /// bottom left, with the `LatLng` under it; `None` without one. C++
+    /// throws `std::domain_error` for an anchor that has no `LatLng`; the port
     /// logs it and ignores the anchor.
     fn momentum_anchor(&self, anchor: Option<ScreenCoordinate>) -> Option<(ScreenCoordinate, LatLng)> {
         let anchor = anchor?;
-        let point = ScreenCoordinate::new(anchor.x, self.state.get_size().height as f64 - anchor.y);
+        let point = ScreenCoordinate::new(anchor.x, f64::from(self.state.get_size().height) - anchor.y);
         match self.state.screen_coordinate_to_lat_lng(&point, WrapMode::Unwrapped) {
             Ok(lat_lng) => Some((point, lat_lng)),
             Err(e) => {
@@ -2089,7 +2094,7 @@ impl Transform {
         const MAX_STEP: f64 = 16.0;
         const MAX_STEPS: f64 = 100.0;
         let distance = offset.x.hypot(offset.y);
-        if !(distance > 0.0) {
+        if distance.is_nan() || distance <= 0.0 {
             return true;
         }
         let before = self.get_lat_lng(WrapMode::Unwrapped);
@@ -2334,7 +2339,7 @@ impl Transform {
                 self.gesture.active = false;
                 let serial = self.gesture.serial;
                 self.with_source(CameraChangeSource::Momentum, |transform| {
-                    transform.start_momentum_now(&momentum, &delta.animation, Some(serial))
+                    transform.start_momentum_now(&momentum, &delta.animation, Some(serial));
                 });
             }
             None if !pans && !eases => end_unstarted(&delta.animation, TransitionOutcome::Completed),
@@ -2360,7 +2365,7 @@ impl Transform {
         }
         self.with_source(gesture_source(update.phase), |transform| match update.mode {
             CameraUpdateMode::Jump => {
-                transform.ease_to(&update.camera, &AnimationOptions { duration: None, ..update.animation.clone() })
+                transform.ease_to(&update.camera, &AnimationOptions { duration: None, ..update.animation.clone() });
             }
             CameraUpdateMode::Ease => transform.ease_to(&update.camera, &update.animation),
             CameraUpdateMode::Fly => transform.fly_to(&update.camera, &update.animation, false),
@@ -2439,7 +2444,7 @@ impl Transform {
 
     pub fn lat_lng_to_screen_coordinate(&self, lat_lng: &LatLng) -> ScreenCoordinate {
         let mut point = self.state.lat_lng_to_screen_coordinate(lat_lng);
-        point.y = self.state.get_size().height as f64 - point.y;
+        point.y = f64::from(self.state.get_size().height) - point.y;
         point
     }
 
@@ -2448,7 +2453,7 @@ impl Transform {
     /// or infinite point.
     pub fn screen_coordinate_to_lat_lng(&self, point: &ScreenCoordinate, wrap_mode: WrapMode) -> Result<LatLng, Error> {
         let mut flipped_point = *point;
-        flipped_point.y = self.state.get_size().height as f64 - flipped_point.y;
+        flipped_point.y = f64::from(self.state.get_size().height) - flipped_point.y;
         self.state.screen_coordinate_to_lat_lng(&flipped_point, wrap_mode)
     }
 
@@ -2541,9 +2546,10 @@ fn get_max_pitch_for_edge_insets(state: &TransformState, insets: &EdgeInsets) ->
 
     let height = state.get_size().height;
     debug_assert!(height != 0);
-    let field_of_view = state.get_field_of_view() as f64;
+    let field_of_view = f64::from(state.get_field_of_view());
     // Half of fov is the field of view above perspective center.
-    let tangent_of_fov_above_center_angle = (0.5 + center_offset_y / height as f64) * 2.0 * (field_of_view / 2.0).tan();
+    let tangent_of_fov_above_center_angle =
+        (0.5 + center_offset_y / f64::from(height)) * 2.0 * (field_of_view / 2.0).tan();
     let fov_above_center = tangent_of_fov_above_center_angle.atan();
     std_max(state.get_min_pitch(), state.get_max_pitch() + field_of_view / 2.0 - fov_above_center)
 }

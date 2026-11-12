@@ -80,6 +80,7 @@ impl HeatmapLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &HeatmapLayerImpl {
         self.base
             .base_impl

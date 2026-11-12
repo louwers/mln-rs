@@ -12,8 +12,8 @@ use mln_util::size::Size;
 
 use crate::bidi::BiDi;
 use crate::glyph::{
-    Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph, Shaping,
-    WritingModeType, gen_new_glyph_id_type,
+    Glyph, GlyphID, GlyphIDType, GlyphMap, GlyphMetrics, GlyphPosition, GlyphPositions, PositionedGlyph,
+    PositionedLine, Shaping, WritingModeType, gen_new_glyph_id_type,
 };
 use crate::harfbuzz::HBShapeAdjust;
 use crate::shaping::{PositionedIcon, get_shaping};
@@ -63,7 +63,7 @@ fn shape_tagged_text(
     string: &TaggedString,
     writing_mode: WritingModeType,
     allow_vertical_placement: bool,
-    image_positions: ImagePositions,
+    image_positions: &ImagePositions,
 ) -> Shaping {
     let mut glyphs = GlyphMap::new();
     let mut glyph_positions = GlyphPositions::new();
@@ -82,7 +82,7 @@ fn shape_tagged_text(
         &mut bidi,
         &glyphs,
         &glyph_positions,
-        &image_positions,
+        image_positions,
         ONE_EM,
         ONE_EM,
         allow_vertical_placement,
@@ -96,7 +96,7 @@ fn shape_line_label_with(text: &str, writing_mode: WritingModeType, allow_vertic
         &TaggedString::new(u(text), SectionOptions::new(1.0, font_stack, GlyphIDType::FontPBF, 0, None)),
         writing_mode,
         allow_vertical_placement,
-        ImagePositions::new(),
+        &ImagePositions::new(),
     )
 }
 
@@ -595,7 +595,7 @@ fn vertical_glyph_orientation_respects_formatted_sections() {
     text.add_text_section(&u("CD"), 0.5, &font_stack, GlyphIDType::FontPBF, true, None);
 
     let orientations =
-        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, ImagePositions::new()));
+        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::new()));
     let expected = expect(&[('A', "along-line"), ('B', "along-line"), ('C', "along-line"), ('D', "along-line")]);
     assert_eq!(orientations, expected);
 }
@@ -624,7 +624,7 @@ fn vertical_glyph_orientation_delimits_inline_images() {
     let mut image_positions = ImagePositions::new();
     image_positions.insert("image".to_string(), ImagePosition::new(RectU16 { x: 0, y: 0, w: 14, h: 26 }, &image, 0));
 
-    let shaped_line_label = shape_tagged_text(&text, WritingModeType::Vertical, false, image_positions);
+    let shaped_line_label = shape_tagged_text(&text, WritingModeType::Vertical, false, &image_positions);
     assert_eq!(shaped_line_label.positioned_lines.len(), 1);
     assert_eq!(shaped_line_label.positioned_lines[0].positioned_glyphs.len(), 5);
     let orientations = get_glyph_orientations(&shaped_line_label);
@@ -651,7 +651,7 @@ fn vertical_glyph_orientation_delimits_native_glyph_sections() {
     text.add_text_section(&u("D"), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
 
     let orientations =
-        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, ImagePositions::new()));
+        get_glyph_orientations(&shape_tagged_text(&text, WritingModeType::Vertical, false, &ImagePositions::new()));
     let expected = expect(&[('A', "upright"), ('B', "upright"), ('C', "along-line"), ('D', "upright")]);
     assert_eq!(orientations, expected);
 }
@@ -663,7 +663,7 @@ fn label_with_shaped_section(
     before: &str,
     rtl: bool,
     after: &str,
-    adjusts: Option<Arc<Vec<HBShapeAdjust>>>,
+    adjusts: Option<&Arc<Vec<HBShapeAdjust>>>,
 ) -> TaggedString {
     let font_stack: FontStack = vec!["font-stack".to_string()];
     let shaped_type = gen_new_glyph_id_type("shaping-test-shaped", &font_stack, &[(0, 0xffff)]);
@@ -671,7 +671,7 @@ fn label_with_shaped_section(
     if !before.is_empty() {
         text.add_text_section(&u(before), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
     }
-    text.add_text_section_with_adjusts(&u("XY"), 1.0, &font_stack, shaped_type, &adjusts, rtl, true, None);
+    text.add_text_section_with_adjusts(&u("XY"), 1.0, &font_stack, shaped_type, &adjusts.cloned(), rtl, true, None);
     if !after.is_empty() {
         text.add_text_section(&u(after), 1.0, &font_stack, GlyphIDType::FontPBF, true, None);
     }
@@ -688,7 +688,7 @@ fn shaped_codes(shaping: &Shaping) -> Vec<u16> {
 }
 
 fn shape_horizontal(text: &TaggedString) -> Shaping {
-    shape_tagged_text(text, WritingModeType::Horizontal, false, ImagePositions::new())
+    shape_tagged_text(text, WritingModeType::Horizontal, false, &ImagePositions::new())
 }
 
 // gtest: Shaping.RightToLeftShapedSectionBeforeLatin
@@ -724,7 +724,7 @@ fn left_to_right_shaped_section_keeps_its_place() {
 #[test]
 fn shaped_section_keeps_its_adjustments_when_it_moves() {
     let adjusts = Arc::new(vec![HBShapeAdjust::new(0.0, 0.0, 5.0), HBShapeAdjust::new(0.0, 0.0, 7.0)]);
-    let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", Some(adjusts)));
+    let shaping = shape_horizontal(&label_with_shaped_section("", true, " 12", Some(&adjusts)));
     assert_eq!(shaping.positioned_lines.len(), 1);
     let glyphs = &shaping.positioned_lines[0].positioned_glyphs;
     assert_eq!(glyphs.len(), 5);
@@ -748,7 +748,7 @@ fn setup_shaped_text(shaped_text: &mut Shaping, text_size: f32) {
     );
     shaped_text.right = text_size;
     shaped_text.bottom = text_size;
-    shaped_text.positioned_lines.push(Default::default());
+    shaped_text.positioned_lines.push(PositionedLine::default());
     shaped_text.positioned_lines.last_mut().unwrap().positioned_glyphs.push(glyph);
 }
 
@@ -767,7 +767,7 @@ fn test_apply_text_fit(
         rectangle,
         &Impl::new(
             "test".to_string(),
-            PremultipliedImage::new(Size::new(rectangle.w as u32, rectangle.h as u32)),
+            PremultipliedImage::new(Size::new(u32::from(rectangle.w), u32::from(rectangle.h))),
             1.0,
             false,
             vec![],

@@ -52,6 +52,7 @@ impl Error {
         Error(message.into())
     }
 
+    #[must_use]
     pub fn message(&self) -> &str {
         &self.0
     }

@@ -18,7 +18,7 @@ use winit::window::Window;
 pub(crate) struct MetalLayer(Layer);
 
 impl MetalLayer {
-    /// Makes the window's view layer-backed with a CAMetalLayer. Call on the
+    /// Makes the window's view layer-backed with a `CAMetalLayer`. Call on the
     /// main thread.
     pub(crate) fn new(window: &Window) -> Result<MetalLayer, String> {
         let handle = window.window_handle().map_err(|e| format!("The window has no handle: {e}"))?;

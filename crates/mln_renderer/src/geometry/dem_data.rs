@@ -9,13 +9,14 @@ use mln_util::size::Size;
 use mln_util::tileset::RasterEncoding;
 use serde::{Deserialize, Serialize};
 
-/// https://www.mapbox.com/help/access-elevation-data/#mapbox-terrain-rgb
+/// <https://www.mapbox.com/help/access-elevation-data/#mapbox-terrain-rgb>
 const UNPACK_MAPBOX: [f32; 4] = [6553.6, 25.6, 0.1, 10000.0];
-/// https://aws.amazon.com/public-datasets/terrain/
+/// <https://aws.amazon.com/public-datasets/terrain>/
 const UNPACK_TERRARIUM: [f32; 4] = [256.0, 1.0, 1.0 / 256.0, 32768.0];
 
 /// The DEM unpack vector for an encoding (`DEMData::getUnpackVector`): the
 /// red, green and blue factors and the base shift.
+#[must_use]
 pub fn get_unpack_vector(encoding: RasterEncoding) -> [f32; 4] {
     match encoding {
         RasterEncoding::Mapbox => UNPACK_MAPBOX,
@@ -142,7 +143,7 @@ impl DEMData {
         ((y + 1) * self.stride + (x + 1)) as usize
     }
 
-    /// This function takes the DEMData from a neighboring tile and
+    /// This function takes the `DEMData` from a neighboring tile and
     /// backfills the edge/corner data in order to create a one pixel
     /// "buffer" of image data around the tile. This is necessary because
     /// the hillshade formula calculates the dx/dz, dy/dz derivatives at each
@@ -196,6 +197,7 @@ impl DEMData {
     }
 
     /// `get(x, y)`.
+    #[must_use]
     pub fn get(&self, x: i32, y: i32) -> i32 {
         let unpack = self.get_unpack_vector();
         let value = pixel(&self.image.data, self.idx(x, y));
@@ -204,11 +206,13 @@ impl DEMData {
     }
 
     /// `getUnpackVector()`.
+    #[must_use]
     pub fn get_unpack_vector(&self) -> [f32; 4] {
         get_unpack_vector(self.encoding)
     }
 
     /// `getImage()`.
+    #[must_use]
     pub fn get_image(&self) -> &PremultipliedImage {
         &self.image
     }
@@ -225,7 +229,7 @@ mod tests {
         let mut img = PremultipliedImage::new(size);
         let mut state: u32 = 12345;
         for i in 0..img.bytes() {
-            state = state.wrapping_mul(1103515245).wrapping_add(12345);
+            state = state.wrapping_mul(1_103_515_245).wrapping_add(12345);
             img.data[i] = if (i + 1) % 4 == 0 { 1 } else { ((state >> 16) % 255) as u8 };
         }
         img

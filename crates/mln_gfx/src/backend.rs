@@ -25,6 +25,7 @@ impl Backend {
     /// The backend on every platform (`MLN_RENDER_BACKEND_WEBGPU`).
     pub const DEFAULT_TYPE: Type = Type::WebGPU;
 
+    #[must_use]
     pub fn get_type() -> Type {
         Self::DEFAULT_TYPE
     }

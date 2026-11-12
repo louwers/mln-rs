@@ -30,18 +30,18 @@ const ATMOSPHERE_SHADER_NAME: &str = "AtmosphereShader";
 
 fn make_fullscreen_layer_group(
     context: &dyn Context,
-    shader: &Option<ShaderProgramBasePtr>,
+    shader: Option<&ShaderProgramBasePtr>,
     name: &str,
     vertex_attribute: usize,
     is_3d: bool,
     depth_mask: DepthMaskType,
 ) -> Option<LayerGroupBasePtr> {
-    shader.as_ref()?;
+    let shader = shader?;
 
     let layer_group = context.create_layer_group(0, 1, name.to_owned())?;
 
     let mut builder = context.create_drawable_builder(name.to_owned());
-    builder.set_shader(shader.clone());
+    builder.set_shader(Some(shader.clone()));
     builder.set_render_pass(RenderPass::Translucent);
     builder.set_is_3d(is_3d);
     builder.set_depth_type(depth_mask);
@@ -134,7 +134,7 @@ impl SkyPass {
             if self.sky_layer_group.as_ref().is_none_or(|group| group.borrow().empty()) {
                 self.sky_layer_group = make_fullscreen_layer_group(
                     context,
-                    &self.sky_shader,
+                    self.sky_shader.as_ref(),
                     "sky",
                     ID_SKY_POS_VERTEX_ATTRIBUTE,
                     false,
@@ -191,7 +191,7 @@ impl SkyPass {
         if self.atmosphere_layer_group.as_ref().is_none_or(|group| group.borrow().empty()) {
             self.atmosphere_layer_group = make_fullscreen_layer_group(
                 context,
-                &self.atmosphere_shader,
+                self.atmosphere_shader.as_ref(),
                 "atmosphere",
                 ID_ATMOSPHERE_POS_VERTEX_ATTRIBUTE,
                 true,
@@ -215,14 +215,17 @@ impl SkyPass {
         );
     }
 
+    #[must_use]
     pub fn get_sky_layer_group(&self) -> Option<&LayerGroupBasePtr> {
         self.sky_layer_group.as_ref()
     }
 
+    #[must_use]
     pub fn get_atmosphere_layer_group(&self) -> Option<&LayerGroupBasePtr> {
         self.atmosphere_layer_group.as_ref()
     }
 
+    #[must_use]
     pub fn has_atmosphere(&self) -> bool {
         self.atmosphere_layer_group.as_ref().is_some_and(|group| !group.borrow().empty())
     }

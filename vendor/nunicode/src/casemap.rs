@@ -11,13 +11,14 @@ use crate::utf8::nu_utf8_read;
 
 pub type Transform = Option<&'static [u8]>;
 
-/// In nu_casemap_read (UTF-8), zero-terminated.
+/// In `nu_casemap_read` (UTF-8), zero-terminated.
 static NU_FINAL_SIGMA: &[u8] = "ς\0".as_bytes();
 
-/// Zero-terminated empty string in nu_casemap_read (UTF-8).
+/// Zero-terminated empty string in `nu_casemap_read` (UTF-8).
 static EMPTY: &[u8] = b"\0";
 
 /// `nu_toupper`.
+#[must_use]
 pub fn nu_toupper(codepoint: u32) -> Transform {
     nu_udb_lookup(
         codepoint,
@@ -30,12 +31,14 @@ pub fn nu_toupper(codepoint: u32) -> Transform {
 
 /// `_nu_toupper`: reads the codepoint at `i` of `s` (limit `limit`), returns
 /// the next position, the codepoint and its transformation.
+#[must_use]
 pub fn _nu_toupper(s: &[u8], i: usize, _limit: usize) -> (usize, u32, Transform) {
     let (np, u) = nu_utf8_read(s, i);
     (np, u, nu_toupper(u))
 }
 
 /// `nu_tolower`.
+#[must_use]
 pub fn nu_tolower(codepoint: u32) -> Transform {
     nu_udb_lookup(
         codepoint,
@@ -47,6 +50,7 @@ pub fn nu_tolower(codepoint: u32) -> Transform {
 }
 
 /// `_nu_tolower`.
+#[must_use]
 pub fn _nu_tolower(s: &[u8], i: usize, limit: usize) -> (usize, u32, Transform) {
     let (np, u) = nu_utf8_read(s, i);
 
@@ -68,6 +72,7 @@ pub fn _nu_tolower(s: &[u8], i: usize, limit: usize) -> (usize, u32, Transform) 
 }
 
 /// `nu_tounaccent`.
+#[must_use]
 pub fn nu_tounaccent(codepoint: u32) -> Transform {
     const BLOCKS: [(u32, u32); 4] = [
         (0x0300, 0x036F), // Combining Diacritical Marks
@@ -94,6 +99,7 @@ pub fn nu_tounaccent(codepoint: u32) -> Transform {
 }
 
 /// `_nu_tounaccent`.
+#[must_use]
 pub fn _nu_tounaccent(s: &[u8], i: usize, _limit: usize) -> (usize, u32, Transform) {
     let (np, u) = nu_utf8_read(s, i);
     (np, u, nu_tounaccent(u))

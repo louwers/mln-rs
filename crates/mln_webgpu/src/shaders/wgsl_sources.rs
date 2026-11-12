@@ -29,9 +29,9 @@ use super::shader_source::WgslShaderSource;
 /// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::WebGPU>`
 pub const ATMOSPHERE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "AtmosphereShader",
-    name: r#"AtmosphereShader"#,
+    name: r"AtmosphereShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -60,10 +60,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.view_direction = view_position.xyz / view_position.w - atmosphere.camera_position.xyz;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) view_direction: vec3<f32>,
 };
@@ -167,7 +167,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     color = pow(color, vec4<f32>(1.0 / 2.2));
     return vec4<f32>(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -175,9 +175,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::WebGPU>`
 pub const BACKGROUND_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "BackgroundPatternShader",
-    name: r#"BackgroundPatternShader"#,
+    name: r"BackgroundPatternShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) position: vec2<i32>,
 };
@@ -255,10 +255,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = clip;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) pos_a: vec2<f32>,
     @location(1) pos_b: vec2<f32>,
@@ -306,7 +306,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     // Mix patterns and apply opacity
     return mix(color_a, color_b, props.mix) * props.opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -314,9 +314,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::WebGPU>`
 pub const BACKGROUND_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "BackgroundShader",
-    name: r#"BackgroundShader"#,
+    name: r"BackgroundShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) position: vec2<i32>,
 };
@@ -365,10 +365,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = clip;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct BackgroundPropsUBO {
     color: vec4<f32>,
     opacity: f32,
@@ -383,7 +383,7 @@ struct BackgroundPropsUBO {
 fn main() -> @location(0) vec4<f32> {
     return props.color * props.opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -391,9 +391,9 @@ fn main() -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::WebGPU>`
 pub const CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "CircleShader",
-    name: r#"CircleShader"#,
+    name: r"CircleShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) color: vec4<f32>,
@@ -522,10 +522,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) extrude: vec2<f32>,
     @location(1) circle_data: vec4<f32>,
@@ -557,10 +557,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let final_color = mix(in.color * opacity, in.stroke_color * stroke_opacity, color_t);
     return opacity_t * final_color;
 }
-"#,
+",
     ),
     prelude: Some(
-        r#"
+        r"
 struct CircleDrawableUBO {
     matrix: mat4x4<f32>,
     extrude_scale: vec2<f32>,
@@ -611,16 +611,16 @@ struct GlobalIndexUBO {
 @group(0) @binding(2) var<storage, read> drawableVector: array<CircleDrawableUBO>;
 @group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
 @group(0) @binding(5) var<uniform> props: CircleEvaluatedPropsUBO;
-"#,
+",
     ),
 };
 
 /// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::WebGPU>`
 pub const CLIPPING_MASK_PROGRAM: WgslShaderSource = WgslShaderSource {
     built_in: "ClippingMaskProgram",
-    name: r#"ClippingMaskProgram"#,
+    name: r"ClippingMaskProgram",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(2) position: vec2<i32>,
 };
@@ -655,15 +655,15 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = vec4<f32>(clip_pos.x, clip_pos.y, clip_pos.z, clip_pos.w);
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 @fragment
 fn main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.0, 0.0, 0.0, 0.0);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -671,9 +671,9 @@ fn main() -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::WebGPU>`
 pub const COLLISION_BOX_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "CollisionBoxShader",
-    name: r#"CollisionBoxShader"#,
+    name: r"CollisionBoxShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) position: vec2<i32>,
     @location(4) anchor_position: vec2<i32>,
@@ -749,10 +749,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) placed: f32,
     @location(1) not_used: f32,
@@ -777,7 +777,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return color;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -785,9 +785,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::WebGPU>`
 pub const COLLISION_CIRCLE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "CollisionCircleShader",
-    name: r#"CollisionCircleShader"#,
+    name: r"CollisionCircleShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) position: vec2<i32>,
     @location(4) anchor_position: vec2<i32>,
@@ -873,10 +873,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.extrude_scale = tile_props.extrude_scale * paintParams.camera_to_center_distance * collision_perspective_ratio;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) placed: f32,
     @location(1) not_used: f32,
@@ -920,7 +920,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return opacity_t * color;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -928,9 +928,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::WebGPU>`
 pub const COLOR_RELIEF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "ColorReliefShader",
-    name: r#"ColorReliefShader"#,
+    name: r"ColorReliefShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<i32>,
     @location(6) texture_pos: vec2<i32>,
@@ -982,10 +982,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) frag_position: vec2<f32>,
 };
@@ -1075,7 +1075,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return vec4<f32>(final_color);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -1083,9 +1083,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::WebGPU>`
 pub const DEBUG_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "DebugShader",
-    name: r#"DebugShader"#,
+    name: r"DebugShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<i32>,
 };
@@ -1126,10 +1126,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) uv: vec2<f32>,
 };
@@ -1152,7 +1152,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let overlay_color = textureSample(overlay_texture, texture_sampler, in.uv);
     return mix(debug.color, overlay_color, overlay_color.a);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -1160,9 +1160,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionPatternShader",
-    name: r#"FillExtrusionPatternShader"#,
+    name: r"FillExtrusionPatternShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) position: vec2<i32>,
     @location(4) decimals_ed: vec2<u32>,
@@ -1348,10 +1348,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) lighting: vec4<f32>,
     @location(1) pos_a: vec2<f32>,
@@ -1429,7 +1429,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let pattern_color = mix(color_a, color_b, props.fade);
     return pattern_color * in.lighting;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -1437,9 +1437,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_EXTRUSION_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillExtrusionShader",
-    name: r#"FillExtrusionShader"#,
+    name: r"FillExtrusionShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) position: vec2<i32>,
     @location(4) decimals_ed: vec2<u32>,
@@ -1557,10 +1557,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.color = vcolor * props.opacity;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) color: vec4<f32>,
 };
@@ -1569,7 +1569,7 @@ struct FragmentInput {
 fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return in.color;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -1577,9 +1577,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_OUTLINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillOutlinePatternShader",
-    name: r#"FillOutlinePatternShader"#,
+    name: r"FillOutlinePatternShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_color
@@ -1747,10 +1747,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @builtin(position) position: vec4<f32>,
     @location(0) v_pos_a: vec2<f32>,
@@ -1861,7 +1861,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     // shaders; the C++ WebGPU source leaves `alpha` out here.
     return mix(color_a, color_b, props.fade) * alpha * opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -1869,9 +1869,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_OUTLINE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillOutlineShader",
-    name: r#"FillOutlineShader"#,
+    name: r"FillOutlineShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_outline_color
@@ -1967,10 +1967,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FillOutlineEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
@@ -2006,7 +2006,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return color * opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2014,9 +2014,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
-    name: r#"FillOutlineTriangulatedShader"#,
+    name: r"FillOutlineTriangulatedShader",
     vertex: Some(
-        r#"
+        r"
 const SCALE: f32 = 0.015873016;
 
 struct VertexInput {
@@ -2104,10 +2104,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) normal: vec2<f32>,
     @location(1) width: f32,
@@ -2146,7 +2146,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let alpha = clamp(min(dist + blur2, in.width - dist) / denom, 0.0, 1.0);
     return props.outline_color * (alpha * props.opacity);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2154,9 +2154,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillPatternShader",
-    name: r#"FillPatternShader"#,
+    name: r"FillPatternShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_color
@@ -2318,10 +2318,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) v_pos_a: vec2<f32>,
     @location(1) v_pos_b: vec2<f32>,
@@ -2425,7 +2425,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     }
     return mix(color_a, color_b, props.fade) * opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2433,9 +2433,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::WebGPU>`
 pub const FILL_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "FillShader",
-    name: r#"FillShader"#,
+    name: r"FillShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_color
@@ -2514,10 +2514,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FillEvaluatedPropsUBO {
     color: vec4<f32>,
     outline_color: vec4<f32>,
@@ -2552,7 +2552,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return color * opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2560,9 +2560,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::WebGPU>`
 pub const GLOBE_DEPTH_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "GlobeDepthShader",
-    name: r#"GlobeDepthShader"#,
+    name: r"GlobeDepthShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -2585,15 +2585,15 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = projectTileFor3D(vec2<f32>(f32(in.position.x), f32(in.position.y)), 0.0, projectionVector[globalIndex.value]);
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 @fragment
 fn main() -> @location(0) vec4<f32> {
     return vec4<f32>(0.0);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2601,9 +2601,9 @@ fn main() -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::WebGPU>`
 pub const HEATMAP_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HeatmapShader",
-    name: r#"HeatmapShader"#,
+    name: r"HeatmapShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 #ifndef HAS_UNIFORM_u_weight
@@ -2687,10 +2687,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) weight: f32,
     @location(1) extrude: vec2<f32>,
@@ -2717,7 +2717,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(val, 1.0, 1.0, 1.0);
 #endif
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2725,9 +2725,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::WebGPU>`
 pub const HEATMAP_TEXTURE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HeatmapTextureShader",
-    name: r#"HeatmapTextureShader"#,
+    name: r"HeatmapTextureShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<i32>,
 };
@@ -2767,10 +2767,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
@@ -2794,7 +2794,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let color = textureSample(color_ramp_texture, texture_sampler, vec2<f32>(t, 0.5));
     return color * ubo.opacity;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2802,9 +2802,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::WebGPU>`
 pub const HILLSHADE_PREPARE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HillshadePrepareShader",
-    name: r#"HillshadePrepareShader"#,
+    name: r"HillshadePrepareShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<i32>,
     @location(6) texcoord: vec2<i32>,
@@ -2839,10 +2839,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.tex_coord = vec2<f32>(f32(in.texcoord.x), f32(in.texcoord.y)) / 8192.0 * scale + epsilon;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) tex_coord: vec2<f32>,
 };
@@ -2906,7 +2906,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
                       vec4<f32>(1.0, 1.0, 1.0, 1.0));
     return color;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -2914,9 +2914,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::WebGPU>`
 pub const HILLSHADE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "HillshadeShader",
-    name: r#"HillshadeShader"#,
+    name: r"HillshadeShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<i32>,
     @location(6) texcoord: vec2<i32>,
@@ -2952,10 +2952,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.tex_coord = tex;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 const STANDARD: i32 = 0;
 const COMBINED: i32 = 1;
 const IGOR: i32 = 2;
@@ -3124,7 +3124,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
         return standard_hillshade(deriv, tileProps);
     }
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -3132,9 +3132,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_GRADIENT_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineGradientSDFShader",
-    name: r#"LineGradientSDFShader"#,
+    name: r"LineGradientSDFShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) pos_normal: vec2<i32>,
     @location(5) data: vec4<u32>,
@@ -3338,10 +3338,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
@@ -3426,7 +3426,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return color * (alpha * in.v_opacity * sdf_alpha);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -3434,9 +3434,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_GRADIENT_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineGradientShader",
-    name: r#"LineGradientShader"#,
+    name: r"LineGradientShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) pos_normal: vec2<i32>,
     @location(5) data: vec4<u32>,
@@ -3610,10 +3610,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
@@ -3662,7 +3662,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return color * (alpha * in.v_opacity);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -3670,9 +3670,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_PATTERN_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LinePatternShader",
-    name: r#"LinePatternShader"#,
+    name: r"LinePatternShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) pos_normal: vec2<i32>,
     @location(5) data: vec4<u32>,
@@ -3872,10 +3872,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
@@ -3996,7 +3996,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return pattern_color * (alpha * opacity);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -4004,9 +4004,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineSDFShader",
-    name: r#"LineSDFShader"#,
+    name: r"LineSDFShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) pos_normal: vec2<i32>,
     @location(5) data: vec4<u32>,
@@ -4230,10 +4230,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
@@ -4313,7 +4313,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return in.v_color * (alpha * in.v_opacity * sdf_alpha);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -4321,9 +4321,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::WebGPU>`
 pub const LINE_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LineShader",
-    name: r#"LineShader"#,
+    name: r"LineShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(4) pos_normal: vec2<i32>,  // packed position and normal
     @location(5) data: vec4<u32>,        // extrude, direction, linesofar
@@ -4497,10 +4497,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) v_width2: vec2<f32>,
     @location(1) v_normal: vec2<f32>,
@@ -4545,7 +4545,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return in.v_color * (alpha * in.v_opacity);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -4553,9 +4553,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LocationIndicatorShader, gfx::Backend::Type::WebGPU>`
 pub const LOCATION_INDICATOR_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LocationIndicatorShader",
-    name: r#"LocationIndicatorShader"#,
+    name: r"LocationIndicatorShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<f32>,
 };
@@ -4578,10 +4578,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.position = projectTile(in.position, projectionVector[globalIndex.value]);
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct LocationIndicatorUBO {
     matrix: mat4x4<f32>,
     color: vec4<f32>,
@@ -4593,7 +4593,7 @@ struct LocationIndicatorUBO {
 fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     return ubo.color;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -4601,9 +4601,9 @@ fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::LocationIndicatorTexturedShader, gfx::Backend::Type::WebGPU>`
 pub const LOCATION_INDICATOR_TEXTURED_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "LocationIndicatorTexturedShader",
-    name: r#"LocationIndicatorTexturedShader"#,
+    name: r"LocationIndicatorTexturedShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec2<f32>,
     @location(6) uv: vec2<f32>,
@@ -4629,10 +4629,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.uv = in.uv;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct LocationIndicatorUBO {
     matrix: mat4x4<f32>,
     color: vec4<f32>,
@@ -4647,7 +4647,7 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let textureColor = textureSample(colorTexture, colorSampler, uv);
     return textureColor * ubo.color;
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -4655,11 +4655,11 @@ fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::WebGPU>`
 pub const PRELUDE: WgslShaderSource = WgslShaderSource {
     built_in: "Prelude",
-    name: r#"Prelude"#,
+    name: r"Prelude",
     vertex: None,
     fragment: None,
     prelude: Some(
-        r#"
+        r"
 // Constants
 const PI: f32 = 3.14159265358979323846;
 const LINE_NORMAL_SCALE: f32 = 1.0 / 63.0;  // 1.0 / (127 / 2)
@@ -4896,16 +4896,16 @@ fn projectLineThickness(tileY: f32, projection: ProjectionUBO) -> f32 {
 fn atlas_pos(origin: vec2<f32>, offset: vec2<f32>) -> vec2<f32> {
     return origin + round(offset * 16777216.0) / 16777216.0;
 }
-"#,
+",
     ),
 };
 
 /// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::WebGPU>`
 pub const RASTER_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "RasterShader",
-    name: r#"RasterShader"#,
+    name: r"RasterShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
     @location(1) texcoord: vec2<i32>,
@@ -4961,10 +4961,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) pos0: vec2<f32>,
     @location(1) pos1: vec2<f32>,
@@ -5021,7 +5021,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     let final_rgb = mix(high_vec, low_vec, rgb) * color.a;
     return vec4<f32>(final_rgb, color.a);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -5029,9 +5029,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::WebGPU>`
 pub const SKY_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SkyShader",
-    name: r#"SkyShader"#,
+    name: r"SkyShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(0) position: vec2<i32>,
 };
@@ -5049,10 +5049,10 @@ fn main(in: VertexInput) -> VertexOutput {
     out.pos = pos;
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) pos: vec2<f32>,
 };
@@ -5084,7 +5084,7 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     }
     return color * (1.0 - sky.sky_blend);
 }
-"#,
+",
     ),
     prelude: None,
 };
@@ -5092,9 +5092,9 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 /// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolIconShader",
-    name: r#"SymbolIconShader"#,
+    name: r"SymbolIconShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
@@ -5247,10 +5247,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
@@ -5277,10 +5277,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 #endif
     return textureSample(image, texture_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity;
 }
-"#,
+",
     ),
     prelude: Some(
-        r#"
+        r"
 // Symbol shader UBO indices
 const idGlobalPaintParamsUBO = 0u;
 const idGlobalUBOIndex = 1u;
@@ -5362,16 +5362,16 @@ struct GlobalIndexUBO {
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
-"#,
+",
     ),
 };
 
 /// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_SDF_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolSDFShader",
-    name: r#"SymbolSDFShader"#,
+    name: r"SymbolSDFShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
@@ -5557,10 +5557,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
@@ -5647,10 +5647,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
 
     return vec4<f32>(color.rgb * coverage, outAlpha);
 }
-"#,
+",
     ),
     prelude: Some(
-        r#"
+        r"
 // Symbol shader UBO indices
 const idGlobalPaintParamsUBO = 0u;
 const idGlobalUBOIndex = 1u;
@@ -5732,16 +5732,16 @@ struct GlobalIndexUBO {
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
-"#,
+",
     ),
 };
 
 /// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::WebGPU>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "SymbolTextAndIconShader",
-    name: r#"SymbolTextAndIconShader"#,
+    name: r"SymbolTextAndIconShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(3) pos_offset: vec4<i32>,
     @location(4) data: vec4<u32>,
@@ -5934,10 +5934,10 @@ fn main(in: VertexInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 struct FragmentInput {
     @location(0) tex: vec2<f32>,
     @location(1) fade_opacity: f32,
@@ -6034,10 +6034,10 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     return vec4<f32>(color.rgb * coverage, outAlpha);
 
 }
-"#,
+",
     ),
     prelude: Some(
-        r#"
+        r"
 // Symbol shader UBO indices
 const idGlobalPaintParamsUBO = 0u;
 const idGlobalUBOIndex = 1u;
@@ -6119,16 +6119,16 @@ struct GlobalIndexUBO {
 };
 
 const c_offscreen_degenerate_triangle_location: f32 = -2.0;
-"#,
+",
     ),
 };
 
 /// `ShaderSource<BuiltIn::WideVectorShader, gfx::Backend::Type::WebGPU>`
 pub const WIDE_VECTOR_SHADER: WgslShaderSource = WgslShaderSource {
     built_in: "WideVectorShader",
-    name: r#"WideVectorShader"#,
+    name: r"WideVectorShader",
     vertex: Some(
-        r#"
+        r"
 struct VertexInput {
     @location(5) position: vec3<f32>,
     @location(6) normal: vec2<f32>,
@@ -6180,16 +6180,16 @@ fn main(in: VertexInput, instance: InstanceInput) -> VertexOutput {
 
     return out;
 }
-"#,
+",
     ),
     fragment: Some(
-        r#"
+        r"
 @fragment
 fn main(@location(0) color: vec4<f32>, @location(1) texCoord: vec2<f32>) -> @location(0) vec4<f32> {
     // Simple color output with alpha blending support
     return color;
 }
-"#,
+",
     ),
     prelude: None,
 };

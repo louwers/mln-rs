@@ -314,7 +314,7 @@ impl HostHeaders {
         };
         // SAFETY: the host's header callback, with its user data, and a URL
         // and response that outlive the call.
-        let status = unsafe { (self.callback)(self.user_data.get(), abi_kind(kind), url.view(), &mut response) };
+        let status = unsafe { (self.callback)(self.user_data.get(), abi_kind(kind), url.view(), &raw mut response) };
         let headers = collection.finish();
         if status == MLN_STATUS_OK { headers } else { HttpHeaders::new() }
     }

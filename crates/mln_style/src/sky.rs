@@ -79,16 +79,19 @@ fn find_property(name: &str) -> Option<Property> {
 
 impl Sky {
     /// `Sky()`.
+    #[must_use]
     pub fn new() -> Self {
         Sky::from_impl(Arc::new(Impl::default()))
     }
 
     /// `explicit Sky(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         Sky { impl_ }
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         (*self.impl_).clone()
     }
@@ -192,6 +195,7 @@ impl Sky {
         Some(Error::new("sky doesn't support this property"))
     }
 
+    #[must_use]
     pub fn get_property(&self, name: &str) -> StyleProperty {
         let Some(property) = find_property(name) else {
             return StyleProperty::default();
@@ -223,10 +227,12 @@ impl Sky {
         }
     }
 
+    #[must_use]
     pub fn get_default_atmosphere_blend() -> f32 {
         SkyAtmosphereBlend::default_value()
     }
 
+    #[must_use]
     pub fn get_atmosphere_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyAtmosphereBlend>().value.clone()
     }
@@ -243,14 +249,17 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_atmosphere_blend_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyAtmosphereBlend>().options
     }
 
+    #[must_use]
     pub fn get_default_fog_color() -> Color {
         SkyFogColor::default_value()
     }
 
+    #[must_use]
     pub fn get_fog_color(&self) -> PropertyValue<Color> {
         self.impl_.properties.get::<SkyFogColor>().value.clone()
     }
@@ -267,14 +276,17 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_fog_color_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyFogColor>().options
     }
 
+    #[must_use]
     pub fn get_default_fog_ground_blend() -> f32 {
         SkyFogGroundBlend::default_value()
     }
 
+    #[must_use]
     pub fn get_fog_ground_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyFogGroundBlend>().value.clone()
     }
@@ -291,14 +303,17 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_fog_ground_blend_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyFogGroundBlend>().options
     }
 
+    #[must_use]
     pub fn get_default_horizon_color() -> Color {
         SkyHorizonColor::default_value()
     }
 
+    #[must_use]
     pub fn get_horizon_color(&self) -> PropertyValue<Color> {
         self.impl_.properties.get::<SkyHorizonColor>().value.clone()
     }
@@ -315,14 +330,17 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_horizon_color_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyHorizonColor>().options
     }
 
+    #[must_use]
     pub fn get_default_horizon_fog_blend() -> f32 {
         SkyHorizonFogBlend::default_value()
     }
 
+    #[must_use]
     pub fn get_horizon_fog_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyHorizonFogBlend>().value.clone()
     }
@@ -339,14 +357,17 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_horizon_fog_blend_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyHorizonFogBlend>().options
     }
 
+    #[must_use]
     pub fn get_default_sky_color() -> Color {
         SkyColor::default_value()
     }
 
+    #[must_use]
     pub fn get_sky_color(&self) -> PropertyValue<Color> {
         self.impl_.properties.get::<SkyColor>().value.clone()
     }
@@ -363,14 +384,17 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_sky_color_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyColor>().options
     }
 
+    #[must_use]
     pub fn get_default_sky_horizon_blend() -> f32 {
         SkyHorizonBlend::default_value()
     }
 
+    #[must_use]
     pub fn get_sky_horizon_blend(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<SkyHorizonBlend>().value.clone()
     }
@@ -387,6 +411,7 @@ impl Sky {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_sky_horizon_blend_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<SkyHorizonBlend>().options
     }

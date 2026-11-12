@@ -12,6 +12,7 @@ pub struct DepthMode {
 }
 
 impl DepthMode {
+    #[must_use]
     pub fn disabled() -> DepthMode {
         DepthMode { func: DepthFunctionType::Always, mask: DepthMaskType::ReadOnly, range: Range::new(0.0, 1.0) }
     }

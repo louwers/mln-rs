@@ -36,7 +36,7 @@ pub trait Scheduler {
     fn schedule(&self, task: Task);
 
     /// Enqueues a function for execution in the queue of `tag` (schedulers
-    /// without tagged queues ignore the tag, as the C++ RunLoop does).
+    /// without tagged queues ignore the tag, as the C++ `RunLoop` does).
     fn schedule_tagged(&self, _tag: SimpleIdentity, task: Task) {
         self.schedule(task);
     }
@@ -68,8 +68,9 @@ pub fn set_current(scheduler: Option<SchedulerPtr>) {
     LOCAL_SCHEDULER.with(|s| *s.borrow_mut() = scheduler);
 }
 
-/// `Scheduler::GetCurrent(init = true)`: creates the thread's RunLoop if it
+/// `Scheduler::GetCurrent(init = true)`: creates the thread's `RunLoop` if it
 /// has no scheduler yet.
+#[must_use]
 pub fn get_current() -> SchedulerPtr {
     if let Some(scheduler) = try_get_current() {
         return scheduler;
@@ -80,6 +81,7 @@ pub fn get_current() -> SchedulerPtr {
 }
 
 /// `Scheduler::GetCurrent(false)`.
+#[must_use]
 pub fn try_get_current() -> Option<SchedulerPtr> {
     LOCAL_SCHEDULER.with(|s| s.borrow().clone())
 }
@@ -88,8 +90,8 @@ static COOPERATIVE: OnceLock<Arc<CooperativeScheduler>> = OnceLock::new();
 
 /// Port-only: makes `scheduler` run everything that would otherwise run on
 /// threads of its own: the background and sequenced schedulers, and the
-/// objects of `util::Thread`s, which stay on the creating thread's RunLoop
-/// (see cooperative_scheduler.rs). For a host with one thread (the
+/// objects of `util::Thread`s, which stay on the creating thread's `RunLoop`
+/// (see `cooperative_scheduler.rs`). For a host with one thread (the
 /// browser), which runs the tasks with `CooperativeScheduler::run_until`.
 /// It must come before anything gets a scheduler or starts a `Thread`, and
 /// only once.
@@ -108,10 +110,10 @@ pub fn cooperative() -> Option<&'static Arc<CooperativeScheduler>> {
 /// first use and kept alive by its users (or the installed cooperative
 /// scheduler).
 pub fn get_background() -> SchedulerPtr {
+    static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
     if let Some(cooperative) = cooperative() {
         return cooperative.clone();
     }
-    static WEAK: Mutex<Option<Weak<ThreadPool>>> = Mutex::new(None);
     let mut weak = WEAK.lock_unpoisoned();
     if let Some(scheduler) = weak.as_ref().and_then(Weak::upgrade) {
         return scheduler;
@@ -125,15 +127,15 @@ pub fn get_background() -> SchedulerPtr {
 /// single-thread schedulers, round robin, each created on first use and
 /// kept alive by its users (or the installed cooperative scheduler).
 pub fn get_sequenced() -> SchedulerPtr {
-    if let Some(cooperative) = cooperative() {
-        return cooperative.clone();
-    }
     const SCHEDULERS_COUNT: usize = 10;
     struct State {
         weaks: Vec<Option<Weak<SequencedScheduler>>>,
         last_used_index: usize,
     }
     static STATE: Mutex<State> = Mutex::new(State { weaks: Vec::new(), last_used_index: 0 });
+    if let Some(cooperative) = cooperative() {
+        return cooperative.clone();
+    }
     let mut state = STATE.lock_unpoisoned();
     if state.weaks.is_empty() {
         state.weaks.resize(SCHEDULERS_COUNT, None);
@@ -211,10 +213,10 @@ pub fn schedule_and_reply_later<R, TaskFn, ReplyFn>(
                     reply_scheduler.schedule_tagged(
                         tag,
                         Box::new(move || {
-                            if let Some(reply) = reply.take() {
-                                if let Some(reply) = reply.borrow_mut().take() {
-                                    reply(result);
-                                }
+                            if let Some(reply) = reply.take()
+                                && let Some(reply) = reply.borrow_mut().take()
+                            {
+                                reply(result);
                             }
                         }),
                     );
@@ -236,6 +238,7 @@ impl TaggedScheduler {
         TaggedScheduler { tag, scheduler }
     }
 
+    #[must_use]
     pub fn get(&self) -> &SchedulerPtr {
         &self.scheduler
     }

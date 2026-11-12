@@ -25,7 +25,7 @@ pub fn parse_glyph_pbf(glyph_range: &GlyphRange, data: &[u8]) -> Result<Vec<Glyp
             if tag.field_number() != 3 || tag.wire_type() != WireType::LengthDelimited {
                 return Ok(false);
             }
-            result.extend(parse_glyph(glyph_range, borrow_bytes(buf)?)?);
+            result.extend(parse_glyph(*glyph_range, borrow_bytes(buf)?)?);
             Ok(true)
         })?;
         Ok(true)
@@ -49,7 +49,7 @@ fn for_each_field<'a>(
 }
 
 /// One `glyph` message: `None` for a glyph to discard.
-fn parse_glyph(glyph_range: &GlyphRange, data: &[u8]) -> Result<Option<Glyph>, DecodeError> {
+fn parse_glyph(glyph_range: GlyphRange, data: &[u8]) -> Result<Option<Glyph>, DecodeError> {
     let mut glyph = Glyph::default();
     let mut glyph_data: &[u8] = &[];
 
@@ -115,8 +115,8 @@ fn parse_glyph(glyph_range: &GlyphRange, data: &[u8]) -> Result<Option<Glyph>, D
         || m.top < -128.0
         || m.top >= 128.0
         || m.advance >= 256
-        || glyph.id.hash() < glyph_range.first as u32
-        || glyph.id.hash() > glyph_range.second as u32
+        || glyph.id.hash() < u32::from(glyph_range.first)
+        || glyph.id.hash() > u32::from(glyph_range.second)
     {
         return Ok(None);
     }
@@ -125,7 +125,7 @@ fn parse_glyph(glyph_range: &GlyphRange, data: &[u8]) -> Result<Option<Glyph>, D
     // expected size with the implicit border size, otherwise we
     // expect there to be no bitmap at all.
     if m.width != 0 && m.height != 0 {
-        let border = Glyph::BORDER_SIZE as u32;
+        let border = u32::from(Glyph::BORDER_SIZE);
         let size = Size::new(m.width + 2 * border, m.height + 2 * border);
         if size.area() as usize != glyph_data.len() {
             return Ok(None);
@@ -136,9 +136,9 @@ fn parse_glyph(glyph_range: &GlyphRange, data: &[u8]) -> Result<Option<Glyph>, D
     Ok(Some(glyph))
 }
 
-/// Ports test/text/glyph_pbf.test.cpp.
+/// Ports `test/text/glyph_pbf.test.cpp`.
 #[cfg(test)]
-mod glyph_pbf {
+mod tests {
     use super::*;
     use crate::glyph::GlyphIDType;
 
@@ -157,7 +157,7 @@ mod glyph_pbf {
             &fixture("test/fixtures/resources/fake_glyphs-0-255.pbf"),
         )
         .unwrap();
-        assert!(sdfs.len() == 1);
+        assert_eq!(sdfs.len(), 1);
 
         let sdf = &sdfs[0];
         assert_eq!(69, sdf.id.code);

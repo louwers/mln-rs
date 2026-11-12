@@ -183,6 +183,7 @@ impl LineLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &LineLayerImpl {
         self.base
             .base_impl

@@ -52,7 +52,7 @@ fn write(path: &Path, contents: impl AsRef<[u8]>) {
 
 fn solid(size: Size, rgba: [u8; 4]) -> PremultipliedImage {
     let mut image = PremultipliedImage::new(size);
-    for px in image.data.chunks_exact_mut(4) {
+    for px in image.data.as_chunks_mut::<4>().0 {
         px.copy_from_slice(&rgba);
     }
     image
@@ -119,7 +119,7 @@ fn filters_tests_by_regex_search_on_the_path() {
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, M1_FILTER.to_string()).unwrap();
     let mut ids: Vec<&str> =
         manifest.get_test_paths().iter().map(|t| t.style_path.strip_prefix(INTEGRATION).unwrap()).collect();
-    ids.sort();
+    ids.sort_unstable();
     assert_eq!(
         ids,
         vec![
@@ -198,7 +198,7 @@ fn parses_test_metadata() {
     assert_eq!(metadata.allowed, 0.00015);
     assert_eq!(metadata.map_mode, MapMode::Static);
     assert!(metadata.render_test && metadata.outputs_image && metadata.ignore_probing);
-    assert!(metadata.error_message.is_empty());
+    assert_eq!(metadata.error_message, "");
     assert_eq!(
         metadata.document_json,
         std::fs::read_to_string(format!("{INTEGRATION}/render-tests/background-color/default/style.json")).unwrap()
@@ -313,7 +313,7 @@ fn transition_operations_drive_the_map() {
     let mut map = MockMap::new(calls.clone(), [255, 0, 0, 255]);
     let (metadata, ok) = run_operations("render-tests/background-color/transition", &mut map);
     assert!(ok);
-    assert!(metadata.error_message.is_empty());
+    assert_eq!(metadata.error_message, "");
     assert_eq!(*calls.borrow(), vec!["set background background-color \"white\"", "render", "render"]);
     assert_eq!(map.color, [255, 255, 255, 255]);
 }
@@ -348,7 +348,7 @@ fn unsupported_operation_drops_all_operations() {
 
 // --- runner: checkRenderTestResults ---
 
-fn check(dir: &Path, actual: PremultipliedImage, expectations: Vec<String>) -> TestMetadata {
+fn check(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>) -> TestMetadata {
     let output = dir.join("out");
     let manifest = ManifestParser::parse_manifest(OUR_MANIFEST, "background-color/default/".to_string()).unwrap();
     let runner = TestRunner::new(manifest, UpdateResults::No, None, false, output);
@@ -373,46 +373,46 @@ fn compares_against_expectations_like_cpp() {
     let d = |p: &Path| format!("{}/", p.display());
 
     // Identical: passes, difference 0, diff.png and actual.png written.
-    let m = check(&dir, red.clone(), vec![d(&default_dir)]);
+    let m = check(&dir, &red, vec![d(&default_dir)]);
     assert_eq!((m.render_failed, m.render_errored), (0, 0));
     assert_eq!(m.difference, 0.0);
     assert!(dir.join("out/check/actual.png").exists());
     assert!(dir.join("out/check/diff.png").exists());
 
     // Every pixel differs: fails with difference 1.
-    let m = check(&dir, blue.clone(), vec![d(&default_dir)]);
+    let m = check(&dir, &blue, vec![d(&default_dir)]);
     assert_eq!((m.render_failed, m.render_errored), (1, 0));
     assert_eq!(m.difference, 1.0);
 
     // One pixel of 64 differs: 1/64 > 0.00015 fails, unless `allowed` says so.
     let mut one_off = red.clone();
     one_off.data[0..4].copy_from_slice(&[0, 0, 255, 255]);
-    let m = check(&dir, one_off.clone(), vec![d(&default_dir)]);
+    let m = check(&dir, &one_off, vec![d(&default_dir)]);
     assert_eq!(m.difference, 1.0 / 64.0);
     assert_eq!(m.render_failed, 1);
 
     // An alternate expected-*.png in the same directory can match.
     write(&default_dir.join("expected-blue.png"), encode_png(&blue));
-    let m = check(&dir, blue.clone(), vec![d(&default_dir)]);
+    let m = check(&dir, &blue, vec![d(&default_dir)]);
     assert_eq!((m.render_failed, m.render_errored), (0, 0));
 
     // A platform directory with expectations shadows the default one.
     write(&platform_dir.join("expected.png"), encode_png(&blue));
-    let m = check(&dir, red.clone(), vec![d(&default_dir), d(&platform_dir)]);
+    let m = check(&dir, &red, vec![d(&default_dir), d(&platform_dir)]);
     assert_eq!(m.render_failed, 1);
-    let m = check(&dir, blue.clone(), vec![d(&default_dir), d(&platform_dir)]);
+    let m = check(&dir, &blue, vec![d(&default_dir), d(&platform_dir)]);
     assert_eq!(m.render_failed, 0);
     // A missing platform directory falls back to the default one.
-    let m = check(&dir, red.clone(), vec![d(&default_dir), d(&dir.join("nope/"))]);
+    let m = check(&dir, &red, vec![d(&default_dir), d(&dir.join("nope/"))]);
     assert_eq!(m.render_failed, 0);
 
     // No expectations at all.
-    let m = check(&dir, red.clone(), vec![d(&dir.join("nope/"))]);
+    let m = check(&dir, &red, vec![d(&dir.join("nope/"))]);
     assert_eq!(m.render_errored, 1);
     assert_eq!(m.error_message, "Failed to find expectations for: style.json");
 
     // An empty actual image.
-    let m = check(&dir, PremultipliedImage::default(), vec![d(&default_dir)]);
+    let m = check(&dir, &PremultipliedImage::default(), vec![d(&default_dir)]);
     assert_eq!(m.render_errored, 1);
     assert_eq!(m.error_message, "Invalid size for actual image");
 
@@ -420,7 +420,7 @@ fn compares_against_expectations_like_cpp() {
     // C++) fails instead of reading out of bounds.
     let small_dir = dir.join("small/");
     write(&small_dir.join("expected.png"), encode_png(&solid(Size::new(16, 16), [255, 0, 0, 255])));
-    let m = check(&dir, red, vec![d(&small_dir)]);
+    let m = check(&dir, &red, vec![d(&small_dir)]);
     assert_eq!((m.render_failed, m.difference), (1, 1.0));
 }
 
@@ -435,7 +435,7 @@ impl Suite {
         Suite { dir: tmp_dir(name) }
     }
 
-    /// A test drawing `color` (see MockMap) with `expected` images in the
+    /// A test drawing `color` (see `MockMap`) with `expected` images in the
     /// test directory.
     fn test(&self, id: &str, color: [u8; 4], extra: &str, expected: &[(&str, [u8; 4])]) {
         let dir = self.dir.join("integration").join(id);
@@ -470,7 +470,7 @@ impl Suite {
             self.dir.join("out").to_str().unwrap(),
         ]
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect();
         let arguments: Arguments = parse_arguments(&args).unwrap();
         run_render_tests_with(&arguments, Some(mock_factory()))

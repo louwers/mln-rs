@@ -33,6 +33,7 @@ pub struct IndexedSymbolInstance {
 }
 
 impl IndexedSymbolInstance {
+    #[must_use]
     pub fn new(cross_tile_id: u32, coord: Point<i64>) -> Self {
         IndexedSymbolInstance { cross_tile_id, coord }
     }
@@ -49,6 +50,7 @@ pub struct TileLayerIndex {
 
 impl TileLayerIndex {
     /// `TileLayerIndex(coord, symbolInstances, bucketInstanceId, bucketLeaderId)`.
+    #[must_use]
     pub fn new(
         coord: OverscaledTileID,
         symbol_instances: &[SymbolInstance],
@@ -72,20 +74,22 @@ impl TileLayerIndex {
     }
 
     /// `getScaledCoordinates(symbolInstance, childTileCoord)`.
+    #[must_use]
     pub fn get_scaled_coordinates(
         &self,
         symbol_instance: &SymbolInstance,
         child_tile_coord: &OverscaledTileID,
     ) -> Point<i64> {
         // Round anchor positions to roughly 4 pixel grid
-        let rounding_factor: f64 = 512.0 / EXTENT as f64 / 2.0;
-        let scale = rounding_factor / 2f64.powi(child_tile_coord.canonical.z as i32 - self.coord.canonical.z as i32);
+        let rounding_factor: f64 = 512.0 / f64::from(EXTENT) / 2.0;
+        let scale =
+            rounding_factor / 2f64.powi(i32::from(child_tile_coord.canonical.z) - i32::from(self.coord.canonical.z));
         // `childTileCoord.canonical.x * util::EXTENT` is uint32_t arithmetic;
         // adding the float anchor makes it a float, the scale a double.
         let anchor = symbol_instance.get_anchor().point;
         let x = child_tile_coord.canonical.x.wrapping_mul(EXTENT as u32) as f32 + anchor.x;
         let y = child_tile_coord.canonical.y.wrapping_mul(EXTENT as u32) as f32 + anchor.y;
-        Point::new((x as f64 * scale).floor() as i64, (y as f64 * scale).floor() as i64)
+        Point::new((f64::from(x) * scale).floor() as i64, (f64::from(y) * scale).floor() as i64)
     }
 
     /// `findMatches(bucket, newCoord, zoomCrossTileIDs)`.
@@ -99,7 +103,7 @@ impl TileLayerIndex {
         let tolerance: f32 = if self.coord.canonical.z < new_coord.canonical.z {
             1.0
         } else {
-            2f64.powi(self.coord.canonical.z as i32 - new_coord.canonical.z as i32) as f32
+            2f64.powi(i32::from(self.coord.canonical.z) - i32::from(new_coord.canonical.z)) as f32
         };
 
         if bucket_leader_id != self.bucket_leader_id {
@@ -140,12 +144,12 @@ impl TileLayerIndex {
 
 /// `isInVewport(posMatrix, point)`.
 fn is_in_viewport(projector: &TileProjector<'_>, point: Point<f32>) -> bool {
-    let projected = projector.project_as_drawn(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
-    let p = &projected.point;
-
     // buffer covers area of the next zoom level (current zoom - 1 covered area).
     const BUFFER: f64 = 1.0;
     const EDGE: f64 = 1.0 + BUFFER;
+
+    let projected = projector.project_as_drawn(&Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
+    let p = &projected.point;
     !projected.occluded && (p.x > -EDGE && p.y > -EDGE && p.x < EDGE && p.y < EDGE)
 }
 
@@ -196,7 +200,7 @@ impl CrossTileSymbolLayerIndex {
                 let mut new_zoom_index: VecMap<OverscaledTileID, TileLayerIndex> = VecMap::new();
                 for (_, mut index) in zoom_index {
                     // change the tileID's wrap and move its index
-                    index.coord = index.coord.unwrap_to((index.coord.wrap as i32 + wrap_delta) as i16);
+                    index.coord = index.coord.unwrap_to((i32::from(index.coord.wrap) + wrap_delta) as i16);
                     new_zoom_index.entry(index.coord).or_insert(index);
                 }
                 new_indexes.entry(zoom).or_insert(new_zoom_index);
@@ -237,14 +241,13 @@ impl CrossTileSymbolLayerIndex {
         if let Some(previous_index) = this_zoom_indexes.get(tile_id) {
             if previous_index.bucket_instance_id == bucket.bucket_instance_id && !state.has_uninitialized_symbols {
                 return false;
-            } else {
-                // We're replacing this bucket with an updated version
-                // Remove the old bucket's "used crossTileIDs" now so that the new
-                // bucket can claim them. We have to keep the old index entries
-                // themselves until the end of 'addBucket' so that we can copy them
-                // with 'findMatches'.
-                remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, tile_id.overscaled_z, previous_index);
             }
+            // We're replacing this bucket with an updated version
+            // Remove the old bucket's "used crossTileIDs" now so that the new
+            // bucket can claim them. We have to keep the old index entries
+            // themselves until the end of 'addBucket' so that we can copy them
+            // with 'findMatches'.
+            remove_bucket_cross_tile_ids(&mut self.used_cross_tile_ids, tile_id.overscaled_z, previous_index);
         }
 
         state.has_uninitialized_symbols = false;
@@ -252,7 +255,7 @@ impl CrossTileSymbolLayerIndex {
         if tile_id.overscale_factor() > 1 {
             // For overscaled tiles the viewport might be showing only a small part of the tile,
             // so we filter out the off-screen symbols to improve the performance.
-            for symbol_instance in state.symbol_instances.iter_mut() {
+            for symbol_instance in &mut state.symbol_instances {
                 if is_in_viewport(projector, symbol_instance.get_anchor().point) {
                     symbol_instance.set_cross_tile_id(0);
                 } else {
@@ -261,7 +264,7 @@ impl CrossTileSymbolLayerIndex {
                 }
             }
         } else {
-            for symbol_instance in state.symbol_instances.iter_mut() {
+            for symbol_instance in &mut state.symbol_instances {
                 symbol_instance.set_cross_tile_id(0);
             }
         }
@@ -293,7 +296,7 @@ impl CrossTileSymbolLayerIndex {
             }
         }
 
-        for symbol_instance in state.symbol_instances.iter_mut() {
+        for symbol_instance in &mut state.symbol_instances {
             if symbol_instance.get_cross_tile_id() == 0 {
                 // symbol did not match any known symbol, assign a new id
                 self.max_cross_tile_id.set(self.max_cross_tile_id.get().wrapping_add(1));
@@ -346,6 +349,7 @@ impl AddLayerResult {
     pub const BUCKETS_REMOVED: AddLayerResult = AddLayerResult(1 << 1);
 
     /// C++ `bool operator&(AddLayerResult, AddLayerResult)`.
+    #[must_use]
     pub fn contains(self, rhs: AddLayerResult) -> bool {
         (self.0 & rhs.0) != 0
     }
@@ -365,6 +369,7 @@ pub struct CrossTileSymbolIndex {
 }
 
 impl CrossTileSymbolIndex {
+    #[must_use]
     pub fn new() -> Self {
         CrossTileSymbolIndex::default()
     }

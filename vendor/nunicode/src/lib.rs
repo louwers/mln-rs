@@ -4,7 +4,7 @@
 //! default platform builds on it:
 //!
 //! - `unaccent` from platform/default/src/mln/i18n/collator.cpp,
-//! - `uppercase`/`lowercase` from platform/default/src/mln/util/string_stdlib.cpp.
+//! - `uppercase`/`lowercase` from `platform/default/src/mln/util/string_stdlib.cpp`.
 //!
 //! The generated tables (`src/tables`) come from nunicode's `src/libnu/gen`
 //! through `tools/gen_tables.py`.
@@ -22,7 +22,7 @@ use utf8::{nu_utf8_read, nu_utf8_write};
 
 type TransformFn = fn(&[u8], usize, usize) -> (usize, u32, Transform);
 
-/// The loop shared by string_stdlib.cpp's `uppercase`/`lowercase` and
+/// The loop shared by `string_stdlib.cpp`'s `uppercase`/`lowercase` and
 /// collator.cpp's `unaccent`: over the whole string (not up to a NUL),
 /// copying codepoints without a mapping and writing the decoded mapping
 /// otherwise.
@@ -51,7 +51,7 @@ fn transform_bytes(s: &[u8], f: TransformFn) -> Vec<u8> {
     output
 }
 
-/// The `_bytes` results as a `String`. nunicode's `b4_utf8` (utf8_internal.h)
+/// The `_bytes` results as a `String`. nunicode's `b4_utf8` (`utf8_internal.h`)
 /// puts bit 12 of a 4-byte codepoint into the third byte instead of the
 /// second, so mappings to such codepoints (e.g. Warang Citi U+118A0 ->
 /// U+118C0) come out as invalid UTF-8 in C++. A `String` cannot hold that;
@@ -64,12 +64,12 @@ fn into_string(bytes: Vec<u8>) -> String {
     }
 }
 
-/// `platform::uppercase` (string_stdlib.cpp) on raw bytes.
+/// `platform::uppercase` (`string_stdlib.cpp`) on raw bytes.
 pub fn uppercase_bytes(s: &[u8]) -> Vec<u8> {
     transform_bytes(s, _nu_toupper)
 }
 
-/// `platform::lowercase` (string_stdlib.cpp) on raw bytes.
+/// `platform::lowercase` (`string_stdlib.cpp`) on raw bytes.
 pub fn lowercase_bytes(s: &[u8]) -> Vec<u8> {
     transform_bytes(s, _nu_tolower)
 }
@@ -79,28 +79,33 @@ pub fn unaccent_bytes(s: &[u8]) -> Vec<u8> {
     transform_bytes(s, _nu_tounaccent)
 }
 
-/// `platform::uppercase` (platform/default/src/mln/util/string_stdlib.cpp).
+/// `platform::uppercase` (`platform/default/src/mln/util/string_stdlib.cpp`).
+#[must_use]
 pub fn uppercase(s: &str) -> String {
     into_string(uppercase_bytes(s.as_bytes()))
 }
 
-/// `platform::lowercase` (platform/default/src/mln/util/string_stdlib.cpp).
+/// `platform::lowercase` (`platform/default/src/mln/util/string_stdlib.cpp`).
+#[must_use]
 pub fn lowercase(s: &str) -> String {
     into_string(lowercase_bytes(s.as_bytes()))
 }
 
 /// The `unaccent` helper of platform/default/src/mln/i18n/collator.cpp.
+#[must_use]
 pub fn unaccent(s: &str) -> String {
     into_string(unaccent_bytes(s.as_bytes()))
 }
 
 /// `nu_strcoll(lhs.c_str(), rhs.c_str(), nu_utf8_read, nu_utf8_read)`: an
 /// embedded NUL ends the string.
+#[must_use]
 pub fn strcoll(lhs: &str, rhs: &str) -> i32 {
     nu_strcoll(lhs.as_bytes(), rhs.as_bytes())
 }
 
 /// `nu_strcasecoll(lhs.c_str(), rhs.c_str(), nu_utf8_read, nu_utf8_read)`.
+#[must_use]
 pub fn strcasecoll(lhs: &str, rhs: &str) -> i32 {
     nu_strcasecoll(lhs.as_bytes(), rhs.as_bytes())
 }
@@ -110,6 +115,7 @@ pub fn strcasecoll(lhs: &str, rhs: &str) -> i32 {
 /// configuration), diacritic-insensitive through `unaccent`. Works on the
 /// exact bytes, so it matches C++ also where `unaccent` produces invalid
 /// UTF-8.
+#[must_use]
 pub fn collator_compare(lhs: &str, rhs: &str, case_sensitive: bool, diacritic_sensitive: bool) -> i32 {
     let (l, r) = (lhs.as_bytes(), rhs.as_bytes());
     if case_sensitive && diacritic_sensitive {

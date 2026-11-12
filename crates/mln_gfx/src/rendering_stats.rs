@@ -164,6 +164,7 @@ pub struct RenderingStats {
 }
 
 impl RenderingStats {
+    #[must_use]
     pub fn is_zero(&self) -> bool {
         *self == RenderingStats::default()
     }

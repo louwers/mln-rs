@@ -27,7 +27,7 @@ fn get_cant_load_tile_error() -> Error {
     Error::native("Can't load tile.")
 }
 
-/// The tile data encoding of a vector tile: VectorMVTTile or VectorMLTTile
+/// The tile data encoding of a vector tile: `VectorMVTTile` or `VectorMLTTile`
 /// (raster tiles ignore it).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VectorTileEncoding {
@@ -55,8 +55,8 @@ pub trait LoaderTile {
     }
 }
 
-/// VectorTile's half of the loader interface (vector_tile.cpp,
-/// vector_mvt_tile.cpp, vector_mlt_tile.cpp).
+/// `VectorTile`'s half of the loader interface (`vector_tile.cpp`,
+/// `vector_mvt_tile.cpp`, `vector_mlt_tile.cpp`).
 impl LoaderTile for GeometryTileInner {
     fn set_error(&self, err: Error) {
         GeometryTileInner::set_error(self, err);
@@ -195,11 +195,11 @@ impl TileLoader {
     pub fn set_necessity(&self, new_necessity: TileNecessity) {
         let changed = {
             let mut state = self.state.borrow_mut();
-            if new_necessity != state.necessity {
+            if new_necessity == state.necessity {
+                false
+            } else {
                 state.necessity = new_necessity;
                 true
-            } else {
-                false
             }
         };
         if changed {
@@ -214,7 +214,9 @@ impl TileLoader {
     pub fn set_update_parameters(&self, params: &TileUpdateParameters) {
         let reload = {
             let mut state = self.state.borrow_mut();
-            if state.update_parameters != *params {
+            if state.update_parameters == *params {
+                false
+            } else {
                 state.update_parameters = *params;
                 if has_pending_network_request(&state) {
                     // Update the pending request.
@@ -223,8 +225,6 @@ impl TileLoader {
                 } else {
                     false
                 }
-            } else {
-                false
             }
         };
         if reload {
@@ -337,15 +337,15 @@ fn load_from_cache(state_rc: &Rc<RefCell<State>>) {
 
 fn loaded_data(state_rc: &Rc<RefCell<State>>, res: &Response, method: LoadingMethod) {
     let tile = tile_of(state_rc);
-    if let Some(error) = &res.error {
-        if error.reason != Reason::NotFound {
-            state_rc.borrow_mut().failed = true;
-            if let Some(tile) = &tile {
-                tile.set_error(Error::native(error.message.clone()));
-                tile.on_tile_action(TileOperation::Error);
-            }
-            return;
+    if let Some(error) = &res.error
+        && error.reason != Reason::NotFound
+    {
+        state_rc.borrow_mut().failed = true;
+        if let Some(tile) = &tile {
+            tile.set_error(Error::native(error.message.clone()));
+            tile.on_tile_action(TileOperation::Error);
         }
+        return;
     }
     state_rc.borrow_mut().failed = false;
 

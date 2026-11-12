@@ -1,6 +1,8 @@
 // Ports vendor/wagyu/include/mapbox/geometry/wagyu/local_minimum_util.hpp and
 // build_local_minima_list.hpp.
 
+use std::cmp::Ordering;
+
 use crate::bound::{Bound, BoundPtr, EdgeSide};
 use crate::build_edges::build_edge_list;
 use crate::config::PolygonType;
@@ -247,8 +249,9 @@ fn add_ring_to_local_minima_list(
                 move_horizontals_on_left_to_right(&mut to_maximum, &mut to_minimum);
             }
         } else {
-            minimum_is_left =
-                !(to_maximum.edges[to_max_first_non_horizontal].dx > to_minimum.edges[to_min_first_non_horizontal].dx);
+            let max_dx = to_maximum.edges[to_max_first_non_horizontal].dx;
+            let min_dx = to_minimum.edges[to_min_first_non_horizontal].dx;
+            minimum_is_left = max_dx.partial_cmp(&min_dx) != Some(Ordering::Greater);
         }
         debug_assert!(!to_minimum.edges.is_empty());
         debug_assert!(!to_maximum.edges.is_empty());
@@ -258,28 +261,7 @@ fn add_ring_to_local_minima_list(
         }
         to_minimum.poly_type = poly_type;
         to_maximum.poly_type = poly_type;
-        if !minimum_is_left {
-            to_minimum.side = EdgeSide::Right;
-            to_maximum.side = EdgeSide::Left;
-            to_minimum.winding_delta = -1;
-            to_maximum.winding_delta = 1;
-            bounds.push(to_maximum);
-            let left = bounds.len() - 1;
-            bounds.push(to_minimum);
-            let right = bounds.len() - 1;
-            minima_list.push(LocalMinimum {
-                left_bound: left,
-                right_bound: right,
-                y: min_front_bot_y,
-                minimum_has_horizontal: lm_minimum_has_horizontal,
-            });
-            if last_maximum == NIL {
-                first_minimum = right;
-            } else {
-                bounds[last_maximum].maximum_bound = right;
-            }
-            last_maximum = left;
-        } else {
+        if minimum_is_left {
             to_minimum.side = EdgeSide::Left;
             to_maximum.side = EdgeSide::Right;
             to_minimum.winding_delta = -1;
@@ -300,6 +282,27 @@ fn add_ring_to_local_minima_list(
                 bounds[last_maximum].maximum_bound = left;
             }
             last_maximum = right;
+        } else {
+            to_minimum.side = EdgeSide::Right;
+            to_maximum.side = EdgeSide::Left;
+            to_minimum.winding_delta = -1;
+            to_maximum.winding_delta = 1;
+            bounds.push(to_maximum);
+            let left = bounds.len() - 1;
+            bounds.push(to_minimum);
+            let right = bounds.len() - 1;
+            minima_list.push(LocalMinimum {
+                left_bound: left,
+                right_bound: right,
+                y: min_front_bot_y,
+                minimum_has_horizontal: lm_minimum_has_horizontal,
+            });
+            if last_maximum == NIL {
+                first_minimum = right;
+            } else {
+                bounds[last_maximum].maximum_bound = right;
+            }
+            last_maximum = left;
         }
     }
     bounds[last_maximum].maximum_bound = first_minimum;
@@ -323,7 +326,7 @@ pub(crate) fn initialize_lm(lm: &LocalMinimum, bounds: &mut [Bound]) {
     }
 }
 
-/// `add_linear_ring` (build_local_minima_list.hpp).
+/// `add_linear_ring` (`build_local_minima_list.hpp`).
 pub(crate) fn add_linear_ring(
     path_geometry: &[GPoint],
     minima_list: &mut Vec<LocalMinimum>,

@@ -1,9 +1,9 @@
 //! Ports the `mln::style::conversion` core: `Error` and `Convertible`
-//! (include/mln/style/conversion.hpp, include/mln/style/conversion_impl.hpp),
-//! the JSON front end (src/mln/style/rapidjson_conversion.hpp, on serde_json
+//! (include/mln/style/conversion.hpp, `include/mln/style/conversion_impl.hpp`),
+//! the JSON front end (`src/mln/style/rapidjson_conversion.hpp`, on `serde_json`
 //! instead of rapidjson) and `getJSONType`
-//! (src/mln/style/conversion/get_json_type.cpp), plus a port-only front end
-//! over `mln::Value` (value_conversion.rs).
+//! (`src/mln/style/conversion/get_json_type.cpp`), plus a port-only front end
+//! over `mln::Value` (`value_conversion.rs`).
 //!
 //! The typed converters (`Converter<T>`, style/conversion/*.cpp) live in
 //! `mln_style`.

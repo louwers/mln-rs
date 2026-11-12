@@ -111,6 +111,7 @@ impl HillshadeLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &HillshadeLayerImpl {
         self.base
             .base_impl

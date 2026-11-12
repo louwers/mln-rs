@@ -49,6 +49,7 @@ impl Metrics {
         self.0.extend(other.0);
     }
 
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<&Metric> {
         self.0.iter().find(|metric| metric.name == name)
     }
@@ -95,6 +96,7 @@ pub struct Context {
 
 impl Context {
     /// `count` iterations, scaled, and at least one.
+    #[must_use]
     pub fn iterations(&self, count: usize) -> usize {
         ((count as f64 * self.scale).round() as usize).max(1)
     }

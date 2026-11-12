@@ -20,10 +20,12 @@ pub struct StyleProperty {
 }
 
 impl StyleProperty {
+    #[must_use]
     pub fn new(value: Value, kind: Kind) -> Self {
         StyleProperty { value, kind }
     }
 
+    #[must_use]
     pub fn get_value(&self) -> &Value {
         &self.value
     }
@@ -32,6 +34,7 @@ impl StyleProperty {
         &mut self.value
     }
 
+    #[must_use]
     pub fn get_kind(&self) -> Kind {
         self.kind
     }

@@ -4,12 +4,14 @@
 use geometry::Point;
 
 /// `perp(a)` for `Point<double>`.
+#[must_use]
 pub fn perp(a: Point<f64>) -> Point<f64> {
     Point::new(-a.y, a.x)
 }
 
 /// `distSqr<float>(a, b)` for two `Point<int16_t>`: the difference and the
 /// sum are computed in `int`, then converted.
+#[must_use]
 pub fn dist_sqr_i16(a: Point<i16>, b: Point<i16>) -> f32 {
     let dx = i32::from(b.x) - i32::from(a.x);
     let dy = i32::from(b.y) - i32::from(a.y);
@@ -17,6 +19,7 @@ pub fn dist_sqr_i16(a: Point<i16>, b: Point<i16>) -> f32 {
 }
 
 /// `distSqr<float>(a, b)` for a `Point<int16_t>` and a `Point<float>`.
+#[must_use]
 pub fn dist_sqr_i16_f32(a: Point<i16>, b: Point<f32>) -> f32 {
     let dx = b.x - f32::from(a.x);
     let dy = b.y - f32::from(a.y);
@@ -24,6 +27,7 @@ pub fn dist_sqr_i16_f32(a: Point<i16>, b: Point<f32>) -> f32 {
 }
 
 /// `dist<T>(a, b)` for `Point<double>`.
+#[must_use]
 pub fn dist_f64(a: Point<f64>, b: Point<f64>) -> f64 {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -32,6 +36,7 @@ pub fn dist_f64(a: Point<f64>, b: Point<f64>) -> f64 {
 
 /// `normal<double>(a, b)`: the unit vector from `a` to `b` (NaN when they
 /// are equal).
+#[must_use]
 pub fn normal(a: Point<f64>, b: Point<f64>) -> Point<f64> {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -40,26 +45,31 @@ pub fn normal(a: Point<f64>, b: Point<f64>) -> Point<f64> {
 }
 
 /// `crossProduct<double>(a, b)`.
+#[must_use]
 pub fn cross_product(a: Point<f64>, b: Point<f64>) -> f64 {
     a.x * b.y - a.y * b.x
 }
 
 /// `angle_between<double>(a, b)`: the signed angle from `a` to `b`.
+#[must_use]
 pub fn angle_between(a: Point<f64>, b: Point<f64>) -> f64 {
     (a.x * b.y - a.y * b.x).atan2(a.x * b.x + a.y * b.y)
 }
 
 /// `length(a, b)`.
+#[must_use]
 pub fn length_f32(a: f32, b: f32) -> f32 {
     (a * a + b * b).sqrt()
 }
 
 /// `mag<double>(a)` for `Point<double>`.
+#[must_use]
 pub fn mag(a: Point<f64>) -> f64 {
     (a.x * a.x + a.y * a.y).sqrt()
 }
 
 /// `unit<double>(a)` for `Point<double>`.
+#[must_use]
 pub fn unit(a: Point<f64>) -> Point<f64> {
     let magnitude = mag(a);
     if magnitude == 0.0 {
@@ -70,6 +80,7 @@ pub fn unit(a: Point<f64>) -> Point<f64> {
 }
 
 /// `rotate<int16_t, float>(a, angle)`: computed in float, truncated back.
+#[must_use]
 pub fn rotate_i16(a: Point<i16>, angle: f32) -> Point<i16> {
     let cos = angle.cos();
     let sin = angle.sin();
@@ -79,6 +90,7 @@ pub fn rotate_i16(a: Point<i16>, angle: f32) -> Point<i16> {
 }
 
 /// `rotate<float, float>(a, angle)`.
+#[must_use]
 pub fn rotate_f32(a: Point<f32>, angle: f32) -> Point<f32> {
     let cos = angle.cos();
     let sin = angle.sin();

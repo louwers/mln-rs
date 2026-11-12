@@ -86,12 +86,12 @@ pub trait LayerTweaker {
 
     /// `checkTweakDrawable`: apply to a drawable if it references us, or if
     /// it doesn't reference anything. The drawable's tweaker slot is opaque
-    /// in mln_gfx (`Rc<dyn Any>`); renderer layers store a `LayerTweakerPtr`
+    /// in `mln_gfx` (`Rc<dyn Any>`); renderer layers store a `LayerTweakerPtr`
     /// in it (see `layer_tweaker_slot`).
     fn check_tweak_drawable(&self, drawable: &dyn Drawable) -> bool {
         match drawable.get_layer_tweaker().and_then(|slot| slot.downcast_ref::<LayerTweakerPtr>()) {
             None => true,
-            Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), self as *const Self),
+            Some(tweaker) => std::ptr::addr_eq(tweaker.as_ptr(), std::ptr::from_ref::<Self>(self)),
         }
     }
 }
@@ -166,6 +166,7 @@ pub fn get_projection_data(
 }
 
 /// `LayerTweaker::toProjectionUBO`.
+#[must_use]
 pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
     ProjectionUBO {
         matrix: cast_matrix(&data.main_matrix),
@@ -181,6 +182,7 @@ pub fn to_projection_ubo(data: &ProjectionData) -> ProjectionUBO {
 /// `LayerTweaker::globeExtrudeScale`: radians per pixel on the sphere for a
 /// tile (GL JS `globeExtrudeScale`). `latitude_scale` is the cosine of the
 /// center latitude on the globe and 1 on Mercator.
+#[must_use]
 pub fn globe_extrude_scale(tile_id: &UnwrappedTileID, zoom: f32, latitude_scale: f64) -> f32 {
     (f64::from(tile_id.pixels_to_tile_units(1.0, zoom)) / (f64::from(EXTENT) * (1u64 << tile_id.canonical.z) as f64)
         * M2PI
@@ -233,7 +235,7 @@ pub fn multiply_with_projection_matrix(
 }
 
 /// `RenderTile::translateVtxMatrix(id, tileMatrix, translation, anchor,
-/// state, inViewportPixelUnits)` (src/mln/renderer/render_tile.cpp).
+/// state, inViewportPixelUnits)` (`src/mln/renderer/render_tile.cpp`).
 pub fn translate_vtx_matrix(
     id: &UnwrappedTileID,
     tile_matrix: &Mat4,
@@ -263,14 +265,14 @@ pub fn translate_vtx_matrix(
         Point::new(cos * translation[0] - sin * translation[1], sin * translation[0] + cos * translation[1]);
 
     if in_viewport_pixel_units {
-        matrix::translate(&mut vtx_matrix, tile_matrix, translate.x as f64, translate.y as f64, 0.0);
+        matrix::translate(&mut vtx_matrix, tile_matrix, f64::from(translate.x), f64::from(translate.y), 0.0);
     } else {
         let zoom = state.get_zoom() as f32;
         matrix::translate(
             &mut vtx_matrix,
             tile_matrix,
-            id.pixels_to_tile_units(translate.x, zoom) as f64,
-            id.pixels_to_tile_units(translate.y, zoom) as f64,
+            f64::from(id.pixels_to_tile_units(translate.x, zoom)),
+            f64::from(id.pixels_to_tile_units(translate.y, zoom)),
             0.0,
         );
     }

@@ -106,10 +106,12 @@ fn circle_layer_properties() -> Immutable<dyn LayerProperties> {
     Arc::new(CircleLayerProperties::new(static_immutable_cast::<CircleLayerImpl>(&layer.base_impl())))
 }
 
-/// `StubTileObserver` (test/src/mln/test/stub_tile_observer.hpp).
+type OnTileChanged = Box<dyn Fn(&TileBase)>;
+
+/// `StubTileObserver` (`test/src/mln/test/stub_tile_observer.hpp`).
 #[derive(Default)]
 struct StubTileObserver {
-    tile_changed: RefCell<Option<Box<dyn Fn(&TileBase)>>>,
+    tile_changed: RefCell<Option<OnTileChanged>>,
 }
 
 impl TileObserver for StubTileObserver {
@@ -229,7 +231,7 @@ fn evaluated_circle_layer_properties() -> Immutable<dyn LayerProperties> {
 
 /// A transport whose workers are in `count` worker instances on threads.
 fn serializing_transport(count: usize) -> Rc<SerializingTransport> {
-    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)))
+    SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)))
 }
 
 // Port-only: GeoJSON.SynchronousUpdate with a `SerializingTransport`: the
@@ -274,7 +276,7 @@ fn update_through_the_codec() {
             tile
         })
         .collect();
-    while !tiles.iter().all(|tile| tile.is_complete()) {
+    while !tiles.iter().all(mln_renderer::tile::Tile::is_complete) {
         test.run_loop.run_once();
     }
     for tile in &tiles {

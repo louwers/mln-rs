@@ -7,7 +7,11 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_FILL_COLOR_VERTEX_ATTRIBUTE, ID_FILL_IMAGE_TEXTURE, ID_FILL_POS_VERTEX_ATTRIBUTE,
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_OPACITY_VERTEX_ATTRIBUTE,
+    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE, ID_LINE_WIDTH_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
     AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableBuilder, ShaderRegistry,
@@ -17,7 +21,10 @@ use mln_map_types::TransformState;
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_layer_impl::Impl as FillLayerImpl;
-use mln_style::layers::fill_layer_properties::*;
+use mln_style::layers::fill_layer_properties::{
+    FillAntialias, FillColor, FillLayerProperties, FillOpacity, FillOutlineColor, FillPaintProperties, FillPattern,
+    FillTranslate, FillTranslateAnchor,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_util::Color;
 use mln_util::identity::SimpleIdentity;
@@ -69,6 +76,7 @@ pub enum FillVariant {
 impl FillVariant {
     /// `static_cast<FillVariant>(drawable.getType())`; `None` for the
     /// values the tweaker's `default:` handles.
+    #[must_use]
     pub fn from_type(type_: usize) -> Option<FillVariant> {
         match type_ {
             0 => Some(FillVariant::Fill),
@@ -311,6 +319,8 @@ impl RenderLayer for RenderFillLayer {
         render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        const LINE_WIDTH: f32 = 2.0;
+
         self.base.stats.rendered_features.clear();
 
         let Some(render_tiles) = self.base.render_tiles.clone().filter(|t| !t.is_empty()) else {
@@ -376,7 +386,6 @@ impl RenderLayer for RenderFillLayer {
 
         let layer_prefix = format!("{}/", self.get_id());
         let render_pass = RenderPass::Translucent;
-        const LINE_WIDTH: f32 = 2.0;
 
         let common_init = |builder: &mut dyn DrawableBuilder| {
             builder.set_cull_face_mode(&CullFaceMode::disabled());
@@ -447,7 +456,7 @@ impl RenderLayer for RenderFillLayer {
                 if current && FillVariant::from_type(drawable.get_type()) != Some(FillVariant::FillOutlineTriangulated)
                 {
                     refresh_if_bucket_updated(drawable, |attrs| {
-                        read_fill_attributes(attrs, binders, &paint(), evaluated, &mut Default::default())
+                        read_fill_attributes(attrs, binders, &paint(), evaluated, &mut Default::default());
                     });
                 }
                 current
@@ -611,56 +620,55 @@ impl RenderLayer for RenderFillLayer {
                     outline_builder = Some(builder);
                 }
 
-                if let Some(builder) = fill_builder.as_mut() {
-                    if !bucket.triangles.is_empty() {
-                        builder.set_shader(fill_shader.clone());
-                        if do_outline && data_driven_outline {
-                            if let Some(outline) = outline_builder.as_mut() {
-                                outline.set_vertex_attributes(Some(vertex_attrs.clone()));
-                            }
-                        }
-                        builder.set_vertex_attributes(Some(vertex_attrs.clone()));
-
-                        builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
-                        builder.set_segments_shared(
-                            DrawMode::Triangles(),
-                            Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
-                            &bucket.triangle_segments,
-                        );
-                        finish(builder.as_mut(), FillVariant::Fill, base_stats);
+                if let Some(builder) = fill_builder.as_mut()
+                    && !bucket.triangles.is_empty()
+                {
+                    builder.set_shader(fill_shader.clone());
+                    if do_outline
+                        && data_driven_outline
+                        && let Some(outline) = outline_builder.as_mut()
+                    {
+                        outline.set_vertex_attributes(Some(vertex_attrs.clone()));
                     }
+                    builder.set_vertex_attributes(Some(vertex_attrs.clone()));
+
+                    builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
+                    builder.set_segments_shared(
+                        DrawMode::Triangles(),
+                        Some(bucket_indexes(geometry, bucket, &bucket.triangles)),
+                        &bucket.triangle_segments,
+                    );
+                    finish(builder.as_mut(), FillVariant::Fill, base_stats);
                 }
 
-                if do_outline {
-                    if let Some(builder) = outline_builder.as_mut() {
-                        if !data_driven_outline {
-                            builder.set_sub_layer_index(if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
-                                2
-                            } else {
-                                0
-                            });
-                            // createOutlineTriangulated(outlineBuilder)
-                            if line_vertex_count != 0 {
-                                builder.set_shader(outline_triangulated_shader.clone());
-                                builder.set_raw_vertices(Vec::new(), line_vertex_count, AttributeDataType::Short2);
-                                builder.set_vertex_attributes(Some(get_triangulated_attributes()));
-                                builder.set_segments_shared(
-                                    DrawMode::Triangles(),
-                                    Some(bucket_indexes(geometry, bucket, &bucket.line_indexes)),
-                                    &bucket.line_segments,
-                                );
-                                finish(builder.as_mut(), FillVariant::FillOutlineTriangulated, base_stats);
-                            }
-                        } else if !bucket.basic_lines.is_empty() {
-                            builder.set_shader(outline_shader.clone());
-                            builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
+                if do_outline && let Some(builder) = outline_builder.as_mut() {
+                    if !data_driven_outline {
+                        builder.set_sub_layer_index(if self.unevaluated.get::<FillOutlineColor>().is_undefined() {
+                            2
+                        } else {
+                            0
+                        });
+                        // createOutlineTriangulated(outlineBuilder)
+                        if line_vertex_count != 0 {
+                            builder.set_shader(outline_triangulated_shader.clone());
+                            builder.set_raw_vertices(Vec::new(), line_vertex_count, AttributeDataType::Short2);
+                            builder.set_vertex_attributes(Some(get_triangulated_attributes()));
                             builder.set_segments_shared(
-                                DrawMode::Lines(LINE_WIDTH),
-                                Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
-                                &bucket.basic_line_segments,
+                                DrawMode::Triangles(),
+                                Some(bucket_indexes(geometry, bucket, &bucket.line_indexes)),
+                                &bucket.line_segments,
                             );
-                            finish(builder.as_mut(), FillVariant::FillOutline, base_stats);
+                            finish(builder.as_mut(), FillVariant::FillOutlineTriangulated, base_stats);
                         }
+                    } else if !bucket.basic_lines.is_empty() {
+                        builder.set_shader(outline_shader.clone());
+                        builder.set_raw_vertices(Vec::new(), fill_vertex_count, AttributeDataType::Short2);
+                        builder.set_segments_shared(
+                            DrawMode::Lines(LINE_WIDTH),
+                            Some(bucket_indexes(geometry, bucket, &bucket.basic_lines)),
+                            &bucket.basic_line_segments,
+                        );
+                        finish(builder.as_mut(), FillVariant::FillOutline, base_stats);
                     }
                 }
             } else {

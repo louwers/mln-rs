@@ -168,7 +168,10 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
         match self {
             PossiblyEvaluatedFadedPropertyValue::Constant(constant) => constant.clone(),
             PossiblyEvaluatedFadedPropertyValue::Expression(expression) => {
-                if !expression.is_zoom_constant() {
+                if expression.is_zoom_constant() {
+                    let evaluated = expression.evaluate_feature_images(feature, available_images, default_value);
+                    Faded { from: evaluated.clone(), to: evaluated }
+                } else {
                     let min = expression.evaluate_zoom_feature_images_canonical(
                         zoom.floor(),
                         feature,
@@ -184,9 +187,6 @@ impl<T: Clone> PossiblyEvaluatedFadedPropertyValue<T> {
                         default_value,
                     );
                     Faded { from: min, to: max }
-                } else {
-                    let evaluated = expression.evaluate_feature_images(feature, available_images, default_value);
-                    Faded { from: evaluated.clone(), to: evaluated }
                 }
             }
         }

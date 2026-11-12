@@ -81,6 +81,7 @@ fn insets(top: f64, left: f64, bottom: f64, right: f64) -> EdgeInsets {
 }
 
 /// `std::make_unique<style::Image>(id, image, pixelRatio)`.
+#[must_use]
 pub fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc<mln_style::image::Impl> {
     Arc::new(
         mln_style::image::Impl::new(id.to_owned(), image, pixel_ratio, false, Vec::new(), Vec::new(), None, None, None)
@@ -88,10 +89,10 @@ pub fn style_image(id: &str, image: PremultipliedImage, pixel_ratio: f32) -> Arc
     )
 }
 
-fn red_background(id: &str) -> Box<BackgroundLayer> {
+fn red_background(id: &str) -> BackgroundLayer {
     let mut layer = BackgroundLayer::new(id);
     layer.set_background_color(&PropertyValue::Constant(Color::new(1.0, 0.0, 0.0, 1.0)));
-    Box::new(layer)
+    layer
 }
 
 fn vector_source(id: &str, tiles: &str) -> VectorSource {
@@ -104,10 +105,10 @@ fn vector_source(id: &str, tiles: &str) -> VectorSource {
     )
 }
 
-fn no_content() -> Option<Response> {
+fn no_content() -> Response {
     let mut res = Response::new();
     res.no_content = true;
-    Some(res)
+    res
 }
 
 // gtest: Map.RendererState
@@ -211,8 +212,8 @@ fn lat_lng_behavior() {
 
 fn new_york_test() -> (MapTest, LatLngBounds) {
     let test = MapTest::new();
-    test.map().jump_to(&cam().with_center(Some(ll(40.712730, -74.005953))).with_zoom(Some(16.0)));
-    let bounds = LatLngBounds::hull(ll(15.68169, 73.499857), ll(53.560711, 134.77281));
+    test.map().jump_to(&cam().with_center(Some(ll(40.712_730, -74.005_953))).with_zoom(Some(16.0)));
+    let bounds = LatLngBounds::hull(ll(15.68169, 73.499_857), ll(53.560_711, 134.77281));
     (test, bounds)
 }
 
@@ -281,7 +282,7 @@ fn lat_lng_bounds_to_camera_with_bearing_pitch_and_padding() {
 }
 
 fn lat_lngs() -> Vec<LatLng> {
-    vec![ll(40.712730, 74.005953), ll(15.68169, 73.499857), ll(30.82678, 83.4082)]
+    vec![ll(40.712_730, 74.005_953), ll(15.68169, 73.499_857), ll(30.82678, 83.4082)]
 }
 
 // gtest: Map.LatLngsToCamera
@@ -392,7 +393,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
     {
         let loaded = loaded.clone();
         let run_loop = test.run_loop.clone();
-        test.observer.did_finish_loading_map_callback.set(move |_| {
+        test.observer.did_finish_loading_map_callback.set(move |()| {
             loaded.set(true);
             run_loop.stop();
         });
@@ -413,7 +414,7 @@ fn a_sourceless_style_loaded_after_the_camera_renders() {
 #[test]
 fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.load_json(r##"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background"}]}"##);
+    test.load_json(r#"{"version": 8, "sources": {}, "layers": [{"id": "bg", "type": "background"}]}"#);
     let run_until_idle = || {
         let idle = Rc::new(Cell::new(false));
         let timeout = Timer::new();
@@ -424,7 +425,7 @@ fn fly_too_slow_to_time_jumps_and_the_map_goes_idle() {
         {
             let idle = idle.clone();
             let run_loop = test.run_loop.clone();
-            test.observer.did_become_idle_callback.set(move |_| {
+            test.observer.did_become_idle_callback.set(move |()| {
                 idle.set(true);
                 run_loop.stop();
             });
@@ -702,8 +703,8 @@ fn database_file_source(file_sources: &FileSourceManager) -> Arc<dyn FileSource>
 }
 
 /// A `dbfs->forward(..., [] {})` callback.
-fn no_op() -> Option<Box<dyn FnOnce() + Send>> {
-    Some(Box::new(|| {}))
+fn no_op() -> Box<dyn FnOnce() + Send> {
+    Box::new(|| {})
 }
 
 // gtest: Map.Offline
@@ -738,10 +739,10 @@ fn offline() {
     NetworkStatus::set(NetworkStatusType::Offline);
     let prefix = "http://127.0.0.1:3000/";
     let dbfs = database_file_source(&file_sources);
-    dbfs.forward(&Resource::style(&format!("{prefix}style.json")), &expired_item("style.json"), no_op());
-    dbfs.forward(&Resource::source(&format!("{prefix}streets.json")), &expired_item("streets.json"), no_op());
-    dbfs.forward(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &expired_item("sprite.json"), no_op());
-    dbfs.forward(&Resource::sprite_image(&format!("{prefix}sprite"), 1.0), &expired_item("sprite.png"), no_op());
+    dbfs.forward(&Resource::style(&format!("{prefix}style.json")), &expired_item("style.json"), Some(no_op()));
+    dbfs.forward(&Resource::source(&format!("{prefix}streets.json")), &expired_item("streets.json"), Some(no_op()));
+    dbfs.forward(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &expired_item("sprite.json"), Some(no_op()));
+    dbfs.forward(&Resource::sprite_image(&format!("{prefix}sprite"), 1.0), &expired_item("sprite.png"), Some(no_op()));
     dbfs.forward(
         &Resource::tile(
             &format!("{prefix}{{z}}-{{x}}-{{y}}.vector.pbf"),
@@ -753,7 +754,7 @@ fn offline() {
             LoadingMethod::All,
         ),
         &expired_item("0-0-0.vector.pbf"),
-        no_op(),
+        Some(no_op()),
     );
     // C++ calls `test.map.getStyle().loadURL(...)` in this callback, which
     // runs inside `frontend.render(map)`'s run loop. Here render borrows the
@@ -885,7 +886,7 @@ fn set_style_invalid_json() {
     {
         let test = MapTest::new();
         let fail = fail.clone();
-        test.observer.did_fail_loading_map_callback.set(move |_| fail.set(true));
+        test.observer.did_fail_loading_map_callback.set(move |()| fail.set(true));
         test.load_json("invalid");
     }
 
@@ -915,7 +916,7 @@ fn set_style_invalid_url() {
     });
 
     let run_loop = test.run_loop.clone();
-    test.observer.did_fail_loading_map_callback.set(move |_| run_loop.stop());
+    test.observer.did_fail_loading_map_callback.set(move |()| run_loop.stop());
 
     test.map().style_mut().load_url("maptiler://bar");
 
@@ -1095,7 +1096,7 @@ fn map_loading_signal() {
     let emitted = Rc::new(Cell::new(false));
     {
         let emitted = emitted.clone();
-        test.observer.will_start_loading_map_callback.set(move |_| emitted.set(true));
+        test.observer.will_start_loading_map_callback.set(move |()| emitted.set(true));
     }
     test.load_json(&read_file("test/fixtures/api/empty.json"));
     assert!(emitted.get());
@@ -1107,7 +1108,7 @@ fn map_loaded_signal() {
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
 
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
     run_with_timeout(&test.run_loop, 60);
@@ -1122,7 +1123,7 @@ fn style_loaded_signal() {
     let emitted = Rc::new(Cell::new(false));
     {
         let emitted = emitted.clone();
-        test.observer.did_finish_loading_style_callback.set(move |_| emitted.set(true));
+        test.observer.did_finish_loading_style_callback.set(move |()| emitted.set(true));
     }
     test.load_json(&read_file("test/fixtures/api/empty.json"));
     assert!(emitted.get());
@@ -1150,7 +1151,7 @@ fn style_network_error_retry() {
     test.map().style_mut().load_url(&server.url("/style-fail-once-500"));
 
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_style_callback.set(move |_| run_loop.stop());
+    test.observer.did_finish_loading_style_callback.set(move |()| run_loop.stop());
 
     run_with_timeout(&test.run_loop, 10);
 }
@@ -1166,11 +1167,11 @@ fn style_not_found() {
     let timer = Rc::new(Timer::new());
 
     // Not found errors should not trigger a retry like other errors.
-    test.observer.did_finish_loading_style_callback.set(|_| panic!("Should not retry on not found!"));
+    test.observer.did_finish_loading_style_callback.set(|()| panic!("Should not retry on not found!"));
 
     {
         let (timer, run_loop) = (timer.clone(), test.run_loop.clone());
-        test.observer.did_fail_loading_map_callback.set(move |_| {
+        test.observer.did_fail_loading_map_callback.set(move |()| {
             let run_loop = run_loop.clone();
             timer.start(Duration::from_millis(1100), Duration::zero(), move || run_loop.stop());
         });
@@ -1190,7 +1191,7 @@ fn add_layer() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map().style_mut().add_layer(Box::new(red_background("background")), None).unwrap();
 
     check_image("test/fixtures/map/add_layer", &test.render().image, 0.0, 0.0);
 }
@@ -1202,7 +1203,7 @@ fn remove_layer() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map().style_mut().add_layer(Box::new(red_background("background")), None).unwrap();
     test.map().style_mut().remove_layer("background");
 
     check_image("test/fixtures/map/remove_layer", &test.render().image, 0.0, 0.0);
@@ -1298,7 +1299,7 @@ fn dont_load_unneeded_tiles() {
         let tiles = tiles.clone();
         test.file_source.set_response(Kind::Tile, move |rsc: &Resource| {
             tiles.borrow_mut().insert(rsc.url.clone());
-            no_content()
+            Some(no_content())
         });
     }
 
@@ -1312,7 +1313,7 @@ fn dont_load_unneeded_tiles() {
             // Since the layer's maxzoom is 1.6, we should never load z2 or z3 tiles.
             &[]
         };
-        tiles.iter().map(|s| s.to_string()).collect()
+        tiles.iter().map(std::string::ToString::to_string).collect()
     };
 
     // Loop through zoom levels from 0 to 3 and check that the correct tiles are
@@ -1436,6 +1437,11 @@ fn no_content_tiles() {
 // load.
 #[test]
 fn glyph_range_errors_reach_the_observer() {
+    /// Font stacks and glyph ranges, as the observer reports them.
+    type Reported = Rc<RefCell<Vec<(Vec<String>, GlyphRange)>>>;
+    /// Font stacks and glyph ranges that failed, with their errors.
+    type ReportedErrors = Rc<RefCell<Vec<(Vec<String>, GlyphRange, String)>>>;
+
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
 
     test.file_source.set_response(Kind::Glyphs, |resource| {
@@ -1470,10 +1476,9 @@ fn glyph_range_errors_reach_the_observer() {
         symbol_layer("Good"),
     ));
 
-    type Reported = Rc<RefCell<Vec<(Vec<String>, GlyphRange)>>>;
     let requested: Reported = Rc::default();
     let loaded: Reported = Rc::default();
-    let errors: Rc<RefCell<Vec<(Vec<String>, GlyphRange, String)>>> = Rc::default();
+    let errors: ReportedErrors = Rc::default();
 
     let r = requested.clone();
     test.observer.on_glyphs_requested_callback.set(move |(font_stack, range)| r.borrow_mut().push((font_stack, range)));
@@ -1524,6 +1529,9 @@ fn glyph_range_errors_reach_the_observer() {
 // loaded or failed.
 #[test]
 fn sprite_events_reach_the_observer() {
+    /// Sprites that failed, with their errors.
+    type ReportedErrors = Rc<RefCell<Vec<(Option<Sprite>, String)>>>;
+
     let test = MapTest::with_mode(1.0, MapMode::Continuous);
 
     let serve = |kind: Kind, file: &'static str| {
@@ -1542,7 +1550,7 @@ fn sprite_events_reach_the_observer() {
 
     let requested: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
     let loaded: Rc<RefCell<Vec<Option<Sprite>>>> = Rc::default();
-    let errors: Rc<RefCell<Vec<(Option<Sprite>, String)>>> = Rc::default();
+    let errors: ReportedErrors = Rc::default();
     let r = requested.clone();
     test.observer.on_sprite_requested_callback.set(move |sprite| r.borrow_mut().push(sprite));
     let (l, e, run_loop) = (loaded.clone(), errors.clone(), test.run_loop.clone());
@@ -1667,7 +1675,7 @@ fn issue12432() {
 
     let map = test.weak_map();
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| {
+    test.observer.did_finish_loading_map_callback.set(move |()| {
         if let Some(map) = map.upgrade() {
             map.borrow_mut().style_mut().load_json(
                 r#"{
@@ -1745,6 +1753,38 @@ fn image_source_beyond_mercator_latitudes() {
     test.frontend.render_frame();
 }
 
+// An image source without a url starts empty: it requests nothing and draws
+// nothing until it gets an image or a url.
+#[test]
+fn an_image_source_without_a_url_draws_once_it_has_an_image() {
+    let log = FixtureLog::new();
+    let test = MapTest::fake();
+    test.load_json(
+        r#"{
+      "version": 8,
+      "sources": {
+        "image": {"type": "image", "coordinates": [[-180, 80], [180, 80], [180, -80], [-180, -80]]}
+      },
+      "layers": [{"id": "image", "type": "raster", "source": "image"}]
+    }"#,
+    );
+    assert!(test.map().style().get_source("image").is_some());
+
+    assert_eq!(center_pixel(&test.render().image), [0, 0, 0, 0]);
+    assert_eq!(test.file_source.requests_len(), 0);
+
+    let mut red = PremultipliedImage::new(Size::new(1, 1));
+    red.data.copy_from_slice(&[255, 0, 0, 255]);
+    let image_source =
+        |map: &Map| map.style().get_source("image").unwrap().as_any().downcast_ref::<ImageSource>().cloned().unwrap();
+    image_source(&test.map()).set_image(red);
+    assert_eq!(center_pixel(&test.render().image), [255, 0, 0, 255]);
+
+    image_source(&test.map()).set_url("fixture://image.png");
+    assert_eq!(test.file_source.requests_len(), 1);
+    assert!(log.unchecked().is_empty(), "{:?}", log.unchecked());
+}
+
 // https://github.com/mapbox/mapbox-gl-native/issues/15342
 // Tests the fix for constant repaint caused by `RenderSource::hasFadingTiles()`
 // returning `true` all the time.
@@ -1760,7 +1800,7 @@ fn issue15342() {
     let map = test.weak_map();
     let observer = Rc::downgrade(&test.observer);
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| {
+    test.observer.did_finish_loading_map_callback.set(move |()| {
         let (Some(map), Some(observer)) = (map.upgrade(), observer.upgrade()) else {
             return;
         };
@@ -1986,7 +2026,7 @@ fn prefetch_delta_override() {
         let requested_tiles = requested_tiles.clone();
         test.file_source.set_response(Kind::Tile, move |_| {
             requested_tiles.fetch_add(1, Ordering::SeqCst);
-            no_content()
+            Some(no_content())
         });
     }
 
@@ -1996,7 +2036,7 @@ fn prefetch_delta_override() {
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     {
         let run_loop = test.run_loop.clone();
-        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+        test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
     test.run_loop.run();
     // 2 sources x 4 tiles
@@ -2072,12 +2112,12 @@ fn globe_prefetch_requests_coarser_tiles() {
             if let Some(tile_data) = &resource.tile_data {
                 zooms.borrow_mut().insert(i32::from(tile_data.z));
             }
-            no_content()
+            Some(no_content())
         });
     }
     test.map().jump_to(&cam().with_center(Some(ll(40.0, 10.0))).with_zoom(Some(8.0)));
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
 
     assert!(zooms.borrow().contains(&4));
@@ -2122,7 +2162,7 @@ fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
     test.map().jump_to(&cam().with_center(Some(ll(36.6026, -120.9375))).with_zoom(Some(7.6)));
     {
         let run_loop = test.run_loop.clone();
-        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+        test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
     run_with_timeout(&test.run_loop, 60);
     test.observer.did_finish_loading_map_callback.clear();
@@ -2160,7 +2200,7 @@ fn globe_tile_drawn_for_its_children_meets_finer_tiles_without_a_gap() {
         let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
         test.frontend.read_still_image()
     };
-    let background = image.data.chunks_exact(4).filter(|pixel| pixel[0] > 128 && pixel[2] < 128).count();
+    let background = image.data.as_chunks::<4>().0.iter().filter(|pixel| pixel[0] > 128 && pixel[2] < 128).count();
     assert_eq!(0, background);
 }
 
@@ -2191,7 +2231,7 @@ fn prefetch_delta_override_custom_source() {
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     {
         let run_loop = test.run_loop.clone();
-        test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+        test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     }
     test.run_loop.run();
     assert_eq!(requested_tiles.load(Ordering::SeqCst), 4);
@@ -2253,7 +2293,7 @@ fn expired_sprite_sheet() {
     {
         let weak_observer = Rc::downgrade(&observer);
         let run_loop = run_loop.clone();
-        observer.did_finish_loading_map_callback.set(move |_| {
+        observer.did_finish_loading_map_callback.set(move |()| {
             NetworkStatus::set(NetworkStatusType::Online);
 
             if let Some(observer) = weak_observer.upgrade() {
@@ -2264,7 +2304,7 @@ fn expired_sprite_sheet() {
                     assert!(params.images.len() < 4);
                 });
                 let run_loop = run_loop.clone();
-                observer.did_become_idle_callback.set(move |_| run_loop.stop());
+                observer.did_become_idle_callback.set(move |()| run_loop.stop());
             }
         });
     }
@@ -2272,10 +2312,22 @@ fn expired_sprite_sheet() {
     NetworkStatus::set(NetworkStatusType::Offline);
     let prefix = server.url("/online/");
     let dbfs = database_file_source(&file_sources);
-    dbfs.forward(&Resource::style(&format!("{prefix}style.json")), &make_response("style.json", false), no_op());
-    dbfs.forward(&Resource::source(&format!("{prefix}streets.json")), &make_response("streets.json", false), no_op());
-    dbfs.forward(&Resource::sprite_json(&format!("{prefix}sprite"), 1.0), &make_response("sprite.json", true), no_op());
-    dbfs.forward(&Resource::sprite_image(&format!("{prefix}sprite"), 1.0), &make_response("sprite.png", true), no_op());
+    dbfs.forward(&Resource::style(&format!("{prefix}style.json")), &make_response("style.json", false), Some(no_op()));
+    dbfs.forward(
+        &Resource::source(&format!("{prefix}streets.json")),
+        &make_response("streets.json", false),
+        Some(no_op()),
+    );
+    dbfs.forward(
+        &Resource::sprite_json(&format!("{prefix}sprite"), 1.0),
+        &make_response("sprite.json", true),
+        Some(no_op()),
+    );
+    dbfs.forward(
+        &Resource::sprite_image(&format!("{prefix}sprite"), 1.0),
+        &make_response("sprite.png", true),
+        Some(no_op()),
+    );
     // C++ loads the style in this callback; see Map.Offline for why the port
     // runs the loop until the callback has run and then loads it.
     let handle = run_loop.handle();
@@ -2335,7 +2387,7 @@ fn source_minimum_update_interval_override() {
     {
         let (a, b) = (requested_tiles_a.clone(), requested_tiles_b.clone());
         test.file_source.set_response(Kind::Tile, move |resource: &Resource| {
-            assert!(!resource.url.is_empty());
+            assert_ne!(resource.url, "");
             let first_symbol = resource.url.as_bytes()[0];
             if first_symbol == b'a' {
                 assert_eq!(Duration::from_secs(1), resource.minimum_update_interval);
@@ -2347,13 +2399,13 @@ fn source_minimum_update_interval_override() {
                 panic!("Never reached");
             }
 
-            no_content()
+            Some(no_content())
         });
     }
 
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
 
     assert_eq!(8, requested_tiles_a.get());
@@ -2399,7 +2451,7 @@ fn keep_render_data() {
     requests_count.set(0);
     // Clear render data.
     for i in 1..=iterations {
-        test.frontend.with_renderer(|renderer| renderer.clear_data());
+        test.frontend.with_renderer(mln_renderer::Renderer::clear_data);
         test.render();
         assert_eq!(resources_count * i, requests_count.get());
     }
@@ -2439,7 +2491,7 @@ fn disabled_placed_symbol_data() {
     test.file_source.set_response(Kind::SpriteImage, make_response("sprite.png", None));
 
     // Camera options will give exactly one tile (12/1171/1566)
-    test.map().jump_to(&cam().with_zoom(Some(16.0)).with_center(Some(ll(50.072317, 14.444827))));
+    test.map().jump_to(&cam().with_zoom(Some(16.0)).with_center(Some(ll(50.072_317, 14.444_827))));
 
     test.map().style_mut().load_url("maptiler://maps/streets");
     let viewport_size = test.frontend.get_size();
@@ -2447,7 +2499,7 @@ fn disabled_placed_symbol_data() {
     test.render();
 
     let placed_symbols = test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data());
-    assert!(!placed_symbols.is_empty());
+    assert_ne!(placed_symbols, [] as [mln_renderer::text::placement::PlacedSymbolData; 0]);
 
     let mut placed_text_inside_tile = 0;
     let mut placed_text = 0;
@@ -2466,23 +2518,23 @@ fn disabled_placed_symbol_data() {
 
     for placed_symbol in &placed_symbols {
         assert!(symbol_layers.contains(&placed_symbol.layer));
-        if placed_symbol.text_placed {
-            if let Some(box_) = &placed_symbol.text_collision_box {
-                if is_inside_tile(box_, placed_symbol.viewport_padding, viewport_size) {
-                    assert!(!placed_symbol.intersects_tile_border);
-                    placed_text_inside_tile += 1;
-                }
-                placed_text += 1;
+        if placed_symbol.text_placed
+            && let Some(box_) = &placed_symbol.text_collision_box
+        {
+            if is_inside_tile(box_, placed_symbol.viewport_padding, viewport_size) {
+                assert!(!placed_symbol.intersects_tile_border);
+                placed_text_inside_tile += 1;
             }
+            placed_text += 1;
         }
-        if placed_symbol.icon_placed {
-            if let Some(box_) = &placed_symbol.icon_collision_box {
-                if is_inside_tile(box_, placed_symbol.viewport_padding, viewport_size) {
-                    assert!(!placed_symbol.intersects_tile_border);
-                    placed_icon_inside_tile += 1;
-                }
-                placed_icon += 1;
+        if placed_symbol.icon_placed
+            && let Some(box_) = &placed_symbol.icon_collision_box
+        {
+            if is_inside_tile(box_, placed_symbol.viewport_padding, viewport_size) {
+                assert!(!placed_symbol.intersects_tile_border);
+                placed_icon_inside_tile += 1;
             }
+            placed_icon += 1;
         }
         placed_total += 1;
     }
@@ -2496,7 +2548,10 @@ fn disabled_placed_symbol_data() {
     test.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(false));
     test.render();
 
-    assert!(test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data()).is_empty());
+    assert_eq!(
+        test.frontend.with_renderer(|renderer| renderer.get_placed_symbols_data()),
+        [] as [mln_renderer::text::placement::PlacedSymbolData; 0]
+    );
 }
 
 // gtest: Map.VolatileSource
@@ -2512,7 +2567,7 @@ fn volatile_source() {
             let expected_policy = if is_volatile { StoragePolicy::Volatile } else { StoragePolicy::Permanent };
             assert_eq!(expected_policy, resource.storage_policy);
             requested_tiles.set(requested_tiles.get() + 1);
-            no_content()
+            Some(no_content())
         });
     }
 
@@ -2533,7 +2588,7 @@ fn volatile_source() {
 
     test.map().jump_to(&cam().with_zoom(Some(16.0)));
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| run_loop.stop());
+    test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
     assert_eq!(8, requested_tiles.get());
 }
@@ -2804,7 +2859,7 @@ fn invalid_utf8_in_tile() {
     }
     let observer = Rc::downgrade(&test.observer);
     let run_loop = test.run_loop.clone();
-    test.observer.did_finish_loading_map_callback.set(move |_| {
+    test.observer.did_finish_loading_map_callback.set(move |()| {
         if !last_needs_repaint.get() {
             run_loop.stop();
             return;
@@ -2828,6 +2883,8 @@ fn invalid_utf8_in_tile() {
 // of the fill and fill-outline shaders (MapObserver has no shader callbacks).
 #[test]
 fn observe_tile_lifecycle() {
+    use TileOperation::*;
+
     let _run_loop = RunLoop::new();
 
     let tile_ops: Rc<RefCell<Vec<(OverscaledTileID, TileOperation)>>> = Rc::default();
@@ -2871,7 +2928,6 @@ fn observe_tile_lifecycle() {
         observer.dispatch(event);
     }
 
-    use TileOperation::*;
     let tile_ops = tile_ops.borrow();
     for tile in expected_tiles {
         let mut stage = NullOp;
@@ -3123,7 +3179,7 @@ fn globe_hand_off_keeps_tiles() {
     map.drain_events().into_iter().for_each(|event| observer.dispatch(event));
     assert!(map.get_transform_state().is_globe_rendering());
     let first_visit = std::mem::take(&mut *parsed.borrow_mut());
-    assert!(!first_visit.is_empty());
+    assert_ne!(first_visit, [] as [mln_tile_id::OverscaledTileID; 0]);
 
     // Zoom 12.5 is Mercator. The zoom-10 tiles stay on screen while their children load; they must not be parsed
     // again.
@@ -3205,10 +3261,6 @@ fn globe_set_bounds_keeps_a_zoom_the_globe_allows() {
 // gtest: Map.GlobeBoundsForCamera
 #[test]
 fn globe_bounds_for_camera() {
-    let test = MapTest::new();
-    test.map().set_size(Size::new(512, 512)).unwrap();
-    test.map().set_bounds(&BoundOptions::default().with_max_pitch(85.0)).unwrap();
-    test.load_json(r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#);
     struct Case {
         lng: f64,
         lat: f64,
@@ -3220,6 +3272,11 @@ fn globe_bounds_for_camera() {
         east: f64,
         north: f64,
     }
+
+    let test = MapTest::new();
+    test.map().set_size(Size::new(512, 512)).unwrap();
+    test.map().set_bounds(&BoundOptions::default().with_max_pitch(85.0)).unwrap();
+    test.load_json(r#"{"version":8,"projection":{"type":"vertical-perspective"},"sources":{},"layers":[]}"#);
     let case = |lng, lat, zoom, bearing, pitch, west, south, east, north| Case {
         lng,
         lat,
@@ -3232,27 +3289,97 @@ fn globe_bounds_for_camera() {
         north,
     };
     let cases = [
-        case(0.0, 0.0, 1.0, 0.0, 0.0, -79.91796042106967, -79.91796042106967, 79.91796042106967, 79.91796042106967),
+        case(
+            0.0,
+            0.0,
+            1.0,
+            0.0,
+            0.0,
+            -79.917_960_421_069_67,
+            -79.917_960_421_069_67,
+            79.917_960_421_069_67,
+            79.917_960_421_069_67,
+        ),
         case(
             30.0,
             20.0,
             1.5,
             30.0,
             30.0,
-            -56.805975633856576,
-            -56.895025199618885,
-            94.30772744796946,
-            73.43306521431964,
+            -56.805_975_633_856_576,
+            -56.895_025_199_618_885,
+            94.307_727_447_969_46,
+            73.433_065_214_319_64,
         ),
-        case(0.0, 75.0, 1.0, 0.0, 0.0, -180.0, 32.70922481421371, 180.0, 90.0),
-        case(0.0, 75.0, 2.5, 0.0, 0.0, -54.89062256787065, 64.72883925258952, 54.89062256787065, 83.47499358170649),
-        case(10.0, 10.0, 3.0, 0.0, 0.0, -25.90264541368299, -19.587774363137328, 45.90264541369834, 36.43783991311318),
-        case(170.0, -10.0, 2.0, 45.0, 40.0, 90.75153870575207, -71.2057256347772, 267.1780088196146, 42.32122600031687),
+        case(0.0, 75.0, 1.0, 0.0, 0.0, -180.0, 32.709_224_814_213_71, 180.0, 90.0),
+        case(
+            0.0,
+            75.0,
+            2.5,
+            0.0,
+            0.0,
+            -54.890_622_567_870_65,
+            64.728_839_252_589_52,
+            54.890_622_567_870_65,
+            83.474_993_581_706_49,
+        ),
+        case(
+            10.0,
+            10.0,
+            3.0,
+            0.0,
+            0.0,
+            -25.902_645_413_682_99,
+            -19.587_774_363_137_328,
+            45.902_645_413_698_34,
+            36.437_839_913_113_18,
+        ),
+        case(
+            170.0,
+            -10.0,
+            2.0,
+            45.0,
+            40.0,
+            90.751_538_705_752_07,
+            -71.205_725_634_777_2,
+            267.178_008_819_614_6,
+            42.321_226_000_316_87,
+        ),
         // Looking away from the north pole, which is behind the camera, with
         // the top of the view in the sky.
-        case(0.0, 80.0, 3.0, 180.0, 75.0, -27.136824618012838, 69.5727070878645, 27.136824618012724, 86.22734028617919),
-        case(0.0, 84.5, 5.0, 180.0, 84.0, -9.769090999914397, 81.42454063588696, 9.769090999914397, 85.70848143480487),
-        case(0.0, 85.0, 6.0, 180.0, 85.0, -7.12413211181115, 82.92590257945324, 7.12413211181115, 85.57800114051855),
+        case(
+            0.0,
+            80.0,
+            3.0,
+            180.0,
+            75.0,
+            -27.136_824_618_012_838,
+            69.572_707_087_864_5,
+            27.136_824_618_012_724,
+            86.227_340_286_179_19,
+        ),
+        case(
+            0.0,
+            84.5,
+            5.0,
+            180.0,
+            84.0,
+            -9.769_090_999_914_397,
+            81.424_540_635_886_96,
+            9.769_090_999_914_397,
+            85.708_481_434_804_87,
+        ),
+        case(
+            0.0,
+            85.0,
+            6.0,
+            180.0,
+            85.0,
+            -7.124_132_111_811_15,
+            82.925_902_579_453_24,
+            7.124_132_111_811_15,
+            85.578_001_140_518_55,
+        ),
     ];
     for c in &cases {
         let camera = cam()
@@ -3283,7 +3410,7 @@ fn globe_sky_pixel_snaps_to_the_horizon_ahead() {
         &cam().with_center(Some(ll(84.5, 0.0))).with_zoom(Some(5.0)).with_bearing(Some(180.0)).with_pitch(Some(84.0)),
     );
     let top = test.map().lat_lng_for_pixel(&ScreenCoordinate::new(256.0, 0.0), WrapMode::Wrapped).unwrap();
-    assert_near(81.42454063588696, top.latitude(), 1e-6);
+    assert_near(81.424_540_635_886_96, top.latitude(), 1e-6);
     assert_near(0.0, top.longitude(), 1e-6);
 }
 
@@ -3359,6 +3486,8 @@ fn globe_bounded_source_loads_finer_tiles() {
 #[test]
 #[ignore = "TODO(port): annotations: in C++ the AnnotationManager's points layer is the style's first layer, so the background added here is drawn per tile; the port has no annotation layer, so the background becomes the clear color and also fills the 5 rows above the pitched world that C++ leaves transparent (measured: 0.01953125 > 0.0006, exactly those 5 rows); see map.test.cpp:2509"]
 fn line_layer_depth_distribution() {
+    const LAYER_COUNT: u32 = 1 << 11;
+
     let test = MapTest::new();
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
@@ -3369,7 +3498,6 @@ fn line_layer_depth_distribution() {
     background_layer.set_background_color(&PropertyValue::Constant(Color::new(1.0, 1.0, 0.0, 1.0)));
     test.map().style_mut().add_layer(Box::new(background_layer), None).unwrap();
 
-    const LAYER_COUNT: u32 = 1 << 11;
     let colors = [Color::red(), Color::green(), Color::blue()];
     let bounds = {
         let map = test.map();
@@ -3411,7 +3539,7 @@ fn set_frustum_offset() {
 
     test.load_json(&read_file("test/fixtures/api/empty.json"));
 
-    test.map().style_mut().add_layer(red_background("background"), None).unwrap();
+    test.map().style_mut().add_layer(Box::new(red_background("background")), None).unwrap();
 
     check_image("test/fixtures/map/setFrustumOffset/before", &test.render().image, 0.0006, 0.1);
 
@@ -3492,7 +3620,7 @@ fn retains_icons_and_text_across_zoom(synchronous: bool, with_text: bool) {
         let image = test.render().image;
         let mut red_pixels = 0;
         let mut black_pixels = 0;
-        for pixel in image.data.chunks_exact(4) {
+        for pixel in image.data.as_chunks::<4>().0 {
             red_pixels += usize::from(pixel[0] > 200 && pixel[1] < 50 && pixel[2] < 50);
             black_pixels += usize::from(pixel[0] < 100 && pixel[1] < 100 && pixel[2] < 100);
         }
@@ -3900,7 +4028,7 @@ fn feature_state_source_removal_and_change_before_one_render() {
 
 fn count_green_pixels(image: &PremultipliedImage) -> usize {
     let mut green_pixels = 0;
-    for pixel in image.data.chunks_exact(4) {
+    for pixel in image.data.as_chunks::<4>().0 {
         if pixel[0] < 40 && pixel[1] > 200 && pixel[2] < 40 {
             green_pixels += 1;
         }
@@ -4072,6 +4200,8 @@ fn render_center_pixel(test: &MapTest) -> [u8; 3] {
 // gtest: Map.GlobeHidesAScreenAlignedIconOnceItsAnchorIsBehindThePlanet
 #[test]
 fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
+    const SIDE: u32 = 24;
+
     let mut test = MapTest::with_mode(1.0, MapMode::Continuous);
     test.frontend.set_size(Size::new(256, 256));
     test.map().set_size(Size::new(256, 256)).unwrap();
@@ -4082,7 +4212,6 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
                             {"id": "icon", "type": "symbol", "source": "point",
                              "layout": {"icon-image": "square", "icon-allow-overlap": true}}]}"#,
     );
-    const SIDE: u32 = 24;
     test.map().style_mut().add_image(style_image("square", red_image(SIDE, SIDE), 1.0));
     test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(1.0)));
 
@@ -4091,12 +4220,12 @@ fn globe_hides_a_screen_aligned_icon_once_its_anchor_is_behind_the_planet() {
             let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
             test.frontend.read_still_image()
         };
-        image.data.chunks_exact(4).filter(|pixel| pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60).count()
+        image.data.as_chunks::<4>().0.iter().filter(|pixel| pixel[0] > 200 && pixel[1] < 60 && pixel[2] < 60).count()
     };
 
     {
         let run_loop = test.run_loop.clone();
-        test.observer.did_become_idle_callback.set(move |_| run_loop.stop());
+        test.observer.did_become_idle_callback.set(move |()| run_loop.stop());
     }
     test.run_loop.run();
     test.observer.did_become_idle_callback.clear();
@@ -4198,17 +4327,6 @@ fn layer_added_with_global_state_change_shows_new_state() {
 // gtest: Map.TileSelectionOptionsPublishUpdates
 #[test]
 fn tile_selection_options_publish_updates() {
-    let _loop = RunLoop::new();
-    let mut map = Map::with_file_source(
-        Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
-        MapOptions::new().with_map_mode(MapMode::Continuous),
-    )
-    .unwrap();
-    let updates = map.update_reader();
-    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
-    map.process_events();
-    assert!(updates.latest().is_some());
-
     fn check<T: PartialEq + std::fmt::Debug + Copy>(
         map: &mut Map,
         updates: &UpdateReader,
@@ -4225,6 +4343,18 @@ fn tile_selection_options_publish_updates() {
         setter(map, value);
         assert!(Arc::ptr_eq(&after, &parameters()));
     }
+
+    let _loop = RunLoop::new();
+    let mut map = Map::with_file_source(
+        Arc::new(StubFileSource::new(ResponseType::Asynchronous)),
+        MapOptions::new().with_map_mode(MapMode::Continuous),
+    )
+    .unwrap();
+    let updates = map.update_reader();
+    map.style_mut().load_json(r#"{"version":8,"sources":{},"layers":[]}"#);
+    map.process_events();
+    assert!(updates.latest().is_some());
+
     check(&mut map, &updates, Map::set_prefetch_zoom_delta, |p| p.prefetch_zoom_delta, 2u8);
     check(&mut map, &updates, Map::set_tile_lod_min_radius, |p| p.tile_lod_min_radius, 4.0);
     check(&mut map, &updates, Map::set_tile_lod_scale, |p| p.tile_lod_scale, 2.0);
@@ -4432,12 +4562,13 @@ fn sourceless_layers_render_after_leaving_zoom_range() {
 
     let again = render(16.0);
     assert_eq!(image.bytes(), again.bytes());
-    assert!(image.data == again.data);
+    assert_eq!(image.data, again.data);
 }
 
 /// `InactiveLayerCase`: a source, a layer object without "id", "source",
 /// "minzoom" or "maxzoom", and a layer of the same source that renders
 /// nothing.
+#[derive(Clone, Copy)]
 struct InactiveLayerCase {
     source: &'static str,
     layer: &'static str,
@@ -4490,7 +4621,8 @@ fn inactive_layer_features() -> String {
     for row in 0..32 {
         let mut line = Vec::new();
         for column in 0..32 {
-            let coordinates = point(&large, -0.002 + f64::from(column) * 0.000125, -0.002 + f64::from(row) * 0.000125);
+            let coordinates =
+                point(&large, -0.002 + f64::from(column) * 0.000_125, -0.002 + f64::from(row) * 0.000_125);
             feature(format!(r#"{{"type":"Point","coordinates":{coordinates}}}"#));
             line.push(coordinates);
         }

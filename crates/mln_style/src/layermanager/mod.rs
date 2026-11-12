@@ -1,7 +1,7 @@
 //! The style half of include/mln/layermanager and src/mln/layermanager
 //! (`LayerFactory::createLayer`, `LayerManager::createLayer`). The C++
 //! factories also create render layers, buckets and layouts; those parts
-//! need mln_renderer, which sits above mln_style, so they stay with the
+//! need `mln_renderer`, which sits above `mln_style`, so they stay with the
 //! renderer (dispatch on `LayerTypeInfo`). A cut point of the C++ include
 //! cycle.
 

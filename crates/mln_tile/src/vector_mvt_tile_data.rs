@@ -57,7 +57,7 @@ impl<'l> VectorMVTTileFeature<'l> {
     }
 
     /// Keeps the first error of a trait accessor.
-    fn keep_error(&self, error: Error) {
+    fn keep_error(&self, error: &Error) {
         let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
@@ -137,7 +137,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
 
     fn get_value(&self, key: &str) -> Option<Value> {
         self.try_get_value(key).unwrap_or_else(|e| {
-            self.keep_error(e);
+            self.keep_error(&e);
             None
         })
     }
@@ -146,7 +146,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
         match self.try_get_properties() {
             Ok(properties) => properties,
             Err(e) => {
-                self.keep_error(e);
+                self.keep_error(&e);
                 &EMPTY_PROPERTIES
             }
         }
@@ -160,7 +160,7 @@ impl GeometryTileFeature for VectorMVTTileFeature<'_> {
         match self.try_get_geometries() {
             Ok(lines) => lines,
             Err(e) => {
-                self.keep_error(e);
+                self.keep_error(&e);
                 &EMPTY_GEOMETRIES
             }
         }
@@ -185,8 +185,8 @@ fn to_value(value: MvtValueRef<'_>) -> Value {
 
 /// Decodes a feature's geometry commands into rings, scaling each
 /// coordinate by `scale` and rounding it, as `mapbox::vector_tile`'s
-/// `feature::getGeometries` does. A MoveTo starts a new ring (each point of
-/// a multipoint is a ring of its own), a ClosePath repeats the ring's first
+/// `feature::getGeometries` does. A `MoveTo` starts a new ring (each point
+/// of a multipoint is a ring of its own), a `ClosePath` repeats the ring's first
 /// point, and no commands give one empty ring. The error is C++'s
 /// `std::runtime_error` text.
 fn decode_geometry(commands: &[u32], scale: f32) -> Result<Vec<Vec<Point<i16>>>, &'static str> {
@@ -213,12 +213,12 @@ fn decode_geometry(commands: &[u32], scale: f32) -> Result<Vec<Vec<Point<i16>>>,
                     // Room for the ClosePath of a polygon ring.
                     ring.reserve(count + 1);
                 }
-                for delta in parameters.chunks_exact(2) {
+                for &[dx, dy] in parameters.as_chunks::<2>().0 {
                     if id == MOVE_TO && !ring.is_empty() {
                         rings.push(std::mem::take(&mut ring));
                     }
-                    x = x.wrapping_add(i64::from(zigzag(delta[0])));
-                    y = y.wrapping_add(i64::from(zigzag(delta[1])));
+                    x = x.wrapping_add(i64::from(zigzag(dx)));
+                    y = y.wrapping_add(i64::from(zigzag(dy)));
                     let px = (x as f32 * scale).round();
                     let py = (y as f32 * scale).round();
                     if px > max || px < min || py > max || py < min {
@@ -302,28 +302,27 @@ impl GeometryTileLayer for VectorMVTTileLayer<'_> {
             if tags.len() % 2 != 0 {
                 return None;
             }
-            for tag in tags.chunks_exact(2) {
-                let slot = *slots.get(tag[0] as usize)?;
-                if tag[1] as usize >= value_count {
+            for &[key, value] in tags.as_chunks::<2>().0 {
+                let slot = *slots.get(key as usize)?;
+                if value as usize >= value_count {
                     return None;
                 }
                 if let Some(slot) = slot
                     && codes[slot] == ABSENT
                 {
-                    codes[slot] = tag[1];
+                    codes[slot] = value;
                 }
             }
-            let group = match index.get(codes.as_slice()) {
-                Some(&group) => group,
-                None => {
-                    if groups.first.len() == limit {
-                        return None;
-                    }
-                    let group = groups.first.len() as u32;
-                    index.insert(codes.as_slice().into(), group);
-                    groups.first.push(i);
-                    group
+            let group = if let Some(&group) = index.get(codes.as_slice()) {
+                group
+            } else {
+                if groups.first.len() == limit {
+                    return None;
                 }
+                let group = groups.first.len() as u32;
+                index.insert(codes.as_slice().into(), group);
+                groups.first.push(i);
+                group
             };
             groups.of_feature.push(group);
         }
@@ -341,13 +340,14 @@ pub struct VectorMVTTileData {
     /// C++ `std::shared_ptr<const std::string>`.
     data: Arc<Vec<u8>>,
     /// The decoded tile, which borrows `data`: the yoke holds its own
-    /// reference to it. OnceLock (not OnceCell): the tile data is shared
-    /// with the tile worker thread (mln_renderer, `Arc<dyn GeometryTileData
-    /// + Send + Sync>`).
+    /// reference to it. `OnceLock` (not `OnceCell`): the tile data is shared
+    /// with the tile worker thread (`mln_renderer`'s
+    /// `Arc<dyn GeometryTileData + Send + Sync>`).
     tile: OnceLock<Yoke<DecodedTile<'static>, Arc<Vec<u8>>>>,
 }
 
 impl VectorMVTTileData {
+    #[must_use]
     pub fn new(data: Arc<Vec<u8>>) -> Self {
         VectorMVTTileData { data, tile: OnceLock::new() }
     }
@@ -376,7 +376,7 @@ impl VectorMVTTileData {
     /// `layerNames()`: each name once, in byte order (C++ lists the keys of
     /// a `std::map`).
     pub fn layer_names(&self) -> Result<Vec<String>, Error> {
-        let names: BTreeSet<&str> = self.tile()?.layers().map(|layer| layer.name()).collect();
+        let names: BTreeSet<&str> = self.tile()?.layers().map(MvtLayerRef::name).collect();
         Ok(names.into_iter().map(str::to_owned).collect())
     }
 }

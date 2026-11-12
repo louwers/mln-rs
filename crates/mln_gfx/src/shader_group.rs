@@ -92,6 +92,7 @@ pub trait ShaderGroup {
 pub type ShaderGroupPtr = Rc<dyn ShaderGroup>;
 
 /// `ShaderGroup::getShaderName(name, key)`: `name + '#' + hex(key)`.
+#[must_use]
 pub fn get_shader_name(name: &str, key: PropertyHashType) -> String {
     format!("{name}#{key:x}")
 }
@@ -100,6 +101,7 @@ pub fn get_shader_name(name: &str, key: PropertyHashType) -> String {
 /// ids (`util::order_independent_hash`).
 // TODO(port): the C++ combination (sum of std::hash values) is approximated;
 // only used as a cache key.
+#[must_use]
 pub fn property_hash(properties_as_uniforms: &StringIDSetsPair) -> PropertyHashType {
     properties_as_uniforms.1.iter().fold(0u64, |acc, &id| acc.wrapping_add(crate::util_hash::hash(&[id as u64])))
 }

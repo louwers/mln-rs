@@ -6,11 +6,11 @@ use crate::layer::{Layer, PropertyScope, layer_type_info};
 use crate::layermanager::LayerManager;
 
 fn set_object_member(layer: &mut Box<dyn Layer>, value: &Convertible<'_>, member: &str, error: &mut Error) -> bool {
-    if let Some(member_value) = value.object_member(member) {
-        if let Some(error_) = layer.set_property(member, &member_value, None) {
-            *error = error_;
-            return false;
-        }
+    if let Some(member_value) = value.object_member(member)
+        && let Some(error_) = layer.set_property(member, &member_value, None)
+    {
+        *error = error_;
+        return false;
     }
     true
 }

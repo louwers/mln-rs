@@ -117,6 +117,7 @@ impl<M: AlphaMode> Image<M> {
 
     /// `Image(Size)`: zero-initialized pixels (`std::make_unique<uint8_t[]>`
     /// value-initializes).
+    #[must_use]
     pub fn new(size: Size) -> Self {
         let bytes = M::CHANNELS * size.width as usize * size.height as usize;
         Image { size, data: vec![0; bytes], _mode: PhantomData }
@@ -136,24 +137,29 @@ impl<M: AlphaMode> Image<M> {
 
     /// `Image(Size, std::unique_ptr<uint8_t[]>)`: takes the buffer as is (no
     /// size check, as in C++).
+    #[must_use]
     pub fn from_vec(size: Size, data: Vec<u8>) -> Self {
         Image { size, data, _mode: PhantomData }
     }
 
     /// Splits the image into its size and pixel buffer (the C++ code moves
     /// `data` out of one image type into another).
+    #[must_use]
     pub fn into_parts(self) -> (Size, Vec<u8>) {
         (self.size, self.data)
     }
 
+    #[must_use]
     pub fn valid(&self) -> bool {
         !self.size.is_empty() && !self.data.is_empty()
     }
 
+    #[must_use]
     pub fn stride(&self) -> usize {
         M::CHANNELS * self.size.width as usize
     }
 
+    #[must_use]
     pub fn bytes(&self) -> usize {
         self.stride() * self.size.height as usize
     }
@@ -366,7 +372,7 @@ mod tests {
         let moved = std::mem::take(&mut rgba);
 
         assert_eq!(rgba.size.width, 0);
-        assert!(rgba.data.is_empty());
+        assert_eq!(rgba.data, [] as [u8; 0]);
         assert_eq!(moved.data[1], 254);
         assert_eq!(moved.size.width, 1);
     }

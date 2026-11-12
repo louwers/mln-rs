@@ -55,6 +55,7 @@ impl Error {
         Error { message: message.into() }
     }
 
+    #[must_use]
     pub fn what(&self) -> &str {
         &self.message
     }
@@ -130,6 +131,7 @@ pub struct Geometry {
 
 impl Geometry {
     /// `Geometry::type`.
+    #[must_use]
     pub fn type_(&self) -> GeometryType {
         match self.shape {
             Shape::Point(_) => GeometryType::Point,
@@ -364,15 +366,18 @@ pub struct Feature {
 }
 
 impl Feature {
+    #[must_use]
     pub fn get_id(&self) -> Option<u64> {
         self.id
     }
 
     /// The index of the feature's values in the property columns.
+    #[must_use]
     pub fn get_index(&self) -> u32 {
         self.index
     }
 
+    #[must_use]
     pub fn get_geometry(&self) -> &Geometry {
         &self.geometry
     }
@@ -400,34 +405,41 @@ pub struct Layer {
 }
 
 impl Layer {
+    #[must_use]
     pub fn get_name(&self) -> &str {
         &self.name
     }
 
+    #[must_use]
     pub fn get_extent(&self) -> u32 {
         self.extent
     }
 
+    #[must_use]
     pub fn get_features(&self) -> &[Feature] {
         &self.features
     }
 
     /// `getProperties()`: every column, in wire order (C++: hash order).
+    #[must_use]
     pub fn get_properties(&self) -> &[(String, PresentProperties)] {
         &self.properties
     }
 
     /// `getProperties().find(key)`.
+    #[must_use]
     pub fn get_property_column(&self, key: &str) -> Option<&PresentProperties> {
         self.property_index.get(key).map(|&i| &self.properties[i].1)
     }
 
     /// The buffer that the features' triangle ranges index.
+    #[must_use]
     pub fn triangle_buffer(&self) -> Option<&Arc<[u32]>> {
         self.triangles.as_ref()
     }
 
     /// `feature.getGeometry().getTriangles()`.
+    #[must_use]
     pub fn get_triangles(&self, feature: &Feature) -> &[u32] {
         match (&self.triangles, &feature.geometry.triangles) {
             (Some(buffer), Some(range)) => &buffer[range.clone()],
@@ -470,11 +482,13 @@ impl MapLibreTile {
         Ok(MapLibreTile { layers: result })
     }
 
+    #[must_use]
     pub fn get_layers(&self) -> &[Layer] {
         &self.layers
     }
 
     /// `getLayer(name)`: the first layer with the name.
+    #[must_use]
     pub fn get_layer(&self, name: &str) -> Option<&Layer> {
         self.layers.iter().find(|layer| layer.name == name)
     }
@@ -586,10 +600,17 @@ impl Layer {
     }
 }
 
+/// A tile's triangle indices, which its features index by range (see
+/// [`Geometry::triangles`]).
+type TriangleIndices = Arc<[u32]>;
+
 /// `GeometryVector::getGeometries`, on mlt-core's decoded topology: one
 /// geometry per feature, except multi-points without points, plus the
 /// per-feature triangle indices.
-fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Arc<[u32]>>), Error> {
+fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<TriangleIndices>), Error> {
+    fn require<'v>(level: Option<&'v [u32]>, what: &str) -> Result<&'v [u32], Error> {
+        level.ok_or_else(|| Error::new(format!("{what} geometry without topology vector")))
+    }
     let vertices = values.vertices().unwrap_or(&[]);
     let geoms = values.geometry_offsets();
     let parts = values.part_offsets();
@@ -611,9 +632,6 @@ fn get_geometries(values: &GeometryValues) -> Result<(Vec<Geometry>, Option<Arc<
     let span = |level: &[u32], i: usize, name: &str| -> Result<Range<usize>, Error> {
         Ok(offset(level, i, name)?..offset(level, i + 1, name)?)
     };
-    fn require<'v>(level: Option<&'v [u32]>, what: &str) -> Result<&'v [u32], Error> {
-        level.ok_or_else(|| Error::new(format!("{what} geometry without topology vector")))
-    }
     // getLineStringCoords: the C++ bounds check `startIndex + numVertices - 1`
     // wraps for an empty line at the start of the buffer.
     let line = |range: Range<usize>, close: bool| -> Result<CoordVec, Error> {

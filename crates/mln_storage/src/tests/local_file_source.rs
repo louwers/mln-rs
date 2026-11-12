@@ -16,8 +16,8 @@ use crate::response::{Reason, Response};
 /// `fileURL(path)`: percent-encodes everything but unreserved characters,
 /// '/' and ':'.
 fn file_url(path: &Path) -> String {
-    let bytes = path.as_os_str().as_encoded_bytes();
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let bytes = path.as_os_str().as_encoded_bytes();
     let mut encoded = String::new();
     for &byte in bytes {
         if byte.is_ascii_alphanumeric() || b"-._~/:".contains(&byte) {
@@ -50,13 +50,13 @@ fn local_file_source() -> LocalFileSource {
 
 /// Requests `resource`, runs the loop until the response and returns it
 /// (the C++ tests check it inside the callback, after `req.reset()`).
-fn request(fs: &LocalFileSource, resource: Resource) -> Response {
+fn request(fs: &LocalFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = std::rc::Rc::new(std::cell::RefCell::new(None));
     let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &resource,
+        resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
             *out.borrow_mut() = Some(res);
@@ -88,7 +88,7 @@ fn accepts_url() {
 #[test]
 fn empty_file() {
     let fs = local_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, to_absolute_url("empty")));
+    let res = request(&fs, &Resource::new(Kind::Unknown, to_absolute_url("empty")));
     assert_eq!(None, res.error);
     assert_eq!(b"", data(&res));
 }
@@ -97,7 +97,7 @@ fn empty_file() {
 #[test]
 fn non_empty_file() {
     let fs = local_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, to_absolute_url("nonempty")));
+    let res = request(&fs, &Resource::new(Kind::Unknown, to_absolute_url("nonempty")));
     assert_eq!(None, res.error);
     assert_eq!(b"content is here\n", data(&res));
 }
@@ -117,7 +117,7 @@ fn non_ascii_path() {
     std::fs::write(&file, body).unwrap();
 
     let fs = local_file_source();
-    let res = request(&fs, Resource::style(&file_url(&file)));
+    let res = request(&fs, &Resource::style(&file_url(&file)));
     assert_eq!(None, res.error);
     assert_eq!(body.as_bytes(), data(&res));
 }
@@ -129,7 +129,7 @@ fn non_ascii_path() {
 #[test]
 fn invalid_utf8_path() {
     let fs = local_file_source();
-    let res = request(&fs, Resource::style("file:///C:/%FF.json"));
+    let res = request(&fs, &Resource::style("file:///C:/%FF.json"));
     assert!(res.error.is_some());
     assert!(res.data.is_none());
 }
@@ -142,7 +142,7 @@ fn partial_file() {
     let mut resource = Resource::new(Kind::Unknown, to_absolute_url("nonempty"));
     resource.data_range = Some((4, 12));
 
-    let res = request(&fs, resource);
+    let res = request(&fs, &resource);
     assert_eq!(None, res.error);
     assert_eq!(b"ent is he", data(&res));
 }
@@ -155,12 +155,12 @@ fn ranges_past_the_end() {
     let fs = local_file_source();
     let mut resource = Resource::new(Kind::Unknown, to_absolute_url("nonempty"));
     resource.data_range = Some((12, 20));
-    let res = request(&fs, resource.clone());
+    let res = request(&fs, &resource);
     assert_eq!(None, res.error);
     assert_eq!(b"ere\n\0\0\0\0\0", data(&res));
 
     resource.data_range = Some((4, u64::MAX - 1));
-    let res = request(&fs, resource);
+    let res = request(&fs, &resource);
     assert_eq!(Reason::Other, res.error.as_ref().expect("error").reason);
 }
 
@@ -168,7 +168,7 @@ fn ranges_past_the_end() {
 #[test]
 fn non_existent_file() {
     let fs = local_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
+    let res = request(&fs, &Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(res.data.is_none());
@@ -180,7 +180,7 @@ fn non_existent_file() {
 #[test]
 fn invalid_url() {
     let fs = local_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, "test://wrong-scheme"));
+    let res = request(&fs, &Resource::new(Kind::Unknown, "test://wrong-scheme"));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert_eq!("Invalid file URL", error.message);
@@ -191,7 +191,7 @@ fn invalid_url() {
 #[test]
 fn read_directory() {
     let fs = local_file_source();
-    let res = request(&fs, Resource::new(Kind::Unknown, to_absolute_url("directory")));
+    let res = request(&fs, &Resource::new(Kind::Unknown, to_absolute_url("directory")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(res.data.is_none());
@@ -204,7 +204,7 @@ fn read_directory() {
 fn url_encoding() {
     let fs = local_file_source();
     let url = to_absolute_url("") + "%6eonempty";
-    let res = request(&fs, Resource::new(Kind::Unknown, url));
+    let res = request(&fs, &Resource::new(Kind::Unknown, url));
     assert_eq!(None, res.error);
     assert_eq!(b"content is here\n", data(&res));
 }
@@ -218,7 +218,7 @@ fn url_limit() {
     let fs = local_file_source();
     let url = "x".repeat(length);
 
-    let res = request(&fs, Resource::new(Kind::Unknown, to_absolute_url(&url)));
+    let res = request(&fs, &Resource::new(Kind::Unknown, to_absolute_url(&url)));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(res.data.is_none());

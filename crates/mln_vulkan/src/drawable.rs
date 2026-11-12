@@ -114,6 +114,7 @@ fn same_textures(a: &Textures, b: &Textures) -> bool {
 }
 
 impl Drawable {
+    #[must_use]
     pub fn new(name: String) -> Self {
         Drawable {
             base: DrawableBase::new(name),
@@ -324,22 +325,21 @@ impl Drawable {
                     input_rate,
                     offset: vk::DeviceSize::from(binding.vertex_offset) * vk::DeviceSize::from(binding.vertex_stride),
                 };
-                let binding_index = match unique_sources.iter().position(|s| *s == Some(source)) {
-                    Some(index) => index,
-                    None => {
-                        let index = impl_.pipeline_info.input_bindings.len();
-                        unique_sources.push(Some(source));
-                        // add new buffer binding
-                        impl_.pipeline_info.input_bindings.push(
-                            vk::VertexInputBindingDescription::default()
-                                .binding(index as u32)
-                                .stride(source.stride)
-                                .input_rate(input_rate),
-                        );
-                        impl_.vulkan_vertex_buffers.push(vertex_buffer.get().get_vulkan_buffer());
-                        impl_.vulkan_vertex_offsets.push(source.offset);
-                        index
-                    }
+                let binding_index = if let Some(index) = unique_sources.iter().position(|s| *s == Some(source)) {
+                    index
+                } else {
+                    let index = impl_.pipeline_info.input_bindings.len();
+                    unique_sources.push(Some(source));
+                    // add new buffer binding
+                    impl_.pipeline_info.input_bindings.push(
+                        vk::VertexInputBindingDescription::default()
+                            .binding(index as u32)
+                            .stride(source.stride)
+                            .input_rate(input_rate),
+                    );
+                    impl_.vulkan_vertex_buffers.push(vertex_buffer.get().get_vulkan_buffer());
+                    impl_.vulkan_vertex_offsets.push(source.offset);
+                    index
                 };
                 impl_.pipeline_info.input_attributes.push(
                     vk::VertexInputAttributeDescription::default()
@@ -478,7 +478,7 @@ impl drawable::Drawable for Drawable {
             return;
         }
 
-        debug_assert!(std::mem::size_of_val(&self.base.ubo_index) == UBO_INDEX_PUSH_CONSTANT_SIZE as usize);
+        debug_assert_eq!(std::mem::size_of_val(&self.base.ubo_index), UBO_INDEX_PUSH_CONSTANT_SIZE as usize);
         // SAFETY: the command buffer is recording, and the index is the
         // push constant of the general pipeline layout.
         unsafe {

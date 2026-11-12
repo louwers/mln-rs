@@ -69,7 +69,7 @@ pub struct GestureOptions {
 
     /// Whether a release that catches the recognizer's last glide (a flick
     /// that interrupts a glide going its way) adds that glide's speed, as
-    /// UIScrollView, Android's scroll flywheel and Compose do. Each part's
+    /// `UIScrollView`, Android's scroll flywheel and Compose do. Each part's
     /// decay still caps the speed. No map app measured in
     /// maplibre-native-ffi#1705 does it (Apple Maps, Google Maps), nor do GL
     /// JS and ffi's demo.

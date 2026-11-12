@@ -7,7 +7,7 @@
 // - rapidjson keeps duplicate object members, serde_json the last one; the
 //   ignore files are read member by member (`read_json_object_members`).
 
-use std::fmt;
+use std::fmt::{self, Write};
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -49,7 +49,7 @@ const RESULTS_STYLE: &str = r#"
 </style>
 "#;
 
-const RESULTS_SCRIPT: &str = r#"
+const RESULTS_SCRIPT: &str = r"
 <script>
 document.addEventListener('mouseover', handleHover);
 document.addEventListener('mouseout', handleHover);
@@ -77,14 +77,14 @@ document.getElementById('toggle-sequence').addEventListener('click', function (e
     document.getElementById('test-sequence').classList.toggle('hide');
 });
 </script>
-"#;
+";
 
-const RESULTS_HEADER_BUTTONS: &str = r#"
+const RESULTS_HEADER_BUTTONS: &str = r"
     <button id='toggle-sequence'>Toggle test sequence</button>
     <button id='toggle-passed'>Toggle passed tests</button>
     <button id='toggle-ignored'>Toggle ignored tests</button>
 </h1>
-"#;
+";
 
 // query: `toJSON` with `indent` 2 and `singleLine` false, the only form the
 // runner uses. rapidjson's PrettyWriter and serde_json's pretty printer lay
@@ -110,11 +110,13 @@ fn value_to_json(value: &Value) -> serde_json::Value {
 }
 
 /// `toJSON(const mln::Value&, 2, false)`.
+#[must_use]
 pub fn to_json_value(value: &Value) -> String {
     serde_json::to_string_pretty(&value_to_json(value)).expect("JSON value serializes")
 }
 
 /// `toJSON(const std::vector<mln::Feature>&, 2, false)`.
+#[must_use]
 pub fn to_json_features(features: &[mln_util::feature::Feature]) -> String {
     let mut array = Vec::with_capacity(features.len());
     for feature in features {
@@ -180,6 +182,7 @@ pub fn read_json_object_members(json_path: &str) -> Result<Vec<(String, serde_js
 }
 
 /// `serializeJsonValue(value)`: compact JSON (rapidjson `Writer`).
+#[must_use]
 pub fn serialize_json_value(value: &serde_json::Value) -> String {
     serde_json::to_string(value).expect("serde_json::Value serializes")
 }
@@ -209,14 +212,17 @@ static EXPECTED_IMAGE_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?
 static EXPECTED_METRIC_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:.*[/\\]metrics.json)$").unwrap());
 static EXPECTED_JSON_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(?:.*[/\\]expected.*.json)$").unwrap());
 
+#[must_use]
 pub fn read_expected_image_entries(base: &str) -> Vec<String> {
     read_expected_entries(&EXPECTED_IMAGE_REGEX, base)
 }
 
+#[must_use]
 pub fn read_expected_metric_entries(base: &str) -> Vec<String> {
     read_expected_entries(&EXPECTED_METRIC_REGEX, base)
 }
 
+#[must_use]
 pub fn read_expected_json_entries(base: &str) -> Vec<String> {
     read_expected_entries(&EXPECTED_JSON_REGEX, base)
 }
@@ -252,6 +258,7 @@ fn array_size(v: &serde_json::Value) -> usize {
 }
 
 /// `readExpectedMetrics(path)`.
+#[must_use]
 pub fn read_expected_metrics(path: &str) -> TestMetrics {
     let mut result = TestMetrics::default();
 
@@ -322,15 +329,13 @@ pub fn read_expected_metrics(path: &str) -> TestMetrics {
 }
 
 /// `parseTestMetadata(paths)`.
+#[must_use]
 pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
     let mut metadata = TestMetadata { paths: paths.clone(), ..TestMetadata::default() };
 
-    let (document, text) = match read_json_with_text(&paths.style_path) {
-        Ok(parsed) => parsed,
-        Err(_) => {
-            metadata.error_message = format!("Unable to parse: {}", metadata.paths.style_path);
-            return metadata;
-        }
+    let Ok((document, text)) = read_json_with_text(&paths.style_path) else {
+        metadata.error_message = format!("Unable to parse: {}", metadata.paths.style_path);
+        return metadata;
     };
     metadata.document = document;
     metadata.document_json = text;
@@ -442,10 +447,10 @@ pub fn parse_test_metadata(paths: &TestPaths) -> TestMetadata {
         metadata.render_test = false;
     }
 
-    if has("ignoreProbing") {
-        if let Some(ignore_probing) = member(test_value, "ignoreProbing").as_bool() {
-            metadata.ignore_probing = ignore_probing;
-        }
+    if has("ignoreProbing")
+        && let Some(ignore_probing) = member(test_value, "ignoreProbing").as_bool()
+    {
+        metadata.ignore_probing = ignore_probing;
     }
 
     if has("queryOptions") {
@@ -477,6 +482,7 @@ pub enum TileLodMode {
 }
 
 impl TileLodMode {
+    #[must_use]
     pub fn to_enum(s: &str) -> Option<TileLodMode> {
         match s {
             "default" => Some(TileLodMode::Default),
@@ -530,7 +536,16 @@ pub mod test_operation_names {
     pub const SET_TILE_LOD_MODE_OP: &str = "setTileLodMode";
 }
 
-use test_operation_names::*;
+use test_operation_names::{
+    ADD_IMAGE_OP, ADD_LAYER_OP, ADD_SOURCE_OP, FILE_SIZE_PROBE_OP, GET_FEATURE_STATE_OP, GFX_PROBE_END_OP,
+    GFX_PROBE_OP, GFX_PROBE_START_OP, MEMORY_PROBE_END_OP, MEMORY_PROBE_OP, MEMORY_PROBE_START_OP,
+    NETWORK_PROBE_END_OP, NETWORK_PROBE_OP, NETWORK_PROBE_START_OP, PAN_GESTURE_OP, REMOVE_FEATURE_STATE_OP,
+    REMOVE_IMAGE_OP, REMOVE_LAYER_OP, REMOVE_SOURCE_OP, SET_BEARING_OP, SET_CENTER_ALTITUDE_OP, SET_CENTER_OP,
+    SET_FEATURE_STATE_OP, SET_FILTER_OP, SET_GLOBAL_STATE_PROPERTY_OP, SET_LAYER_ZOOM_RANGE_OP, SET_LAYOUT_PROPERTY_OP,
+    SET_LIGHT_OP, SET_PAINT_PROPERTY_OP, SET_PITCH_OP, SET_ROLL_OP, SET_STYLE_OP, SET_TILE_LOD_MIN_RADIUS_OP,
+    SET_TILE_LOD_MODE_OP, SET_TILE_LOD_PITCH_THRESHOLD_OP, SET_TILE_LOD_SCALE_OP, SET_TILE_LOD_ZOOM_SHIFT_OP,
+    SET_ZOOM_OP, SLEEP_OP, UPDATE_IMAGE_OP, WAIT_OP,
+};
 
 /// `parseGlobalStateValue(value)`.
 fn parse_global_state_value(value: &serde_json::Value) -> Value {
@@ -624,10 +639,9 @@ fn not_ported(what: String) -> TestOperation {
 /// cannot fail (it returns `true`).
 fn infallible(ctx: &mut TestContext<'_>, result: Result<(), MapError>) -> bool {
     match result {
-        Ok(()) => true,
         Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
         Err(MapError::Exception(what)) => ctx.fail_exception(&what),
-        Err(_) => true,
+        Ok(()) | Err(_) => true,
     }
 }
 
@@ -688,7 +702,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                     Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
                     Err(_) => {
-                        ctx.get_metadata().error_message += &format!("Failed to load expected image {image_path}");
+                        let _ = write!(ctx.get_metadata().error_message, "Failed to load expected image {image_path}");
                         false
                     }
                 }
@@ -722,7 +736,7 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             // longitude, which the runner does not catch.
             match LatLng::new(get_f64(index(center_array, 1)), get_f64(index(center_array, 0))) {
                 Ok(center) => {
-                    result.push(camera_operation(CameraOptions { center: Some(center), ..CameraOptions::default() }))
+                    result.push(camera_operation(CameraOptions { center: Some(center), ..CameraOptions::default() }));
                 }
                 Err(e) => {
                     metadata.error_message = format!("Invalid setCenter operation: {e}");
@@ -781,14 +795,13 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let max_zoom = get_f32(arg(3));
             result.push(Box::new(move |ctx: &mut TestContext<'_>| {
                 match ctx.get_map().set_layer_zoom_range(&layer_name, min_zoom, max_zoom) {
-                    Ok(()) => true,
                     Err(MapError::LayerNotFound) => {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
                     Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
-                    Err(_) => true,
+                    Ok(()) | Err(_) => true,
                 }
             }));
         } else if name == SET_LIGHT_OP {
@@ -798,27 +811,25 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             // happens when the operation runs, with the same message.
             let json = serialize_json_value(arg(1));
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().set_light(&json) {
-                Ok(()) => true,
                 Err(MapError::Conversion(message)) => {
                     ctx.get_metadata().error_message = format!("Unable to convert light: {message}");
                     false
                 }
                 Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
-                Err(_) => true,
+                Ok(()) | Err(_) => true,
             }));
         } else if name == ADD_LAYER_OP {
             // addLayer
             let json = serialize_json_value(arg(1));
             result.push(Box::new(move |ctx: &mut TestContext<'_>| match ctx.get_map().add_layer(&json) {
-                Ok(()) => true,
                 Err(MapError::Conversion(message)) => {
                     ctx.get_metadata().error_message = format!("Unable to convert layer: {message}");
                     false
                 }
                 Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
                 Err(MapError::Exception(what)) => ctx.fail_exception(&what),
-                Err(_) => true,
+                Ok(()) | Err(_) => true,
             }));
         } else if name == REMOVE_LAYER_OP {
             // removeLayer
@@ -835,14 +846,13 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let json = serialize_json_value(arg(2));
             result.push(Box::new(move |ctx: &mut TestContext<'_>| {
                 match ctx.get_map().add_source(&source_name, &json) {
-                    Ok(()) => true,
                     Err(MapError::Conversion(message)) => {
                         ctx.get_metadata().error_message = format!("Unable to convert source: {message}");
                         false
                     }
                     Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
-                    Err(_) => true,
+                    Ok(()) | Err(_) => true,
                 }
             }));
         } else if name == REMOVE_SOURCE_OP {
@@ -863,16 +873,15 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
             let value = arg(3).clone();
             result.push(Box::new(move |ctx: &mut TestContext<'_>| {
                 match ctx.get_map().set_layer_property(&layer_name, &property_name, &value) {
-                    // `Layer::setProperty` returns an optional<Error> the
-                    // runner ignores.
-                    Ok(()) | Err(MapError::Conversion(_)) => true,
                     Err(MapError::LayerNotFound) => {
                         ctx.get_metadata().error_message = format!("Layer not found: {layer_name}");
                         false
                     }
                     Err(MapError::NotPorted(what)) => ctx.fail_not_ported(&what),
                     Err(MapError::Exception(what)) => ctx.fail_exception(&what),
-                    Err(MapError::LoadFailed) => true,
+                    // `Layer::setProperty` returns an optional<Error> the
+                    // runner ignores.
+                    Ok(()) | Err(MapError::Conversion(_) | MapError::LoadFailed) => true,
                 }
             }));
         } else if name == SET_GLOBAL_STATE_PROPERTY_OP {
@@ -902,9 +911,9 @@ pub fn parse_test_operations(metadata: &mut TestMetadata) -> TestOperations {
                 }
                 let size = if compressed {
                     let raw = std::fs::read(&file_path).unwrap_or_default();
-                    mln_util::compression::compress(&raw).map(|c| c.len() as u64).unwrap_or(0)
+                    mln_util::compression::compress(&raw).map_or(0, |c| c.len() as u64)
                 } else {
-                    std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0)
+                    std::fs::metadata(&file_path).map_or(0, |m| m.len())
                 };
 
                 ctx.get_metadata().metrics.file_size.entry(mark.clone()).or_insert(FileSizeProbe::new(
@@ -1075,6 +1084,7 @@ fn camera_operation(camera: CameraOptions) -> TestOperation {
 /// `insert_linebreaks<base64_from_binary<transform_width<const char*, 6, 8>>, 72>`,
 /// which emits the last partial sextet zero-padded and no `=` padding, with
 /// a `\n` after every 72 characters (none at the end).
+#[must_use]
 pub fn encode_base64(data: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len() * 4 / 3 + data.len() / 54 + 4);
@@ -1103,15 +1113,17 @@ fn to_string_u32(v: u32) -> String {
 }
 
 /// `createResultItem(metadata, hasFailedTests)`.
+#[must_use]
 pub fn create_result_item(metadata: &TestMetadata, has_failed_tests: bool) -> String {
     let should_hide = (has_failed_tests && metadata.status == "passed") || metadata.status.contains("ignored");
 
     let mut html = String::new();
-    html.push_str(&format!("<div class=\"test {}{}\">\n", metadata.status, if should_hide { " hide" } else { "" }));
-    html.push_str(&format!(
+    let _ = writeln!(html, "<div class=\"test {}{}\">", metadata.status, if should_hide { " hide" } else { "" });
+    let _ = write!(
+        html,
         r#"<h2><span class="label" style="background: {}">{}</span> {}</h2>"#,
         metadata.color, metadata.status, metadata.id
-    ));
+    );
     html.push('\n');
 
     if metadata.render_errored == 0 {
@@ -1119,47 +1131,48 @@ pub fn create_result_item(metadata: &TestMetadata, has_failed_tests: bool) -> St
             let width = to_string_u32(metadata.size.width);
             let height = to_string_u32(metadata.size.height);
             if metadata.render_test {
-                html.push_str(&format!("<img width={width}"));
-                html.push_str(&format!(" height={height}"));
-                html.push_str(&format!(" src=\"data:image/png;base64,{}\"", encode_base64(&metadata.actual)));
-                html.push_str(&format!(
-                    " data-alt-src=\"data:image/png;base64,{}\">\n",
-                    encode_base64(&metadata.expected)
-                ));
+                let _ = write!(html, "<img width={width}");
+                let _ = write!(html, " height={height}");
+                let _ = write!(html, " src=\"data:image/png;base64,{}\"", encode_base64(&metadata.actual));
+                let _ =
+                    writeln!(html, " data-alt-src=\"data:image/png;base64,{}\">", encode_base64(&metadata.expected));
 
-                html.push_str(&format!("<img width={width}"));
-                html.push_str(&format!(" height={height}"));
-                html.push_str(&format!(" src=\"data:image/png;base64,{}\">\n", encode_base64(&metadata.diff)));
+                let _ = write!(html, "<img width={width}");
+                let _ = write!(html, " height={height}");
+                let _ = writeln!(html, " src=\"data:image/png;base64,{}\">", encode_base64(&metadata.diff));
             } else {
-                html.push_str(&format!("<img width={width}"));
-                html.push_str(&format!(" height={height}"));
-                html.push_str(&format!(" src=\"data:image/png;base64,{}\">\n", encode_base64(&metadata.actual)));
+                let _ = write!(html, "<img width={width}");
+                let _ = write!(html, " height={height}");
+                let _ = writeln!(html, " src=\"data:image/png;base64,{}\">", encode_base64(&metadata.actual));
             }
         }
     } else {
         // FIXME: there are several places that errorMessage is not filled
         // comment out assert(!metadata.errorMessage.empty());
-        html.push_str(&format!("<p style=\"color: red\"><strong>Error:</strong> {}</p>\n", metadata.error_message));
+        let _ = writeln!(html, "<p style=\"color: red\"><strong>Error:</strong> {}</p>", metadata.error_message);
     }
 
     if metadata.metrics_failed != 0 || metadata.metrics_errored != 0 || metadata.label_cut_off_found != 0 {
-        html.push_str(&format!(
-            "<p style=\"color: red\"><strong>Error:</strong> {}</p>\n",
+        let _ = writeln!(
+            html,
+            "<p style=\"color: red\"><strong>Error:</strong> {}</p>",
             metadata.error_message.replace('\n', "<br>")
-        ));
+        );
     }
 
     if metadata.difference != 0.0 {
         if metadata.render_test {
-            html.push_str(&format!(
-                "<p class=\"diff\"><strong>Diff:</strong> {}</p>\n",
+            let _ = writeln!(
+                html,
+                "<p class=\"diff\"><strong>Diff:</strong> {}</p>",
                 mln_util::string::to_string_double(metadata.difference)
-            ));
+            );
         } else {
-            html.push_str(&format!(
-                "<p class=\"diff\"><strong>Diff:</strong> {}</p>\n",
+            let _ = writeln!(
+                html,
+                "<p class=\"diff\"><strong>Diff:</strong> {}</p>",
                 String::from_utf8_lossy(&metadata.diff)
-            ));
+            );
         }
     }
     html.push_str("</div>\n");
@@ -1168,6 +1181,7 @@ pub fn create_result_item(metadata: &TestMetadata, has_failed_tests: bool) -> St
 }
 
 /// `createResultPage(stats, metadatas, shuffle, seed)`.
+#[must_use]
 pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], shuffle: bool, seed: u32) -> String {
     let unsuccessful = stats.errored_tests + stats.failed_tests;
     let mut results_page = String::new();
@@ -1178,7 +1192,7 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
     // Header
     if unsuccessful != 0 {
         results_page.push_str(r#"<h1 style="color: red;">"#);
-        results_page.push_str(&format!("{unsuccessful} tests failed."));
+        let _ = write!(results_page, "{unsuccessful} tests failed.");
     } else {
         results_page.push_str(r#"<h1 style="color: green;">"#);
         results_page.push_str("All tests passed!");
@@ -1188,18 +1202,18 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
     // stats
     results_page.push_str(r#"<p class="stats">"#);
     if stats.ignore_failed_tests != 0 {
-        results_page.push_str(&format!("{} ignored failed, ", stats.ignore_failed_tests));
+        let _ = write!(results_page, "{} ignored failed, ", stats.ignore_failed_tests);
     }
     if stats.ignore_passed_tests != 0 {
-        results_page.push_str(&format!("{} ignored passed, ", stats.ignore_passed_tests));
+        let _ = write!(results_page, "{} ignored passed, ", stats.ignore_passed_tests);
     }
     if stats.errored_tests != 0 {
-        results_page.push_str(&format!("{} errored, ", stats.errored_tests));
+        let _ = write!(results_page, "{} errored, ", stats.errored_tests);
     }
     if stats.failed_tests != 0 {
-        results_page.push_str(&format!("{} failed, ", stats.failed_tests));
+        let _ = write!(results_page, "{} failed, ", stats.failed_tests);
     }
-    results_page.push_str(&format!("{} passed.\n", stats.passed_tests));
+    let _ = writeln!(results_page, "{} passed.", stats.passed_tests);
     results_page.push_str("</p>\n");
 
     // Test sequence
@@ -1211,7 +1225,7 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
             results_page.push_str("<p><strong>Failed tests:</strong>");
             for metadata in metadatas {
                 if metadata.status == "failed" || metadata.status == "errored" {
-                    results_page.push_str(&format!("{} ", metadata.id));
+                    let _ = write!(results_page, "{} ", metadata.id);
                 }
             }
             results_page.push_str("</p>\n");
@@ -1220,13 +1234,13 @@ pub fn create_result_page(stats: &TestStatistics, metadatas: &[TestMetadata], sh
         // Test sequence
         results_page.push_str("<p><strong>Test sequence:</strong>");
         for metadata in metadatas {
-            results_page.push_str(&format!("{} ", metadata.id));
+            let _ = write!(results_page, "{} ", metadata.id);
         }
         results_page.push_str("</p>\n");
 
         // Shuffle
         if shuffle {
-            results_page.push_str(&format!("<p><strong>Shuffle seed</strong>: {seed}</p>\n"));
+            let _ = writeln!(results_page, "<p><strong>Shuffle seed</strong>: {seed}</p>");
         }
 
         results_page.push_str("</div>\n");

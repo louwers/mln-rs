@@ -37,7 +37,7 @@ impl Observer for Recorder {
     }
 }
 
-/// test/src/mln/test/fixture_log_observer.hpp `FixtureLog` (for the calling
+/// `test/src/mln/test/fixture_log_observer.hpp` `FixtureLog` (for the calling
 /// thread).
 struct FixtureLog {
     messages: Messages,
@@ -46,7 +46,7 @@ struct FixtureLog {
 impl FixtureLog {
     fn new() -> Self {
         let messages: Messages = Arc::new(Mutex::new(Vec::new()));
-        Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
+        let _ = Log::set_thread_observer(Some(Box::new(Recorder(messages.clone()))));
         FixtureLog { messages }
     }
 
@@ -57,7 +57,7 @@ impl FixtureLog {
 
 impl Drop for FixtureLog {
     fn drop(&mut self) {
-        Log::set_thread_observer(None);
+        let _ = Log::set_thread_observer(None);
     }
 }
 
@@ -122,10 +122,10 @@ impl ImageRequestor for StubImageRequestor {
         version_map: ImageVersionMap,
         image_correlation_id: u64,
     ) {
-        if let Some(images_available) = &*self.images_available.borrow() {
-            if self.image_correlation_id.get() == image_correlation_id {
-                images_available(icons, patterns, version_map);
-            }
+        if let Some(images_available) = &*self.images_available.borrow()
+            && self.image_correlation_id.get() == image_correlation_id
+        {
+            images_available(icons, patterns, version_map);
         }
     }
 }
@@ -133,7 +133,7 @@ impl ImageRequestor for StubImageRequestor {
 impl Drop for StubImageRequestor {
     /// `~ImageRequestor()`: `imageManager->removeRequestor(*this)`.
     fn drop(&mut self) {
-        self.image_manager.remove_requestor_key(self as *const Self as *const () as usize);
+        self.image_manager.remove_requestor_key(std::ptr::from_ref::<Self>(self).cast::<()>() as usize);
     }
 }
 
@@ -697,7 +697,7 @@ fn removed_requestor_does_not_relayout() {
     image_manager.notify_if_missing_image_added();
 
     image_manager.add_image(make_image("marker", Size::new(16, 16), 1.0, false));
-    image_manager.remove_requestor_key(Rc::as_ptr(&requestor) as *const () as usize);
+    image_manager.remove_requestor_key(Rc::as_ptr(&requestor).cast::<()>() as usize);
     image_manager.notify_if_missing_image_added();
     assert_eq!(requestor.relayouts.get(), 0);
 }

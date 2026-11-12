@@ -34,11 +34,13 @@ impl Default for Bin {
 
 impl Bin {
     /// `Bin(id, w, h)` (the other arguments default to -1).
+    #[must_use]
     pub fn new(id: i32, w: i32, h: i32) -> Self {
         Bin::with_all(id, w, h, -1, -1, -1, -1)
     }
 
     /// `Bin(id, w, h, maxw, maxh, x, y)`; `maxw`/`maxh` of -1 mean `w`/`h`.
+    #[must_use]
     pub fn with_all(id: i32, w: i32, h: i32, maxw: i32, maxh: i32, x: i32, y: i32) -> Self {
         let mut bin = Bin { id, w, h, maxw, maxh, x, y, refcount_: 0 };
         if bin.maxw == -1 {
@@ -50,6 +52,7 @@ impl Bin {
         bin
     }
 
+    #[must_use]
     pub fn refcount(&self) -> i32 {
         self.refcount_
     }
@@ -74,6 +77,7 @@ pub struct Shelf {
 }
 
 impl Shelf {
+    #[must_use]
     pub fn new(y1: i32, w1: i32, h1: i32) -> Self {
         Shelf { x_: 0, y_: y1, w_: w1, h_: h1, wfree_: w1, bins_: VecDeque::new() }
     }
@@ -96,18 +100,23 @@ impl Shelf {
         true
     }
 
+    #[must_use]
     pub fn x(&self) -> i32 {
         self.x_
     }
+    #[must_use]
     pub fn y(&self) -> i32 {
         self.y_
     }
+    #[must_use]
     pub fn w(&self) -> i32 {
         self.w_
     }
+    #[must_use]
     pub fn h(&self) -> i32 {
         self.h_
     }
+    #[must_use]
     pub fn wfree(&self) -> i32 {
         self.wfree_
     }
@@ -147,6 +156,7 @@ impl Default for ShelfPack {
 
 impl ShelfPack {
     /// `ShelfPack(w, h, options)`: non-positive sizes become 64.
+    #[must_use]
     pub fn new(w: i32, h: i32, options: ShelfPackOptions) -> Self {
         ShelfPack {
             width_: if w > 0 { w } else { 64 },
@@ -161,6 +171,7 @@ impl ShelfPack {
     }
 
     /// The bin a `BinRef` points to (`*bin`).
+    #[must_use]
     pub fn bin(&self, r: BinRef) -> &Bin {
         &self.shelves_[r.shelf].bins_[r.bin]
     }
@@ -202,16 +213,16 @@ impl ShelfPack {
         let mut best_waste = i32::MAX;
 
         // if id was supplied, attempt a lookup..
-        if id != -1 {
+        if id == -1 {
+            self.max_id_ = self.max_id_.wrapping_add(1);
+            id = self.max_id_;
+        } else {
             if let Some(pbin) = self.get_bin(id) {
                 // we packed this bin already
                 self.ref_(pbin);
                 return Some(pbin);
             }
             self.max_id_ = if self.max_id_ < id { id } else { self.max_id_ };
-        } else {
-            self.max_id_ = self.max_id_.wrapping_add(1);
-            id = self.max_id_;
         }
 
         // First try to reuse a free bin..
@@ -319,6 +330,7 @@ impl ShelfPack {
     }
 
     /// `getBin(id)`
+    #[must_use]
     pub fn get_bin(&self, id: i32) -> Option<BinRef> {
         self.usedbins_.get(&id).copied()
     }
@@ -331,7 +343,7 @@ impl ShelfPack {
         if refcount == 1 {
             // a new Bin.. record height in stats historgram..
             let s = self.stats_.entry(h).or_insert(0);
-            *s = (*s | 0).wrapping_add(1);
+            *s = s.wrapping_add(1);
         }
 
         refcount
@@ -375,20 +387,24 @@ impl ShelfPack {
         true
     }
 
+    #[must_use]
     pub fn width(&self) -> i32 {
         self.width_
     }
 
+    #[must_use]
     pub fn height(&self) -> i32 {
         self.height_
     }
 
     /// The bin-height histogram (`stats_`, private in C++).
+    #[must_use]
     pub fn stats(&self) -> &BTreeMap<i32, i32> {
         &self.stats_
     }
 
     /// The shelves (`shelves_`, private in C++).
+    #[must_use]
     pub fn shelves(&self) -> &VecDeque<Shelf> {
         &self.shelves_
     }

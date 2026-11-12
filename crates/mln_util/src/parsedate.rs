@@ -188,8 +188,8 @@ enum Assume {
     Year,
 }
 
-/// `parsedate`: `Ok(t)` for PARSEDATE_OK, `Err(Some(t))` for
-/// PARSEDATE_SOONER/LATER, `Err(None)` for PARSEDATE_FAIL.
+/// `parsedate`: `Ok(t)` for `PARSEDATE_OK`, `Err(Some(t))` for
+/// `PARSEDATE_SOONER/LATER`, `Err(None)` for `PARSEDATE_FAIL`.
 fn parsedate(date: &[u8]) -> Result<i64, Option<i64>> {
     let mut wdaynum = -1;
     let mut monnum = -1;
@@ -378,6 +378,7 @@ fn parsedate(date: &[u8]) -> Result<i64, Option<i64>> {
 }
 
 /// `parse_date(const char*)`: seconds since the epoch, or -1 on failure.
+#[must_use]
 pub fn parse_date(p: &str) -> i64 {
     match parsedate(p.as_bytes()) {
         // avoid returning -1 for a working scenario
@@ -395,17 +396,17 @@ mod tests {
     #[test]
     fn http_formats() {
         // RFC 1123, RFC 850, asctime
-        assert_eq!(parse_date("Sun, 06 Nov 1994 08:49:37 GMT"), 784111777);
-        assert_eq!(parse_date("Sunday, 06-Nov-94 08:49:37 GMT"), 784111777);
-        assert_eq!(parse_date("Sun Nov  6 08:49:37 1994"), 784111777);
-        assert_eq!(parse_date("Wed, 21 Oct 2015 07:28:00 GMT"), 1445412480);
+        assert_eq!(parse_date("Sun, 06 Nov 1994 08:49:37 GMT"), 784_111_777);
+        assert_eq!(parse_date("Sunday, 06-Nov-94 08:49:37 GMT"), 784_111_777);
+        assert_eq!(parse_date("Sun Nov  6 08:49:37 1994"), 784_111_777);
+        assert_eq!(parse_date("Wed, 21 Oct 2015 07:28:00 GMT"), 1_445_412_480);
     }
 
     #[test]
     fn zones_and_limits() {
-        assert_eq!(parse_date("Sun, 06 Nov 1994 08:49:37 +0100"), 784111777 - 3600);
-        assert_eq!(parse_date("Sun, 06 Nov 1994 08:49:37 PST"), 784111777 + 8 * 3600);
-        assert_eq!(parse_date("20151021"), 1445385600);
+        assert_eq!(parse_date("Sun, 06 Nov 1994 08:49:37 +0100"), 784_111_777 - 3600);
+        assert_eq!(parse_date("Sun, 06 Nov 1994 08:49:37 PST"), 784_111_777 + 8 * 3600);
+        assert_eq!(parse_date("20151021"), 1_445_385_600);
         assert_eq!(parse_date("Thu, 01 Jan 1960 00:00:00 GMT"), -1);
         assert_eq!(parse_date("Fri, 01 Jan 2100 00:00:00 GMT"), -1);
         assert_eq!(parse_date("not a date"), -1);

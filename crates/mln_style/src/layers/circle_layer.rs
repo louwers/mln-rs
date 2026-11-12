@@ -37,6 +37,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -44,12 +45,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct CircleLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl CircleLayer {
     /// `CircleLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         CircleLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -57,16 +59,19 @@ impl CircleLayer {
     }
 
     /// `CircleLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         CircleLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -77,10 +82,12 @@ impl CircleLayer {
 
     // Layout properties
 
+    #[must_use]
     pub fn get_default_circle_sort_key() -> PropertyValue<f32> {
         PropertyValue::Constant(CircleSortKey::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_sort_key(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<CircleSortKey>()
     }
@@ -96,10 +103,12 @@ impl CircleLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_circle_blur() -> PropertyValue<f32> {
         PropertyValue::Constant(CircleBlur::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_blur(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleBlur>().value
     }
@@ -119,14 +128,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_blur_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleBlur>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_color() -> PropertyValue<Color> {
         PropertyValue::Constant(CircleColor::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<CircleColor>().value
     }
@@ -146,14 +158,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleColor>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(CircleOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleOpacity>().value
     }
@@ -173,14 +188,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_pitch_alignment() -> PropertyValue<AlignmentType> {
         PropertyValue::Constant(CirclePitchAlignment::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_pitch_alignment(&self) -> &PropertyValue<AlignmentType> {
         &self.impl_().paint.get::<CirclePitchAlignment>().value
     }
@@ -200,14 +218,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_pitch_alignment_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CirclePitchAlignment>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_pitch_scale() -> PropertyValue<CirclePitchScaleType> {
         PropertyValue::Constant(CirclePitchScale::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_pitch_scale(&self) -> &PropertyValue<CirclePitchScaleType> {
         &self.impl_().paint.get::<CirclePitchScale>().value
     }
@@ -227,14 +248,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_pitch_scale_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CirclePitchScale>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_radius() -> PropertyValue<f32> {
         PropertyValue::Constant(CircleRadius::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_radius(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleRadius>().value
     }
@@ -254,14 +278,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_radius_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleRadius>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_stroke_color() -> PropertyValue<Color> {
         PropertyValue::Constant(CircleStrokeColor::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_stroke_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<CircleStrokeColor>().value
     }
@@ -281,14 +308,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_stroke_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleStrokeColor>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_stroke_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(CircleStrokeOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_stroke_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleStrokeOpacity>().value
     }
@@ -308,14 +338,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_stroke_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleStrokeOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_stroke_width() -> PropertyValue<f32> {
         PropertyValue::Constant(CircleStrokeWidth::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_stroke_width(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<CircleStrokeWidth>().value
     }
@@ -335,14 +368,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_stroke_width_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleStrokeWidth>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_translate() -> PropertyValue<[f32; 2]> {
         PropertyValue::Constant(CircleTranslate::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<CircleTranslate>().value
     }
@@ -362,14 +398,17 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleTranslate>().options
     }
 
+    #[must_use]
     pub fn get_default_circle_translate_anchor() -> PropertyValue<TranslateAnchorType> {
         PropertyValue::Constant(CircleTranslateAnchor::default_value())
     }
 
+    #[must_use]
     pub fn get_circle_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<CircleTranslateAnchor>().value
     }
@@ -389,6 +428,7 @@ impl CircleLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_circle_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<CircleTranslateAnchor>().options
     }
@@ -399,56 +439,56 @@ const K_PAINT_PROPERTY_COUNT: u8 = 22;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
-    CircleBlur,
-    CircleColor,
-    CircleOpacity,
-    CirclePitchAlignment,
-    CirclePitchScale,
-    CircleRadius,
-    CircleStrokeColor,
-    CircleStrokeOpacity,
-    CircleStrokeWidth,
-    CircleTranslate,
-    CircleTranslateAnchor,
-    CircleBlurTransition,
-    CircleColorTransition,
-    CircleOpacityTransition,
-    CirclePitchAlignmentTransition,
-    CirclePitchScaleTransition,
-    CircleRadiusTransition,
-    CircleStrokeColorTransition,
-    CircleStrokeOpacityTransition,
-    CircleStrokeWidthTransition,
-    CircleTranslateTransition,
-    CircleTranslateAnchorTransition,
-    CircleSortKey = K_PAINT_PROPERTY_COUNT,
+    Blur,
+    Color,
+    Opacity,
+    PitchAlignment,
+    PitchScale,
+    Radius,
+    StrokeColor,
+    StrokeOpacity,
+    StrokeWidth,
+    Translate,
+    TranslateAnchor,
+    BlurTransition,
+    ColorTransition,
+    OpacityTransition,
+    PitchAlignmentTransition,
+    PitchScaleTransition,
+    RadiusTransition,
+    StrokeColorTransition,
+    StrokeOpacityTransition,
+    StrokeWidthTransition,
+    TranslateTransition,
+    TranslateAnchorTransition,
+    SortKey = K_PAINT_PROPERTY_COUNT,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
-    ("circle-blur", Property::CircleBlur),
-    ("circle-color", Property::CircleColor),
-    ("circle-opacity", Property::CircleOpacity),
-    ("circle-pitch-alignment", Property::CirclePitchAlignment),
-    ("circle-pitch-scale", Property::CirclePitchScale),
-    ("circle-radius", Property::CircleRadius),
-    ("circle-stroke-color", Property::CircleStrokeColor),
-    ("circle-stroke-opacity", Property::CircleStrokeOpacity),
-    ("circle-stroke-width", Property::CircleStrokeWidth),
-    ("circle-translate", Property::CircleTranslate),
-    ("circle-translate-anchor", Property::CircleTranslateAnchor),
-    ("circle-blur-transition", Property::CircleBlurTransition),
-    ("circle-color-transition", Property::CircleColorTransition),
-    ("circle-opacity-transition", Property::CircleOpacityTransition),
-    ("circle-pitch-alignment-transition", Property::CirclePitchAlignmentTransition),
-    ("circle-pitch-scale-transition", Property::CirclePitchScaleTransition),
-    ("circle-radius-transition", Property::CircleRadiusTransition),
-    ("circle-stroke-color-transition", Property::CircleStrokeColorTransition),
-    ("circle-stroke-opacity-transition", Property::CircleStrokeOpacityTransition),
-    ("circle-stroke-width-transition", Property::CircleStrokeWidthTransition),
-    ("circle-translate-transition", Property::CircleTranslateTransition),
-    ("circle-translate-anchor-transition", Property::CircleTranslateAnchorTransition),
-    ("circle-sort-key", Property::CircleSortKey),
+    ("circle-blur", Property::Blur),
+    ("circle-color", Property::Color),
+    ("circle-opacity", Property::Opacity),
+    ("circle-pitch-alignment", Property::PitchAlignment),
+    ("circle-pitch-scale", Property::PitchScale),
+    ("circle-radius", Property::Radius),
+    ("circle-stroke-color", Property::StrokeColor),
+    ("circle-stroke-opacity", Property::StrokeOpacity),
+    ("circle-stroke-width", Property::StrokeWidth),
+    ("circle-translate", Property::Translate),
+    ("circle-translate-anchor", Property::TranslateAnchor),
+    ("circle-blur-transition", Property::BlurTransition),
+    ("circle-color-transition", Property::ColorTransition),
+    ("circle-opacity-transition", Property::OpacityTransition),
+    ("circle-pitch-alignment-transition", Property::PitchAlignmentTransition),
+    ("circle-pitch-scale-transition", Property::PitchScaleTransition),
+    ("circle-radius-transition", Property::RadiusTransition),
+    ("circle-stroke-color-transition", Property::StrokeColorTransition),
+    ("circle-stroke-opacity-transition", Property::StrokeOpacityTransition),
+    ("circle-stroke-width-transition", Property::StrokeWidthTransition),
+    ("circle-translate-transition", Property::TranslateTransition),
+    ("circle-translate-anchor-transition", Property::TranslateAnchorTransition),
+    ("circle-sort-key", Property::SortKey),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -457,41 +497,35 @@ fn find_property(name: &str) -> Option<Property> {
 
 fn get_layer_property(layer: &CircleLayer, property: Property) -> StyleProperty {
     match property {
-        Property::CircleBlur => make_style_property(layer.get_circle_blur()),
-        Property::CircleColor => make_style_property(layer.get_circle_color()),
-        Property::CircleOpacity => make_style_property(layer.get_circle_opacity()),
-        Property::CirclePitchAlignment => make_style_property(layer.get_circle_pitch_alignment()),
-        Property::CirclePitchScale => make_style_property(layer.get_circle_pitch_scale()),
-        Property::CircleRadius => make_style_property(layer.get_circle_radius()),
-        Property::CircleStrokeColor => make_style_property(layer.get_circle_stroke_color()),
-        Property::CircleStrokeOpacity => make_style_property(layer.get_circle_stroke_opacity()),
-        Property::CircleStrokeWidth => make_style_property(layer.get_circle_stroke_width()),
-        Property::CircleTranslate => make_style_property(layer.get_circle_translate()),
-        Property::CircleTranslateAnchor => make_style_property(layer.get_circle_translate_anchor()),
-        Property::CircleBlurTransition => make_transition_style_property(&layer.get_circle_blur_transition()),
-        Property::CircleColorTransition => make_transition_style_property(&layer.get_circle_color_transition()),
-        Property::CircleOpacityTransition => make_transition_style_property(&layer.get_circle_opacity_transition()),
-        Property::CirclePitchAlignmentTransition => {
+        Property::Blur => make_style_property(layer.get_circle_blur()),
+        Property::Color => make_style_property(layer.get_circle_color()),
+        Property::Opacity => make_style_property(layer.get_circle_opacity()),
+        Property::PitchAlignment => make_style_property(layer.get_circle_pitch_alignment()),
+        Property::PitchScale => make_style_property(layer.get_circle_pitch_scale()),
+        Property::Radius => make_style_property(layer.get_circle_radius()),
+        Property::StrokeColor => make_style_property(layer.get_circle_stroke_color()),
+        Property::StrokeOpacity => make_style_property(layer.get_circle_stroke_opacity()),
+        Property::StrokeWidth => make_style_property(layer.get_circle_stroke_width()),
+        Property::Translate => make_style_property(layer.get_circle_translate()),
+        Property::TranslateAnchor => make_style_property(layer.get_circle_translate_anchor()),
+        Property::BlurTransition => make_transition_style_property(&layer.get_circle_blur_transition()),
+        Property::ColorTransition => make_transition_style_property(&layer.get_circle_color_transition()),
+        Property::OpacityTransition => make_transition_style_property(&layer.get_circle_opacity_transition()),
+        Property::PitchAlignmentTransition => {
             make_transition_style_property(&layer.get_circle_pitch_alignment_transition())
         }
-        Property::CirclePitchScaleTransition => {
-            make_transition_style_property(&layer.get_circle_pitch_scale_transition())
-        }
-        Property::CircleRadiusTransition => make_transition_style_property(&layer.get_circle_radius_transition()),
-        Property::CircleStrokeColorTransition => {
-            make_transition_style_property(&layer.get_circle_stroke_color_transition())
-        }
-        Property::CircleStrokeOpacityTransition => {
+        Property::PitchScaleTransition => make_transition_style_property(&layer.get_circle_pitch_scale_transition()),
+        Property::RadiusTransition => make_transition_style_property(&layer.get_circle_radius_transition()),
+        Property::StrokeColorTransition => make_transition_style_property(&layer.get_circle_stroke_color_transition()),
+        Property::StrokeOpacityTransition => {
             make_transition_style_property(&layer.get_circle_stroke_opacity_transition())
         }
-        Property::CircleStrokeWidthTransition => {
-            make_transition_style_property(&layer.get_circle_stroke_width_transition())
-        }
-        Property::CircleTranslateTransition => make_transition_style_property(&layer.get_circle_translate_transition()),
-        Property::CircleTranslateAnchorTransition => {
+        Property::StrokeWidthTransition => make_transition_style_property(&layer.get_circle_stroke_width_transition()),
+        Property::TranslateTransition => make_transition_style_property(&layer.get_circle_translate_transition()),
+        Property::TranslateAnchorTransition => {
             make_transition_style_property(&layer.get_circle_translate_anchor_transition())
         }
-        Property::CircleSortKey => make_style_property(layer.get_circle_sort_key()),
+        Property::SortKey => make_style_property(layer.get_circle_sort_key()),
     }
 }
 
@@ -543,63 +577,62 @@ impl Layer for CircleLayer {
             )));
         };
 
-        if property == Property::CircleBlur || property == Property::CircleOpacity ||
-            property == Property::CircleRadius || property == Property::CircleStrokeOpacity ||
-            property == Property::CircleStrokeWidth || property == Property::CircleSortKey {
+        if property == Property::Blur || property == Property::Opacity || property == Property::Radius ||
+            property == Property::StrokeOpacity || property == Property::StrokeWidth || property == Property::SortKey {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::CircleBlur {
+            if property == Property::Blur {
                 self.set_circle_blur(&typed_value);
                 return None;
             }
 
-            if property == Property::CircleOpacity {
+            if property == Property::Opacity {
                 self.set_circle_opacity(&typed_value);
                 return None;
             }
 
-            if property == Property::CircleRadius {
+            if property == Property::Radius {
                 self.set_circle_radius(&typed_value);
                 return None;
             }
 
-            if property == Property::CircleStrokeOpacity {
+            if property == Property::StrokeOpacity {
                 self.set_circle_stroke_opacity(&typed_value);
                 return None;
             }
 
-            if property == Property::CircleStrokeWidth {
+            if property == Property::StrokeWidth {
                 self.set_circle_stroke_width(&typed_value);
                 return None;
             }
 
-            if property == Property::CircleSortKey {
+            if property == Property::SortKey {
                 self.set_circle_sort_key(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::CircleColor || property == Property::CircleStrokeColor {
+        if property == Property::Color || property == Property::StrokeColor {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Color>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::CircleColor {
+            if property == Property::Color {
                 self.set_circle_color(&typed_value);
                 return None;
             }
 
-            if property == Property::CircleStrokeColor {
+            if property == Property::StrokeColor {
                 self.set_circle_stroke_color(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::CirclePitchAlignment {
+        if property == Property::PitchAlignment {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<AlignmentType>(value, &mut error, false, false) else {
                 return Some(error);
@@ -609,7 +642,7 @@ impl Layer for CircleLayer {
             return None;
         }
 
-        if property == Property::CirclePitchScale {
+        if property == Property::PitchScale {
             let mut error = Error::default();
             let Some(typed_value) =
                 convert_property_value::<CirclePitchScaleType>(value, &mut error, false, false)
@@ -621,7 +654,7 @@ impl Layer for CircleLayer {
             return None;
         }
 
-        if property == Property::CircleTranslate {
+        if property == Property::Translate {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<[f32; 2]>(value, &mut error, false, false) else {
                 return Some(error);
@@ -631,7 +664,7 @@ impl Layer for CircleLayer {
             return None;
         }
 
-        if property == Property::CircleTranslateAnchor {
+        if property == Property::TranslateAnchor {
             let mut error = Error::default();
             let Some(typed_value) =
                 convert_property_value::<TranslateAnchorType>(value, &mut error, false, false)
@@ -648,57 +681,57 @@ impl Layer for CircleLayer {
             return Some(error);
         };
 
-        if property == Property::CircleBlurTransition {
+        if property == Property::BlurTransition {
             self.set_circle_blur_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleColorTransition {
+        if property == Property::ColorTransition {
             self.set_circle_color_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleOpacityTransition {
+        if property == Property::OpacityTransition {
             self.set_circle_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::CirclePitchAlignmentTransition {
+        if property == Property::PitchAlignmentTransition {
             self.set_circle_pitch_alignment_transition(&transition);
             return None;
         }
 
-        if property == Property::CirclePitchScaleTransition {
+        if property == Property::PitchScaleTransition {
             self.set_circle_pitch_scale_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleRadiusTransition {
+        if property == Property::RadiusTransition {
             self.set_circle_radius_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleStrokeColorTransition {
+        if property == Property::StrokeColorTransition {
             self.set_circle_stroke_color_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleStrokeOpacityTransition {
+        if property == Property::StrokeOpacityTransition {
             self.set_circle_stroke_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleStrokeWidthTransition {
+        if property == Property::StrokeWidthTransition {
             self.set_circle_stroke_width_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleTranslateTransition {
+        if property == Property::TranslateTransition {
             self.set_circle_translate_transition(&transition);
             return None;
         }
 
-        if property == Property::CircleTranslateAnchorTransition {
+        if property == Property::TranslateAnchorTransition {
             self.set_circle_translate_anchor_transition(&transition);
             return None;
         }

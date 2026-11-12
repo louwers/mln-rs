@@ -123,13 +123,14 @@ impl Database {
     }
 
     /// `getFilename()`.
+    #[must_use]
     pub fn get_filename(&self) -> String {
         self.conn().path().unwrap_or("").to_owned()
     }
 
     /// `setBusyTimeout(std::chrono::milliseconds)` (clamped to `int`).
     pub fn set_busy_timeout(&self, timeout_ms: i64) -> Result<(), SqliteError> {
-        let ms = timeout_ms.clamp(0, i32::MAX as i64) as u64;
+        let ms = timeout_ms.clamp(0, i64::from(i32::MAX)) as u64;
         self.conn().busy_timeout(std::time::Duration::from_millis(ms))?;
         Ok(())
     }
@@ -293,11 +294,13 @@ impl<'s, 'conn> Query<'s, 'conn> {
     }
 
     /// `lastInsertRowId()`.
+    #[must_use]
     pub fn last_insert_row_id(&self) -> i64 {
         *self.last_insert_row_id
     }
 
     /// `changes()`.
+    #[must_use]
     pub fn changes(&self) -> u64 {
         (*self.changes).max(0) as u64
     }
@@ -388,11 +391,11 @@ fn text_to_i64(t: &[u8]) -> i64 {
     }
     let mut value: i128 = 0;
     while i < t.len() && t[i].is_ascii_digit() {
-        value = (value * 10 + (t[i] - b'0') as i128).min(i64::MAX as i128 + 1);
+        value = (value * 10 + i128::from(t[i] - b'0')).min(i128::from(i64::MAX) + 1);
         i += 1;
     }
     if negative {
         value = -value;
     }
-    value.clamp(i64::MIN as i128, i64::MAX as i128) as i64
+    value.clamp(i128::from(i64::MIN), i128::from(i64::MAX)) as i64
 }

@@ -10,6 +10,7 @@ pub const MAX_WIDTH: usize = 120;
 
 /// `if a || b || ... {` at `indent`, wrapped after `||` past
 /// [`MAX_WIDTH`], continuation lines indented four more spaces.
+#[must_use]
 pub fn if_condition(indent: &str, terms: &[String]) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current = format!("{indent}if {}", terms[0]);
@@ -33,6 +34,7 @@ pub struct Writer {
 }
 
 impl Writer {
+    #[must_use]
     pub fn new() -> Self {
         Writer { out: String::new() }
     }
@@ -54,15 +56,12 @@ impl Writer {
     pub fn imports(&mut self, paths: Vec<String>) {
         let mut modules: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for path in paths {
-            let (module, items) = match path.find("::{") {
-                Some(i) => {
-                    let items = path[i + 3..path.len() - 1].split(',').map(|s| s.trim().to_owned()).collect();
-                    (path[..i].to_owned(), items)
-                }
-                None => {
-                    let i = path.rfind("::").expect("a path with a module");
-                    (path[..i].to_owned(), vec![path[i + 2..].to_owned()])
-                }
+            let (module, items) = if let Some(i) = path.find("::{") {
+                let items = path[i + 3..path.len() - 1].split(',').map(|s| s.trim().to_owned()).collect();
+                (path[..i].to_owned(), items)
+            } else {
+                let i = path.rfind("::").expect("a path with a module");
+                (path[..i].to_owned(), vec![path[i + 2..].to_owned()])
             };
             modules.entry(module).or_default().extend(items);
         }
@@ -110,6 +109,7 @@ impl Writer {
         }
     }
 
+    #[must_use]
     pub fn finish(mut self) -> String {
         while self.out.ends_with("\n\n") {
             self.out.pop();
@@ -118,8 +118,15 @@ impl Writer {
     }
 }
 
+impl Default for Writer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// `type.replace('-', '_')` in generate-style-code.mjs (the first hyphen
 /// only; no layer type has two).
+#[must_use]
 pub fn layer_file_name(type_: &str) -> String {
     type_.replacen('-', "_", 1)
 }
@@ -155,6 +162,7 @@ fn type_path(name: &str) -> String {
 
 /// The value types of a property list, for `EvaluatedType`s the caller
 /// mentions directly.
+#[must_use]
 pub fn imports_for_type(t: &EvaluatedType) -> Vec<String> {
     let mut names = Vec::new();
     t.named_types(&mut names);

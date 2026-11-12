@@ -7,34 +7,34 @@ use crate::types::{
 };
 use crate::writer::{MAX_WIDTH, Writer, if_condition, imports_for, layer_file_name};
 
-/// `layerCapabilities` of layer.cpp.ejs: (Source, Pass3D, Layout,
-/// FadingTiles, CrossTileIndex, TileKind).
+/// `layerCapabilities` of layer.cpp.ejs: (Source, `Pass3D`, Layout,
+/// `FadingTiles`, `CrossTileIndex`, `TileKind`).
 fn layer_capabilities(type_: &str) -> [&'static str; 6] {
     const N: &str = "NotRequired";
     const R: &str = "Required";
     match type_ {
-        "background" => [N, N, N, N, N, N],
-        "fill" | "line" => [R, N, R, N, N, "Geometry"],
+        "background" | "location-indicator" => [N, N, N, N, N, N],
+        "fill" | "line" | "circle" => [R, N, R, N, N, "Geometry"],
         "fill-extrusion" => [R, R, R, N, N, "Geometry"],
         "hillshade" => [R, R, N, N, N, "RasterDEM"],
         "color-relief" => [R, N, N, N, N, "RasterDEM"],
         "symbol" => [R, N, R, R, R, "Geometry"],
-        "circle" => [R, N, R, N, N, "Geometry"],
         "heatmap" => [R, R, N, N, N, "Geometry"],
         "raster" => [R, N, N, N, N, "Raster"],
-        "location-indicator" => [N, N, N, N, N, N],
         other => panic!("layer.cpp.ejs has no capabilities for layer type {other}"),
     }
 }
 
 /// `(type === 'background') || (type === 'location-indicator')`: the
 /// constructor without a source ID.
+#[must_use]
 pub fn is_source_less(type_: &str) -> bool {
     type_ == "background" || type_ == "location-indicator"
 }
 
 /// The `convert<...>(value, error, dataDriven, convertTokens)` call of
 /// `setPropertyInternal` (also the grouping key, as in the template).
+#[must_use]
 pub fn conversion(property: &Property) -> String {
     let data_driven = is_data_driven(property);
     let convert_tokens = property.name == "icon-image" || property.name == "text-field";
@@ -91,6 +91,8 @@ fn emit_accessors(w: &mut Writer, layer: &LayerSpec, property: &Property, paint:
     let pv = property_value_type(property);
     let member = if paint { "paint" } else { "layout" };
 
+    w.line("    #[must_use]");
+
     w.line(&format!("    pub fn get_default_{snake_name}() -> {pv} {{"));
     if property.name == "heatmap-color" {
         let raw = crate::json::js_stringify(property.default().expect("heatmap-color default"));
@@ -112,10 +114,12 @@ fn emit_accessors(w: &mut Writer, layer: &LayerSpec, property: &Property, paint:
     w.blank();
 
     if paint {
+        w.line("    #[must_use]");
         w.line(&format!("    pub fn get_{snake_name}(&self) -> &{pv} {{"));
         w.line(&format!("        &self.impl_().paint.get::<{name}>().value"));
         w.line("    }");
     } else {
+        w.line("    #[must_use]");
         w.line(&format!("    pub fn get_{snake_name}(&self) -> &{pv} {{"));
         w.line(&format!("        self.impl_().layout.get::<{name}>()"));
         w.line("    }");
@@ -146,6 +150,7 @@ fn emit_accessors(w: &mut Writer, layer: &LayerSpec, property: &Property, paint:
         w.line("        self.set_impl(impl_);");
         w.line("    }");
         w.blank();
+        w.line("    #[must_use]");
         w.line(&format!("    pub fn get_{snake_name}_transition(&self) -> TransitionOptions {{"));
         w.line(&format!("        self.impl_().paint.get::<{name}>().options"));
         w.line("    }");
@@ -154,6 +159,20 @@ fn emit_accessors(w: &mut Writer, layer: &LayerSpec, property: &Property, paint:
     let _ = layer;
 }
 
+/// The layer's `Property` variant for a property: the property's name,
+/// camelized, without the layer type's prefix when every property of the
+/// layer has it (`line-color` -> `Color`).
+fn property_variant(layer: &LayerSpec, property: &Property) -> String {
+    let prefix = format!("{}-", layer.type_);
+    let mut properties = layer.paint_properties.iter().chain(&layer.layout_properties);
+    let name = match property.name.strip_prefix(&prefix) {
+        Some(stripped) if properties.all(|p| p.name.starts_with(&prefix)) => stripped,
+        _ => &property.name,
+    };
+    camelize(name)
+}
+
+#[must_use]
 pub fn emit(layer: &LayerSpec) -> String {
     let t = camelize(&layer.type_);
     let file = layer_file_name(&layer.type_);
@@ -239,6 +258,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.blank();
     w.line("impl Impl {");
     w.line("    /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.");
+    w.line("    #[must_use]");
     w.line("    pub fn static_type_info() -> &'static LayerTypeInfo {");
     w.line("        &TYPE_INFO");
     w.line("    }");
@@ -248,13 +268,14 @@ pub fn emit(layer: &LayerSpec) -> String {
     // The layer.
     w.line("#[derive(Debug)]");
     w.line(&format!("pub struct {layer_name} {{"));
-    w.line("    /// `baseImpl`, typed (C++ static_casts it in `impl()`).");
+    w.line("    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).");
     w.line("    base_impl: Immutable<Impl>,");
     w.line("}");
     w.blank();
     w.line(&format!("impl {layer_name} {{"));
     if is_source_less(&layer.type_) {
         w.line(&format!("    /// `{layer_name}(const std::string& layerID)`."));
+        w.line("    #[must_use]");
         w.line("    pub fn new(layer_id: &str) -> Self {");
         w.line(&format!("        {layer_name} {{"));
         w.line("            base_impl: Arc::new(Impl::new(layer_id.to_owned(), String::new())),");
@@ -262,6 +283,7 @@ pub fn emit(layer: &LayerSpec) -> String {
         w.line("    }");
     } else {
         w.line(&format!("    /// `{layer_name}(const std::string& layerID, const std::string& sourceID)`."));
+        w.line("    #[must_use]");
         w.line("    pub fn new(layer_id: &str, source_id: &str) -> Self {");
         w.line(&format!("        {layer_name} {{"));
         w.line("            base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),");
@@ -270,16 +292,19 @@ pub fn emit(layer: &LayerSpec) -> String {
     }
     w.blank();
     w.line(&format!("    /// `{layer_name}(Immutable<Impl>)`."));
+    w.line("    #[must_use]");
     w.line("    pub fn from_impl(impl_: Immutable<Impl>) -> Self {");
     w.line(&format!("        {layer_name} {{ base_impl: impl_ }}"));
     w.line("    }");
     w.blank();
     w.line("    /// `impl()`.");
+    w.line("    #[must_use]");
     w.line("    pub fn impl_(&self) -> &Impl {");
     w.line("        &self.base_impl");
     w.line("    }");
     w.blank();
     w.line("    /// `mutableImpl()`.");
+    w.line("    #[must_use]");
     w.line("    pub fn mutable_impl(&self) -> Impl {");
     w.line("        self.impl_().clone()");
     w.line("    }");
@@ -311,16 +336,16 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.line("#[repr(u8)]");
     w.line("enum Property {");
     for p in &paint {
-        w.line(&format!("    {},", camelize(&p.name)));
+        w.line(&format!("    {},", property_variant(layer, p)));
     }
     for p in &paint {
-        w.line(&format!("    {}Transition,", camelize(&p.name)));
+        w.line(&format!("    {}Transition,", property_variant(layer, p)));
     }
     for (i, p) in layout.iter().enumerate() {
         if i == 0 {
-            w.line(&format!("    {} = K_PAINT_PROPERTY_COUNT,", camelize(&p.name)));
+            w.line(&format!("    {} = K_PAINT_PROPERTY_COUNT,", property_variant(layer, p)));
         } else {
-            w.line(&format!("    {},", camelize(&p.name)));
+            w.line(&format!("    {},", property_variant(layer, p)));
         }
     }
     w.line("}");
@@ -328,13 +353,13 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.line("/// `layerProperties` (a `mapbox::eternal::hash_map` in C++).");
     w.line("const LAYER_PROPERTIES: &[(&str, Property)] = &[");
     for p in &paint {
-        w.line(&format!("    (\"{}\", Property::{}),", p.name, camelize(&p.name)));
+        w.line(&format!("    (\"{}\", Property::{}),", p.name, property_variant(layer, p)));
     }
     for p in &paint {
-        w.line(&format!("    (\"{}-transition\", Property::{}Transition),", p.name, camelize(&p.name)));
+        w.line(&format!("    (\"{}-transition\", Property::{}Transition),", p.name, property_variant(layer, p)));
     }
     for p in &layout {
-        w.line(&format!("    (\"{}\", Property::{}),", p.name, camelize(&p.name)));
+        w.line(&format!("    (\"{}\", Property::{}),", p.name, property_variant(layer, p)));
     }
     w.line("];");
     w.blank();
@@ -347,14 +372,14 @@ pub fn emit(layer: &LayerSpec) -> String {
     let value_arm = |w: &mut Writer, p: &Property| {
         let arm = format!(
             "        Property::{} => {}(layer.get_{}()),",
-            camelize(&p.name),
+            property_variant(layer, p),
             make_style_property(p),
             snake(&p.name)
         );
         if arm.len() <= MAX_WIDTH {
             w.line(&arm);
         } else {
-            w.line(&format!("        Property::{} => {{", camelize(&p.name)));
+            w.line(&format!("        Property::{} => {{", property_variant(layer, p)));
             w.line(&format!("            {}(layer.get_{}())", make_style_property(p), snake(&p.name)));
             w.line("        }");
         }
@@ -365,13 +390,13 @@ pub fn emit(layer: &LayerSpec) -> String {
     for p in &paint {
         let arm = format!(
             "        Property::{}Transition => make_transition_style_property(&layer.get_{}_transition()),",
-            camelize(&p.name),
+            property_variant(layer, p),
             snake(&p.name)
         );
         if arm.len() <= MAX_WIDTH {
             w.line(&arm);
         } else {
-            w.line(&format!("        Property::{}Transition => {{", camelize(&p.name)));
+            w.line(&format!("        Property::{}Transition => {{", property_variant(layer, p)));
             w.line(&format!("            make_transition_style_property(&layer.get_{}_transition())", snake(&p.name)));
             w.line("        }");
         }
@@ -434,7 +459,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.blank();
     for (key, members) in conversion_groups(paint.iter().copied().chain(layout.iter().copied())) {
         let terms: Vec<String> =
-            members.iter().map(|p| format!("property == Property::{}", camelize(&p.name))).collect();
+            members.iter().map(|p| format!("property == Property::{}", property_variant(layer, p))).collect();
         for line in if_condition("        ", &terms) {
             w.line(&line);
         }
@@ -449,7 +474,7 @@ pub fn emit(layer: &LayerSpec) -> String {
                 if i > 0 {
                     w.blank();
                 }
-                w.line(&format!("            if property == Property::{} {{", camelize(&p.name)));
+                w.line(&format!("            if property == Property::{} {{", property_variant(layer, p)));
                 w.line(&format!("                self.set_{}(&typed_value);", snake(&p.name)));
                 w.line("                return None;");
                 w.line("            }");
@@ -464,7 +489,7 @@ pub fn emit(layer: &LayerSpec) -> String {
     w.line("        };");
     w.blank();
     for p in &paint {
-        w.line(&format!("        if property == Property::{}Transition {{", camelize(&p.name)));
+        w.line(&format!("        if property == Property::{}Transition {{", property_variant(layer, p)));
         w.line(&format!("            self.set_{}_transition(&transition);", snake(&p.name)));
         w.line("            return None;");
         w.line("        }");

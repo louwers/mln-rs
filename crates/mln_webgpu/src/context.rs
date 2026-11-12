@@ -26,7 +26,7 @@ use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::{AttributeDataType, DrawModeType};
-use mln_gfx::globe_clip_mask::GlobeClipMask;
+use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::renderer::layer_group::LayerGroupBasePtr;
 use mln_gfx::rendering_stats::RenderingStats;
@@ -43,7 +43,6 @@ use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUnifor
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
-use mln_tile_id::CanonicalTileID;
 use mln_util::range::Range;
 use mln_util::size::Size;
 
@@ -251,7 +250,7 @@ impl Context {
     }
 
     /// A buffer holding `data` (zero padded to 4 bytes), as `createBuffer`
-    /// makes one (usage | CopyDst, initial queue write).
+    /// makes one (usage | `CopyDst`, initial queue write).
     fn create_raw_buffer(&self, data: &[u8], usage: wgpu::BufferUsages) -> Option<(wgpu::Buffer, u64)> {
         let device = self.backend.get_device()?;
         let padded_size = (data.len() + 3) & !3usize;
@@ -269,7 +268,7 @@ impl Context {
     }
 
     /// `getTileVertexBuffer()`: `RenderStaticData::tileVertices()`, the four
-    /// corners of the tile extent as short2 (inlined: RenderStaticData is a
+    /// corners of the tile extent as short2 (inlined: `RenderStaticData` is a
     /// renderer type).
     pub fn get_tile_vertex_buffer(&self) -> Option<(wgpu::Buffer, u64)> {
         let mut cached = self.tile_vertex_buffer.borrow_mut();
@@ -341,7 +340,7 @@ impl Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         if masks.is_empty() {
             return true;
@@ -792,7 +791,7 @@ impl GfxContext for Context {
         render_pass: &dyn mln_gfx::render_pass::RenderPass,
         shaders: &ShaderRegistry,
         masks: &[GlobeClipMask],
-        mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         self.render_globe_tile_clipping_masks_impl(render_pass, shaders, masks, mesh)
     }

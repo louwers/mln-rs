@@ -13,6 +13,7 @@ use crate::math::{dist_sqr_i16, dist_sqr_i16_f32};
 
 type GeometryCoordinate = Point<i16>;
 
+#[must_use]
 pub fn polygon_contains_point(ring: &[GeometryCoordinate], p: &GeometryCoordinate) -> bool {
     let mut c = false;
     if ring.is_empty() {
@@ -37,34 +38,34 @@ pub fn polygon_contains_point(ring: &[GeometryCoordinate], p: &GeometryCoordinat
     c
 }
 
-/// Code from http://stackoverflow.com/a/1501725/331379.
-fn dist_to_segment_squared(p: &GeometryCoordinate, v: &GeometryCoordinate, w: &GeometryCoordinate) -> f32 {
+/// Code from <http://stackoverflow.com/a/1501725/331379>.
+fn dist_to_segment_squared(p: GeometryCoordinate, v: GeometryCoordinate, w: GeometryCoordinate) -> f32 {
     if v == w {
-        return dist_sqr_i16(*p, *v);
+        return dist_sqr_i16(p, v);
     }
-    let l2 = dist_sqr_i16(*v, *w);
+    let l2 = dist_sqr_i16(v, w);
     let dot = (i32::from(p.x) - i32::from(v.x))
         .wrapping_mul(i32::from(w.x) - i32::from(v.x))
         .wrapping_add((i32::from(p.y) - i32::from(v.y)).wrapping_mul(i32::from(w.y) - i32::from(v.y)));
     let t = dot as f32 / l2;
     if t < 0.0 {
-        return dist_sqr_i16(*p, *v);
+        return dist_sqr_i16(p, v);
     }
     if t > 1.0 {
-        return dist_sqr_i16(*p, *w);
+        return dist_sqr_i16(p, w);
     }
     // convertPoint<float>(w - v) * t + convertPoint<float>(v); `w - v` is a
     // Point<int16_t> (narrowed).
     let d = Point::new(w.x.wrapping_sub(v.x), w.y.wrapping_sub(v.y));
     let q = Point::new(f32::from(d.x) * t + f32::from(v.x), f32::from(d.y) * t + f32::from(v.y));
-    dist_sqr_i16_f32(*p, q)
+    dist_sqr_i16_f32(p, q)
 }
 
-fn point_intersects_buffered_line(p: &GeometryCoordinate, line: &[GeometryCoordinate], radius: f32) -> bool {
+fn point_intersects_buffered_line(p: GeometryCoordinate, line: &[GeometryCoordinate], radius: f32) -> bool {
     let radius_squared = radius * radius;
 
     if line.len() == 1 {
-        return dist_sqr_i16(*p, line[0]) < radius_squared;
+        return dist_sqr_i16(p, line[0]) < radius_squared;
     }
     if line.is_empty() {
         return false;
@@ -73,8 +74,8 @@ fn point_intersects_buffered_line(p: &GeometryCoordinate, line: &[GeometryCoordi
     for i in 1..line.len() {
         // Find line segments that have a distance <= radius^2 to p
         // In that case, we treat the line as "containing point p".
-        let v = &line[i - 1];
-        let w = &line[i];
+        let v = line[i - 1];
+        let w = line[i];
         if dist_to_segment_squared(p, v, w) < radius_squared {
             return true;
         }
@@ -83,17 +84,17 @@ fn point_intersects_buffered_line(p: &GeometryCoordinate, line: &[GeometryCoordi
 }
 
 // http://bryceboe.com/2006/10/23/line-segment-intersection-algorithm/
-fn is_counter_clockwise(a: &GeometryCoordinate, b: &GeometryCoordinate, c: &GeometryCoordinate) -> bool {
+fn is_counter_clockwise(a: GeometryCoordinate, b: GeometryCoordinate, c: GeometryCoordinate) -> bool {
     let l = (i32::from(c.y) - i32::from(a.y)).wrapping_mul(i32::from(b.x) - i32::from(a.x));
     let r = (i32::from(b.y) - i32::from(a.y)).wrapping_mul(i32::from(c.x) - i32::from(a.x));
     l > r
 }
 
 fn line_segment_intersects_line_segment(
-    a0: &GeometryCoordinate,
-    a1: &GeometryCoordinate,
-    b0: &GeometryCoordinate,
-    b1: &GeometryCoordinate,
+    a0: GeometryCoordinate,
+    a1: GeometryCoordinate,
+    b0: GeometryCoordinate,
+    b1: GeometryCoordinate,
 ) -> bool {
     is_counter_clockwise(a0, b0, b1) != is_counter_clockwise(a1, b0, b1)
         && is_counter_clockwise(a0, a1, b0) != is_counter_clockwise(a0, a1, b1)
@@ -104,11 +105,11 @@ fn line_intersects_line(line_a: &[GeometryCoordinate], line_b: &[GeometryCoordin
         return false;
     }
     for i in 0..line_a.len() - 1 {
-        let a0 = &line_a[i];
-        let a1 = &line_a[i + 1];
+        let a0 = line_a[i];
+        let a1 = line_a[i + 1];
         for j in 0..line_b.len() - 1 {
-            let b0 = &line_b[j];
-            let b1 = &line_b[j + 1];
+            let b0 = line_b[j];
+            let b1 = line_b[j + 1];
             if line_segment_intersects_line_segment(a0, a1, b0, b1) {
                 return true;
             }
@@ -125,14 +126,14 @@ fn line_intersects_buffered_line(line_a: &[GeometryCoordinate], line_b: &[Geomet
 
         // Check whether any point in either line is within radius of the other line
         for p in line_b {
-            if point_intersects_buffered_line(p, line_a, radius) {
+            if point_intersects_buffered_line(*p, line_a, radius) {
                 return true;
             }
         }
     }
 
     for p in line_a {
-        if point_intersects_buffered_line(p, line_b, radius) {
+        if point_intersects_buffered_line(*p, line_b, radius) {
             return true;
         }
     }
@@ -140,6 +141,7 @@ fn line_intersects_buffered_line(line_a: &[GeometryCoordinate], line_b: &[Geomet
     false
 }
 
+#[must_use]
 pub fn polygon_intersects_buffered_point(
     polygon: &[GeometryCoordinate],
     point: &GeometryCoordinate,
@@ -148,12 +150,13 @@ pub fn polygon_intersects_buffered_point(
     if polygon_contains_point(polygon, point) {
         return true;
     }
-    if point_intersects_buffered_line(point, polygon, radius) {
+    if point_intersects_buffered_line(*point, polygon, radius) {
         return true;
     }
     false
 }
 
+#[must_use]
 pub fn polygon_intersects_buffered_multi_point(
     polygon: &[GeometryCoordinate],
     rings: &[Vec<GeometryCoordinate>],
@@ -169,6 +172,7 @@ pub fn polygon_intersects_buffered_multi_point(
     false
 }
 
+#[must_use]
 pub fn polygon_intersects_buffered_multi_line(
     polygon: &[GeometryCoordinate],
     multi_line: &[Vec<GeometryCoordinate>],
@@ -191,6 +195,7 @@ pub fn polygon_intersects_buffered_multi_line(
     false
 }
 
+#[must_use]
 pub fn polygon_intersects_polygon(polygon_a: &[GeometryCoordinate], polygon_b: &[GeometryCoordinate]) -> bool {
     for p in polygon_a {
         if polygon_contains_point(polygon_b, p) {
@@ -207,6 +212,7 @@ pub fn polygon_intersects_polygon(polygon_a: &[GeometryCoordinate], polygon_b: &
     line_intersects_line(polygon_a, polygon_b)
 }
 
+#[must_use]
 pub fn polygon_intersects_multi_polygon(
     polygon: &[GeometryCoordinate],
     multi_polygon: &[Vec<GeometryCoordinate>],
@@ -240,6 +246,6 @@ mod tests {
         let far = vec![pts(&[(20, 20), (30, 30)])];
         assert!(!polygon_intersects_multi_polygon(&square, &far));
         let query = pts(&[(5, 5)]);
-        assert!(polygon_intersects_multi_polygon(&query, &[square.clone()]));
+        assert!(polygon_intersects_multi_polygon(&query, std::slice::from_ref(&square)));
     }
 }

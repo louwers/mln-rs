@@ -37,7 +37,7 @@ use crate::tile_render_data::{SharedBucketTileRenderData, TileRenderData};
 
 /// The messages a `RasterTile` sends its `RasterTileWorker`: the worker's
 /// public member functions. Port-only: serde writes them for a worker in
-/// another wasm instance (tile/worker_codec).
+/// another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterWorkerMessage {
     /// `parse(data, correlationID)`.
@@ -50,7 +50,7 @@ pub enum RasterWorkerMessage {
 
 /// The messages a `RasterTileWorker` sends its `RasterTile`: the tile's
 /// member functions the worker calls. Port-only: serde writes them for a
-/// worker in another wasm instance (tile/worker_codec).
+/// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum RasterTileMessage {
     /// `onParsed(std::move(bucket), correlationID)`.
@@ -62,12 +62,13 @@ pub enum RasterTileMessage {
 /// `RasterTileWorker`.
 pub struct RasterTileWorker {
     /// The tile, which gets the replies in the order of their parses
-    /// although images may decode asynchronously (ordered_replies.rs).
+    /// although images may decode asynchronously (`ordered_replies.rs`).
     parent: OrderedReplies<RasterTileMessage>,
 }
 
 impl RasterTileWorker {
     /// `RasterTileWorker(ActorRef<RasterTileWorker>, ActorRef<RasterTile>)`.
+    #[must_use]
     pub fn new(parent: Box<dyn TileEndpoint<RasterTileMessage>>) -> Self {
         RasterTileWorker { parent: OrderedReplies::new(parent) }
     }
@@ -81,7 +82,7 @@ impl RasterTileWorker {
 
     /// `parse(data, correlationID)`. The reply goes once the image has
     /// decoded, which may be after this returns (decoder.rs in
-    /// mln_image).
+    /// `mln_image`).
     pub fn parse(&mut self, data: Option<Data>, correlation_id: u64) {
         let parent = self.parent.slot();
         let Some(data) = data else {
@@ -206,6 +207,7 @@ pub struct RasterTile {
 
 impl RasterTile {
     /// `RasterTile(id, sourceID, parameters, tileset, observer)`.
+    #[must_use]
     pub fn new(
         id: OverscaledTileID,
         source_id: String,
@@ -230,6 +232,7 @@ impl RasterTile {
         RasterTile { inner, loader: Some(loader) }
     }
 
+    #[must_use]
     pub fn inner(&self) -> &Rc<RasterTileInner> {
         &self.inner
     }

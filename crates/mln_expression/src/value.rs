@@ -43,30 +43,36 @@ pub enum Value {
 }
 
 impl Value {
-    /// Javascript's Number.MAX_SAFE_INTEGER.
+    /// Javascript's `Number.MAX_SAFE_INTEGER`.
+    #[must_use]
     pub const fn max_safe_integer() -> u64 {
-        9007199254740991
+        9_007_199_254_740_991
     }
 
+    #[must_use]
     pub const fn is_safe_integer_u64(x: u64) -> bool {
         x <= Self::max_safe_integer()
     }
 
+    #[must_use]
     pub const fn is_safe_integer_i64(x: i64) -> bool {
         // `-x` wraps for INT64_MIN as the C++ compiles.
         (if x > 0 { x } else { x.wrapping_neg() }) as u64 <= Self::max_safe_integer()
     }
 
+    #[must_use]
     pub fn is_safe_integer_f64(x: f64) -> bool {
         // TODO(port): `static_cast<uint64_t>` of |x| >= 2^64 is UB in C++;
         // `as` saturates.
         ((if x > 0.0 { x } else { -x }) as u64) <= Self::max_safe_integer()
     }
 
+    #[must_use]
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)
     }
 
+    #[must_use]
     pub fn as_number(&self) -> Option<f64> {
         match self {
             Value::Number(n) => Some(*n),
@@ -74,6 +80,7 @@ impl Value {
         }
     }
 
+    #[must_use]
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Value::Bool(b) => Some(*b),
@@ -81,6 +88,7 @@ impl Value {
         }
     }
 
+    #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Value::String(s) => Some(s),
@@ -88,6 +96,7 @@ impl Value {
         }
     }
 
+    #[must_use]
     pub fn as_array(&self) -> Option<&Vec<Value>> {
         match self {
             Value::Array(a) => Some(a),
@@ -95,6 +104,7 @@ impl Value {
         }
     }
 
+    #[must_use]
     pub fn as_object(&self) -> Option<&ObjectType> {
         match self {
             Value::Object(o) => Some(o),
@@ -170,6 +180,7 @@ impl From<ObjectType> for Value {
 }
 
 /// `typeOf`.
+#[must_use]
 pub fn type_of(value: &Value) -> Type {
     match value {
         Value::Bool(_) => Type::Boolean,
@@ -190,7 +201,7 @@ pub fn type_of(value: &Value) -> Type {
                 let t = type_of(item);
                 match &item_type {
                     None => item_type = Some(t),
-                    Some(it) if *it == t => continue,
+                    Some(it) if *it == t => {}
                     Some(_) => {
                         item_type = Some(Type::Value);
                         break;
@@ -204,6 +215,7 @@ pub fn type_of(value: &Value) -> Type {
 }
 
 /// `expression::toString(const Value&)`.
+#[must_use]
 pub fn to_string(value: &Value) -> String {
     match value {
         Value::Null => String::new(),
@@ -265,29 +277,29 @@ fn write_json(writer: &mut Writer, value: &Value) {
 }
 
 /// `static_cast<int>(double)` for an integral double as clang compiles it on
-/// x86-64 (`cvttsd2si`): out-of-range values become INT_MIN.
+/// x86-64 (`cvttsd2si`): out-of-range values become `INT_MIN`.
 fn static_cast_int(f: f64) -> i32 {
-    if f >= -2147483648.0 && f < 2147483648.0 { f as i32 } else { i32::MIN }
+    if (-2_147_483_648.0..2_147_483_648.0).contains(&f) { f as i32 } else { i32::MIN }
 }
 
 /// `conversion::stringify(writer, const Padding&)` (via `toArray()`).
 fn stringify_padding(writer: &mut Writer, p: &Padding) {
     writer.start_array();
-    writer.double(p.top as f64);
-    writer.double(p.right as f64);
-    writer.double(p.bottom as f64);
-    writer.double(p.left as f64);
+    writer.double(f64::from(p.top));
+    writer.double(f64::from(p.right));
+    writer.double(f64::from(p.bottom));
+    writer.double(f64::from(p.left));
     writer.end_array();
 }
 
 /// `conversion::stringify(writer, const VariableAnchorOffsetCollection&)`.
 fn stringify_variable_anchor_offset_collection(writer: &mut Writer, v: &VariableAnchorOffsetCollection) {
     writer.start_array();
-    for pair in v.iter() {
+    for pair in v {
         writer.string(pair.anchor_type.to_string());
         writer.start_array();
-        writer.double(pair.offset[0] as f64);
-        writer.double(pair.offset[1] as f64);
+        writer.double(f64::from(pair.offset[0]));
+        writer.double(f64::from(pair.offset[1]));
         writer.end_array();
     }
     writer.end_array();
@@ -323,6 +335,7 @@ pub(crate) fn stringify_mbgl(writer: &mut Writer, v: &MbglValue) {
 }
 
 /// `expression::stringify(const Value&)`.
+#[must_use]
 pub fn stringify(value: &Value) -> String {
     let mut writer = Writer::new();
     write_json(&mut writer, value);
@@ -422,7 +435,7 @@ pub trait ValueConverter: Sized {
 
     /// `ValueConverter<std::vector<T>>::fromExpressionValue`: an array,
     /// element-wise. C++ specializes it for `std::vector<Color>`
-    /// (hillshade_conversions.cpp), which also wraps a single color.
+    /// (`hillshade_conversions.cpp`), which also wraps a single color.
     fn vec_from_expression_value(value: &Value) -> Option<Vec<Self>> {
         match value {
             Value::Array(v) => v.iter().map(Self::from_expression_value).collect(),
@@ -435,15 +448,18 @@ pub fn to_expression_value<T: ValueConverter>(value: &T) -> Value {
     value.to_expression_value()
 }
 
+#[must_use]
 pub fn from_expression_value<T: ValueConverter>(value: &Value) -> Option<T> {
     T::from_expression_value(value)
 }
 
+#[must_use]
 pub fn value_type_to_expression_type<T: ValueConverter>() -> Type {
     T::expression_type()
 }
 
 /// `fromExpressionValues<T>`.
+#[must_use]
 pub fn from_expression_values<T: ValueConverter>(values: &[Option<Value>]) -> Vec<Option<T>> {
     values.iter().map(|value| value.as_ref().and_then(from_expression_value::<T>)).collect()
 }
@@ -478,7 +494,7 @@ impl ValueConverter for f32 {
         Type::Number
     }
     fn to_expression_value(&self) -> Value {
-        Value::Number(*self as f64)
+        Value::Number(f64::from(*self))
     }
     fn from_expression_value(value: &Value) -> Option<Self> {
         value.as_number().map(|d| d as f32)
@@ -522,7 +538,7 @@ impl ValueConverter for Color {
     }
 
     /// `ValueConverter<std::vector<Color>>::fromExpressionValue`
-    /// (hillshade_conversions.cpp): an array converts element-wise; a single
+    /// (`hillshade_conversions.cpp)`: an array converts element-wise; a single
     /// color is wrapped in a one-element vector.
     fn vec_from_expression_value(value: &Value) -> Option<Vec<Self>> {
         if let Value::Array(values) = value {
@@ -603,7 +619,7 @@ impl ValueConverter for Rotation {
         (self.get_angle() as f32).to_expression_value()
     }
     fn from_expression_value(value: &Value) -> Option<Self> {
-        f32::from_expression_value(value).map(|angle| Rotation::new(angle as f64))
+        f32::from_expression_value(value).map(|angle| Rotation::new(f64::from(angle)))
     }
 }
 
@@ -652,6 +668,7 @@ enum_value_converter!(
 
 /// `type::toString` re-exported next to the value helpers, as the C++ code
 /// calls both unqualified.
+#[must_use]
 pub fn type_to_string(t: &Type) -> String {
     type_::to_string(t)
 }
@@ -671,8 +688,8 @@ mod tests {
 
     #[test]
     fn safe_integers() {
-        assert!(Value::is_safe_integer_f64(9007199254740991.0));
-        assert!(!Value::is_safe_integer_f64(9007199254740992.0));
+        assert!(Value::is_safe_integer_f64(9_007_199_254_740_991.0));
+        assert!(!Value::is_safe_integer_f64(9_007_199_254_740_992.0));
         assert!(!Value::is_safe_integer_i64(i64::MIN));
     }
 }

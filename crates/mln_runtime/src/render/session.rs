@@ -177,7 +177,7 @@ pub(crate) struct Waiters {
 impl Waiters {
     /// Completes the releases, and the detaches with `detached`. The attach
     /// and the work that never ran fail with `lost`.
-    pub(crate) fn settle(self, detached: Result<(), Error>, lost: impl Fn() -> Error) {
+    pub(crate) fn settle(self, detached: &Result<(), Error>, lost: impl Fn() -> Error) {
         if let Some(attach) = self.attach {
             attach.resolve(Err(lost()));
         }
@@ -248,7 +248,7 @@ impl SessionShared {
     /// The state is locked, and the session usable or failed.
     fn start_detach(&self, state: &mut SessionState) {
         state.lifecycle = RenderSessionState::Detaching;
-        worker::post(&self.run_loop, |worker, outbox| worker.detach(outbox));
+        worker::post(&self.run_loop, worker::Worker::detach);
     }
 
     /// Releases the session without waiting: it detaches, unless it is
@@ -362,14 +362,14 @@ impl SessionShared {
         match &map {
             // The map unbinds the session before another can attach.
             Some(map) => {
-                map.unbind_session(self.id, self.run_loop.clone(), |worker, outbox| worker.finish(outbox));
+                map.unbind_session(self.id, self.run_loop.clone(), worker::Worker::finish);
                 map.release_session_claim(self.id);
             }
-            None => worker::post(&self.run_loop, |worker, outbox| worker.finish(outbox)),
+            None => worker::post(&self.run_loop, worker::Worker::finish),
         }
         drop(gate);
         let lost = || Error::target_lost("the render session was abandoned");
-        waiters.settle(Err(lost()), lost);
+        waiters.settle(&Err(lost()), lost);
         drop(map);
         Ok(kept)
     }
@@ -821,7 +821,7 @@ impl RenderSession {
         if !self.shared().capabilities.presentation {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
-        self.operation(|worker, outbox| worker.release_target(outbox))
+        self.operation(worker::Worker::release_target)
     }
 
     /// Gives a surface session a new surface of `size` logical pixels, after
@@ -870,7 +870,7 @@ impl RenderSession {
     /// Clears what the renderer holds, such as loaded tiles, so that the
     /// next frame loads and draws the map again.
     pub fn clear_data(&self) -> Result<Completion<()>, Error> {
-        self.operation(|worker, outbox| worker.clear_data(outbox))
+        self.operation(worker::Worker::clear_data)
     }
 
     /// Logs the renderer's sources and tiles.

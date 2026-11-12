@@ -1,4 +1,4 @@
-//! Fails when the checked-in generated style code (crates/mln_style/src)
+//! Fails when the checked-in generated style code (`crates/mln_style/src`)
 //! differs from what the generator writes for the style spec in v8.json.
 
 use std::path::{Path, PathBuf};

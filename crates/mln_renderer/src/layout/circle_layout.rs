@@ -66,7 +66,7 @@ impl CircleLayout {
         filter_groups: &mut FilterGroups,
     ) -> Result<Self, Error> {
         debug_assert!(!group.is_empty());
-        let zoom = parameters.tile_id.overscaled_z as f32;
+        let zoom = f32::from(parameters.tile_id.overscaled_z);
         let leader_layer_properties = (*group[0])
             .as_any()
             .downcast_ref::<CircleLayerProperties>()
@@ -160,6 +160,7 @@ impl CircleLayout {
     }
 
     /// `hasDependencies()`.
+    #[must_use]
     pub fn has_dependencies(&self) -> bool {
         false
     }
@@ -233,7 +234,7 @@ impl CircleLayout {
                 // boundaries. Include all points in Still mode. You need to
                 // include points from neighbouring tiles so that they are
                 // not clipped at tile boundaries.
-                if mode == MapMode::Continuous && (x < 0 || x as i32 >= EXTENT || y < 0 || y as i32 >= EXTENT) {
+                if mode == MapMode::Continuous && (x < 0 || i32::from(x) >= EXTENT || y < 0 || i32::from(y) >= EXTENT) {
                     continue;
                 }
 
@@ -265,7 +266,7 @@ impl CircleLayout {
                 bucket.vertices.get_mut().push(CircleBucket::vertex(*point, -1.0, 1.0)); // 4
 
                 let segment = bucket.segments.last_mut().expect("segment");
-                debug_assert!(segment.vertex_length <= u16::MAX as usize);
+                debug_assert!(u16::try_from(segment.vertex_length).is_ok());
                 let index = segment.vertex_length as u16;
 
                 // 1, 2, 3
@@ -273,11 +274,11 @@ impl CircleLayout {
                 // (`index + 1` etc. are `int`s narrowed to uint16_t)
                 bucket.triangles.get_mut().extend_from_slice(&[
                     index,
-                    (index as i32 + 1) as u16,
-                    (index as i32 + 2) as u16,
+                    (i32::from(index) + 1) as u16,
+                    (i32::from(index) + 2) as u16,
                     index,
-                    (index as i32 + 3) as u16,
-                    (index as i32 + 2) as u16,
+                    (i32::from(index) + 3) as u16,
+                    (i32::from(index) + 2) as u16,
                 ]);
 
                 segment.vertex_length += VERTEX_LENGTH;
@@ -291,7 +292,7 @@ impl CircleLayout {
                 feature,
                 length,
                 feature_index,
-                &Default::default(),
+                &ImagePositions::default(),
                 None,
                 canonical,
                 &EMPTY_FORMATTED_SECTION,
@@ -319,7 +320,7 @@ impl Layout for CircleLayout {
         self.create_bucket_with(
             &*layer,
             &mut |geometries, i, source_layer_id, bucket_leader_id| {
-                feature_index.insert(geometries, i, source_layer_id, bucket_leader_id)
+                feature_index.insert(geometries, i, source_layer_id, bucket_leader_id);
             },
             render_data,
             canonical,

@@ -17,16 +17,16 @@ pub type StyledText = (Vec<u16>, Vec<u8>);
 /// `FontStackHash`.
 pub type FontStackHash = u64;
 
-/// libstdc++'s `std::_Hash_bytes` (hash_bytes.cc, 64-bit `size_t`), which
+/// libstdc++'s `std::_Hash_bytes` (`hash_bytes.cc`, 64-bit `size_t`), which
 /// `std::hash<std::string>` calls with seed 0xc70f6907.
 fn hash_bytes(data: &[u8], seed: u64) -> u64 {
-    const MUL: u64 = (0xc6a4a793u64 << 32) + 0x5bd1e995;
+    const MUL: u64 = (0xc6a4_a793_u64 << 32) + 0x5bd1_e995;
     let shift_mix = |v: u64| v ^ (v >> 47);
     let len = data.len();
     let len_aligned = len & !7;
     let mut hash = seed ^ (len as u64).wrapping_mul(MUL);
-    for chunk in data[..len_aligned].chunks_exact(8) {
-        let d = shift_mix(u64::from_le_bytes(chunk.try_into().unwrap()).wrapping_mul(MUL)).wrapping_mul(MUL);
+    for chunk in data[..len_aligned].as_chunks::<8>().0 {
+        let d = shift_mix(u64::from_le_bytes(*chunk).wrapping_mul(MUL)).wrapping_mul(MUL);
         hash ^= d;
         hash = hash.wrapping_mul(MUL);
     }
@@ -34,7 +34,7 @@ fn hash_bytes(data: &[u8], seed: u64) -> u64 {
         // load_bytes: the remaining bytes, little-endian.
         let mut d: u64 = 0;
         for &b in data[len_aligned..].iter().rev() {
-            d = (d << 8) + b as u64;
+            d = (d << 8) + u64::from(b);
         }
         hash ^= d;
         hash = hash.wrapping_mul(MUL);
@@ -43,14 +43,15 @@ fn hash_bytes(data: &[u8], seed: u64) -> u64 {
     shift_mix(hash)
 }
 
-/// `FontStackHasher` (util/font_stack.cpp): `util::hash_combine` of
+/// `FontStackHasher` (`util/font_stack.cpp)`: `util::hash_combine` of
 /// `std::hash<std::string>` of each font name.
 // TODO(port): belongs in mln_util::font_stack.
+#[must_use]
 pub fn font_stack_hash(font_stack: &FontStack) -> FontStackHash {
     let mut seed: u64 = 0;
     for font in font_stack {
-        let h = hash_bytes(font.as_bytes(), 0xc70f6907);
-        seed ^= h.wrapping_add(0x9e3779b9).wrapping_add(seed << 6).wrapping_add(seed >> 2);
+        let h = hash_bytes(font.as_bytes(), 0xc70f_6907);
+        seed ^= h.wrapping_add(0x9e37_79b9).wrapping_add(seed << 6).wrapping_add(seed >> 2);
     }
     seed
 }
@@ -75,6 +76,7 @@ pub struct SectionOptions {
 
 impl SectionOptions {
     /// `SectionOptions(scale, fontStack, type, startIndex, textColor)`.
+    #[must_use]
     pub fn new(
         scale: f64,
         font_stack: FontStack,
@@ -98,6 +100,7 @@ impl SectionOptions {
     }
 
     /// `SectionOptions(scale, fontStackHash, type, startIndex, textColor)`.
+    #[must_use]
     pub fn with_hash(
         scale: f64,
         font_stack_hash: FontStackHash,
@@ -121,6 +124,7 @@ impl SectionOptions {
 
     /// `SectionOptions(std::string imageID)`. (C++ leaves `fontStackHash`
     /// and `startIndex` uninitialized here; they are 0.)
+    #[must_use]
     pub fn image(image_id: String) -> Self {
         SectionOptions {
             scale: 1.0,
@@ -162,41 +166,50 @@ fn is_trim_whitespace(c: u16) -> bool {
 
 impl TaggedString {
     /// `TaggedString(std::u16string text, SectionOptions options)`.
+    #[must_use]
     pub fn new(text: Vec<u16>, options: SectionOptions) -> Self {
         let size = text.len();
         TaggedString { styled_text: (text, vec![0; size]), sections: vec![options], ..Default::default() }
     }
 
     /// `TaggedString(StyledText, std::vector<SectionOptions>)`.
+    #[must_use]
     pub fn from_styled_text(styled_text: StyledText, sections: Vec<SectionOptions>) -> Self {
         TaggedString { styled_text, sections, ..Default::default() }
     }
 
+    #[must_use]
     pub fn length(&self) -> usize {
         self.styled_text.0.len()
     }
 
+    #[must_use]
     pub fn section_count(&self) -> usize {
         self.sections.len()
     }
 
+    #[must_use]
     pub fn empty(&self) -> bool {
         self.styled_text.0.is_empty()
     }
 
     /// `getSection(index)`: `sections.at(styledText.second.at(index))`.
+    #[must_use]
     pub fn get_section(&self, index: usize) -> &SectionOptions {
         &self.sections[self.styled_text.1[index] as usize]
     }
 
+    #[must_use]
     pub fn get_char_code_at(&self, index: usize) -> u16 {
         self.styled_text.0[index]
     }
 
+    #[must_use]
     pub fn raw_text(&self) -> &[u16] {
         &self.styled_text.0
     }
 
+    #[must_use]
     pub fn get_styled_text(&self) -> &StyledText {
         &self.styled_text
     }
@@ -266,19 +279,23 @@ impl TaggedString {
         self.styled_text.1.resize(self.styled_text.0.len(), index);
     }
 
+    #[must_use]
     pub fn section_at(&self, index: usize) -> &SectionOptions {
         &self.sections[index]
     }
 
+    #[must_use]
     pub fn get_sections(&self) -> &[SectionOptions] {
         &self.sections
     }
 
+    #[must_use]
     pub fn get_section_index(&self, character_index: usize) -> u8 {
         self.styled_text.1[character_index]
     }
 
     /// `getMaxScale` (`util::max` = `fmax`).
+    #[must_use]
     pub fn get_max_scale(&self) -> f64 {
         let mut max_scale = 0.0;
         for i in 0..self.styled_text.0.len() {
@@ -343,9 +360,9 @@ impl TaggedString {
     /// characters in place so that style indices don't need updating.
     pub fn verticalize_punctuation(&mut self) {
         let mut replaced = i18n::verticalize_punctuation_str(&self.styled_text.0);
-        for i in 0..replaced.len() {
+        for (i, unit) in replaced.iter_mut().enumerate() {
             if self.get_section(i).type_ != GlyphIDType::FontPBF {
-                replaced[i] = self.styled_text.0[i];
+                *unit = self.styled_text.0[i];
             }
         }
         self.styled_text.0 = replaced;
@@ -367,6 +384,7 @@ impl TaggedString {
         self.supports_vertical_writing_mode.unwrap()
     }
 
+    #[must_use]
     pub fn hb_shaped(&self) -> bool {
         self.text_hb_shaped
     }
@@ -375,6 +393,7 @@ impl TaggedString {
         self.text_hb_shaped = shaped;
     }
 
+    #[must_use]
     pub fn has_need_hb_shape_text(&self) -> bool {
         self.has_need_shape_text_val
     }
@@ -393,9 +412,9 @@ impl TaggedString {
     }
 }
 
-/// Ports test/text/tagged_string.test.cpp.
+/// Ports `test/text/tagged_string.test.cpp`.
 #[cfg(test)]
-mod tagged_string {
+mod tests {
     use super::*;
 
     fn u(s: &str) -> Vec<u16> {
@@ -452,6 +471,6 @@ mod tagged_string {
     #[test]
     fn font_stack_hash_of_libstdcxx() {
         // std::hash<std::string>{}("") with libstdc++ (x86-64).
-        assert_eq!(hash_bytes(b"", 0xc70f6907), 6142509188972423790);
+        assert_eq!(hash_bytes(b"", 0xc70f_6907), 6_142_509_188_972_423_790);
     }
 }

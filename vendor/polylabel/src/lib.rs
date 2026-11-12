@@ -10,7 +10,7 @@ use std::collections::BinaryHeap;
 
 use geometry::{LinearRing, Point, Polygon};
 
-/// `polygon.at(0)` / `ring.at(0)` on an empty vector (std::out_of_range).
+/// `polygon.at(0)` / `ring.at(0)` on an empty vector (`std::out_of_range`).
 const OUT_OF_RANGE: &str = "vector::_M_range_check: __n (which is 0) >= this->size() (which is 0)";
 
 /// `std::min(a, b)`
@@ -19,6 +19,7 @@ fn std_min(a: f64, b: f64) -> f64 {
 }
 
 // get squared distance from a point to a segment
+#[must_use]
 pub fn get_seg_dist_sq(p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
     let mut x = a.x;
     let mut y = a.y;
@@ -45,6 +46,7 @@ pub fn get_seg_dist_sq(p: &Point<f64>, a: &Point<f64>, b: &Point<f64>) -> f64 {
 
 // signed distance from point to polygon outline (negative if point is
 // outside)
+#[must_use]
 pub fn point_to_polygon_dist(point: &Point<f64>, polygon: &Polygon<f64>) -> f64 {
     let mut inside = false;
     let mut min_dist_sq = f64::INFINITY;
@@ -82,6 +84,7 @@ pub struct Cell {
 }
 
 impl Cell {
+    #[must_use]
     pub fn new(c: Point<f64>, h: f64, polygon: &Polygon<f64>) -> Self {
         let d = point_to_polygon_dist(&c, polygon);
         Cell { c, h, d, max: d + h * std::f64::consts::SQRT_2 }

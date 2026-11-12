@@ -30,6 +30,7 @@ pub struct RenderCustomVectorSource {
 
 impl RenderCustomVectorSource {
     /// `RenderCustomVectorSource(Immutable<style::CustomVectorSource::Impl>, const TaggedScheduler&)`.
+    #[must_use]
     pub fn new(impl_: Arc<custom_vector_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderCustomVectorSource { tile_source: RenderTileSource::new(impl_, thread_pool), fast_pfor_enabled: false }

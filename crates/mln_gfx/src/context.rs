@@ -13,7 +13,6 @@ use std::any::Any;
 use std::cell::{Ref, RefCell, RefMut};
 use std::rc::Rc;
 
-use mln_tile_id::CanonicalTileID;
 use mln_util::size::Size;
 
 use crate::backend::Type as BackendType;
@@ -22,7 +21,7 @@ use crate::command_encoder::CommandEncoder;
 use crate::context_observer::ContextObserver;
 use crate::depth_mode::DepthMode;
 use crate::drawable_builder::UniqueDrawableBuilder;
-use crate::globe_clip_mask::GlobeClipMask;
+use crate::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
 use crate::offscreen_texture::OffscreenTexture;
 use crate::projection_variant::ProjectionVariant;
 use crate::render_pass::RenderPass;
@@ -46,6 +45,7 @@ pub struct ContextBase {
 impl ContextBase {
     pub const MINIMUM_REQUIRED_VERTEX_BINDING_COUNT: u32 = 8;
 
+    #[must_use]
     pub fn new(maximum_vertex_binding_count: u32) -> Self {
         ContextBase {
             maximum_vertex_binding_count,
@@ -130,7 +130,7 @@ pub trait Context: Any {
     /// C++: `webgpu::Context::renderTileClippingMasks(renderPass, staticData,
     /// tileUBOs)`, called by `PaintParameters::renderTileClippingMasks` under
     /// `MLN_RENDER_BACKEND_WEBGPU` (Metal has the same method). On the trait
-    /// because mln_renderer can't name mln_webgpu; `staticData` is reduced to
+    /// because `mln_renderer` can't name `mln_webgpu`; `staticData` is reduced to
     /// the shader registry, the only member used. Backends without it return
     /// false.
     fn render_tile_clipping_masks(
@@ -154,7 +154,7 @@ pub trait Context: Any {
     /// staticData, masks)`; on the trait for the reason
     /// `render_tile_clipping_masks` is. C++ builds the meshes with
     /// `rawGlobeTileMesh(tile, borders, SubdivisionGranularitySetting::globe().stencil)`,
-    /// which lives in mln_renderer, so the caller passes that call as
+    /// which lives in `mln_renderer`, so the caller passes that call as
     /// `mesh`, returning the mesh's raw `Short2` vertices and its indices; the
     /// context still keeps one per zoom, pole row and border. Backends without
     /// it return false.
@@ -163,7 +163,7 @@ pub trait Context: Any {
         _render_pass: &dyn RenderPass,
         _shaders: &ShaderRegistry,
         _masks: &[GlobeClipMask],
-        _mesh: &dyn Fn(&CanonicalTileID, bool) -> (Vec<u8>, Vec<u16>),
+        _mesh: &GlobeClipMeshFn<'_>,
     ) -> bool {
         false
     }

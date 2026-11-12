@@ -7,6 +7,8 @@
 //! `build_root_leaves`, `make_root_leaves`), `collect_entries`,
 //! `entries_tms` and `get_tile` over a memory map (unused by the core).
 
+use std::cmp::Ordering;
+
 pub const TILETYPE_UNKNOWN: u8 = 0x0;
 pub const TILETYPE_MVT: u8 = 0x1;
 pub const TILETYPE_PNG: u8 = 0x2;
@@ -215,18 +217,17 @@ fn rotate(n: i64, x: &mut u32, y: &mut u32, rx: u32, ry: u32) {
 }
 
 /// `find_tile`: use a 0 length entry as a null value.
+#[must_use]
 pub fn find_tile(entries: &[EntryV3], tile_id: u64) -> EntryV3 {
     let mut m: i64 = 0;
     let mut n: i64 = entries.len() as i64 - 1;
     while m <= n {
         let k = (n + m) >> 1;
         let entry = &entries[k as usize];
-        if tile_id > entry.tile_id {
-            m = k + 1;
-        } else if tile_id < entry.tile_id {
-            n = k - 1;
-        } else {
-            return *entry;
+        match tile_id.cmp(&entry.tile_id) {
+            Ordering::Greater => m = k + 1,
+            Ordering::Less => n = k - 1,
+            Ordering::Equal => return *entry,
         }
     }
 
@@ -245,7 +246,7 @@ pub fn find_tile(entries: &[EntryV3], tile_id: u64) -> EntryV3 {
 
 /// `tileid_to_zxy`.
 pub fn tileid_to_zxy(tileid: u64) -> Result<Zxy, Error> {
-    if tileid > 6148914691236517204 {
+    if tileid > 6_148_914_691_236_517_204 {
         return Err(Error::Overflow("tile zoom exceeds 64-bit limit"));
     }
     let bit_width = 64 - (3 * tileid + 1).leading_zeros() as u8;
@@ -307,7 +308,7 @@ pub fn deserialize_directory(decompressed: &[u8]) -> Result<Vec<EntryV3>, Error>
     let mut result = vec![EntryV3::default(); num_entries];
 
     let mut last_id: u64 = 0;
-    for entry in result.iter_mut() {
+    for entry in &mut result {
         let val = decode_varint(&mut t)?;
         if val > u64::MAX - last_id {
             return Err(Error::MalformedDirectory);
@@ -317,7 +318,7 @@ pub fn deserialize_directory(decompressed: &[u8]) -> Result<Vec<EntryV3>, Error>
         last_id = tile_id;
     }
 
-    for entry in result.iter_mut() {
+    for entry in &mut result {
         let val = decode_varint(&mut t)?;
         if val > u64::from(u32::MAX) {
             return Err(Error::MalformedDirectory);
@@ -325,7 +326,7 @@ pub fn deserialize_directory(decompressed: &[u8]) -> Result<Vec<EntryV3>, Error>
         entry.run_length = val as u32;
     }
 
-    for entry in result.iter_mut() {
+    for entry in &mut result {
         let val = decode_varint(&mut t)?;
         if val > u64::from(u32::MAX) {
             return Err(Error::MalformedDirectory);
@@ -383,7 +384,7 @@ mod tests {
     fn varints() {
         let mut data: &[u8] = &[0xac, 0x02];
         assert_eq!(300, decode_varint(&mut data).unwrap());
-        assert!(data.is_empty());
+        assert_eq!(data, []);
         let mut data: &[u8] = &[0xac];
         assert_eq!(Err(Error::EndOfBuffer), decode_varint(&mut data));
         let mut data: &[u8] = &[0xff; 12];

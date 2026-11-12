@@ -29,6 +29,7 @@ pub use crate::tagged_string::StyledText;
 /// Takes UTF16 input in logical order and applies Arabic shaping to the
 /// input while maintaining logical order. Output won't be intelligible
 /// until the bidirectional algorithm is applied.
+#[must_use]
 pub fn apply_arabic_shaping(input: &[u16]) -> Vec<u16> {
     // (U_SHAPE_LETTERS_SHAPE & U_SHAPE_LETTERS_MASK) |
     // (U_SHAPE_TEXT_DIRECTION_LOGICAL & U_SHAPE_TEXT_DIRECTION_MASK)
@@ -50,6 +51,7 @@ pub fn apply_arabic_shaping(input: &[u16]) -> Vec<u16> {
 
 /// `startsRightToLeft`: whether the first character in `text` with a
 /// strong direction runs right to left.
+#[must_use]
 pub fn starts_right_to_left(text: &[u16]) -> bool {
     // u_charDirection: U_LEFT_TO_RIGHT, U_RIGHT_TO_LEFT,
     // U_RIGHT_TO_LEFT_ARABIC.
@@ -57,7 +59,7 @@ pub fn starts_right_to_left(text: &[u16]) -> bool {
     const U_RIGHT_TO_LEFT: u8 = 1;
     const U_RIGHT_TO_LEFT_ARABIC: u8 = 13;
     for &ch in text {
-        match ubidi_get_class(ch as i32) {
+        match ubidi_get_class(i32::from(ch)) {
             U_LEFT_TO_RIGHT => return false,
             U_RIGHT_TO_LEFT | U_RIGHT_TO_LEFT_ARABIC => return true,
             _ => {}
@@ -67,17 +69,17 @@ pub fn starts_right_to_left(text: &[u16]) -> bool {
 }
 
 /// `IS_BIDI_CONTROL_CHAR(c)` (ICU ubidiimp.h): what
-/// UBIDI_REMOVE_BIDI_CONTROLS removes.
+/// `UBIDI_REMOVE_BIDI_CONTROLS` removes.
 fn is_bidi_control_char(c: u16) -> bool {
-    let c = c as u32;
-    (c & 0xfffffffc) == 0x200c || c.wrapping_sub(0x202a) < 5 || c.wrapping_sub(0x2066) < 4
+    let c = u32::from(c);
+    (c & 0xffff_fffc) == 0x200c || c.wrapping_sub(0x202a) < 5 || c.wrapping_sub(0x2066) < 4
 }
 
 /// The code point ending at `text[end - 1]` and its first index.
 fn code_point_before(text: &[u16], end: usize) -> (u32, usize) {
-    let c = text[end - 1] as u32;
+    let c = u32::from(text[end - 1]);
     if (c & 0xfc00) == 0xdc00 && end >= 2 {
-        let lead = text[end - 2] as u32;
+        let lead = u32::from(text[end - 2]);
         if (lead & 0xfc00) == 0xd800 {
             return (((lead - 0xd800) << 10) + (c - 0xdc00) + 0x10000, end - 2);
         }
@@ -95,7 +97,7 @@ fn push_code_point(out: &mut Vec<u16>, c: u32) {
 }
 
 /// An RTL run written as `ubidi_writeReverse`/`writeReordered` do with
-/// UBIDI_DO_MIRRORING | UBIDI_REMOVE_BIDI_CONTROLS: code points in reverse
+/// `UBIDI_DO_MIRRORING` | `UBIDI_REMOVE_BIDI_CONTROLS`: code points in reverse
 /// order, mirrored, BiDi controls dropped.
 fn write_reverse_mirrored(src: &[u16], out: &mut Vec<u16>) {
     let mut end = src.len();
@@ -138,6 +140,7 @@ fn visual_runs(info: &BidiInfo<'_>, para: &ParagraphInfo, line: Range<usize>) ->
 }
 
 impl BiDi {
+    #[must_use]
     pub fn new() -> Self {
         BiDi {}
     }

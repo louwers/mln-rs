@@ -95,7 +95,7 @@ pub(crate) unsafe fn write_sized<T: Versioned>(pointer: *mut T, value: &T) -> Re
     // caller's struct and readable in `value`, and the two don't overlap.
     unsafe {
         core::ptr::copy_nonoverlapping(
-            (value as *const T).cast::<u8>().add(skip),
+            std::ptr::from_ref::<T>(value).cast::<u8>().add(skip),
             pointer.cast::<u8>().add(skip),
             length - skip,
         );
@@ -154,12 +154,12 @@ mod tests {
     fn a_read_zeroes_what_an_older_caller_left_out() {
         let older = Options { size: 8, first: 3, second: 9 };
         // SAFETY: a local of the size it declares.
-        let read = unsafe { read_sized(&older) }.unwrap();
+        let read = unsafe { read_sized(&raw const older) }.unwrap();
         assert_eq!(read, Options { size: 8, first: 3, second: 0 });
 
         let current = Options { size: size_of::<Options>() as u32, ..older };
         // SAFETY: as above.
-        assert_eq!(unsafe { read_sized(&current) }.unwrap(), current);
+        assert_eq!(unsafe { read_sized(&raw const current) }.unwrap(), current);
     }
 
     #[test]
@@ -167,7 +167,7 @@ mod tests {
         let small = Options { size: 4, first: 0, second: 0 };
         // SAFETY: a local, and null.
         unsafe {
-            assert_eq!(read_sized(&small).unwrap_err().message(), "options.size is too small");
+            assert_eq!(read_sized(&raw const small).unwrap_err().message(), "options.size is too small");
             assert_eq!(read_sized::<Options>(core::ptr::null()).unwrap_err().message(), "options must not be null");
         }
     }
@@ -177,17 +177,17 @@ mod tests {
         let value = Options { size: 99, first: 1, second: 2 };
         let mut older = Options { size: 8, first: 0, second: 7 };
         // SAFETY: a local of the size it declares.
-        unsafe { write_sized(&mut older, &value) }.unwrap();
+        unsafe { write_sized(&raw mut older, &value) }.unwrap();
         assert_eq!(older, Options { size: 8, first: 1, second: 7 });
 
         let mut current = Options { size: size_of::<Options>() as u32, first: 0, second: 0 };
         // SAFETY: as above.
-        unsafe { write_sized(&mut current, &value) }.unwrap();
+        unsafe { write_sized(&raw mut current, &value) }.unwrap();
         assert_eq!(current, Options { size: size_of::<Options>() as u32, first: 1, second: 2 });
 
         let mut small = Options { size: 0, first: 0, second: 0 };
         // SAFETY: as above.
-        assert!(unsafe { write_sized(&mut small, &value) }.is_err());
+        assert!(unsafe { write_sized(&raw mut small, &value) }.is_err());
     }
 
     #[test]

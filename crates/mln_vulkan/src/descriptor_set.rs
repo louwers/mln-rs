@@ -52,6 +52,7 @@ pub struct BufferSetShape {
 
 impl DescriptorSetType {
     /// The buffers of the type's sets; none for the image set.
+    #[must_use]
     pub fn buffer_shape(self) -> BufferSetShape {
         match self {
             DescriptorSetType::Global => BufferSetShape { storage: 0, uniform: GLOBAL_UNIFORM_COUNT },
@@ -65,6 +66,7 @@ impl DescriptorSetType {
     /// (`buildUniformDescriptorSetLayout`): all but the fragment stage for a
     /// layer's vertex-only buffer, and all but the vertex stage for its
     /// fragment-only one.
+    #[must_use]
     pub fn buffer_stages(self, binding: u32) -> vk::ShaderStageFlags {
         let mut stages = vk::ShaderStageFlags::VERTEX | vk::ShaderStageFlags::FRAGMENT;
         if self == DescriptorSetType::Layer {
@@ -99,6 +101,7 @@ pub struct DescriptorPoolGrowable {
 }
 
 impl DescriptorPoolGrowable {
+    #[must_use]
     pub fn new(
         max_sets: u32,
         descriptor_storage_per_set: u32,

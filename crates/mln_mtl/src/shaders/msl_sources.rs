@@ -438,10 +438,10 @@ enum {
 /// `ShaderSource<BuiltIn::AtmosphereShader, gfx::Backend::Type::Metal>`
 pub const ATMOSPHERE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "AtmosphereShader",
-    name: r#"AtmosphereShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
-    prelude: r#"
+    name: r"AtmosphereShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r"
 
 enum {
     idSkyPropsUBO = drawableReservedUBOCount,
@@ -469,8 +469,8 @@ struct alignas(16) AtmospherePropsUBO {
     float4 sun_position;
 };
 
-"#,
-    source: r#"
+",
+    source: r"
 
 struct AtmosphereVertexStage {
     short2 position [[attribute(0)]];
@@ -591,15 +591,15 @@ half4 fragment fragmentMain(
     color = pow(color, float4(1.0 / 2.2));
     return half4(float4(color.rgb, 1.0 - color.a) * atmosphere.sun_position.w);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::BackgroundPatternShader, gfx::Backend::Type::Metal>`
 pub const BACKGROUND_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "BackgroundPatternShader",
-    name: r#"BackgroundPatternShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"BackgroundPatternShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -665,7 +665,7 @@ union BackgroundDrawableUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -722,15 +722,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(mix(color1, color2, props.mix) * props.opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::BackgroundShader, gfx::Backend::Type::Metal>`
 pub const BACKGROUND_SHADER: MslShaderSource = MslShaderSource {
     built_in: "BackgroundShader",
-    name: r#"BackgroundShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"BackgroundShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -796,7 +796,7 @@ union BackgroundDrawableUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -826,15 +826,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(props.color * props.opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CircleShader, gfx::Backend::Type::Metal>`
 pub const CIRCLE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "CircleShader",
-    name: r#"CircleShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"CircleShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -879,7 +879,7 @@ struct alignas(16) CircleEvaluatedPropsUBO {
 static_assert(sizeof(CircleEvaluatedPropsUBO) == 4 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -1093,15 +1093,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(opacity_t * mix(color * opacity, stroke_color * stroke_opacity, color_t));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::ClippingMaskProgram, gfx::Backend::Type::Metal>`
 pub const CLIPPING_MASK_PROGRAM: MslShaderSource = MslShaderSource {
     built_in: "ClippingMaskProgram",
-    name: r#"ClippingMaskProgram"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"ClippingMaskProgram",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1120,7 +1120,7 @@ struct alignas(16) ClipUBO {
 static_assert(sizeof(ClipUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -1150,15 +1150,15 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(1.0);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CollisionBoxShader, gfx::Backend::Type::Metal>`
 pub const COLLISION_BOX_SHADER: MslShaderSource = MslShaderSource {
     built_in: "CollisionBoxShader",
-    name: r#"CollisionBoxShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"CollisionBoxShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1184,7 +1184,7 @@ struct alignas(16) CollisionTilePropsUBO {
 static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1257,15 +1257,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
 
     return half4(color);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::CollisionCircleShader, gfx::Backend::Type::Metal>`
 pub const COLLISION_CIRCLE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "CollisionCircleShader",
-    name: r#"CollisionCircleShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"CollisionCircleShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1291,7 +1291,7 @@ struct alignas(16) CollisionTilePropsUBO {
 static_assert(sizeof(CollisionTilePropsUBO) == 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1384,15 +1384,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(opacity_t * color);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::ColorReliefShader, gfx::Backend::Type::Metal>`
 pub const COLOR_RELIEF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "ColorReliefShader",
-    name: r#"ColorReliefShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"ColorReliefShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1427,7 +1427,7 @@ struct alignas(16) ColorReliefEvaluatedPropsUBO {
 static_assert(sizeof(ColorReliefEvaluatedPropsUBO) == 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1538,15 +1538,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     fragColor = half4(color);
     return fragColor;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::DebugShader, gfx::Backend::Type::Metal>`
 pub const DEBUG_SHADER: MslShaderSource = MslShaderSource {
     built_in: "DebugShader",
-    name: r#"DebugShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"DebugShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1566,7 +1566,7 @@ struct alignas(16) DebugUBO {
 static_assert(sizeof(DebugUBO) == 6 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1603,15 +1603,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     float4 color = mix(debug.color, overlay_color, overlay_color.a);
     return half4(color);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionInstancedShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionInstancedShader",
-    name: r#"FillExtrusionInstancedShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillExtrusionInstancedShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1667,7 +1667,7 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -1794,15 +1794,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionPatternInstancedShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_PATTERN_INSTANCED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionPatternInstancedShader",
-    name: r#"FillExtrusionPatternInstancedShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillExtrusionPatternInstancedShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -1858,7 +1858,7 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -2065,15 +2065,15 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionPatternShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionPatternShader",
-    name: r#"FillExtrusionPatternShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillExtrusionPatternShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -2129,7 +2129,7 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -2307,15 +2307,15 @@ fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]],
 
     return {half4(mix(color1, color2, props.fade) * in.lighting)/*, in.position.z*/};
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillExtrusionShader, gfx::Backend::Type::Metal>`
 pub const FILL_EXTRUSION_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillExtrusionShader",
-    name: r#"FillExtrusionShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillExtrusionShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -2371,7 +2371,7 @@ struct alignas(16) FillExtrusionPropsUBO {
 static_assert(sizeof(FillExtrusionPropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -2481,15 +2481,15 @@ FragmentStage vertex vertexMain(thread const VertexStage vertx [[stage_in]],
 fragment FragmentOutput fragmentMain(FragmentStage in [[stage_in]]) {
     return { in.color/*, in.position.z*/ };
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlinePatternShader, gfx::Backend::Type::Metal>`
 pub const FILL_OUTLINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillOutlinePatternShader",
-    name: r#"FillOutlinePatternShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillOutlinePatternShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -2630,7 +2630,7 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -2798,15 +2798,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     // shaders; the C++ Metal source leaves `alpha` out here.
     return half4(mix(color1, color2, props.fade) * alpha * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlineShader, gfx::Backend::Type::Metal>`
 pub const FILL_OUTLINE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillOutlineShader",
-    name: r#"FillOutlineShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillOutlineShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -2947,7 +2947,7 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -3013,15 +3013,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillOutlineTriangulatedShader, gfx::Backend::Type::Metal>`
 pub const FILL_OUTLINE_TRIANGULATED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillOutlineTriangulatedShader",
-    name: r#"FillOutlineTriangulatedShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillOutlineTriangulatedShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -3162,7 +3162,7 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
@@ -3232,15 +3232,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(props.outline_color * (alpha * props.opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillPatternShader, gfx::Backend::Type::Metal>`
 pub const FILL_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillPatternShader",
-    name: r#"FillPatternShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillPatternShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -3381,7 +3381,7 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -3534,15 +3534,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     }
     return half4(mix(color1, color2, props.fade) * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::FillShader, gfx::Backend::Type::Metal>`
 pub const FILL_SHADER: MslShaderSource = MslShaderSource {
     built_in: "FillShader",
-    name: r#"FillShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"FillShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -3683,7 +3683,7 @@ union FillTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -3745,23 +3745,23 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::GlobeDepthShader, gfx::Backend::Type::Metal>`
 pub const GLOBE_DEPTH_SHADER: MslShaderSource = MslShaderSource {
     built_in: "GlobeDepthShader",
-    name: r#"GlobeDepthShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
-    prelude: r#"
+    name: r"GlobeDepthShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r"
 
 enum {
     globeDepthUBOCount = drawableReservedUBOCount
 };
 
-"#,
-    source: r#"
+",
+    source: r"
 
 struct VertexStage {
     short2 position [[attribute(0)]];
@@ -3782,15 +3782,15 @@ FragmentStage vertex vertexMain(VertexStage in [[stage_in]],
 half4 fragment fragmentMain(FragmentStage in [[stage_in]]) {
     return half4(0.0);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HeatmapShader, gfx::Backend::Type::Metal>`
 pub const HEATMAP_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HeatmapShader",
-    name: r#"HeatmapShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"HeatmapShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -3928,9 +3928,9 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 /// `ShaderSource<BuiltIn::HeatmapTextureShader, gfx::Backend::Type::Metal>`
 pub const HEATMAP_TEXTURE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HeatmapTextureShader",
-    name: r#"HeatmapTextureShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"HeatmapTextureShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -3949,7 +3949,7 @@ struct alignas(16) HeatmapTexturePropsUBO {
 static_assert(sizeof(HeatmapTexturePropsUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -3988,15 +3988,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
     float4 color = color_ramp.sample(color_ramp_sampler, float2(t, 0.5));
     return half4(color * props.opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HillshadePrepareShader, gfx::Backend::Type::Metal>`
 pub const HILLSHADE_PREPARE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HillshadePrepareShader",
-    name: r#"HillshadePrepareShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"HillshadePrepareShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -4021,7 +4021,7 @@ struct alignas(16) HillshadePrepareTilePropsUBO {
 static_assert(sizeof(HillshadePrepareTilePropsUBO) == 2 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -4114,15 +4114,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::HillshadeShader, gfx::Backend::Type::Metal>`
 pub const HILLSHADE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "HillshadeShader",
-    name: r#"HillshadeShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"HillshadeShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -4162,7 +4162,7 @@ struct alignas(16) HillshadeEvaluatedPropsUBO {
 static_assert(sizeof(HillshadeEvaluatedPropsUBO) == 11 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 #define PI 3.141592653589793
 #define STANDARD 0
@@ -4362,15 +4362,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return fragColor;
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineGradientSDFShader, gfx::Backend::Type::Metal>`
 pub const LINE_GRADIENT_SDF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineGradientSDFShader",
-    name: r#"LineGradientSDFShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LineGradientSDFShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -4539,7 +4539,7 @@ union LineTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
@@ -4758,15 +4758,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineGradientShader, gfx::Backend::Type::Metal>`
 pub const LINE_GRADIENT_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineGradientShader",
-    name: r#"LineGradientShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LineGradientShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -4935,7 +4935,7 @@ union LineTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
@@ -5109,15 +5109,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LinePatternShader, gfx::Backend::Type::Metal>`
 pub const LINE_PATTERN_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LinePatternShader",
-    name: r#"LinePatternShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LinePatternShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -5286,7 +5286,7 @@ union LineTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
@@ -5541,15 +5541,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * alpha * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineSDFShader, gfx::Backend::Type::Metal>`
 pub const LINE_SDF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineSDFShader",
-    name: r#"LineSDFShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LineSDFShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -5718,7 +5718,7 @@ union LineTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
@@ -5946,15 +5946,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LineShader, gfx::Backend::Type::Metal>`
 pub const LINE_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LineShader",
-    name: r#"LineShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LineShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -6123,7 +6123,7 @@ union LineTilePropsUnionUBO {
 };
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos_normal [[attribute(0)]];
@@ -6310,15 +6310,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LocationIndicatorShader, gfx::Backend::Type::Metal>`
 pub const LOCATION_INDICATOR_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LocationIndicatorShader",
-    name: r#"LocationIndicatorShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LocationIndicatorShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -6334,7 +6334,7 @@ struct alignas(16) LocationIndicatorDrawableUBO {
 static_assert(sizeof(LocationIndicatorDrawableUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     float2 position [[attribute(0)]];
@@ -6357,15 +6357,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
                             device const LocationIndicatorDrawableUBO& drawable [[buffer(idLocationIndicatorUBO)]]) {
     return half4(drawable.color);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::LocationIndicatorTexturedShader, gfx::Backend::Type::Metal>`
 pub const LOCATION_INDICATOR_TEXTURED_SHADER: MslShaderSource = MslShaderSource {
     built_in: "LocationIndicatorTexturedShader",
-    name: r#"LocationIndicatorTexturedShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"LocationIndicatorTexturedShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -6381,7 +6381,7 @@ struct alignas(16) LocationIndicatorDrawableUBO {
 static_assert(sizeof(LocationIndicatorDrawableUBO) == 5 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     float2 position [[attribute(0)]];
@@ -6412,15 +6412,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::RasterShader, gfx::Backend::Type::Metal>`
 pub const RASTER_SHADER: MslShaderSource = MslShaderSource {
     built_in: "RasterShader",
-    name: r#"RasterShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"RasterShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -6454,7 +6454,7 @@ struct alignas(16) RasterEvaluatedPropsUBO {
 static_assert(sizeof(RasterEvaluatedPropsUBO) == 4 * 16, "wrong size");
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short2 pos [[attribute(0)]];
@@ -6534,16 +6534,16 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(half3(mix(high_vec, low_vec, rgb) * color.a), color.a);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SkyShader, gfx::Backend::Type::Metal>`
 pub const SKY_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SkyShader",
-    name: r#"SkyShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
-    prelude: r#"
+    name: r"SkyShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
+    prelude: r"
 
 enum {
     idSkyPropsUBO = drawableReservedUBOCount,
@@ -6571,8 +6571,8 @@ struct alignas(16) AtmospherePropsUBO {
     float4 sun_position;
 };
 
-"#,
-    source: r#"
+",
+    source: r"
 
 struct SkyVertexStage {
     short2 position [[attribute(0)]];
@@ -6608,15 +6608,15 @@ half4 fragment fragmentMain(SkyFragmentStage in [[stage_in]],
 
     return half4(color * (1.0 - sky.sky_blend));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolIconShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_ICON_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolIconShader",
-    name: r#"SymbolIconShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"SymbolIconShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -6690,7 +6690,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
@@ -6872,15 +6872,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(image.sample(image_sampler, atlas_pos(in.tex_origin, in.tex)) * opacity);
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolSDFShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_SDF_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolSDFShader",
-    name: r#"SymbolSDFShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"SymbolSDFShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -6954,7 +6954,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r#"
+    source: r"
 
 struct VertexStage {
     short4 pos_offset [[attribute(0)]];
@@ -7214,15 +7214,15 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity * in.fade_opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::SymbolTextAndIconShader, gfx::Backend::Type::Metal>`
 pub const SYMBOL_TEXT_AND_ICON_SHADER: MslShaderSource = MslShaderSource {
     built_in: "SymbolTextAndIconShader",
-    name: r#"SymbolTextAndIconShader"#,
-    vertex_main_function: r#"vertexMain"#,
-    fragment_main_function: r#"fragmentMain"#,
+    name: r"SymbolTextAndIconShader",
+    vertex_main_function: r"vertexMain",
+    fragment_main_function: r"fragmentMain",
     prelude: r#"
 
 enum {
@@ -7296,7 +7296,7 @@ static_assert(sizeof(SymbolEvaluatedPropsUBO) == 6 * 16, "wrong size");
 #define c_offscreen_degenerate_triangle_location -2.0
 
 "#,
-    source: r#"
+    source: r"
 
 #define SDF 1.0
 #define ICON 0.0
@@ -7574,16 +7574,16 @@ half4 fragment fragmentMain(FragmentStage in [[stage_in]],
 
     return half4(color * (alpha * opacity * in.fade_opacity));
 }
-"#,
+",
 };
 
 /// `ShaderSource<BuiltIn::WideVectorShader, gfx::Backend::Type::Metal>`
 pub const WIDE_VECTOR_SHADER: MslShaderSource = MslShaderSource {
     built_in: "WideVectorShader",
-    name: r#"WideVectorShader"#,
-    vertex_main_function: r#"vertexTri_wideVecPerf"#,
-    fragment_main_function: r#"fragmentTri_wideVecPerf"#,
-    prelude: r#"
+    name: r"WideVectorShader",
+    vertex_main_function: r"vertexTri_wideVecPerf",
+    fragment_main_function: r"fragmentTri_wideVecPerf",
+    prelude: r"
 
 enum {
     idWideVectorUniformsUBO = idDrawableReservedVertexOnlyUBO,
@@ -7591,7 +7591,7 @@ enum {
     wideVectorUBOCount
 };
 
-"#,
+",
     source: r#"
 
 namespace WhirlyKitShader

@@ -1,6 +1,6 @@
 #![cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
 //! Compiles every GLSL source `shader_source()` returns to SPIR-V with naga,
-//! the way vulkan::ShaderProgram does: `#version 450`, the ProgramParameters
+//! the way `vulkan::ShaderProgram` does: `#version 450`, the `ProgramParameters`
 //! defines, a `HAS_UNIFORM_u_<name>` define per property passed as a uniform,
 //! `PROJECTION_GLOBE` for the globe variant, then the stage's prelude, the
 //! shader's prelude and the stage's source. Also checks that the buffers,
@@ -11,6 +11,7 @@
 //! variants. It needs no GPU.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
@@ -134,10 +135,10 @@ fn defines<'a>(overdraw: bool, globe: bool, uniforms: impl IntoIterator<Item = &
         defines.push_str("#define OVERDRAW_INSPECTOR\n");
     }
     if globe {
-        defines.push_str(&format!("#define {GLOBE_DEFINE}\n"));
+        let _ = writeln!(defines, "#define {GLOBE_DEFINE}");
     }
     for name in uniforms {
-        defines.push_str(&format!("#define HAS_UNIFORM_u_{name}\n"));
+        let _ = writeln!(defines, "#define HAS_UNIFORM_u_{name}");
     }
     defines
 }
@@ -227,8 +228,8 @@ impl Buffer {
     }
 }
 
-/// `sizeof(shaders::DebugUBO)` (include/mln/shaders/debug_layer_ubo.hpp),
-/// which mln_gfx has no struct for.
+/// `sizeof(shaders::DebugUBO)` (`include/mln/shaders/debug_layer_ubo.hpp`),
+/// which `mln_gfx` has no struct for.
 const DEBUG_UBO_SIZE: usize = 6 * 16;
 
 /// The buffers of each shader, with the size of what the renderer binds: a
@@ -436,7 +437,7 @@ fn resources_are_in_the_descriptor_set_layouts() {
         for variant in variants(source, false) {
             for stage in STAGES {
                 let mut fail = |message: String| {
-                    failures.push(format!("{} ({}, {stage:?}): {message}", source.name, variant.name))
+                    failures.push(format!("{} ({}, {stage:?}): {message}", source.name, variant.name));
                 };
                 let Resources { bindings, push_constants } = match resources(&module(source, stage, &variant.defines)) {
                     Ok(resources) => resources,

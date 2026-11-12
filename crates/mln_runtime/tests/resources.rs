@@ -176,7 +176,7 @@ fn a_provider_sees_the_url_that_an_alias_names() {
 fn a_not_modified_answer_delivers_the_cached_copy() {
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(options).unwrap();
+    let runtime = Runtime::new(&options).unwrap();
     let revalidations = Arc::new(AtomicUsize::new(0));
     let counted = revalidations.clone();
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
@@ -283,7 +283,7 @@ fn cache_operations_change_what_the_ambient_cache_serves() {
     });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(options).unwrap();
+    let runtime = Runtime::new(&options).unwrap();
     let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
     let definition =
         OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
@@ -329,7 +329,7 @@ fn a_merge_takes_only_a_readable_database_file() {
     let bounds = LatLngBounds::hull(LatLng::new(1.0, 2.0).unwrap(), LatLng::new(3.0, 4.0).unwrap());
     let definition =
         OfflineTilePyramidRegionDefinition::new("custom://style.json", bounds, 0.0, 0.0, 1.0, false).unwrap().into();
-    let writer = Runtime::new(RuntimeOptions { cache_path: Some(side.clone()), ..RuntimeOptions::default() }).unwrap();
+    let writer = Runtime::new(&RuntimeOptions { cache_path: Some(side.clone()), ..RuntimeOptions::default() }).unwrap();
     wait(writer.offline().create_region(definition, b"side".to_vec()));
     wait(writer.release());
 
@@ -355,7 +355,7 @@ fn an_offline_region_downloads_and_reports_its_progress() {
     });
     let dir = TempDir::new();
     let options = RuntimeOptions { cache_path: Some(dir.path("cache.db")), ..RuntimeOptions::default() };
-    let runtime = Runtime::new(options).unwrap();
+    let runtime = Runtime::new(&options).unwrap();
     let log = EventLog::install(&runtime);
     let offline = runtime.offline();
 
@@ -383,7 +383,7 @@ fn an_offline_region_downloads_and_reports_its_progress() {
 
     wait(offline.invalidate_region(id));
     wait(offline.delete_region(id));
-    assert!(wait(offline.regions()).is_empty());
+    assert_eq!(wait(offline.regions()), [] as [mln_storage::offline::OfflineRegion; 0]);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.region_status(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.delete_region(id)).kind);
     assert_eq!(ErrorKind::NotFound, wait_err(offline.set_region_observed(id, EventMask::NONE)).kind);

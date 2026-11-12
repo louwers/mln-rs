@@ -140,6 +140,7 @@ impl CircleLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &CircleLayerImpl {
         self.base
             .base_impl

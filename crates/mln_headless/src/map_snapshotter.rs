@@ -45,7 +45,7 @@ impl MapSnapshotterObserver for NullMapSnapshotterObserver {}
 /// `MapSnapshotter::PointForFn`.
 pub type PointForFn = Box<dyn Fn(&LatLng) -> ScreenCoordinate>;
 /// `MapSnapshotter::LatLngForFn`.
-/// `Err`: the std::domain_error of the C++ LatLng constructor.
+/// `Err`: the `std::domain_error` of the C++ `LatLng` constructor.
 pub type LatLngForFn = Box<dyn Fn(&ScreenCoordinate) -> Result<LatLng, Error>>;
 /// `MapSnapshotter::Attributions`.
 pub type Attributions = Vec<String>;
@@ -192,6 +192,7 @@ impl MapSnapshotter {
     }
 
     /// The map, for `getStyle()`: `snapshotter.map().style_mut()`.
+    #[must_use]
     pub fn map(&self) -> RefMut<'_, Map> {
         self.map.borrow_mut()
     }
@@ -200,6 +201,7 @@ impl MapSnapshotter {
         self.map().style_mut().load_url(style_url);
     }
 
+    #[must_use]
     pub fn get_style_url(&self) -> String {
         self.map.borrow().style().get_url()
     }
@@ -208,6 +210,7 @@ impl MapSnapshotter {
         self.map().style_mut().load_json(style_json);
     }
 
+    #[must_use]
     pub fn get_style_json(&self) -> String {
         self.map.borrow().style().get_json()
     }
@@ -218,6 +221,7 @@ impl MapSnapshotter {
         self.frontend.clone().set_size(size);
     }
 
+    #[must_use]
     pub fn get_size(&self) -> Size {
         self.map.borrow().get_map_options().size()
     }
@@ -233,6 +237,7 @@ impl MapSnapshotter {
         self.map().jump_to(&options_with_padding);
     }
 
+    #[must_use]
     pub fn get_camera_options(&self) -> CameraOptions {
         self.map.borrow().get_camera_options(None)
     }
@@ -258,6 +263,7 @@ impl MapSnapshotter {
         Ok(())
     }
 
+    #[must_use]
     pub fn get_padding(&self) -> EdgeInsets {
         self.region_insets
     }

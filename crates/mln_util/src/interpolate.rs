@@ -15,12 +15,14 @@ use crate::range::Range;
 
 pub trait Interpolate: Sized {
     /// `Interpolator<T>()(a, b, double t)`.
+    #[must_use]
     fn interpolate(&self, to: &Self, t: f64) -> Self;
 
     /// `Interpolator<T>()(a, b, float t)`. Defaults to promoting `t`, which
     /// is what C++ does for specializations without a float overload.
+    #[must_use]
     fn interpolate_f32(&self, to: &Self, t: f32) -> Self {
-        self.interpolate(to, t as f64)
+        self.interpolate(to, f64::from(t))
     }
 }
 
@@ -35,7 +37,7 @@ impl Interpolate for f64 {
 impl Interpolate for f32 {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         // static_cast<float>(a * (1.0 - t) + b * t)
-        (*self as f64 * (1.0 - t) + *to as f64 * t) as f32
+        (f64::from(*self) * (1.0 - t) + f64::from(*to) * t) as f32
     }
 
     fn interpolate_f32(&self, to: &Self, t: f32) -> Self {
@@ -72,7 +74,7 @@ impl<const N: usize> Interpolate for [f64; N] {
 }
 
 /// `Interpolator<Color>`: channel-wise lerp of the *premultiplied* channels
-/// (this is what ColorSpace::RGB means).
+/// (this is what `ColorSpace::RGB` means).
 impl Interpolate for Color {
     fn interpolate(&self, to: &Self, t: f64) -> Self {
         Color::new(
@@ -129,7 +131,7 @@ impl Interpolate for String {
 }
 
 /// `Interpolator<std::vector<T>> : Uninterpolated`. (The
-/// `std::vector<expression::Value>` specialization lives in mln_expression.)
+/// `std::vector<expression::Value>` specialization lives in `mln_expression`.)
 impl<T: Clone> Interpolate for Vec<T> {
     fn interpolate(&self, _to: &Self, _t: f64) -> Self {
         self.clone()
@@ -147,6 +149,7 @@ pub fn interpolate_f32<T: Interpolate>(from: &T, to: &T, t: f32) -> T {
 }
 
 /// `util::interpolationFactor`.
+#[must_use]
 pub fn interpolation_factor(base: f32, range: Range<f32>, z: f32) -> f32 {
     let zoom_diff = range.max - range.min;
     let zoom_progress = z - range.min;
@@ -155,7 +158,8 @@ pub fn interpolation_factor(base: f32, range: Range<f32>, z: f32) -> f32 {
     } else if base == 1.0f32 {
         zoom_progress / zoom_diff
     } else {
-        (((base as f64).powf(zoom_progress as f64) - 1.0) / ((base as f64).powf(zoom_diff as f64) - 1.0)) as f32
+        ((f64::from(base).powf(f64::from(zoom_progress)) - 1.0) / (f64::from(base).powf(f64::from(zoom_diff)) - 1.0))
+            as f32
     }
 }
 
@@ -169,7 +173,7 @@ mod tests {
         let a = 0.1f32;
         let b = 0.7f32;
         assert_eq!(a.interpolate_f32(&b, 0.3), a * (1.0 - 0.3f32) + b * 0.3f32);
-        assert_eq!(a.interpolate(&b, 0.3), (a as f64 * 0.7 + b as f64 * 0.3) as f32);
+        assert_eq!(a.interpolate(&b, 0.3), (f64::from(a) * 0.7 + f64::from(b) * 0.3) as f32);
         let arr = [a, b];
         assert_eq!(arr.interpolate(&[b, a], 0.3), arr.interpolate_f32(&[b, a], 0.3f32));
     }

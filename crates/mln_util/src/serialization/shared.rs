@@ -42,15 +42,18 @@ pub trait Kind: 'static {
     fn read<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Arc<Self::Value>, D::Error>;
 }
 
+/// A value the side it comes from gave a key, and that key.
+type Keyed<T> = (Weak<T>, u64);
+
 /// The keys the side a kind's values come from gave them.
 struct Origin<T: ?Sized> {
-    by_address: HashMap<usize, (Weak<T>, u64)>,
+    by_address: HashMap<usize, Keyed<T>>,
     by_key: HashMap<u64, Weak<T>>,
     /// The keys of values that died and whose address a new value took
     /// before `forget_dead` saw them.
     dead: Vec<u64>,
     /// The keys given since the last `commit`, which `rollback` takes back.
-    uncommitted: Vec<(usize, Option<(Weak<T>, u64)>)>,
+    uncommitted: Vec<(usize, Option<Keyed<T>>)>,
     next: u64,
 }
 
@@ -61,7 +64,7 @@ struct Copies<T: ?Sized> {
 }
 
 fn address<T: ?Sized>(value: &Arc<T>) -> usize {
-    Arc::as_ptr(value) as *const () as usize
+    Arc::as_ptr(value).cast::<()>() as usize
 }
 
 impl<T: ?Sized> Origin<T> {
@@ -171,11 +174,13 @@ thread_local! {
 }
 
 impl Tables {
+    #[must_use]
     pub fn new() -> Self {
         Tables::default()
     }
 
     /// Adds the table of a kind whose values come from this side.
+    #[must_use]
     pub fn origin<K: Kind>(mut self) -> Self
     where
         K::Value: Send + Sync,
@@ -192,6 +197,7 @@ impl Tables {
     }
 
     /// Adds the table of a kind whose values the other side defines.
+    #[must_use]
     pub fn copies<K: Kind>(mut self) -> Self
     where
         K::Value: Send + Sync,
@@ -318,8 +324,11 @@ pub fn deserialize_known<'de, K: Kind, D: Deserializer<'de>>(
     Ok(read::<K, D>(deserializer)?.1)
 }
 
+/// A value read, if any, and the key it was read by, if any.
+type KeyedRead<T> = (Option<u64>, Option<Arc<T>>);
+
 /// The value read, and the key it was read by, if any.
-fn read<'de, K: Kind, D: Deserializer<'de>>(deserializer: D) -> Result<(Option<u64>, Option<Arc<K::Value>>), D::Error> {
+fn read<'de, K: Kind, D: Deserializer<'de>>(deserializer: D) -> Result<KeyedRead<K::Value>, D::Error> {
     Ok(match Read::<K>::deserialize(deserializer)? {
         Read::Define(key, value) => {
             with_table::<K, _>(|table| {

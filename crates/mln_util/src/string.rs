@@ -4,6 +4,7 @@
 use rapidjson::Writer;
 
 /// `util::toString(int32_t)`.
+#[must_use]
 pub fn to_string_i32(t: i32) -> String {
     let mut writer = Writer::new();
     writer.int(t);
@@ -11,6 +12,7 @@ pub fn to_string_i32(t: i32) -> String {
 }
 
 /// `util::toString(uint32_t)`.
+#[must_use]
 pub fn to_string_u32(t: u32) -> String {
     let mut writer = Writer::new();
     writer.uint(t);
@@ -18,6 +20,7 @@ pub fn to_string_u32(t: u32) -> String {
 }
 
 /// `util::toString(int64_t)`.
+#[must_use]
 pub fn to_string_i64(t: i64) -> String {
     let mut writer = Writer::new();
     writer.int64(t);
@@ -25,6 +28,7 @@ pub fn to_string_i64(t: i64) -> String {
 }
 
 /// `util::toString(uint64_t)`.
+#[must_use]
 pub fn to_string_u64(t: u64) -> String {
     let mut writer = Writer::new();
     writer.uint64(t);
@@ -34,6 +38,7 @@ pub fn to_string_u64(t: u64) -> String {
 /// `util::toString(double, decimal)`: rapidjson's `Writer::Double` (Grisu2,
 /// shortest round trip, `Prettify` layout), so NaN and infinities give `""`
 /// and -0.0 gives `"-0"`. Unless `decimal`, a trailing `.0` is removed.
+#[must_use]
 pub fn to_string_double_decimal(t: f64, decimal: bool) -> String {
     let mut writer = Writer::new();
     writer.double(t);
@@ -47,13 +52,15 @@ pub fn to_string_double_decimal(t: f64, decimal: bool) -> String {
 }
 
 /// `util::toString(double)` (`decimal = false`).
+#[must_use]
 pub fn to_string_double(value: f64) -> String {
     to_string_double_decimal(value, false)
 }
 
 /// `util::toString(float, decimal)`: promotes to double.
+#[must_use]
 pub fn to_string_f32(t: f32, decimal: bool) -> String {
-    to_string_double_decimal(t as f64, decimal)
+    to_string_double_decimal(f64::from(t), decimal)
 }
 
 /// The exceptions `std::stof` throws (libstdc++: `what()` is `"stof"`).
@@ -67,6 +74,7 @@ pub enum StofError {
 
 impl StofError {
     /// `what()`.
+    #[must_use]
     pub fn what(&self) -> &'static str {
         "stof"
     }
@@ -85,11 +93,13 @@ pub fn stof(s: &str) -> Result<f32, StofError> {
 }
 
 /// `util::toHex(uint32_t)`.
+#[must_use]
 pub fn to_hex_u32(value: u32) -> String {
     format!("{value:08x}")
 }
 
 /// `util::toHex(uint64_t)`.
+#[must_use]
 pub fn to_hex_u64(value: u64) -> String {
     format!("{value:016x}")
 }

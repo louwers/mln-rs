@@ -38,6 +38,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -45,12 +46,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct HillshadeLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl HillshadeLayer {
     /// `HillshadeLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         HillshadeLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -58,16 +60,19 @@ impl HillshadeLayer {
     }
 
     /// `HillshadeLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         HillshadeLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -78,10 +83,12 @@ impl HillshadeLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_hillshade_accent_color() -> PropertyValue<Color> {
         PropertyValue::Constant(HillshadeAccentColor::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_accent_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<HillshadeAccentColor>().value
     }
@@ -101,14 +108,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_accent_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeAccentColor>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_exaggeration() -> PropertyValue<f32> {
         PropertyValue::Constant(HillshadeExaggeration::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_exaggeration(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<HillshadeExaggeration>().value
     }
@@ -128,14 +138,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_exaggeration_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeExaggeration>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_highlight_color() -> PropertyValue<Vec<Color>> {
         PropertyValue::Constant(HillshadeHighlightColor::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_highlight_color(&self) -> &PropertyValue<Vec<Color>> {
         &self.impl_().paint.get::<HillshadeHighlightColor>().value
     }
@@ -155,14 +168,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_highlight_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeHighlightColor>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_illumination_altitude() -> PropertyValue<Vec<f32>> {
         PropertyValue::Constant(HillshadeIlluminationAltitude::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_illumination_altitude(&self) -> &PropertyValue<Vec<f32>> {
         &self.impl_().paint.get::<HillshadeIlluminationAltitude>().value
     }
@@ -182,14 +198,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_illumination_altitude_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeIlluminationAltitude>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_illumination_anchor() -> PropertyValue<HillshadeIlluminationAnchorType> {
         PropertyValue::Constant(HillshadeIlluminationAnchor::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_illumination_anchor(&self) -> &PropertyValue<HillshadeIlluminationAnchorType> {
         &self.impl_().paint.get::<HillshadeIlluminationAnchor>().value
     }
@@ -209,14 +228,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_illumination_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeIlluminationAnchor>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_illumination_direction() -> PropertyValue<Vec<f32>> {
         PropertyValue::Constant(HillshadeIlluminationDirection::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_illumination_direction(&self) -> &PropertyValue<Vec<f32>> {
         &self.impl_().paint.get::<HillshadeIlluminationDirection>().value
     }
@@ -236,14 +258,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_illumination_direction_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeIlluminationDirection>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_method() -> PropertyValue<HillshadeMethodType> {
         PropertyValue::Constant(HillshadeMethod::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_method(&self) -> &PropertyValue<HillshadeMethodType> {
         &self.impl_().paint.get::<HillshadeMethod>().value
     }
@@ -263,14 +288,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_method_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeMethod>().options
     }
 
+    #[must_use]
     pub fn get_default_hillshade_shadow_color() -> PropertyValue<Vec<Color>> {
         PropertyValue::Constant(HillshadeShadowColor::default_value())
     }
 
+    #[must_use]
     pub fn get_hillshade_shadow_color(&self) -> &PropertyValue<Vec<Color>> {
         &self.impl_().paint.get::<HillshadeShadowColor>().value
     }
@@ -290,14 +318,17 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_hillshade_shadow_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<HillshadeShadowColor>().options
     }
 
+    #[must_use]
     pub fn get_default_resampling() -> PropertyValue<ResamplingType> {
         PropertyValue::Constant(Resampling::default_value())
     }
 
+    #[must_use]
     pub fn get_resampling(&self) -> &PropertyValue<ResamplingType> {
         &self.impl_().paint.get::<Resampling>().value
     }
@@ -317,6 +348,7 @@ impl HillshadeLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_resampling_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<Resampling>().options
     }

@@ -57,6 +57,7 @@ pub struct AssetFileSource {
 }
 
 impl AssetFileSource {
+    #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         let root = resource_options.asset_path().to_owned();
         AssetFileSource {

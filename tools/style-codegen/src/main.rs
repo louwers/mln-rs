@@ -1,7 +1,7 @@
 //! `style-codegen --spec <v8.json> --out <crates/mln_style/src> [--check]`
 //! writes (or with `--check` compares) the generated style code;
 //! `style-codegen --spec <v8.json> --difftest <reference.cpp> <cases.rs>`
-//! writes the //difftest/style_codegen sources.
+//! writes the `//difftest/style_codegen` sources.
 //!
 //! `just generate-style-code` regenerates the checked-in files.
 
@@ -87,11 +87,11 @@ fn main() -> ExitCode {
             eprintln!("* Skipping file '{}' because it is up-to-date", path.display());
             continue;
         }
-        if let Some(dir) = path.parent() {
-            if let Err(e) = std::fs::create_dir_all(dir) {
-                eprintln!("{}: {e}", dir.display());
-                return ExitCode::FAILURE;
-            }
+        if let Some(dir) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(dir)
+        {
+            eprintln!("{}: {e}", dir.display());
+            return ExitCode::FAILURE;
         }
         if let Err(e) = std::fs::write(&path, &file.content) {
             eprintln!("{}: {e}", path.display());

@@ -30,6 +30,7 @@ impl Case {
         Case { name: name.into(), run: Box::new(run) }
     }
 
+    #[must_use]
     pub fn run(&self, cx: &Context) -> Metrics {
         (self.run)(cx)
     }

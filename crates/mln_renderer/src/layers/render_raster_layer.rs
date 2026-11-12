@@ -20,7 +20,10 @@ use std::sync::Arc;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_RASTER_IMAGE0_TEXTURE, ID_RASTER_IMAGE1_TEXTURE, ID_RASTER_POS_VERTEX_ATTRIBUTE,
+    ID_RASTER_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
@@ -33,7 +36,9 @@ use mln_map_types::TransformState;
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::raster_layer_impl::Impl as RasterLayerImpl;
-use mln_style::layers::raster_layer_properties::*;
+use mln_style::layers::raster_layer_properties::{
+    RasterLayerProperties, RasterOpacity, RasterPaintProperties, RasterResampling, Resampling,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{RasterResamplingType, ResamplingType};
 use mln_tile_id::OverscaledTileID;
@@ -148,7 +153,7 @@ impl RenderRasterLayer {
     fn update_image(
         &mut self,
         context: &dyn Context,
-        raster_shader: Option<ShaderProgramBasePtr>,
+        raster_shader: Option<&ShaderProgramBasePtr>,
         image_data: &ImageSourceRenderData,
         changes: &mut UniqueChangeRequestVec,
     ) {
@@ -188,7 +193,7 @@ impl RenderRasterLayer {
         // TODO: Share textures
         for tile_id in &image_data.tile_ids {
             let mut builder = context.create_drawable_builder("raster".to_owned());
-            builder.set_shader(raster_shader.clone());
+            builder.set_shader(raster_shader.cloned());
             builder.set_render_pass(RenderPass::Translucent);
             builder.set_sub_layer_index(0);
             builder.set_depth_type(DepthMaskType::ReadOnly);
@@ -307,7 +312,7 @@ impl RenderLayer for RenderRasterLayer {
                 self.base.render_tiles = None;
             }
         }
-        self.image_data = params.source.and_then(|source| source.get_image_render_data());
+        self.image_data = params.source.and_then(crate::render_source::RenderSource::get_image_render_data);
         // It is possible image data is not available until the source loads it.
         self.update_render_tile_ids();
     }
@@ -400,7 +405,7 @@ impl RenderLayer for RenderRasterLayer {
         let layer_tweaker = self.base.layer_tweaker.clone();
 
         if let Some(image_data) = image_data {
-            self.update_image(context, raster_shader, &image_data, changes);
+            self.update_image(context, raster_shader.as_ref(), &image_data, changes);
             return;
         }
         let Some(render_tiles) = render_tiles else {

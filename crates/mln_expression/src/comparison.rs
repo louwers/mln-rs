@@ -109,6 +109,7 @@ pub struct BasicComparison {
 }
 
 impl BasicComparison {
+    #[must_use]
     pub fn new(op: String, lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Self {
         debug_assert!(is_comparable_type(&op, lhs.get_type()) && is_comparable_type(&op, rhs.get_type()));
         debug_assert!(
@@ -161,10 +162,10 @@ impl Expression for BasicComparison {
 
     fn equals(&self, e: &dyn Expression) -> bool {
         // C++ static_casts any Kind::Comparison to BasicComparison.
-        if e.get_kind() == Kind::Comparison {
-            if let Some(comp) = downcast::<BasicComparison>(e) {
-                return comp.op == self.op && comp.lhs.equals(&*self.lhs) && comp.rhs.equals(&*self.rhs);
-            }
+        if e.get_kind() == Kind::Comparison
+            && let Some(comp) = downcast::<BasicComparison>(e)
+        {
+            return comp.op == self.op && comp.lhs.equals(&*self.lhs) && comp.rhs.equals(&*self.rhs);
         }
         false
     }
@@ -189,6 +190,7 @@ pub struct CollatorComparison {
 }
 
 impl CollatorComparison {
+    #[must_use]
     pub fn new(op: String, lhs: Box<dyn Expression>, rhs: Box<dyn Expression>, collator: Box<dyn Expression>) -> Self {
         debug_assert!(is_comparable_type(&op, lhs.get_type()) && is_comparable_type(&op, rhs.get_type()));
         let needs_runtime_type_check =
@@ -248,13 +250,13 @@ impl Expression for CollatorComparison {
     }
 
     fn equals(&self, e: &dyn Expression) -> bool {
-        if e.get_kind() == Kind::Comparison {
-            if let Some(comp) = downcast::<CollatorComparison>(e) {
-                return comp.op == self.op
-                    && comp.collator.equals(&*self.collator)
-                    && comp.lhs.equals(&*self.lhs)
-                    && comp.rhs.equals(&*self.rhs);
-            }
+        if e.get_kind() == Kind::Comparison
+            && let Some(comp) = downcast::<CollatorComparison>(e)
+        {
+            return comp.op == self.op
+                && comp.collator.equals(&*self.collator)
+                && comp.lhs.equals(&*self.lhs)
+                && comp.rhs.equals(&*self.rhs);
         }
         false
     }

@@ -149,6 +149,7 @@ impl LocationIndicatorLayerProperties {
         }
     }
 
+    #[must_use]
     pub fn layer_impl(&self) -> &LocationIndicatorLayerImpl {
         self.base
             .base_impl

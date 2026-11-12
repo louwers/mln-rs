@@ -102,6 +102,7 @@ fn same_range(a: &GlyphCacheRange, b: &GlyphCacheRange) -> bool {
 }
 
 impl GlyphCache {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }

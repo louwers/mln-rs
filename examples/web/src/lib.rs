@@ -4,18 +4,18 @@
 //! it, each instance with its own memory:
 //!
 //! - In the map's Web Worker, `WebMap` (map.rs): the map, its renderer (the
-//!   browser's WebGPU through wgpu, or its WebGL2 through mln_gl in the
-//!   `webgl` build, into the page's canvas as an OffscreenCanvas) and its
-//!   file sources. Each animation frame runs the RunLoop, draws, and runs the
+//!   browser's WebGPU through wgpu, or its WebGL2 through `mln_gl` in the
+//!   `webgl` build, into the page's canvas as an `OffscreenCanvas`) and its
+//!   file sources. Each animation frame runs the `RunLoop`, draws, and runs the
 //!   cooperative scheduler's tasks until the frame's budget is spent; between
 //!   frames, they wake the worker to run what arrives (`WebMap::tick`).
 //! - In each tile worker's Web Worker, `TileWorker` (worker.rs): a
 //!   `TileWorkerHost` on the instance's cooperative scheduler. The map's
 //!   `SerializingTransport` puts each tile's worker (geometry, raster or
 //!   raster-dem) in one of them and talks to it only through bytes, over a
-//!   MessageChannel between the two Web Workers.
+//!   `MessageChannel` between the two Web Workers.
 //! - In the map's Web Worker again, once a style declares font faces: the
-//!   shaper module (crates/mln_web_shaper), which shapes and rasterizes them
+//!   shaper module (`crates/mln_web_shaper`), which shapes and rasterizes them
 //!   (shaper.rs). Only the map's Web Worker loads it, and maps without font
 //!   faces never do.
 //!

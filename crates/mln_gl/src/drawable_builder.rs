@@ -18,6 +18,7 @@ pub struct DrawableBuilder {
 }
 
 impl DrawableBuilder {
+    #[must_use]
     pub fn new(name: String) -> Self {
         DrawableBuilder { base: DrawableBuilderBase::new(name) }
     }
@@ -91,7 +92,7 @@ impl drawable_builder::DrawableBuilder for DrawableBuilder {
 
         // Clear the builder's textures, so that the next drawable doesn't
         // get this one's.
-        for texture_slot in base.textures.iter_mut() {
+        for texture_slot in &mut base.textures {
             *texture_slot = None;
         }
     }

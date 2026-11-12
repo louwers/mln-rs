@@ -24,6 +24,7 @@ pub struct TestTimedOut {
 }
 
 impl TestTimedOut {
+    #[must_use]
     pub fn message(&self) -> String {
         format!("Test timed out after {} s (--timeout)", self.limit.as_secs_f64())
     }
@@ -58,6 +59,7 @@ pub struct Watchdog {
 }
 
 impl Watchdog {
+    #[must_use]
     pub fn new(limit: Duration) -> Self {
         let shared = Arc::new(Shared {
             state: Mutex::new(State::default()),
@@ -74,6 +76,7 @@ impl Watchdog {
 
     /// Starts the limit for the test about to run on this thread; the
     /// returned guard stops it.
+    #[must_use]
     pub fn arm(&self) -> WatchdogGuard<'_> {
         let generation = self.shared.current.fetch_add(1, Ordering::SeqCst) + 1;
         let mut state = self.shared.state.lock().unwrap();

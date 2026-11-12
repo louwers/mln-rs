@@ -35,7 +35,7 @@ pub trait RenderItem {
     fn has_render_pass(&self, pass: RenderPass) -> bool;
     fn get_name(&self) -> &str;
     /// `updateDebugDrawables(DebugLayerGroupMap&, PaintParameters&)`; a
-    /// no-op for the items that have none (LayerRenderItem, the image
+    /// no-op for the items that have none (`LayerRenderItem`, the image
     /// source). The orchestrator gives each debug layer group its tweaker
     /// (layers: debug).
     fn update_debug_drawables(&self, _debug_layer_groups: &mut DebugLayerGroupMap, _parameters: &PaintParameters<'_>) {}
@@ -56,10 +56,12 @@ impl LayerRenderItem {
         LayerRenderItem { layer, source, index }
     }
 
+    #[must_use]
     pub fn has_render_pass(&self, pass: RenderPass) -> bool {
         self.layer.borrow().has_render_pass(pass)
     }
 
+    #[must_use]
     pub fn get_name(&self) -> String {
         self.layer.borrow().get_id().to_owned()
     }
@@ -96,7 +98,7 @@ impl RenderTreeParameters {
             map_mode,
             debug_options,
             time_point,
-            light: Default::default(),
+            light: crate::render_light::EvaluatedLight::default(),
             sky: None,
             has_3d: false,
             opaque_pass_cut_off: 0,
@@ -174,24 +176,29 @@ impl RenderTree {
         }
     }
 
+    #[must_use]
     pub fn get_layer_render_item_map(&self) -> &VecMap<u32, LayerRenderItem> {
         &self.layer_render_items
     }
 
+    #[must_use]
     pub fn get_layer_render_items(&self) -> Vec<LayerRenderItem> {
         self.layer_render_items.values().cloned().collect()
     }
 
     /// `getSourceRenderItems()`.
+    #[must_use]
     pub fn get_source_render_items(&self) -> &[Box<dyn RenderItem>] {
         &self.source_render_items
     }
 
+    #[must_use]
     pub fn get_parameters(&self) -> &RenderTreeParameters {
         &self.parameters
     }
 
     /// `getElapsedTime()`, in seconds.
+    #[must_use]
     pub fn get_elapsed_time(&self) -> f64 {
         self.start_time.elapsed().as_secs_f64()
     }

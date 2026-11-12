@@ -65,16 +65,19 @@ fn find_property(name: &str) -> Option<Property> {
 
 impl Light {
     /// `Light()`.
+    #[must_use]
     pub fn new() -> Self {
         Light::from_impl(Arc::new(Impl::default()))
     }
 
     /// `explicit Light(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         Light { impl_ }
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         (*self.impl_).clone()
     }
@@ -153,6 +156,7 @@ impl Light {
         Some(Error::new("light doesn't support this property"))
     }
 
+    #[must_use]
     pub fn get_property(&self, name: &str) -> StyleProperty {
         let Some(property) = find_property(name) else {
             return StyleProperty::default();
@@ -170,10 +174,12 @@ impl Light {
         }
     }
 
+    #[must_use]
     pub fn get_default_anchor() -> LightAnchorType {
         LightAnchor::default_value()
     }
 
+    #[must_use]
     pub fn get_anchor(&self) -> PropertyValue<LightAnchorType> {
         self.impl_.properties.get::<LightAnchor>().value.clone()
     }
@@ -190,14 +196,17 @@ impl Light {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_anchor_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<LightAnchor>().options
     }
 
+    #[must_use]
     pub fn get_default_color() -> Color {
         LightColor::default_value()
     }
 
+    #[must_use]
     pub fn get_color(&self) -> PropertyValue<Color> {
         self.impl_.properties.get::<LightColor>().value.clone()
     }
@@ -214,14 +223,17 @@ impl Light {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_color_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<LightColor>().options
     }
 
+    #[must_use]
     pub fn get_default_intensity() -> f32 {
         LightIntensity::default_value()
     }
 
+    #[must_use]
     pub fn get_intensity(&self) -> PropertyValue<f32> {
         self.impl_.properties.get::<LightIntensity>().value.clone()
     }
@@ -238,14 +250,17 @@ impl Light {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_intensity_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<LightIntensity>().options
     }
 
+    #[must_use]
     pub fn get_default_position() -> Position {
         LightPosition::default_value()
     }
 
+    #[must_use]
     pub fn get_position(&self) -> PropertyValue<Position> {
         self.impl_.properties.get::<LightPosition>().value.clone()
     }
@@ -262,6 +277,7 @@ impl Light {
         self.impl_ = Arc::new(impl_);
     }
 
+    #[must_use]
     pub fn get_position_transition(&self) -> TransitionOptions {
         self.impl_.properties.get::<LightPosition>().options
     }

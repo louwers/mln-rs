@@ -39,6 +39,7 @@ static TYPE_INFO: LayerTypeInfo = LayerTypeInfo {
 
 impl Impl {
     /// `static const LayerTypeInfo* staticTypeInfo() noexcept`.
+    #[must_use]
     pub fn static_type_info() -> &'static LayerTypeInfo {
         &TYPE_INFO
     }
@@ -46,12 +47,13 @@ impl Impl {
 
 #[derive(Debug)]
 pub struct FillExtrusionLayer {
-    /// `baseImpl`, typed (C++ static_casts it in `impl()`).
+    /// `baseImpl`, typed (C++ `static_cast`s it in `impl()`).
     base_impl: Immutable<Impl>,
 }
 
 impl FillExtrusionLayer {
     /// `FillExtrusionLayer(const std::string& layerID, const std::string& sourceID)`.
+    #[must_use]
     pub fn new(layer_id: &str, source_id: &str) -> Self {
         FillExtrusionLayer {
             base_impl: Arc::new(Impl::new(layer_id.to_owned(), source_id.to_owned())),
@@ -59,16 +61,19 @@ impl FillExtrusionLayer {
     }
 
     /// `FillExtrusionLayer(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(impl_: Immutable<Impl>) -> Self {
         FillExtrusionLayer { base_impl: impl_ }
     }
 
     /// `impl()`.
+    #[must_use]
     pub fn impl_(&self) -> &Impl {
         &self.base_impl
     }
 
     /// `mutableImpl()`.
+    #[must_use]
     pub fn mutable_impl(&self) -> Impl {
         self.impl_().clone()
     }
@@ -79,10 +84,12 @@ impl FillExtrusionLayer {
 
     // Layout properties
 
+    #[must_use]
     pub fn get_default_fill_extrusion_rounded_corner_distance() -> PropertyValue<f32> {
         PropertyValue::Constant(FillExtrusionRoundedCornerDistance::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_rounded_corner_distance(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<FillExtrusionRoundedCornerDistance>()
     }
@@ -98,10 +105,12 @@ impl FillExtrusionLayer {
 
     // Paint properties
 
+    #[must_use]
     pub fn get_default_fill_extrusion_base() -> PropertyValue<f32> {
         PropertyValue::Constant(FillExtrusionBase::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_base(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<FillExtrusionBase>().value
     }
@@ -121,14 +130,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_base_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionBase>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_color() -> PropertyValue<Color> {
         PropertyValue::Constant(FillExtrusionColor::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_color(&self) -> &PropertyValue<Color> {
         &self.impl_().paint.get::<FillExtrusionColor>().value
     }
@@ -148,14 +160,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_color_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionColor>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_height() -> PropertyValue<f32> {
         PropertyValue::Constant(FillExtrusionHeight::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_height(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<FillExtrusionHeight>().value
     }
@@ -175,14 +190,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_height_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionHeight>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_opacity() -> PropertyValue<f32> {
         PropertyValue::Constant(FillExtrusionOpacity::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<FillExtrusionOpacity>().value
     }
@@ -202,14 +220,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionOpacity>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_pattern() -> PropertyValue<Image> {
         PropertyValue::Constant(FillExtrusionPattern::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_pattern(&self) -> &PropertyValue<Image> {
         &self.impl_().paint.get::<FillExtrusionPattern>().value
     }
@@ -229,14 +250,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_pattern_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionPattern>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_translate() -> PropertyValue<[f32; 2]> {
         PropertyValue::Constant(FillExtrusionTranslate::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<FillExtrusionTranslate>().value
     }
@@ -256,14 +280,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionTranslate>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_translate_anchor() -> PropertyValue<TranslateAnchorType> {
         PropertyValue::Constant(FillExtrusionTranslateAnchor::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_translate_anchor(&self) -> &PropertyValue<TranslateAnchorType> {
         &self.impl_().paint.get::<FillExtrusionTranslateAnchor>().value
     }
@@ -283,14 +310,17 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_translate_anchor_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionTranslateAnchor>().options
     }
 
+    #[must_use]
     pub fn get_default_fill_extrusion_vertical_gradient() -> PropertyValue<bool> {
         PropertyValue::Constant(FillExtrusionVerticalGradient::default_value())
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_vertical_gradient(&self) -> &PropertyValue<bool> {
         &self.impl_().paint.get::<FillExtrusionVerticalGradient>().value
     }
@@ -310,6 +340,7 @@ impl FillExtrusionLayer {
         self.set_impl(impl_);
     }
 
+    #[must_use]
     pub fn get_fill_extrusion_vertical_gradient_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillExtrusionVerticalGradient>().options
     }
@@ -320,44 +351,44 @@ const K_PAINT_PROPERTY_COUNT: u8 = 16;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum Property {
-    FillExtrusionBase,
-    FillExtrusionColor,
-    FillExtrusionHeight,
-    FillExtrusionOpacity,
-    FillExtrusionPattern,
-    FillExtrusionTranslate,
-    FillExtrusionTranslateAnchor,
-    FillExtrusionVerticalGradient,
-    FillExtrusionBaseTransition,
-    FillExtrusionColorTransition,
-    FillExtrusionHeightTransition,
-    FillExtrusionOpacityTransition,
-    FillExtrusionPatternTransition,
-    FillExtrusionTranslateTransition,
-    FillExtrusionTranslateAnchorTransition,
-    FillExtrusionVerticalGradientTransition,
-    FillExtrusionRoundedCornerDistance = K_PAINT_PROPERTY_COUNT,
+    Base,
+    Color,
+    Height,
+    Opacity,
+    Pattern,
+    Translate,
+    TranslateAnchor,
+    VerticalGradient,
+    BaseTransition,
+    ColorTransition,
+    HeightTransition,
+    OpacityTransition,
+    PatternTransition,
+    TranslateTransition,
+    TranslateAnchorTransition,
+    VerticalGradientTransition,
+    RoundedCornerDistance = K_PAINT_PROPERTY_COUNT,
 }
 
 /// `layerProperties` (a `mapbox::eternal::hash_map` in C++).
 const LAYER_PROPERTIES: &[(&str, Property)] = &[
-    ("fill-extrusion-base", Property::FillExtrusionBase),
-    ("fill-extrusion-color", Property::FillExtrusionColor),
-    ("fill-extrusion-height", Property::FillExtrusionHeight),
-    ("fill-extrusion-opacity", Property::FillExtrusionOpacity),
-    ("fill-extrusion-pattern", Property::FillExtrusionPattern),
-    ("fill-extrusion-translate", Property::FillExtrusionTranslate),
-    ("fill-extrusion-translate-anchor", Property::FillExtrusionTranslateAnchor),
-    ("fill-extrusion-vertical-gradient", Property::FillExtrusionVerticalGradient),
-    ("fill-extrusion-base-transition", Property::FillExtrusionBaseTransition),
-    ("fill-extrusion-color-transition", Property::FillExtrusionColorTransition),
-    ("fill-extrusion-height-transition", Property::FillExtrusionHeightTransition),
-    ("fill-extrusion-opacity-transition", Property::FillExtrusionOpacityTransition),
-    ("fill-extrusion-pattern-transition", Property::FillExtrusionPatternTransition),
-    ("fill-extrusion-translate-transition", Property::FillExtrusionTranslateTransition),
-    ("fill-extrusion-translate-anchor-transition", Property::FillExtrusionTranslateAnchorTransition),
-    ("fill-extrusion-vertical-gradient-transition", Property::FillExtrusionVerticalGradientTransition),
-    ("fill-extrusion-rounded-corner-distance", Property::FillExtrusionRoundedCornerDistance),
+    ("fill-extrusion-base", Property::Base),
+    ("fill-extrusion-color", Property::Color),
+    ("fill-extrusion-height", Property::Height),
+    ("fill-extrusion-opacity", Property::Opacity),
+    ("fill-extrusion-pattern", Property::Pattern),
+    ("fill-extrusion-translate", Property::Translate),
+    ("fill-extrusion-translate-anchor", Property::TranslateAnchor),
+    ("fill-extrusion-vertical-gradient", Property::VerticalGradient),
+    ("fill-extrusion-base-transition", Property::BaseTransition),
+    ("fill-extrusion-color-transition", Property::ColorTransition),
+    ("fill-extrusion-height-transition", Property::HeightTransition),
+    ("fill-extrusion-opacity-transition", Property::OpacityTransition),
+    ("fill-extrusion-pattern-transition", Property::PatternTransition),
+    ("fill-extrusion-translate-transition", Property::TranslateTransition),
+    ("fill-extrusion-translate-anchor-transition", Property::TranslateAnchorTransition),
+    ("fill-extrusion-vertical-gradient-transition", Property::VerticalGradientTransition),
+    ("fill-extrusion-rounded-corner-distance", Property::RoundedCornerDistance),
 ];
 
 fn find_property(name: &str) -> Option<Property> {
@@ -366,41 +397,29 @@ fn find_property(name: &str) -> Option<Property> {
 
 fn get_layer_property(layer: &FillExtrusionLayer, property: Property) -> StyleProperty {
     match property {
-        Property::FillExtrusionBase => make_style_property(layer.get_fill_extrusion_base()),
-        Property::FillExtrusionColor => make_style_property(layer.get_fill_extrusion_color()),
-        Property::FillExtrusionHeight => make_style_property(layer.get_fill_extrusion_height()),
-        Property::FillExtrusionOpacity => make_style_property(layer.get_fill_extrusion_opacity()),
-        Property::FillExtrusionPattern => make_style_property(layer.get_fill_extrusion_pattern()),
-        Property::FillExtrusionTranslate => make_style_property(layer.get_fill_extrusion_translate()),
-        Property::FillExtrusionTranslateAnchor => make_style_property(layer.get_fill_extrusion_translate_anchor()),
-        Property::FillExtrusionVerticalGradient => make_style_property(layer.get_fill_extrusion_vertical_gradient()),
-        Property::FillExtrusionBaseTransition => {
-            make_transition_style_property(&layer.get_fill_extrusion_base_transition())
-        }
-        Property::FillExtrusionColorTransition => {
-            make_transition_style_property(&layer.get_fill_extrusion_color_transition())
-        }
-        Property::FillExtrusionHeightTransition => {
-            make_transition_style_property(&layer.get_fill_extrusion_height_transition())
-        }
-        Property::FillExtrusionOpacityTransition => {
-            make_transition_style_property(&layer.get_fill_extrusion_opacity_transition())
-        }
-        Property::FillExtrusionPatternTransition => {
-            make_transition_style_property(&layer.get_fill_extrusion_pattern_transition())
-        }
-        Property::FillExtrusionTranslateTransition => {
+        Property::Base => make_style_property(layer.get_fill_extrusion_base()),
+        Property::Color => make_style_property(layer.get_fill_extrusion_color()),
+        Property::Height => make_style_property(layer.get_fill_extrusion_height()),
+        Property::Opacity => make_style_property(layer.get_fill_extrusion_opacity()),
+        Property::Pattern => make_style_property(layer.get_fill_extrusion_pattern()),
+        Property::Translate => make_style_property(layer.get_fill_extrusion_translate()),
+        Property::TranslateAnchor => make_style_property(layer.get_fill_extrusion_translate_anchor()),
+        Property::VerticalGradient => make_style_property(layer.get_fill_extrusion_vertical_gradient()),
+        Property::BaseTransition => make_transition_style_property(&layer.get_fill_extrusion_base_transition()),
+        Property::ColorTransition => make_transition_style_property(&layer.get_fill_extrusion_color_transition()),
+        Property::HeightTransition => make_transition_style_property(&layer.get_fill_extrusion_height_transition()),
+        Property::OpacityTransition => make_transition_style_property(&layer.get_fill_extrusion_opacity_transition()),
+        Property::PatternTransition => make_transition_style_property(&layer.get_fill_extrusion_pattern_transition()),
+        Property::TranslateTransition => {
             make_transition_style_property(&layer.get_fill_extrusion_translate_transition())
         }
-        Property::FillExtrusionTranslateAnchorTransition => {
+        Property::TranslateAnchorTransition => {
             make_transition_style_property(&layer.get_fill_extrusion_translate_anchor_transition())
         }
-        Property::FillExtrusionVerticalGradientTransition => {
+        Property::VerticalGradientTransition => {
             make_transition_style_property(&layer.get_fill_extrusion_vertical_gradient_transition())
         }
-        Property::FillExtrusionRoundedCornerDistance => {
-            make_style_property(layer.get_fill_extrusion_rounded_corner_distance())
-        }
+        Property::RoundedCornerDistance => make_style_property(layer.get_fill_extrusion_rounded_corner_distance()),
     }
 }
 
@@ -452,24 +471,24 @@ impl Layer for FillExtrusionLayer {
             )));
         };
 
-        if property == Property::FillExtrusionBase || property == Property::FillExtrusionHeight {
+        if property == Property::Base || property == Property::Height {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, true, false) else {
                 return Some(error);
             };
 
-            if property == Property::FillExtrusionBase {
+            if property == Property::Base {
                 self.set_fill_extrusion_base(&typed_value);
                 return None;
             }
 
-            if property == Property::FillExtrusionHeight {
+            if property == Property::Height {
                 self.set_fill_extrusion_height(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::FillExtrusionColor {
+        if property == Property::Color {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Color>(value, &mut error, true, false) else {
                 return Some(error);
@@ -479,24 +498,24 @@ impl Layer for FillExtrusionLayer {
             return None;
         }
 
-        if property == Property::FillExtrusionOpacity || property == Property::FillExtrusionRoundedCornerDistance {
+        if property == Property::Opacity || property == Property::RoundedCornerDistance {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<f32>(value, &mut error, false, false) else {
                 return Some(error);
             };
 
-            if property == Property::FillExtrusionOpacity {
+            if property == Property::Opacity {
                 self.set_fill_extrusion_opacity(&typed_value);
                 return None;
             }
 
-            if property == Property::FillExtrusionRoundedCornerDistance {
+            if property == Property::RoundedCornerDistance {
                 self.set_fill_extrusion_rounded_corner_distance(&typed_value);
                 return None;
             }
         }
 
-        if property == Property::FillExtrusionPattern {
+        if property == Property::Pattern {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<Image>(value, &mut error, true, false) else {
                 return Some(error);
@@ -506,7 +525,7 @@ impl Layer for FillExtrusionLayer {
             return None;
         }
 
-        if property == Property::FillExtrusionTranslate {
+        if property == Property::Translate {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<[f32; 2]>(value, &mut error, false, false) else {
                 return Some(error);
@@ -516,7 +535,7 @@ impl Layer for FillExtrusionLayer {
             return None;
         }
 
-        if property == Property::FillExtrusionTranslateAnchor {
+        if property == Property::TranslateAnchor {
             let mut error = Error::default();
             let Some(typed_value) =
                 convert_property_value::<TranslateAnchorType>(value, &mut error, false, false)
@@ -528,7 +547,7 @@ impl Layer for FillExtrusionLayer {
             return None;
         }
 
-        if property == Property::FillExtrusionVerticalGradient {
+        if property == Property::VerticalGradient {
             let mut error = Error::default();
             let Some(typed_value) = convert_property_value::<bool>(value, &mut error, false, false) else {
                 return Some(error);
@@ -543,42 +562,42 @@ impl Layer for FillExtrusionLayer {
             return Some(error);
         };
 
-        if property == Property::FillExtrusionBaseTransition {
+        if property == Property::BaseTransition {
             self.set_fill_extrusion_base_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionColorTransition {
+        if property == Property::ColorTransition {
             self.set_fill_extrusion_color_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionHeightTransition {
+        if property == Property::HeightTransition {
             self.set_fill_extrusion_height_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionOpacityTransition {
+        if property == Property::OpacityTransition {
             self.set_fill_extrusion_opacity_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionPatternTransition {
+        if property == Property::PatternTransition {
             self.set_fill_extrusion_pattern_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionTranslateTransition {
+        if property == Property::TranslateTransition {
             self.set_fill_extrusion_translate_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionTranslateAnchorTransition {
+        if property == Property::TranslateAnchorTransition {
             self.set_fill_extrusion_translate_anchor_transition(&transition);
             return None;
         }
 
-        if property == Property::FillExtrusionVerticalGradientTransition {
+        if property == Property::VerticalGradientTransition {
             self.set_fill_extrusion_vertical_gradient_transition(&transition);
             return None;
         }

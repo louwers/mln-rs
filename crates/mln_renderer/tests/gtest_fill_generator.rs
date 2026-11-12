@@ -101,7 +101,7 @@ fn drawn_lines(vertices: &[FillLayoutVertex], indexes: &[u16], segments: &[Segme
 
 fn mesh_triangles(mesh: &SubdivisionResult) -> Vec<Triangle> {
     let mut triangles = Vec::new();
-    for indices in mesh.triangle_indices.chunks_exact(3) {
+    for indices in mesh.triangle_indices.as_chunks::<3>().0 {
         let mut triangle: Triangle = [0; 6];
         for k in 0..3 {
             triangle[k * 2] = mesh.vertices[indices[k] as usize * 2];
@@ -115,7 +115,7 @@ fn mesh_triangles(mesh: &SubdivisionResult) -> Vec<Triangle> {
 fn mesh_lines(mesh: &SubdivisionResult) -> Vec<Line> {
     let mut lines = Vec::new();
     for list in &mesh.line_index_lists {
-        for pair in list.chunks_exact(2) {
+        for pair in list.as_chunks::<2>().0 {
             lines.push([
                 mesh.vertices[pair[0] as usize * 2],
                 mesh.vertices[pair[0] as usize * 2 + 1],
@@ -142,7 +142,7 @@ fn globe_zoom_zero_outline_stays_inside_the_tile() {
     let wide = square(-2000, 1000, EXTENT_I16 + 2000, 2000);
     for zoom in [0u8, 1] {
         let buffers = generate(&wide, &CanonicalTileID::new(zoom, 0, 0), 8);
-        assert!(!buffers.line_vertices.is_empty());
+        assert_ne!(buffers.line_vertices, [] as [mln_renderer::buckets::line_bucket::LineLayoutVertex; 0]);
         // Only the zoom 0 tile wraps onto itself; every other zoom keeps the
         // outline of its buffer.
         assert_eq!(zoom != 0, any_outline_vertex_outside_tile_x(&buffers.line_vertices), "zoom {zoom}");
@@ -176,10 +176,10 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
     // crossing 127 cell rows need more vertices than a 16-bit index space
     // holds, so the fill spreads them over several segments, as GL JS does,
     // rather than coarsening them.
-    let mut ring = GeometryCoordinates::new();
     const TEETH: i16 = 400;
     const STEP: i16 = EXTENT_I16 / (TEETH * 2);
     const BAR: i16 = EXTENT_I16 - STEP;
+    let mut ring = GeometryCoordinates::new();
     for i in 0..TEETH {
         let x0 = i * 2 * STEP;
         let x1 = x0 + STEP;
@@ -203,9 +203,9 @@ fn globe_subdivided_polygon_beyond_the_index_limit_keeps_its_granularity() {
     let expected_triangles = mesh_triangles(&full);
     let triangles = drawn_triangles(&buffers.fill_vertices, &buffers.fill_indexes, &buffers.fill_segments);
     assert_eq!(expected_triangles.len(), triangles.len());
-    assert!(expected_triangles == triangles);
+    assert_eq!(expected_triangles, triangles);
     let expected_lines = mesh_lines(&full);
     let lines = drawn_lines(&buffers.fill_vertices, &buffers.basic_line_indexes, &buffers.basic_line_segments);
     assert_eq!(expected_lines.len(), lines.len());
-    assert!(expected_lines == lines);
+    assert_eq!(expected_lines, lines);
 }
