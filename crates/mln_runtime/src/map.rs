@@ -691,8 +691,15 @@ impl Map {
                 sequence,
                 outbox,
                 move |entry, _| {
+                    // A host may hand the session the target it has, such as
+                    // on every frame. That changes nothing, so it publishes
+                    // no update, which a demand sent before would draw.
+                    let pixel_ratio = scale_factor as f32;
+                    if entry.core.get_map_options().size() == size && entry.core.get_pixel_ratio() == pixel_ratio {
+                        return Ok(());
+                    }
                     entry.core.set_size(size)?;
-                    entry.core.set_pixel_ratio(scale_factor as f32)
+                    entry.core.set_pixel_ratio(pixel_ratio)
                 },
                 move |_, resized, applied, _| {
                     let result = resized.map(|()| applied);
