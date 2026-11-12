@@ -794,7 +794,7 @@ mod android {
         }
         let mut waiting = libc::pollfd { fd: sync.handle as i32, events: libc::POLLIN, revents: 0 };
         // SAFETY: a poll of the frame's live sync file.
-        assert_eq!(1, unsafe { libc::poll(&mut waiting, 1, 10_000) }, "the frame's sync file signals");
+        assert_eq!(1, unsafe { libc::poll(&raw mut waiting, 1, 10_000) }, "the frame's sync file signals");
     }
 
     /// The pixel at `x`, `y` from the first row of a frame's hardware
@@ -807,13 +807,13 @@ mod android {
         let mut desc = Desc::default();
         // SAFETY: the frame's live buffer, locked around the read.
         unsafe {
-            AHardwareBuffer_describe(buffer, &mut desc);
+            AHardwareBuffer_describe(buffer, &raw mut desc);
             assert_eq!((size.width, size.height, 1), (desc.width, desc.height, desc.layers));
             assert_eq!(FORMAT_R8G8B8A8_UNORM, desc.format);
             let usage = USAGE_GPU_COLOR_OUTPUT | USAGE_GPU_SAMPLED_IMAGE | USAGE_CPU_READ_OFTEN;
             assert_eq!(usage, desc.usage & usage);
             let mut data = std::ptr::null_mut();
-            assert_eq!(0, AHardwareBuffer_lock(buffer, USAGE_CPU_READ_OFTEN, -1, std::ptr::null(), &mut data));
+            assert_eq!(0, AHardwareBuffer_lock(buffer, USAGE_CPU_READ_OFTEN, -1, std::ptr::null(), &raw mut data));
             let offset = (y as usize * desc.stride as usize + x as usize) * 4;
             let mut pixel = [0u8; 4];
             std::ptr::copy_nonoverlapping(data.cast::<u8>().add(offset), pixel.as_mut_ptr(), 4);
@@ -837,7 +837,7 @@ mod android {
         }
     }
 
-    /// A hardware buffer's readers, such as a texture or a SurfaceFlinger
+    /// A hardware buffer's readers, such as a texture or a `SurfaceFlinger`
     /// layer, take its first row as the top of the image: the map's north.
     #[test]
     fn a_hardware_buffer_starts_at_the_top_of_the_map() {

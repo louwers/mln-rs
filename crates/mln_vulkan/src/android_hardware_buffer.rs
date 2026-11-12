@@ -95,7 +95,7 @@ impl HardwareBuffer {
         };
         let mut buffer = std::ptr::null_mut();
         // SAFETY: a valid description and output.
-        let result = unsafe { (functions.allocate)(&desc, &mut buffer) };
+        let result = unsafe { (functions.allocate)(&raw const desc, &raw mut buffer) };
         match NonNull::new(buffer) {
             Some(buffer) if result == 0 => Ok(HardwareBuffer { buffer, release: functions.release }),
             _ => Err(Error::native(format!(

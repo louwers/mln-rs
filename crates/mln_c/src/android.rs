@@ -52,12 +52,12 @@ mod init_tests {
             let mut out = diagnostic();
             // SAFETY: null or local pointers, which the call checks before
             // it would use them, and a local diagnostic.
-            assert_eq!(unsafe { mln_android_init(jni_env, context, &mut *out) }, MLN_STATUS_INVALID_ARGUMENT);
+            assert_eq!(unsafe { mln_android_init(jni_env, context, &raw mut *out) }, MLN_STATUS_INVALID_ARGUMENT);
             assert_eq!(message(&out), "jni_env and context must not be null");
         }
         let mut out = diagnostic();
         // SAFETY: as above; no platform but Android reads them.
-        assert_eq!(unsafe { mln_android_init(sentinel, sentinel, &mut *out) }, MLN_STATUS_UNSUPPORTED);
+        assert_eq!(unsafe { mln_android_init(sentinel, sentinel, &raw mut *out) }, MLN_STATUS_UNSUPPORTED);
         assert_eq!(message(&out), "Android initialization is not supported");
     }
 }
@@ -218,7 +218,8 @@ mod tests {
         fn new(width: i32, height: i32) -> Reader {
             let mut reader = core::ptr::null_mut();
             // SAFETY: a local output.
-            let status = unsafe { AImageReader_newWithUsage(width, height, RGBA_8888, CPU_READ_OFTEN, 4, &mut reader) };
+            let status =
+                unsafe { AImageReader_newWithUsage(width, height, RGBA_8888, CPU_READ_OFTEN, 4, &raw mut reader) };
             assert_eq!(status, 0, "an image reader");
             Reader(reader)
         }
@@ -227,7 +228,7 @@ mod tests {
         fn window(&self) -> *mut c_void {
             let mut window = core::ptr::null_mut();
             // SAFETY: the live reader and a local output.
-            assert_eq!(unsafe { AImageReader_getWindow(self.0, &mut window) }, 0);
+            assert_eq!(unsafe { AImageReader_getWindow(self.0, &raw mut window) }, 0);
             window
         }
 
@@ -237,7 +238,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut image = core::ptr::null_mut();
             // SAFETY: the live reader and a local output.
-            while unsafe { AImageReader_acquireLatestImage(self.0, &mut image) } != 0 {
+            while unsafe { AImageReader_acquireLatestImage(self.0, &raw mut image) } != 0 {
                 assert!(Instant::now() < deadline, "the window presented no image");
                 std::thread::sleep(Duration::from_millis(10));
             }
@@ -246,10 +247,10 @@ mod tests {
             unsafe {
                 let (mut width, mut height, mut stride, mut length) = (0, 0, 0, 0);
                 let mut data = core::ptr::null_mut();
-                AImage_getWidth(image, &mut width);
-                AImage_getHeight(image, &mut height);
-                AImage_getPlaneRowStride(image, 0, &mut stride);
-                assert_eq!(AImage_getPlaneData(image, 0, &mut data, &mut length), 0);
+                AImage_getWidth(image, &raw mut width);
+                AImage_getHeight(image, &raw mut height);
+                AImage_getPlaneRowStride(image, 0, &raw mut stride);
+                assert_eq!(AImage_getPlaneData(image, 0, &raw mut data, &raw mut length), 0);
                 let offset = (height / 2 * stride + width / 2 * 4) as usize;
                 let mut pixel = [0u8; 4];
                 core::ptr::copy_nonoverlapping(data.add(offset), pixel.as_mut_ptr(), 4);
@@ -277,7 +278,7 @@ mod tests {
         let styled = Waiter::new();
         let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
         // SAFETY: local arguments.
-        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, NO_DIAGNOSTIC) };
+        unsafe { mln_map_set_style_json(map, view(style), &raw const styled.descriptor, NO_DIAGNOSTIC) };
         assert_eq!(styled.status(), MLN_STATUS_OK);
         map
     }
@@ -289,8 +290,17 @@ mod tests {
         };
         let (mut session, attached) = (0, Waiter::new());
         // SAFETY: local arguments.
-        let status =
-            unsafe { mln_map_attach(map, target, device, &options, &mut session, &attached.descriptor, NO_DIAGNOSTIC) };
+        let status = unsafe {
+            mln_map_attach(
+                map,
+                target,
+                device,
+                &raw const options,
+                &raw mut session,
+                &raw const attached.descriptor,
+                NO_DIAGNOSTIC,
+            )
+        };
         assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
         session
     }
@@ -298,7 +308,7 @@ mod tests {
     fn capabilities(session: mln_render_session) -> mln_render_session_capabilities {
         let mut capabilities = sized::<mln_render_session_capabilities>();
         // SAFETY: local capabilities.
-        let status = unsafe { mln_render_session_get_capabilities(session, &mut capabilities, NO_DIAGNOSTIC) };
+        let status = unsafe { mln_render_session_get_capabilities(session, &raw mut capabilities, NO_DIAGNOSTIC) };
         assert_eq!(status, MLN_STATUS_OK);
         capabilities
     }
@@ -308,10 +318,10 @@ mod tests {
         let options = mln_gpu_device_options { fields: MLN_GPU_DEVICE_OPTION_BACKEND, backend, ..sized() };
         let mut device = 0;
         // SAFETY: local arguments.
-        assert_eq!(unsafe { mln_gpu_device_create(&options, &mut device, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_gpu_device_create(&raw const options, &raw mut device, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         let mut capabilities = sized::<mln_gpu_device_capabilities>();
         // SAFETY: local arguments.
-        unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, NO_DIAGNOSTIC) };
+        unsafe { mln_gpu_device_get_capabilities(device, &raw mut capabilities, NO_DIAGNOSTIC) };
         assert_ne!(capabilities.target_kinds & MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, 0, "backend {backend}");
         device
     }
@@ -345,7 +355,7 @@ mod tests {
                 mln_render_session_set_target(
                     session,
                     &window_target(second.window(), 80, 40),
-                    &moved.descriptor,
+                    &raw const moved.descriptor,
                     NO_DIAGNOSTIC,
                 )
             };
@@ -365,7 +375,11 @@ mod tests {
             let released = Waiter::new();
             // SAFETY: a local completion.
             let status = unsafe {
-                crate::render_session::mln_render_session_release_target(session, &released.descriptor, NO_DIAGNOSTIC)
+                crate::render_session::mln_render_session_release_target(
+                    session,
+                    &raw const released.descriptor,
+                    NO_DIAGNOSTIC,
+                )
             };
             assert_eq!((status, released.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
             release_session(session);
@@ -384,7 +398,7 @@ mod tests {
         }
         let mut waiting = libc::pollfd { fd: sync.handle as i32, events: libc::POLLIN, revents: 0 };
         // SAFETY: a poll of the frame's live sync file.
-        assert_eq!(unsafe { libc::poll(&mut waiting, 1, 10_000) }, 1, "the frame's sync file signals");
+        assert_eq!(unsafe { libc::poll(&raw mut waiting, 1, 10_000) }, 1, "the frame's sync file signals");
     }
 
     /// Acquires the session's frame, checks that its hardware buffer is red
@@ -395,29 +409,29 @@ mod tests {
     ) -> (crate::generated::types::mln_acquired_frame, u32) {
         let mut frame = 0;
         // SAFETY: a local output.
-        assert_eq!(unsafe { mln_render_session_acquire_frame(session, &mut frame, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_render_session_acquire_frame(session, &raw mut frame, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         let mut buffer = sized::<mln_android_hardware_buffer_frame>();
         // SAFETY: a local output.
-        let status = unsafe { mln_acquired_frame_get_android_hardware_buffer(frame, &mut buffer, NO_DIAGNOSTIC) };
+        let status = unsafe { mln_acquired_frame_get_android_hardware_buffer(frame, &raw mut buffer, NO_DIAGNOSTIC) };
         assert_eq!(status, MLN_STATUS_OK);
         assert_eq!((buffer.width, buffer.height, buffer.scale_factor), (64, 48, 1.0));
         let mut dma_buf = sized::<mln_dma_buf_frame>();
         // SAFETY: a local output.
-        let status = unsafe { mln_acquired_frame_get_dma_buf(frame, &mut dma_buf, NO_DIAGNOSTIC) };
+        let status = unsafe { mln_acquired_frame_get_dma_buf(frame, &raw mut dma_buf, NO_DIAGNOSTIC) };
         assert_eq!(status, MLN_STATUS_UNSUPPORTED);
         let mut sync = sized::<mln_gpu_sync>();
         // SAFETY: a local output.
-        assert_eq!(unsafe { mln_acquired_frame_get_producer_sync(frame, &mut sync, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        assert_eq!(unsafe { mln_acquired_frame_get_producer_sync(frame, &raw mut sync, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
         assert_eq!(sync.kind, capabilities.producer_sync_kind);
         wait_for_producer(&sync);
         let mut desc = Desc::default();
         // SAFETY: the frame's live buffer, locked around the read.
         let center = unsafe {
-            AHardwareBuffer_describe(buffer.buffer, &mut desc);
+            AHardwareBuffer_describe(buffer.buffer, &raw mut desc);
             assert_eq!((desc.width, desc.height, desc.layers, desc.format), (64, 48, 1, 1));
             assert_eq!(desc.usage & CPU_READ_OFTEN, CPU_READ_OFTEN);
             let mut data = core::ptr::null_mut();
-            assert_eq!(AHardwareBuffer_lock(buffer.buffer, CPU_READ_OFTEN, -1, core::ptr::null(), &mut data), 0);
+            assert_eq!(AHardwareBuffer_lock(buffer.buffer, CPU_READ_OFTEN, -1, core::ptr::null(), &raw mut data), 0);
             let offset = (24 * desc.stride as usize + 32) * 4;
             let mut pixel = [0u8; 4];
             core::ptr::copy_nonoverlapping(data.cast::<u8>().add(offset), pixel.as_mut_ptr(), 4);
@@ -468,7 +482,7 @@ mod tests {
             for (frame, _) in frames {
                 let done = mln_gpu_sync { kind: MLN_GPU_SYNC_CPU_COMPLETE, ..sized() };
                 // SAFETY: a local sync.
-                assert_eq!(unsafe { mln_acquired_frame_release(frame, &done, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+                assert_eq!(unsafe { mln_acquired_frame_release(frame, &raw const done, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
             }
         }
         release_session(session);

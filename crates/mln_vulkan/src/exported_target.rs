@@ -306,10 +306,7 @@ impl ExportedMemory {
         };
         let format = layout.format();
         let mut external = vk::ExternalMemoryImageCreateInfo::default().handle_types(layout.handle_type());
-        let modifiers = match layout {
-            Layout::DmaBuf { modifiers, .. } => modifiers.as_slice(),
-            _ => &[],
-        };
+        let modifiers: &[u64] = if let Layout::DmaBuf { modifiers, .. } = layout { modifiers } else { &[] };
         let mut modifier_list = vk::ImageDrmFormatModifierListCreateInfoEXT::default().drm_format_modifiers(modifiers);
         let mut info = vk::ImageCreateInfo::default()
             .image_type(vk::ImageType::TYPE_2D)
@@ -318,9 +315,10 @@ impl ExportedMemory {
             .mip_levels(1)
             .array_layers(1)
             .samples(vk::SampleCountFlags::TYPE_1)
-            .tiling(match layout {
-                Layout::DmaBuf { .. } => vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT,
-                _ => vk::ImageTiling::OPTIMAL,
+            .tiling(if matches!(layout, Layout::DmaBuf { .. }) {
+                vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT
+            } else {
+                vk::ImageTiling::OPTIMAL
             })
             .usage(layout.usage())
             .sharing_mode(vk::SharingMode::EXCLUSIVE)
@@ -423,6 +421,7 @@ impl ExportedMemory {
     /// Allocates a hardware buffer of `extent` with the extra `usage` bits,
     /// and binds the image, made for one, to it.
     #[cfg(target_os = "android")]
+    #[expect(clippy::used_underscore_binding, reason = "the image keeps the buffer only to release it")]
     fn import_hardware_buffer(&mut self, device: &Device, extent: vk::Extent2D, usage: u64) -> Result<(), Error> {
         use crate::android_hardware_buffer::HardwareBuffer;
         let loader = device
