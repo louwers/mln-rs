@@ -31,8 +31,6 @@ pub unsafe extern "C" fn mln_apple_frame_pacer_create(
     }
 }
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {}
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_ohos_frame_pacer_create(
     options: *const mln_frame_pacer_options,
     out_pacer: *mut mln_frame_pacer,
