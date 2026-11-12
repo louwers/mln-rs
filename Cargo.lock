@@ -978,8 +978,9 @@ checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fast-mvt"
-version = "0.7.2"
-source = "git+https://github.com/louwers-bot/fast-mvt?rev=43f181d19d9d01ac27c5fa95a51c4bca12eb93f2#43f181d19d9d01ac27c5fa95a51c4bca12eb93f2"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "852aa4708f6b1b09274ac76f91faa312ce7ff736ac458f41cb9ac1f5329c2933"
 dependencies = [
  "buffa",
  "foldhash 0.2.0",
@@ -5934,3 +5935,8 @@ checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
 dependencies = [
  "zune-core",
 ]
+
+[[patch.unused]]
+name = "fast-mvt"
+version = "0.7.2"
+source = "git+https://github.com/louwers-bot/fast-mvt?rev=43f181d19d9d01ac27c5fa95a51c4bca12eb93f2#43f181d19d9d01ac27c5fa95a51c4bca12eb93f2"
