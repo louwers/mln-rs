@@ -511,3 +511,33 @@ fn an_abandon_off_the_drivers_thread_keeps_the_graphics_objects() {
     assert!(driver.is_finished());
     wait(session.release());
 }
+
+#[test]
+fn a_caller_driven_session_renders_the_tiles_that_its_workers_parse() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let style = r##"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"Feature","properties":{},
+        "geometry":{"type":"Point","coordinates":[0,0]}}}},"layers":[{"id":"bg","type":"background",
+        "paint":{"background-color":"#ff0000"}},{"id":"circle","type":"circle","source":"points",
+        "paint":{"circle-radius":20,"circle-color":"#0000ff"}}]}"##;
+    wait(map.set_style_json(style));
+    let (session, driver) = attach(&map, caller_options());
+    // The first frame finds the tile still parsing, and a frame after it
+    // has parsed draws the circle.
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    let mut token = 0;
+    while center_pixel_after(&driver, &session, &mut token) != [0, 0, 255, 255] {
+        assert!(std::time::Instant::now() < deadline, "the tile never rendered");
+    }
+    wait_release(&driver, &session);
+}
+
+/// Renders a frame, forced the first time and then one that waits for the
+/// map's next update, and reads its center pixel.
+fn center_pixel_after(driver: &DriverWork, session: &RenderSession, token: &mut u64) -> [u8; 4] {
+    *token += 1;
+    let mode = if *token == 1 { DemandMode::Force } else { DemandMode::WaitForUpdate };
+    session.demand_frame(FrameDemand::new(mode, *token)).unwrap();
+    take_one(driver, session);
+    center_pixel(driver, session)
+}
