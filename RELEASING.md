@@ -69,8 +69,8 @@ push and PR. It catches a manifest crates.io would reject.
 just package
 ```
 
-On NixOS, run it inside `nix develop path:.nix-shell#linux` if a build script
-cannot find a C compiler or zlib.
+On NixOS, run it inside `nix develop` if a build script cannot find a C
+compiler.
 
 ## Adding a library
 

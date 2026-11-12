@@ -46,8 +46,8 @@ Everything generated goes to `$LIBERTY_COMPARE_DIR` (default
    existing Release build with `MLN_WITH_VULKAN=ON` from 2026-10-27. The
    preset sets ccache as compiler launcher; add
    `-DCMAKE_CXX_COMPILER_LAUNCHER= -DCMAKE_C_COMPILER_LAUNCHER=` if the
-   shell has none.) The binary runs inside this repo's `.nix-shell`
-   (created by the justfile on NixOS), with lavapipe.
+   shell has none.) On NixOS the binary runs inside this repo's dev shell
+   (`flake.nix`), with lavapipe.
 2. The Rust runner: `just liberty-compare` builds it
    (`cargo build -p mln-rs-render-test --bin render-test`).
 3. References (network: tiles.openfreemap.org):

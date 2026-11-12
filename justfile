@@ -18,10 +18,10 @@ ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
 # The Cargo profile `just desktop` builds the app with, e.g. `just profile=release desktop`
 profile := 'dev'
 
-# On NixOS, the tests and the apps build and run inside the C++ repo's #linux dev shell, extended by nix/flake.nix, which has the
-# libraries they load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
+# On NixOS, the tests and the apps build and run inside flake.nix's dev shell, which has the C toolchain and the libraries they
+# load (the Vulkan loader, Wayland, X11, ...). Elsewhere (macOS, CI) the system's libraries are the environment.
 nixos := path_exists('/etc/NIXOS')
-dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell#linux') + ' --command'} else {''}
+dev_shell := if nixos == 'true' {'nix develop ' + quote('path:' + justfile_directory() / '.nix-shell') + ' --command'} else {''}
 
 # The tests' headless frontends render with WebGPU, or with the backend MLN_RENDER_BACKEND names: webgpu, metal, vulkan
 # or gl.
@@ -458,20 +458,16 @@ _coverage *report_args:  _dev-shell (cargo-install 'cargo-llvm-cov')
     {{dev_shell}} cargo llvm-cov --no-report --workspace
     cargo llvm-cov report --workspace {{report_args}}
 
-# The dev shell flake (nix/flake.nix, which wraps the C++ repo's), used from a copy in .nix-shell: `nix develop path:<repo>` would copy
-# the whole working tree into the store on every call. Nothing to do outside NixOS.
+# The dev shell flake (flake.nix), used from a copy in .nix-shell: `nix develop` on the repository copies its tracked files into
+# the store again after every change to one. Nothing to do outside NixOS.
 _dev-shell:
     #!/usr/bin/env bash
     set -euo pipefail
     [[ "{{nixos}}" == true ]] || exit 0
-    mkdir -p .nix-shell/cpp
-    cmp -s nix/flake.nix .nix-shell/flake.nix || cp nix/flake.nix .nix-shell/flake.nix
-    cmp -s {{quote(cpp)}}/flake.nix .nix-shell/cpp/flake.nix || cp {{quote(cpp)}}/flake.nix .nix-shell/cpp/flake.nix
-    # The wrapper's lock holds a copy of the C++ lock's nixpkgs: relock when that changes.
-    if ! cmp -s {{quote(cpp)}}/flake.lock .nix-shell/cpp/flake.lock; then
-        cp {{quote(cpp)}}/flake.lock .nix-shell/cpp/flake.lock
-        rm -f .nix-shell/flake.lock
-    fi
+    mkdir -p .nix-shell
+    for file in flake.nix flake.lock; do
+        cmp -s "$file" ".nix-shell/$file" || cp "$file" ".nix-shell/$file"
+    done
 
 # Ensure that a certain command is available
 [private]
