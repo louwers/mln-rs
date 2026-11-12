@@ -35,8 +35,6 @@ pub enum BuiltIn {
     LineShader,
     LineGradientShader,
     LinePatternShader,
-    LocationIndicatorShader,
-    LocationIndicatorTexturedShader,
     LineSDFShader,
     LineGradientSDFShader,
     RasterShader,

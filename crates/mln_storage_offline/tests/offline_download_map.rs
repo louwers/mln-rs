@@ -24,7 +24,6 @@ use mln_storage::{Kind, Resource, Response};
 use mln_storage_offline::OfflineDownload;
 use mln_util::compression::compress;
 use mln_util::geo::{LatLng, LatLngBounds};
-use mln_util::tile_server_options::TileServerOptions;
 
 fn cpp_path(relative: &str) -> PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata").join(relative)
@@ -60,8 +59,7 @@ fn resource_offline_usage_unset() {
     let dir = std::env::temp_dir().to_string_lossy().into_owned();
     let filename = format!("{dir}/offline_download.db");
     let _ = std::fs::remove_file(&filename);
-    let db =
-        Rc::new(RefCell::new(OfflineDatabase::new(filename.as_str(), &TileServerOptions::map_tiler_configuration())));
+    let db = Rc::new(RefCell::new(OfflineDatabase::new(filename.as_str())));
     let size = Rc::new(Cell::new(0u64));
 
     let region = db

@@ -14,6 +14,8 @@ idiomatic_version_file_enable_tools = ["rust"]
 
 [tools]
 "aqua:casey/just" = "1.59.0"
+# The test runner, which ends a test that hangs (.config/nextest.toml).
+"github:nextest-rs/nextest" = { version = "0.9.151", version_prefix = "cargo-nextest-" }
 # The browser build: wasm-bindgen must match the wasm-bindgen crate in
 # Cargo.lock, and binaryen's wasm-opt shrinks the release build.
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"

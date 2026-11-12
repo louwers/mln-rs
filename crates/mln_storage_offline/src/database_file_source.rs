@@ -109,9 +109,7 @@ pub trait DatabaseFileSourceExt {
     /// `mergeOfflineRegions(sideDatabasePath, callback)`: copies the regions
     /// of another database, and the resources and tiles they use, into this
     /// one. Identical regions become one. The side database is upgraded to
-    /// the current schema in place, so it must be writable. Fails with
-    /// `DatabaseError::TileCountLimitExceeded` if the merge would exceed
-    /// the offline Mapbox tile limit.
+    /// the current schema in place, so it must be writable.
     fn merge_offline_regions(
         &self,
         side_database_path: &str,

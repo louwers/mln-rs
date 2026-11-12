@@ -5,11 +5,6 @@
 // "DatabaseFileSource"); requests reach it as actor messages and the
 // response goes back to the requesting thread's `FileSourceRequest`.
 //
-// C++ `DatabaseFileSourceThread` reads the tile server options from the
-// online file source (`onlineFileSource_->getResourceOptions()`); so does
-// the port, falling back to the ResourceOptions only when there is no
-// Network file source (C++ would dereference null).
-//
 // The offline region API needs `OfflineDownload`, which parses styles and so
 // sits above this crate: mln_storage_offline adds it to `DatabaseFileSource`
 // through `invoke` and `DatabaseFileSourceThread::extension`.
@@ -26,7 +21,6 @@ use mln_util::chrono::Duration;
 use mln_util::constants::{ASSET_PROTOCOL, FILE_PROTOCOL};
 use mln_util::logging::{Event, Log};
 use mln_util::sync::MutexExt;
-use mln_util::tile_server_options::TileServerOptions;
 
 use crate::async_request::AsyncRequest;
 use crate::file_source::{Callback, FileSource, FileSourceType, READ_ONLY_MODE_KEY};
@@ -61,13 +55,8 @@ impl DatabaseFileSourceThread {
         self_ref: ActorRef<DatabaseFileSourceThread>,
         online_file_source: Option<Arc<dyn FileSource>>,
         cache_path: &str,
-        tile_server_options: &TileServerOptions,
     ) -> Self {
-        let tile_server_options = match &online_file_source {
-            Some(online) => online.get_resource_options().tile_server_options(),
-            None => tile_server_options.clone(),
-        };
-        let mut db = OfflineDatabase::new(cache_path, &tile_server_options);
+        let mut db = OfflineDatabase::new(cache_path);
         let accessed_flush_scheduled = Arc::new(AtomicBool::new(false));
         let (scheduled, actor) = (accessed_flush_scheduled.clone(), self_ref.clone());
         db.set_accessed_callback(Box::new(move || {
@@ -168,11 +157,6 @@ impl DatabaseFileSourceThread {
         callback(into_result(self.db.borrow_mut().set_maximum_ambient_cache_size(size)));
     }
 
-    /// `setOfflineMapboxTileCountLimit(uint64_t)`.
-    pub fn set_offline_mapbox_tile_count_limit(&self, limit: u64) {
-        self.db.borrow_mut().set_offline_mapbox_tile_count_limit(limit);
-    }
-
     /// `reopenDatabaseReadOnly(bool)`.
     pub fn reopen_database_read_only(&self, read_only: bool) {
         self.db.borrow_mut().reopen_database_read_only(read_only);
@@ -230,10 +214,9 @@ impl DatabaseFileSource {
     pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
         let cache_path = resource_options.cache_path().to_owned();
-        let tile_server_options = resource_options.tile_server_options();
         // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_DATABASE).
         let thread = Thread::new("DatabaseFileSource", move |self_ref| {
-            DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path, &tile_server_options)
+            DatabaseFileSourceThread::new(self_ref, online_file_source, &cache_path)
         });
         DatabaseFileSource { impl_: Impl { thread, resource_options: Mutex::new(resource_options.clone()) } }
     }
@@ -294,11 +277,6 @@ impl DatabaseFileSource {
         callback: impl FnOnce(Result<(), DatabaseError>) + Send + 'static,
     ) {
         self.invoke(move |t| t.set_maximum_ambient_cache_size(size, callback));
-    }
-
-    /// `setOfflineMapboxTileCountLimit(uint64_t)`.
-    pub fn set_offline_mapbox_tile_count_limit(&self, limit: u64) {
-        self.invoke(move |t| t.set_offline_mapbox_tile_count_limit(limit));
     }
 
     /// Runs `f` on the database thread, after the requests and operations

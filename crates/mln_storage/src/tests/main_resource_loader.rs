@@ -10,7 +10,6 @@ use feature::Value;
 use mln_actor::{ActorRef, Mailbox, RunLoop, Timer, scheduler};
 use mln_test_server::HttpServer;
 use mln_util::chrono::{Duration, Timestamp, now};
-use mln_util::tile_server_options::TileServerOptions;
 
 use super::{local_callback, req, serial, temp_path};
 use crate::database_file_source::DatabaseFileSource;
@@ -927,19 +926,15 @@ fn resource_options() {
     let _serial = serial();
     let fs = MainResourceLoader::new(
         &FileSourceManager::new(),
-        &ResourceOptions::default().with_tile_server_options(
-            TileServerOptions::new().with_base_url("originalBaseURL").with_uri_scheme_alias("originalAlias"),
-        ),
+        &ResourceOptions::default().with_asset_path("originalAssetPath").with_maximum_cache_size(1),
     );
 
-    fs.set_resource_options(ResourceOptions::default().with_tile_server_options(
-        TileServerOptions::new().with_base_url("updatedBaseURL").with_uri_scheme_alias("updatedAlias"),
-    ));
+    fs.set_resource_options(ResourceOptions::default().with_asset_path("updatedAssetPath").with_maximum_cache_size(2));
 
-    let updated_options = fs.get_resource_options().tile_server_options();
+    let updated_options = fs.get_resource_options();
 
-    assert_eq!(updated_options.base_url(), "updatedBaseURL");
-    assert_eq!(updated_options.uri_scheme_alias(), "updatedAlias");
+    assert_eq!(updated_options.asset_path(), "updatedAssetPath");
+    assert_eq!(updated_options.maximum_cache_size(), 2);
 }
 
 // Not a C++ test: the "Unsupported resource request." branch (a request

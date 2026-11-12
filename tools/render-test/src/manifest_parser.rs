@@ -17,7 +17,6 @@ pub struct Manifest {
     test_root_path: String,
     result_path: String,
     cache_path: String,
-    api_key: String,
     ignores: Vec<(String, String)>,
     test_paths: Vec<TestPaths>,
     /// `std::set<std::string>`: iterated in sorted order.
@@ -25,10 +24,6 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    fn new() -> Self {
-        Manifest { api_key: std::env::var("MLN_API_KEY").unwrap_or_default(), ..Default::default() }
-    }
-
     #[must_use]
     pub fn get_ignores(&self) -> &[(String, String)] {
         &self.ignores
@@ -52,10 +47,6 @@ impl Manifest {
     #[must_use]
     pub fn get_cache_path(&self) -> &str {
         &self.cache_path
-    }
-    #[must_use]
-    pub fn get_api_key(&self) -> &str {
-        &self.api_key
     }
     #[must_use]
     pub fn get_probes(&self) -> &BTreeSet<String> {
@@ -122,7 +113,7 @@ pub struct ManifestParser;
 impl ManifestParser {
     /// `ManifestParser::parseManifest(manifestPath, testFilter)`.
     pub fn parse_manifest(manifest_path: &str, mut test_filter: String) -> Option<Manifest> {
-        let mut manifest = Manifest::new();
+        let mut manifest = Manifest::default();
         let file_path = manifest_path;
         // C++: manifestPath.substr(0, manifestPath.find(filename)).
         let name = filesystem::filename(file_path);
@@ -157,17 +148,6 @@ impl ManifestParser {
             };
             manifest.cache_path = filesystem::join(&get_valid_path(&manifest.manifest_path, "."), cache_path);
             if manifest.cache_path.is_empty() {
-                return None;
-            }
-        }
-        // TODO:PP
-        if let Some(api_key_value) = document.get("access_token") {
-            let Some(api_key) = api_key_value.as_str() else {
-                invalid("access_token");
-                return None;
-            };
-            manifest.api_key = api_key.to_string();
-            if manifest.api_key.is_empty() {
                 return None;
             }
         }

@@ -1,6 +1,7 @@
 // Ported C++ gtests of the actor layer: test/actor/*.test.cpp and the
 // thread/loop parts of test/util (thread, run_loop, async_task, timer).
-// Every test carries a `// gtest: Group.Name` marker (tools/gtest-parity).
+// Every test carries a `// gtest: Group.Name` marker naming the C++ test it
+// ports.
 //
 // C++ -> Rust in these tests:
 // - `Actor<O>` on `Scheduler::GetBackground()` is the pool `mln_actor::actor::

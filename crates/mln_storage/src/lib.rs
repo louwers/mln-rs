@@ -67,7 +67,7 @@ pub use main_resource_loader::MainResourceLoader;
 #[cfg(feature = "sqlite")]
 pub use mbtiles_file_source::MBTilesFileSource;
 #[cfg(feature = "sqlite")]
-pub use offline_database::{OfflineDatabase, TileCountLimitExceeded};
+pub use offline_database::OfflineDatabase;
 pub use online_file_source::OnlineFileSource;
 pub use pmtiles_file_source::PMTilesFileSource;
 pub use resource::{Kind, LoadingMethod, Resource, StoragePolicy, TileData};

@@ -147,6 +147,8 @@ rusqlite = { version = "0.41.1", features = ["bundled"] }
 # precision parse (the default parser can be off by an ULP).
 serde_json = { version = "1.0.154", features = ["float_roundtrip", "preserve_order"] }
 skrifa = { version = "0.49.0" }
+# Tests' temporary directories, which they don't share with test runs at the same time.
+tempfile = "3.27.0"
 # Derives the libraries' `Display` and `std::error::Error` impls.
 thiserror = "2.0.21"
 # Candidate for ICU's ubidi (platform/default/src/mln/text/bidi.cpp); kept only
