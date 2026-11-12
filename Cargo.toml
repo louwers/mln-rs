@@ -168,8 +168,8 @@ unicode-bidi = { version = "0.3.18" }
 # General_Category (mln_text's script runs, mln_util's i18n), in the Unicode
 # version of harfrust's own tables.
 unicode-properties = { version = "0.1.5", default-features = false, features = ["general-category"] }
-# WOFF2 font faces (mln_text's woff): pure Rust, no unsafe. Only its Brotli
-# decoder: mln_text decodes WOFF 1.0 itself, with FreeType's checks.
+# WOFF and WOFF2 font faces (mln_text's woff): pure Rust, no unsafe. Only its
+# Brotli decoder: mln_text hands it the workspace's flate2 for WOFF's zlib.
 wuff = { version = "0.2.10", default-features = false, features = ["brotli"] }
 # decodeJPEG (platform/default/src/mln/util/jpeg_reader.cpp) natively; pure
 # Rust. The browser build decodes JPEG with the browser instead.

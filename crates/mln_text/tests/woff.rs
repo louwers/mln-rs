@@ -98,14 +98,14 @@ fn set_u32(data: &mut [u8], at: usize, value: u32) {
 fn malformed_woff_is_an_error() {
     let mut wrong_length = WOFF.to_vec();
     wrong_length.push(0);
-    assert_eq!(woff::decode_woff(&wrong_length), Err(WoffError::InvalidHeader));
+    assert_eq!(woff::decode_woff(&wrong_length), Err(WoffError::InvalidWoff));
 
     // The first table entry's original length, beyond what its data can
     // inflate to, with the font's size to match.
     let mut huge = WOFF.to_vec();
     set_u32(&mut huge, 44 + 12, 0x7FFF_FFF0);
     set_u32(&mut huge, 16, 0xFFFF_FFFC);
-    assert_eq!(woff::decode_woff(&huge), Err(WoffError::InvalidTableDirectory));
+    assert_eq!(woff::decode_woff(&huge), Err(WoffError::InvalidWoff));
 
     // A compressed table's zlib stream, corrupted.
     let mut corrupt = WOFF.to_vec();
@@ -116,11 +116,18 @@ fn malformed_woff_is_an_error() {
         .unwrap();
     let offset = u32::from_be_bytes(WOFF[compressed + 4..compressed + 8].try_into().unwrap()) as usize;
     corrupt[offset] ^= 0xFF;
-    assert_eq!(woff::decode_woff(&corrupt), Err(WoffError::InvalidTableData));
+    assert_eq!(woff::decode_woff(&corrupt), Err(WoffError::InvalidWoff));
 
-    assert_eq!(woff::decode_woff(TTF), Err(WoffError::InvalidHeader));
+    // Every other table entry pointing at that table's zlib stream.
+    let mut repeated = WOFF.to_vec();
+    for entry in (0..usize::from(u16::from_be_bytes([WOFF[12], WOFF[13]]))).map(|i| directory + i * 20) {
+        repeated[entry + 4..entry + 16].copy_from_slice(&WOFF[compressed + 4..compressed + 16]);
+    }
+    assert_eq!(woff::decode_woff(&repeated), Err(WoffError::InvalidWoff));
+
+    assert_eq!(woff::decode_woff(TTF), Err(WoffError::InvalidWoff));
     assert_eq!(woff::decode_woff2(b"wOF2"), Err(WoffError::InvalidWoff2));
-    assert_eq!(woff::to_sfnt(FontData::from(b"wOFF".to_vec())), Err(WoffError::InvalidHeader));
+    assert_eq!(woff::to_sfnt(FontData::from(b"wOFF".to_vec())), Err(WoffError::InvalidWoff));
     assert!(!FreeTypeFace::from_memory(corrupt, &FreeTypeLibrary::new()).is_valid());
 }
 

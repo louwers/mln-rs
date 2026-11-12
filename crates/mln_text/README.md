@@ -9,7 +9,7 @@ Ports text shaping and glyphs (`src/mln/text`) on HarfRust and unicode-bidi, wit
 
 Licensed under the BSD 2-Clause License, as the rest of mln-rs is
 ([LICENSE.md](../../LICENSE.md)), except the ports that keep their own licenses:
-the FreeType subset (`ft`, and the WOFF decoder) under the FreeType License
+the FreeType subset (`ft`) under the FreeType License
 ([LICENSE-FreeType](LICENSE-FreeType)), hb-ft under HarfBuzz's license
 ([LICENSE-HarfBuzz](LICENSE-HarfBuzz)),
 and ICU's BiDi properties and Arabic shaping (`icu`) under ICU's license
