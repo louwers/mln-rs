@@ -8,7 +8,7 @@ use mln_util::ErrorKind;
 use crate::generated::types::{
     MLN_STATUS_ALREADY_EXISTS, MLN_STATUS_BUSY, MLN_STATUS_CANCELLED, MLN_STATUS_INVALID_ARGUMENT,
     MLN_STATUS_INVALID_STATE, MLN_STATUS_NATIVE_ERROR, MLN_STATUS_NOT_FOUND, MLN_STATUS_TARGET_LOST,
-    MLN_STATUS_UNSUPPORTED, mln_status,
+    MLN_STATUS_UNSUPPORTED, MLN_STATUS_WRONG_THREAD, mln_status,
 };
 
 /// The `mln_status` that reports a failure of `kind`.
@@ -50,6 +50,12 @@ impl Error {
 
     pub(crate) fn native(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(ErrorKind::Native, message)
+    }
+
+    /// `MLN_STATUS_WRONG_THREAD`, which no core error reports: a call on a
+    /// thread other than the one that an object belongs to.
+    pub(crate) fn wrong_thread(message: impl Into<Cow<'static, str>>) -> Self {
+        Self { status: MLN_STATUS_WRONG_THREAD, message: message.into() }
     }
 
     /// The status, never `MLN_STATUS_OK`.
