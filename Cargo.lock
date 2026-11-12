@@ -2097,7 +2097,6 @@ dependencies = [
 name = "mln-rs-actor"
 version = "0.0.11"
 dependencies = [
- "mln-rs-feature",
  "mln-rs-util",
 ]
 
