@@ -57,7 +57,7 @@ use crate::shaders::shader_program::{BindingType, VertexLayout, as_webgpu_shader
 use crate::shaders::shader_source::shader_source;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
-use crate::uniform_buffer::UniformBuffer;
+use crate::uniform_buffer::{UNIFORM_BUFFER_ALIGNMENT, UniformBuffer};
 
 /// A globe clipping mask mesh's vertex and index buffers (with their sizes in
 /// bytes) and its index count.
@@ -79,7 +79,8 @@ pub struct Context {
     clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
     clip_mask_renderable: Cell<Option<usize>>,
     clip_mask_pipeline_hash: Cell<Option<u64>>,
-    clip_mask_uniform_buffers: RefCell<Vec<wgpu::Buffer>>,
+    /// The last clipping masks' UBOs, kept to count their release.
+    clip_mask_uniform_buffer: RefCell<Option<wgpu::Buffer>>,
     globe_clip_mask_shader: RefCell<Option<Weak<dyn ShaderProgramBase>>>,
     globe_clip_mask_pipeline_hash: Cell<Option<u64>>,
     /// `globeClipMeshes`: per zoom, north pole row, south pole row and
@@ -124,7 +125,7 @@ impl Context {
             clip_mask_shader: RefCell::new(None),
             clip_mask_renderable: Cell::new(None),
             clip_mask_pipeline_hash: Cell::new(None),
-            clip_mask_uniform_buffers: RefCell::new(Vec::new()),
+            clip_mask_uniform_buffer: RefCell::new(None),
             globe_clip_mask_shader: RefCell::new(None),
             globe_clip_mask_pipeline_hash: Cell::new(None),
             globe_clip_meshes: RefCell::new(BTreeMap::new()),
@@ -255,6 +256,27 @@ impl Context {
         cached.clone()
     }
 
+    /// A new uniform buffer holding `ubos`, `stride` bytes apart, and
+    /// `stride`: one buffer and one write for all of a pass's clipping masks,
+    /// which bind it at their offsets. Each call makes a new one, since the
+    /// draws of an earlier call may not have been submitted yet.
+    fn clip_mask_uniform_buffer<'a, T: bytemuck::Pod>(
+        &self,
+        ubos: impl ExactSizeIterator<Item = &'a T>,
+    ) -> Option<(wgpu::Buffer, u64)> {
+        let size = std::mem::size_of::<T>();
+        let stride = size.next_multiple_of(UNIFORM_BUFFER_ALIGNMENT);
+        let mut data = vec![0; stride * ubos.len()];
+        for (ubo, slot) in ubos.zip(data.chunks_exact_mut(stride)) {
+            slot[..size].copy_from_slice(bytemuck::bytes_of(ubo));
+        }
+        let (buffer, _) = self.create_raw_buffer(&data, wgpu::BufferUsages::UNIFORM)?;
+        if let Some(previous) = self.clip_mask_uniform_buffer.replace(Some(buffer.clone())) {
+            self.count_buffer_released(previous.size());
+        }
+        Some((buffer, stride as u64))
+    }
+
     fn get_clip_mask_shader(&self, shaders: &ShaderRegistry) -> Option<ShaderProgramBasePtr> {
         if let Some(shader) = self.clip_mask_shader.borrow().as_ref().and_then(Weak::upgrade) {
             return Some(shader);
@@ -354,19 +376,10 @@ impl Context {
         encoder.set_pipeline(&pipeline);
 
         let ubo_size = std::mem::size_of::<ProjectionUBO>() as u64;
-        let mut uniform_buffers = self.clip_mask_uniform_buffers.borrow_mut();
-        for buffer in uniform_buffers.drain(..) {
-            self.count_buffer_released(buffer.size());
-        }
-        uniform_buffers.reserve(masks.len());
-        for mask in masks {
-            let Some((buffer, _)) =
-                self.create_raw_buffer(bytemuck::bytes_of(&mask.projection), wgpu::BufferUsages::UNIFORM)
-            else {
-                return false;
-            };
-            uniform_buffers.push(buffer);
-        }
+        let Some((uniform_buffer, stride)) = self.clip_mask_uniform_buffer(masks.iter().map(|mask| &mask.projection))
+        else {
+            return false;
+        };
 
         let Some(device) = self.backend.get_device() else {
             return false;
@@ -386,17 +399,16 @@ impl Context {
             return false;
         };
 
-        let bind_groups: Vec<wgpu::BindGroup> = uniform_buffers
-            .iter()
-            .map(|buffer| {
+        let bind_groups: Vec<wgpu::BindGroup> = (0..masks.len() as u64)
+            .map(|i| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
                     label: None,
                     layout,
                     entries: &[wgpu::BindGroupEntry {
                         binding: uniform_binding,
                         resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer,
-                            offset: 0,
+                            buffer: &uniform_buffer,
+                            offset: i * stride,
                             size: wgpu::BufferSize::new(ubo_size),
                         }),
                     }],
@@ -524,18 +536,10 @@ impl Context {
         encoder.set_index_buffer(index_buffer.slice(0..index_size), wgpu::IndexFormat::Uint16);
 
         let ubo_size = std::mem::size_of::<ClipUBO>() as u64;
-        let mut uniform_buffers = self.clip_mask_uniform_buffers.borrow_mut();
-        for buffer in uniform_buffers.drain(..) {
-            self.count_buffer_released(buffer.size());
-        }
-        uniform_buffers.reserve(tile_ubos.len());
-        for ubo in tile_ubos {
-            let Some((buffer, _)) = self.create_raw_buffer(bytemuck::bytes_of(ubo), wgpu::BufferUsages::UNIFORM) else {
-                eprintln!("WebGPU: Failed to allocate uniform buffer for clipping mask tile");
-                return false;
-            };
-            uniform_buffers.push(buffer);
-        }
+        let Some((uniform_buffer, stride)) = self.clip_mask_uniform_buffer(tile_ubos.iter()) else {
+            eprintln!("WebGPU: Failed to allocate the uniform buffer for clipping masks");
+            return false;
+        };
 
         let Some(device) = self.backend.get_device() else {
             eprintln!("WebGPU: Device unavailable for clipping masks");
@@ -566,8 +570,8 @@ impl Context {
                 entries: &[wgpu::BindGroupEntry {
                     binding: uniform_binding,
                     resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                        buffer: &uniform_buffers[i],
-                        offset: 0,
+                        buffer: &uniform_buffer,
+                        offset: i as u64 * stride,
                         size: wgpu::BufferSize::new(ubo_size),
                     }),
                 }],

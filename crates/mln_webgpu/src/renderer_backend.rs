@@ -37,7 +37,13 @@ pub struct BackendImpl {
     depth_stencil_format: Cell<Option<wgpu::TextureFormat>>,
     color_format: Cell<Option<wgpu::TextureFormat>>,
     writes: RefCell<Writes>,
+    /// The page that small uniform buffers are taken from, and how many of
+    /// its bytes are taken.
+    uniform_page: RefCell<Option<(wgpu::Buffer, u64)>>,
 }
+
+/// The size of the buffers that small uniform buffers share.
+const UNIFORM_PAGE: u64 = 16 << 10;
 
 impl BackendImpl {
     pub fn set_instance(&self, instance: Option<wgpu::Instance>) {
@@ -49,6 +55,7 @@ impl BackendImpl {
     pub fn set_device(&self, device: Option<wgpu::Device>) {
         *self.device.borrow_mut() = device;
         *self.writes.borrow_mut() = Writes::default();
+        *self.uniform_page.borrow_mut() = None;
     }
     pub fn set_queue(&self, queue: Option<wgpu::Queue>) {
         *self.queue.borrow_mut() = queue;
@@ -85,6 +92,45 @@ impl BackendImpl {
         if let (Some(device), Some(queue)) = (self.device.borrow().as_ref(), self.queue.borrow().as_ref()) {
             self.writes.borrow_mut().write(device, queue, buffer, offset, data);
         }
+    }
+
+    /// Port-only: [`write_buffer`](Self::write_buffer) where the bytes after
+    /// `data` up to `padded` bytes from `offset` already hold zeros
+    /// (`Writes::write_padded`).
+    pub(crate) fn write_buffer_padded(&self, buffer: &wgpu::Buffer, offset: u64, data: &[u8], padded: u64) {
+        if let (Some(device), Some(queue)) = (self.device.borrow().as_ref(), self.queue.borrow().as_ref()) {
+            self.writes.borrow_mut().write_padded(device, queue, buffer, offset, data, padded);
+        }
+    }
+
+    /// Port-only: `size` bytes (a multiple of 256) of a new uniform buffer,
+    /// zero filled: the buffer and their offset in it. Small ones are taken
+    /// in turn from a shared page, so that UBOs made together sit together
+    /// and their writes join one copy. A page is freed with the last of its
+    /// UBOs (and the bind groups and commands that use them).
+    pub(crate) fn allocate_uniform_buffer(&self, device: &wgpu::Device, size: u64) -> (wgpu::Buffer, u64) {
+        let create = |size| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("Uniform Buffer"),
+                size,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        if size > UNIFORM_PAGE / 4 {
+            return (create(size), 0);
+        }
+        let mut page = self.uniform_page.borrow_mut();
+        let (buffer, taken) = match &mut *page {
+            Some((buffer, taken)) if *taken + size <= UNIFORM_PAGE => (buffer, taken),
+            _ => {
+                let (buffer, taken) = page.insert((create(UNIFORM_PAGE), 0));
+                (buffer, taken)
+            }
+        };
+        let offset = *taken;
+        *taken += size;
+        (buffer.clone(), offset)
     }
 
     /// Port-only: writes the bytes of `data` at `offset` in `buffer`
