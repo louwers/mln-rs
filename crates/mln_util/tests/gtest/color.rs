@@ -89,8 +89,8 @@ fn expect_color(actual: Color, r: f32, g: f32, b: f32, a: f32) {
 // gtest: ColorParse.Oklch
 #[test]
 fn oklch() {
-    expect_color(Color::parse("oklch(70% 0.1 30)").unwrap(), 0.8367361, 0.5266265, 0.4751982, 1.0);
-    expect_color(Color::parse("oklch(0.8 0.05 160 / 0.75)").unwrap(), 0.4785853, 0.588708, 0.5258182, 0.75);
+    expect_color(Color::parse("oklch(70% 0.1 30)").unwrap(), 0.836_736_1, 0.526_626_5, 0.475_198_2, 1.0);
+    expect_color(Color::parse("oklch(0.8 0.05 160 / 0.75)").unwrap(), 0.478_585_3, 0.588_708, 0.525_818_2, 0.75);
     for input in [
         "oklch(0.6 0.1 90)",
         "oklch(60% 25% 90deg)",
@@ -105,9 +105,9 @@ fn oklch() {
         " oklch(  0.6\t0.1\n90  /  100% ) ",
     ] {
         let color = Color::parse(input).unwrap_or_else(|| panic!("{input}: no value"));
-        expect_color(color, 0.5937185, 0.4908275, 0.1901161, 1.0);
+        expect_color(color, 0.593_718_5, 0.490_827_5, 0.190_116_1, 1.0);
     }
-    expect_color(Color::parse("oklch(0.6 0.1 90 / 50%)").unwrap(), 0.2968593, 0.2454138, 0.09505807, 0.5);
+    expect_color(Color::parse("oklch(0.6 0.1 90 / 50%)").unwrap(), 0.296_859_3, 0.245_413_8, 0.095_058_07, 0.5);
 }
 
 // gtest: ColorParse.OklchClampsAndReadsNoneAsZero
@@ -117,8 +117,8 @@ fn oklch_clamps_and_reads_none_as_zero() {
     let darkest = Color::parse("oklch(0 0.1 30)").unwrap();
     expect_color(Color::parse("oklch(1.2 0.1 30)").unwrap(), lightest.r, lightest.g, lightest.b, lightest.a);
     expect_color(Color::parse("oklch(-0.1 0.1 30)").unwrap(), darkest.r, darkest.g, darkest.b, darkest.a);
-    expect_color(Color::parse("oklch(0.6 -0.1 30)").unwrap(), 0.5021107, 0.5021107, 0.5021107, 1.0);
-    expect_color(Color::parse("oklch(0.6 0.1 90 / 1.5)").unwrap(), 0.5937185, 0.4908275, 0.1901161, 1.0);
+    expect_color(Color::parse("oklch(0.6 -0.1 30)").unwrap(), 0.502_110_7, 0.502_110_7, 0.502_110_7, 1.0);
+    expect_color(Color::parse("oklch(0.6 0.1 90 / 1.5)").unwrap(), 0.593_718_5, 0.490_827_5, 0.190_116_1, 1.0);
     expect_color(Color::parse("oklch(0.6 0.1 90 / -1)").unwrap(), 0.0, 0.0, 0.0, 0.0);
     let zero_lightness = Color::parse("oklch(0 0.1 90)").unwrap();
     expect_color(
@@ -128,17 +128,17 @@ fn oklch_clamps_and_reads_none_as_zero() {
         zero_lightness.b,
         zero_lightness.a,
     );
-    expect_color(Color::parse("oklch(0.6 none 90)").unwrap(), 0.5021107, 0.5021107, 0.5021107, 1.0);
-    expect_color(Color::parse("oklch(0.6 0.1 none)").unwrap(), 0.692324, 0.3988401, 0.4927913, 1.0);
+    expect_color(Color::parse("oklch(0.6 none 90)").unwrap(), 0.502_110_7, 0.502_110_7, 0.502_110_7, 1.0);
+    expect_color(Color::parse("oklch(0.6 0.1 none)").unwrap(), 0.692_324, 0.398_840_1, 0.492_791_3, 1.0);
     expect_color(Color::parse("oklch(0.6 0.1 90 / none)").unwrap(), 0.0, 0.0, 0.0, 0.0);
 }
 
 // gtest: ColorParse.OklchOutsideSrgbIsClipped
 #[test]
 fn oklch_outside_srgb_is_clipped() {
-    expect_color(Color::parse("oklch(0.7 0.3 140)").unwrap(), 0.0, 0.7715854, 0.0, 1.0);
-    expect_color(Color::parse("oklch(0.9 0.3 300)").unwrap(), 1.0, 0.6255093, 1.0, 1.0);
-    expect_color(Color::parse("oklch(0.3 0.25 30)").unwrap(), 0.5091695, 0.0, 0.0, 1.0);
+    expect_color(Color::parse("oklch(0.7 0.3 140)").unwrap(), 0.0, 0.771_585_4, 0.0, 1.0);
+    expect_color(Color::parse("oklch(0.9 0.3 300)").unwrap(), 1.0, 0.625_509_3, 1.0, 1.0);
+    expect_color(Color::parse("oklch(0.3 0.25 30)").unwrap(), 0.509_169_5, 0.0, 0.0, 1.0);
     // A huge chroma converts as chroma 1e6, which stays finite.
     expect_color(Color::parse("oklch(0.6 1e110 90)").unwrap(), 0.0, 1.0, 0.0, 1.0);
 }
@@ -177,9 +177,9 @@ fn oklch_invalid() {
 fn oklch_interpolate() {
     let blue = Color::blue();
     let green = Color::parse("rgba(0,255,0,.6)").unwrap();
-    expect_color(Color::interpolate(&blue, &green, 0.25, ColorSpace::Oklch), 0.0, 0.3866815, 0.8861813, 0.9);
-    expect_color(Color::interpolate(&blue, &green, 0.5, ColorSpace::Oklch), 0.0, 0.5325832, 0.6610553, 0.8);
-    expect_color(Color::interpolate(&blue, &green, 0.75, ColorSpace::Oklch), 0.0, 0.5941883, 0.3981223, 0.7);
+    expect_color(Color::interpolate(&blue, &green, 0.25, ColorSpace::Oklch), 0.0, 0.386_681_5, 0.886_181_3, 0.9);
+    expect_color(Color::interpolate(&blue, &green, 0.5, ColorSpace::Oklch), 0.0, 0.532_583_2, 0.661_055_3, 0.8);
+    expect_color(Color::interpolate(&blue, &green, 0.75, ColorSpace::Oklch), 0.0, 0.594_188_3, 0.398_122_3, 0.7);
     // The hue takes the short way round, across 0.
     expect_color(
         Color::interpolate(
@@ -188,9 +188,9 @@ fn oklch_interpolate() {
             0.5,
             ColorSpace::Oklch,
         ),
-        0.8222712,
-        0.409868,
-        0.5177325,
+        0.822_271_2,
+        0.409_868,
+        0.517_732_5,
         1.0,
     );
 }
@@ -200,8 +200,8 @@ fn oklch_interpolate() {
 fn oklch_gray_takes_the_other_hue() {
     let gray = Color::parse("#808080").unwrap();
     let blue = Color::parse("oklch(0.6 0.12 250)").unwrap();
-    expect_color(Color::interpolate(&gray, &blue, 0.5, ColorSpace::Oklch), 0.3955842, 0.5149412, 0.6398697, 1.0);
-    expect_color(Color::interpolate(&blue, &gray, 0.5, ColorSpace::Oklch), 0.3955842, 0.5149412, 0.6398697, 1.0);
+    expect_color(Color::interpolate(&gray, &blue, 0.5, ColorSpace::Oklch), 0.395_584_2, 0.514_941_2, 0.639_869_7, 1.0);
+    expect_color(Color::interpolate(&blue, &gray, 0.5, ColorSpace::Oklch), 0.395_584_2, 0.514_941_2, 0.639_869_7, 1.0);
 }
 
 // gtest: ColorInterpolate.OklchPremultipliesLightnessAndChroma
@@ -214,16 +214,16 @@ fn oklch_premultiplies_lightness_and_chroma() {
             0.5,
             ColorSpace::Oklch,
         ),
-        0.315826,
-        0.2084958,
-        0.3403197,
+        0.315_826,
+        0.208_495_8,
+        0.340_319_7,
         0.6,
     );
     expect_color(
         Color::interpolate(&Color::default(), &Color::parse("oklch(0.7 0.1 150)").unwrap(), 0.5, ColorSpace::Oklch),
-        0.2181294,
-        0.345293,
-        0.2453651,
+        0.218_129_4,
+        0.345_293,
+        0.245_365_1,
         0.5,
     );
     expect_color(Color::interpolate(&Color::default(), &Color::default(), 0.5, ColorSpace::Oklch), 0.0, 0.0, 0.0, 0.0);
