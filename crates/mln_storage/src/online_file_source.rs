@@ -31,19 +31,17 @@ use mln_util::constants::{
     ASSET_PROTOCOL, CLOCK_SKEW_RETRY_TIMEOUT, DEFAULT_MAXIMUM_CONCURRENT_REQUESTS, FILE_PROTOCOL,
 };
 use mln_util::logging::{Event, Log};
-use mln_util::mapbox;
 use mln_util::sync::MutexExt;
-use mln_util::tile_server_options::TileServerOptions;
 use mln_vec_map::{VecMap, VecSet};
 
 use crate::async_request::AsyncRequest;
-use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
+use crate::file_source::{Callback, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
 use crate::file_source_request::{FileSourceRequest, FileSourceRequestState};
 use crate::http_file_source::HTTPFileSource;
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::http_timeout::{error_retry_timeout, expiration_timeout};
 use crate::network_status::{NetworkStatus, Status};
-use crate::resource::{Kind, Priority, Resource};
+use crate::resource::{Priority, Resource};
 use crate::resource_options::ResourceOptions;
 use crate::resource_transform::{ResourceTransform, TransformResult};
 use crate::response::{Reason, ResourceError, Response};
@@ -587,18 +585,6 @@ impl OnlineFileSourceThread {
     fn set_maximum_concurrent_requests(&self, maximum: u32) {
         self.state.maximum_concurrent_requests.set(maximum);
     }
-
-    fn set_api_base_url(&self, url: String) {
-        let mut options = self.state.resource_options.borrow_mut();
-        let updated = options.clone().with_tile_server_options(TileServerOptions::new().with_base_url(url));
-        *options = updated;
-    }
-
-    fn set_api_key(&self, key: String) {
-        let mut options = self.state.resource_options.borrow_mut();
-        let updated = options.clone().with_api_key(key);
-        *options = updated;
-    }
 }
 
 impl Drop for OnlineFileSourceThread {
@@ -642,10 +628,6 @@ impl Impl {
         self.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.request(req_id, res, &req_ref));
         Box::new(req)
     }
-
-    fn get_api_key(&self) -> String {
-        self.cached_resource_options.lock_unpoisoned().api_key().to_owned()
-    }
 }
 
 /// `OnlineFileSource`: the `Network` file source.
@@ -668,33 +650,7 @@ impl OnlineFileSource {
 
 impl FileSource for OnlineFileSource {
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest> {
-        let mut res = resource.clone();
-        let options = self.impl_.cached_resource_options.lock_unpoisoned().tile_server_options();
-        let api_key = self.impl_.get_api_key();
-
-        match resource.kind {
-            Kind::Unknown | Kind::Image => {}
-            Kind::Style => res.url = mapbox::normalize_style_url(&options, &resource.url, &api_key),
-            Kind::Source => match mapbox::normalize_source_url(&options, &resource.url, &api_key) {
-                Ok(url) => res.url = url,
-                // C++ throws out of `request`; the port answers with the error.
-                Err(message) => {
-                    let mut response = Response::new();
-                    response.error = Some(Box::new(ResourceError::new(Reason::Other, message)));
-                    let req = FileSourceRequest::new(callback);
-                    let r = req.actor();
-                    r.invoke(move |request: &FileSourceRequestState| request.set_response(response));
-                    return Box::new(req);
-                }
-            },
-            Kind::Glyphs => res.url = mapbox::normalize_glyphs_url(&options, &resource.url, &api_key),
-            Kind::SpriteImage | Kind::SpriteJSON => {
-                res.url = mapbox::normalize_sprite_url(&options, &resource.url, &api_key);
-            }
-            Kind::Tile => res.url = mapbox::normalize_tile_url(&options, &resource.url, &api_key),
-        }
-
-        self.impl_.request(callback, res)
+        self.impl_.request(callback, resource.clone())
     }
 
     fn can_request(&self, resource: &Resource) -> bool {
@@ -704,26 +660,7 @@ impl FileSource for OnlineFileSource {
     }
 
     fn set_property(&self, key: &str, value: &Value) {
-        if key == API_KEY_KEY {
-            if let Value::String(api_key) = value {
-                let key = api_key.clone();
-                self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_api_key(key));
-                let mut options = self.impl_.cached_resource_options.lock_unpoisoned();
-                *options = options.clone().with_api_key(api_key.clone());
-            } else {
-                Log::error(Event::General, "Invalid apiKey property value type.");
-            }
-        } else if key == API_BASE_URL_KEY {
-            if let Value::String(base_url) = value {
-                let url = base_url.clone();
-                self.impl_.thread.actor().invoke(move |t: &OnlineFileSourceThread| t.set_api_base_url(url));
-                let mut options = self.impl_.cached_resource_options.lock_unpoisoned();
-                let tile_server_options = options.tile_server_options().with_base_url(base_url.clone());
-                *options = options.clone().with_tile_server_options(tile_server_options);
-            } else {
-                Log::error(Event::General, "Invalid base-url property value type.");
-            }
-        } else if key == MAX_CONCURRENT_REQUESTS_KEY {
+        if key == MAX_CONCURRENT_REQUESTS_KEY {
             if let Value::Uint(maximum) = value {
                 debug_assert!(*maximum < u64::from(u32::MAX));
                 let maximum = *maximum as u32;
@@ -747,13 +684,7 @@ impl FileSource for OnlineFileSource {
     }
 
     fn get_property(&self, key: &str) -> Value {
-        if key == API_KEY_KEY {
-            Value::String(self.impl_.get_api_key())
-        } else if key == API_BASE_URL_KEY {
-            Value::String(
-                self.impl_.cached_resource_options.lock_unpoisoned().tile_server_options().base_url().to_owned(),
-            )
-        } else if key == MAX_CONCURRENT_REQUESTS_KEY {
+        if key == MAX_CONCURRENT_REQUESTS_KEY {
             Value::Uint(u64::from(*self.impl_.cached_maximum_concurrent_requests.lock_unpoisoned()))
         } else {
             Log::error(Event::General, format!("Resource provider does not support property {key}"));

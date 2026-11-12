@@ -10,8 +10,8 @@
 //   vulkan_overlay.rs, gl_overlay.rs).
 //
 // Command line: -h/--help, -f/--fullscreen, -b/--benchmark, -o/--offline,
-// -s/--style URL, -t/--apikey KEY, -c/--cache FILE, -x/--lon, -y/--lat,
-// -a/--alt, --fov, -z/--zoom, --bearing, -p/--pitch, -r/--roll,
+// -s/--style URL, -c/--cache FILE, -x/--lon, -y/--lat, -a/--alt, --fov,
+// -z/--zoom, --bearing, -p/--pitch, -r/--roll,
 // -P/--maxPitch, --backend (metal, the default on macOS, webgpu: wgpu, the
 // default elsewhere, vulkan, elsewhere than on Apple's platforms, or opengl:
 // OpenGL ES, on Linux; see backend.rs), and for checking the app:
@@ -50,7 +50,6 @@ const USAGE: &str = "  mln-desktop {OPTIONS}
       -f, --fullscreen                  Toggle fullscreen
       -b, --benchmark                   Toggle benchmark
       -o, --offline                     Toggle offline
-      -t[key], --apikey=[key]           API key
       -s[URL], --style=[URL]            Map stylesheet
       -c[file], --cache=[file]          Cache database file name
       -x[degrees], --lon=[degrees]      Longitude
@@ -77,7 +76,6 @@ pub(crate) struct Args {
     pub(crate) fullscreen: bool,
     pub(crate) benchmark: bool,
     pub(crate) offline: bool,
-    pub(crate) apikey: Option<String>,
     pub(crate) style: Option<String>,
     pub(crate) cache: Option<String>,
     pub(crate) lon: Option<f64>,
@@ -129,7 +127,6 @@ fn parse_args() -> Result<Args, String> {
             "f" | "fullscreen" => args.fullscreen = true,
             "b" | "benchmark" => args.benchmark = true,
             "o" | "offline" => args.offline = true,
-            "t" | "apikey" => args.apikey = Some(value(&name)?),
             "s" | "style" => args.style = Some(value(&name)?),
             "c" | "cache" => args.cache = Some(value(&name)?),
             "x" | "lon" => args.lon = Some(number(value(&name)?, &name)?),

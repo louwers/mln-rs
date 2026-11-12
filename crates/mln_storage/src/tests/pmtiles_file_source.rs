@@ -22,7 +22,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn pmtiles_file_source() -> Rc<PMTilesFileSource> {
-    Rc::new(PMTilesFileSource::new(&FileSourceManager::new(), &ResourceOptions::default_options()))
+    Rc::new(PMTilesFileSource::new(&FileSourceManager::new(), &ResourceOptions::default()))
 }
 
 fn tile(url: &str, z: i8) -> Resource {

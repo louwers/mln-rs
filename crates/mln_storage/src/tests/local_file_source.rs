@@ -45,7 +45,7 @@ fn to_absolute_url(file_name: &str) -> String {
 }
 
 fn local_file_source() -> LocalFileSource {
-    LocalFileSource::new(&ResourceOptions::default_options())
+    LocalFileSource::new(&ResourceOptions::default())
 }
 
 /// Requests `resource`, runs the loop until the response and returns it

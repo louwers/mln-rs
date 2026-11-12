@@ -52,9 +52,6 @@ pub enum RuntimeEventKind {
     OfflineRegionStatusChanged { region_id: i64, status: OfflineRegionStatus },
     /// A resource that an observed offline region needs failed to download.
     OfflineRegionResponseError { region_id: i64, error: ResourceError },
-    /// An observed region's download stopped because the offline regions hold
-    /// as many tiles of MapLibre's demo tile server as `limit` allows.
-    OfflineRegionTileCountLimitExceeded { region_id: i64, limit: u64 },
 }
 
 impl RuntimeEventKind {
@@ -64,9 +61,6 @@ impl RuntimeEventKind {
             RuntimeEventKind::Map(event) => map_event_type(event),
             RuntimeEventKind::OfflineRegionStatusChanged { .. } => EventType::OfflineRegionStatusChanged,
             RuntimeEventKind::OfflineRegionResponseError { .. } => EventType::OfflineRegionResponseError,
-            RuntimeEventKind::OfflineRegionTileCountLimitExceeded { .. } => {
-                EventType::OfflineRegionTileCountLimitExceeded
-            }
         }
     }
 }
@@ -94,6 +88,8 @@ pub enum EventType {
     MapSourceChanged = 16,
     OfflineRegionStatusChanged = 17,
     OfflineRegionResponseError = 18,
+    /// No event has this type. It keeps maplibre-native-ffi's value, so that
+    /// a mask that names it stays valid.
     OfflineRegionTileCountLimitExceeded = 19,
     MapGlyphsRequested = 20,
     MapGlyphsLoaded = 21,

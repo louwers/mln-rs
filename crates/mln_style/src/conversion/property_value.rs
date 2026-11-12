@@ -153,14 +153,3 @@ where
         None
     }
 }
-
-/// `Converter<PropertyValue<std::array<double, 3>>>`.
-pub fn convert_property_value_double3(
-    value: &Convertible<'_>,
-    error: &mut Error,
-    _allow_data_expressions: bool,
-    _convert_tokens: bool,
-) -> Option<PropertyValue<[f64; 3]>> {
-    let a = convert::<[f64; 3]>(value, error)?;
-    Some(PropertyValue::Constant([a[0], a[1], a[2]]))
-}

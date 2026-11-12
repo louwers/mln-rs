@@ -59,7 +59,7 @@ jobs:
           egl: ${{ matrix.backend == 'gl' }}
 
       - uses: taiki-e/install-action@v2
-        with: { tool: 'just,cargo-llvm-cov' }
+        with: { tool: 'just,cargo-llvm-cov,cargo-nextest' }
 
       - name: Install Rust
         run: |

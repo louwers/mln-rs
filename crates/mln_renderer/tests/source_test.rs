@@ -687,31 +687,6 @@ fn custom_vector_source_set_tile_data() {
     test.run();
 }
 
-// gtest: Source.InvisibleSourcesTileNecessity
-#[test]
-#[ignore = "TODO(port): RenderTileSetSource as an overridable base (the C++ FakeTileSource overrides updateInternal and creates FakeTiles; the port has one update per source type)"]
-fn invisible_sources_tile_necessity() {
-    // TODO(port): body: tiles get TileNecessity::Required on a visible update,
-    // Optional when needsRendering is false, Required again when visible.
-}
-
-// gtest: Source.SourceMinimumUpdateInterval
-#[test]
-#[ignore = "TODO(port): RenderTileSetSource as an overridable base (FakeTileSource / FakeTile record setUpdateParameters)"]
-fn source_minimum_update_interval() {
-    // TODO(port): body: setMinimumTileUpdateInterval replaces the impl only on
-    // a change; visible updates pass the interval to the tiles, invisible
-    // ones do not.
-}
-
-// gtest: Source.RenderTileSetSourceUpdate
-#[test]
-#[ignore = "TODO(port): RenderTileSetSource as an overridable base (FakeRenderTileSetSource mocks updateInternal)"]
-fn render_tile_set_source_update() {
-    // TODO(port): body: updateInternal runs on both updates, also for a
-    // source whose description has not loaded yet.
-}
-
 // gtest: Source.EmptyTileset
 #[test]
 fn empty_tileset() {

@@ -9,8 +9,8 @@
 // shares the orchestrator's event sink.
 //
 // Not yet ported (TODO(port) at each use): annotations, glyph eviction,
-// image-manager memory trimming, DynamicFeatureIndex (location indicator),
-// shape-annotation and feature-extension queries, debug layer groups.
+// image-manager memory trimming, shape-annotation and feature-extension
+// queries, debug layer groups.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -1449,9 +1449,6 @@ impl RenderOrchestrator {
         }
 
         self.query_rendered_symbols(&mut results_by_layer, geometry, &filtered_layers, options)?;
-
-        // TODO(port): DynamicFeatureIndex (populateDynamicRenderFeatureIndex,
-        // only the location indicator layer fills it).
 
         let mut result = Vec::new();
 

@@ -17,7 +17,6 @@ use super::heatmap_layer_factory::HeatmapLayerFactory;
 use super::hillshade_layer_factory::HillshadeLayerFactory;
 use super::layer_factory::LayerFactory;
 use super::line_layer_factory::LineLayerFactory;
-use super::location_indicator_layer_factory::LocationIndicatorLayerFactory;
 use super::raster_layer_factory::RasterLayerFactory;
 use super::symbol_layer_factory::SymbolLayerFactory;
 use crate::layer::Layer;
@@ -49,7 +48,6 @@ impl LayerManager {
         manager.add_layer_type(Box::new(HeatmapLayerFactory));
         // The custom layer factory is registered only with the OpenGL
         // backend (MLN_RENDER_BACKEND_OPENGL); the port renders with WebGPU.
-        manager.add_layer_type(Box::new(LocationIndicatorLayerFactory));
         manager
     }
 
