@@ -36,18 +36,6 @@ pub enum VectorEncoding {
     MLT,
 }
 
-/// The source's `emptyResponse`: what an empty tile response (HTTP 204, or
-/// no tile data from an archive such as PMTiles) means.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum EmptyResponse {
-    /// The tile is in the tileset and has nothing at that place.
-    #[default]
-    Blank,
-    /// The tileset has no tile there at that zoom level, and a tile from
-    /// another zoom level may be drawn in its place.
-    Missing,
-}
-
 /// `Tileset`. TileJSON also includes center and zoom but they are not used
 /// by mbgl.
 #[derive(Clone, Debug, PartialEq)]
@@ -59,8 +47,11 @@ pub struct Tileset {
     pub raster_encoding: Option<RasterEncoding>,
     pub vector_encoding: Option<VectorEncoding>,
     pub bounds: Option<crate::geo::LatLngBounds>,
-    /// The style source's `emptyResponse`; a TileJSON doesn't set it.
-    pub empty_response: EmptyResponse,
+    /// The style vector source's `sparse`; a TileJSON doesn't set it. When it's set, an empty tile
+    /// response (HTTP 204, or no tile data from an archive such as PMTiles) means the tileset has
+    /// no tile there at that zoom level, and a tile from a lower zoom level may be drawn in its
+    /// place. Otherwise it's a tile with nothing at that place.
+    pub sparse: bool,
 }
 
 impl Default for Tileset {
@@ -75,7 +66,7 @@ impl Default for Tileset {
             raster_encoding: None,
             vector_encoding: None,
             bounds: None,
-            empty_response: EmptyResponse::Blank,
+            sparse: false,
         }
     }
 }

@@ -19,6 +19,7 @@
 //   buffer in the rendering stats, as an offscreen texture does.
 // - A swapchain isn't made for an empty extent, which a minimized window
 //   can have: the resource then has no images until it is made again.
+//   `current_extent` says whether the surface has one now.
 // - A frame that acquired no image has no framebuffer, and `swap` submits
 //   it without copying or presenting.
 // - Port-only: `set_overlay` draws over each frame in a render pass of its
@@ -43,6 +44,19 @@ use crate::draw_target::TargetResource;
 use crate::renderer_backend::{BackendImpl, SurfaceProvider};
 use crate::surface_target::{Overlay, OverlayTarget};
 use crate::texture2d::{ImageAllocation, Texture2D, Texture2DUsage, transition_image};
+
+/// Port-only: the extent that `surface`, a surface of `backend`'s instance,
+/// has now, which is empty for a minimized window's. `None` when the
+/// swapchain sets the surface's extent, as on Wayland, or the surface can't
+/// say, such as once it is lost.
+pub(crate) fn surface_extent(backend: &BackendImpl, surface: vk::SurfaceKHR) -> Option<vk::Extent2D> {
+    let loader = backend.get_surface_loader()?;
+    // SAFETY: the surface is the instance's.
+    let capabilities =
+        unsafe { loader.get_physical_device_surface_capabilities(backend.get_physical_device(), surface) }.ok()?;
+    let extent = capabilities.current_extent;
+    (extent.width != u32::MAX || extent.height != u32::MAX).then_some(extent)
+}
 
 struct SurfaceState {
     surface: vk::SurfaceKHR,
@@ -141,6 +155,16 @@ impl SurfaceResource {
             context.rendering_stats().num_frame_buffers += 1;
         }
         resource
+    }
+
+    /// Port-only: the extent of the resource's surface now, or `None` when
+    /// it has no surface or its surface doesn't say ([`surface_extent`]).
+    pub(crate) fn current_extent(&self) -> Option<vk::Extent2D> {
+        let surface = self.state.borrow().surface;
+        if surface == vk::SurfaceKHR::null() {
+            return None;
+        }
+        surface_extent(&self.backend, surface)
     }
 
     /// `getPlatformSurface()`: whether the resource presents to a surface.

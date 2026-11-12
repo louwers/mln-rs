@@ -73,9 +73,10 @@ winit.workspace = true
 libc.workspace = true
 
 # The D3D11 device of the exported ring tests, which opens the ring's
-# textures and fences as a host does.
+# textures and fences as a host does, and the windows of the Win32 surface
+# tests.
 [target.'cfg(windows)'.dev-dependencies]
-windows.workspace = true
+windows = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
 
 [lints]
 workspace = true

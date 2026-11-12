@@ -59,10 +59,7 @@ fn convert_raster_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
         }
     }
 
-    let empty_response = crate::conversion::tileset::empty_response_member(value, error).ok()?;
-    let source = RasterSource::new(id, url_or_tileset, tile_size, SourceType::Raster, zooms[0], zooms[1]);
-    source.tile_source().set_empty_response(empty_response);
-    Some(Box::new(source))
+    Some(Box::new(RasterSource::new(id, url_or_tileset, tile_size, SourceType::Raster, zooms[0], zooms[1])))
 }
 
 // dem-heatmap
@@ -97,10 +94,7 @@ fn convert_raster_dem_source(id: &str, value: &Convertible<'_>, error: &mut Erro
         return None;
     }
 
-    let empty_response = crate::conversion::tileset::empty_response_member(value, error).ok()?;
-    let source = crate::sources::tile_source::RasterDEMSource::new(id, url_or_tileset, tile_size, options);
-    source.tile_source().set_empty_response(empty_response);
-    Some(Box::new(source))
+    Some(Box::new(crate::sources::tile_source::RasterDEMSource::new(id, url_or_tileset, tile_size, options)))
 }
 
 /// `convertVectorSource(id, value, error)`.
@@ -137,9 +131,9 @@ fn convert_vector_source(id: &str, value: &Convertible<'_>, error: &mut Error) -
             }
         }
     }
-    let empty_response = crate::conversion::tileset::empty_response_member(value, error).ok()?;
+    let sparse = crate::conversion::tileset::sparse_member(value, error).ok()?;
     let source = VectorSource::new(id, url_or_tileset, maxzoom, minzoom, encoding);
-    source.tile_source().set_empty_response(empty_response);
+    source.tile_source().set_sparse(sparse);
     Some(Box::new(source))
 }
 
