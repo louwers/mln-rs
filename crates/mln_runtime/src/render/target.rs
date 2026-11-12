@@ -75,6 +75,11 @@ pub enum RenderTarget {
     /// windows, and on WebGPU otherwise (on Apple's platforms, whose Metal
     /// takes a layer); a Metal layer renders on Metal.
     ///
+    /// A frame finishes as
+    /// [`TargetNotReady`](crate::FrameDisposition::TargetNotReady) while the
+    /// surface can't show it: while a window is minimized or has no client
+    /// area, or the surface has an empty extent or gives no image for it.
+    ///
     /// [`release_target`](crate::RenderSession::release_target) lets go of
     /// the surface, and [`set_surface`](crate::RenderSession::set_surface)
     /// gives the session another one.
@@ -524,6 +529,27 @@ impl Surface {
         }
     }
 
+    /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a
+    /// window that has no area to present to: a minimized Win32 window, or
+    /// one whose client area is empty ([`mln_gfx::window::has_area`]).
+    pub(crate) fn check_area(&self) -> Result<(), Error> {
+        if let SurfaceKind::Window(window) = &self.kind
+            && !mln_gfx::window::has_area(&**window)
+        {
+            return Err(Error::invalid_state("the window is minimized or has no client area"));
+        }
+        Ok(())
+    }
+
+    /// The window, for a surface of one.
+    pub(crate) fn host_window(&self) -> Option<Arc<dyn Window>> {
+        match &self.kind {
+            SurfaceKind::Window(window) => Some(window.clone()),
+            #[allow(unreachable_patterns)]
+            _ => None,
+        }
+    }
+
     /// Whether the session can make the surface without the host's device.
     pub(crate) fn needs_no_device(&self) -> bool {
         match self.kind {
@@ -562,7 +588,8 @@ pub enum Device {
     /// A Vulkan GPU.
     #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
     Vulkan(mln_vulkan::Device),
-    /// An OpenGL ES share group.
+    /// An OpenGL share group, or the one context that its sessions take
+    /// turns in.
     #[cfg(all(feature = "gl", not(target_family = "wasm")))]
     Gl(mln_gl::Device),
 }
@@ -572,6 +599,29 @@ pub enum Device {
 pub struct DeviceOptions {
     /// The GPU to use. `None` picks the default one.
     pub adapter: Option<Adapter>,
+    /// The API that an OpenGL device renders with. Only Linux's and
+    /// FreeBSD's EGL renders desktop OpenGL, and Windows' WGL renders it
+    /// only. Other backends ignore it.
+    pub gl_api: GlApi,
+    /// Whether the sessions of an OpenGL device take turns in one context
+    /// instead of having one each. Other backends ignore it.
+    pub gl_single_context: bool,
+}
+
+/// The OpenGL API that an OpenGL device renders with. By default the
+/// platform's: desktop OpenGL on Windows, and OpenGL ES elsewhere.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GlApi {
+    /// OpenGL ES 3.0 or later.
+    Gles,
+    /// Desktop OpenGL 3.3 or later.
+    Gl,
+}
+
+impl Default for GlApi {
+    fn default() -> GlApi {
+        if cfg!(windows) { GlApi::Gl } else { GlApi::Gles }
+    }
 }
 
 /// A GPU, by what names it to a backend.
@@ -629,12 +679,18 @@ impl SurfaceType {
             BackendType::Vulkan => {
                 cfg!(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))) && windowing
             }
+            // EGL presents to these windows, and on Windows WGL to Win32
+            // windows.
             BackendType::OpenGL => {
-                cfg!(all(feature = "gl", unix, not(target_vendor = "apple")))
+                cfg!(all(feature = "gl", any(windows, all(unix, not(target_vendor = "apple")))))
                     && windowing
                     && matches!(
                         self,
-                        SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk | SurfaceType::OhosNdk
+                        SurfaceType::Win32
+                            | SurfaceType::Xlib
+                            | SurfaceType::Wayland
+                            | SurfaceType::AndroidNdk
+                            | SurfaceType::OhosNdk
                     )
             }
             // wgpu's Vulkan backend makes no OpenHarmony surface, and this
@@ -694,12 +750,30 @@ fn missing(error: &Error) -> bool {
 }
 
 impl Device {
+    /// Whether an abandon keeps a session's graphics objects on the device
+    /// until the process exits, which only a detach frees: OpenGL's and
+    /// WebGPU's, as the C API promises, since only the session's own thread
+    /// may destroy them, and the host's graphics objects behind them may be
+    /// going away.
+    pub(crate) fn abandon_keeps_graphics(&self) -> bool {
+        match *self {
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            Device::WebGpu(_) => true,
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            Device::Metal(_) => false,
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            Device::Vulkan(_) => false,
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            Device::Gl(_) => true,
+        }
+    }
+
     /// The library's device, on the platform's native backend: Metal on
-    /// Apple's platforms, and Vulkan elsewhere, or OpenGL ES where there is
-    /// no Vulkan. WebGPU (wgpu) takes the place of a native backend that
-    /// isn't there. A backend that can't name the GPU that `options` names
-    /// is skipped: OpenGL ES names none, and only Vulkan names one by UUID or
-    /// LUID.
+    /// Apple's platforms, and Vulkan elsewhere, or OpenGL where there is no
+    /// Vulkan. WebGPU (wgpu) takes the place of a native backend that isn't
+    /// there. A backend that can't name the GPU that `options` names is
+    /// skipped: OpenGL names none, and only Vulkan names one by UUID or LUID.
+    /// So is OpenGL where it can't render with `options.gl_api`.
     ///
     /// Fails with [`ErrorKind::NotFound`](mln_util::ErrorKind) when
     /// the options name no GPU, with
@@ -733,7 +807,7 @@ impl Device {
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a backend that
     /// isn't in this build or on this platform.
     pub fn with_backend(backend: BackendType, options: DeviceOptions) -> Result<Device, Error> {
-        let DeviceOptions { adapter } = options;
+        let DeviceOptions { adapter, gl_api, gl_single_context } = options;
         // Only Vulkan names its GPUs by ID here.
         let index = |adapter: Option<Adapter>| match adapter {
             None => Ok(None),
@@ -753,13 +827,20 @@ impl Device {
             }
             .map(Device::Vulkan),
             #[cfg(all(feature = "gl", not(target_family = "wasm")))]
-            BackendType::OpenGL => match adapter {
-                Some(_) => Err(Error::unsupported("OpenGL ES picks no GPU")),
-                None => mln_gl::Device::new().map(Device::Gl),
-            },
+            BackendType::OpenGL => {
+                if adapter.is_some() {
+                    return Err(Error::unsupported("OpenGL picks no GPU"));
+                }
+                let api = match gl_api {
+                    GlApi::Gles => mln_gl::Api::Gles,
+                    GlApi::Gl => mln_gl::Api::Gl,
+                };
+                let options = mln_gl::DeviceOptions { api, single_context: gl_single_context };
+                mln_gl::Device::with_options(options).map(Device::Gl)
+            }
             #[allow(unreachable_patterns)]
             _ => {
-                let _ = (index, adapter);
+                let _ = (index, adapter, gl_api, gl_single_context);
                 Err(Error::unsupported(format!("this build has no {backend:?} backend")))
             }
         }
@@ -824,7 +905,10 @@ impl Device {
     }
 
     /// The kinds of [`export_kinds`](Self::export_kinds) whose rings also
-    /// share each frame's depth texture, when they keep depth.
+    /// share each frame's depth texture, when they keep depth: only
+    /// [`ExportKind::OpaqueFd`], since an `IOSurface`, a dmabuf or an Android
+    /// hardware buffer holds no depth format. A ring of those keeps its depth
+    /// on the device.
     #[must_use]
     pub fn depth_export_kinds(&self) -> ExportKinds {
         match self {
@@ -844,7 +928,7 @@ impl Device {
             Device::Vulkan(device) => device.export_kinds(),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => mln_mtl::exported_target::export_kinds(device),
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => mln_gl::exported_target::export_kinds(device),
             #[allow(unreachable_patterns)]
             _ => ExportKinds::NONE,
@@ -872,10 +956,10 @@ impl Device {
                 let (producer, consumer) = mln_mtl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
             Device::Gl(device) => {
                 let kind = mln_gl::exported_target::plan(device, ring)?;
-                let (producer, consumer) = mln_gl::exported_target::sync_kinds();
+                let (producer, consumer) = mln_gl::exported_target::sync_kinds(device);
                 Ok((kind, producer, consumer))
             }
             _ => {
@@ -899,8 +983,8 @@ impl Device {
             Device::Vulkan(device) => mln_vulkan::exported_target::sync_kinds(device),
             #[cfg(all(feature = "metal", target_vendor = "apple"))]
             Device::Metal(device) => mln_mtl::exported_target::sync_kinds(device),
-            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
-            Device::Gl(_) => mln_gl::exported_target::sync_kinds(),
+            #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
+            Device::Gl(device) => mln_gl::exported_target::sync_kinds(device),
             _ => (SyncKinds::NONE, SyncKinds::NONE),
         }
     }

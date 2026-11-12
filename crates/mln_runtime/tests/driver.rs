@@ -6,16 +6,17 @@
 mod support;
 
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use mln_map::MapMode;
 use mln_runtime::{
-    AttachOptions, Completion, DemandMode, Driver, DriverWork, ErrorKind, FrameDemand, FrameDisposition, FrameResult,
-    LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState, RenderTarget, Runtime, Wake,
+    AttachOptions, BackendType, Completion, DemandMode, Device, DeviceOptions, Driver, DriverWork, ErrorKind,
+    FrameDemand, FrameDisposition, FrameResult, LogicalExtent, Map, MapOptions, RenderSession, RenderSessionState,
+    RenderTarget, Runtime, Wake,
 };
 use mln_util::size::Size;
-use support::{TIMEOUT, runtime, wait};
+use support::{TIMEOUT, eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -121,8 +122,8 @@ fn a_caller_driven_session_works_only_when_serviced() {
     let (session, attached) =
         map.attach(offscreen(), AttachOptions { driver_work_wake: Some(wake), ..caller_options() }).unwrap();
     assert_eq!(Driver::CallerThread, session.capabilities().unwrap().driver);
-    // The attach waits for the host's thread, and has woken it.
-    assert!(support::eventually(|| wakes.load(Ordering::SeqCst) > 0));
+    // The attach waits for the host's thread, and woke it before it returned.
+    assert_eq!(1, wakes.load(Ordering::SeqCst));
     assert_eq!(RenderSessionState::Attaching, session.snapshot().unwrap().state);
     assert!(!attached.is_complete());
 
@@ -289,7 +290,8 @@ fn an_abandon_completes_pending_work_at_once() {
     let (session, driver) = attach(&map, caller_options());
     let pending = session.reduce_memory_use().unwrap();
     session.demand_frame(FrameDemand::new(DemandMode::Force, 6)).unwrap();
-    session.abandon().unwrap();
+    // On the driver's thread, the session keeps none of its graphics objects.
+    assert_eq!(0, session.abandon().unwrap());
     assert!(pending.is_complete());
     assert_eq!(ErrorKind::TargetLost, pending.wait().unwrap_err().kind);
     assert_eq!(RenderSessionState::Abandoned, session.snapshot().unwrap().state);
@@ -319,6 +321,90 @@ fn a_map_release_abandons_a_released_session_that_waits_for_a_service() {
     released.wait().unwrap();
     map_released.wait().unwrap();
     assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+}
+
+/// A library device of `backend`, or `None` where this build or machine has
+/// none.
+fn device_of(backend: BackendType) -> Option<Device> {
+    match Device::with_backend(backend, DeviceOptions::default()) {
+        Ok(device) => Some(device),
+        Err(error) if error.kind == ErrorKind::Unsupported => {
+            eprintln!("skipped: no {backend:?} device: {error}");
+            None
+        }
+        Err(error) => panic!("a {backend:?} device: {error}"),
+    }
+}
+
+#[test]
+fn an_abandon_on_the_drivers_thread_keeps_only_open_gl_objects() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    // What an abandon keeps before the first frame and after it: an OpenGL
+    // session's target, and its renderer's objects once it drew.
+    for (backend, kept) in [(BackendType::Vulkan, [0, 0]), (BackendType::OpenGL, [1, 2])] {
+        let Some(device) = device_of(backend) else { continue };
+        for (rendered, kept) in kept.into_iter().enumerate() {
+            let target = RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) };
+            let (session, attached) = map.attach(target, caller_options()).unwrap();
+            let driver = session.take_driver_work().unwrap();
+            serviced(&driver, attached).unwrap();
+            if rendered == 1 {
+                session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+                take_one(&driver, &session);
+            }
+            assert_eq!(kept, session.abandon().unwrap(), "{backend:?}");
+            assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+            wait(session.release());
+        }
+    }
+}
+
+#[test]
+fn a_session_released_after_its_map_is_abandoned_without_a_service() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (session, driver) = attach(&map, caller_options());
+    // The disposed map waits for the session, which a release then
+    // abandons rather than detach at a service that may never come.
+    let map_released = map.dispose().unwrap();
+    session.release().unwrap().wait().unwrap();
+    map_released.wait().unwrap();
+    assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+}
+
+#[test]
+fn a_map_command_that_no_work_waits_for_wakes_no_driver() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (wake, wakes) = counter();
+    let (session, driver) = attach(&map, AttachOptions { driver_work_wake: Some(wake), ..caller_options() });
+    settle(&driver, &wakes);
+    wait(map.style_url());
+    assert_eq!(0, wakes.load(Ordering::SeqCst));
+    // A demand waits for the commands sent before it, and wakes the driver.
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    assert_eq!(1, wakes.load(Ordering::SeqCst));
+    assert_eq!(FrameDisposition::Rendered, take_one(&driver, &session).disposition);
+    wait_release(&driver, &session);
+}
+
+#[test]
+fn a_caller_driven_session_asks_for_a_redraw_before_a_service() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (wake, redraws) = counter();
+    let (session, driver) = attach(&map, AttachOptions { redraw_wake: Some(wake), ..caller_options() });
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    take_one(&driver, &session);
+    let before = redraws.load(Ordering::SeqCst);
+    // The host hears of the change from the map's thread, and services the
+    // session only once it demands the frame.
+    wait(map.set_style_json(style("#0000ff")));
+    assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 1));
+    session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 2)).unwrap();
+    assert_eq!(FrameDisposition::Rendered, take_one(&driver, &session).disposition);
+    wait_release(&driver, &session);
 }
 
 #[test]
@@ -405,4 +491,138 @@ fn the_driver_wake_runs_with_the_session_unlocked() {
     assert_eq!(1, reads.load(Ordering::SeqCst));
     serviced(&driver, detached).unwrap();
     wait_release(&driver, &session);
+}
+
+#[test]
+fn work_sent_inside_a_service_leaves_the_wake_for_later_work() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (wake, wakes) = counter();
+    let cell = Arc::new(OnceLock::<RenderSession>::new());
+    let reader = cell.clone();
+    let demanded = Arc::new(AtomicBool::new(false));
+    let once = demanded.clone();
+    // The frame wake runs inside the service, and demands another frame
+    // there, once.
+    let frame_wake: Wake = Arc::new(move || {
+        if let Some(session) = reader.get()
+            && !once.swap(true, Ordering::SeqCst)
+        {
+            session.demand_frame(FrameDemand::new(DemandMode::Force, 2)).unwrap();
+        }
+    });
+    let options = AttachOptions { driver_work_wake: Some(wake), frame_wake: Some(frame_wake), ..caller_options() };
+    let (session, driver) = attach(&map, options);
+    cell.set(session.clone()).unwrap();
+    settle(&driver, &wakes);
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    wakes.store(0, Ordering::SeqCst);
+    driver.service().unwrap();
+    assert!(demanded.load(Ordering::SeqCst));
+    let results = session.drain_frame_results().unwrap();
+    let tokens: Vec<_> = results.iter().map(|result| result.token.unwrap()).collect();
+    assert_eq!(vec![1, 2], tokens);
+    // The demand that the service ran took the wake, which the host gets
+    // again for work that comes after the service.
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 3)).unwrap();
+    assert!(wakes.load(Ordering::SeqCst) >= 2, "no wake for work after the service");
+    assert_eq!(3, take_one(&driver, &session).token.unwrap());
+    wait_release(&driver, &session);
+}
+
+#[test]
+fn an_abandon_from_a_completion_inside_a_service_is_busy() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (session, driver) = attach(&map, caller_options());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let abandoned = session.clone();
+    session.barrier().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
+    });
+    let mut received = None;
+    service_until(&driver, || {
+        received = received.take().or_else(|| receiver.try_recv().ok());
+        received.is_some()
+    });
+    let (result, abandon) = received.unwrap();
+    result.unwrap();
+    assert_eq!(Err(ErrorKind::Busy), abandon);
+    assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
+    wait_release(&driver, &session);
+}
+
+#[test]
+fn an_abandon_while_another_thread_services_is_busy() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let cell = Arc::new(OnceLock::<RenderSession>::new());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let reader = cell.clone();
+    let host = std::thread::current().id();
+    // The frame wake runs inside the host's service, and has another thread
+    // abandon the session meanwhile.
+    let frame_wake: Wake = Arc::new(move || {
+        if std::thread::current().id() == host
+            && let Some(session) = reader.get().cloned()
+        {
+            let abandon = std::thread::spawn(move || session.abandon().map_err(|error| error.kind));
+            let _ = sender.send(abandon.join().unwrap());
+        }
+    });
+    let (session, driver) = attach(&map, AttachOptions { frame_wake: Some(frame_wake), ..caller_options() });
+    cell.set(session.clone()).unwrap();
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    take_one(&driver, &session);
+    assert_eq!(Err(ErrorKind::Busy), receiver.try_recv().unwrap());
+    assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
+    wait_release(&driver, &session);
+}
+
+#[test]
+fn an_abandon_off_the_drivers_thread_keeps_the_graphics_objects() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (session, driver) = attach(&map, caller_options());
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    take_one(&driver, &session);
+    let other = session.clone();
+    // Only the driver's thread may free them, and the host may destroy what
+    // they were made on once the abandon returns.
+    let kept = std::thread::spawn(move || other.abandon()).join().unwrap().unwrap();
+    assert_eq!(2, kept);
+    assert_eq!(RenderSessionState::Abandoned, session.snapshot().unwrap().state);
+    assert_eq!(ErrorKind::InvalidState, driver.service().unwrap_err().kind);
+    assert!(driver.is_finished());
+    wait(session.release());
+}
+
+#[test]
+fn a_caller_driven_session_renders_the_tiles_that_its_workers_parse() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let style = r##"{"version":8,"sources":{"points":{"type":"geojson","data":{"type":"Feature","properties":{},
+        "geometry":{"type":"Point","coordinates":[0,0]}}}},"layers":[{"id":"bg","type":"background",
+        "paint":{"background-color":"#ff0000"}},{"id":"circle","type":"circle","source":"points",
+        "paint":{"circle-radius":20,"circle-color":"#0000ff"}}]}"##;
+    wait(map.set_style_json(style));
+    let (session, driver) = attach(&map, caller_options());
+    // The first frame finds the tile still parsing, and a frame after it
+    // has parsed draws the circle.
+    let deadline = std::time::Instant::now() + TIMEOUT;
+    let mut token = 0;
+    while center_pixel_after(&driver, &session, &mut token) != [0, 0, 255, 255] {
+        assert!(std::time::Instant::now() < deadline, "the tile never rendered");
+    }
+    wait_release(&driver, &session);
+}
+
+/// Renders a frame, forced the first time and then one that waits for the
+/// map's next update, and reads its center pixel.
+fn center_pixel_after(driver: &DriverWork, session: &RenderSession, token: &mut u64) -> [u8; 4] {
+    *token += 1;
+    let mode = if *token == 1 { DemandMode::Force } else { DemandMode::WaitForUpdate };
+    session.demand_frame(FrameDemand::new(mode, *token)).unwrap();
+    take_one(driver, session);
+    center_pixel(driver, session)
 }

@@ -235,7 +235,7 @@ pub struct GeometryTileInner {
     mailbox: Arc<Mailbox>,
 
     correlation_id: Cell<u64>,
-    /// The tileset has no tile here (`emptyResponse: "missing"`): the tile
+    /// The tileset has no tile here (`LoaderTile::set_missing`): the tile
     /// lays out without data but isn't renderable.
     pub(crate) missing: Cell<bool>,
 

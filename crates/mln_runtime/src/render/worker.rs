@@ -8,8 +8,8 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use mln_actor::RunLoopHandle;
@@ -32,6 +32,7 @@ use super::local::{LocalTarget, Pending, PendingReads};
 use super::session::{Published, RenderSessionState, SessionShared, WorkId, physical_size};
 use super::target::{BorrowedRing, Device, Driver, ExportKind, ExportedRing, Surface};
 use crate::completion::Resolver;
+use crate::map::Published as MapPublished;
 use crate::runtime::Outbox;
 
 /// Where a thread keeps the session whose work it runs.
@@ -66,20 +67,20 @@ pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut Worker, &mut
 }
 
 /// Runs `task` on the session, then delivers what it sends to the host, with
-/// the session unborrowed and unlocked. A session that was abandoned lets go
-/// of its graphics objects first.
+/// the session unborrowed and unlocked: a driver call, which the delivery is
+/// part of. A session that was abandoned lets go of its graphics objects
+/// first.
 fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
+    let Some(slot) = CURRENT.with(|current| current.borrow().clone()) else { return };
+    let Some(shared) = slot.borrow().as_ref().map(|worker| worker.shared.clone()) else { return };
+    let _call = shared.enter_call();
     let mut outbox = Outbox::default();
-    if let Some(slot) = CURRENT.with(|current| current.borrow().clone()) {
-        let mut slot = slot.borrow_mut();
-        if let Some(worker) = slot.as_mut() {
-            let shared = worker.shared.clone();
-            let _gate = shared.gate.lock_unpoisoned();
-            if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
-                worker.tear_down(&mut outbox);
-            }
-            task(worker, &mut outbox);
+    if let Some(worker) = slot.borrow_mut().as_mut() {
+        let _gate = shared.gate.lock_unpoisoned();
+        if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
+            worker.tear_down(&mut outbox);
         }
+        task(worker, &mut outbox);
     }
     outbox.deliver();
 }
@@ -135,6 +136,7 @@ pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
     let Some(Ok(init)) = shared.state.lock_unpoisoned().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
         return;
     };
+    let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     let gate = shared.gate.lock_unpoisoned();
     let worker = Worker::new(shared.clone(), *init, &mut outbox);
@@ -153,7 +155,8 @@ struct Gfx {
 }
 
 impl Gfx {
-    /// How many graphics objects a `Gfx` holds: the renderer and its target.
+    /// How many graphics objects a `Gfx` holds: its target, and its
+    /// renderer's, which the renderer makes when it first draws.
     const OBJECTS: u32 = 2;
 
     fn new(init: Init) -> Result<Gfx, Error> {
@@ -178,9 +181,13 @@ impl Gfx {
         BackendScope::new(&*self.backend, ScopeType::Explicit)
     }
 
-    /// Whether the target can take a frame now: it begins one, which a
-    /// surface needs a texture for.
+    /// Whether the target can take a frame now: its window, if any, has an
+    /// area to present to, and it begins a frame, which a surface needs a
+    /// texture for.
     fn ready_for_frame(&self) -> bool {
+        if !self.target.window_has_area() {
+            return false;
+        }
         let _scope = self.scope();
         self.target.frames().is_some_and(|frames| frames.begin_frame().is_some())
     }
@@ -202,6 +209,18 @@ impl Gfx {
 struct PendingDemand {
     demand: FrameDemand,
     sequence: u64,
+    /// The demand's place among the demands that reached the session.
+    serial: u64,
+}
+
+/// Work that waits for the work sent before it: resizes that haven't
+/// landed, and demands that wait for the map's commands.
+struct Behind {
+    /// How many of the session's resizes must land first.
+    resizes: u64,
+    /// How many demands reached the session before the work.
+    demands: u64,
+    task: Task,
 }
 
 /// The texture of a borrowed ring that the next frame renders into.
@@ -239,6 +258,8 @@ pub(crate) struct Worker {
     update_scheduled: Arc<AtomicBool>,
     /// The sequence number of the map's last command that ran.
     map_applied: u64,
+    /// What the map publishes, from the bind on: the last command that ran.
+    map_published: Option<Arc<MapPublished>>,
     /// The demands in the order they came, each waiting until the map ran
     /// the commands sent before it.
     queue: VecDeque<PendingDemand>,
@@ -266,8 +287,10 @@ pub(crate) struct Worker {
     pub(crate) finished: bool,
     /// Counts the resizes that landed, of those that the session sent.
     resizes_landed: u64,
-    /// The work that waits for resizes to land, each with how many.
-    behind_resizes: VecDeque<(u64, Task)>,
+    /// Counts the host's demands that reached the session.
+    demands_received: u64,
+    /// The work that waits for the work sent before it, in the order sent.
+    behind: VecDeque<Behind>,
     /// The target and backend that a teardown keeps while views name their
     /// sync objects, until the last view ends.
     viewed: Option<(LocalTarget, Rc<dyn RendererBackend>)>,
@@ -345,7 +368,10 @@ impl Worker {
         let gfx = match built {
             Some(Ok(mut gfx)) => {
                 gfx.renderer.set_event_queue(Some(renderer_events.clone()));
-                shared.state.lock_unpoisoned().graphics_objects = Gfx::OBJECTS;
+                let mut state = shared.state.lock_unpoisoned();
+                state.graphics_objects = Gfx::OBJECTS - 1;
+                state.abandon_keeps_graphics = gfx.target.device().abandon_keeps_graphics();
+                drop(state);
                 Some(gfx)
             }
             Some(Err(error)) => {
@@ -373,6 +399,7 @@ impl Worker {
             renderer_events,
             update_scheduled: Arc::new(AtomicBool::new(false)),
             map_applied: 0,
+            map_published: None,
             queue: VecDeque::new(),
             waiting: Vec::new(),
             parked: VecDeque::new(),
@@ -386,7 +413,8 @@ impl Worker {
             unbound: false,
             finished: false,
             resizes_landed: 0,
-            behind_resizes: VecDeque::new(),
+            demands_received: 0,
+            behind: VecDeque::new(),
             viewed: None,
             settling: Vec::new(),
             ticker: None,
@@ -402,14 +430,29 @@ impl Worker {
 
     /// The map bound the session in its command `sequence`: from now on the
     /// session draws its updates and reports to it.
-    pub(crate) fn bound(&mut self, sequence: u64, reader: UpdateReader, events: RendererEvents, outbox: &mut Outbox) {
+    pub(crate) fn bound(
+        &mut self,
+        sequence: u64,
+        reader: UpdateReader,
+        events: RendererEvents,
+        published: Arc<MapPublished>,
+        outbox: &mut Outbox,
+    ) {
         if self.torn_down {
             return;
         }
         self.map_applied = self.map_applied.max(sequence);
+        self.map_published = Some(published);
         let scheduled = self.update_scheduled.clone();
         let run_loop = self.shared.run_loop.clone();
+        // A caller-driven session's thread runs only when the host services
+        // it, which the host may do only once it knows to draw, so the map's
+        // thread tells it of the update.
+        let redraw = (self.shared.driver == Driver::CallerThread).then(|| Arc::downgrade(&self.shared));
         reader.set_waker(Some(Arc::new(move || {
+            if let Some(wake) = redraw.as_ref().and_then(Weak::upgrade).and_then(|shared| shared.take_redraw_wake()) {
+                wake();
+            }
             if !scheduled.swap(true, Ordering::SeqCst) {
                 post(&run_loop, Worker::on_update);
             }
@@ -425,6 +468,10 @@ impl Worker {
         };
         if let Some(attach) = attach {
             outbox.resolve(attach, Ok(()));
+        }
+        // A new session has the map's latest update to draw.
+        if self.gfx.is_some() && self.latest().is_some() {
+            self.wake_for_redraw(outbox);
         }
         // The demands that came while the session attached wait for the
         // attach to complete, which the outbox delivers once this task ends,
@@ -448,6 +495,7 @@ impl Worker {
             outbox.resolve(attach, Err(error));
         }
         self.end_demands(FrameDisposition::Failed, outbox);
+        self.run_queued(outbox);
     }
 
     /// The map ran its command `sequence`, and published what it changed.
@@ -468,13 +516,7 @@ impl Worker {
     /// Tells the host that the map has something new to draw, unless it was
     /// told since its last demand, or the session has no target.
     fn wake_for_redraw(&self, outbox: &mut Outbox) {
-        let wake = {
-            let mut state = self.shared.state.lock_unpoisoned();
-            let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
-            state.redraw_armed &= !wake;
-            wake.then(|| self.shared.redraw_wake.clone()).flatten()
-        };
-        if let Some(wake) = wake {
+        if let Some(wake) = self.shared.take_redraw_wake() {
             outbox.push(move || wake());
         }
     }
@@ -524,7 +566,8 @@ impl Worker {
                 self.publish(&result, outbox);
             }
         }
-        self.queue.push_back(PendingDemand { demand, sequence });
+        self.demands_received += 1;
+        self.queue.push_back(PendingDemand { demand, sequence, serial: self.demands_received });
         self.pump(outbox);
     }
 
@@ -539,21 +582,15 @@ impl Worker {
             if self.unbound {
                 self.end_demands(FrameDisposition::Failed, outbox);
             }
-            return;
+            return self.run_queued(outbox);
         }
         while let Some(pending) = self.parked.pop_front() {
             if let Some(pending) = self.evaluate(pending, outbox) {
                 self.parked.push_front(pending);
-                return;
+                return self.run_queued(outbox);
             }
         }
-        while self.parked.is_empty() && self.queue.front().is_some_and(|pending| pending.sequence <= self.map_applied) {
-            if let Some(pending) = self.queue.pop_front()
-                && let Some(pending) = self.evaluate(pending, outbox)
-            {
-                self.parked.push_back(pending);
-            }
-        }
+        self.run_queued(outbox);
         let latest = self.latest_generation();
         // A ring replacement on its way gives the demands that wait a new
         // target, which they render to once it lands.
@@ -567,6 +604,67 @@ impl Worker {
             }
         }
         self.render_still_image(outbox);
+    }
+
+    /// Runs the demands whose map commands ran and the work that waits
+    /// behind earlier work, in the order they came, until each has to wait:
+    /// a demand for the map's commands or for a parked demand, and other
+    /// work for a resize to land or a demand sent before it that waits for
+    /// the map's commands. Work doesn't wait for a ring to free a texture,
+    /// as a parked demand and those behind it do.
+    fn run_queued(&mut self, outbox: &mut Outbox) {
+        loop {
+            self.run_ready(outbox);
+            // The map tells the session of the commands that the demands
+            // left wait for. One may have run before it could.
+            let awaited = self
+                .queue
+                .iter()
+                .map(|pending| pending.sequence)
+                .filter(|sequence| *sequence > self.map_applied)
+                .min()
+                .unwrap_or(u64::MAX);
+            self.shared.awaited_command.store(awaited, Ordering::SeqCst);
+            let applied = self.map_published.as_ref().map_or(0, |published| published.applied());
+            if awaited == u64::MAX || applied < awaited {
+                return;
+            }
+            self.map_applied = applied;
+        }
+    }
+
+    /// Runs what [`run_queued`](Self::run_queued) runs, with the map's
+    /// commands that the session knows ran.
+    fn run_ready(&mut self, outbox: &mut Outbox) {
+        loop {
+            let front = self.queue.front().map(|pending| (pending.serial, pending.sequence <= self.map_applied));
+            let work_first =
+                self.behind.front().is_some_and(|behind| front.is_none_or(|(serial, _)| behind.demands < serial));
+            let evaluable = !self.torn_down && self.reader.is_some() && self.parked.is_empty();
+            if !work_first && evaluable && front.is_some_and(|(_, ready)| ready) {
+                if let Some(pending) = self.queue.pop_front()
+                    && let Some(pending) = self.evaluate(pending, outbox)
+                {
+                    self.parked.push_back(pending);
+                }
+                continue;
+            }
+            let waits = |behind: &Behind| {
+                behind.resizes > self.resizes_landed
+                    || self
+                        .queue
+                        .iter()
+                        .any(|pending| pending.serial <= behind.demands && pending.sequence > self.map_applied)
+            };
+            match self.behind.front() {
+                Some(behind) if !waits(behind) => {
+                    if let Some(behind) = self.behind.pop_front() {
+                        (behind.task)(self, outbox);
+                    }
+                }
+                _ => return,
+            }
+        }
     }
 
     /// Renders the demand, or ends it, or has it wait for an update. Returns
@@ -631,7 +729,9 @@ impl Worker {
     /// [`pick_slot`](Self::pick_slot) marked, or into a target without a
     /// ring, and publishes its result. A still map draws no frame until
     /// everything that it shows has loaded, and a surface without a texture
-    /// to render into takes no frame.
+    /// to render into takes no frame. A frame that a surface drops, having
+    /// had no image for it after all, finishes as not ready, and the next
+    /// demand draws the map again.
     fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>, outbox: &mut Outbox) {
         let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
@@ -652,6 +752,16 @@ impl Worker {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
             gfx.target.frames().and_then(|frames| gfx.renderer.render(&update.parameters, frames))
         };
+        {
+            let mut state = self.shared.state.lock_unpoisoned();
+            state.graphics_objects = state.graphics_objects.max(Gfx::OBJECTS);
+        }
+        if gfx.target.is_presenting() && matches!(handoff, Some(Handoff::Dropped)) {
+            let events = self.renderer_events.take();
+            let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
+            self.publish(&result, outbox);
+            return self.forward(events);
+        }
         let projection = gfx.renderer.frame_projection();
         self.rendered_update = update.generation;
         self.rendered_generation = self.generation();
@@ -825,7 +935,7 @@ impl Worker {
         if failure {
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
-            return;
+            return self.run_queued(outbox);
         }
         self.pump(outbox);
     }
@@ -902,23 +1012,17 @@ impl Worker {
 
     // MARK: - Work
 
-    /// Runs `task` once `resizes` of the session's resizes have landed, in
-    /// the order of the work that waits.
-    pub(crate) fn after_resizes(&mut self, resizes: u64, task: Task, outbox: &mut Outbox) {
-        if resizes <= self.resizes_landed && self.behind_resizes.is_empty() {
-            task(self, outbox);
-        } else {
-            self.behind_resizes.push_back((resizes, task));
-        }
+    /// Runs `task` after the work sent before it: once `resizes` of the
+    /// session's resizes have landed, and the demands that came before it
+    /// and wait for the map's commands have rendered or ended.
+    pub(crate) fn after_earlier_work(&mut self, resizes: u64, task: Task, outbox: &mut Outbox) {
+        self.behind.push_back(Behind { resizes, demands: self.demands_received, task });
+        self.run_queued(outbox);
     }
 
     fn resize_landed(&mut self, outbox: &mut Outbox) {
         self.resizes_landed += 1;
-        while self.behind_resizes.front().is_some_and(|(resizes, _)| *resizes <= self.resizes_landed) {
-            if let Some((_, task)) = self.behind_resizes.pop_front() {
-                task(self, outbox);
-            }
-        }
+        self.run_queued(outbox);
     }
 
     /// The target's size in logical pixels.
@@ -1000,6 +1104,7 @@ impl Worker {
         if failed {
             self.end_demands(FrameDisposition::Failed, outbox);
             self.drop_gfx();
+            self.run_queued(outbox);
         }
     }
 

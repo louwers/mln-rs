@@ -20,7 +20,8 @@
         # compile C, and the libraries.
         default = pkgs.mkShell {
           # tools/c-abi-test builds maplibre-native-ffi's ABI suite with
-          # CMake, against the Vulkan headers and loader.
+          # CMake, against the Vulkan headers and loader, and for its OpenGL
+          # preset EGL and OpenGL ES (libglvnd).
           packages = [ pkgs.cmake ];
 
           # sqlite-wasm-rs compiles SQLite for wasm32 (`just check-wasm`)
@@ -32,6 +33,7 @@
           buildInputs = [
             pkgs.vulkan-headers
             pkgs.vulkan-loader
+            pkgs.libglvnd
           ];
 
           # Loaded with dlopen() at run time: the Vulkan loader by wgpu, EGL

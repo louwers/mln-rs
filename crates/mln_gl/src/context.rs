@@ -115,6 +115,8 @@ pub struct Context {
     /// Whether a half-float texture can be rendered into
     /// (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`).
     half_float_renderable: bool,
+    /// Whether the context is of desktop OpenGL rather than OpenGL ES.
+    desktop: bool,
     global_uniform_buffers: RefCell<UniformBufferArray>,
     /// The uniform buffers of the layer group being drawn.
     layer_uniform_buffers: RefCell<UniformBufferArray>,
@@ -148,10 +150,20 @@ impl Context {
         // SAFETY: the parameters are GL ES 3.0's.
         let (alignment, extensions) =
             unsafe { (gl.get_parameter_i32(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT), gl.supported_extensions()) };
-        let half_float_renderable = extensions.contains("EXT_color_buffer_half_float")
+        let desktop = !gl.version().is_embedded;
+        // Desktop OpenGL 3.0 renders into half-float textures without an
+        // extension.
+        let half_float_renderable = desktop
+            || extensions.contains("EXT_color_buffer_half_float")
             || extensions.contains("GL_EXT_color_buffer_half_float")
             || extensions.contains("EXT_color_buffer_float")
             || extensions.contains("GL_EXT_color_buffer_float");
+        if desktop {
+            // OpenGL ES encodes what it writes to an sRGB framebuffer, such
+            // as the host's texture, as sRGB; desktop OpenGL only with this.
+            // SAFETY: a capability of OpenGL 3.0.
+            unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
+        }
         Rc::new_cyclic(|weak| Context {
             base: ContextBase::default(),
             backend,
@@ -159,6 +171,7 @@ impl Context {
             state: State::default(),
             uniform_buffer_offset_alignment: alignment.max(1) as usize,
             half_float_renderable,
+            desktop,
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             layer_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             abandoned: RefCell::new(Abandoned::default()),
@@ -195,6 +208,13 @@ impl Context {
 
     pub fn uniform_buffer_offset_alignment(&self) -> usize {
         self.uniform_buffer_offset_alignment
+    }
+
+    /// Whether the context is of desktop OpenGL (3.3 or later) rather than
+    /// OpenGL ES or WebGL2. Its shaders compile as GLSL 3.30, and it has no
+    /// alpha or luminance textures.
+    pub fn is_desktop(&self) -> bool {
+        self.desktop
     }
 
     /// Port-only: deletes what the context caches and what is abandoned,

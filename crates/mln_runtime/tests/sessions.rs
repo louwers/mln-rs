@@ -363,6 +363,25 @@ fn the_redraw_wake_runs_once_per_demand() {
     assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 2));
 }
 
+#[test]
+fn a_new_session_wakes_for_the_map_it_has_to_draw() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let redraws = Arc::new(AtomicUsize::new(0));
+    let counter = redraws.clone();
+    let options = AttachOptions {
+        redraw_wake: Some(Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        })),
+        ..AttachOptions::default()
+    };
+    let (session, attached) = map.attach(offscreen(SIZE), options).unwrap();
+    attached.wait().unwrap();
+    assert!(eventually(|| redraws.load(Ordering::SeqCst) == 1));
+    demand(&session, DemandMode::IfChanged, 1);
+    assert_eq!(FrameDisposition::Rendered, take_one(&session).disposition);
+}
+
 // MARK: - Resizing
 
 #[test]
@@ -600,6 +619,26 @@ fn abandon_ends_pending_work_and_frees_the_map_at_once() {
 }
 
 #[test]
+fn an_abandon_from_a_completion_that_the_worker_delivers_is_busy() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    demand(&session, DemandMode::Force, 1);
+    take_one(&session);
+    let (sender, receiver) = channel();
+    let abandoned = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
+    });
+    let (result, abandon) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(Err(ErrorKind::Busy), abandon);
+    assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
+    // Off the worker's thread, the abandon waits for its call.
+    assert_eq!(0, session.abandon().unwrap());
+}
+
+#[test]
 fn an_abandon_that_keeps_graphics_counts_the_renderer_and_its_backend() {
     let runtime = runtime();
     let map = red_map(&runtime);
@@ -679,6 +718,30 @@ fn maintenance_work_runs_in_order_with_frames() {
 }
 
 #[test]
+fn maintenance_work_waits_behind_a_demand_for_map_commands() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    render_until_idle(&map, &session);
+    let open = hold_runtime(&map);
+    let zoomed = zoom(&map, 2.0);
+    demand(&session, DemandMode::Force, 1);
+    // The work completes once the demand rendered, which waits for the zoom
+    // that the held runtime hasn't applied yet.
+    let (sender, receiver) = channel();
+    let drained = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, drained.drain_frame_results().unwrap()));
+    });
+    drop(open);
+    zoomed.wait().unwrap();
+    let (result, results) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(1, results.len(), "{results:?}");
+    assert_eq!((1, FrameDisposition::Rendered), (results[0].token.unwrap(), results[0].disposition));
+}
+
+#[test]
 fn sessions_on_two_maps_share_one_device() {
     let device = Device::new(DeviceOptions::default()).unwrap();
     let runtime = runtime();
@@ -704,7 +767,11 @@ fn sessions_on_two_maps_share_one_device() {
 
 #[test]
 fn a_device_reports_a_missing_adapter() {
-    let error = Device::new(DeviceOptions { adapter: Some(mln_runtime::Adapter::Index(usize::MAX)) }).unwrap_err();
+    let error = Device::new(DeviceOptions {
+        adapter: Some(mln_runtime::Adapter::Index(usize::MAX)),
+        ..DeviceOptions::default()
+    })
+    .unwrap_err();
     assert_eq!(ErrorKind::NotFound, error.kind);
 }
 

@@ -201,8 +201,6 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::LinePatternShader,
     BuiltIn::LineSDFShader,
     BuiltIn::LineGradientSDFShader,
-    BuiltIn::LocationIndicatorShader,
-    BuiltIn::LocationIndicatorTexturedShader,
     BuiltIn::RasterShader,
     BuiltIn::SymbolIconShader,
     BuiltIn::SymbolSDFShader,

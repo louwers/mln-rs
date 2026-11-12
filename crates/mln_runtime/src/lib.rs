@@ -46,7 +46,7 @@ pub use render::{
     AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, DepthStencilFormat,
     DepthStencilFormats, Device, DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, DriverWork, ExportKind, ExportKinds,
     ExportedImage, ExportedRing, FrameDemand, FrameDepth, FrameDisposition, FrameResult, FrameTexture,
-    FrameTextureKind, FrameView, GpuSync, LocalTarget, NativeTexture, RenderSession, RenderSessionCapabilities,
+    FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget, NativeTexture, RenderSession, RenderSessionCapabilities,
     RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface, SurfaceType, SyncKind,
     SyncKinds, Wake,
 };

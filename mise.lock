@@ -101,6 +101,44 @@ url = "https://github.com/pnpm/pnpm/releases/download/v12.18.0/pnpm-win32-x64.zi
 url_api = "https://api.github.com/repos/pnpm/pnpm/releases/assets/711505547"
 provenance = "github-attestations"
 
+[[tools."github:nextest-rs/nextest"]]
+version = "0.9.151"
+backend = "github:nextest-rs/nextest"
+specifiers = ["0.9.151"]
+
+[tools."github:nextest-rs/nextest".options]
+version_prefix = "cargo-nextest-"
+
+[tools."github:nextest-rs/nextest"."platforms.linux-arm64"]
+checksum = "sha256:3e35e8f6913af92558ba09d7155f74e35dd1f0024ef3cd891637433ae4eacbdd"
+url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.151/cargo-nextest-0.9.151-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/nextest-rs/nextest/releases/assets/703601411"
+provenance = "github-attestations"
+
+[tools."github:nextest-rs/nextest"."platforms.linux-x64"]
+checksum = "sha256:1d4ce302b820c41f4b89c5fb9bce45f0f0c94882c1cf08fc360caf08be6e7df4"
+url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.151/cargo-nextest-0.9.151-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/nextest-rs/nextest/releases/assets/703600788"
+provenance = "github-attestations"
+
+[tools."github:nextest-rs/nextest"."platforms.macos-arm64"]
+checksum = "sha256:d1d7d025d4bfc9fb154cd76aea3949bd78534829a0589abefa6e5dd4edb135dd"
+url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.151/cargo-nextest-0.9.151-universal-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/nextest-rs/nextest/releases/assets/703616437"
+provenance = "github-attestations"
+
+[tools."github:nextest-rs/nextest"."platforms.windows-arm64"]
+checksum = "sha256:753c190857e280bdb8f8bfd72989335b913b894cda0914c8b40a01703fa27b94"
+url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.151/cargo-nextest-0.9.151-aarch64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/nextest-rs/nextest/releases/assets/703615468"
+provenance = "github-attestations"
+
+[tools."github:nextest-rs/nextest"."platforms.windows-x64"]
+checksum = "sha256:ba35ee0ce14ace65cd8c7aaa9613adb7d2644b0fe3866e85131eb4c269786efb"
+url = "https://github.com/nextest-rs/nextest/releases/download/cargo-nextest-0.9.151/cargo-nextest-0.9.151-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/nextest-rs/nextest/releases/assets/703606896"
+provenance = "github-attestations"
+
 [[tools."github:wasm-bindgen/wasm-bindgen"]]
 version = "0.2.130"
 backend = "github:wasm-bindgen/wasm-bindgen"

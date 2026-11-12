@@ -41,6 +41,10 @@ pub(crate) unsafe fn write(diagnostic: *mut mln_diagnostic, message: &str) {
 /// # Safety
 ///
 /// As for [`write`].
+#[allow(
+    dead_code,
+    reason = "the generated stub of a function that reports a diagnostic calls it, and no such function is a stub today"
+)]
 pub(crate) unsafe fn unsupported(diagnostic: *mut mln_diagnostic, function: &str) -> mln_status {
     // SAFETY: the caller's contract.
     unsafe { write(diagnostic, &format!("{function} is not implemented")) };

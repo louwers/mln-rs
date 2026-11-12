@@ -17,7 +17,7 @@ use mln_gfx::rendering_stats::RenderingStats;
 use mln_gfx::{BackendScope, RendererBackend, ScopeType};
 use mln_map::Map;
 use mln_renderer::{Renderer, UpdateParameters, UpdateReader};
-use mln_runtime::{BackendType, Device, DeviceOptions, LocalTarget};
+use mln_runtime::{BackendType, Device, DeviceOptions, GlApi, LocalTarget};
 use mln_text::GlyphCache;
 use mln_util::error::Error;
 use mln_util::image::PremultipliedImage;
@@ -58,16 +58,22 @@ pub struct HeadlessFrontend {
 }
 
 /// The device a frontend renders on without one of its own: on the backend
-/// `MLN_RENDER_BACKEND` names, or on WebGPU.
+/// `MLN_RENDER_BACKEND` names, or on WebGPU. `gl` names OpenGL ES, and
+/// `gl-desktop` desktop OpenGL.
 pub fn harness_device() -> Result<Device, Error> {
+    let mut options = DeviceOptions::default();
     let backend = match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
         Ok("metal") => BackendType::Metal,
         Ok("vulkan") => BackendType::Vulkan,
         Ok("gl") => BackendType::OpenGL,
+        Ok("gl-desktop") => {
+            options.gl_api = GlApi::Gl;
+            BackendType::OpenGL
+        }
         Ok("webgpu") | Err(_) => BackendType::WebGPU,
         Ok(other) => return Err(Error::invalid_argument(format!("MLN_RENDER_BACKEND names no backend: {other}"))),
     };
-    Device::with_backend(backend, DeviceOptions::default())
+    Device::with_backend(backend, options)
 }
 
 /// `{static_cast<uint32_t>(size.width * pixelRatio), static_cast<uint32_t>(size.height * pixelRatio)}`.

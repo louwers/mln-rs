@@ -14,6 +14,7 @@ use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
 
@@ -189,6 +190,9 @@ pub(crate) struct SessionState {
     /// Whether the session's thread keeps its graphics objects until the
     /// process exits, instead of freeing them, when the session ends.
     pub(crate) keep_graphics: bool,
+    /// Whether an abandon keeps the graphics objects on any thread, as
+    /// `Device::abandon_keeps_graphics` says of the session's device.
+    pub(crate) abandon_keeps_graphics: bool,
     /// The slots of a borrowed ring, and none for another target.
     pub(crate) ring: Vec<RingSlot>,
     /// How many of the ring's frames the host holds.
@@ -276,6 +280,10 @@ pub(crate) struct SessionShared {
     /// Held while the session's thread runs a task, so an abandon waits for
     /// the graphics work in progress.
     pub(crate) gate: Mutex<()>,
+    /// Whether the session's thread is inside a driver call: a core worker
+    /// running a task and delivering what it sent the host, or a service of
+    /// a caller-driven session.
+    pub(crate) in_call: AtomicBool,
     pub(crate) frame_wake: Option<Wake>,
     pub(crate) redraw_wake: Option<Wake>,
     capabilities: RenderSessionCapabilities,
@@ -283,6 +291,11 @@ pub(crate) struct SessionShared {
     /// Whether the driver-work wake may run: from the start of the last
     /// service until it runs.
     pub(crate) driver_armed: Arc<AtomicBool>,
+    /// The first of the map's commands that the session's work waits for,
+    /// or `u64::MAX` for none: the map tells the session's thread when it
+    /// ran a command only from that one on, so a command that no work waits
+    /// for wakes no caller's driver.
+    pub(crate) awaited_command: Arc<AtomicU64>,
 }
 
 impl SessionShared {
@@ -302,6 +315,16 @@ impl SessionShared {
         self.state.lock_unpoisoned().released
     }
 
+    /// The redraw wake that tells the host the map has something new to
+    /// draw, unless the host was told since its last demand, or the session
+    /// has no target. The host isn't told again until its next demand.
+    pub(crate) fn take_redraw_wake(&self) -> Option<Wake> {
+        let mut state = self.state.lock_unpoisoned();
+        let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
+        state.redraw_armed &= !wake;
+        wake.then(|| self.redraw_wake.clone()).flatten()
+    }
+
     /// Starts a detach on the session's thread, after the work sent before.
     /// The state is locked, and the session usable or failed.
     fn start_detach(&self, state: &mut SessionState) {
@@ -311,8 +334,9 @@ impl SessionShared {
 
     /// Releases the session without waiting: it detaches, unless it is
     /// detached or abandoned already, and every call on it fails after. A
-    /// caller-driven session that isn't attached is abandoned instead, so the
-    /// release doesn't wait for the host to service it.
+    /// caller-driven session that isn't attached, or whose map was released,
+    /// is abandoned instead, so the release doesn't wait for the host to
+    /// service it.
     fn dispose(&self, done: Option<Resolver<()>>) -> Result<(), Error> {
         with_unlocked_wakes(|| self.dispose_locked(done))
     }
@@ -354,6 +378,8 @@ impl SessionShared {
             return Err(released());
         }
         state.released = true;
+        // A released map waits for no service of its session's detach.
+        let map_released = state.map.as_ref().is_some_and(Map::is_released);
         match state.lifecycle {
             RenderSessionState::Detached | RenderSessionState::Abandoned => {
                 drop(state);
@@ -366,13 +392,13 @@ impl SessionShared {
             RenderSessionState::Attaching | RenderSessionState::Failed if self.driver == Driver::CallerThread => {
                 state.release_waiters.extend(done);
                 drop(state);
-                if self.abandon(Abandoner::Library).is_err() {
-                    // Only the session's own work could hold the gate here.
-                    let mut state = self.state.lock_unpoisoned();
-                    if state.lifecycle != RenderSessionState::Abandoned {
-                        self.start_detach(&mut state);
-                    }
-                }
+                self.abandon_or_detach();
+                return Ok(());
+            }
+            RenderSessionState::Attached if self.driver == Driver::CallerThread && map_released => {
+                state.release_waiters.extend(done);
+                drop(state);
+                self.abandon_or_detach();
                 return Ok(());
             }
             RenderSessionState::Attaching | RenderSessionState::Attached | RenderSessionState::Failed => {
@@ -383,16 +409,51 @@ impl SessionShared {
         Ok(())
     }
 
-    /// Stops the session at once, as [`RenderSession::abandon`] documents.
-    /// The library may abandon a released session too.
-    pub(crate) fn abandon(&self, by: Abandoner) -> Result<(), Error> {
-        with_unlocked_wakes(|| self.abandon_locked(by, false)).map(drop)
+    /// Abandons the released session, or detaches it when its own work
+    /// holds the gate, which only it could here.
+    fn abandon_or_detach(&self) {
+        if self.abandon(Abandoner::Library).is_err() {
+            let mut state = self.state.lock_unpoisoned();
+            if state.lifecycle != RenderSessionState::Abandoned {
+                self.start_detach(&mut state);
+            }
+        }
+    }
+
+    /// Stops the session at once, as [`RenderSession::abandon`] documents,
+    /// and returns how many graphics objects it keeps. The library may
+    /// abandon a released session too.
+    pub(crate) fn abandon(&self, by: Abandoner) -> Result<u32, Error> {
+        with_unlocked_wakes(|| self.abandon_locked(by, false))
+    }
+
+    /// Marks the session's thread as inside a driver call until the guard
+    /// drops.
+    pub(crate) fn enter_call(&self) -> InCall<'_> {
+        InCall { shared: self, previous: self.in_call.swap(true, Ordering::SeqCst) }
     }
 
     /// Abandons the session, which keeps its graphics objects until the
     /// process exits if `keep_graphics`, and returns how many it keeps.
+    ///
+    /// A driver call can't be waited for on its own thread, where the
+    /// session's callbacks run inside it, and a host's service on another
+    /// thread is the host's to end, so either is busy. A core worker's call
+    /// on another thread is waited for. A caller-driven session that is
+    /// abandoned off its thread keeps its graphics objects, which only its
+    /// thread may free: once this returns, the host may destroy what they
+    /// were made on.
     fn abandon_locked(&self, by: Abandoner, keep_graphics: bool) -> Result<u32, Error> {
         let on_driver = self.thread.get() == Some(&std::thread::current().id());
+        if self.in_call.load(Ordering::SeqCst) {
+            if on_driver {
+                return Err(Error::busy("the render session's driver call is running on this thread"));
+            }
+            if self.driver == Driver::CallerThread && by == Abandoner::Host {
+                return Err(Error::busy("the render session's driver work is running on another thread"));
+            }
+        }
+        let off_thread = self.driver == Driver::CallerThread && !on_driver;
         let gate = if on_driver {
             self.gate.try_lock().map_err(|_| Error::busy("the render session is rendering on this thread"))?
         } else {
@@ -419,7 +480,7 @@ impl SessionShared {
                 return Err(Error::busy("a view is open on one of the render session's acquired frames"));
             }
             state.lifecycle = RenderSessionState::Abandoned;
-            state.keep_graphics |= keep_graphics;
+            state.keep_graphics |= keep_graphics || off_thread || state.abandon_keeps_graphics;
             let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
             (state.take_waiters(), state.map.take(), kept)
         };
@@ -446,10 +507,36 @@ impl SessionShared {
             // A worker that ended drops the task, and the sender with it.
             let _ = receiver.recv();
         }
+        if kept != 0 {
+            let reason = if keep_graphics {
+                "it was abandoned without graphics calls"
+            } else if off_thread {
+                "only the thread that services it may free them"
+            } else {
+                "only a detach frees OpenGL and WebGPU objects"
+            };
+            Log::warning(
+                Event::Render,
+                format!("An abandoned render session keeps {kept} graphics objects until the process exits: {reason}"),
+            );
+        }
         let lost = || Error::target_lost("the render session was abandoned");
         waiters.settle(&Err(lost()), lost);
         drop(map);
         Ok(kept)
+    }
+}
+
+/// Marks a session's thread as inside a driver call, as
+/// [`SessionShared::enter_call`] does.
+pub(crate) struct InCall<'a> {
+    shared: &'a SessionShared,
+    previous: bool,
+}
+
+impl Drop for InCall<'_> {
+    fn drop(&mut self) {
+        self.shared.in_call.store(self.previous, Ordering::SeqCst);
     }
 }
 
@@ -588,6 +675,7 @@ pub(crate) fn attach(
             if device.is_none() && !surface.needs_no_device() {
                 return Err(Error::invalid_argument("a surface that the host made needs the host's device"));
             }
+            surface.check_area()?;
             (size, TargetInit::Surface { surface, device })
         }
         RenderTarget::Borrowed { size, ring: borrowed, device } => {
@@ -677,6 +765,7 @@ pub(crate) fn attach(
             resizes_sent: 0,
             graphics_objects: 0,
             keep_graphics: false,
+            abandon_keeps_graphics: false,
             ring: vec![RingSlot::default(); ring.map_or(0, |(depth, _, _)| depth)],
             acquired_frames: 0,
             pending_retargets: 0,
@@ -698,6 +787,8 @@ pub(crate) fn attach(
         },
         driver_work_taken: AtomicBool::new(false),
         driver_armed,
+        awaited_command: Arc::new(AtomicU64::new(u64::MAX)),
+        in_call: AtomicBool::new(false),
     });
     let (completion, resolver) = shared.completion();
     shared.state.lock_unpoisoned().attach = Some(resolver);
@@ -714,10 +805,15 @@ pub(crate) fn attach(
         }
     }
     let session = RenderSession { handle: Arc::new(SessionHandle { shared }) };
-    if let Err(error) = map.bind_session(id, run_loop, size) {
+    if let Err(error) = map.bind_session(id, run_loop, session.shared().awaited_command.clone(), size) {
         // The map was released meanwhile: the session lets go of it.
         drop(session);
         return Err(error);
+    }
+    if options.driver == Driver::CallerThread {
+        // The first service builds the renderer, which is work that is ready
+        // now: the host hears of it before the attach returns.
+        session.shared().run_loop.invoke(|| {});
     }
     Ok((session, completion))
 }
@@ -787,7 +883,7 @@ impl RenderSession {
                         Err(error) => outbox.resolve(resolver, Err(error)),
                     }
                 });
-                worker.after_resizes(resizes, task, outbox);
+                worker.after_earlier_work(resizes, task, outbox);
             });
             drop(state);
             Ok(completion)
@@ -981,11 +1077,14 @@ impl RenderSession {
     /// shows the old. An exported ring gets images of the new size, and the
     /// frames that the host holds keep theirs until it gives them back.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, or a scale factor that isn't finite and positive, and
-    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed
-    /// ring, which [`set_ring`](Self::set_ring) resizes.
+    /// Fails first as a call that sends work does once the session no
+    /// longer takes work. Then fails with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed ring,
+    /// which [`set_ring`](Self::set_ring) resizes, and with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size,
+    /// or a scale factor that isn't finite and positive.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
+        check_usable(&self.shared().state.lock_unpoisoned())?;
         let capabilities = self.shared().capabilities;
         if capabilities.frame_acquisition && capabilities.export_kind.is_none() {
             return Err(Error::unsupported("a borrowed ring is sized by its owner: give it new textures instead"));
@@ -1105,12 +1204,16 @@ impl RenderSession {
     /// session makes its backend and renderer again.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)
-    /// for an offscreen session. Completes with
+    /// empty size, with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
+    /// an offscreen session, and with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) for a window that is
+    /// minimized or has no client area. Completes with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when the session's
     /// device can't present to the surface in the format that the session
-    /// renders in: attach a new session instead. The session then keeps the
-    /// surface it had, at the new size.
+    /// renders in: attach a new session instead. Completes with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the window had no
+    /// area to present to by then. The session then keeps the surface it had,
+    /// at the new size.
     pub fn set_surface(&self, size: Size, surface: Surface) -> Result<Completion<Applied>, Error> {
         check_usable(&self.shared().state.lock_unpoisoned())?;
         let capabilities = self.shared().capabilities;
@@ -1120,6 +1223,7 @@ impl RenderSession {
         if !capabilities.presentation {
             return Err(Error::unsupported("an offscreen session keeps its target"));
         }
+        surface.check_area()?;
         self.resize_then(size, None, move |worker, size, scale_factor, outbox| {
             worker.set_surface(size, scale_factor, surface, outbox).map(|()| None)
         })
@@ -1283,14 +1387,20 @@ impl RenderSession {
     /// returns, the session renders no more, and another session can attach
     /// to the map. Release the session afterward.
     ///
-    /// A caller-driven session lets go of its graphics objects on the host's
-    /// thread, at its next service or when its [`DriverWork`] drops.
+    /// Returns how many graphics objects the session keeps until the
+    /// process exits. A caller-driven session abandoned on the thread that
+    /// services it lets go of them there, at its next service or when its
+    /// [`DriverWork`] drops, and keeps none. Abandoned on another thread, it
+    /// keeps them, since only that thread may free them, and logs a warning.
     ///
-    /// It waits for a frame that the session is rendering. Fails with
-    /// [`ErrorKind::Busy`](mln_util::ErrorKind) on the session's own thread
-    /// while that runs, and with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// It waits for a core worker's driver call on another thread, such as a
+    /// frame that it renders. Fails with
+    /// [`ErrorKind::Busy`](mln_util::ErrorKind) inside a driver call on the
+    /// session's own thread, such as from a completion that the session
+    /// delivers, and while a caller-driven session's service runs on another
+    /// thread. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// once the session is detached, abandoned or released.
-    pub fn abandon(&self) -> Result<(), Error> {
+    pub fn abandon(&self) -> Result<u32, Error> {
         self.shared().abandon(Abandoner::Host)
     }
 

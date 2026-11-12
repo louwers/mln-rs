@@ -20,16 +20,15 @@ use crate::generated::types::{
     MLN_RESOURCE_ERROR_REASON_SERVER, MLN_RUNTIME_EVENT_PAYLOAD_CAMERA_CHANGE, MLN_RUNTIME_EVENT_PAYLOAD_GLYPHS,
     MLN_RUNTIME_EVENT_PAYLOAD_LOADING_FAILED, MLN_RUNTIME_EVENT_PAYLOAD_NONE,
     MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_RESPONSE_ERROR, MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_STATUS,
-    MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_TILE_COUNT_LIMIT, MLN_RUNTIME_EVENT_PAYLOAD_RENDER_FRAME,
-    MLN_RUNTIME_EVENT_PAYLOAD_SOURCE_CHANGED, MLN_RUNTIME_EVENT_PAYLOAD_SPRITE, MLN_RUNTIME_EVENT_PAYLOAD_STYLE_IMAGE,
-    MLN_RUNTIME_EVENT_PAYLOAD_TILE_ACTION, MLN_RUNTIME_EVENT_SOURCE_MAP, MLN_RUNTIME_EVENT_SOURCE_RUNTIME,
-    MLN_TILE_OPERATION_CANCELLED, MLN_TILE_OPERATION_END_PARSE, MLN_TILE_OPERATION_ERROR,
-    MLN_TILE_OPERATION_LOAD_FROM_CACHE, MLN_TILE_OPERATION_LOAD_FROM_NETWORK, MLN_TILE_OPERATION_NULL,
-    MLN_TILE_OPERATION_REQUESTED_FROM_CACHE, MLN_TILE_OPERATION_REQUESTED_FROM_NETWORK, MLN_TILE_OPERATION_START_PARSE,
-    mln_buffer_view, mln_camera_change_mode, mln_camera_change_source, mln_event_batch_view, mln_offline_region_status,
-    mln_rendering_stats, mln_resource_error_reason, mln_runtime_event, mln_runtime_event_camera_change,
-    mln_runtime_event_glyphs, mln_runtime_event_loading_failed, mln_runtime_event_offline_region_response_error,
-    mln_runtime_event_offline_region_status, mln_runtime_event_offline_region_tile_count_limit,
+    MLN_RUNTIME_EVENT_PAYLOAD_RENDER_FRAME, MLN_RUNTIME_EVENT_PAYLOAD_SOURCE_CHANGED, MLN_RUNTIME_EVENT_PAYLOAD_SPRITE,
+    MLN_RUNTIME_EVENT_PAYLOAD_STYLE_IMAGE, MLN_RUNTIME_EVENT_PAYLOAD_TILE_ACTION, MLN_RUNTIME_EVENT_SOURCE_MAP,
+    MLN_RUNTIME_EVENT_SOURCE_RUNTIME, MLN_TILE_OPERATION_CANCELLED, MLN_TILE_OPERATION_END_PARSE,
+    MLN_TILE_OPERATION_ERROR, MLN_TILE_OPERATION_LOAD_FROM_CACHE, MLN_TILE_OPERATION_LOAD_FROM_NETWORK,
+    MLN_TILE_OPERATION_NULL, MLN_TILE_OPERATION_REQUESTED_FROM_CACHE, MLN_TILE_OPERATION_REQUESTED_FROM_NETWORK,
+    MLN_TILE_OPERATION_START_PARSE, mln_buffer_view, mln_camera_change_mode, mln_camera_change_source,
+    mln_event_batch_view, mln_offline_region_status, mln_rendering_stats, mln_resource_error_reason, mln_runtime_event,
+    mln_runtime_event_camera_change, mln_runtime_event_glyphs, mln_runtime_event_loading_failed,
+    mln_runtime_event_offline_region_response_error, mln_runtime_event_offline_region_status,
     mln_runtime_event_payload, mln_runtime_event_payload_type, mln_runtime_event_render_frame,
     mln_runtime_event_source_changed, mln_runtime_event_sprite, mln_runtime_event_style_image,
     mln_runtime_event_tile_action, mln_tile_id, mln_tile_operation,
@@ -139,11 +138,6 @@ fn payload<'a>(
                 reason: error_reason(error.reason),
             };
             (MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_RESPONSE_ERROR, Some(error.message.as_str()))
-        }
-        RuntimeEventKind::OfflineRegionTileCountLimitExceeded { region_id, limit } => {
-            payload.offline_region_tile_count_limit =
-                mln_runtime_event_offline_region_tile_count_limit { region_id: *region_id, limit: *limit };
-            (MLN_RUNTIME_EVENT_PAYLOAD_OFFLINE_REGION_TILE_COUNT_LIMIT, None)
         }
     };
     (payload_type, payload, message)
@@ -318,12 +312,13 @@ mod tests {
 
     use ::mln_map::{RenderFrameStatus, RenderingStats};
     use ::mln_tile_id::{CanonicalTileID, OverscaledTileID};
+    use mln_storage::ResourceError;
 
     use super::*;
     use crate::generated::types::{
         MLN_RUNTIME_EVENT_MAP_CAMERA_WILL_CHANGE, MLN_RUNTIME_EVENT_MAP_GLYPHS_ERROR,
         MLN_RUNTIME_EVENT_MAP_RENDER_FRAME_FINISHED, MLN_RUNTIME_EVENT_MAP_TILE_ACTION,
-        MLN_RUNTIME_EVENT_OFFLINE_REGION_TILE_COUNT_LIMIT_EXCEEDED,
+        MLN_RUNTIME_EVENT_OFFLINE_REGION_RESPONSE_ERROR,
     };
 
     fn text(view: mln_buffer_view) -> (String, bool) {
@@ -364,7 +359,10 @@ mod tests {
             ),
             event(
                 EventSource::Runtime,
-                RuntimeEventKind::OfflineRegionTileCountLimitExceeded { region_id: 5, limit: 6 },
+                RuntimeEventKind::OfflineRegionResponseError {
+                    region_id: 5,
+                    error: ResourceError::new(Reason::NotFound, "no tile"),
+                },
             ),
         ];
         let batch = EventBatch::new(&events, 100, |id| 200 + id.0);
@@ -374,7 +372,7 @@ mod tests {
                 assert_eq!((view.event_count, view.event_size as usize), (4, size_of::<mln_runtime_event>()));
                 // SAFETY: the batch's events.
                 let events = unsafe { core::slice::from_raw_parts(view.events, view.event_count) };
-                let [camera, tile, glyphs, limit] = events else { unreachable!() };
+                let [camera, tile, glyphs, offline] = events else { unreachable!() };
 
                 assert_eq!(
                     (camera.type_, camera.source_type, camera.source),
@@ -405,11 +403,12 @@ mod tests {
                 assert_eq!(text(fonts[1]).0, "Noto");
 
                 assert_eq!(
-                    (limit.type_, limit.source_type, limit.source),
-                    (MLN_RUNTIME_EVENT_OFFLINE_REGION_TILE_COUNT_LIMIT_EXCEEDED, MLN_RUNTIME_EVENT_SOURCE_RUNTIME, 100)
+                    (offline.type_, offline.source_type, offline.source),
+                    (MLN_RUNTIME_EVENT_OFFLINE_REGION_RESPONSE_ERROR, MLN_RUNTIME_EVENT_SOURCE_RUNTIME, 100)
                 );
+                assert_eq!(text(offline.message), ("no tile".to_owned(), true));
                 // SAFETY: as above.
-                assert_eq!(unsafe { limit.payload.offline_region_tile_count_limit }.limit, 6);
+                assert_eq!(unsafe { offline.payload.offline_region_response_error }.region_id, 5);
             });
         })
         .join()

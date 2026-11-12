@@ -55,6 +55,10 @@ pub struct Response {
     /// This is set to true for 304 Not Modified responses.
     pub not_modified: bool,
 
+    /// Port-only: set, with `no_content`, for a 404 Not Found response for a tile, which the
+    /// tileset doesn't have. A tile loader can tell such a tile apart from one with nothing in it.
+    pub tile_not_found: bool,
+
     /// This is set to true when the server requested that no expired
     /// resources be used by specifying "Cache-Control: must-revalidate".
     pub must_revalidate: bool,

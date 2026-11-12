@@ -10,9 +10,6 @@
 // TileJSON response handler applies the overrides) and `VectorSource` /
 // `RasterSource` wrap it. Like GeoJSONSource, a TileSource is a handle to
 // an `Rc`'d state (see source.rs).
-//
-// TODO(port): `util::mapbox::canonicalizeSourceURL` / `canonicalizeTileset`
-// (only change URLs with the tile server's scheme alias, e.g. mapbox://).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -23,7 +20,7 @@ use mln_storage::{AsyncRequest, FileSource, Resource, Response};
 use mln_style_types::SourceType;
 use mln_util::constants;
 use mln_util::immutable::Immutable;
-use mln_util::tileset::{EmptyResponse, RasterEncoding, Tileset, VectorEncoding};
+use mln_util::tileset::{RasterEncoding, Tileset, VectorEncoding};
 
 use crate::conversion::Error;
 use crate::conversion::tileset::convert_json_tileset;
@@ -108,8 +105,8 @@ struct Inner {
     url_or_tileset: UrlOrTileset,
     req: RefCell<Option<Box<dyn AsyncRequest>>>,
     overrides: Overrides,
-    /// The style's `emptyResponse`, which the source's tileset takes.
-    empty_response: Cell<EmptyResponse>,
+    /// The style's `sparse`, which the source's tileset takes.
+    sparse: Cell<bool>,
 }
 
 /// `TileSource`.
@@ -143,7 +140,7 @@ impl TileSource {
                 url_or_tileset,
                 req: RefCell::new(None),
                 overrides,
-                empty_response: Cell::new(EmptyResponse::Blank),
+                sparse: Cell::new(false),
             }),
         }
     }
@@ -172,10 +169,9 @@ impl TileSource {
         self.impl_().get_tile_size()
     }
 
-    /// Sets the style's `emptyResponse`, which the tileset takes when the source loads its
-    /// description.
-    pub(crate) fn set_empty_response(&self, empty_response: EmptyResponse) {
-        self.inner.empty_response.set(empty_response);
+    /// Sets the style's `sparse`, which the tileset takes when the source loads its description.
+    pub(crate) fn set_sparse(&self, sparse: bool) {
+        self.inner.sparse.set(sparse);
     }
 
     /// `setTilesetOverrides(Tileset&)`: `VectorSource`'s and `RasterSource`'s zoom
@@ -192,7 +188,7 @@ impl TileSource {
         if let Some(encoding) = overrides.raster_encoding {
             tileset.raster_encoding = Some(encoding);
         }
-        tileset.empty_response = self.inner.empty_response.get();
+        tileset.sparse = self.inner.sparse.get();
     }
 }
 
@@ -232,8 +228,6 @@ fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: &Re
             observer.on_source_error(this_source, mln_util::Error::native(error.message));
             return;
         };
-        // TODO(port): canonicalizeTileset for the "mapbox" scheme alias.
-
         this.set_tileset_overrides(&mut tileset);
 
         let current = this.impl_();
@@ -263,7 +257,7 @@ impl Source for TileSource {
     fn load_description(&self, file_source: &dyn FileSource) {
         let raw_url = match &self.inner.url_or_tileset {
             UrlOrTileset::Tileset(tileset) => {
-                let tileset = Tileset { empty_response: self.inner.empty_response.get(), ..tileset.clone() };
+                let tileset = Tileset { sparse: self.inner.sparse.get(), ..tileset.clone() };
                 let new_impl: Immutable<dyn source_impl::Impl> = Arc::new(Impl::with_tileset(&self.impl_(), tileset));
                 self.inner.base.set_base_impl(new_impl);
                 self.inner.base.set_loaded(true);

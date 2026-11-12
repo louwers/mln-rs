@@ -34,7 +34,6 @@ struct QueryTest(MapTest);
 impl QueryTest {
     fn new() -> Self {
         let run_loop = RunLoop::new();
-        // TODO(port): `StubFileSource()` uses the MapTiler tile server options.
         let file_source = Arc::new(StubFileSource::new(ResponseType::Asynchronous));
         let test = QueryTest(MapTest::create(run_loop, file_source, 1.0, MapMode::Static));
         test.map().style_mut().load_json(&read_file("test/fixtures/api/query_style.json"));

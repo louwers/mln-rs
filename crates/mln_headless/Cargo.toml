@@ -89,10 +89,10 @@ path = "tests/debug_options_test.rs"
 name = "pixel_ratio_test"
 path = "tests/pixel_ratio_test.rs"
 
-# A tile source's emptyResponse through Map -> HeadlessFrontend.
+# Empty and absent tiles of vector and raster sources through Map -> HeadlessFrontend.
 [[test]]
-name = "empty_response_test"
-path = "tests/empty_response_test.rs"
+name = "empty_tile_test"
+path = "tests/empty_tile_test.rs"
 
 [dev-dependencies]
 # gtest_map's MainResourceLoader and Database file source tests.

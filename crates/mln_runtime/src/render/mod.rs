@@ -19,7 +19,7 @@ pub use session::{
 pub use target::{
     Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DepthStencilFormat, DepthStencilFormats, Device,
     DeviceOptions, DmaBufFormat, DmaBufPlane, Driver, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDepth,
-    FrameTexture, FrameTextureKind, GpuSync, NativeTexture, RenderTarget, Surface, SurfaceType, SyncKind, SyncKinds,
-    Wake,
+    FrameTexture, FrameTextureKind, GlApi, GpuSync, NativeTexture, RenderTarget, Surface, SurfaceType, SyncKind,
+    SyncKinds, Wake,
 };
 pub(crate) use worker::{Worker, post as worker_post};

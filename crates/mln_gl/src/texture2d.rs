@@ -74,17 +74,29 @@ impl Texture2D {
                 }
             };
             context.state().activate_texture(gl, 0, Some(texture));
+            let desktop = context.is_desktop();
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                enums::texture_pixel_sized_for(self.pixel_format, self.channel_type) as i32,
+                enums::texture_pixel_sized_for(self.pixel_format, self.channel_type, desktop) as i32,
                 self.size.width as i32,
                 self.size.height as i32,
                 0,
-                enums::texture_pixel(self.pixel_format),
+                enums::texture_pixel(self.pixel_format, desktop),
                 enums::texture_channel_data(self.channel_type),
                 glow::PixelUnpackData::Slice(None),
             );
+            if let Some(swizzle) = enums::texture_swizzle(self.pixel_format, desktop) {
+                let names = [
+                    glow::TEXTURE_SWIZZLE_R,
+                    glow::TEXTURE_SWIZZLE_G,
+                    glow::TEXTURE_SWIZZLE_B,
+                    glow::TEXTURE_SWIZZLE_A,
+                ];
+                for (name, source) in names.into_iter().zip(swizzle) {
+                    gl.tex_parameter_i32(glow::TEXTURE_2D, name, source as i32);
+                }
+            }
             self.texture = Some(texture);
         }
         self.allocated_bytes = texture2d::Texture2D::get_data_size(self) as i32;
@@ -184,7 +196,7 @@ impl Texture2D {
                 i32::from(y_offset),
                 size.width as i32,
                 size.height as i32,
-                enums::texture_pixel(self.pixel_format),
+                enums::texture_pixel(self.pixel_format, context.is_desktop()),
                 enums::texture_channel_data(self.channel_type),
                 glow::PixelUnpackData::Slice(Some(pixel_data)),
             );

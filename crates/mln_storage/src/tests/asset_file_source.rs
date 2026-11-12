@@ -19,7 +19,7 @@ use crate::response::{Reason, Response};
 
 fn asset_file_source() -> AssetFileSource {
     AssetFileSource::new(
-        &ResourceOptions::default_options().with_asset_path(cpp_path("test/fixtures/storage/assets").to_str().unwrap()),
+        &ResourceOptions::default().with_asset_path(cpp_path("test/fixtures/storage/assets").to_str().unwrap()),
     )
 }
 

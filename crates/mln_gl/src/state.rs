@@ -255,8 +255,10 @@ impl State {
         }
         self.set_depth_mask(gl, depth.mask == DepthMaskType::ReadWrite);
         if changed(&self.depth_range, (depth.range.min, depth.range.max)) {
+            // `glDepthRange` on desktop OpenGL, which has `glDepthRangef`
+            // only from 4.1, and `glDepthRangef` on OpenGL ES.
             // SAFETY: GL clamps the range.
-            unsafe { gl.depth_range_f32(depth.range.min, depth.range.max) };
+            unsafe { gl.depth_range(f64::from(depth.range.min), f64::from(depth.range.max)) };
         }
     }
 
@@ -417,8 +419,10 @@ impl State {
         if let Some(depth) = depth {
             mask |= glow::DEPTH_BUFFER_BIT;
             if changed(&self.clear_depth, depth) {
+                // `glClearDepth` on desktop OpenGL, which has `glClearDepthf`
+                // only from 4.1, and `glClearDepthf` on OpenGL ES.
                 // SAFETY: no preconditions.
-                unsafe { gl.clear_depth_f32(depth) };
+                unsafe { gl.clear_depth(f64::from(depth)) };
             }
             self.set_depth_mask(gl, true);
         }

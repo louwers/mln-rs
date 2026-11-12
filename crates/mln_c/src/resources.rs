@@ -104,7 +104,7 @@ struct RequestInfo {
 }
 
 impl RequestInfo {
-    fn new(resource: &Resource, resolved_url: &str) -> Self {
+    fn new(resource: &Resource) -> Self {
         let mut fields = 0;
         let mut flag = |set: bool, bit: u32| {
             if set {
@@ -118,7 +118,9 @@ impl RequestInfo {
         Self {
             fields,
             requested_url: LentText::new(&resource.url),
-            resolved_url: LentText::new(resolved_url),
+            // The library rewrites no URL, so the URL to load is the
+            // requested one.
+            resolved_url: LentText::new(&resource.url),
             kind: abi_kind(resource.kind),
             loading_method: match resource.loading_method {
                 LoadingMethod::CacheOnly => MLN_RESOURCE_LOADING_METHOD_CACHE_ONLY,
@@ -183,7 +185,7 @@ impl ResourceProvider for HostProvider {
     }
 
     fn request(&self, request: ResourceRequest) {
-        let info = RequestInfo::new(request.resource(), request.resolved_url());
+        let info = RequestInfo::new(request.resource());
         let object = Arc::new(RequestObject {
             request: std::sync::Mutex::new(Some(request)),
             cancel_registered: AtomicBool::new(false),
