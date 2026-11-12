@@ -4,6 +4,7 @@
 // The browser build renders into no borrowed ring.
 #![cfg_attr(target_family = "wasm", allow(unreachable_code, unused_variables))]
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
@@ -105,7 +106,7 @@ impl ResizeLanding {
 impl Drop for ResizeLanding {
     fn drop(&mut self) {
         if let Some(run_loop) = self.0.take() {
-            post(&run_loop, |worker, outbox| worker.resize_landed(outbox));
+            post(&run_loop, Worker::resize_landed);
         }
     }
 }
@@ -131,7 +132,7 @@ pub(crate) enum TargetInit {
 /// Builds the session's renderer into `slot`, on the thread that runs the
 /// session's work, before any other work.
 pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
-    let Some(Ok(init)) = shared.state.lock_unpoisoned().init.take().map(|init| init.downcast::<Init>()) else {
+    let Some(Ok(init)) = shared.state.lock_unpoisoned().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
         return;
     };
     let mut outbox = Outbox::default();
@@ -288,8 +289,11 @@ const SETTLE_POLL: Duration = Duration::from_millis(2);
 struct Settling {
     reads: Box<dyn PendingReads>,
     deadline: Instant,
-    done: Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>,
+    done: SettleDone,
 }
+
+/// What runs once a release or replacement has settled, with its result.
+type SettleDone = Box<dyn FnOnce(&mut Outbox, Result<(), Error>)>;
 
 /// Starts a thread that has the session's thread poll the host's reads on
 /// its later turns, until the returned flag stops it. It posts to the
@@ -302,7 +306,7 @@ fn start_ticker(run_loop: RunLoopHandle) -> Arc<AtomicBool> {
     let spawned = mln_util::thread::builder("RenderSessionSettle").spawn(move || {
         while !stopped.load(Ordering::SeqCst) && Instant::now() < deadline {
             std::thread::sleep(SETTLE_POLL);
-            post(&run_loop, |worker, outbox| worker.poll_settling(outbox));
+            post(&run_loop, Worker::poll_settling);
         }
     });
     if spawned.is_err() {
@@ -407,7 +411,7 @@ impl Worker {
         let run_loop = self.shared.run_loop.clone();
         reader.set_waker(Some(Arc::new(move || {
             if !scheduled.swap(true, Ordering::SeqCst) {
-                post(&run_loop, |worker, outbox| worker.on_update(outbox));
+                post(&run_loop, Worker::on_update);
             }
         })));
         self.reader = Some(reader);
@@ -429,7 +433,7 @@ impl Worker {
         // The demands that came while the session attached wait for the
         // attach to complete, which the outbox delivers once this task ends,
         // so they render in a task of their own.
-        post(&self.shared.run_loop, |worker, outbox| worker.pump(outbox));
+        post(&self.shared.run_loop, Worker::pump);
     }
 
     /// The map couldn't bind the session.
@@ -508,7 +512,7 @@ impl Worker {
     pub(crate) fn demand(&mut self, demand: FrameDemand, sequence: u64, outbox: &mut Outbox) {
         if self.torn_down {
             let result = FrameResult::unrendered(Some(demand.token), FrameDisposition::TargetNotReady, 0);
-            return self.publish(result, outbox);
+            return self.publish(&result, outbox);
         }
         if demand.mode != DemandMode::Force {
             let latest = self.latest_generation();
@@ -521,7 +525,7 @@ impl Worker {
             let superseded = superseded.into_iter().chain(waiting_superseded.into_iter().map(|(pending, _)| pending));
             for pending in superseded {
                 let result = FrameResult::unrendered(Some(pending.demand.token), FrameDisposition::Superseded, latest);
-                self.publish(result, outbox);
+                self.publish(&result, outbox);
             }
         }
         self.queue.push_back(PendingDemand { demand, sequence });
@@ -578,7 +582,7 @@ impl Worker {
         if self.gfx.is_none() {
             let failed = self.shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Failed;
             let disposition = if failed { FrameDisposition::Failed } else { FrameDisposition::TargetNotReady };
-            self.publish(FrameResult::unrendered(token, disposition, latest_generation), outbox);
+            self.publish(&FrameResult::unrendered(token, disposition, latest_generation), outbox);
             return None;
         }
         let changed = latest_generation != self.rendered_update || self.generation() != self.rendered_generation;
@@ -591,16 +595,16 @@ impl Worker {
                     RingPick::Quarantined => {
                         let result =
                             FrameResult::unrendered(token, FrameDisposition::TargetNotReady, latest_generation);
-                        self.publish(result, outbox);
+                        self.publish(&result, outbox);
                         return None;
                     }
                     RingPick::None => None,
                     RingPick::Slot(slot) => Some(slot),
                 };
-                self.render(token, update, slot, outbox);
+                self.render(token, &update, slot, outbox);
             }
             _ if pending.demand.mode == DemandMode::WaitForUpdate => self.waiting.push((pending, latest_generation)),
-            _ => self.publish(FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
+            _ => self.publish(&FrameResult::unrendered(token, FrameDisposition::NoUpdate, latest_generation), outbox),
         }
         None
     }
@@ -620,7 +624,7 @@ impl Worker {
             RingPick::Slot(slot) => Some(slot),
         };
         self.still_attempted = update.generation;
-        self.render(None, update, slot, outbox);
+        self.render(None, &update, slot, outbox);
     }
 
     fn generation(&self) -> u64 {
@@ -632,21 +636,21 @@ impl Worker {
     /// ring, and publishes its result. A still map draws no frame until
     /// everything that it shows has loaded, and a surface without a texture
     /// to render into takes no frame.
-    fn render(&mut self, token: Option<u64>, update: Update, slot: Option<usize>, outbox: &mut Outbox) {
+    fn render(&mut self, token: Option<u64>, update: &Update, slot: Option<usize>, outbox: &mut Outbox) {
         let ready = self.gfx.as_ref().is_some_and(Gfx::ready_for_frame);
         let Some(gfx) = self.gfx.as_mut().filter(|_| ready) else {
             if let Some(slot) = slot {
                 self.end_slot(slot, None);
             }
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return self.publish(result, outbox);
+            return self.publish(&result, outbox);
         };
         if let Some(slot) = slot
             && gfx.target.select_slot(slot).is_err()
         {
             self.end_slot(slot, None);
             let result = FrameResult::unrendered(token, FrameDisposition::TargetNotReady, update.generation);
-            return self.publish(result, outbox);
+            return self.publish(&result, outbox);
         }
         let handoff = {
             let _scope = BackendScope::new(&*gfx.backend, ScopeType::Explicit);
@@ -704,16 +708,16 @@ impl Worker {
         }
         // The result goes out before the map hears of the frame, so a still
         // image completes with its frame's result queued.
-        self.publish(result, outbox);
+        self.publish(&result, outbox);
         self.forward(events);
     }
 
     /// Queues a frame result for the host, and wakes it unless it was woken
     /// since its last drain.
-    fn publish(&self, result: FrameResult, outbox: &mut Outbox) {
+    fn publish(&self, result: &FrameResult, outbox: &mut Outbox) {
         let wake = {
             let mut state = self.shared.state.lock_unpoisoned();
-            state.results.push(result);
+            state.results.push(*result);
             let wake = !state.frame_woken;
             state.frame_woken = true;
             wake.then(|| self.shared.frame_wake.clone()).flatten()
@@ -733,7 +737,7 @@ impl Worker {
             .chain(self.waiting.drain(..).map(|(pending, _)| pending))
             .collect();
         for pending in pending {
-            self.publish(FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
+            self.publish(&FrameResult::unrendered(Some(pending.demand.token), disposition, latest), outbox);
         }
     }
 
@@ -844,7 +848,7 @@ impl Worker {
         &mut self,
         size: Size,
         scale_factor: f64,
-        ring: BorrowedRing,
+        ring: &BorrowedRing,
         outbox: &mut Outbox,
     ) -> Result<Pending, Error> {
         self.set_scale_factor(scale_factor)?;
@@ -852,7 +856,7 @@ impl Worker {
         let gfx = self.gfx.as_mut().ok_or_else(target_lost)?;
         // The ring it has already: nothing changes, and the frames it holds
         // stay.
-        if self.ring.as_ref() == Some(&ring) && gfx.target.frames().is_some() && same_size {
+        if self.ring.as_ref() == Some(ring) && gfx.target.frames().is_some() && same_size {
             // The demands that wait keep waiting for an update past the
             // replacement's resize.
             let latest = self.latest_generation();
@@ -960,7 +964,7 @@ impl Worker {
                     // has its old image retired.
                     Ok(true) => {
                         let mut state = self.shared.state.lock_unpoisoned();
-                        for slot in state.ring.iter_mut() {
+                        for slot in &mut state.ring {
                             if slot.acquired {
                                 slot.retired = true;
                             } else {
@@ -1184,6 +1188,11 @@ impl Worker {
         cluster_id: u32,
         read: impl FnOnce(&dyn GeoJSONData, Vec<feature::Feature<f64>>) -> Result<T, Error>,
     ) -> Result<T, Error> {
+        // A cluster's ID holds its zoom plus one in its low five bits, so an
+        // ID without them names no cluster, though it would find the points
+        // at zoom 0 as children. An index of no points has no clusters.
+        const ZOOM_BITS: u32 = 0x1F;
+
         self.renderer()?;
         let source = self
             .sources
@@ -1198,10 +1207,6 @@ impl Worker {
             return Err(Error::invalid_argument(format!("GeoJSON source {source_id} does not cluster")));
         }
         let data = geojson.get_data().and_then(|data| data.upgrade());
-        // A cluster's ID holds its zoom plus one in its low five bits, so an
-        // ID without them names no cluster, though it would find the points
-        // at zoom 0 as children. An index of no points has no clusters.
-        const ZOOM_BITS: u32 = 0x1F;
         let children = data
             .as_ref()
             .filter(|_| cluster_id & ZOOM_BITS != 0)
@@ -1306,7 +1311,7 @@ impl Worker {
         if let Some(map) = &map {
             map.release_session_claim(self.shared.id);
         }
-        outbox.push(move || waiters.settle(Ok(()), target_lost));
+        outbox.push(move || waiters.settle(&Ok(()), target_lost));
         outbox.push(move || drop(map));
         self.finished = true;
         // A target that views keep stops the loop once they end.

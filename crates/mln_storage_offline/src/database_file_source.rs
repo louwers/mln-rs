@@ -219,7 +219,7 @@ impl DatabaseFileSourceExt for DatabaseFileSource {
             callback(require_region(t, region_id).and_then(|region| {
                 let download = t.extension::<Downloads>().downloads.borrow_mut().remove(&region_id);
                 drop(download);
-                t.database().borrow_mut().delete_region(region).map_or(Ok(()), Err)
+                t.database().borrow_mut().delete_region(&region).map_or(Ok(()), Err)
             }));
         });
     }

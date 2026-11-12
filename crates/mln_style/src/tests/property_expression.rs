@@ -36,7 +36,7 @@ fn empty_tile_feature() -> StubGeometryTileFeature {
     StubGeometryTileFeature::new(property_map(&[]))
 }
 
-fn evaluate(value: PropertyValue<f32>, zoom: f32) -> f32 {
+fn evaluate(value: &PropertyValue<f32>, zoom: f32) -> f32 {
     let parameters = PropertyEvaluationParameters::new(zoom);
     value.evaluate(&PropertyEvaluator::new(&parameters, 0.0))
 }
@@ -48,15 +48,15 @@ fn num(v: f64) -> Box<dyn crate::expression::Expression> {
 // gtest: PropertyExpression.Constant
 #[test]
 fn constant() {
-    assert_eq!(2.0_f32, evaluate(PropertyValue::Constant(2.0), 0.0));
-    assert_eq!(3.8_f32, evaluate(PropertyValue::Constant(3.8), 0.0));
-    assert_eq!(22.0_f32, evaluate(PropertyValue::Constant(22.0), 0.0));
-    assert_eq!(2.0_f32, evaluate(PropertyValue::Constant(2.0), 4.0));
-    assert_eq!(3.8_f32, evaluate(PropertyValue::Constant(3.8), 4.0));
-    assert_eq!(22.0_f32, evaluate(PropertyValue::Constant(22.0), 4.0));
-    assert_eq!(2.0_f32, evaluate(PropertyValue::Constant(2.0), 22.0));
-    assert_eq!(3.8_f32, evaluate(PropertyValue::Constant(3.8), 22.0));
-    assert_eq!(22.0_f32, evaluate(PropertyValue::Constant(22.0), 22.0));
+    assert_eq!(2.0_f32, evaluate(&PropertyValue::Constant(2.0), 0.0));
+    assert_eq!(3.8_f32, evaluate(&PropertyValue::Constant(3.8), 0.0));
+    assert_eq!(22.0_f32, evaluate(&PropertyValue::Constant(22.0), 0.0));
+    assert_eq!(2.0_f32, evaluate(&PropertyValue::Constant(2.0), 4.0));
+    assert_eq!(3.8_f32, evaluate(&PropertyValue::Constant(3.8), 4.0));
+    assert_eq!(22.0_f32, evaluate(&PropertyValue::Constant(22.0), 4.0));
+    assert_eq!(2.0_f32, evaluate(&PropertyValue::Constant(2.0), 22.0));
+    assert_eq!(3.8_f32, evaluate(&PropertyValue::Constant(3.8), 22.0));
+    assert_eq!(22.0_f32, evaluate(&PropertyValue::Constant(22.0), 22.0));
 
     assert_eq!(Dependency::NONE, PropertyValue::Constant(2.0_f32).get_dependencies());
 }
@@ -68,8 +68,8 @@ fn expression() {
         interpolate(linear(), zoom(), vec![(0.0, num(0.0)), (1.0, num(1.0))]),
         None,
     );
-    assert_eq!(0.0, evaluate(PropertyValue::Expression(expression.clone()), 0.0));
-    assert_eq!(0.5, evaluate(PropertyValue::Expression(expression.clone()), 0.5));
+    assert_eq!(0.0, evaluate(&PropertyValue::Expression(expression.clone()), 0.0));
+    assert_eq!(0.5, evaluate(&PropertyValue::Expression(expression.clone()), 0.5));
     assert_eq!(Dependency::ZOOM, expression.get_dependencies());
 }
 
@@ -86,7 +86,7 @@ fn defaults() {
     assert_eq!(Dependency::FEATURE, no_default.get_dependencies());
 }
 
-/// interpolate(linear(), number(get("property")), 1.0, literal(v))
+/// `interpolate(linear()`, number(get("property")), 1.0, literal(v))
 fn inner(v: f64) -> Box<dyn crate::expression::Expression> {
     interpolate(linear(), number(get_str("property"), None), vec![(1.0, num(v))])
 }
@@ -183,7 +183,7 @@ fn issue8460() {
 fn image_expression() {
     let empty_set = VecSet::new();
     let available_images: VecSet<String> =
-        ["maki-11", "airport-11", "bicycle-15"].iter().map(|s| s.to_string()).collect();
+        ["maki-11", "airport-11", "bicycle-15"].iter().map(std::string::ToString::to_string).collect();
 
     // evaluation test without available images
     {
@@ -238,8 +238,8 @@ fn image_expression() {
 }
 
 /// `convertGeometry(geometry, canonical)` (lon/lat to tile coordinates).
-fn convert_geometry(geometry: Geometry<f64>, canonical: &CanonicalTileID) -> GeometryCollection {
-    mln_tile::geometry_tile_data::convert_geometry_to_tile(&geometry, canonical)
+fn convert_geometry(geometry: &Geometry<f64>, canonical: &CanonicalTileID) -> GeometryCollection {
+    mln_tile::geometry_tile_data::convert_geometry_to_tile(geometry, canonical)
 }
 
 fn pt(x: f64, y: f64) -> Point<f64> {
@@ -311,11 +311,11 @@ fn within_expression() {
     {
         // testPoly is inside polygon, but will return false
         let test_ring = vec![pts(&[
-            (-9.228515625, -17.560246503294888),
-            (-2.4609375, -16.04581345375217),
-            (-9.228515625, -17.560246503294888),
+            (-9.228_515_625, -17.560_246_503_294_888),
+            (-2.460_937_5, -16.045_813_453_752_17),
+            (-9.228_515_625, -17.560_246_503_294_888),
         ])];
-        let geo_poly = convert_geometry(Geometry::Polygon(test_ring), &canonical_tile_id);
+        let geo_poly = convert_geometry(&Geometry::Polygon(test_ring), &canonical_tile_id);
         let poly_feature = StubGeometryTileFeature::with_geometry(FeatureType::Polygon, geo_poly);
 
         assert!(!eval(&poly_feature));
@@ -323,13 +323,14 @@ fn within_expression() {
     // evaluation test with valid geojson source and valid linestring features
     {
         // testLine is inside polygon
-        let test_line0 = pts(&[(-9.228515625, -17.560246503294888), (-2.4609375, -16.04581345375217)]);
-        let geo_line0 = convert_geometry(Geometry::LineString(test_line0), &canonical_tile_id);
+        let test_line0 = pts(&[(-9.228_515_625, -17.560_246_503_294_888), (-2.460_937_5, -16.045_813_453_752_17)]);
+        let geo_line0 = convert_geometry(&Geometry::LineString(test_line0), &canonical_tile_id);
         let line_feature0 = StubGeometryTileFeature::with_geometry(FeatureType::LineString, geo_line0);
 
         // testLine is intersecting polygon even though end points are all inside polygon, will return false
-        let test_line1 = pts(&[(-10.4150390625, -10.082445532162465), (-8.8275146484375, -9.194292714912638)]);
-        let geo_line1 = convert_geometry(Geometry::LineString(test_line1), &canonical_tile_id);
+        let test_line1 =
+            pts(&[(-10.415_039_062_5, -10.082_445_532_162_465), (-8.827_514_648_437_5, -9.194_292_714_912_638)]);
+        let geo_line1 = convert_geometry(&Geometry::LineString(test_line1), &canonical_tile_id);
         let line_feature1 = StubGeometryTileFeature::with_geometry(FeatureType::LineString, geo_line1);
 
         assert!(eval(&line_feature0));
@@ -339,33 +340,33 @@ fn within_expression() {
     // evaluation test with valid geojson source and valid point features
     {
         let get_point_feature = |x: f64, y: f64| {
-            let geo_point = convert_geometry(Geometry::Point(pt(x, y)), &canonical_tile_id);
+            let geo_point = convert_geometry(&Geometry::Point(pt(x, y)), &canonical_tile_id);
             StubGeometryTileFeature::with_geometry(FeatureType::Point, geo_point)
         };
 
         // check `within` algorithm
-        assert!(!eval(&get_point_feature(-10.72265625, -7.27529233637217)));
-        assert!(!eval(&get_point_feature(-7.646484374999999, -12.382928338487396)));
-        assert!(!eval(&get_point_feature(-15.2490234375, -2.986927393334863)));
-        assert!(!eval(&get_point_feature(-10.590820312499998, 2.4601811810210052)));
-        assert!(eval(&get_point_feature(-3.9990234375, -4.915832801313164)));
-        assert!(eval(&get_point_feature(-1.1865234375, -16.63619187839765)));
-        assert!(eval(&get_point_feature(-15.5126953125, -11.73830237143684)));
+        assert!(!eval(&get_point_feature(-10.722_656_25, -7.275_292_336_372_17)));
+        assert!(!eval(&get_point_feature(-7.646_484_374_999_999, -12.382_928_338_487_396)));
+        assert!(!eval(&get_point_feature(-15.249_023_437_5, -2.986_927_393_334_863)));
+        assert!(!eval(&get_point_feature(-10.590_820_312_499_998, 2.460_181_181_021_005_2)));
+        assert!(eval(&get_point_feature(-3.999_023_437_5, -4.915_832_801_313_164)));
+        assert!(eval(&get_point_feature(-1.186_523_437_5, -16.636_191_878_397_65)));
+        assert!(eval(&get_point_feature(-15.512_695_312_5, -11.738_302_371_436_84)));
 
         // On the boundary
-        assert!(!eval(&get_point_feature(3.076171875, -7.01366792756663)));
-        assert!(!eval(&get_point_feature(-11.689453125, -9.79567758282973)));
-        assert!(!eval(&get_point_feature(2.021484375, -10.012129557908128)));
-        assert!(!eval(&get_point_feature(-15.99609375, -17.392579271057766)));
-        assert!(!eval(&get_point_feature(-5.9765625, -5.659718554577273)));
-        assert!(!eval(&get_point_feature(-16.259765625, -3.7327083213358336)));
-        assert!(!eval(&get_point_feature(-17.75390625, -12.897489183755892)));
-        assert!(!eval(&get_point_feature(-17.138671875, -21.002471054356715)));
-        assert!(!eval(&get_point_feature(4.482421875, -16.8886597873816)));
-        assert!(!eval(&get_point_feature(3.076171875, -7.01366792756663)));
-        assert!(!eval(&get_point_feature(-5.9326171875, 0.6591651462894632)));
-        assert!(!eval(&get_point_feature(-16.1279296875, 1.4939713066293239)));
-        assert!(!eval(&get_point_feature(-11.689453125, -9.79567758282973)));
+        assert!(!eval(&get_point_feature(3.076_171_875, -7.013_667_927_566_63)));
+        assert!(!eval(&get_point_feature(-11.689_453_125, -9.795_677_582_829_73)));
+        assert!(!eval(&get_point_feature(2.021_484_375, -10.012_129_557_908_128)));
+        assert!(!eval(&get_point_feature(-15.996_093_75, -17.392_579_271_057_766)));
+        assert!(!eval(&get_point_feature(-5.976_562_5, -5.659_718_554_577_273)));
+        assert!(!eval(&get_point_feature(-16.259_765_625, -3.732_708_321_335_833_6)));
+        assert!(!eval(&get_point_feature(-17.753_906_25, -12.897_489_183_755_892)));
+        assert!(!eval(&get_point_feature(-17.138_671_875, -21.002_471_054_356_715)));
+        assert!(!eval(&get_point_feature(4.482_421_875, -16.888_659_787_381_6)));
+        assert!(!eval(&get_point_feature(3.076_171_875, -7.013_667_927_566_63)));
+        assert!(!eval(&get_point_feature(-5.932_617_187_5, 0.659_165_146_289_463_2)));
+        assert!(!eval(&get_point_feature(-16.127_929_687_5, 1.493_971_306_629_323_9)));
+        assert!(!eval(&get_point_feature(-11.689_453_125, -9.795_677_582_829_73)));
     }
 }
 
@@ -393,10 +394,10 @@ fn within_expression_anti_meridian() {
         let prop_expr = PropertyExpression::<bool>::from_box(expression.unwrap(), None);
 
         let geo_line0 =
-            convert_geometry(Geometry::LineString(pts(&[(-183.0, 5.0), (-179.0, 1.0)])), &canonical_tile_id);
+            convert_geometry(&Geometry::LineString(pts(&[(-183.0, 5.0), (-179.0, 1.0)])), &canonical_tile_id);
         let line_feature0 = StubGeometryTileFeature::with_geometry(FeatureType::LineString, geo_line0);
 
-        let geo_line1 = convert_geometry(Geometry::LineString(pts(&[(183.0, 5.0), (181.0, 1.0)])), &canonical_tile_id);
+        let geo_line1 = convert_geometry(&Geometry::LineString(pts(&[(183.0, 5.0), (181.0, 1.0)])), &canonical_tile_id);
         let line_feature1 = StubGeometryTileFeature::with_geometry(FeatureType::LineString, geo_line1);
 
         assert!(eval(&prop_expr, &line_feature0));
@@ -416,7 +417,7 @@ fn within_expression_anti_meridian() {
         let prop_expr = PropertyExpression::<bool>::from_box(expression.unwrap(), None);
 
         let get_point_feature = |x: f64, y: f64| {
-            let geo_point = convert_geometry(Geometry::Point(pt(x, y)), &canonical_tile_id);
+            let geo_point = convert_geometry(&Geometry::Point(pt(x, y)), &canonical_tile_id);
             StubGeometryTileFeature::with_geometry(FeatureType::Point, geo_point)
         };
 
@@ -455,7 +456,7 @@ fn distance_expression() {
         PropertyExpression::<f64>::from_box(expression.unwrap(), None)
     };
     let feature = |type_: FeatureType, geometry: Geometry<f64>| {
-        StubGeometryTileFeature::with_geometry(type_, convert_geometry(geometry, &canonical_tile_id))
+        StubGeometryTileFeature::with_geometry(type_, convert_geometry(&geometry, &canonical_tile_id))
     };
     let get_feature = |name: &str, type_: FeatureType| {
         let geometry_input = read_geometry_data(name);
@@ -498,7 +499,8 @@ fn distance_expression() {
 
     // Evaluation test with Point to Point distance by using different units
     {
-        let point_feature = feature(FeatureType::Point, Geometry::Point(pt(24.931159615516663, 60.16733387258923)));
+        let point_feature =
+            feature(FeatureType::Point, Geometry::Point(pt(24.931_159_615_516_663, 60.167_333_872_589_23)));
 
         // Default Unit: meters
         let prop_expr = distance_expr(point_geo_source);
@@ -513,8 +515,8 @@ fn distance_expression() {
         let multi_point = feature(
             FeatureType::Point,
             Geometry::MultiPoint(pts(&[
-                (24.931159615516663, 60.16733387258923),
-                (24.936089515686035, 60.169033745694826),
+                (24.931_159_615_516_663, 60.167_333_872_589_23),
+                (24.936_089_515_686_035, 60.169_033_745_694_826),
             ])),
         );
         expect_near(158.541, eval(&prop_expr, &multi_point), 0.01);
@@ -526,9 +528,9 @@ fn distance_expression() {
         let line_feature = feature(
             FeatureType::LineString,
             Geometry::LineString(pts(&[
-                (24.93621826171875, 60.17131789507754),
-                (24.941453933715817, 60.170229208170014),
-                (24.941110610961914, 60.16850004304534),
+                (24.936_218_261_718_75, 60.171_317_895_077_54),
+                (24.941_453_933_715_817, 60.170_229_208_170_014),
+                (24.941_110_610_961_914, 60.168_500_043_045_34),
             ])),
         );
         expect_near(107.211, eval(&prop_expr, &line_feature), 0.01);
@@ -541,11 +543,14 @@ fn distance_expression() {
             FeatureType::LineString,
             Geometry::MultiLineString(vec![
                 pts(&[
-                    (24.93621826171875, 60.17131789507754),
-                    (24.941453933715817, 60.170229208170014),
-                    (24.941110610961914, 60.16850004304534),
+                    (24.936_218_261_718_75, 60.171_317_895_077_54),
+                    (24.941_453_933_715_817, 60.170_229_208_170_014),
+                    (24.941_110_610_961_914, 60.168_500_043_045_34),
                 ]),
-                pts(&[(24.937773942947388, 60.16940199546824), (24.933900833129883, 60.17007977773949)]),
+                pts(&[
+                    (24.937_773_942_947_388, 60.169_401_995_468_24),
+                    (24.933_900_833_129_883, 60.170_079_777_739_49),
+                ]),
             ]),
         );
         expect_near(59.845, eval(&prop_expr, &line_feature), 0.01);
@@ -637,11 +642,11 @@ fn distance_expression() {
         let polygon_feature = feature(
             FeatureType::Polygon,
             Geometry::Polygon(vec![pts(&[
-                (24.94171142578125, 60.16777419352904),
-                (24.948577880859375, 60.16777419352904),
-                (24.948577880859375, 60.170122472217564),
-                (24.94171142578125, 60.170122472217564),
-                (24.94171142578125, 60.16777419352904),
+                (24.941_711_425_781_25, 60.167_774_193_529_04),
+                (24.948_577_880_859_375, 60.167_774_193_529_04),
+                (24.948_577_880_859_375, 60.170_122_472_217_564),
+                (24.941_711_425_781_25, 60.170_122_472_217_564),
+                (24.941_711_425_781_25, 60.167_774_193_529_04),
             ])]),
         );
         expect_near(203.876, eval(&prop_expr, &polygon_feature), 0.01);
@@ -671,11 +676,11 @@ fn distance_expression() {
         let polygon_feature1 = feature(
             FeatureType::Polygon,
             Geometry::Polygon(vec![pts(&[
-                (24.941797256469727, 60.16850004304534),
-                (24.94235515594482, 60.16850004304534),
-                (24.94235515594482, 60.169439353910285),
-                (24.941797256469727, 60.169439353910285),
-                (24.941797256469727, 60.16850004304534),
+                (24.941_797_256_469_727, 60.168_500_043_045_34),
+                (24.942_355_155_944_82, 60.168_500_043_045_34),
+                (24.942_355_155_944_82, 60.169_439_353_910_285),
+                (24.941_797_256_469_727, 60.169_439_353_910_285),
+                (24.941_797_256_469_727, 60.168_500_043_045_34),
             ])]),
         );
         expect_near(0.0, eval(&prop_expr, &polygon_feature1), 0.01);
@@ -684,11 +689,11 @@ fn distance_expression() {
         let polygon_feature2 = feature(
             FeatureType::Polygon,
             Geometry::Polygon(vec![pts(&[
-                (24.943385124206543, 60.166066249059554),
-                (24.94596004486084, 60.166066249059554),
-                (24.94596004486084, 60.1714246271462),
-                (24.943385124206543, 60.1714246271462),
-                (24.943385124206543, 60.166066249059554),
+                (24.943_385_124_206_543, 60.166_066_249_059_554),
+                (24.945_960_044_860_84, 60.166_066_249_059_554),
+                (24.945_960_044_860_84, 60.171_424_627_146_2),
+                (24.943_385_124_206_543, 60.171_424_627_146_2),
+                (24.943_385_124_206_543, 60.166_066_249_059_554),
             ])]),
         );
         expect_near(0.0, eval(&prop_expr, &polygon_feature2), 0.01);
@@ -697,11 +702,11 @@ fn distance_expression() {
         let polygon_feature3 = feature(
             FeatureType::Polygon,
             Geometry::Polygon(vec![pts(&[
-                (24.94797706604004, 60.1694607015724),
-                (24.952354431152344, 60.1694607015724),
-                (24.952354431152344, 60.17082692309542),
-                (24.94797706604004, 60.17082692309542),
-                (24.94797706604004, 60.1694607015724),
+                (24.947_977_066_040_04, 60.169_460_701_572_4),
+                (24.952_354_431_152_344, 60.169_460_701_572_4),
+                (24.952_354_431_152_344, 60.170_826_923_095_42),
+                (24.947_977_066_040_04, 60.170_826_923_095_42),
+                (24.947_977_066_040_04, 60.169_460_701_572_4),
             ])]),
         );
         expect_near(0.0, eval(&prop_expr, &polygon_feature3), 0.01);
@@ -710,8 +715,8 @@ fn distance_expression() {
         let line_feature1 = feature(
             FeatureType::LineString,
             Geometry::LineString(pts(&[
-                (24.947097301483154, 60.16921520262075),
-                (24.947311878204346, 60.1680197032483),
+                (24.947_097_301_483_154, 60.169_215_202_620_75),
+                (24.947_311_878_204_346, 60.168_019_703_248_3),
             ])),
         );
         expect_near(0.0, eval(&prop_expr, &line_feature1), 0.01);
@@ -720,8 +725,8 @@ fn distance_expression() {
         let line_feature2 = feature(
             FeatureType::LineString,
             Geometry::LineString(pts(&[
-                (24.93999481201172, 60.17116846959888),
-                (24.940037727355957, 60.16542574699484),
+                (24.939_994_812_011_72, 60.171_168_469_598_88),
+                (24.940_037_727_355_957, 60.165_425_746_994_84),
             ])),
         );
         expect_near(0.0, eval(&prop_expr, &line_feature2), 0.01);

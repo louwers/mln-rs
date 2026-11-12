@@ -11,7 +11,11 @@
 use mln_gfx::backend::Type as BackendType;
 use mln_gfx::renderer::layer_group::visit_layer_group_drawables;
 use mln_gfx::shaders::layer_ubo::ProjectionUBO;
-use mln_gfx::shaders::line_layer_ubo::*;
+use mln_gfx::shaders::line_layer_ubo::{
+    LINE_EXPRESSION_UBO_SIZE, LineDrawableUBO, LineDrawableUnionUBO, LineEvaluatedPropsUBO, LineGradientDrawableUBO,
+    LinePatternDrawableUBO, LinePatternTilePropsUBO, LineSDFDrawableUBO, LineSDFTilePropsUBO, LineTilePropsUnionUBO,
+    line_expression_mask,
+};
 use mln_gfx::shaders::shader_defines::{
     ID_LINE_DASH_TEXTURE, ID_LINE_DRAWABLE_UBO, ID_LINE_EVALUATED_PROPS_UBO, ID_LINE_EXPRESSION_UBO,
     ID_LINE_IMAGE_TEXTURE, ID_LINE_TILE_PROPS_UBO,
@@ -19,7 +23,10 @@ use mln_gfx::shaders::shader_defines::{
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::expression::Image;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
-use mln_style::layers::line_layer_properties::*;
+use mln_style::layers::line_layer_properties::{
+    LineBlur, LineColor, LineDasharray, LineFloorWidth, LineGapWidth, LineLayerProperties, LineOffset, LineOpacity,
+    LinePattern, LineTranslate, LineTranslateAnchor, LineWidth,
+};
 use mln_style::properties::Property;
 use mln_style::renderer::cross_faded_property_evaluator::Faded;
 use mln_util::immutable::Immutable;
@@ -45,6 +52,7 @@ pub enum LineType {
 }
 
 impl LineType {
+    #[must_use]
     pub fn from_type(type_: usize) -> Option<LineType> {
         match type_ {
             0 => Some(LineType::Simple),
@@ -57,7 +65,7 @@ impl LineType {
     }
 }
 
-/// `gfx::LineDrawableData` (gfx/line_drawable_data.hpp): the line cap the
+/// `gfx::LineDrawableData` (`gfx/line_drawable_data.hpp)`: the line cap the
 /// dash pattern was built for.
 #[derive(Clone, Copy, Debug)]
 pub struct LineDrawableData {
@@ -88,7 +96,7 @@ impl LineLayerTweaker {
 }
 
 fn cast_tlbr(a: [u16; 4]) -> [f32; 4] {
-    [a[0] as f32, a[1] as f32, a[2] as f32, a[3] as f32]
+    [f32::from(a[0]), f32::from(a[1]), f32::from(a[2]), f32::from(a[3])]
 }
 
 impl LayerTweaker for LineLayerTweaker {
@@ -120,7 +128,7 @@ impl LayerTweaker for LineLayerTweaker {
 
         let metal = context.backend_type() == BackendType::Metal;
         if self.evaluated_props_uniform_buffer.is_none() || self.base.properties_updated {
-            use line_expression_mask::*;
+            use line_expression_mask::{BLUR, COLOR, FLOOR_WIDTH, GAP_WIDTH, NONE, OFFSET, OPACITY, WIDTH};
             self.expression_mask = NONE;
             // On Metal, the mask marks the properties evaluated on the GPU
             // (none, see the top of the file); on WebGPU, the constant ones.
@@ -181,6 +189,8 @@ impl LayerTweaker for LineLayerTweaker {
 
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
+            const NEAR_CLIPPED: bool = false;
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             let shader = drawable.get_shader().clone();
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
@@ -214,8 +224,6 @@ impl LayerTweaker for LineLayerTweaker {
 
             let translation = *evaluated.get::<LineTranslate>();
             let anchor = *evaluated.get::<LineTranslateAnchor>();
-            const NEAR_CLIPPED: bool = false;
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
             let projection = get_projection_data(
                 &tile_id,
                 parameters,
@@ -287,7 +295,7 @@ impl LayerTweaker for LineLayerTweaker {
                         pattern_to: pattern_pos_b.as_ref().map_or([0.0; 4], |p| cast_tlbr(p.tlbr())),
                         scale: [
                             parameters.pixel_ratio,
-                            1.0 / tile_id.pixels_to_tile_units(1.0, int_zoom as f32),
+                            1.0 / tile_id.pixels_to_tile_units(1.0, f32::from(int_zoom)),
                             crossfade.from_scale,
                             crossfade.to_scale,
                         ],
@@ -333,11 +341,11 @@ impl LayerTweaker for LineLayerTweaker {
                         drawable_ubo_vector[i as usize].set(&LineSDFDrawableUBO {
                             matrix: cast_matrix(&matrix),
                             patternscale_a: [
-                                1.0 / tile_id.pixels_to_tile_units(width_a, int_zoom as f32),
+                                1.0 / tile_id.pixels_to_tile_units(width_a, f32::from(int_zoom)),
                                 -pos_a.height / 2.0,
                             ],
                             patternscale_b: [
-                                1.0 / tile_id.pixels_to_tile_units(width_b, int_zoom as f32),
+                                1.0 / tile_id.pixels_to_tile_units(width_b, f32::from(int_zoom)),
                                 -pos_b.height / 2.0,
                             ],
                             tex_y_a: pos_a.y,

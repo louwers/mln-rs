@@ -14,18 +14,22 @@ pub const DIGITS_LUT: [u8; 200] = *b"\
 6061626364656667686970717273747576777879\
 8081828384858687888990919293949596979899";
 
+#[must_use]
 pub fn u32toa(value: u32) -> String {
     value.to_string()
 }
 
+#[must_use]
 pub fn i32toa(value: i32) -> String {
     value.to_string()
 }
 
+#[must_use]
 pub fn u64toa(value: u64) -> String {
     value.to_string()
 }
 
+#[must_use]
 pub fn i64toa(value: i64) -> String {
     value.to_string()
 }

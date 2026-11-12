@@ -341,51 +341,48 @@ impl Painter {
         if width == 0 || height == 0 {
             return;
         }
-        let pixels: Vec<u8> = image.pixels.iter().flat_map(|color| color.to_array()).collect();
+        let pixels: Vec<u8> = image.pixels.iter().flat_map(egui::Color32::to_array).collect();
         let size = Size::new(width as u32, height as u32);
-        match delta.pos {
-            Some([x, y]) => {
-                if let Some(texture) = self.textures.get(&id) {
-                    texture.texture.borrow_mut().upload_sub_region(Some(&pixels), size, x as u16, y as u16);
-                }
+        if let Some([x, y]) = delta.pos {
+            if let Some(texture) = self.textures.get(&id) {
+                texture.texture.borrow_mut().upload_sub_region(Some(&pixels), size, x as u16, y as u16);
             }
-            None => {
-                if let Some(old) = self.textures.remove(&id) {
-                    self.free_texture(old);
-                }
-                let texture = target.context.create_vulkan_texture_2d();
-                let (image_view, sampler, layout) = {
-                    let mut texture = texture.borrow_mut();
-                    texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
-                    texture.set_sampler_configuration(sampler_state(&delta.options));
-                    texture.upload_data(Some(&pixels), size);
-                    (texture.get_vulkan_image_view(), texture.get_vulkan_sampler(), texture.get_vulkan_image_layout())
-                };
-                if image_view == vk::ImageView::null() || sampler == vk::Sampler::null() {
-                    return;
-                }
-                let Ok(set) = self.allocate_set(target.device) else {
-                    return;
-                };
-                let image_info = [vk::DescriptorImageInfo::default().image_view(image_view).image_layout(layout)];
-                let sampler_info = [vk::DescriptorImageInfo::default().sampler(sampler)];
-                let writes = [
-                    vk::WriteDescriptorSet::default()
-                        .dst_set(set)
-                        .dst_binding(TEXTURE_BINDING)
-                        .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
-                        .image_info(&image_info),
-                    vk::WriteDescriptorSet::default()
-                        .dst_set(set)
-                        .dst_binding(SAMPLER_BINDING)
-                        .descriptor_type(vk::DescriptorType::SAMPLER)
-                        .image_info(&sampler_info),
-                ];
-                // SAFETY: no frame uses the set, and the view and the
-                // sampler are the texture's, which is freed with the set.
-                unsafe { target.device.update_descriptor_sets(&writes, &[]) };
-                self.textures.insert(id, Texture { texture, set });
+        } else {
+            if let Some(old) = self.textures.remove(&id) {
+                self.free_texture(old);
             }
+            let texture = target.context.create_vulkan_texture_2d();
+            let (image_view, sampler, layout) = {
+                let mut texture = texture.borrow_mut();
+                texture.set_format(TexturePixelType::RGBA, TextureChannelDataType::UnsignedByte);
+                texture.set_sampler_configuration(sampler_state(delta.options));
+                texture.upload_data(Some(&pixels), size);
+                (texture.get_vulkan_image_view(), texture.get_vulkan_sampler(), texture.get_vulkan_image_layout())
+            };
+            if image_view == vk::ImageView::null() || sampler == vk::Sampler::null() {
+                return;
+            }
+            let Ok(set) = self.allocate_set(target.device) else {
+                return;
+            };
+            let image_info = [vk::DescriptorImageInfo::default().image_view(image_view).image_layout(layout)];
+            let sampler_info = [vk::DescriptorImageInfo::default().sampler(sampler)];
+            let writes = [
+                vk::WriteDescriptorSet::default()
+                    .dst_set(set)
+                    .dst_binding(TEXTURE_BINDING)
+                    .descriptor_type(vk::DescriptorType::SAMPLED_IMAGE)
+                    .image_info(&image_info),
+                vk::WriteDescriptorSet::default()
+                    .dst_set(set)
+                    .dst_binding(SAMPLER_BINDING)
+                    .descriptor_type(vk::DescriptorType::SAMPLER)
+                    .image_info(&sampler_info),
+            ];
+            // SAFETY: no frame uses the set, and the view and the
+            // sampler are the texture's, which is freed with the set.
+            unsafe { target.device.update_descriptor_sets(&writes, &[]) };
+            self.textures.insert(id, Texture { texture, set });
         }
     }
 
@@ -528,7 +525,7 @@ impl Drop for Painter {
 /// The backend's sampler configuration for egui's texture options. The
 /// backend's textures have one filter, for which egui's magnification
 /// filter is taken, and repeat without mirroring.
-fn sampler_state(options: &egui::TextureOptions) -> SamplerState {
+fn sampler_state(options: egui::TextureOptions) -> SamplerState {
     let wrap = match options.wrap_mode {
         egui::TextureWrapMode::ClampToEdge => TextureWrapType::Clamp,
         egui::TextureWrapMode::Repeat | egui::TextureWrapMode::MirroredRepeat => TextureWrapType::Repeat,

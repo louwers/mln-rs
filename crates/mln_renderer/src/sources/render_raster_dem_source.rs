@@ -60,6 +60,7 @@ fn opposite(mask: DEMTileNeighbors) -> DEMTileNeighbors {
 }
 
 impl RenderRasterDEMSource {
+    #[must_use]
     pub fn new(impl_: Arc<tile_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderRasterDEMSource { tile_source: RenderTileSource::new(impl_, thread_pool), cached_tileset: None }
@@ -113,7 +114,7 @@ impl RenderRasterDEMSource {
         }
     }
 
-    /// `onTileChanged(Tile&)` (without the forward to RenderTileSource,
+    /// `onTileChanged(Tile&)` (without the forward to `RenderTileSource`,
     /// which the tile's observer does).
     fn on_tile_changed(&self, demtile: &RasterDEMTile) {
         if !(demtile.is_renderable() && demtile.neighboring_tiles() != DEMTileNeighbors::COMPLETE) {

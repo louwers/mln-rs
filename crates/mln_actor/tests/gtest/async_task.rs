@@ -17,7 +17,7 @@ use mln_actor::scheduler::{self, SchedulerPtr, TaggedScheduler};
 use mln_actor::{AsyncTask, AsyncTaskSender, RunLoop};
 use mln_util::identity::SimpleIdentity;
 
-use crate::{Failures, get};
+use crate::{Failures, wait};
 
 struct TestWorker {
     async_: AsyncTaskSender,
@@ -25,19 +25,19 @@ struct TestWorker {
 
 impl TestWorker {
     fn run(&mut self) {
-        for _ in 0..100000 {
+        for _ in 0..100_000 {
             self.async_.send();
         }
     }
 
     fn run_with_callback(&mut self, cb: impl FnOnce()) {
-        for _ in 0..100000 {
+        for _ in 0..100_000 {
             self.async_.send();
         }
         cb();
     }
 
-    fn sync(&mut self, barrier: mpsc::Sender<()>) {
+    fn sync(barrier: &mpsc::Sender<()>) {
         barrier.send(()).unwrap();
     }
 }
@@ -135,8 +135,8 @@ fn request_coalescing_multithreaded() {
     }
 
     let (barrier, barrier_future) = mpsc::channel();
-    worker_ref.invoke(move |w: &mut TestWorker| w.sync(barrier));
-    get(&barrier_future);
+    worker_ref.invoke(move |_: &mut TestWorker| TestWorker::sync(&barrier));
+    wait(&barrier_future);
 
     run_loop.run_once();
 
@@ -170,7 +170,7 @@ fn thread_safety() {
                 if completed.fetch_sub(1, Ordering::SeqCst) == 1 {
                     handle.stop();
                 }
-            })
+            });
         });
     }
 
@@ -251,7 +251,7 @@ fn sequenced_scheduler() {
 fn multiple_sequenced_schedulers() {
     let schedulers_count = 10; // must match the value in the scheduler
     let mut schedulers: Vec<SchedulerPtr> = Vec::new();
-    let same = |a: &SchedulerPtr, b: &SchedulerPtr| Arc::as_ptr(a) as *const () == Arc::as_ptr(b) as *const ();
+    let same = |a: &SchedulerPtr, b: &SchedulerPtr| Arc::as_ptr(a).cast::<()>() == Arc::as_ptr(b).cast::<()>();
 
     // Regression check, the scheduler assignment was previously sensitive to the state of the weak references.
     // If expired weak references followed a still-valid one, both after the last-used index, the index would

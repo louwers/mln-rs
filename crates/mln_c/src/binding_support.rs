@@ -152,7 +152,7 @@ impl DartPort {
         // SAFETY: `post` is `NativeApi.postCObject`, which the creator passed
         // and which lives as long as the process, and the message is a valid
         // integer message for the call. A closed port only drops it.
-        let _ = unsafe { (self.post)(self.port, &mut message) };
+        let _ = unsafe { (self.post)(self.port, &raw mut message) };
     }
 }
 
@@ -236,14 +236,14 @@ mod tests {
         let mut out = diagnostic();
         // SAFETY: each pointer is null or to a local.
         unsafe {
-            let status = mln_binding_dart_wake_create(post, 0, &mut wake, &mut *out);
+            let status = mln_binding_dart_wake_create(post, 0, &raw mut wake, &raw mut *out);
             assert_eq!((status, message(&out)), (MLN_STATUS_INVALID_ARGUMENT, "port must not be zero"));
-            let null = mln_binding_dart_wake_create(core::ptr::null_mut(), 41, &mut wake, NO_DIAGNOSTIC);
+            let null = mln_binding_dart_wake_create(core::ptr::null_mut(), 41, &raw mut wake, NO_DIAGNOSTIC);
             assert_eq!(null, MLN_STATUS_INVALID_ARGUMENT);
             let no_out = mln_binding_dart_wake_create(post, 41, core::ptr::null_mut(), NO_DIAGNOSTIC);
             assert_eq!(no_out, MLN_STATUS_INVALID_ARGUMENT);
 
-            assert_eq!(mln_binding_dart_wake_create(post, 41, &mut wake, NO_DIAGNOSTIC), MLN_STATUS_OK);
+            assert_eq!(mln_binding_dart_wake_create(post, 41, &raw mut wake, NO_DIAGNOSTIC), MLN_STATUS_OK);
             assert_eq!(wake.queue, handles::NULL);
             wake.callback.unwrap()(wake.user_data);
             wake.release_user_data.unwrap()(wake.user_data);
@@ -291,7 +291,7 @@ mod tests {
         unsafe {
             let status = mln_binding_render_session_abandon_at_exit(session, core::ptr::null_mut(), NO_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
-            let status = mln_binding_render_session_abandon_at_exit(session, &mut result, NO_DIAGNOSTIC);
+            let status = mln_binding_render_session_abandon_at_exit(session, &raw mut result, NO_DIAGNOSTIC);
             assert_eq!(status, MLN_STATUS_OK);
         }
         assert_eq!(
@@ -299,7 +299,7 @@ mod tests {
             (MLN_RENDER_ABANDON_DISPOSITION_QUARANTINED, 2)
         );
         // SAFETY: as above.
-        let again = unsafe { mln_binding_render_session_abandon_at_exit(session, &mut result, NO_DIAGNOSTIC) };
+        let again = unsafe { mln_binding_render_session_abandon_at_exit(session, &raw mut result, NO_DIAGNOSTIC) };
         assert_eq!(again, MLN_STATUS_INVALID_STATE);
         render_session::tests::release_session(session);
         crate::map::tests::release_map(map);

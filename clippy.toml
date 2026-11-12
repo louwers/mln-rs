@@ -1,0 +1,22 @@
+# Proper names in doc comments that `clippy::doc_markdown` would otherwise
+# want in backticks. `..` keeps clippy's own list.
+doc-valid-idents = [
+    "..",
+    "BiDi",
+    "FastPFOR",
+    "FreeType",
+    "GeoJSON",
+    "HarfBuzz",
+    "HarfRust",
+    "LamAlef",
+    "LamAlefs",
+    "MapLibre",
+    "MBTiles",
+    "McNamee",
+    "PMTiles",
+    "RapidJSON",
+    "SwiftShader",
+    "TileJSON",
+    "TinySDF",
+    "ZigZag",
+]

@@ -1,4 +1,4 @@
-//! The browser build's font-face shaper: mln_text's HBShaper in a wasm
+//! The browser build's font-face shaper: `mln_text`'s `HBShaper` in a wasm
 //! module of its own. The map's Web Worker (examples/web) imports it the
 //! first time a style declares font faces, a second instance beside its own,
 //! and calls it through JavaScript as its map's `FontFaceEngine`
@@ -27,6 +27,7 @@ fn start() {
 /// `HBShaper(type, fontFileData)`: undefined unless `data` is a font. The
 /// face keeps `data` instead of copying it.
 #[wasm_bindgen(js_name = openFace)]
+#[must_use]
 pub fn open_face(type_: u16, data: Vec<u8>) -> Option<Face> {
     let shaper = HBShaper::new(GlyphIDType(type_), data, &FreeTypeLibrary::new());
     shaper.valid().then_some(Face { shaper, type_: GlyphIDType(type_) })
@@ -54,9 +55,9 @@ impl Face {
             .collect()
     }
 
-    /// `rasterizeGlyph`: `[metrics, bitmap]`, the metrics a Float64Array of
+    /// `rasterizeGlyph`: `[metrics, bitmap]`, the metrics a `Float64Array` of
     /// width, height, left, top, advance, double resolution (0 or 1), and
-    /// the bitmap's width and height, the bitmap a Uint8Array.
+    /// the bitmap's width and height, the bitmap a `Uint8Array`.
     pub fn rasterize(&self, code: u16) -> js_sys::Array {
         let glyph = self.shaper.rasterize_glyph(&GlyphID::with_type(code, self.type_));
         let m = &glyph.metrics;

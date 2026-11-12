@@ -47,6 +47,7 @@ impl DescriptorSetType {
 
     /// `GLOBAL_SET_INDEX`, `LAYER_SET_INDEX`, `DRAWABLE_UBO_SET_INDEX` and
     /// `DRAWABLE_IMAGE_SET_INDEX` of the GLSL.
+    #[must_use]
     pub const fn set_index(self) -> u32 {
         self as u32
     }
@@ -73,16 +74,19 @@ pub const IMAGE_TEXTURE_COUNT: usize = MAX_TEXTURE_COUNT_PER_SHADER;
 pub const IMAGE_SAMPLER_START: usize = MAX_TEXTURE_COUNT_PER_SHADER;
 
 /// The binding in the global set of the uniform buffer `id`.
+#[must_use]
 pub const fn global_uniform_binding(id: usize) -> Option<u32> {
     if id < GLOBAL_UNIFORM_COUNT { Some(id as u32) } else { None }
 }
 
 /// The binding in the layer set of the storage buffer `id`.
+#[must_use]
 pub const fn layer_storage_binding(id: usize) -> Option<u32> {
     if id >= LAYER_SSBO_START_ID && id < LAYER_UBO_START_ID { Some((id - LAYER_SSBO_START_ID) as u32) } else { None }
 }
 
 /// The binding in the layer set of the uniform buffer `id`.
+#[must_use]
 pub const fn layer_uniform_binding(id: usize) -> Option<u32> {
     if id >= DRAWABLE_RESERVED_UBO_COUNT && id < MAX_UBO_COUNT_PER_SHADER {
         Some((LAYER_STORAGE_COUNT + id - DRAWABLE_RESERVED_UBO_COUNT) as u32)
@@ -92,6 +96,7 @@ pub const fn layer_uniform_binding(id: usize) -> Option<u32> {
 }
 
 /// The binding in the drawable set of the uniform buffer `id`.
+#[must_use]
 pub const fn drawable_uniform_binding(id: usize) -> Option<u32> {
     if id >= LAYER_SSBO_START_ID && id < MAX_UBO_COUNT_PER_SHADER {
         Some((id - LAYER_SSBO_START_ID) as u32)
@@ -102,11 +107,13 @@ pub const fn drawable_uniform_binding(id: usize) -> Option<u32> {
 
 /// The binding in the image set of the texture at `index`
 /// (`TextureInfo::index`).
+#[must_use]
 pub const fn image_texture_binding(index: usize) -> u32 {
     index as u32
 }
 
 /// The binding in the image set of the sampler of the texture at `index`.
+#[must_use]
 pub const fn image_sampler_binding(index: usize) -> u32 {
     (IMAGE_SAMPLER_START + index) as u32
 }

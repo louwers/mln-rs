@@ -6,7 +6,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_LINE_COLOR_VERTEX_ATTRIBUTE, ID_LINE_DATA_VERTEX_ATTRIBUTE, ID_LINE_IMAGE_TEXTURE,
+    ID_LINE_POS_NORMAL_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::shaders::shader_program_base::ShaderProgramBasePtr;
 use mln_gfx::texture2d::{SamplerState, Texture2DPtr};
 use mln_gfx::types::{TextureFilterType, TextureWrapType};
@@ -20,7 +23,10 @@ use mln_style::expression::{Dependency, GlobalStateMap, global_state_refs_inters
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::line_layer_impl::Impl as LineLayerImpl;
-use mln_style::layers::line_layer_properties::*;
+use mln_style::layers::line_layer_properties::{
+    LineBlur, LineCap, LineColor, LineDasharray, LineFloorWidth, LineGapWidth, LineGradient, LineLayerProperties,
+    LineOffset, LineOpacity, LinePaintProperties, LinePattern, LineTranslate, LineTranslateAnchor, LineWidth,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::LineCapType;
 use mln_util::Color;
@@ -72,7 +78,7 @@ pub fn apply_color_ramp(
 
     let mut i: u32 = 0;
     while (i as usize) < length {
-        let color = color_value.evaluate_ramp(i as f64 / length as f64, global_state);
+        let color = color_value.evaluate_ramp(f64::from(i) / length as f64, global_state);
         let i_ = i as usize;
         image.data[i_] = (color.r * 255.0).floor() as u8;
         image.data[i_ + 1] = (color.g * 255.0).floor() as u8;
@@ -320,12 +326,12 @@ impl RenderLineLayer {
             feature_state,
             LineGapWidth::default_value(),
         );
-        if gap_width != 0.0 { gap_width + 2.0 * line_width } else { line_width }
+        if gap_width == 0.0 { line_width } else { gap_width + 2.0 * line_width }
     }
 }
 
 // query
-/// `offsetLine(rings, offset)` (render_line_layer.cpp).
+/// `offsetLine(rings, offset)` (`render_line_layer.cpp`).
 fn offset_line(
     rings: &mln_tile_id::geometry_tile_data::GeometryCollection,
     offset: f64,
@@ -353,7 +359,7 @@ fn offset_line(
             let mut extrude = unit(Point::new(a_to_b.x + b_to_c.x, a_to_b.y + b_to_c.y));
 
             let cos_half_angle = extrude.x * b_to_c.x + extrude.y * b_to_c.y;
-            let scale = if cos_half_angle != 0.0 { 1.0 / cos_half_angle } else { 0.0 };
+            let scale = if cos_half_angle == 0.0 { 0.0 } else { 1.0 / cos_half_angle };
             extrude = Point::new(extrude.x * scale, extrude.y * scale);
 
             // convertPoint<int16_t>(extrude * offset) + p
@@ -707,7 +713,7 @@ impl RenderLayer for RenderLineLayer {
                             &paint(),
                             evaluated,
                             &mut Default::default(),
-                        )
+                        );
                     });
                 }
                 current

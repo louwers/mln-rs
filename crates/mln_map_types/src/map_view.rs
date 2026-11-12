@@ -59,6 +59,7 @@ pub struct LogicalExtent {
 }
 
 impl LogicalExtent {
+    #[must_use]
     pub fn new(size: Size, scale_factor: f64) -> LogicalExtent {
         LogicalExtent { size, scale_factor }
     }

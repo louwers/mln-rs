@@ -46,12 +46,12 @@ fn property_value(property: Property<'_>) -> Value {
 
 /// `PointConverter`: `static_cast<int16_t>(std::round(coord * scale))`,
 /// saturating out of range.
-fn convert_point(scale: f64, coord: &Coordinate) -> GeometryCoordinate {
+fn convert_point(scale: f64, coord: Coordinate) -> GeometryCoordinate {
     GeometryCoordinate::new((f64::from(coord.x) * scale).round() as i16, (f64::from(coord.y) * scale).round() as i16)
 }
 
 fn convert_coords(scale: f64, coords: &[Coordinate]) -> GeometryCoordinates {
-    coords.iter().map(|c| convert_point(scale, c)).collect()
+    coords.iter().map(|c| convert_point(scale, *c)).collect()
 }
 
 /// `VectorMLTTileFeature`.
@@ -67,6 +67,7 @@ pub struct VectorMLTTileFeature<'l> {
 }
 
 impl<'l> VectorMLTTileFeature<'l> {
+    #[must_use]
     pub fn new(layer: &'l mlt::Layer, feature: &'l mlt::Feature, extent: u32) -> Self {
         VectorMLTTileFeature {
             layer,
@@ -79,7 +80,7 @@ impl<'l> VectorMLTTileFeature<'l> {
     }
 
     /// Keeps the first exception a trait accessor would have thrown.
-    fn keep_error(&self, error: mlt::Error) {
+    fn keep_error(&self, error: &mlt::Error) {
         let _ = self.error.set(MlnError::native(error.to_string()));
     }
 
@@ -133,7 +134,7 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
 
     fn get_value(&self, key: &str) -> Option<Value> {
         self.try_get_value(key).unwrap_or_else(|e| {
-            self.keep_error(e);
+            self.keep_error(&e);
             None
         })
     }
@@ -142,7 +143,7 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
         match self.try_get_properties() {
             Ok(properties) => properties,
             Err(e) => {
-                self.keep_error(e);
+                self.keep_error(&e);
                 &EMPTY_PROPERTIES
             }
         }
@@ -164,7 +165,7 @@ impl GeometryTileFeature for VectorMLTTileFeature<'_> {
             let scale = f64::from(EXTENT) / f64::from(self.extent);
             let geometry = self.feature.get_geometry();
             let mut lines = match &geometry.shape {
-                Shape::Point(coord) => GeometryCollection::from(vec![vec![convert_point(scale, coord)]]),
+                Shape::Point(coord) => GeometryCollection::from(vec![vec![convert_point(scale, *coord)]]),
                 Shape::MultiPoint(coords) | Shape::LineString(coords) => {
                     GeometryCollection::from(vec![convert_coords(scale, coords)])
                 }
@@ -200,12 +201,14 @@ pub struct VectorMLTTileLayer {
 
 impl VectorMLTTileLayer {
     /// The `mlt::Layer`.
+    #[must_use]
     pub fn layer(&self) -> &mlt::Layer {
         &self.tile.get_layers()[self.layer]
     }
 
     /// `getFeature(index)`. C++ indexes the feature vector unchecked; an index
     /// past the end panics here.
+    #[must_use]
     pub fn feature(&self, index: usize) -> VectorMLTTileFeature<'_> {
         let layer = self.layer();
         VectorMLTTileFeature::new(layer, &layer.get_features()[index], layer.get_extent())
@@ -239,7 +242,7 @@ impl GeometryTileLayer for VectorMLTTileLayer {
         let columns: Vec<mlt::ValueCodes<'_>> = keys
             .iter()
             .filter_map(|key| layer.get_property_column(key))
-            .map(|column| column.codes())
+            .map(super::mlt::PresentProperties::codes)
             .collect::<Option<_>>()?;
         let mut index: HashMap<Box<[Option<u64>]>, u32> = HashMap::new();
         let mut codes = vec![None; columns.len() + 1];
@@ -249,17 +252,16 @@ impl GeometryTileLayer for VectorMLTTileLayer {
             for (code, column) in codes.iter_mut().zip(&columns) {
                 *code = column.get(feature.get_index()).ok()?;
             }
-            let group = match index.get(codes.as_slice()) {
-                Some(&group) => group,
-                None => {
-                    if groups.first.len() == limit {
-                        return None;
-                    }
-                    let group = groups.first.len() as u32;
-                    index.insert(codes.as_slice().into(), group);
-                    groups.first.push(i);
-                    group
+            let group = if let Some(&group) = index.get(codes.as_slice()) {
+                group
+            } else {
+                if groups.first.len() == limit {
+                    return None;
                 }
+                let group = groups.first.len() as u32;
+                index.insert(codes.as_slice().into(), group);
+                groups.first.push(i);
+                group
             };
             groups.of_feature.push(group);
         }
@@ -283,6 +285,7 @@ pub struct VectorMLTTileData {
 
 impl VectorMLTTileData {
     /// `VectorMLTTileData(std::shared_ptr<const std::string>, bool fastPFOREnabled)`.
+    #[must_use]
     pub fn new(data: Arc<Vec<u8>>, fast_pfor_enabled: bool) -> Self {
         VectorMLTTileData { state: Mutex::new(State { data: Some(data), tile: None }), fast_pfor_enabled }
     }

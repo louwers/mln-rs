@@ -258,12 +258,12 @@ fn a_cache_file_that_cant_be_created_fails_the_runtime() {
     let dir = TempDir::new();
     let unwritable = dir.path("missing-directory").join("cache.db");
     let options = RuntimeOptions { cache_path: Some(unwritable.clone()), ..RuntimeOptions::default() };
-    let error = Runtime::new(options).unwrap_err();
+    let error = Runtime::new(&options).unwrap_err();
     assert_eq!(ErrorKind::InvalidArgument, error.kind);
     assert!(error.message.contains(unwritable.to_str().unwrap()), "{}", error.message);
 
     let writable = dir.path("cache.db");
-    let runtime = Runtime::new(RuntimeOptions { cache_path: Some(writable.clone()), ..RuntimeOptions::default() });
+    let runtime = Runtime::new(&RuntimeOptions { cache_path: Some(writable.clone()), ..RuntimeOptions::default() });
     assert!(writable.exists());
     wait(runtime.unwrap().release());
 }
@@ -343,7 +343,7 @@ fn a_resize_sets_the_scale_factor_and_rejects_one_that_isnt_positive() {
 fn only_a_continuous_map_repaints() {
     let runtime = runtime();
     let options = map_options();
-    let still = MapOptions { map: options.map.clone().with_map_mode(mln_map::MapMode::Static), ..options };
+    let still = MapOptions { map: options.map.with_map_mode(mln_map::MapMode::Static), ..options };
     let (map, created) = runtime.create_map(still).unwrap();
     created.wait().unwrap();
     assert_eq!(ErrorKind::InvalidState, map.request_repaint().unwrap_err().kind);

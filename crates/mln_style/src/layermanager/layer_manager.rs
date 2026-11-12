@@ -70,9 +70,10 @@ impl LayerManager {
 
     /// `getFactory(const LayerTypeInfo*)`: by address, as C++.
     pub fn get_factory_by_type_info(&self, info: &LayerTypeInfo) -> Option<&dyn LayerFactory> {
-        self.factories.iter().find(|f| std::ptr::eq(f.get_type_info(), info)).map(|f| f.as_ref())
+        self.factories.iter().find(|f| std::ptr::eq(f.get_type_info(), info)).map(std::convert::AsRef::as_ref)
     }
 
+    #[must_use]
     pub fn has_layer_type(&self, type_: &str) -> bool {
         self.get_factory(type_).is_some()
     }
@@ -91,9 +92,8 @@ impl LayerManager {
                 error.message = format!("Error parsing layer {id} of type: {type_}");
             }
             return layer;
-        } else {
-            error.message = format!("Null factory for type: {type_}");
         }
+        error.message = format!("Null factory for type: {type_}");
         error.message = format!("Unsupported layer type! {}", error.message);
         None
     }

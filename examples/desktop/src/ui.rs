@@ -25,6 +25,7 @@ use crate::backend::Kind;
 use crate::styles::Style;
 
 /// What the controls ask of the map.
+#[derive(Clone, Copy)]
 pub(crate) enum Action {
     ZoomIn,
     ZoomOut,
@@ -269,8 +270,7 @@ impl Controls {
 fn style_name<'a>(style: &'a Style, loaded_name: &'a str) -> &'a str {
     match (style.name.as_str(), loaded_name) {
         ("", "") => "Custom style",
-        ("", name) => name,
-        (name, _) => name,
+        ("", name) | (name, _) => name,
     }
 }
 

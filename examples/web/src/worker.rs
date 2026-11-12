@@ -10,6 +10,7 @@ use mln_actor::TaggedScheduler;
 use mln_actor::cooperative_scheduler::CooperativeScheduler;
 use mln_renderer::tile::worker_codec::{Encoded, TileWorkerHost};
 use mln_util::identity::SimpleIdentity;
+use mln_util::serialization::payload::Payload;
 use wasm_bindgen::prelude::*;
 
 use crate::{cooperative_scheduler, deadline};
@@ -49,6 +50,7 @@ impl TileWorker {
     /// The instance's tile workers, on its cooperative scheduler. `wake()`
     /// asks the Web Worker to `run` soon: when a reply comes outside `run`.
     #[wasm_bindgen(constructor)]
+    #[must_use]
     pub fn new(wake: js_sys::Function) -> TileWorker {
         WAKE.with(|w| *w.borrow_mut() = Some(wake));
         let scheduler = cooperative_scheduler();
@@ -80,7 +82,7 @@ impl TileWorker {
             .into_iter()
             .map(|reply| {
                 std::iter::once(reply.bytes)
-                    .chain(reply.payloads.into_iter().map(|payload| payload.into_vec()))
+                    .chain(reply.payloads.into_iter().map(Payload::into_vec))
                     .map(|part| js_sys::Uint8Array::from(&part[..]))
                     .collect::<js_sys::Array>()
             })

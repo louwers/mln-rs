@@ -14,7 +14,7 @@ use crate::serialization::shared_expression;
 
 /// Special-case implementation of (a subset of) the `PropertyValue<T>`
 /// interface used for building the paint property traits classes for
-/// HeatmapColor, ColorReliefColor, and LineGradient.
+/// `HeatmapColor`, `ColorReliefColor`, and `LineGradient`.
 ///
 /// Generic paint-property evaluation uses a placeholder Color, while the
 /// render layers evaluate the expression separately to build their
@@ -57,6 +57,7 @@ impl From<ColorRampPropertyValue> for ColorRampParts {
 
 impl ColorRampPropertyValue {
     /// `ColorRampPropertyValue(std::shared_ptr<expression::Expression>)`.
+    #[must_use]
     pub fn new(value: Option<Arc<dyn Expression>>) -> Self {
         let global_state_refs = match &value {
             Some(expression) if expression.has(Dependency::GLOBAL_STATE) => {
@@ -69,11 +70,13 @@ impl ColorRampPropertyValue {
         ColorRampPropertyValue { value, global_state_refs }
     }
 
+    #[must_use]
     pub fn is_undefined(&self) -> bool {
         self.value.is_none()
     }
 
     /// `evaluate(double rampEvaluationParameter, const GlobalStateMap* globalState)`.
+    #[must_use]
     pub fn evaluate_ramp(&self, ramp_evaluation_parameter: f64, global_state: Option<&GlobalStateMap>) -> Color {
         let value = self.value.as_ref().expect("ColorRampPropertyValue::evaluate on an undefined value");
         let result = value.evaluate(
@@ -86,19 +89,23 @@ impl ColorRampPropertyValue {
         from_expression_value::<Color>(&result).unwrap_or_default()
     }
 
+    #[must_use]
     pub fn is_data_driven(&self) -> bool {
         false
     }
 
+    #[must_use]
     pub fn has_data_driven_property_difference(&self, _other: &ColorRampPropertyValue) -> bool {
         false
     }
 
     /// `getExpression()`; C++ requires a defined value.
+    #[must_use]
     pub fn get_expression(&self) -> &dyn Expression {
         self.value.as_deref().expect("ColorRampPropertyValue::get_expression on an undefined value")
     }
 
+    #[must_use]
     pub fn get_dependencies(&self) -> Dependency {
         match &self.value {
             Some(value) => value.dependencies(),
@@ -106,6 +113,7 @@ impl ColorRampPropertyValue {
         }
     }
 
+    #[must_use]
     pub fn get_global_state_refs(&self) -> Option<&VecSet<String>> {
         self.global_state_refs.as_deref()
     }

@@ -106,15 +106,18 @@ impl BufferAllocation {
         })
     }
 
+    #[must_use]
     pub fn id(&self) -> u64 {
         self.id
     }
 
+    #[must_use]
     pub fn buffer(&self) -> vk::Buffer {
         self.buffer
     }
 
     /// The buffer's memory, or null if the allocator couldn't map it.
+    #[must_use]
     pub fn mapped_buffer(&self) -> *mut u8 {
         self.mapped_buffer
     }

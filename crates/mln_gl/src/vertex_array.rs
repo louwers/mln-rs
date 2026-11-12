@@ -84,6 +84,7 @@ impl VertexArray {
     }
 
     /// `getID()`
+    #[must_use]
     pub fn get_id(&self) -> VertexArrayID {
         self.id
     }

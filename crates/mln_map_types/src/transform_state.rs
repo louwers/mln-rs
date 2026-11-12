@@ -112,82 +112,102 @@ pub struct TransformStateProperties {
 }
 
 impl TransformStateProperties {
+    #[must_use]
     pub fn with_x(mut self, val: Option<f64>) -> Self {
         self.x = val;
         self
     }
+    #[must_use]
     pub fn with_y(mut self, val: Option<f64>) -> Self {
         self.y = val;
         self
     }
+    #[must_use]
     pub fn with_z(mut self, val: Option<f64>) -> Self {
         self.z = val;
         self
     }
+    #[must_use]
     pub fn with_scale(mut self, val: Option<f64>) -> Self {
         self.scale = val;
         self
     }
+    #[must_use]
     pub fn with_fov(mut self, val: Option<f64>) -> Self {
         self.fov = val;
         self
     }
+    #[must_use]
     pub fn with_bearing(mut self, val: Option<f64>) -> Self {
         self.bearing = val;
         self
     }
+    #[must_use]
     pub fn with_pitch(mut self, val: Option<f64>) -> Self {
         self.pitch = val;
         self
     }
+    #[must_use]
     pub fn with_roll(mut self, val: Option<f64>) -> Self {
         self.roll = val;
         self
     }
+    #[must_use]
     pub fn with_x_skew(mut self, val: Option<f64>) -> Self {
         self.x_skew = val;
         self
     }
+    #[must_use]
     pub fn with_y_skew(mut self, val: Option<f64>) -> Self {
         self.y_skew = val;
         self
     }
+    #[must_use]
     pub fn with_axonometric(mut self, val: Option<bool>) -> Self {
         self.axonometric = val;
         self
     }
+    #[must_use]
     pub fn with_panning_in_progress(mut self, val: Option<bool>) -> Self {
         self.panning = val;
         self
     }
+    #[must_use]
     pub fn with_scaling_in_progress(mut self, val: Option<bool>) -> Self {
         self.scaling = val;
         self
     }
+    #[must_use]
     pub fn with_rotating_in_progress(mut self, val: Option<bool>) -> Self {
         self.rotating = val;
         self
     }
+    #[must_use]
     pub fn with_edge_insets(mut self, val: Option<EdgeInsets>) -> Self {
         self.edge_insets = val;
         self
     }
+    #[must_use]
     pub fn with_size(mut self, val: Option<Size>) -> Self {
         self.size = val;
         self
     }
+    #[must_use]
     pub fn with_constrain_mode(mut self, val: Option<ConstrainMode>) -> Self {
         self.constrain = val;
         self
     }
+    #[must_use]
     pub fn with_north_orientation(mut self, val: Option<NorthOrientation>) -> Self {
         self.north_orientation = val;
         self
     }
+    #[must_use]
     pub fn with_viewport_mode(mut self, val: Option<ViewportMode>) -> Self {
         self.view_port_mode = val;
         self
     }
+    #[must_use]
     pub fn with_frustum_offset(mut self, val: Option<EdgeInsets>) -> Self {
         self.frustum_offset = val;
         self
@@ -272,12 +292,13 @@ impl Default for TransformState {
 }
 
 impl TransformState {
+    #[must_use]
     pub fn new(constrain_mode: ConstrainMode, viewport_mode: ViewportMode) -> Self {
         let scale = 1.0;
         TransformState {
             bounds: LatLngBounds::default(),
             min_scale: 2.0f64.powf(0.0),
-            max_scale: 2.0f64.powf(DEFAULT_MAX_ZOOM as f64),
+            max_scale: 2.0f64.powf(f64::from(DEFAULT_MAX_ZOOM)),
             min_pitch: constants::PITCH_MIN,
             max_pitch: DEFAULT_PITCH_MAX,
             min_fov: mln_math::deg2rad(0.1),
@@ -454,7 +475,7 @@ impl TransformState {
             return;
         }
 
-        let camera_to_center_distance = self.get_camera_to_center_distance() as f64;
+        let camera_to_center_distance = f64::from(self.get_camera_to_center_distance());
         let offset = self.get_center_offset();
 
         let limited_pitch = mln_math::clamp_f64(self.get_pitch(), 0.0, max_mercator_horizon_angle());
@@ -467,8 +488,8 @@ impl TransformState {
         // (the distance between[width/2, height/2] and [width/2 + 1, height/2])
         // See https://github.com/mapbox/mapbox-gl-native/pull/15195 for details.
         // See TransformState::fov description: fov = 2 * arctan((height / 2) / (height * 1.5)).
-        let width = self.size.width as f64;
-        let height = self.size.height as f64;
+        let width = f64::from(self.size.width);
+        let height = f64::from(self.size.height);
         let tan_fov_above_center = (0.5 + (offset.y - self.frustum_offset.top) / height)
             * 2.0
             * (self.fov / 2.0).tan()
@@ -485,9 +506,9 @@ impl TransformState {
         let world_to_camera = camera.get_world_to_camera(self.scale, self.viewport_mode == ViewportMode::FlippedY);
         // getFieldOfView() returns float.
         let mut camera_to_clip = camera.get_camera_to_clip_perspective(
-            self.get_field_of_view() as f64,
+            f64::from(self.get_field_of_view()),
             width / height,
-            near_z as f64,
+            f64::from(near_z),
             far_z,
         );
 
@@ -539,8 +560,8 @@ impl TransformState {
             let dx = self.x - 0.5 * world_size;
             let dy = self.y - 0.5 * world_size;
 
-            let x_shift = (self.size.width % 2) as f64 / 2.0;
-            let y_shift = (self.size.height % 2) as f64 / 2.0;
+            let x_shift = f64::from(self.size.width % 2) / 2.0;
+            let y_shift = f64::from(self.size.height % 2) / 2.0;
             let bearing_cos = self.bearing.cos();
             let bearing_sin = self.bearing.sin();
             let dxa = -modf_fraction(dx) + bearing_cos * x_shift + bearing_sin * y_shift;
@@ -565,7 +586,7 @@ impl TransformState {
         }
 
         let world_size = Projection::world_size(self.scale);
-        let camera_to_center_distance = self.get_camera_to_center_distance() as f64;
+        let camera_to_center_distance = f64::from(self.get_camera_to_center_distance());
 
         // x & y tracks the center of the map in pixels. However as rendering
         // is done in pixel coordinates the rendering origo is actually in the
@@ -608,7 +629,7 @@ impl TransformState {
         new_pitch = mln_math::clamp_f64(new_pitch, self.min_pitch, self.max_pitch);
 
         // Compute zoom level from the camera altitude
-        let center_distance = self.get_camera_to_center_distance() as f64;
+        let center_distance = f64::from(self.get_camera_to_center_distance());
         let zoom;
         let travel;
         if dz < -1.0e-9 && position[2] > 1.0e-9 && new_pitch <= max_mercator_horizon_angle() {
@@ -647,7 +668,7 @@ impl TransformState {
 
         let max_world_size = Projection::world_size(2.0f64.powf(self.get_max_zoom()));
         let min_world_size = Projection::world_size(2.0f64.powf(self.get_min_zoom()));
-        let dist_to_center = self.get_camera_to_center_distance() as f64;
+        let dist_to_center = f64::from(self.get_camera_to_center_distance());
 
         let updated_pos: Vec3 = [
             position[0],
@@ -693,16 +714,16 @@ impl TransformState {
 
         let mut camera = self.camera_state();
         let mut changed = false;
-        if let Some(orientation) = options.orientation {
-            if orientation != camera.get_orientation().m() {
-                changed |= Self::set_camera_orientation(&mut camera, &Quaternion::from_vec4(&orientation));
-            }
+        if let Some(orientation) = options.orientation
+            && orientation != camera.get_orientation().m()
+        {
+            changed |= Self::set_camera_orientation(&mut camera, &Quaternion::from_vec4(&orientation));
         }
 
-        if let Some(position) = options.position {
-            if position != camera.get_position() {
-                changed |= self.set_camera_position(&mut camera, &position);
-            }
+        if let Some(position) = options.position
+            && position != camera.get_position()
+        {
+            changed |= self.set_camera_position(&mut camera, &position);
         }
 
         if changed {
@@ -944,12 +965,12 @@ impl TransformState {
     }
 
     pub fn pixel_x(&self) -> f64 {
-        let center = (self.size.width as f64 - Projection::world_size(self.scale)) / 2.0;
+        let center = (f64::from(self.size.width) - Projection::world_size(self.scale)) / 2.0;
         center + self.x
     }
 
     pub fn pixel_y(&self) -> f64 {
-        let center = (self.size.height as f64 - Projection::world_size(self.scale)) / 2.0;
+        let center = (f64::from(self.size.height) - Projection::world_size(self.scale)) / 2.0;
         center + self.y
     }
 
@@ -1000,7 +1021,7 @@ impl TransformState {
     }
 
     pub fn get_zoom_fraction(&self) -> f64 {
-        self.get_zoom() - self.get_integer_zoom() as f64
+        self.get_zoom() - f64::from(self.get_integer_zoom())
     }
 
     // MARK: - Bounds
@@ -1164,7 +1185,7 @@ impl TransformState {
 
     /// Returns float, as C++ does.
     pub fn get_camera_to_center_distance(&self) -> f32 {
-        (0.5 * self.size.height as f64 / (self.fov / 2.0).tan()) as f32
+        (0.5 * f64::from(self.size.height) / (self.fov / 2.0).tan()) as f32
     }
 
     pub fn get_pitch(&self) -> f64 {
@@ -1286,7 +1307,7 @@ impl TransformState {
         let pt = Point::new(pt.x / TILE_SIZE_D, pt.y / TILE_SIZE_D);
         let c: Vec4 = [pt.x, pt.y, 0.0, 1.0];
         matrix::transform_mat4(p, &c, &self.get_coord_matrix());
-        ScreenCoordinate::new(p[0] / p[3], self.size.height as f64 - p[1] / p[3])
+        ScreenCoordinate::new(p[0] / p[3], f64::from(self.size.height) - p[1] / p[3])
     }
 
     /// Whether the globe hides a location from the camera; a Mercator map
@@ -1300,7 +1321,7 @@ impl TransformState {
         plane[0] * surface[0] + plane[1] * surface[1] + plane[2] * surface[2] + plane[3] < 0.0
     }
 
-    /// Implements mapbox-gl-js pointCoordinate() : MercatorCoordinate.
+    /// Implements mapbox-gl-js `pointCoordinate()` : `MercatorCoordinate`.
     pub fn screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
         if self.size.is_empty() {
             return TileCoordinate { p: Point::new(0.0, 0.0), z: 0.0 };
@@ -1319,7 +1340,7 @@ impl TransformState {
     fn mercator_screen_coordinate_to_tile_coordinate(&self, point: &ScreenCoordinate, at_zoom: u8) -> TileCoordinate {
         let target_z: f32 = 0.0;
 
-        let flipped_y = self.size.height as f64 - point.y;
+        let flipped_y = f64::from(self.size.height) - point.y;
 
         // since we don't know the correct projected z value for the point,
         // unproject two points to get a line and then find the point on that
@@ -1341,12 +1362,12 @@ impl TransformState {
 
         let z0 = coord0[2] / w0;
         let z1 = coord1[2] / w1;
-        let t = if z0 <= z1 { 0.0 } else { (target_z as f64 - z0) / (z1 - z0) };
+        let t = if z0 <= z1 { 0.0 } else { (f64::from(target_z) - z0) / (z1 - z0) };
 
         let p = interpolate(&p0, &p1, t);
         // C++ `static_cast<double>(1 << atZoom)`: an int shift.
-        let factor = 1i32.wrapping_shl(at_zoom as u32) as f64;
-        TileCoordinate { p: Point::new(p.x / self.scale * factor, p.y / self.scale * factor), z: at_zoom as f64 }
+        let factor = f64::from(1i32.wrapping_shl(u32::from(at_zoom)));
+        TileCoordinate { p: Point::new(p.x / self.scale * factor, p.y / self.scale * factor), z: f64::from(at_zoom) }
     }
 
     /// `screenCoordinateToLatLng(const ScreenCoordinate&, LatLng::WrapMode = LatLng::Unwrapped)`.
@@ -1380,7 +1401,7 @@ impl TransformState {
         let mut m: Mat4 = [0.0; 16];
         matrix::identity(&mut m);
         let a = m;
-        matrix::scale(&mut m, &a, self.size.width as f64 / 2.0, -(self.size.height as f64) / 2.0, 1.0);
+        matrix::scale(&mut m, &a, f64::from(self.size.width) / 2.0, -f64::from(self.size.height) / 2.0, 1.0);
         let a = m;
         matrix::translate(&mut m, &a, 1.0, -1.0, 0.0);
         m
@@ -1426,8 +1447,8 @@ impl TransformState {
             return;
         }
 
-        let width = self.size.width as f64;
-        let height = self.size.height as f64;
+        let width = f64::from(self.size.width);
+        let height = f64::from(self.size.height);
 
         // Constrain scale to avoid zooming out far enough to show off-world
         // areas on the Y axis.
@@ -1464,7 +1485,7 @@ impl TransformState {
         // in the result we need to do the same when testing if the requested
         // center and zoom is outside the bounds or not.
         if let Some(mut anchor) = requested_camera.anchor {
-            anchor.y = self.get_size().height as f64 - anchor.y;
+            anchor.y = f64::from(self.get_size().height) - anchor.y;
             // The screenCoordinateToLatLng function requires the matrices
             // inside the state to reflect the requested scale. So we create a
             // copy and set the requested zoom before the conversion. This will
@@ -1504,7 +1525,7 @@ impl TransformState {
         let screen_width = self.get_size().width;
         let screen_height = self.get_size().height;
 
-        let h2 = screen_height as f64 / 2.0;
+        let h2 = f64::from(screen_height) / 2.0;
         if start_y - h2 + anchor_offset.y < min_y {
             result_y = min_y + h2;
         }
@@ -1512,7 +1533,7 @@ impl TransformState {
             result_y = max_y - h2;
         }
 
-        let w2 = screen_width as f64 / 2.0;
+        let w2 = f64::from(screen_width) / 2.0;
         if start_x + anchor_offset.x - w2 < min_x {
             result_x = min_x + w2;
         }
@@ -1521,15 +1542,15 @@ impl TransformState {
         }
 
         let mut scale_y = 0.0;
-        if max_y - min_y < screen_height as f64 {
-            scale_y = screen_height as f64 / (max_y - min_y);
-            result_y = (max_y + min_y) / 2.0;
+        if max_y - min_y < f64::from(screen_height) {
+            scale_y = f64::from(screen_height) / (max_y - min_y);
+            result_y = f64::midpoint(max_y, min_y);
         }
 
         let mut scale_x = 0.0;
-        if max_x - min_x < screen_width as f64 {
-            scale_x = screen_width as f64 / (max_x - min_x);
-            result_x = (max_x + min_x) / 2.0;
+        if max_x - min_x < f64::from(screen_width) {
+            scale_x = f64::from(screen_width) / (max_x - min_x);
+            result_x = f64::midpoint(max_x, min_x);
         }
 
         let max_scale = if scale_x > scale_y { scale_x } else { scale_y };
@@ -1538,7 +1559,7 @@ impl TransformState {
         // max bounds in either the X or Y direction. To avoid numerical
         // instabilities we add small amount to the check to make sure we
         // don't try to scale when we don't actually need it.
-        if max_scale > 1.000001 {
+        if max_scale > 1.000_001 {
             *requested_zoom += self.scale_zoom(max_scale);
 
             if scale_y > scale_x {
@@ -1742,7 +1763,7 @@ impl TransformState {
         // the corner's unclamped Mercator position. C++ builds the point from
         // `static_cast<float>(height)`.
         let corner = self.mercator_screen_coordinate_to_tile_coordinate(
-            &ScreenCoordinate::new(0.0, self.get_size().height as f32 as f64),
+            &ScreenCoordinate::new(0.0, f64::from(self.get_size().height as f32)),
             0,
         );
         // A point on the screen has a LatLng unless the state holds NaN,

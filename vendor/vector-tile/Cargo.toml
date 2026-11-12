@@ -17,6 +17,7 @@ doctest = false
 feature.workspace = true
 geometry.workspace = true
 protozero.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

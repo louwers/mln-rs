@@ -256,9 +256,8 @@ fn for_each_repeated_run<F: FnMut(&mut RingManager, usize, usize) -> R<()>>(
             itr += 1;
             if itr != points.len() {
                 continue;
-            } else {
-                prev_itr += 1;
             }
+            prev_itr += 1;
         } else {
             prev_itr += 1;
             itr += 1;
@@ -607,7 +606,7 @@ fn process_single_intersection(
     }
 
     if manager.is_hole(ring_origin) {
-        for i_ring in i_list.iter_mut() {
+        for i_ring in &mut i_list {
             let ring_itr = i_ring.0;
             if !manager.is_hole(ring_itr) {
                 // Make the hole the origin!
@@ -810,7 +809,7 @@ fn sort_rings_smallest_to_largest(manager: &mut RingManager) -> Vec<RingPtr> {
 }
 
 /// `collinear_path<int32_t>`: collinear edges are in opposite directions
-/// such that start_1 is at the same position of end_2 and vise versa. Start
+/// such that `start_1` is at the same position of `end_2` and vise versa. Start
 /// to end is always forward (next) on path.
 struct CollinearPath {
     start_1: PointPtr,
@@ -1006,7 +1005,7 @@ fn find_start_and_end_of_collinear_edges(pt_a: PointPtr, pt_b: PointPtr, m: &Rin
     CollinearPath { start_1: start_a, end_1: end_a, start_2: start_b, end_2: end_b }
 }
 
-/// `has_collinear_edge`: it is assumed pt_a and pt_b are at the same
+/// `has_collinear_edge`: it is assumed `pt_a` and `pt_b` are at the same
 /// location.
 fn has_collinear_edge(pt_a: PointPtr, pt_b: PointPtr, m: &RingManager) -> bool {
     m.pt_eq(m.next(pt_a), m.prev(pt_b)) || m.pt_eq(m.next(pt_b), m.prev(pt_a))
@@ -1247,10 +1246,9 @@ fn correct_tree(manager: &mut RingManager) -> R<()> {
         if !found {
             if manager.is_hole(r) {
                 return Err("Could not properly place hole to a parent.".to_owned());
-            } else {
-                // Assign to base of tree by passing nullptr
-                reassign_as_child(r, NIL, manager)?;
             }
+            // Assign to base of tree by passing nullptr
+            reassign_as_child(r, NIL, manager)?;
         }
     }
     Ok(())

@@ -28,6 +28,7 @@ use mln_util::geo::{LatLng, LatLngBounds};
 use support::*;
 
 /// `std::make_unique<style::Image>(id, image, pixelRatio)`.
+#[must_use]
 pub fn style_image(
     id: &str,
     image: mln_util::image::PremultipliedImage,

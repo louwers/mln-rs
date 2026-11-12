@@ -116,7 +116,7 @@ impl RendererImpl {
 
         let state = &render_tree_parameters.transform_params.state;
         let frustum_offset = state.get_frustum_offset();
-        let pixel_ratio = self.pixel_ratio as f64;
+        let pixel_ratio = f64::from(self.pixel_ratio);
         let scissor_rect = ScissorRect {
             x: (frustum_offset.left * pixel_ratio) as i32,
             y: (frustum_offset.top * pixel_ratio) as i32,
@@ -268,7 +268,7 @@ impl RendererImpl {
             parameters.pass = RenderPass::Pass3D;
 
             // drawable3DPass: draw layer groups, 3D pass
-            debug_assert!(parameters.pass == RenderPass::Pass3D);
+            debug_assert_eq!(parameters.pass, RenderPass::Pass3D);
             // `depthModeFor3D` uses this, and the 3D pass runs before the opaque pass sets it
             parameters.depth_range_size =
                 1.0 - ((orchestrator.num_layer_groups() + 2) * num_sublayers) as f32 * depth_epsilon;

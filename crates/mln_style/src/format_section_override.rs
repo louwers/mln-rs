@@ -28,6 +28,7 @@ pub struct FormatSectionOverride {
 }
 
 impl FormatSectionOverride {
+    #[must_use]
     pub fn new(type_: Type, default_value: PossiblyEvaluatedPropertyValue<Color>, property_name: String) -> Self {
         let dependencies = default_value.get_dependencies() | Dependency::OVERRIDE | Dependency::FEATURE;
         FormatSectionOverride {
@@ -53,22 +54,22 @@ impl Expression for FormatSectionOverride {
     }
 
     fn evaluate(&self, context: &EvaluationContext<'_>) -> EvaluationResult {
-        if let Some(Value::Object(section)) = context.formatted_section {
-            if let Some(hit) = section.get(&self.property_name) {
-                return Ok(hit.clone());
-            }
+        if let Some(Value::Object(section)) = context.formatted_section
+            && let Some(hit) = section.get(&self.property_name)
+        {
+            return Ok(hit.clone());
         }
         match &self.default_value {
             PossiblyEvaluatedPropertyValue::Expression(e) => {
                 // Binder contexts do not carry global state, so the captured
                 // state is used as a fallback. If the caller explicitly
                 // provides context state, it takes precedence.
-                if context.global_state.is_none() {
-                    if let Some(state) = e.get_captured_global_state() {
-                        let mut context_with_state = *context;
-                        context_with_state.global_state = Some(state);
-                        return e.get_expression().evaluate(&context_with_state);
-                    }
+                if context.global_state.is_none()
+                    && let Some(state) = e.get_captured_global_state()
+                {
+                    let mut context_with_state = *context;
+                    context_with_state.global_state = Some(state);
+                    return e.get_expression().evaluate(&context_with_state);
                 }
                 e.get_expression().evaluate(context)
             }

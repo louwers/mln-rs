@@ -23,6 +23,10 @@ impl Paint {
     /// and the images, which egui loads again.
     pub(crate) fn resend_textures(&mut self, ui: &egui::Context) {
         self.textures.clear();
+        #[expect(
+            clippy::redundant_closure_for_method_calls,
+            reason = "`FontsView::image` takes one lifetime of the view, the closure every one"
+        )]
         let font_image = ui.fonts(|fonts| fonts.image());
         ui.tex_manager().write().set(
             egui::TextureId::default(),

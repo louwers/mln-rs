@@ -96,7 +96,7 @@ impl Target {
 }
 
 /// A borrowed ring's textures: `count` of them at `textures`, from one to
-/// MLN_TEXTURE_RING_MAX_DEPTH, distinct by `key`, of a positive size.
+/// `MLN_TEXTURE_RING_MAX_DEPTH`, distinct by `key`, of a positive size.
 ///
 /// # Safety
 ///
@@ -649,7 +649,11 @@ pub unsafe extern "C" fn mln_map_attach(
             }
             Target::Unsupported(message) => return Err(unsupported(message)),
         };
-        let (handle, attached) = render_session::attach(&map, target, options)?;
+        let attached = render_session::attach(&map, target, &options);
+        // The request's references to the wakes go before the completion can
+        // run, which leaves the session's as the last ones.
+        drop(options);
+        let (handle, attached) = attached?;
         // The completion may run before this call returns, and the caller may
         // read the handle there.
         *out_session = handle;
@@ -757,8 +761,9 @@ mod tests {
         let (mut out_width, mut out_height) = (7, 7);
         let extent = mln_logical_extent { width, height, scale_factor };
         // SAFETY: local outputs and a null diagnostic.
-        let status =
-            unsafe { mln_logical_extent_physical_size(extent, &mut out_width, &mut out_height, core::ptr::null_mut()) };
+        let status = unsafe {
+            mln_logical_extent_physical_size(extent, &raw mut out_width, &raw mut out_height, core::ptr::null_mut())
+        };
         (status, out_width, out_height)
     }
 
@@ -775,7 +780,7 @@ mod tests {
         let extent = mln_logical_extent { width: 1, height: 1, scale_factor: 1.0 };
         // SAFETY: a null output, a local one, and a null diagnostic.
         let status = unsafe {
-            mln_logical_extent_physical_size(extent, core::ptr::null_mut(), &mut height, core::ptr::null_mut())
+            mln_logical_extent_physical_size(extent, core::ptr::null_mut(), &raw mut height, core::ptr::null_mut())
         };
         assert_eq!(status, MLN_STATUS_INVALID_ARGUMENT);
     }
@@ -891,7 +896,7 @@ mod tests {
         let styled = Waiter::new();
         let style = r#"{"version":8,"sources":{},"layers":[{"id":"bg","type":"background","paint":{"background-color":"red"}}]}"#;
         // SAFETY: local arguments.
-        unsafe { mln_map_set_style_json(map, view(style), &styled.descriptor, core::ptr::null_mut()) };
+        unsafe { mln_map_set_style_json(map, view(style), &raw const styled.descriptor, core::ptr::null_mut()) };
         assert_eq!(styled.status(), MLN_STATUS_OK);
         let rendered = |session, token| {
             assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token), MLN_STATUS_OK);
@@ -910,7 +915,8 @@ mod tests {
                 options.backend = *value;
                 let mut device = 0;
                 // SAFETY: local arguments.
-                let status = unsafe { mln_gpu_device_create(&options, &mut device, core::ptr::null_mut()) };
+                let status =
+                    unsafe { mln_gpu_device_create(&raw const options, &raw mut device, core::ptr::null_mut()) };
                 assert_eq!(status, MLN_STATUS_OK, "a {backend:?} device");
                 device
             })
@@ -924,11 +930,11 @@ mod tests {
             let status = unsafe {
                 mln_map_attach(
                     map,
-                    &target,
+                    &raw const target,
                     device,
-                    &options,
-                    &mut session,
-                    &attached.descriptor,
+                    &raw const options,
+                    &raw mut session,
+                    &raw const attached.descriptor,
                     core::ptr::null_mut(),
                 )
             };
@@ -936,22 +942,29 @@ mod tests {
             assert_eq!((status, attached.status()), (MLN_STATUS_OK, MLN_STATUS_OK), "device {index}");
             let mut capabilities = sized::<mln_render_session_capabilities>();
             // SAFETY: local capabilities.
-            unsafe { mln_render_session_get_capabilities(session, &mut capabilities, core::ptr::null_mut()) };
+            unsafe { mln_render_session_get_capabilities(session, &raw mut capabilities, core::ptr::null_mut()) };
             assert_eq!(capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION);
             rendered(session, token + 1);
 
             let (target, moved) = (xlib(&second, 80, 40), Waiter::new());
             // SAFETY: local arguments.
-            let status =
-                unsafe { mln_render_session_set_target(session, &target, &moved.descriptor, core::ptr::null_mut()) };
+            let status = unsafe {
+                mln_render_session_set_target(
+                    session,
+                    &raw const target,
+                    &raw const moved.descriptor,
+                    core::ptr::null_mut(),
+                )
+            };
             assert_eq!((status, moved.status()), (MLN_STATUS_OK, MLN_STATUS_OK), "device {index}");
             assert_eq!(rendered(session, token + 2).view.extent.width, 80);
 
             let extent = mln_logical_extent { width: 40, height: 20, scale_factor: 2.0 };
             let resized = Waiter::new();
             // SAFETY: local arguments.
-            let status =
-                unsafe { mln_render_session_resize(session, extent, &resized.descriptor, core::ptr::null_mut()) };
+            let status = unsafe {
+                mln_render_session_resize(session, extent, &raw const resized.descriptor, core::ptr::null_mut())
+            };
             assert_eq!((status, resized.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
             assert_eq!(rendered(session, token + 3).view.extent.scale_factor, 2.0);
             assert_eq!(snapshot(session).map(|snapshot| snapshot.extent.scale_factor), Ok(2.0));

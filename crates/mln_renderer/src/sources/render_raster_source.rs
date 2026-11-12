@@ -34,6 +34,7 @@ pub struct RenderRasterSource {
 }
 
 impl RenderRasterSource {
+    #[must_use]
     pub fn new(impl_: Arc<tile_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderRasterSource { tile_source: RenderTileSource::new(impl_, thread_pool), cached_tileset: None }

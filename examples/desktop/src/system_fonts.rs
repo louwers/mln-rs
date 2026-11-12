@@ -297,7 +297,7 @@ mod tests {
             let (family, face) = (&face.family, &face.face);
             let bytes = face.data.as_ref().expect("a system face holds its font file").as_bytes();
             println!("{family}: {} ({} bytes) for {:04X?}", face.url, bytes.len(), face.ranges);
-            assert!(face.name.is_empty());
+            assert_eq!(face.name, "");
             assert!(face.url.starts_with("file://"));
             assert_ne!(face.type_, GlyphIDType::FontPBF);
             // Face 0, as the map's font loader reads a collection.

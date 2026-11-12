@@ -31,6 +31,7 @@ pub struct DebugBucket {
 }
 
 impl DebugBucket {
+    #[must_use]
     pub fn new(
         id: &OverscaledTileID,
         renderable: bool,
@@ -81,8 +82,8 @@ fn add_strokes(strokes: &mut Vec<GeometryCoordinates>, text: &str, mut left: f64
         }
         let glyph = &SIMPLEX[usize::from(c - 32)];
         let mut stroke = GeometryCoordinates::new();
-        for pair in glyph.data.chunks_exact(2) {
-            if pair == [-1, -1] {
+        for pair in glyph.data.as_chunks::<2>().0 {
+            if *pair == [-1, -1] {
                 finish_stroke(strokes, &mut stroke);
             } else {
                 stroke.push(Point::new(
@@ -120,13 +121,13 @@ mod tests {
     fn parse_status_text() {
         let bucket = bucket(MapDebugOptions::PARSE_STATUS, None, None);
         assert_eq!(bucket.text, ["2/1/3=>3 - renderable streets"]);
-        assert!(!bucket.strokes.is_empty());
+        assert_ne!(bucket.strokes, Vec::<GeometryCoordinates>::new());
     }
 
     #[test]
     fn timestamps_need_both_times() {
-        let time = Some(Timestamp::from_secs(784111777));
-        assert!(bucket(MapDebugOptions::TIMESTAMPS, time, None).text.is_empty());
+        let time = Some(Timestamp::from_secs(784_111_777));
+        assert_eq!(bucket(MapDebugOptions::TIMESTAMPS, time, None).text, Vec::<String>::new());
         let bucket = bucket(MapDebugOptions::TIMESTAMPS | MapDebugOptions::PARSE_STATUS, time, time);
         assert_eq!(
             bucket.text,
@@ -137,8 +138,8 @@ mod tests {
     #[test]
     fn tile_borders_have_no_text() {
         let bucket = bucket(MapDebugOptions::TILE_BORDERS, None, None);
-        assert!(bucket.text.is_empty());
-        assert!(bucket.strokes.is_empty());
+        assert_eq!(bucket.text, Vec::<String>::new());
+        assert_eq!(bucket.strokes, Vec::<GeometryCoordinates>::new());
     }
 
     #[test]

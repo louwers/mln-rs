@@ -37,8 +37,8 @@ pub type Callback = Box<dyn FnMut(Response) + 'static>;
 pub trait FileSource: Send + Sync {
     /// Request a resource. The callback will be called asynchronously, in
     /// the same thread as the request was made. This thread must have an
-    /// active RunLoop. The request may be cancelled before completion by
-    /// releasing the returned AsyncRequest. If the request is cancelled
+    /// active `RunLoop`. The request may be cancelled before completion by
+    /// releasing the returned `AsyncRequest`. If the request is cancelled
     /// before the callback is executed, the callback will not be executed.
     fn request(&self, resource: &Resource, callback: Callback) -> Box<dyn AsyncRequest>;
 
@@ -50,7 +50,7 @@ pub trait FileSource: Send + Sync {
     /// When a file source supports consulting a local cache only, it must
     /// return true. Cache-only requests are requests that aren't as urgent,
     /// but could be useful, e.g. to cover part of the map while loading. The
-    /// FileSource should only do cheap actions to retrieve the data, e.g.
+    /// `FileSource` should only do cheap actions to retrieve the data, e.g.
     /// load it from a cache, but not from the internet.
     fn supports_cache_only_requests(&self) -> bool {
         false
@@ -101,11 +101,11 @@ pub trait FileSource: Send + Sync {
 // Properties that may be supported by online file sources:
 
 /// Property name to set / get an access token.
-/// type: std::string
+/// type: `std::string`
 pub const API_KEY_KEY: &str = "api-tkey";
 
 /// Property name to set / get base url.
-/// type: std::string
+/// type: `std::string`
 pub const API_BASE_URL_KEY: &str = "api-base-url";
 
 /// Property name to set / get maximum number of concurrent requests.

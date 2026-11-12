@@ -18,6 +18,7 @@ impl RenderPass {
     pub const Pass3D: RenderPass = RenderPass(1 << 2);
 
     /// `mln::underlying_type(pass)`
+    #[must_use]
     pub fn underlying_type(self) -> u8 {
         self.0
     }

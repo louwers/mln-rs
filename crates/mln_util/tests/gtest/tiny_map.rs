@@ -5,6 +5,7 @@
 // messages. A C++ move leaves an empty map behind, which is `mem::take`.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 use std::hash::Hash;
 use std::time::{Duration, Instant};
 
@@ -265,10 +266,10 @@ fn make_gen_string_id() -> impl FnMut() -> String {
 }
 
 /// `std::shuffle` with a small LCG (`std::default_random_engine` is
-/// libstdc++'s minstd_rand0; the order only spreads the lookups).
+/// libstdc++'s `minstd_rand0`; the order only spreads the lookups).
 fn shuffle<T>(items: &mut [T], state: &mut u64) {
     for i in (1..items.len()).rev() {
-        *state = *state * 16807 % 2147483647;
+        *state = *state * 16807 % 2_147_483_647;
         let j = (*state as usize) % (i + 1);
         items.swap(i, j);
     }
@@ -300,6 +301,7 @@ fn benchmark<K: Clone, M: LookupMap<K>>(
     make: impl Fn(Vec<K>, Vec<usize>) -> M,
     mut generate: impl FnMut() -> K,
 ) {
+    const TIMING_ITERATIONS: u32 = 50;
     assert_eq!((max / reports) * reports, max);
     let mut engine = 0xf00d_u64;
 
@@ -309,7 +311,6 @@ fn benchmark<K: Clone, M: LookupMap<K>>(
     let values: Vec<usize> = (0..keys.len()).collect();
 
     let mut times = vec![0.0f64; reports];
-    const TIMING_ITERATIONS: u32 = 50;
     let mut hits = 0usize;
 
     // test each size from 1 to max
@@ -332,7 +333,7 @@ fn benchmark<K: Clone, M: LookupMap<K>>(
         }
         if i % (max / reports) == 0 {
             let total_elapsed: Duration = start_time.elapsed();
-            let elapsed = total_elapsed.as_micros() as f64 / TIMING_ITERATIONS as f64;
+            let elapsed = total_elapsed.as_micros() as f64 / f64::from(TIMING_ITERATIONS);
             times[i / (max / reports) - 1] = elapsed;
         }
     }
@@ -340,7 +341,7 @@ fn benchmark<K: Clone, M: LookupMap<K>>(
 
     let mut ss = format!("{label:<10} threshold={threshold:03} (x{:>2}): ", max / reports);
     for time in times {
-        ss += &format!("{:>6}", (time * 10.0).round());
+        let _ = write!(ss, "{:>6}", (time * 10.0).round());
     }
     Log::info(Event::Timing, &ss);
 }

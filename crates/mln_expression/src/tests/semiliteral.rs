@@ -4,7 +4,7 @@ use feature::Feature;
 use mln_conversion::Convertible;
 
 use crate::expression::{EvaluationContext, Kind, evaluate_feature};
-use crate::parsing_context::{ParseResult, ParsingContext};
+use crate::parsing_context::{ParseResult, ParsingContext, ParsingError};
 use crate::type_::Type;
 use crate::value::Value;
 
@@ -39,7 +39,7 @@ fn invalid() {
     ] {
         let mut ctx = ParsingContext::new();
         assert!(parse_semiliteral(json, &mut ctx, false).is_none(), "{json}");
-        assert!(!ctx.get_errors().is_empty());
+        assert_ne!(ctx.get_errors(), Vec::<ParsingError>::new());
     }
 
     for json in [

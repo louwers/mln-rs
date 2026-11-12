@@ -4,8 +4,9 @@
 use mln_style_types::{
     AlignmentType, AnchorOffsetPair, CirclePitchScaleType, HillshadeIlluminationAnchorType, HillshadeMethodType,
     IconTextFitType, LightAnchorType, LineCapType, LineJoinType, ProjectionDefinition, RasterResamplingType,
-    SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType, TextWritingModeType,
-    TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType, projection_type_from_name,
+    ResamplingType, SymbolAnchorType, SymbolPlacementType, SymbolZOrderType, TextJustifyType, TextTransformType,
+    TextWritingModeType, TranslateAnchorType, VariableAnchorOffsetCollection, VisibilityType,
+    projection_type_from_name,
 };
 use mln_util::enum_::Enum;
 use mln_util::{Color, Padding};
@@ -99,6 +100,7 @@ enum_converters!(
     LineCapType,
     LineJoinType,
     RasterResamplingType,
+    ResamplingType,
     SymbolAnchorType,
     SymbolPlacementType,
     SymbolZOrderType,
@@ -189,11 +191,12 @@ impl Converter for Padding {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Padding> {
         let mut result = None;
         if value.is_array() {
-            if value.array_length() > 0 && value.array_length() <= 4 {
-                if let Some(vector) = <Vec<f32> as Converter>::convert(value, error) {
-                    // `Padding(*vector)`: 1..=4 elements, checked above.
-                    result = Padding::from_values(&vector).ok();
-                }
+            if value.array_length() > 0
+                && value.array_length() <= 4
+                && let Some(vector) = <Vec<f32> as Converter>::convert(value, error)
+            {
+                // `Padding(*vector)`: 1..=4 elements, checked above.
+                result = Padding::from_values(&vector).ok();
             }
         } else if let Some(number) = value.to_number() {
             result = Some(Padding::uniform(number));
@@ -214,7 +217,7 @@ impl Converter for VariableAnchorOffsetCollection {
         }
 
         let array_size = value.array_length();
-        if array_size < 1 || array_size % 2 != 0 {
+        if array_size < 1 || !array_size.is_multiple_of(2) {
             error.message = "array must contain an even number of elements".to_owned();
             return None;
         }
@@ -346,7 +349,7 @@ impl Converter for Vec<String> {
 }
 
 /// `Converter<expression::Formatted>` (src/mln/style/expression/formatted.cpp;
-/// mln_expression ports it as `formatted::convert_formatted`).
+/// `mln_expression` ports it as `formatted::convert_formatted`).
 impl Converter for mln_expression::formatted::Formatted {
     fn convert(value: &Convertible<'_>, error: &mut Error) -> Option<Self> {
         mln_expression::formatted::convert_formatted(value, error)

@@ -2158,6 +2158,7 @@ dependencies = [
  "objc2-quartz-core 0.3.2",
  "raw-window-handle",
  "serde_json",
+ "thiserror 2.0.21",
  "winit",
 ]
 
@@ -2186,6 +2187,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geojson",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2263,6 +2265,7 @@ dependencies = [
  "mln-rs-vec-map",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2298,6 +2301,7 @@ dependencies = [
  "mln-rs-geometry",
  "mln-rs-rapidjson",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2428,6 +2432,7 @@ dependencies = [
  "mln-rs-tile-id",
  "mln-rs-util",
  "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2461,6 +2466,9 @@ version = "0.0.11"
 [[package]]
 name = "mln-rs-pmtiles"
 version = "0.0.11"
+dependencies = [
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "mln-rs-polylabel"
@@ -2616,6 +2624,7 @@ dependencies = [
  "rusqlite",
  "rustls",
  "serde_json",
+ "thiserror 2.0.21",
  "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2669,6 +2678,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2724,6 +2734,7 @@ dependencies = [
  "mln-rs-vec-map",
  "serde",
  "skrifa 0.49.0",
+ "thiserror 2.0.21",
  "unicode-bidi",
  "wasm-bindgen",
  "web-sys",
@@ -2745,6 +2756,7 @@ dependencies = [
  "mln-rs-wagyu",
  "mlt-core",
  "proptest",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -2779,6 +2791,7 @@ dependencies = [
  "postcard",
  "serde",
  "serde_json",
+ "thiserror 2.0.21",
  "web-time",
 ]
 
@@ -2796,6 +2809,7 @@ dependencies = [
  "mln-rs-feature",
  "mln-rs-geometry",
  "mln-rs-protozero",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

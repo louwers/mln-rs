@@ -137,7 +137,7 @@ fn rotated_frame(quaternion: &Vec4) -> (Vec3, Vec3, Vec3) {
     (q.transform(&[1.0, 0.0, 0.0]), q.transform(&[0.0, -1.0, 0.0]), q.transform(&[0.0, 0.0, -1.0]))
 }
 
-/// Records the AnimationOptions callbacks (see the file comment).
+/// Records the `AnimationOptions` callbacks (see the file comment).
 struct CallbackLog {
     frames: Arc<Mutex<Vec<f64>>>,
     finishes: Arc<SyncCell<u32>>,
@@ -258,12 +258,12 @@ fn integer_zoom() {
         transform.jump_to(&cam().with_zoom(Some(zoom)));
         assert_near(transform.get_zoom(), zoom, 1e-8);
         assert_eq!(transform.get_state().get_integer_zoom(), zoom_int);
-        assert_near(transform.get_state().get_zoom_fraction(), zoom - zoom_int as f64, 1e-8);
+        assert_near(transform.get_state().get_zoom_fraction(), zoom - f64::from(zoom_int), 1e-8);
     };
 
     for zoom_int in 0u8..20 {
         for percent in 0u32..100 {
-            let zoom = zoom_int as f64 + (0.01 * percent as f64);
+            let zoom = f64::from(zoom_int) + (0.01 * f64::from(percent));
             check_integer_zoom(zoom_int, zoom);
         }
     }
@@ -279,7 +279,7 @@ fn perspective_projection() {
     transform.resize(Size::new(1000, 1000)).unwrap();
 
     // 0.9 rad ~ 51.56620156 deg
-    transform.jump_to(&cam().with_center(Some(ll(38.0, -77.0))).with_zoom(Some(10.0)).with_pitch(Some(51.56620156)));
+    transform.jump_to(&cam().with_center(Some(ll(38.0, -77.0))).with_zoom(Some(10.0)).with_pitch(Some(51.566_201_56)));
 
     // expected values are from maplibre-gl-js
 
@@ -288,31 +288,33 @@ fn perspective_projection() {
     assert_double_eq(38.0, loc.latitude());
 
     let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(0.0, 1000.0), WrapMode::Unwrapped).unwrap();
-    assert_near(-77.59198961199148, loc.longitude(), 1e-6);
-    assert_near(38.74661326302018, loc.latitude(), 1e-6);
+    assert_near(-77.591_989_611_991_48, loc.longitude(), 1e-6);
+    assert_near(38.746_613_263_020_18, loc.latitude(), 1e-6);
 
     let loc = transform.get_state().screen_coordinate_to_lat_lng(&sc(1000.0, 0.0), WrapMode::Unwrapped).unwrap();
-    assert_near(-76.75823239205641, loc.longitude(), 1e-6);
-    assert_near(37.692872969426375, loc.latitude(), 1e-6);
+    assert_near(-76.758_232_392_056_41, loc.longitude(), 1e-6);
+    assert_near(37.692_872_969_426_375, loc.latitude(), 1e-6);
 
-    let point = transform.get_state().lat_lng_to_screen_coordinate(&ll(38.74661326302018, -77.59198961199148));
+    let point = transform.get_state().lat_lng_to_screen_coordinate(&ll(38.746_613_263_020_18, -77.591_989_611_991_48));
     assert_near(point.x, 0.0, 1e-5);
     assert_near(point.y, 1000.0, 1e-4);
 
-    let point = transform.get_state().lat_lng_to_screen_coordinate(&ll(37.692872969426375, -76.75823239205641));
+    let point = transform.get_state().lat_lng_to_screen_coordinate(&ll(37.692_872_969_426_375, -76.758_232_392_056_41));
     assert_near(point.x, 1000.0, 1e-5);
     assert_near(point.y, 0.0, 1e-4);
 
     let mut p: Vec4 = [0.0; 4];
-    let point =
-        transform.get_state().lat_lng_to_screen_coordinate_with(&ll(37.692872969426375, -76.75823239205641), &mut p);
+    let point = transform
+        .get_state()
+        .lat_lng_to_screen_coordinate_with(&ll(37.692_872_969_426_375, -76.758_232_392_056_41), &mut p);
     assert_near(point.x, 1000.0, 1e-5);
     assert_near(point.y, 0.0, 1e-4);
     assert!(p[3] > 0.0);
 
-    transform.jump_to(&cam().with_center(Some(ll(38.0, -77.0))).with_zoom(Some(18.0)).with_pitch(Some(51.56620156)));
-    let _point =
-        transform.get_state().lat_lng_to_screen_coordinate_with(&ll(7.692872969426375, -76.75823239205641), &mut p);
+    transform.jump_to(&cam().with_center(Some(ll(38.0, -77.0))).with_zoom(Some(18.0)).with_pitch(Some(51.566_201_56)));
+    let _point = transform
+        .get_state()
+        .lat_lng_to_screen_coordinate_with(&ll(7.692_872_969_426_375, -76.758_232_392_056_41), &mut p);
     assert!(p[3] < 0.0);
 }
 
@@ -323,7 +325,7 @@ fn unwrapped_lat_lng() {
     transform.resize(Size::new(1000, 1000)).unwrap();
 
     // 0.9 rad ~ 51.56620156 deg
-    transform.jump_to(&cam().with_center(Some(ll(38.0, -77.0))).with_zoom(Some(10.0)).with_pitch(Some(51.56620156)));
+    transform.jump_to(&cam().with_center(Some(ll(38.0, -77.0))).with_zoom(Some(10.0)).with_pitch(Some(51.566_201_56)));
 
     let state = transform.get_state();
 
@@ -608,7 +610,7 @@ fn move_by_pitched_does_not_cross_horizon() {
     // way (north) -- before the fix it reversed south and stay bounded (clamped
     // short of the horizon).
     transform.jump_to(&start);
-    transform.move_by(&sc(0.0, 100000.0), &AnimationOptions::default()).unwrap();
+    transform.move_by(&sc(0.0, 100_000.0), &AnimationOptions::default()).unwrap();
     let fling_lat = transform.get_lat_lng(WrapMode::Wrapped).latitude();
 
     assert!(moderate_lat > 0.0, "{moderate_lat}"); // moved north
@@ -628,19 +630,19 @@ fn antimeridian() {
     // San Francisco
     let coordinate_san_francisco = ll(37.7833, -122.4167);
     let pixel_sf = transform.lat_lng_to_screen_coordinate(&coordinate_san_francisco);
-    assert_double_eq(151.79249437176432, pixel_sf.x);
-    assert_double_eq(383.76720782527661, pixel_sf.y);
+    assert_double_eq(151.792_494_371_764_32, pixel_sf.x);
+    assert_double_eq(383.767_207_825_276_6, pixel_sf.y);
 
     transform.jump_to(&cam().with_center(Some(ll(0.0, -181.0))));
 
     let pixel_sf_longest = transform.lat_lng_to_screen_coordinate(&coordinate_san_francisco);
-    assert_double_eq(-357.36306616412816, pixel_sf_longest.x);
+    assert_double_eq(-357.363_066_164_128_16, pixel_sf_longest.x);
     assert_double_eq(pixel_sf.y, pixel_sf_longest.y);
     let mut unwrapped_sf = coordinate_san_francisco.wrapped();
     unwrapped_sf.unwrap_for_shortest_path(&transform.get_lat_lng(WrapMode::Wrapped));
 
     let pixel_sf_shortest = transform.lat_lng_to_screen_coordinate(&unwrapped_sf);
-    assert_double_eq(666.63694385219173, pixel_sf_shortest.x);
+    assert_double_eq(666.636_943_852_191_7, pixel_sf_shortest.x);
     assert_double_eq(pixel_sf.y, pixel_sf_shortest.y);
 
     transform.jump_to(&cam().with_center(Some(ll(0.0, 179.0))));
@@ -657,13 +659,13 @@ fn antimeridian() {
 
     transform.jump_to(&cam().with_center(Some(ll(coordinate_waikiri.latitude(), 180.0213))));
     let pixel_waikiri_longest = transform.lat_lng_to_screen_coordinate(&coordinate_waikiri);
-    assert_double_eq(524725.96438108233, pixel_waikiri_longest.x);
+    assert_double_eq(524_725.964_381_082_3, pixel_waikiri_longest.x);
     assert_double_eq(pixel_waikiri.y, pixel_waikiri_longest.y);
 
     let mut unwrapped_waikiri = coordinate_waikiri.wrapped();
     unwrapped_waikiri.unwrap_for_shortest_path(&transform.get_lat_lng(WrapMode::Wrapped));
     let pixel_waikiri_shortest = transform.lat_lng_to_screen_coordinate(&unwrapped_waikiri);
-    assert_double_eq(437.95925272648344, pixel_waikiri_shortest.x);
+    assert_double_eq(437.959_252_726_483_44, pixel_waikiri_shortest.x);
     assert_double_eq(pixel_waikiri.y, pixel_waikiri_shortest.y);
 
     let coordinate_from_pixel =
@@ -732,7 +734,7 @@ fn camera() {
     let ease_log = CallbackLog::install(&mut ease_options);
     let check_ease = |transform: &Transform| {
         for t in ease_log.take_frames() {
-            assert!(t >= 0.0 && t <= 1.0, "t = {t}");
+            assert!((0.0..=1.0).contains(&t), "t = {t}");
             assert!(lat_lng1.latitude() >= transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert!(lat_lng1.longitude() <= transform.get_lat_lng(WrapMode::Wrapped).longitude());
         }
@@ -760,7 +762,7 @@ fn camera() {
     let fly_log = CallbackLog::install(&mut fly_options);
     let check_fly = |transform: &Transform| {
         for t in fly_log.take_frames() {
-            assert!(t >= 0.0 && t <= 1.0, "t = {t}");
+            assert!((0.0..=1.0).contains(&t), "t = {t}");
             assert!(lat_lng2.latitude() <= transform.get_lat_lng(WrapMode::Wrapped).latitude());
             assert!(lat_lng2.longitude() >= transform.get_lat_lng(WrapMode::Unwrapped).longitude());
         }
@@ -787,10 +789,12 @@ fn camera() {
     assert!(!transform.in_transition());
 
     // Anchor and center points are mutually exclusive.
-    let mut camera = CameraOptions::default();
-    camera.center = Some(ll(0.0, 0.0));
-    camera.anchor = Some(sc(0.0, 0.0)); // top-left
-    camera.zoom = Some(transform.get_state().get_max_zoom());
+    let camera = CameraOptions {
+        center: Some(ll(0.0, 0.0)),
+        anchor: Some(sc(0.0, 0.0)), // top-left
+        zoom: Some(transform.get_state().get_max_zoom()),
+        ..CameraOptions::default()
+    };
     transform.ease_to(&camera, &AnimationOptions::new(seconds(1)));
     transform.update_transitions(transform.get_latest_transition_start() + milliseconds(250));
     transform.update_transitions(transform.get_latest_transition_start() + milliseconds(500));
@@ -880,26 +884,18 @@ fn default_transform() {
     let valid_size = Size::new(max, max);
     assert!(!valid_size.is_empty());
 
-    match transform.resize(valid_size) {
-        Ok(()) => {
-            assert_eq!(observer.camera_will_change_count.get(), 1);
-            assert_eq!(observer.camera_did_change_count.get(), 1);
-        }
-        Err(_) => panic!("Should not throw"),
-    }
+    transform.resize(valid_size).expect("Should not throw");
+    assert_eq!(observer.camera_will_change_count.get(), 1);
+    assert_eq!(observer.camera_did_change_count.get(), 1);
 
     assert!(transform.get_state().valid());
 
     // Double resize
-    match transform.resize(valid_size) {
-        Ok(()) => {
-            assert_eq!(observer.camera_will_change_count.get(), 1);
-            assert_eq!(observer.camera_did_change_count.get(), 1);
-        }
-        Err(_) => panic!("Should not throw"),
-    }
+    transform.resize(valid_size).expect("Should not throw");
+    assert_eq!(observer.camera_will_change_count.get(), 1);
+    assert_eq!(observer.camera_did_change_count.get(), 1);
 
-    let center = sc(max as f64 / 2.0, max as f64 / 2.0);
+    let center = sc(f64::from(max) / 2.0, f64::from(max) / 2.0);
     let lat_lng = transform.get_state().screen_coordinate_to_lat_lng(&center, WrapMode::Unwrapped).unwrap();
     assert_near(lat_lng.latitude(), null_island.latitude(), 1e-8);
     assert_near(lat_lng.longitude(), null_island.longitude(), 1e-8);
@@ -1257,12 +1253,12 @@ fn padding_preserves_minimum_pitch() {
                 &cam().with_center(Some(ll(40.7128, -74.006))).with_zoom(Some(9.5)).with_pitch(Some(min_pitch)),
             );
 
-            transform.jump_to(&cam().with_padding(Some(insets(size as f64 * 28.0, 392.0, 0.0, 0.0))));
+            transform.jump_to(&cam().with_padding(Some(insets(f64::from(size) * 28.0, 392.0, 0.0, 0.0))));
             assert_double_eq(deg2rad(min_pitch), transform.get_pitch());
 
-            transform.jump_to(&cam().with_padding(Some(insets(size as f64 * 24.0, 392.0, 0.0, 0.0))));
+            transform.jump_to(&cam().with_padding(Some(insets(f64::from(size) * 24.0, 392.0, 0.0, 0.0))));
             assert_double_eq(deg2rad(min_pitch), transform.get_pitch());
-            assert_double_eq(size as f64 * 24.0, transform.get_state().get_edge_insets().top());
+            assert_double_eq(f64::from(size) * 24.0, transform.get_state().get_edge_insets().top());
 
             transform.resize(Size::new(800, 600)).unwrap();
             assert_double_eq(deg2rad(min_pitch), transform.get_pitch());
@@ -1327,10 +1323,7 @@ fn min_max_pitch() {
 #[test]
 fn free_camera_options_invalid_size() {
     let mut transform = new_transform();
-    let mut options = FreeCameraOptions::default();
-
-    options.orientation = Some([1.0, 1.0, 1.0, 1.0]);
-    options.position = Some([0.1, 0.2, 0.3]);
+    let options = FreeCameraOptions { orientation: Some([1.0, 1.0, 1.0, 1.0]), position: Some([0.1, 0.2, 0.3]) };
     transform.set_free_camera_options(&options);
 
     let updated_orientation = transform.get_free_camera_options().orientation.unwrap();
@@ -1349,9 +1342,7 @@ fn free_camera_options_invalid_size() {
 fn free_camera_options_nan_input() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
-    let mut options = FreeCameraOptions::default();
-
-    options.position = Some([0.5, 0.5, 0.25]);
+    let mut options = FreeCameraOptions { position: Some([0.5, 0.5, 0.25]), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
 
     options.position = Some([0.0, 0.0, f64::NAN]);
@@ -1371,10 +1362,8 @@ fn free_camera_options_nan_input() {
 fn free_camera_options_invalid_z() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
-    let mut options = FreeCameraOptions::default();
-
     // Invalid z-value (<= 0.0 || > 1) should be clamped to respect both min&max zoom values
-    options.position = Some([0.1, 0.1, 0.0]);
+    let mut options = FreeCameraOptions { position: Some([0.1, 0.1, 0.0]), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
     assert_double_eq(transform.get_state().get_max_zoom(), transform.get_state().get_zoom());
     assert!(transform.get_free_camera_options().position.unwrap()[2] > 0.0);
@@ -1389,7 +1378,7 @@ fn free_camera_options_invalid_z() {
 #[test]
 fn camera_follows_jumps_below_a_fractional_minimum_zoom() {
     let mercator_y = 0.5 - (PI / 4.0 + deg2rad(10.0) / 2.0).tan().ln() / (2.0 * PI);
-    for min_zoom in [1.525373023184723, 1.55, 3.1, 6.2] {
+    for min_zoom in [1.525_373_023_184_723, 1.55, 3.1, 6.2] {
         let _trace = ScopedTrace(std_to_string(min_zoom));
         let mut transform = new_transform();
         transform.resize(Size::new(512, 512)).unwrap();
@@ -1409,10 +1398,10 @@ fn free_camera_options_high_pitch() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
     transform.set_max_pitch(180.0);
-    let mut options = FreeCameraOptions::default();
-
-    options.position = Some([0.1, 0.1, 0.1]);
-    options.orientation = Some(Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], deg2rad(-90.0)).m());
+    let mut options = FreeCameraOptions {
+        position: Some([0.1, 0.1, 0.1]),
+        orientation: Some(Quaternion::from_axis_angle(&[1.0, 0.0, 0.0], deg2rad(-90.0)).m()),
+    };
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(90.0), transform.get_state().get_pitch());
     assert_double_eq(0.0, transform.get_state().get_bearing());
@@ -1433,8 +1422,7 @@ fn free_camera_options_invalid_orientation() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
 
-    let mut options = FreeCameraOptions::default();
-    options.orientation = Some([0.0, 0.0, 0.0, 0.0]);
+    let mut options = FreeCameraOptions { orientation: Some([0.0, 0.0, 0.0, 0.0]), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
     assert_eq!(Some(Quaternion::IDENTITY.m()), transform.get_free_camera_options().orientation);
 
@@ -1467,9 +1455,7 @@ fn free_camera_options_invalid_orientation() {
 fn free_camera_options_set_orientation() {
     let mut transform = new_transform();
     transform.resize(Size::new(100, 100)).unwrap();
-    let mut options = FreeCameraOptions::default();
-
-    options.orientation = Some(Quaternion::IDENTITY.m());
+    let mut options = FreeCameraOptions { orientation: Some(Quaternion::IDENTITY.m()), ..FreeCameraOptions::default() };
     transform.set_free_camera_options(&options);
     assert_double_eq(0.0, transform.get_state().get_bearing());
     assert_double_eq(0.0, transform.get_state().get_pitch());
@@ -1489,7 +1475,7 @@ fn free_camera_options_set_orientation() {
     assert_double_eq(0.0, transform.get_state().get_pitch());
     assert_double_eq(0.0, transform.get_state().get_roll());
     assert_double_eq(0.0, transform.get_state().get_x());
-    assert_near(152.192378, transform.get_state().get_y(), 1e-6);
+    assert_near(152.192_378, transform.get_state().get_y(), 1e-6);
 
     options.orientation = Some(
         Quaternion::from_euler_angles(0.0, 0.0, deg2rad(-179.0))
@@ -1499,8 +1485,8 @@ fn free_camera_options_set_orientation() {
     transform.set_free_camera_options(&options);
     assert_double_eq(deg2rad(179.0), transform.get_state().get_bearing());
     assert_double_eq(deg2rad(30.0), transform.get_state().get_pitch());
-    assert_near(1.308930, transform.get_state().get_x(), 1e-6);
-    assert_near(56.813889, transform.get_state().get_y(), 1e-6);
+    assert_near(1.308_930, transform.get_state().get_x(), 1e-6);
+    assert_near(56.813_889, transform.get_state().get_y(), 1e-6);
 
     options.orientation = Some(
         Quaternion::from_axis_angle(&[0.0, 0.0, 1.0], deg2rad(-33.0))
@@ -1523,11 +1509,11 @@ fn free_camera_options_clamp_to_bounds() {
     transform.resize(Size::new(100, 100)).unwrap();
     transform.set_constrain_mode(ConstrainMode::WidthAndHeight);
     transform.jump_to(&cam().with_zoom(Some(8.56)));
-    let mut options = FreeCameraOptions::default();
-
     // Place camera to an arbitrary position looking away from the map
-    options.position = Some([-100.0, -10000.0, 1000.0]);
-    options.orientation = Some(Quaternion::from_euler_angles(deg2rad(-45.0), 0.0, 0.0).m());
+    let options = FreeCameraOptions {
+        position: Some([-100.0, -10000.0, 1000.0]),
+        orientation: Some(Quaternion::from_euler_angles(deg2rad(-45.0), 0.0, 0.0).m()),
+    };
     transform.set_free_camera_options(&options);
 
     // Map center should be clamped to width/2 pixels away from map borders
@@ -1537,10 +1523,10 @@ fn free_camera_options_clamp_to_bounds() {
     assert_double_eq(deg2rad(45.0), transform.get_state().get_pitch());
 
     let (right, up, forward) = rotated_frame(&transform.get_free_camera_options().orientation.unwrap());
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.0976562, 0.304816, 0.20716]);
+    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.097_656_2, 0.304_816, 0.20716]);
     assert_vec3_near_1e5(&right, &[1.0, 0.0, 0.0]);
-    assert_vec3_near_1e5(&up, &[0.0, -0.707107, 0.707107]);
-    assert_vec3_near_1e5(&forward, &[0.0, -0.707107, -0.707107]);
+    assert_vec3_near_1e5(&up, &[0.0, -0.707_107, 0.707_107]);
+    assert_vec3_near_1e5(&forward, &[0.0, -0.707_107, -0.707_107]);
 }
 
 // gtest: Transform.FreeCameraOptionsInvalidState
@@ -1566,16 +1552,16 @@ fn free_camera_options_state_synchronization() {
 
     transform.jump_to(&cam().with_pitch(Some(0.0)).with_bearing(Some(0.0)));
     let (right, up, forward) = rotated_frame(&transform.get_free_camera_options().orientation.unwrap());
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.5, 0.5, 0.29296875]);
+    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.5, 0.5, 0.292_968_75]);
     assert_vec3_near_1e5(&right, &[1.0, 0.0, 0.0]);
     assert_vec3_near_1e5(&up, &[0.0, -1.0, 0.0]);
     assert_vec3_near_1e5(&forward, &[0.0, 0.0, -1.0]);
 
     transform.jump_to(&cam().with_center(Some(ll(60.1699, 24.9384))));
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.569273, 0.289453, 0.292969]);
+    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.569_273, 0.289_453, 0.292_969]);
 
     transform.jump_to(&cam().with_pitch(Some(20.0)).with_bearing(Some(77.0)).with_center(Some(ll(-20.0, 20.0))));
-    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.457922, 0.57926, 0.275301]);
+    assert_vec3_near_1e5(&transform.get_free_camera_options().position.unwrap(), &[0.457_922, 0.57926, 0.275_301]);
 }
 
 // TEST(Camera, *) (util::Camera)
@@ -1634,12 +1620,12 @@ fn reference_tile_matrix(scale: f64, tile_id: &UnwrappedTileID) -> Mat4 {
     matrix::translate(
         &mut m,
         &a,
-        (tile_id.canonical.x as i64 + tile_id.wrap as i64 * tile_scale as i64) as f64 * s,
-        tile_id.canonical.y as f64 * s,
+        (i64::from(tile_id.canonical.x) + i64::from(tile_id.wrap) * tile_scale as i64) as f64 * s,
+        f64::from(tile_id.canonical.y) * s,
         0.0,
     );
     let a = m;
-    matrix::scale(&mut m, &a, s / EXTENT as f64, s / EXTENT as f64, 1.0);
+    matrix::scale(&mut m, &a, s / f64::from(EXTENT), s / f64::from(EXTENT), 1.0);
     m
 }
 
@@ -1744,12 +1730,12 @@ fn projection_data_mercator_fields() {
         UnwrappedTileID::with_wrap(-1, CanonicalTileID::new(2, 1, 1)),
     ] {
         let data = state.get_projection_data(&tile_id);
-        let tile_scale = (1u32 << tile_id.canonical.z) as f64;
+        let tile_scale = f64::from(1u32 << tile_id.canonical.z);
         assert_eq!(data.main_matrix, data.fallback_matrix);
-        assert_eq!(tile_id.canonical.x as f64 / tile_scale, data.tile_mercator_coords[0]);
-        assert_eq!(tile_id.canonical.y as f64 / tile_scale, data.tile_mercator_coords[1]);
-        assert_eq!(1.0 / tile_scale / EXTENT as f64, data.tile_mercator_coords[2]);
-        assert_eq!(1.0 / tile_scale / EXTENT as f64, data.tile_mercator_coords[3]);
+        assert_eq!(f64::from(tile_id.canonical.x) / tile_scale, data.tile_mercator_coords[0]);
+        assert_eq!(f64::from(tile_id.canonical.y) / tile_scale, data.tile_mercator_coords[1]);
+        assert_eq!(1.0 / tile_scale / f64::from(EXTENT), data.tile_mercator_coords[2]);
+        assert_eq!(1.0 / tile_scale / f64::from(EXTENT), data.tile_mercator_coords[3]);
         assert_eq!([0.0, 0.0, 0.0, 0.0], data.clipping_plane);
         assert_eq!(0.0, data.projection_transition);
     }
@@ -1938,17 +1924,17 @@ fn cached_view_state_follows_the_camera() {
         let expected = VerticalPerspectiveProjection::globe_view_projection_matrix(state, radius);
         let plane = VerticalPerspectiveProjection::clipping_plane(state, radius);
         let camera = VerticalPerspectiveProjection::camera_position(state, radius);
-        for i in 0..16 {
+        for (i, &value) in expected.iter().enumerate() {
             let _trace = ScopedTrace(format!("element {i}"));
-            assert_double_eq(expected[i], state.get_globe_view_projection_matrix()[i]);
+            assert_double_eq(value, state.get_globe_view_projection_matrix()[i]);
         }
-        for i in 0..4 {
+        for (i, &value) in plane.iter().enumerate() {
             let _trace = ScopedTrace(format!("plane {i}"));
-            assert_double_eq(plane[i], state.get_globe_clipping_plane()[i]);
+            assert_double_eq(value, state.get_globe_clipping_plane()[i]);
         }
-        for i in 0..3 {
+        for (i, &value) in camera.iter().enumerate() {
             let _trace = ScopedTrace(format!("camera {i}"));
-            assert_double_eq(camera[i], state.get_globe_camera_position()[i]);
+            assert_double_eq(value, state.get_globe_camera_position()[i]);
         }
         let mut round_trip: Mat4 = [0.0; 16];
         matrix::multiply(
@@ -2164,10 +2150,10 @@ fn poles_are_reachable_and_zoom_follows_latitude() {
     let radius_before = transform.get_state().get_globe_radius_pixels();
     transform.jump_to(&cam().with_center(Some(ll(89.0, 0.0))));
     assert_near(89.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-    assert_near(1.9907089805355933, transform.get_zoom(), 1e-6);
+    assert_near(1.990_708_980_535_593_3, transform.get_zoom(), 1e-6);
     assert_near(radius_before, transform.get_state().get_globe_radius_pixels(), 1e-6);
     transform.move_by(&sc(0.0, 300.0), &AnimationOptions::default()).unwrap();
-    assert_near(89.50632407943635, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(89.506_324_079_436_35, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(radius_before, transform.get_state().get_globe_radius_pixels(), 1e-6);
 }
 
@@ -2273,7 +2259,7 @@ fn ease_adjusts_the_zoom_to_the_new_latitude() {
     run_to(&mut transform, 1.0);
     assert!(!transform.in_transition());
     assert_near(40.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-    assert_near(0.61549999962236379, transform.get_zoom(), 1e-9);
+    assert_near(0.615_499_999_622_363_8, transform.get_zoom(), 1e-9);
 }
 
 // gtest: GlobeTransform.FlyAdjustsTheZoomToTheNewLatitude
@@ -2284,11 +2270,11 @@ fn fly_adjusts_the_zoom_to_the_new_latitude() {
     transform.fly_to(&cam().with_center(Some(ll(40.0, 0.0))), &linear_second(), false);
     run_to(&mut transform, 0.5);
     assert_near(20.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-    assert_near(0.87493158146277261, transform.get_zoom(), 1e-9);
+    assert_near(0.874_931_581_462_772_6, transform.get_zoom(), 1e-9);
     run_to(&mut transform, 1.0);
     assert!(!transform.in_transition());
     assert_near(40.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-    assert_near(0.61549999962236379, transform.get_zoom(), 1e-9);
+    assert_near(0.615_499_999_622_363_8, transform.get_zoom(), 1e-9);
 }
 
 // gtest: GlobeTransform.EaseKeepsThePlanetSizeAcrossLatitudes
@@ -2301,7 +2287,7 @@ fn ease_keeps_the_planet_size_across_latitudes() {
     run_to(&mut transform, 0.5);
     assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(0.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
-    assert_near(2.7924812503605780, transform.get_zoom(), 1e-9);
+    assert_near(2.792_481_250_360_578, transform.get_zoom(), 1e-9);
     assert_near(radius, transform.get_state().get_globe_radius_pixels(), 1e-6);
     run_to(&mut transform, 1.0);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
@@ -2316,9 +2302,9 @@ fn ease_follows_the_longitude_speed_curve() {
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
     transform.ease_to(&cam().with_center(Some(ll(60.0, 60.0))), &linear_second());
     run_to(&mut transform, 0.5);
-    assert_near(25.026136930423718, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+    assert_near(25.026_136_930_423_718, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-    assert_near(2.7924812503605780, transform.get_zoom(), 1e-9);
+    assert_near(2.792_481_250_360_578, transform.get_zoom(), 1e-9);
     run_to(&mut transform, 1.0);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
@@ -2332,8 +2318,8 @@ fn ease_with_zoom_speeds_up_the_center() {
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
     transform.ease_to(&cam().with_center(Some(ll(60.0, 0.0))).with_zoom(Some(5.0)), &linear_second());
     run_to(&mut transform, 0.5);
-    assert_near(42.426406871192853, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-    assert_near(4.0619751435424885, transform.get_zoom(), 1e-9);
+    assert_near(42.426_406_871_192_85, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+    assert_near(4.061_975_143_542_488_5, transform.get_zoom(), 1e-9);
     run_to(&mut transform, 1.0);
     assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(5.0, transform.get_zoom(), 1e-9);
@@ -2347,9 +2333,9 @@ fn fly_follows_the_globe_path() {
         set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
         transform.fly_to(&cam().with_center(Some(ll(60.0, 60.0))), &linear_second(), false);
         run_to(&mut transform, 0.5);
-        assert_near(25.026136930425196, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        assert_near(25.026_136_930_425_196, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
         assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
-        assert_near(1.8176209209717085, transform.get_zoom(), 1e-9);
+        assert_near(1.817_620_920_971_708_5, transform.get_zoom(), 1e-9);
         run_to(&mut transform, 1.0);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-8);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
@@ -2360,9 +2346,9 @@ fn fly_follows_the_globe_path() {
         set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 3.0);
         transform.fly_to(&cam().with_center(Some(ll(60.0, 60.0))).with_zoom(Some(6.0)), &linear_second(), false);
         run_to(&mut transform, 0.5);
-        assert_near(54.663652625664554, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
-        assert_near(56.470588235293114, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
-        assert_near(2.4045752372957860, transform.get_zoom(), 1e-9);
+        assert_near(54.663_652_625_664_554, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
+        assert_near(56.470_588_235_293_114, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
+        assert_near(2.404_575_237_295_786, transform.get_zoom(), 1e-9);
         run_to(&mut transform, 1.0);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-8);
         assert_near(60.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-8);
@@ -2406,27 +2392,27 @@ fn camera_for_bounds_fits_the_globe() {
         flat.jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(0.0)));
         let flat_fit = crate::map::camera_for_lat_lngs(&corners, &flat, &EdgeInsets::default()).unwrap();
         assert!(flat_fit.zoom.is_some());
-        assert_near(2.4694852833012204, flat_fit.zoom.unwrap(), 1e-7);
+        assert_near(2.469_485_283_301_220_4, flat_fit.zoom.unwrap(), 1e-7);
     }
 
     let mut fit = crate::map::camera_for_lat_lngs(&corners, &transform, &EdgeInsets::default()).unwrap();
     assert!(fit.center.is_some() && fit.zoom.is_some());
     assert_near(-100.5, fit.center.unwrap().longitude(), 1e-9);
-    assert_near(34.717077774070773, fit.center.unwrap().latitude(), 1e-9);
-    assert_near(2.4964711163134550, fit.zoom.unwrap(), 1e-7);
+    assert_near(34.717_077_774_070_77, fit.center.unwrap().latitude(), 1e-9);
+    assert_near(2.496_471_116_313_455, fit.zoom.unwrap(), 1e-7);
 
     fit = crate::map::camera_for_lat_lngs(&corners, &transform, &insets(15.0, 15.0, 15.0, 15.0)).unwrap();
     assert!(fit.center.is_some() && fit.zoom.is_some());
     assert_near(-100.5, fit.center.unwrap().longitude(), 1e-9);
-    assert_near(34.717077774070773, fit.center.unwrap().latitude(), 1e-9);
-    assert_near(2.3985253272853888, fit.zoom.unwrap(), 1e-7);
+    assert_near(34.717_077_774_070_77, fit.center.unwrap().latitude(), 1e-9);
+    assert_near(2.398_525_327_285_389, fit.zoom.unwrap(), 1e-7);
 
     transform.jump_to(&cam().with_bearing(Some(45.0)));
     fit = crate::map::camera_for_lat_lngs(&corners, &transform, &EdgeInsets::default()).unwrap();
     assert!(fit.center.is_some() && fit.zoom.is_some());
     assert_near(-100.5, fit.center.unwrap().longitude(), 1e-9);
-    assert_near(34.717077774070773, fit.center.unwrap().latitude(), 1e-9);
-    assert_near(2.4499189488903967, fit.zoom.unwrap(), 1e-7);
+    assert_near(34.717_077_774_070_77, fit.center.unwrap().latitude(), 1e-9);
+    assert_near(2.449_918_948_890_396_7, fit.zoom.unwrap(), 1e-7);
 }
 
 // Bounds fitted with uneven padding fill the padded part of the view the
@@ -2439,8 +2425,8 @@ fn camera_for_bounds_fits_the_padded_view() {
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 0.0);
     let bounds = LatLngBounds::hull(ll(16.0, -133.0), ll(50.0, -68.0));
     let corners = [bounds.northwest(), bounds.southwest(), bounds.southeast(), bounds.northeast()];
-    let mid_latitude = (bounds.north() + bounds.south()) / 2.0;
-    let mid_longitude = (bounds.west() + bounds.east()) / 2.0;
+    let mid_latitude = f64::midpoint(bounds.north(), bounds.south());
+    let mid_longitude = f64::midpoint(bounds.west(), bounds.east());
     let samples = [
         bounds.northwest(),
         bounds.southwest(),
@@ -2552,15 +2538,15 @@ fn globe_size_corrections_blend_through_the_transition() {
     }
     for c in [
         Case {
-            latitude: 52.499167,
+            latitude: 52.499_167,
             transition: 0.5,
-            circle: 0.8043864815927202,
-            pixel: 1.321324254256826,
-            pitched: 1.2637600088069,
+            circle: 0.804_386_481_592_720_2,
+            pixel: 1.321_324_254_256_826,
+            pitched: 1.263_760_008_806_9,
         },
-        Case { latitude: 60.0, transition: 0.25, circle: 0.875, pixel: 1.25, pitched: 1.0636473098322572 },
-        Case { latitude: 60.0, transition: 1.0, circle: 0.5, pixel: 2.0, pitched: 1.2545892393290283 },
-        Case { latitude: 0.0, transition: 0.5, circle: 1.0, pixel: 1.0, pitched: 1.7545892393290279 },
+        Case { latitude: 60.0, transition: 0.25, circle: 0.875, pixel: 1.25, pitched: 1.063_647_309_832_257_2 },
+        Case { latitude: 60.0, transition: 1.0, circle: 0.5, pixel: 2.0, pitched: 1.254_589_239_329_028_3 },
+        Case { latitude: 0.0, transition: 0.5, circle: 1.0, pixel: 1.0, pitched: 1.754_589_239_329_027_9 },
     ] {
         let mut transform = new_transform();
         transform.resize(Size::new(256, 256)).unwrap();
@@ -2569,7 +2555,7 @@ fn globe_size_corrections_blend_through_the_transition() {
             ProjectionType::VerticalPerspective,
             c.transition,
         ));
-        transform.jump_to(&cam().with_center(Some(ll(c.latitude, 13.418056))).with_zoom(Some(11.5)));
+        transform.jump_to(&cam().with_center(Some(ll(c.latitude, 13.418_056))).with_zoom(Some(11.5)));
         let state = transform.get_state();
         let projection = state.get_projection();
         assert_near(c.circle, projection.circle_radius_correction(state), 1e-9);
@@ -2594,9 +2580,9 @@ fn globe_max_pitch_scale_factor() {
         factor: f64,
     }
     for view in [
-        View { center: ll(20.0, 30.0), zoom: 1.0, pitch: 50.0, factor: 1.659065925812732 },
-        View { center: ll(0.0, 0.0), zoom: 1.0, pitch: 60.0, factor: 2.3660254037842425 },
-        View { center: ll(20.0, 30.0), zoom: 2.0, pitch: 50.0, factor: 1.6590659258122578 },
+        View { center: ll(20.0, 30.0), zoom: 1.0, pitch: 50.0, factor: 1.659_065_925_812_732 },
+        View { center: ll(0.0, 0.0), zoom: 1.0, pitch: 60.0, factor: 2.366_025_403_784_242_5 },
+        View { center: ll(20.0, 30.0), zoom: 2.0, pitch: 50.0, factor: 1.659_065_925_812_257_8 },
     ] {
         let mut transform = new_transform();
         transform.resize(Size::new(512, 512)).unwrap();
@@ -2745,21 +2731,21 @@ fn globe_fling_ends_at_gljs_inertia_center() {
             zoom: 4.0,
             bearing: 30.0,
             offset: sc(120.0, -80.0),
-            expected: ll(29.64674667013475, -26.3247433402695),
+            expected: ll(29.646_746_670_134_75, -26.324_743_340_269_5),
         },
         Pan {
             center: ll(-45.0, 170.0),
             zoom: 8.0,
             bearing: -100.0,
             offset: sc(-50.0, 25.0),
-            expected: ll(-44.91280009391755, 169.90853166980656),
+            expected: ll(-44.912_800_093_917_55, 169.908_531_669_806_56),
         },
         Pan {
             center: ll(70.0, 0.0),
             zoom: 5.0,
             bearing: 0.0,
             offset: sc(200.0, 0.0),
-            expected: ll(70.0, -4.23757815424085),
+            expected: ll(70.0, -4.237_578_154_240_85),
         },
     ] {
         let _trace = ScopedTrace(format!("zoom {}", std_to_string(pan.zoom)));
@@ -2791,8 +2777,11 @@ fn globe_fling_toward_a_pole_stays_on_its_meridian() {
         halves: [(f64, f64); 2],
     }
     for fling in [
-        Fling { zoom: 1.5, halves: [(75.0, 0.5500156865235035), (90.0, -1.0350518437681169)] },
-        Fling { zoom: 3.0, halves: [(73.2171601091423, 2.2078682014999638), (86.43432021828463, 0.4649481562318831)] },
+        Fling { zoom: 1.5, halves: [(75.0, 0.550_015_686_523_503_5), (90.0, -1.035_051_843_768_116_9)] },
+        Fling {
+            zoom: 3.0,
+            halves: [(73.217_160_109_142_3, 2.207_868_201_499_963_8), (86.434_320_218_284_63, 0.464_948_156_231_883_1)],
+        },
     ] {
         let _trace = ScopedTrace(format!("zoom {}", std_to_string(fling.zoom)));
         let mut transform = new_transform();
@@ -2853,47 +2842,47 @@ fn drag_center_matches_gljs() {
             0.0,
             (330.0, 240.0),
             (10.0, 0.0),
-            (19.96528220871278, 6.48152888184427),
+            (19.965_282_208_712_78, 6.481_528_881_844_27),
         ),
         (
             "center-drag-east 2",
-            (19.93062984381388, 2.96383097806563),
-            1.0006345588283656,
+            (19.930_629_843_813_88, 2.963_830_978_065_63),
+            1.000_634_558_828_365_6,
             0.0,
             0.0,
             (330.0, 240.0),
             (10.0, 0.0),
-            (19.89604275335306, -0.5530967909885476),
+            (19.896_042_753_353_06, -0.553_096_790_988_547_6),
         ),
         (
             "center-drag-east 4",
-            (19.86152078591744, -4.06925749079096),
-            1.0012643498868492,
+            (19.861_520_785_917_44, -4.069_257_490_790_96),
+            1.001_264_349_886_849_2,
             0.0,
             0.0,
             (330.0, 240.0),
             (10.0, 0.0),
-            (19.8270637906032, -7.584654172731689),
+            (19.827_063_790_603_2, -7.584_654_172_731_689),
         ),
         (
             "off-center-drag 2",
-            (16.074405186537916, 4.212860800653175),
-            1.0322017912167816,
+            (16.074_405_186_537_916, 4.212_860_800_653_175),
+            1.032_201_791_216_781_6,
             0.0,
             0.0,
             (400.0, 180.0),
             (6.0, -4.0),
-            (14.115311037321156, 1.3609496277557582),
+            (14.115_311_037_321_156, 1.360_949_627_755_758_2),
         ),
         (
             "off-center-drag 4",
-            (12.158623543717447, -1.4683004008273883),
-            1.057008507859097,
+            (12.158_623_543_717_447, -1.468_300_400_827_388_3),
+            1.057_008_507_859_097,
             0.0,
             0.0,
             (400.0, 180.0),
             (6.0, -4.0),
-            (10.204304619531165, -4.278521558340458),
+            (10.204_304_619_531_165, -4.278_521_558_340_458),
         ),
         (
             "drag-north-into-pole 0",
@@ -2903,77 +2892,77 @@ fn drag_center_matches_gljs() {
             0.0,
             (320.0, 300.0),
             (0.0, 6.0),
-            (70.73728720083854, -100.00000000000205),
+            (70.737_287_200_838_54, -100.000_000_000_002_05),
         ),
         (
             "drag-north-into-pole 20",
-            (84.74574401678998, -100.00000000000068),
-            -0.9010463352914224,
+            (84.745_744_016_789_98, -100.000_000_000_000_68),
+            -0.901_046_335_291_422_4,
             0.0,
             0.0,
             (320.0, 300.0),
             (0.0, 6.0),
-            (85.48303121762915, -100.00000000000068),
+            (85.483_031_217_629_15, -100.000_000_000_000_68),
         ),
         (
             "drag-north-into-pole 21",
-            (85.48303121762915, -100.00000000000068),
-            -0.9872050442266238,
+            (85.483_031_217_629_15, -100.000_000_000_000_68),
+            -0.987_205_044_226_623_8,
             0.0,
             0.0,
             (320.0, 300.0),
             (0.0, 6.0),
-            (86.22031841846909, -100.00000000000068),
+            (86.220_318_418_469_09, -100.000_000_000_000_68),
         ),
         (
             "drag-north-into-pole 27",
-            (89.90675442266692, -100.00000000000068),
-            -0.9872050442266238,
+            (89.906_754_422_666_92, -100.000_000_000_000_68),
+            -0.987_205_044_226_623_8,
             0.0,
             0.0,
             (320.0, 300.0),
             (0.0, 6.0),
-            (90.0, -100.00000000000068),
+            (90.0, -100.000_000_000_000_68),
         ),
         (
             "drag-north-into-pole 28",
-            (90.0, -100.00000000000068),
-            -0.9872050442266238,
+            (90.0, -100.000_000_000_000_68),
+            -0.987_205_044_226_623_8,
             0.0,
             0.0,
             (320.0, 300.0),
             (0.0, 6.0),
-            (90.0, -100.00000000000068),
+            (90.0, -100.000_000_000_000_68),
         ),
         (
             "side-drag-at-pole 0",
-            (85.0511287798066, -100.0),
+            (85.051_128_779_806_6, -100.0),
             1.0,
             0.0,
             0.0,
             (380.0, 240.0),
             (6.0, 0.0),
-            (85.0477656113963, -101.87137817590371),
+            (85.047_765_611_396_3, -101.871_378_175_903_71),
         ),
         (
             "side-drag-at-pole 30",
-            (84.95121303919578, -155.737980622539),
-            1.0287640984336475,
+            (84.951_213_039_195_78, -155.737_980_622_539),
+            1.028_764_098_433_647_5,
             0.0,
             0.0,
             (380.0, 240.0),
             (6.0, 0.0),
-            (84.94791671962916, -157.58177081818087),
+            (84.947_916_719_629_16, -157.581_770_818_180_87),
         ),
         (
             "side-drag-at-pole 59",
-            (84.85648183647973, 151.15114974424728),
-            1.0555120380074723,
+            (84.856_481_836_479_73, 151.151_149_744_247_28),
+            1.055_512_038_007_472_3,
             0.0,
             0.0,
             (380.0, 240.0),
             (6.0, 0.0),
-            (84.85324650692623, 149.33280710271083),
+            (84.853_246_506_926_23, 149.332_807_102_710_83),
         ),
         (
             "side-drag-centred-pole 0",
@@ -2983,37 +2972,37 @@ fn drag_center_matches_gljs() {
             0.0,
             (340.0, 200.0),
             (0.0, 8.0),
-            (89.34438829057913, 13.508337366700857),
+            (89.344_388_290_579_13, 13.508_337_366_700_857),
         ),
         (
             "side-drag-centred-pole 2",
-            (89.68877639444831, 22.57677926378733),
+            (89.688_776_394_448_31, 22.576_779_263_787_33),
             0.5,
             0.0,
             0.0,
             (340.0, 200.0),
             (0.0, 8.0),
-            (90.0, 28.803865724291313),
+            (90.0, 28.803_865_724_291_313),
         ),
         (
             "side-drag-centred-pole 15",
-            (90.0, 83.80781405685116),
+            (90.0, 83.807_814_056_851_16),
             0.5,
             0.0,
             0.0,
             (340.0, 200.0),
             (0.0, 8.0),
-            (90.0, 88.39147641789782),
+            (90.0, 88.391_476_417_897_82),
         ),
         (
             "side-drag-centred-pole 29",
-            (90.0, 147.97908711150444),
+            (90.0, 147.979_087_111_504_44),
             0.5,
             0.0,
             0.0,
             (340.0, 200.0),
             (0.0, 8.0),
-            (90.0, 152.5627494725511),
+            (90.0, 152.562_749_472_551_1),
         ),
         (
             "drag-off-globe 0",
@@ -3023,27 +3012,27 @@ fn drag_center_matches_gljs() {
             0.0,
             (620.0, 240.0),
             (20.0, 0.0),
-            (9.982236219514714, 1.5494610302675937),
+            (9.982_236_219_514_714, 1.549_461_030_267_593_7),
         ),
         (
             "drag-off-globe 2",
-            (9.964504640751409, -1.9008899375490955),
-            1.0001573094988878,
+            (9.964_504_640_751_409, -1.900_889_937_549_095_5),
+            1.000_157_309_498_887_8,
             0.0,
             0.0,
             (620.0, 240.0),
             (20.0, 0.0),
-            (9.946805201839899, -5.3510535945838456),
+            (9.946_805_201_839_899, -5.351_053_594_583_845_6),
         ),
         (
             "drag-off-globe 4",
-            (9.929137841049005, -8.801030629313573),
-            1.0003134815524495,
+            (9.929_137_841_049_005, -8.801_030_629_313_573),
+            1.000_313_481_552_449_5,
             0.0,
             0.0,
             (620.0, 240.0),
             (20.0, 0.0),
-            (9.911502496783827, -12.250821727578682),
+            (9.911_502_496_783_827, -12.250_821_727_578_682),
         ),
         (
             "drag-bearing-pitch 0",
@@ -3053,27 +3042,27 @@ fn drag_center_matches_gljs() {
             40.0,
             (300.0, 330.0),
             (-7.0, 5.0),
-            (40.100686468998106, 30.988488451527928),
+            (40.100_686_468_998_106, 30.988_488_451_527_928),
         ),
         (
             "drag-bearing-pitch 4",
-            (40.40265566873954, 33.96278116325789),
-            2.4914316029001595,
+            (40.402_655_668_739_54, 33.962_781_163_257_89),
+            2.491_431_602_900_159_5,
             30.0,
             40.0,
             (300.0, 330.0),
             (-7.0, 5.0),
-            (40.50328185738783, 34.95717865523261),
+            (40.503_281_857_387_83, 34.957_178_655_232_61),
         ),
         (
             "drag-bearing-pitch 7",
-            (40.70448865902955, 36.95046737255302),
-            2.4849281889924244,
+            (40.704_488_659_029_55, 36.950_467_372_553_02),
+            2.484_928_188_992_424_4,
             30.0,
             40.0,
             (300.0, 330.0),
             (-7.0, 5.0),
-            (40.80506918481425, 37.94937335237137),
+            (40.805_069_184_814_25, 37.949_373_352_371_37),
         ),
         (
             "drag-across-antimeridian 0",
@@ -3083,27 +3072,27 @@ fn drag_center_matches_gljs() {
             0.0,
             (300.0, 240.0),
             (-12.0, 0.0),
-            (0.0, 177.9946248399193),
+            (0.0, 177.994_624_839_919_3),
         ),
         (
             "drag-across-antimeridian 5",
-            (0.0, -170.02687580040782),
+            (0.0, -170.026_875_800_407_82),
             1.5,
             0.0,
             0.0,
             (300.0, 240.0),
             (-12.0, 0.0),
-            (0.0, -167.0322509604884),
+            (0.0, -167.032_250_960_488_4),
         ),
         (
             "drag-across-antimeridian 9",
-            (0.0, -158.0483764407433),
+            (0.0, -158.048_376_440_743_3),
             1.5,
             0.0,
             0.0,
             (300.0, 240.0),
             (-12.0, 0.0),
-            (0.0, -155.0537516008231),
+            (0.0, -155.053_751_600_823_1),
         ),
         (
             "drag-south-pole 0",
@@ -3113,37 +3102,37 @@ fn drag_center_matches_gljs() {
             0.0,
             (320.0, 200.0),
             (0.0, -7.0),
-            (-80.49305711248556, 40.00000000000148),
+            (-80.493_057_112_485_56, 40.000_000_000_001_48),
         ),
         (
             "drag-south-pole 10",
-            (-84.93057112485239, 40.00000000000193),
-            -0.17465574390064653,
+            (-84.930_571_124_852_39, 40.000_000_000_001_93),
+            -0.174_655_743_900_646_53,
             0.0,
             0.0,
             (320.0, 200.0),
             (0.0, -7.0),
-            (-85.42362823733717, 40.00000000000193),
+            (-85.423_628_237_337_17, 40.000_000_000_001_93),
         ),
         (
             "drag-south-pole 19",
-            (-89.36808513722191, 40.00000000000193),
-            -0.20929101946440645,
+            (-89.368_085_137_221_91, 40.000_000_000_001_93),
+            -0.209_291_019_464_406_45,
             0.0,
             0.0,
             (320.0, 200.0),
             (0.0, -7.0),
-            (-89.86114224970903, 40.00000000000193),
+            (-89.861_142_249_709_03, 40.000_000_000_001_93),
         ),
         (
             "drag-south-pole 20",
-            (-89.86114224970903, 40.00000000000193),
-            -0.20929101946440645,
+            (-89.861_142_249_709_03, 40.000_000_000_001_93),
+            -0.209_291_019_464_406_45,
             0.0,
             0.0,
             (320.0, 200.0),
             (0.0, -7.0),
-            (-90.0, 40.00000000000193),
+            (-90.0, 40.000_000_000_001_93),
         ),
     ];
     for (name, center, zoom, bearing, pitch, point, pan_delta, expected) in steps {
@@ -3187,16 +3176,16 @@ fn drag_around_the_pole_holds_its_latitude() {
     }
     // GL JS after the same 60 steps, run in doubles as in
     // DragCenterMatchesGLJS.
-    assert_near(84.85324650692623, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(84.853_246_506_926_23, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(
         0.0,
         VerticalPerspectiveProjection::difference_of_angles_degrees(
-            149.33280710271083,
+            149.332_807_102_710_83,
             transform.get_lat_lng(WrapMode::Wrapped).longitude(),
         ),
         1e-6,
     );
-    assert_near(1.0564167839713543, transform.get_zoom(), 1e-6);
+    assert_near(1.056_416_783_971_354_3, transform.get_zoom(), 1e-6);
 }
 
 // Dragging north over the pole stops on it, as GL JS's drag does, the zoom
@@ -3215,7 +3204,7 @@ fn drag_over_the_pole_stops_on_it() {
     }
     assert_eq!(90.0, transform.get_lat_lng(WrapMode::Wrapped).latitude());
     assert_near(-100.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
-    assert_near(-0.9872050442266238, transform.get_zoom(), 1e-6);
+    assert_near(-0.987_205_044_226_623_8, transform.get_zoom(), 1e-6);
 }
 
 // GL JS's drag without the fixed bearing
@@ -3240,107 +3229,107 @@ fn free_bearing_drag_matches_gljs() {
             0.0,
             (340.0, 240.0),
             (10.0, 0.0),
-            (19.964831035703163, 6.458738472277901),
-            -1.2105018410808273,
+            (19.964_831_035_703_163, 6.458_738_472_277_901),
+            -1.210_501_841_080_827_3,
         ),
         (
             "mid-globe-east 7",
-            (18.019206354761504, -16.65450732839554),
-            1.0171849312490204,
-            -8.825955295711765,
+            (18.019_206_354_761_504, -16.654_507_328_395_54),
+            1.017_184_931_249_020_4,
+            -8.825_955_295_711_765,
             0.0,
             (410.0, 240.0),
             (10.0, 0.0),
-            (17.29289010262656, -21.199373456415287),
-            -10.205107464700406,
+            (17.292_890_102_626_56, -21.199_373_456_415_287),
+            -10.205_107_464_700_406,
         ),
         (
             "over-north-pole 13",
-            (79.41551935272437, -99.99999999999989),
-            0.10315332639360152,
-            3.410605131648481e-13,
+            (79.415_519_352_724_37, -99.999_999_999_999_89),
+            0.103_153_326_393_601_52,
+            3.410_605_131_648_481e-13,
             0.0,
             (320.0, 284.0),
             (0.0, 6.0),
-            (80.14639071459133, -99.99999999999807),
-            2.0463630789890885e-12,
+            (80.146_390_714_591_33, -99.999_999_999_998_07),
+            2.046_363_078_989_088_5e-12,
         ),
         (
             "over-north-pole 25",
-            (88.49295346569899, -99.99999999998397),
-            -0.9872050442266241,
-            1.671196514507756e-11,
+            (88.492_953_465_698_99, -99.999_999_999_983_97),
+            -0.987_205_044_226_624_1,
+            1.671_196_514_507_756e-11,
             0.0,
             (320.0, 356.0),
             (0.0, 6.0),
-            (89.29419866472097, -99.99999999996294),
-            3.8198777474462986e-11,
+            (89.294_198_664_720_97, -99.999_999_999_962_94),
+            3.819_877_747_446_298_6e-11,
         ),
         (
             "over-north-pole 26",
-            (89.29419866472097, -99.99999999996294),
-            -0.9872050442266241,
-            3.8198777474462986e-11,
+            (89.294_198_664_720_97, -99.999_999_999_962_94),
+            -0.987_205_044_226_624_1,
+            3.819_877_747_446_298_6e-11,
             0.0,
             (320.0, 362.0),
             (0.0, 6.0),
-            (89.89453036004743, 79.99999999974375),
-            179.99999999974605,
+            (89.894_530_360_047_43, 79.999_999_999_743_75),
+            179.999_999_999_746_05,
         ),
         (
             "over-north-pole 27",
-            (89.89453036004743, 79.99999999974375),
-            -0.9872050442266241,
-            179.99999999974605,
+            (89.894_530_360_047_43, 79.999_999_999_743_75),
+            -0.987_205_044_226_624_1,
+            179.999_999_999_746_05,
             0.0,
             (320.0, 368.0),
             (0.0, 6.0),
-            (89.07238060450973, 79.99999999996999),
-            179.99999999997203,
+            (89.072_380_604_509_73, 79.999_999_999_969_99),
+            179.999_999_999_972_03,
         ),
         (
             "over-north-pole 39",
-            (78.96870340062405, 79.99999999999284),
-            0.16209611242931793,
-            179.999999999995,
+            (78.968_703_400_624_05, 79.999_999_999_992_84),
+            0.162_096_112_429_317_93,
+            179.999_999_999_995,
             0.0,
             (320.0, 440.0),
             (0.0, 6.0),
-            (77.9082916607387, 79.99999999999159),
-            179.99999999999363,
+            (77.908_291_660_738_7, 79.999_999_999_991_59),
+            179.999_999_999_993_63,
         ),
         (
             "across-pole-on-globe 19",
-            (89.340072693097, -100.00000000001774),
-            -0.009291019464406594,
-            -1.6825651982799172e-11,
+            (89.340_072_693_097, -100.000_000_000_017_74),
+            -0.009_291_019_464_406_594,
+            -1.682_565_198_279_917_2e-11,
             0.0,
             (320.0, 320.0),
             (0.0, 8.0),
-            (89.83806502107838, -100.00000000007714),
-            -7.651124178664759e-11,
+            (89.838_065_021_078_38, -100.000_000_000_077_14),
+            -7.651_124_178_664_759e-11,
         ),
         (
             "across-pole-on-globe 20",
-            (89.83806502107838, -100.00000000007714),
-            -0.009291019464406594,
-            -7.651124178664759e-11,
+            (89.838_065_021_078_38, -100.000_000_000_077_14),
+            -0.009_291_019_464_406_594,
+            -7.651_124_178_664_759e-11,
             0.0,
             (320.0, 328.0),
             (0.0, 8.0),
-            (89.6617557958742, 80.00000000003092),
-            -179.99999999996658,
+            (89.661_755_795_874_2, 80.000_000_000_030_92),
+            -179.999_999_999_966_58,
         ),
         (
             "across-pole-on-globe 21",
-            (89.6617557958742, 80.00000000003092),
-            -0.009291019464406594,
-            -179.99999999996658,
+            (89.661_755_795_874_2, 80.000_000_000_030_92),
+            -0.009_291_019_464_406_594,
+            -179.999_999_999_966_58,
             0.0,
             (320.0, 336.0),
             (0.0, 8.0),
-            (89.15914508699329, 80.00000000001307),
-            -179.99999999998465,
+            (89.159_145_086_993_29, 80.000_000_000_013_07),
+            -179.999_999_999_984_65,
         ),
         (
             "beside-north-pole 0",
@@ -3350,62 +3339,62 @@ fn free_bearing_drag_matches_gljs() {
             0.0,
             (386.0, 240.0),
             (6.0, 0.0),
-            (85.04662278483669, -102.12115815315576),
-            -2.113243435839649,
+            (85.046_622_784_836_69, -102.121_158_153_155_76),
+            -2.113_243_435_839_649,
         ),
         (
             "beside-north-pole 29",
-            (82.61847217815794, -148.0453022994218),
-            1.5742929546363558,
-            -47.80814125537427,
+            (82.618_472_178_157_94, -148.045_302_299_421_8),
+            1.574_292_954_636_355_8,
+            -47.808_141_255_374_27,
             0.0,
             (560.0, 240.0),
             (6.0, 0.0),
-            (82.46976369277144, -149.0658211264905),
-            -48.82003297275798,
+            (82.469_763_692_771_44, -149.065_821_126_490_5),
+            -48.820_032_972_757_98,
         ),
         (
             "off-globe-and-back 5",
-            (59.63182334571161, 0.0),
-            0.015938893735801596,
+            (59.631_823_345_711_61, 0.0),
+            0.015_938_893_735_801_596,
             0.0,
             0.0,
             (320.0, 240.0),
             (0.0, 25.0),
-            (68.48553614142399, 0.0),
+            (68.485_536_141_423_99, 0.0),
             0.0,
         ),
         (
             "off-globe-and-back 9",
-            (84.95332547144974, 180.0),
-            -2.506889874048772,
+            (84.953_325_471_449_74, 180.0),
+            -2.506_889_874_048_772,
             180.0,
             0.0,
             (320.0, 240.0),
             (0.0, 25.0),
-            (76.09961267574481, 180.0),
+            (76.099_612_675_744_81, 180.0),
             180.0,
         ),
         (
             "off-globe-and-back 15",
-            (84.95332547144743, 180.0),
-            -2.5068898740481123,
+            (84.953_325_471_447_43, 180.0),
+            -2.506_889_874_048_112_3,
             180.0,
             0.0,
             (320.0, 240.0),
             (0.0, -25.0),
-            (86.19296173284701, 0.0),
+            (86.192_961_732_847_01, 0.0),
             0.0,
         ),
         (
             "off-globe-and-back 20",
-            (33.13938452686452, 0.0),
-            0.7438908494163972,
+            (33.139_384_526_864_52, 0.0),
+            0.743_890_849_416_397_2,
             0.0,
             0.0,
             (320.0, 315.0),
             (0.0, -25.0),
-            (20.561601743914935, 0.0),
+            (20.561_601_743_914_935, 0.0),
             0.0,
         ),
         (
@@ -3416,19 +3405,19 @@ fn free_bearing_drag_matches_gljs() {
             20.0,
             (308.0, 255.0),
             (8.0, -5.0),
-            (39.90522931489954, 27.677367870127796),
-            28.54888958514232,
+            (39.905_229_314_899_54, 27.677_367_870_127_796),
+            28.548_889_585_142_32,
         ),
         (
             "bearing-pitch 9",
-            (36.75658194038969, 8.665623636743362),
-            1.5647074495325435,
-            17.020204416245633,
+            (36.756_581_940_389_69, 8.665_623_636_743_362),
+            1.564_707_449_532_543_5,
+            17.020_204_416_245_633,
             20.0,
             (380.0, 210.0),
             (8.0, -5.0),
-            (36.00738235824049, 6.187079071036919),
-            15.610527473047796,
+            (36.007_382_358_240_49, 6.187_079_071_036_919),
+            15.610_527_473_047_796,
         ),
     ];
     for (name, center, zoom, bearing, pitch, anchor, pan_delta, expected, expected_bearing) in steps {
@@ -3571,14 +3560,14 @@ fn center_reaches_the_pole_at_low_zoom() {
 
     set_up_globe_camera(&mut transform, &ll(0.0, 0.0), 0.0);
     transform.jump_to(&cam().with_center(Some(ll(90.0, 0.0))).with_zoom(Some(2.0)));
-    assert_near(88.57750940365021, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(88.577_509_403_650_21, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
 
     for (zoom, latitude) in [
         (1.0, 90.0),
         (1.5, 90.0),
-        (2.0, 88.57750940365021),
-        (2.5, 87.06149291090357),
-        (3.0, 85.98950736849177),
+        (2.0, 88.577_509_403_650_21),
+        (2.5, 87.061_492_910_903_57),
+        (3.0, 85.989_507_368_491_77),
         (4.0, LATITUDE_MAX),
     ] {
         let _trace = ScopedTrace(format!("zoom {}", std_to_string(zoom)));
@@ -3607,19 +3596,19 @@ fn zoom_around_the_pole_keeps_the_centers_meridian() {
         90.0,
         90.0,
         90.0,
-        89.7739138279545,
-        89.34717269436429,
-        88.9490091378788,
-        88.57750940365021,
-        88.23088789526778,
-        87.90747859237072,
-        87.60572704299784,
-        87.3241828921856,
-        87.06149291090357,
-        86.81639449182124,
-        86.58770958064392,
-        86.37433901384881,
-        86.17525723560607,
+        89.773_913_827_954_5,
+        89.347_172_694_364_29,
+        88.949_009_137_878_8,
+        88.577_509_403_650_21,
+        88.230_887_895_267_78,
+        87.907_478_592_370_72,
+        87.605_727_042_997_84,
+        87.324_182_892_185_6,
+        87.061_492_910_903_57,
+        86.816_394_491_821_24,
+        86.587_709_580_643_92,
+        86.374_339_013_848_81,
+        86.175_257_235_606_07,
     ];
     for longitude in [30.0, 120.0] {
         let _trace = ScopedTrace(format!("longitude {}", std_to_string(longitude)));
@@ -3641,7 +3630,7 @@ fn zoom_around_the_pole_keeps_the_centers_meridian() {
     transform.jump_to(&cam().with_zoom(Some(1.7)).with_anchor(Some(pole)));
     assert_near(88.0, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-9);
     assert_near(30.0, transform.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
-    assert_near(149.15333659991416, transform.lat_lng_to_screen_coordinate(&ll(90.0, 0.0)).y, 1e-4);
+    assert_near(149.153_336_599_914_16, transform.lat_lng_to_screen_coordinate(&ll(90.0, 0.0)).y, 1e-4);
 }
 
 // Without a zoom, GL JS's jump bounds a center past the Mercator range by the
@@ -3650,7 +3639,7 @@ fn zoom_around_the_pole_keeps_the_centers_meridian() {
 // gtest: GlobeTransform.JumpBoundsThePoleByTheZoomItLandsOn
 #[test]
 fn jump_bounds_the_pole_by_the_zoom_it_lands_on() {
-    let landing_zoom = -0.5129658685303338;
+    let landing_zoom = -0.512_965_868_530_333_8;
     let mut jump = new_transform();
     set_up_globe_camera(&mut jump, &ll(10.0, 0.0), 3.0);
     jump.jump_to(&cam().with_center(Some(ll(89.0, 30.0))));
@@ -3662,11 +3651,11 @@ fn jump_bounds_the_pole_by_the_zoom_it_lands_on() {
     set_up_globe_camera(&mut ease, &ll(10.0, 0.0), 3.0);
     ease.ease_to(&cam().with_center(Some(ll(89.0, 30.0))), &linear_second());
     run_to(&mut ease, 0.5);
-    assert_near(47.99475368424589, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
-    assert_near(7.785022180215378, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
-    assert_near(2.442592415258865, ease.get_zoom(), 1e-6);
+    assert_near(47.994_753_684_245_89, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(7.785_022_180_215_378, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-6);
+    assert_near(2.442_592_415_258_865, ease.get_zoom(), 1e-6);
     run_to(&mut ease, 1.0);
-    assert_near(85.98950736849177, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(85.989_507_368_491_77, ease.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(30.0, ease.get_lat_lng(WrapMode::Wrapped).longitude(), 1e-9);
     assert_near(landing_zoom, ease.get_zoom(), 1e-6);
 
@@ -3674,7 +3663,7 @@ fn jump_bounds_the_pole_by_the_zoom_it_lands_on() {
     set_up_globe_camera(&mut fly, &ll(10.0, 0.0), 3.0);
     fly.fly_to(&cam().with_center(Some(ll(89.0, 30.0))), &linear_second(), false);
     run_to(&mut fly, 1.0);
-    assert_near(85.98950736849132, fly.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
+    assert_near(85.989_507_368_491_32, fly.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
     assert_near(landing_zoom, fly.get_zoom(), 1e-6);
 }
 
@@ -3703,7 +3692,7 @@ fn eases_onto_and_off_the_pole() {
             start_zoom: 2.0,
             camera: cam().with_center(Some(ll(90.0, 20.0))).with_zoom(Some(0.0)),
             halves: [
-                Frame { latitude: 78.05612639366316, longitude: 20.0, zoom: 0.9949038280649232 },
+                Frame { latitude: 78.056_126_393_663_16, longitude: 20.0, zoom: 0.994_903_828_064_923_2 },
                 Frame { latitude: 90.0, longitude: 20.0, zoom: 0.0 },
             ],
         },
@@ -3713,8 +3702,8 @@ fn eases_onto_and_off_the_pole() {
             start_zoom: 1.0,
             camera: cam().with_center(Some(ll(89.5, 50.0))),
             halves: [
-                Frame { latitude: 74.75, longitude: 29.139640453666175, zoom: 0.07330592239273392 },
-                Frame { latitude: 89.5, longitude: 50.0, zoom: -1.5350518437681169 },
+                Frame { latitude: 74.75, longitude: 29.139_640_453_666_175, zoom: 0.073_305_922_392_733_92 },
+                Frame { latitude: 89.5, longitude: 50.0, zoom: -1.535_051_843_768_116_9 },
             ],
         },
         Ease {
@@ -3723,7 +3712,11 @@ fn eases_onto_and_off_the_pole() {
             start_zoom: 0.0,
             camera: cam().with_center(Some(ll(30.0, 40.0))).with_zoom(Some(1.0)),
             halves: [
-                Frame { latitude: 68.78679656440357, longitude: 24.852188049491588, zoom: 0.9047067439922991 },
+                Frame {
+                    latitude: 68.786_796_564_403_57,
+                    longitude: 24.852_188_049_491_588,
+                    zoom: 0.904_706_743_992_299_1,
+                },
                 Frame { latitude: 30.0, longitude: 40.0, zoom: 1.0 },
             ],
         },
@@ -3733,7 +3726,7 @@ fn eases_onto_and_off_the_pole() {
             start_zoom: 0.5,
             camera: cam().with_zoom(Some(4.0)),
             halves: [
-                Frame { latitude: 86.50061975668255, longitude: 0.0, zoom: 2.25 },
+                Frame { latitude: 86.500_619_756_682_55, longitude: 0.0, zoom: 2.25 },
                 Frame { latitude: LATITUDE_MAX, longitude: 0.0, zoom: 4.0 },
             ],
         },
@@ -3769,7 +3762,7 @@ fn flies_onto_the_pole() {
 
     set_up_globe_camera(&mut transform, &ll(60.0, 20.0), 2.0);
     transform.fly_to(&cam().with_center(Some(ll(89.9, 20.0))).with_zoom(Some(0.0)), &linear_second(), false);
-    for (k, latitude, zoom) in [(0.5, 77.69090627898427, 0.6859841910974791), (1.0, 89.9, 0.0)] {
+    for (k, latitude, zoom) in [(0.5, 77.690_906_278_984_27, 0.685_984_191_097_479_1), (1.0, 89.9, 0.0)] {
         let _trace = ScopedTrace(format!("k {}", std_to_string(k)));
         run_to(&mut transform, k);
         assert_near(latitude, transform.get_lat_lng(WrapMode::Wrapped).latitude(), 1e-6);
@@ -3796,14 +3789,14 @@ fn zoom_around_near_the_pole_matches_gljs() {
             zoom: 1.0,
             zoom_delta: 1.0,
             anchor: sc(450.0, 200.0),
-            expected: ll(88.2247980153879, 39.898924941760924),
+            expected: ll(88.224_798_015_387_9, 39.898_924_941_760_924),
         },
         Zoom {
             center: ll(90.0, 0.0),
             zoom: 0.5,
             zoom_delta: 2.0,
             anchor: sc(400.0, 300.0),
-            expected: ll(87.69055327579845, 0.0),
+            expected: ll(87.690_553_275_798_45, 0.0),
         },
     ] {
         let _trace = ScopedTrace(format!("zoom {}", std_to_string(zoom.zoom)));

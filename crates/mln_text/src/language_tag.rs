@@ -77,22 +77,24 @@ impl Parser<'_> {
         self.langtag(i).or_else(|| self.privateuse(i)).or_else(|| self.grandfathered(i))
     }
 
-    /// `langtag %= language[...] >> -("-" >> script[...]) >> -("-" >> region[...])
-    /// >> *("-" >> variant) >> *("-" >> extension) >> -("-" >> privateuse)`
+    /// ```text
+    /// langtag %= language[...] >> -("-" >> script[...]) >> -("-" >> region[...])
+    ///     >> *("-" >> variant) >> *("-" >> extension) >> -("-" >> privateuse)
+    /// ```
     fn langtag(&mut self, i: usize) -> Option<usize> {
         let (mut i, language) = self.language(i)?;
         self.tag.language = Some(language);
-        if let Some(j) = self.lit(i, b'-') {
-            if let Some((k, script)) = self.script(j) {
-                self.tag.script = Some(script);
-                i = k;
-            }
+        if let Some(j) = self.lit(i, b'-')
+            && let Some((k, script)) = self.script(j)
+        {
+            self.tag.script = Some(script);
+            i = k;
         }
-        if let Some(j) = self.lit(i, b'-') {
-            if let Some((k, region)) = self.region(j) {
-                self.tag.region = Some(region);
-                i = k;
-            }
+        if let Some(j) = self.lit(i, b'-')
+            && let Some((k, region)) = self.region(j)
+        {
+            self.tag.region = Some(region);
+            i = k;
         }
         while let Some(j) = self.lit(i, b'-').and_then(|j| self.variant(j)) {
             i = j;
@@ -222,11 +224,13 @@ impl Parser<'_> {
 
 impl LanguageTag {
     /// `LanguageTag(language, script, region)`.
+    #[must_use]
     pub fn new(language: Option<String>, script: Option<String>, region: Option<String>) -> Self {
         LanguageTag { language, script, region }
     }
 
     /// `LanguageTag::fromBCP47`: the whole tag must parse.
+    #[must_use]
     pub fn from_bcp47(bcp47_tag: &str) -> LanguageTag {
         let mut parser = Parser { s: bcp47_tag.as_bytes(), tag: LanguageTag::default() };
         match parser.start(0) {
@@ -237,6 +241,7 @@ impl LanguageTag {
     }
 
     /// `toBCP47`.
+    #[must_use]
     pub fn to_bcp47(&self) -> String {
         let Some(language) = &self.language else {
             // BCP 47 requires a language, but we're matching implementations
@@ -256,55 +261,51 @@ impl LanguageTag {
     }
 }
 
-/// Ports test/text/language_tag.test.cpp.
+/// Ports `test/text/language_tag.test.cpp`.
 #[cfg(test)]
-mod language_tag {
+mod tests {
     use super::*;
-
-    fn s(v: &str) -> Option<String> {
-        Some(v.to_string())
-    }
 
     // gtest: LanguageTag.Parsing
     #[test]
     fn parsing() {
         let bare_language = LanguageTag::from_bcp47("de");
-        assert_eq!(bare_language.language, s("de"));
+        assert_eq!(bare_language.language.as_deref(), Some("de"));
         assert!(bare_language.script.is_none());
         assert!(bare_language.region.is_none());
 
         let language_and_script = LanguageTag::from_bcp47("de-hans");
-        assert_eq!(language_and_script.language, s("de"));
-        assert_eq!(language_and_script.script, s("hans"));
+        assert_eq!(language_and_script.language.as_deref(), Some("de"));
+        assert_eq!(language_and_script.script.as_deref(), Some("hans"));
         assert!(language_and_script.region.is_none());
 
         let language_and_region = LanguageTag::from_bcp47("de-US");
-        assert_eq!(language_and_region.language, s("de"));
+        assert_eq!(language_and_region.language.as_deref(), Some("de"));
         assert!(language_and_region.script.is_none());
-        assert_eq!(language_and_region.region, s("US"));
+        assert_eq!(language_and_region.region.as_deref(), Some("US"));
 
         let kitchen_sink = LanguageTag::from_bcp47("de-ext-two-Hans-US-variant-x-private");
-        assert_eq!(kitchen_sink.language, s("de"));
-        assert_eq!(kitchen_sink.script, s("Hans"));
-        assert_eq!(kitchen_sink.region, s("US"));
+        assert_eq!(kitchen_sink.language.as_deref(), Some("de"));
+        assert_eq!(kitchen_sink.script.as_deref(), Some("Hans"));
+        assert_eq!(kitchen_sink.region.as_deref(), Some("US"));
     }
 
     // gtest: LanguageTag.Generation
     #[test]
     fn generation() {
-        let de_hans_us = LanguageTag::new(s("de"), s("hans"), s("US"));
+        let de_hans_us = LanguageTag::new(Some("de".to_owned()), Some("hans".to_owned()), Some("US".to_owned()));
         assert_eq!(de_hans_us.to_bcp47(), "de-hans-US");
 
-        let de_us = LanguageTag::new(s("de"), None, s("US"));
+        let de_us = LanguageTag::new(Some("de".to_owned()), None, Some("US".to_owned()));
         assert_eq!(de_us.to_bcp47(), "de-US");
 
-        let no_language = LanguageTag::new(None, s("hans"), s("US"));
+        let no_language = LanguageTag::new(None, Some("hans".to_owned()), Some("US".to_owned()));
         assert_eq!(no_language.to_bcp47(), "");
 
-        let de_hans = LanguageTag::new(s("de"), s("hans"), None);
+        let de_hans = LanguageTag::new(Some("de".to_owned()), Some("hans".to_owned()), None);
         assert_eq!(de_hans.to_bcp47(), "de-hans");
 
-        let de = LanguageTag::new(s("de"), None, None);
+        let de = LanguageTag::new(Some("de".to_owned()), None, None);
         assert_eq!(de.to_bcp47(), "de");
     }
 }

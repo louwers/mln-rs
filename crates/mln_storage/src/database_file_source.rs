@@ -41,7 +41,7 @@ use crate::response::{Reason, ResourceError, Response};
 /// map load share one write.
 const ACCESSED_FLUSH_DELAY: Duration = Duration::from_millis(250);
 
-/// `DatabaseFileSourceThread`: owns the OfflineDatabase on the database
+/// `DatabaseFileSourceThread`: owns the `OfflineDatabase` on the database
 /// thread.
 pub struct DatabaseFileSourceThread {
     db: Rc<RefCell<OfflineDatabase>>,
@@ -98,7 +98,7 @@ impl DatabaseFileSourceThread {
     /// `request(const Resource&, const ActorRef<FileSourceRequest>&)`.
     pub fn request(&self, resource: &Resource, req: &ActorRef<FileSourceRequestState>) {
         let mut offline_response =
-            if resource.storage_policy != StoragePolicy::Volatile { self.db.borrow_mut().get(resource) } else { None };
+            if resource.storage_policy == StoragePolicy::Volatile { None } else { self.db.borrow_mut().get(resource) };
         match &mut offline_response {
             None => {
                 let mut response = Response::new();
@@ -226,6 +226,7 @@ pub struct DatabaseFileSource {
 impl DatabaseFileSource {
     /// A database at `resource_options`' cache path. Offline downloads go
     /// through `file_sources`' network file source.
+    #[must_use]
     pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let online_file_source = file_sources.get_file_source(FileSourceType::Network, resource_options);
         let cache_path = resource_options.cache_path().to_owned();

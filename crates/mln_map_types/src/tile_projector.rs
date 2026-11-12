@@ -27,32 +27,39 @@ impl<'a> TileProjector<'a> {
 
     /// GL JS's `projectTileCoordinates`, for queries and label placement.
     /// (C++ defaults `elevation` to 0.)
+    #[must_use]
     pub fn project(&self, point: &Point<f64>, elevation: f64) -> ProjectedTilePoint {
         self.state.get_projection().project_tile_point(&self.data, &self.tile_id, point, elevation)
     }
 
     /// Where the renderer draws the point, for the rendered feature capture.
     /// (C++ defaults `elevation` to 0.)
+    #[must_use]
     pub fn project_as_drawn(&self, point: &Point<f64>, elevation: f64) -> ProjectedTilePoint {
         self.state.get_projection().drawn_tile_point(&self.data, &self.tile_id, point, elevation)
     }
 
+    #[must_use]
     pub fn circle_radius_correction(&self) -> f64 {
         self.state.get_projection().circle_radius_correction(self.state)
     }
 
+    #[must_use]
     pub fn pitched_text_correction(&self, tile_anchor: &Point<f64>) -> f64 {
         self.state.get_projection().pitched_text_correction(self.state, tile_anchor, &self.tile_id)
     }
 
+    #[must_use]
     pub fn get_transform_state(&self) -> &TransformState {
         self.state
     }
 
+    #[must_use]
     pub fn get_tile_id(&self) -> &UnwrappedTileID {
         &self.tile_id
     }
 
+    #[must_use]
     pub fn get_projection_data(&self) -> &ProjectionData {
         &self.data
     }

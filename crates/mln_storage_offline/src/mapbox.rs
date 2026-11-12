@@ -203,7 +203,7 @@ pub fn canonicalize_tileset(
     if is_canonical_url(tile_server_options, source_url)
         || is_normalized_source_url(tile_server_options.base_url(), tile_server_options.source_template(), source_url)
     {
-        for url in tileset.tiles.iter_mut() {
+        for url in &mut tileset.tiles {
             *url = canonicalize_tile_url(tile_server_options, url, type_, tile_size);
         }
     }
@@ -215,7 +215,7 @@ fn canonicalize(
     url: &str,
     template: &str,
     domain_name: &str,
-    version_prefix: &Option<String>,
+    version_prefix: Option<&str>,
 ) -> String {
     if url.is_empty() {
         return url.to_owned();
@@ -251,28 +251,31 @@ fn canonicalize(
 }
 
 /// `canonicalizeSourceURL(tileServerOptions, url)`.
+#[must_use]
 pub fn canonicalize_source_url(tile_server_options: &TileServerOptions, url: &str) -> String {
     canonicalize(
         tile_server_options,
         url,
         tile_server_options.source_template(),
         tile_server_options.source_domain_name(),
-        tile_server_options.source_version_prefix(),
+        tile_server_options.source_version_prefix().as_deref(),
     )
 }
 
 /// `canonicalizeSpriteURL(tileServerOptions, url)`.
+#[must_use]
 pub fn canonicalize_sprite_url(tile_server_options: &TileServerOptions, url: &str) -> String {
     canonicalize(
         tile_server_options,
         url,
         tile_server_options.sprites_template(),
         tile_server_options.sprites_domain_name(),
-        tile_server_options.sprites_version_prefix(),
+        tile_server_options.sprites_version_prefix().as_deref(),
     )
 }
 
 /// `canonicalizeGlyphURL(tileServerOptions, url)`.
+#[must_use]
 pub fn canonicalize_glyph_url(tile_server_options: &TileServerOptions, url: &str) -> String {
     // "https://api.maptiler.com/fonts/{fontstack}/{range}.pbf?key=uwvyvzaF2P7UWbyOEvjU"
     canonicalize(
@@ -280,7 +283,7 @@ pub fn canonicalize_glyph_url(tile_server_options: &TileServerOptions, url: &str
         url,
         tile_server_options.glyphs_template(),
         tile_server_options.glyphs_domain_name(),
-        tile_server_options.glyphs_version_prefix(),
+        tile_server_options.glyphs_version_prefix().as_deref(),
     )
 }
 

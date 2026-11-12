@@ -22,7 +22,7 @@ impl Converter for Filter {
             Some(Filter::new(Some(Arc::from(parse_result)), None))
         } else {
             let Some(expression) = convert_legacy_filter(value, error) else {
-                debug_assert!(!error.message.is_empty());
+                debug_assert_ne!(error.message, "");
                 return None;
             };
             Some(Filter::new(Some(Arc::from(expression)), serialize_legacy_filter(value)))
@@ -247,6 +247,7 @@ pub fn convert_legacy_filter(values: &Convertible<'_>, error: &mut Error) -> Par
 }
 
 /// `serializeLegacyFilter`.
+#[must_use]
 pub fn serialize_legacy_filter(values: &Convertible<'_>) -> Option<MbglValue> {
     if values.is_undefined() {
         None

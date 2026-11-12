@@ -53,6 +53,7 @@ impl<T> Default for GeometryVec<T> {
 }
 
 impl<T> GeometryVec<T> {
+    #[must_use]
     pub fn new(v: Vec<T>) -> Self {
         GeometryVec {
             v: Mutex::new(v),
@@ -189,7 +190,7 @@ impl<T: bytemuck::Pod> Serialize for GeometryVec<T> {
     }
 }
 
-/// A payload the host kept in JS stays there (mln_util::host_bytes).
+/// A payload the host kept in JS stays there (`mln_util::host_bytes`).
 impl<'de, T: bytemuck::Pod> Deserialize<'de> for GeometryVec<T> {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         Ok(match pod::deserialize_payload::<T, D>(deserializer)? {
@@ -253,6 +254,7 @@ pub fn released_vertices<V: bytemuck::Pod>(vertices: &[V]) -> VertexVectorBasePt
 
 /// A released gfx index vector holding a copy of `indexes`, see
 /// `released_vertices`.
+#[must_use]
 pub fn released_indexes(indexes: &[u16]) -> IndexVectorBasePtr {
     Rc::new(RefCell::new(IndexVectorBase::new_released(indexes.to_vec())))
 }

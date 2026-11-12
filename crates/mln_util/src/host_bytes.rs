@@ -1,7 +1,7 @@
 //! Port-only: bytes that stay in a JS `Uint8Array`, outside wasm memory.
 //!
 //! A tile worker's reply reaches the map's instance as JS arrays
-//! (serialization::payload). The vertex and index arrays among them can go
+//! (`serialization::payload`). The vertex and index arrays among them can go
 //! from there to the GPU (`GPUQueue.writeBuffer`) without a copy in wasm
 //! memory; a reader that needs the bytes themselves copies them in
 //! (`to_vec`, `to_pod_vec`).
@@ -25,6 +25,7 @@ pub struct HostBytes {
 }
 
 impl HostBytes {
+    #[must_use]
     pub fn new(array: js_sys::Uint8Array) -> Self {
         let key = NEXT_KEY.with(|next| next.replace(next.get() + 1));
         let len = array.length() as usize;
@@ -32,15 +33,18 @@ impl HostBytes {
         HostBytes { key, len }
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.len
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
     /// The array, or `None` on a thread other than the one that made it.
+    #[must_use]
     pub fn array(&self) -> Option<js_sys::Uint8Array> {
         let array = ARRAYS.with(|arrays| arrays.borrow().get(&self.key).cloned());
         debug_assert!(array.is_some(), "host bytes used on another thread");
@@ -48,12 +52,14 @@ impl HostBytes {
     }
 
     /// A copy of the bytes in wasm memory.
+    #[must_use]
     pub fn to_vec(&self) -> Vec<u8> {
         self.to_pod_vec()
     }
 
     /// A copy of the bytes in wasm memory, as plain values; `len` must be a
     /// whole number of them.
+    #[must_use]
     pub fn to_pod_vec<T: bytemuck::Pod>(&self) -> Vec<T> {
         debug_assert!(self.len.is_multiple_of(size_of::<T>()));
         let mut values = vec![T::zeroed(); self.len / size_of::<T>()];
@@ -88,6 +94,6 @@ impl Eq for HostBytes {}
 
 impl std::fmt::Debug for HostBytes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostBytes").field("len", &self.len).finish()
+        f.debug_struct("HostBytes").field("len", &self.len).finish_non_exhaustive()
     }
 }

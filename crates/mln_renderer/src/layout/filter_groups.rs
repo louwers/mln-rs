@@ -29,12 +29,11 @@ impl FilterGroups {
         passes: impl Fn(&dyn GeometryTileFeature) -> bool,
     ) -> Option<Vec<bool>> {
         let keys = filter.property_keys()?;
-        let at = match self.sets.iter().position(|(n, k, _)| n == name && **k == *keys) {
-            Some(at) => at,
-            None => {
-                self.sets.push((name.to_owned(), keys.into(), layer.group_features(keys)));
-                self.sets.len() - 1
-            }
+        let at = if let Some(at) = self.sets.iter().position(|(n, k, _)| n == name && **k == *keys) {
+            at
+        } else {
+            self.sets.push((name.to_owned(), keys.into(), layer.group_features(keys)));
+            self.sets.len() - 1
         };
         let groups = self.sets[at].2.as_ref()?;
         let mut group_passes = Vec::with_capacity(groups.first.len());
@@ -131,12 +130,13 @@ mod tests {
             let mut packed = Vec::new();
             for (n, (key, value)) in tags.iter().enumerate() {
                 // "class" is in the key table twice; features alternate.
-                let key_at = match keys.iter().enumerate().filter(|(_, k)| k == key).nth((i as usize + n) % 2) {
-                    Some((at, _)) => at,
-                    None => {
-                        keys.push((*key).to_owned());
-                        keys.len() - 1
-                    }
+                let key_at = if let Some((at, _)) =
+                    keys.iter().enumerate().filter(|(_, k)| k == key).nth((i as usize + n) % 2)
+                {
+                    at
+                } else {
+                    keys.push((*key).to_owned());
+                    keys.len() - 1
                 };
                 let encoded = encode_value(value);
                 let value_at = match value_index.get(&encoded) {

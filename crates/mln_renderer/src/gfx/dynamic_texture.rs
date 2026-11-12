@@ -44,14 +44,17 @@ impl TextureHandle {
         }
     }
 
+    #[must_use]
     pub fn get_id(&self) -> i32 {
         self.id
     }
 
+    #[must_use]
     pub fn get_rectangle(&self) -> &RectU16 {
         &self.rectangle
     }
 
+    #[must_use]
     pub fn is_upload_needed(&self) -> bool {
         self.needs_upload
     }
@@ -69,7 +72,7 @@ impl Eq for TextureHandle {}
 struct Inner {
     shelf_pack: ShelfPack,
     num_textures: i32,
-    /// `imagesToUpload` (webgpu::DynamicTexture), keyed by handle id.
+    /// `imagesToUpload` (`webgpu::DynamicTexture`), keyed by handle id.
     images_to_upload: HashMap<i32, (RectU16, Vec<u8>)>,
 }
 
@@ -91,7 +94,7 @@ pub struct DynamicTexture {
 
 impl std::fmt::Debug for DynamicTexture {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DynamicTexture").field("id", &self.id).field("size", &self.size).finish()
+        f.debug_struct("DynamicTexture").field("id", &self.id).field("size", &self.size).finish_non_exhaustive()
     }
 }
 
@@ -134,7 +137,7 @@ impl DynamicTexture {
     /// it (render thread).
     pub fn get_texture(&self) -> Option<Texture2DPtr> {
         let gpu_texture = self.gpu_texture.lock_unpoisoned();
-        gpu_texture.as_ref().and_then(|t| t.get()).and_then(|t| t.borrow().clone())
+        gpu_texture.as_ref().and_then(LocalObject::get).and_then(|t| t.borrow().clone())
     }
 
     pub fn get_pixel_format(&self) -> TexturePixelType {
@@ -180,36 +183,35 @@ impl DynamicTexture {
     /// and uploads the queued images (render thread).
     pub fn upload_deferred_images(&self, context: &dyn Context) {
         let mut inner = self.inner.lock_unpoisoned();
-        let texture = match self.get_texture() {
-            Some(texture) => texture,
-            None => {
-                let texture = context.create_texture_2d();
-                {
-                    let mut t = texture.borrow_mut();
-                    t.set_size(self.size);
-                    t.set_format(self.pixel_format, TextureChannelDataType::UnsignedByte);
-                    t.set_sampler_configuration(SamplerState {
-                        filter: TextureFilterType::Linear,
-                        wrap_u: TextureWrapType::Clamp,
-                        wrap_v: TextureWrapType::Clamp,
-                        ..SamplerState::default()
-                    });
-                    t.create();
-                }
-                *self.gpu_texture.lock_unpoisoned() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
-                texture
+        let texture = if let Some(texture) = self.get_texture() {
+            texture
+        } else {
+            let texture = context.create_texture_2d();
+            {
+                let mut t = texture.borrow_mut();
+                t.set_size(self.size);
+                t.set_format(self.pixel_format, TextureChannelDataType::UnsignedByte);
+                t.set_sampler_configuration(SamplerState {
+                    filter: TextureFilterType::Linear,
+                    wrap_u: TextureWrapType::Clamp,
+                    wrap_v: TextureWrapType::Clamp,
+                    ..SamplerState::default()
+                });
+                t.create();
             }
+            *self.gpu_texture.lock_unpoisoned() = Some(LocalObject::new(RefCell::new(Some(texture.clone()))));
+            texture
         };
         let mut t = texture.borrow_mut();
         for (rect, data) in inner.images_to_upload.values() {
-            t.upload_sub_region(Some(data), Size::new(rect.w as u32, rect.h as u32), rect.x, rect.y);
+            t.upload_sub_region(Some(data), Size::new(u32::from(rect.w), u32::from(rect.h)), rect.x, rect.y);
         }
         inner.images_to_upload.clear();
     }
 
     /// Port-only: takes the queued images (handle id, rectangle, pixels),
     /// in handle order, for a mirror of this texture in another wasm
-    /// instance (tile/worker_codec), which uploads them instead.
+    /// instance (`tile/worker_codec`), which uploads them instead.
     pub fn take_uploads(&self) -> Vec<(i32, RectU16, Vec<u8>)> {
         let mut inner = self.inner.lock_unpoisoned();
         let mut uploads: Vec<_> = inner.images_to_upload.drain().map(|(id, (rect, data))| (id, rect, data)).collect();
@@ -254,10 +256,10 @@ impl DynamicTexture {
     /// elsewhere).
     pub(crate) fn release_gpu_texture(&self) {
         let gpu_texture = self.gpu_texture.lock_unpoisoned().take();
-        if let Some(gpu_texture) = gpu_texture {
-            if let Some(cell) = gpu_texture.get() {
-                cell.borrow_mut().take();
-            }
+        if let Some(gpu_texture) = gpu_texture
+            && let Some(cell) = gpu_texture.get()
+        {
+            cell.borrow_mut().take();
         }
     }
 }

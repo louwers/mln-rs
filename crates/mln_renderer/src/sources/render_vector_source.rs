@@ -34,6 +34,7 @@ pub struct RenderVectorSource {
 
 impl RenderVectorSource {
     /// `RenderVectorSource(Immutable<style::TileSource::Impl>, const TaggedScheduler&)`.
+    #[must_use]
     pub fn new(impl_: Arc<tile_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderVectorSource {

@@ -39,6 +39,7 @@ pub struct PropertyEvaluationParameters {
 
 impl PropertyEvaluationParameters {
     /// `explicit PropertyEvaluationParameters(float z)`.
+    #[must_use]
     pub fn new(z: f32) -> Self {
         PropertyEvaluationParameters {
             z,
@@ -55,6 +56,7 @@ impl PropertyEvaluationParameters {
     }
 
     /// `PropertyEvaluationParameters(ZoomHistory, TimePoint, Duration)`.
+    #[must_use]
     pub fn with_zoom_history(zoom_history: ZoomHistory, now: TimePoint, default_fade_duration: Duration) -> Self {
         PropertyEvaluationParameters {
             z: zoom_history.last_zoom,
@@ -65,19 +67,20 @@ impl PropertyEvaluationParameters {
         }
     }
 
+    #[must_use]
     pub fn get_crossfade_parameters(&self) -> CrossfadeParameters {
         let fraction = self.z - self.z.floor();
         // std::chrono::duration<float> d = defaultFadeDuration;
         let d = self.default_fade_duration.as_secs_f32();
-        let t = if d != 0.0 {
+        let t = if d == 0.0 {
+            1.0_f32
+        } else {
             // std::min((now - lastIntegerZoomTime) / d, 1.0f): both operands
             // go to the common type duration<float, nano>, so the nanosecond
             // count becomes a float and the float seconds are scaled by 1e9.
             let elapsed = (self.now - self.zoom_history.last_integer_zoom_time).count() as f32;
             let ratio = elapsed / (d * 1_000_000_000.0_f32);
             if 1.0_f32 < ratio { 1.0_f32 } else { ratio }
-        } else {
-            1.0_f32
         };
 
         if self.z > self.zoom_history.last_integer_zoom {

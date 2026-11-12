@@ -46,6 +46,7 @@ impl HostSurface {
     ///
     /// `surface` is a live surface of the instance of the device that the
     /// targets on it render on, and it outlives them.
+    #[must_use]
     pub unsafe fn from_raw(surface: u64) -> HostSurface {
         use ash::vk::Handle as _;
         HostSurface(vk::SurfaceKHR::from_raw(surface))
@@ -84,6 +85,7 @@ pub type Overlay = Box<dyn FnMut(&OverlayTarget<'_>)>;
 /// A capped surface prefers mailbox to FIFO, as the WebGPU backend does:
 /// FIFO blocks acquiring and presenting on Wayland while the window isn't
 /// visible, which stalls the thread that renders.
+#[must_use]
 pub fn present_mode(cap_frame_rate: bool, available: &[vk::PresentModeKHR]) -> vk::PresentModeKHR {
     let preferred: &[vk::PresentModeKHR] = if cap_frame_rate {
         &[vk::PresentModeKHR::MAILBOX]
@@ -125,7 +127,7 @@ impl SurfaceTarget {
     }
 
     /// [`with_backend`](Self::with_backend) for the surfaces `provider`
-    /// makes, which may be of no window, such as VK_EXT_headless_surface's.
+    /// makes, which may be of no window, such as `VK_EXT_headless_surface`'s.
     pub fn with_backend_from_provider(
         device: &Device,
         provider: Rc<dyn SurfaceProvider>,

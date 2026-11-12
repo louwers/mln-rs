@@ -42,38 +42,47 @@ pub struct CameraOptions {
 }
 
 impl CameraOptions {
+    #[must_use]
     pub fn with_center(mut self, o: Option<LatLng>) -> Self {
         self.center = o;
         self
     }
+    #[must_use]
     pub fn with_center_altitude(mut self, o: Option<f64>) -> Self {
         self.center_altitude = o;
         self
     }
+    #[must_use]
     pub fn with_padding(mut self, p: Option<EdgeInsets>) -> Self {
         self.padding = p;
         self
     }
+    #[must_use]
     pub fn with_anchor(mut self, o: Option<ScreenCoordinate>) -> Self {
         self.anchor = o;
         self
     }
+    #[must_use]
     pub fn with_zoom(mut self, o: Option<f64>) -> Self {
         self.zoom = o;
         self
     }
+    #[must_use]
     pub fn with_bearing(mut self, o: Option<f64>) -> Self {
         self.bearing = o;
         self
     }
+    #[must_use]
     pub fn with_pitch(mut self, o: Option<f64>) -> Self {
         self.pitch = o;
         self
     }
+    #[must_use]
     pub fn with_roll(mut self, o: Option<f64>) -> Self {
         self.roll = o;
         self
     }
+    #[must_use]
     pub fn with_fov(mut self, o: Option<f64>) -> Self {
         self.fov = o;
         self
@@ -98,13 +107,13 @@ pub type TransitionEndFn = std::sync::Arc<dyn Fn(&TransitionEnd) + Send + Sync>;
 pub struct AnimationOptions {
     /// Time to animate to the viewpoint defined herein.
     pub duration: Option<Duration>,
-    /// Average velocity of a flyTo() transition, measured in screenfuls per
+    /// Average velocity of a `flyTo()` transition, measured in screenfuls per
     /// second, assuming a linear timing curve.
     pub velocity: Option<f64>,
-    /// Zero-based zoom level at the peak of the flyTo() transition's flight
+    /// Zero-based zoom level at the peak of the `flyTo()` transition's flight
     /// path.
     pub min_zoom: Option<f64>,
-    /// The longest a flyTo() transition may take, as GL JS's `maxDuration`:
+    /// The longest a `flyTo()` transition may take, as GL JS's `maxDuration`:
     /// a flight whose duration, set or derived from the velocity, exceeds it
     /// jumps instead. `None` caps nothing beyond what [`Duration`] holds: a
     /// derived duration it can't hold jumps too. Other camera commands
@@ -182,6 +191,7 @@ pub struct TransitionEnd {
 
 impl AnimationOptions {
     /// `AnimationOptions(Duration d)`.
+    #[must_use]
     pub fn new(d: Duration) -> Self {
         AnimationOptions { duration: Some(d), ..Default::default() }
     }
@@ -190,7 +200,7 @@ impl AnimationOptions {
 /// Various options for accessing physical properties of the underlying camera
 /// entity. A direct access to these properties allows more flexible and
 /// precise controlling of the camera while also being fully compatible and
-/// interchangeable with CameraOptions. All fields are optional.
+/// interchangeable with `CameraOptions`. All fields are optional.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FreeCameraOptions {
     /// Position of the camera in slightly modified web mercator coordinates.
@@ -283,45 +293,30 @@ pub struct CameraUpdate {
 }
 
 /// Why a [`CameraDelta`] was rejected, as maplibre-native-ffi rejects it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, thiserror::Error)]
 pub enum CameraError {
     /// An offset, anchor, bearing or pitch isn't finite.
+    #[error("camera delta offset, anchor, bearing and pitch must be finite")]
     NotFinite,
     /// The scale isn't finite and positive.
+    #[error("camera delta scale must be finite and positive")]
     InvalidScale,
     /// An anchor needs an offset, scale, bearing or pitch to hold in place.
+    #[error("a camera delta anchor requires scale, bearing, or pitch, or an offset to hold")]
     AnchorWithoutChange,
     /// Only a delta in the end phase carries momentum.
+    #[error("only a camera delta in the end phase carries momentum")]
     MomentumOutsideEnd,
     /// A delta with momentum sets only its animation's transition id and end
     /// function: the momentum, not an animation, moves the camera.
+    #[error("a camera delta with momentum sets only the transition ID and end function of its animation")]
     MomentumWithAnimation,
     /// An anchor combines with an offset and a scale, bearing or pitch only
     /// in an immediate delta: an anchored ease couples the center with its
     /// fields, so it would replace an animated pan.
+    #[error("a camera delta anchor combines with offset only in an immediate delta")]
     AnimatedAnchoredOffset,
 }
-
-impl std::fmt::Display for CameraError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            CameraError::NotFinite => "camera delta offset, anchor, bearing and pitch must be finite",
-            CameraError::InvalidScale => "camera delta scale must be finite and positive",
-            CameraError::AnchorWithoutChange => {
-                "a camera delta anchor requires scale, bearing, or pitch, or an offset to hold"
-            }
-            CameraError::MomentumOutsideEnd => "only a camera delta in the end phase carries momentum",
-            CameraError::MomentumWithAnimation => {
-                "a camera delta with momentum sets only the transition ID and end function of its animation"
-            }
-            CameraError::AnimatedAnchoredOffset => {
-                "a camera delta anchor combines with offset only in an immediate delta"
-            }
-        })
-    }
-}
-
-impl std::error::Error for CameraError {}
 
 impl CameraDelta {
     /// Checks the delta as maplibre-native-ffi's `validate_camera_delta`

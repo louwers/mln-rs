@@ -551,17 +551,20 @@ impl LocalTarget {
     }
 
     /// The device the target renders on.
+    #[must_use]
     pub fn device(&self) -> &Device {
         &self.device
     }
 
     /// The backend that renderers drawing into the target draw with.
+    #[must_use]
     pub fn backend(&self) -> Rc<dyn RendererBackend> {
         self.backend.as_dyn()
     }
 
     /// The frames to draw into, or `None` while a surface target has no
     /// surface.
+    #[must_use]
     pub fn frames(&self) -> Option<&dyn FrameTarget> {
         match &self.frames {
             Frames::Offscreen(target) => Some(&**target),
@@ -572,16 +575,19 @@ impl LocalTarget {
     }
 
     /// Whether frames go to the host in images of the target's own.
+    #[must_use]
     pub fn is_exported(&self) -> bool {
         matches!(self.frames, Frames::Exported(_))
     }
 
     /// Whether frames go to the host's ring.
+    #[must_use]
     pub fn is_borrowed(&self) -> bool {
         matches!(self.frames, Frames::Borrowed { .. })
     }
 
     /// Whether the target is a ring that let go of its textures.
+    #[must_use]
     pub fn ring_released(&self) -> bool {
         matches!(self.frames, Frames::Borrowed { target: None, .. })
     }
@@ -626,6 +632,7 @@ impl LocalTarget {
 
     /// The size in pixels of an exported ring's images, or `None` for
     /// another target.
+    #[must_use]
     pub fn exported_size(&self) -> Option<Size> {
         match &self.frames {
             Frames::Exported(target) => Some(target.size()),
@@ -649,6 +656,7 @@ impl LocalTarget {
     }
 
     /// The exported image of the frame at `slot`, of the size it has.
+    #[must_use]
     pub fn exported_texture(&self, slot: usize) -> Option<FrameTexture> {
         match &self.frames {
             Frames::Exported(target) => {
@@ -677,6 +685,7 @@ impl LocalTarget {
     }
 
     /// Whether frames are read back rather than presented.
+    #[must_use]
     pub fn is_offscreen(&self) -> bool {
         matches!(self.frames, Frames::Offscreen(_))
     }

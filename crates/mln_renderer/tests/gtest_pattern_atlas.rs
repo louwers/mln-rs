@@ -27,9 +27,7 @@ fn check_image(base: &str, actual: &PremultipliedImage) {
     let image_threshold = 0.0;
     let pixel_threshold = 0.0;
     let expected = decode_image(&read_file(&format!("{base}/expected.png"))).expect("expected.png");
-    let diff = if expected.size != actual.size {
-        1.0
-    } else {
+    let diff = if expected.size == actual.size {
         let pixels = pixelmatch::pixelmatch(
             &actual.data,
             &expected.data,
@@ -39,7 +37,9 @@ fn check_image(base: &str, actual: &PremultipliedImage) {
             pixel_threshold,
             false,
         );
-        pixels as f64 / (expected.size.width * expected.size.height) as f64
+        pixels as f64 / f64::from(expected.size.width * expected.size.height)
+    } else {
+        1.0
     };
     assert!(diff <= image_threshold, "{base}: image diff {diff} > {image_threshold}");
 }

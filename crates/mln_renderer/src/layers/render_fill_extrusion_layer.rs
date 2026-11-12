@@ -18,7 +18,11 @@ use mln_gfx::drawable_tweaker::DrawableTweakerPtr;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_FILL_EXTRUSION_BASE_VERTEX_ATTRIBUTE, ID_FILL_EXTRUSION_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_IMAGE_TEXTURE,
+    ID_FILL_EXTRUSION_NEXT_DECIMALS_ED_ATTRIBUTE, ID_FILL_EXTRUSION_NEXT_OUTLINE_POS_ATTRIBUTE,
+    ID_FILL_EXTRUSION_OUTLINE_POS_ATTRIBUTE, ID_FILL_EXTRUSION_POS_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{
@@ -29,7 +33,10 @@ use mln_map_types::TransformState;
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_crossfade, get_evaluated};
 use mln_style::layers::fill_extrusion_layer_impl::Impl as FillExtrusionLayerImpl;
-use mln_style::layers::fill_extrusion_layer_properties::*;
+use mln_style::layers::fill_extrusion_layer_properties::{
+    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties, FillExtrusionOpacity,
+    FillExtrusionPaintProperties, FillExtrusionPattern, FillExtrusionTranslate, FillExtrusionTranslateAnchor,
+};
 use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::AlignmentType;
@@ -99,7 +106,7 @@ fn capture_rendered_features(
     stats.rendered_features.reserve(features.len());
 
     for feature in features {
-        debug_assert!(!feature.feature_id.is_empty());
+        debug_assert_ne!(feature.feature_id, "");
 
         if !color_is_constant {
             // Consider only the value for the first vertex of this feature, for now.
@@ -211,7 +218,7 @@ fn create_builder(
     }
     builder.set_render_pass(RenderPass::Translucent);
     builder.set_cull_face_mode(&CullFaceMode::back_ccw());
-    builder.set_draw_priority(if enable_color { 1 } else { 0 });
+    builder.set_draw_priority(i64::from(enable_color));
     if let Some(tweaker) = tweaker {
         builder.add_tweaker(tweaker.clone());
     }
@@ -570,31 +577,28 @@ impl RenderLayer for RenderFillExtrusionLayer {
                 ));
             }
 
-            if has_pattern && tweaker.is_none() {
-                if let Some(atlases) = tile.get_atlas_textures() {
-                    let new_tweaker: DrawableTweakerPtr = Rc::new(DrawableAtlasesTweaker::new(
-                        Some(atlases.clone()),
-                        None,
-                        Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
-                        /*is_text=*/ false,
-                        false,
-                        AlignmentType::Auto,
-                        false,
-                        false,
-                    ));
-                    for builder in [
-                        &mut depth_builder,
-                        &mut color_builder,
-                        &mut instanced_depth_builder,
-                        &mut instanced_color_builder,
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        builder.add_tweaker(new_tweaker.clone());
-                    }
-                    tweaker = Some(new_tweaker);
+            if has_pattern
+                && tweaker.is_none()
+                && let Some(atlases) = tile.get_atlas_textures()
+            {
+                let new_tweaker: DrawableTweakerPtr = Rc::new(DrawableAtlasesTweaker::new(
+                    Some(atlases.clone()),
+                    None,
+                    Some(ID_FILL_EXTRUSION_IMAGE_TEXTURE),
+                    /*is_text=*/ false,
+                    false,
+                    AlignmentType::Auto,
+                    false,
+                    false,
+                ));
+                for builder in
+                    [&mut depth_builder, &mut color_builder, &mut instanced_depth_builder, &mut instanced_color_builder]
+                        .into_iter()
+                        .flatten()
+                {
+                    builder.add_tweaker(new_tweaker.clone());
                 }
+                tweaker = Some(new_tweaker);
             }
             let _ = &tweaker;
 

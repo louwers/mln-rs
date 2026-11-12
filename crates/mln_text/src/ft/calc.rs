@@ -19,31 +19,34 @@ fn neg_long(x: i64) -> i64 {
 }
 
 /// `FT_MulDiv(a, b, c)`: `(a * b + c / 2) / c`, rounding the magnitude.
+#[must_use]
 pub fn mul_div(a: i64, b: i64, c: i64) -> i64 {
     let mut s = 1;
     let a = move_sign(a, &mut s);
     let b = move_sign(b, &mut s);
     let c = move_sign(c, &mut s);
-    let d = if c > 0 { a.wrapping_mul(b).wrapping_add(c >> 1) / c } else { 0x7FFF_FFFF };
+    let d = a.wrapping_mul(b).wrapping_add(c >> 1).checked_div(c).unwrap_or(0x7FFF_FFFF);
     let d = d as i64;
     if s < 0 { neg_long(d) } else { d }
 }
 
 /// `FT_DivFix(a, b)`: `(a << 16 + b / 2) / b`.
+#[must_use]
 pub fn div_fix(a: i64, b: i64) -> i64 {
     let mut s = 1;
     let a = move_sign(a, &mut s);
     let b = move_sign(b, &mut s);
-    let q = if b > 0 { (a << 16).wrapping_add(b >> 1) / b } else { 0x7FFF_FFFF };
+    let q = (a << 16).wrapping_add(b >> 1).checked_div(b).unwrap_or(0x7FFF_FFFF);
     let q = q as i64;
     if s < 0 { neg_long(q) } else { q }
 }
 
 /// `FT_MulFix(a, b)` (the C version; the x86-64 inline assembly computes
 /// the same, truncated to 32 bits).
+#[must_use]
 pub fn mul_fix(a: i64, b: i64) -> i64 {
-    let ab = (a as i32 as i64).wrapping_mul(b as i32 as i64);
-    ((ab + 0x8000 - (ab < 0) as i64) >> 16) as i32 as i64
+    let ab = i64::from(a as i32).wrapping_mul(i64::from(b as i32));
+    i64::from(((ab + 0x8000 - i64::from(ab < 0)) >> 16) as i32)
 }
 
 #[cfg(test)]
@@ -53,8 +56,8 @@ mod tests {
     #[test]
     fn fixed_point() {
         assert_eq!(div_fix(1536, 2048), 49152);
-        assert_eq!(div_fix(1536, 1000), 100663);
-        assert_eq!(mul_div(500, 100663, 64), 786430);
+        assert_eq!(div_fix(1536, 1000), 100_663);
+        assert_eq!(mul_div(500, 100_663, 64), 786_430);
         assert_eq!(mul_div(-3, 5, 2), -8);
         assert_eq!(mul_fix(1 << 16, 3), 3);
         assert_eq!(mul_fix(-(1 << 15), 1), -1); // -0.5 rounds away from zero

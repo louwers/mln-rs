@@ -1,6 +1,6 @@
 //! Ported gtests (test/style/**) plus the M1 render-test style check.
 //! One module per C++ test file; `#[test]` names are the gtest names in
-//! snake_case.
+//! `snake_case`.
 
 mod conversion_function;
 mod conversion_geojson_options;

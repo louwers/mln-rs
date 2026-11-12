@@ -126,7 +126,7 @@ fn miles_ruler() -> CheapRuler {
 
 fn assert_err(expected: f64, actual: f64, max_error: f64) {
     // Add a negligible fraction to make sure we don't divide by zero.
-    let error = ((actual - expected) / (if expected == 0.0 { expected + 0.000001 } else { expected })).abs();
+    let error = ((actual - expected) / (if expected == 0.0 { expected + 0.000_001 } else { expected })).abs();
 
     assert!(error <= max_error, "expected is {expected} but got {actual}");
 }
@@ -148,7 +148,7 @@ fn distance_in_miles() {
     let d = ruler().distance(p(30.5, 32.8351), p(30.51, 32.8451));
     let d2 = miles_ruler().distance(p(30.5, 32.8351), p(30.51, 32.8451));
 
-    assert_err(d / d2, 1.609344, 1e-12);
+    assert_err(d / d2, 1.609_344, 1e-12);
 }
 
 #[test]
@@ -232,13 +232,13 @@ fn along_with_dist_greater_than_length() {
 fn point_on_line() {
     // not Turf comparison because pointOnLine is bugged
     // https://github.com/Turfjs/turf/issues/344
-    let line = vec![p(-77.031669, 38.878605), p(-77.029609, 38.881946)];
-    let result = ruler().point_on_line(&line, p(-77.034076, 38.882017));
+    let line = vec![p(-77.031_669, 38.878_605), p(-77.029_609, 38.881_946)];
+    let result = ruler().point_on_line(&line, p(-77.034_076, 38.882_017));
 
-    assert_err(result.0.x, -77.03052689033436, 1e-6);
-    assert_err(result.0.y, 38.880457324462576, 1e-6);
+    assert_err(result.0.x, -77.030_526_890_334_36, 1e-6);
+    assert_err(result.0.y, 38.880_457_324_462_576, 1e-6);
     assert_eq!(result.1, 0); // index
-    assert_err(result.2, 0.5544221677861756, 1e-6); // t
+    assert_err(result.2, 0.554_422_167_786_175_6, 1e-6); // t
 
     assert_eq!(ruler().point_on_line(&line, p(-80.0, 38.0)).2, 0.0, "t is not less than 0");
     assert_eq!(ruler().point_on_line(&line, p(-75.0, 38.0)).2, 1.0, "t is not bigger than 1");
@@ -246,10 +246,10 @@ fn point_on_line() {
 
 #[test]
 fn point_to_segment_distance() {
-    let pt = p(-77.034076, 38.882017);
-    let p0 = p(-77.031669, 38.878605);
-    let p1 = p(-77.029609, 38.881946);
-    assert_err(0.37461484020420416, ruler().point_to_segment_distance(&pt, &p0, &p1), 1e-6);
+    let pt = p(-77.034_076, 38.882_017);
+    let p0 = p(-77.031_669, 38.878_605);
+    let p1 = p(-77.029_609, 38.881_946);
+    assert_err(0.374_614_840_204_204_16, ruler().point_to_segment_distance(&pt, &p0, &p1), 1e-6);
 }
 
 #[test]
@@ -295,7 +295,7 @@ fn line_slice_reverse() {
     let stop = ruler().along(line, dist * 0.3);
     let actual = ruler().line_distance(&ruler().line_slice(start, stop, line));
 
-    assert_err(0.018676476689649835, actual, 1e-6);
+    assert_err(0.018_676_476_689_649_835, actual, 1e-6);
 }
 
 #[test]
@@ -317,10 +317,10 @@ fn buffer_bbox() {
     let bbox = Box::new(p(30.0, 38.0), p(40.0, 39.0));
     let bbox2 = ruler().buffer_bbox(bbox, 1.0);
 
-    assert_err(bbox2.min.x, 29.989319515875376, 1e-6);
-    assert_err(bbox2.min.y, 37.99098271225711, 1e-6);
-    assert_err(bbox2.max.x, 40.01068048412462, 1e-6);
-    assert_err(bbox2.max.y, 39.00901728774289, 1e-6);
+    assert_err(bbox2.min.x, 29.989_319_515_875_376, 1e-6);
+    assert_err(bbox2.min.y, 37.990_982_712_257_11, 1e-6);
+    assert_err(bbox2.max.x, 40.010_680_484_124_62, 1e-6);
+    assert_err(bbox2.max.y, 39.009_017_287_742_89, 1e-6);
 }
 
 #[test]
@@ -344,7 +344,7 @@ fn from_tile() {
 
 #[test]
 fn longitude_wrap() {
-    let mut seed: u64 = 0x2545F4914F6CDD1D;
+    let mut seed: u64 = 0x2545_F491_4F6C_DD1D;
     let mut bernoulli = move || {
         seed ^= seed << 13;
         seed ^= seed >> 7;

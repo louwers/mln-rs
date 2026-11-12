@@ -40,10 +40,10 @@ pub enum ViewportMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum TileLodMode {
-    /// Default TileLOD algorithm
+    /// Default `TileLOD` algorithm
     #[default]
     Default,
-    /// Distance-based TileLOD algorithm
+    /// Distance-based `TileLOD` algorithm
     Distance,
 }
 
@@ -63,6 +63,7 @@ impl MapDebugOptions {
     pub const DEPTH_BUFFER: MapDebugOptions = MapDebugOptions(1 << 7);
 
     /// C++ `bool operator&(MapDebugOptions, MapDebugOptions)`.
+    #[must_use]
     pub const fn contains(self, rhs: MapDebugOptions) -> bool {
         (self.0 & rhs.0) != 0
     }

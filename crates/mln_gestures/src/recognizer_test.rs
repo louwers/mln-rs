@@ -45,13 +45,13 @@ struct Rig {
 
 impl Rig {
     fn new() -> Self {
-        Self::with(GestureOptions::DEFAULT)
+        Self::with(&GestureOptions::DEFAULT)
     }
 
-    fn with(options: GestureOptions) -> Self {
+    fn with(options: &GestureOptions) -> Self {
         Rig {
             camera: transform(),
-            input: GestureRecognizer::new(options),
+            input: GestureRecognizer::new(*options),
             now: 1000.0,
             start: TimePoint::default(),
             frames: 0,
@@ -580,7 +580,7 @@ fn input_interrupts_animations() {
     assert!(!rig.camera.in_transition());
 
     // Or only the recognizer's own.
-    let mut rig = Rig::with(GestureOptions { interrupt_animations: false, ..GestureOptions::DEFAULT });
+    let mut rig = Rig::with(&GestureOptions { interrupt_animations: false, ..GestureOptions::DEFAULT });
     rig.camera.ease_to(&CameraOptions::default().with_zoom(Some(4.0)), &AnimationOptions::new(milliseconds(500)));
     rig.frame();
     rig.down(1, PointerKind::Mouse, 10.0, 10.0);
@@ -636,7 +636,7 @@ fn a_flick_that_catches_a_glide_carries_its_speed() {
     assert!(compounded > again && compounded <= glide(10_000.0) + 0.01, "{compounded}");
 
     // Off, each release glides at its own speed, as ffi's demo and GL JS do.
-    let mut rig = Rig::with(GestureOptions { carry_caught_glide: false, ..GestureOptions::DEFAULT });
+    let mut rig = Rig::with(&GestureOptions { carry_caught_glide: false, ..GestureOptions::DEFAULT });
     fling_and_glide(&mut rig, 100.0, 1.0, 6);
     let own = rig.fling(300.0, 10.0);
     assert!((own - alone).abs() < 0.01, "{own} vs {alone}");
@@ -750,7 +750,7 @@ fn shift_drag_zooms_to_a_box() {
 /// Pinches out by about 0.93 levels and tilts by about 5° with two fingers,
 /// holds still so nothing glides, and lifts both; returns the zoom and pitch
 /// once everything settles.
-fn pinch_and_tilt(options: GestureOptions) -> (f64, f64) {
+fn pinch_and_tilt(options: &GestureOptions) -> (f64, f64) {
     let mut rig = Rig::with(options);
     rig.down(1, PointerKind::Touch, 300.0, 300.0);
     rig.down(2, PointerKind::Touch, 500.0, 300.0);
@@ -783,11 +783,11 @@ fn pinch_and_tilt(options: GestureOptions) -> (f64, f64) {
 #[test]
 fn zoom_and_pitch_settle_only_when_their_snaps_are_set() {
     // Compose's defaults: zoom and pitch stay where the gesture left them.
-    let (zoom, pitch) = pinch_and_tilt(GestureOptions::DEFAULT);
+    let (zoom, pitch) = pinch_and_tilt(&GestureOptions::DEFAULT);
     assert!((zoom - zoom.round()).abs() > 0.05, "{zoom}");
     assert!(pitch > 1.0, "{pitch}");
     // ffi's C API defaults: a whole level, and flat within 7°.
-    let (zoom, pitch) = pinch_and_tilt(GestureOptions {
+    let (zoom, pitch) = pinch_and_tilt(&GestureOptions {
         zoom_snap: Some(MomentumSnap::ZOOM),
         pitch_snap: Some(MomentumSnap::PITCH),
         ..GestureOptions::DEFAULT

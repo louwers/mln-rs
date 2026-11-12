@@ -44,7 +44,7 @@ impl Settings {
         }
     }
 
-    /// Returns setting value for a specified key or NullValue if element
+    /// Returns setting value for a specified key or `NullValue` if element
     /// for specified key is missing.
     pub fn get(&self, key: &str) -> Value {
         get_value(key, &self.settings.lock_unpoisoned())

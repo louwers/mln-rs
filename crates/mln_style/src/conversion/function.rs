@@ -5,6 +5,7 @@
 // Quirk kept: the conversion interpolates with ColorSpace::RGB; the legacy
 // "colorSpace" member is not read.
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use mln_expression::Interpolator;
@@ -26,6 +27,7 @@ use crate::property_expression::PropertyExpression;
 const TOKEN_RESERVED_CHARS: &[u8] = b"{}";
 
 /// `hasTokens`: whether `source` contains a `{token}`.
+#[must_use]
 pub fn has_tokens(source: &str) -> bool {
     let bytes = source.as_bytes();
     let end = bytes.len();
@@ -49,16 +51,19 @@ pub fn has_tokens(source: &str) -> bool {
     false
 }
 
+#[must_use]
 pub fn convert_token_string_to_format_expression(source: &str) -> Box<dyn Expression> {
     let text_expression = convert_token_string_to_expression(source);
     let sections = vec![FormatExpressionSection::new(text_expression)];
     Box::new(FormatExpression::new(sections))
 }
 
+#[must_use]
 pub fn convert_token_string_to_image_expression(source: &str) -> Box<dyn Expression> {
     Box::new(ImageExpression::new(convert_token_string_to_expression(source)))
 }
 
+#[must_use]
 pub fn convert_token_string_to_expression(source: &str) -> Box<dyn Expression> {
     let mut inputs: Vec<Box<dyn Expression>> = Vec::new();
 
@@ -104,7 +109,7 @@ pub fn convert_function_to_expression<T>(
 where
     T: Converter + ValueConverter,
 {
-    let expression = convert_function_to_expression_for_type(T::expression_type(), value, error, convert_tokens)?;
+    let expression = convert_function_to_expression_for_type(&T::expression_type(), value, error, convert_tokens)?;
 
     let mut default_value: Option<T> = None;
 
@@ -124,7 +129,7 @@ where
 // check that the input is an integer).
 fn convert_double(value: &Convertible<'_>, error: &mut Error) -> Option<f64> {
     let converted = convert::<f32>(value, error)?;
-    Some(converted as f64)
+    Some(f64::from(converted))
 }
 
 fn convert_int64(value: &Convertible<'_>, error: &mut Error) -> Option<i64> {
@@ -145,11 +150,11 @@ enum FunctionType {
 
 fn interpolatable(type_: &Type) -> bool {
     match type_ {
-        Type::Number => true,
-        Type::Color => true,
-        Type::Padding => true,
-        Type::ProjectionDefinition => true,
-        Type::VariableAnchorOffsetCollection => true,
+        Type::Number
+        | Type::Color
+        | Type::Padding
+        | Type::ProjectionDefinition
+        | Type::VariableAnchorOffsetCollection => true,
         Type::Array(array) => {
             // Arrays are interpolatable if they have a fixed size and item type is Number,
             // OR if the item type itself is interpolatable (e.g., Array<Color>)
@@ -185,7 +190,7 @@ fn convert_literal(
     match type_ {
         Type::Number => {
             let result = convert::<f32>(value, error)?;
-            Some(dsl::literal(Value::Number(result as f64)))
+            Some(dsl::literal(Value::Number(f64::from(result))))
         }
         Type::Boolean => {
             let result = convert::<bool>(value, error)?;
@@ -220,11 +225,11 @@ fn convert_literal(
                 error.message = "value must be an array".to_owned();
                 return None;
             }
-            if let Some(n) = array.n {
-                if value.array_length() != n {
-                    error.message = format!("value must be an array of length {n}");
-                    return None;
-                }
+            if let Some(n) = array.n
+                && value.array_length() != n
+            {
+                error.message = format!("value must be an array of length {n}");
+                return None;
             }
             match &array.item_type {
                 Type::Number => {
@@ -234,7 +239,7 @@ fn convert_literal(
                             error.message = "value must be an array of numbers".to_owned();
                             return None;
                         };
-                        result.push(Value::Number(number as f64));
+                        result.push(Value::Number(f64::from(number)));
                     }
                     Some(dsl::literal(Value::Array(result)))
                 }
@@ -293,7 +298,7 @@ impl DoubleStops {
 
     fn emplace(&mut self, key: f64, value: Box<dyn Expression>) {
         let i = self.lower_bound(key);
-        if i < self.stops.len() && !(key < self.stops[i].0) {
+        if i < self.stops.len() && key.partial_cmp(&self.stops[i].0) != Some(Ordering::Less) {
             return;
         }
         self.stops.insert(i, (key, value));
@@ -349,7 +354,7 @@ fn convert_stops(
         let t = convert::<f32>(&stop_value.array_member(0), error)?;
 
         let e = convert_literal(&stop_type, &stop_value.array_member(1), error, convert_tokens)?;
-        stops.emplace(t as f64, e);
+        stops.emplace(f64::from(t), e);
     }
     Some(stops)
 }
@@ -362,7 +367,7 @@ fn omit_first_stop(stops: &mut DoubleStops) {
     }
     // stops.emplace(-inf, std::move(stops[min])); stops.erase(min);
     let i = stops.lower_bound(min);
-    if i < stops.stops.len() && !(min < stops.stops[i].0) {
+    if i < stops.stops.len() && min.partial_cmp(&stops.stops[i].0) != Some(Ordering::Less) {
         let (_, value) = stops.stops.remove(i);
         stops.emplace(f64::NEG_INFINITY, value);
     }
@@ -423,7 +428,7 @@ fn convert_base(value: &Convertible<'_>, error: &mut Error) -> Option<f64> {
         return None;
     };
 
-    Some(base as f64)
+    Some(f64::from(base))
 }
 
 fn step(type_: Type, input: Box<dyn Expression>, stops: DoubleStops) -> Box<dyn Expression> {
@@ -673,7 +678,7 @@ fn composite<M: InnerStops>(
 
         // map[*z].emplace(*d, std::move(*r));
         let index = map.partition_point(|(k, _)| *k < z);
-        if !(index < map.len() && !(z < map[index].0)) {
+        if index >= map.len() || z < map[index].0 {
             map.insert(index, (z, M::default()));
         }
         map[index].1.emplace(d, r);
@@ -682,7 +687,7 @@ fn composite<M: InnerStops>(
     let mut stops = DoubleStops::default();
 
     for (z, inner) in map {
-        stops.emplace(z as f64, make_inner_expression(&type_, base, inner));
+        stops.emplace(f64::from(z), make_inner_expression(&type_, base, inner));
     }
 
     if interpolatable(&type_) {
@@ -694,7 +699,7 @@ fn composite<M: InnerStops>(
 
 /// `convertFunctionToExpression(type::Type, const Convertible&, Error&, bool convertTokens)`.
 pub fn convert_function_to_expression_for_type(
-    type_: Type,
+    type_: &Type,
     value: &Convertible<'_>,
     err: &mut Error,
     convert_tokens: bool,
@@ -708,14 +713,14 @@ pub fn convert_function_to_expression_for_type(
 
     match value.object_member("type") {
         None => {
-            function_type = if interpolatable(&type_) { FunctionType::Exponential } else { FunctionType::Interval };
+            function_type = if interpolatable(type_) { FunctionType::Exponential } else { FunctionType::Interval };
         }
         Some(type_value) => {
             if let Some(string) = type_value.to_string() {
                 if string == "interval" {
                     function_type = FunctionType::Interval;
                 }
-                if string == "exponential" && interpolatable(&type_) {
+                if string == "exponential" && interpolatable(type_) {
                     function_type = FunctionType::Exponential;
                 }
                 if string == "categorical" {
@@ -732,7 +737,7 @@ pub fn convert_function_to_expression_for_type(
     // it can leave a message in `err` without failing.
     let default_expr = |err: &mut Error| -> Option<Box<dyn Expression>> {
         let member = value.object_member("default")?;
-        convert_literal(&type_, &member, err, false)
+        convert_literal(type_, &member, err, false)
     };
 
     if value.object_member("property").is_none() {
@@ -766,7 +771,7 @@ pub fn convert_function_to_expression_for_type(
 
     if function_type == FunctionType::Identity {
         let get = || dsl::get(dsl::literal_str(&property));
-        return match &type_ {
+        return match type_ {
             Type::String => Some(dsl::string(get(), default_expr(err))),
             Type::Number => Some(dsl::number(get(), default_expr(err))),
             Type::Boolean => Some(dsl::boolean(get(), default_expr(err))),
@@ -821,27 +826,7 @@ pub fn convert_function_to_expression_for_type(
         }
     };
 
-    if !stop.is_object() {
-        // Source function.
-        match function_type {
-            FunctionType::Interval => {
-                let def = default_expr(err);
-                convert_interval_function(type_.clone(), value, err, &get_property, def, false)
-            }
-            FunctionType::Exponential => {
-                let def = default_expr(err);
-                convert_exponential_function(type_.clone(), value, err, &get_property, def, false)
-            }
-            FunctionType::Categorical => {
-                let def = default_expr(err);
-                convert_categorical_function(type_.clone(), value, err, &property, def)
-            }
-            _ => {
-                err.message = "unsupported function type".to_owned();
-                None
-            }
-        }
-    } else {
+    if stop.is_object() {
         // Composite function.
         let Some(source_value) = stop.object_member("value") else {
             err.message = "stop must specify value".to_owned();
@@ -857,18 +842,17 @@ pub fn convert_function_to_expression_for_type(
         };
 
         if source_value.to_bool().is_some() {
-            return match function_type {
-                FunctionType::Categorical => composite::<VecMap<bool, Box<dyn Expression>>>(
+            return if function_type == FunctionType::Categorical {
+                composite::<VecMap<bool, Box<dyn Expression>>>(
                     type_.clone(),
                     value,
                     err,
                     &|v, e| convert::<bool>(v, e),
                     &|type_inner, _, stops| categorical_bool(type_inner.clone(), &property, stops, default_for_inner()),
-                ),
-                _ => {
-                    err.message = "unsupported function type".to_owned();
-                    None
-                }
+                )
+            } else {
+                err.message = "unsupported function type".to_owned();
+                None
             };
         }
 
@@ -910,23 +894,42 @@ pub fn convert_function_to_expression_for_type(
         }
 
         if source_value.to_string().is_some() {
-            return match function_type {
-                FunctionType::Categorical => composite::<VecMap<String, Box<dyn Expression>>>(
+            return if function_type == FunctionType::Categorical {
+                composite::<VecMap<String, Box<dyn Expression>>>(
                     type_.clone(),
                     value,
                     err,
                     &|v, e| convert::<String>(v, e),
                     &|type_inner, _, stops| categorical(type_inner.clone(), &property, stops, default_for_inner()),
-                ),
-                _ => {
-                    err.message = "unsupported function type".to_owned();
-                    None
-                }
+                )
+            } else {
+                err.message = "unsupported function type".to_owned();
+                None
             };
         }
 
         err.message = "stop domain value must be a number, string, or boolean".to_owned();
         None
+    } else {
+        // Source function.
+        match function_type {
+            FunctionType::Interval => {
+                let def = default_expr(err);
+                convert_interval_function(type_.clone(), value, err, &get_property, def, false)
+            }
+            FunctionType::Exponential => {
+                let def = default_expr(err);
+                convert_exponential_function(type_.clone(), value, err, &get_property, def, false)
+            }
+            FunctionType::Categorical => {
+                let def = default_expr(err);
+                convert_categorical_function(type_.clone(), value, err, &property, def)
+            }
+            _ => {
+                err.message = "unsupported function type".to_owned();
+                None
+            }
+        }
     }
 }
 
@@ -939,6 +942,8 @@ mod tests {
     // gtest: StyleConversion.TokenStrings
     #[test]
     fn token_strings() {
+        use dsl::{concat, get, literal_str};
+
         assert!(!has_tokens(""));
         assert!(!has_tokens("{"));
         assert!(!has_tokens("{token"));
@@ -946,7 +951,6 @@ mod tests {
         assert!(has_tokens("token {token}"));
         assert!(has_tokens("{token} {token}"));
 
-        use dsl::{concat, get, literal_str};
         let eq = |a: Box<dyn Expression>, b: Box<dyn Expression>| a.equals(b.as_ref());
         assert!(eq(convert_token_string_to_expression("{token}"), dsl::to_string(get(literal_str("token")), None)));
         assert!(eq(

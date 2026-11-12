@@ -1,6 +1,7 @@
 // Ports vendor/vector-tile/test/unit/tags.test.cpp and
 // vendor/vector-tile/test/unit/vector_tile.test.cpp.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 use feature::{Identifier, Value};
@@ -50,7 +51,7 @@ fn protobuf_tag_constants() {
     assert_eq!(GeomType::POLYGON.0, 3);
 }
 
-/// ASSERT_KNOWN_FEATURE() followed by the type and geometry checks.
+/// `ASSERT_KNOWN_FEATURE()` followed by the type and geometry checks.
 fn assert_known_feature(path: &str, type_: GeomType, expected_geom: &str) {
     let buffer = open_tile(path);
     let tile = Buffer::new(&buffer).unwrap();
@@ -76,7 +77,7 @@ fn stringify_geom(geom: &PointsArraysType) -> String {
     for point_array in geom {
         s.push('[');
         for point in point_array {
-            s.push_str(&format!("{}, {}", point.x, point.y));
+            let _ = write!(s, "{}, {}", point.x, point.y);
         }
         s.push(']');
     }
@@ -136,7 +137,7 @@ fn prevent_massive_over_allocation() {
     assert_eq!(layer.get_name(), "0000000000");
     let feature = Feature::new(layer.get_feature(0).unwrap(), &layer).unwrap();
     let geom: PointsArraysType = feature.get_geometries::<i16>(1.0).unwrap();
-    assert!(geom.capacity() <= 655360);
+    assert!(geom.capacity() <= 655_360);
 }
 
 #[test]
@@ -152,7 +153,7 @@ fn prevent_underflow_in_case_of_lineto_with_0_command_count() {
         let feature = Feature::new(layer.get_feature(i).unwrap(), &layer).unwrap();
         assert_eq!(feature.get_type(), GeomType::LINESTRING);
         let geom = feature.get_geometries::<i16>(1.0).unwrap();
-        assert!(!geom.is_empty());
+        assert_ne!(geom, [] as [std::vec::Vec<geometry::Point<i16>>; 0]);
     }
 }
 
@@ -169,7 +170,7 @@ fn handle_layer_with_duplicate_keys() {
 #[test]
 fn errors() {
     let tile = Buffer::new(&[]).unwrap();
-    assert!(tile.layer_names().is_empty());
+    assert_eq!(tile.layer_names(), [] as [std::string::String; 0]);
     assert_eq!(tile.get_layer("x").unwrap_err(), Error::Runtime("no layer by the name of 'x'".to_owned()));
     // A layer without a name.
     assert_eq!(Buffer::new(&[0x1a, 0x00]).unwrap_err(), Error::Runtime("Layer missing name".to_owned()));

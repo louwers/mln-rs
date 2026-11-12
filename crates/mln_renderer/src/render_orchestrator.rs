@@ -54,7 +54,9 @@ use crate::render_tree::{DebugType, LayerRenderItem, RenderItem, RenderTree, Ren
 use crate::renderer_event::{EventSink, RendererEvent, RendererEvents};
 use crate::sources::render_tile_source::{PolylineLayerTweaker, debug_line_properties}; // layers: debug
 use crate::style_diff::{diff_images, diff_layers, diff_sources, has_layout_difference};
+use crate::text::cross_tile_symbol_index::AddLayerResult;
 use crate::text::glyph_manager::GlyphManager;
+use crate::text::placement::Placement;
 use crate::tile::tile::TileOperation;
 use crate::tile::tile_worker_transport::{InProcessTransport, TileWorkerTransport};
 use crate::tile_parameters::TileParameters;
@@ -65,7 +67,7 @@ use crate::update_parameters::UpdateParameters;
 /// equality is sufficient here.
 fn diff_global_state_keys(previous: &GlobalStateMap, current: &GlobalStateMap) -> VecSet<String> {
     let mut keys = VecSet::new();
-    for (key, value) in current.iter() {
+    for (key, value) in current {
         match previous.get(key) {
             Some(prev) if prev == value => {}
             _ => {
@@ -81,7 +83,7 @@ fn diff_global_state_keys(previous: &GlobalStateMap, current: &GlobalStateMap) -
     keys
 }
 
-/// The ImageManagerObserver half of `RenderOrchestrator`.
+/// The `ImageManagerObserver` half of `RenderOrchestrator`.
 struct OrchestratorImageObserver {
     events: EventSink,
 }
@@ -99,7 +101,7 @@ impl crate::image_manager::ImageManagerObserver for OrchestratorImageObserver {
     }
 }
 
-/// symbols: the GlyphManagerObserver half of `RenderOrchestrator`.
+/// symbols: the `GlyphManagerObserver` half of `RenderOrchestrator`.
 struct OrchestratorGlyphObserver {
     events: EventSink,
 }
@@ -143,7 +145,7 @@ impl crate::text::glyph_manager::GlyphManagerObserver for OrchestratorGlyphObser
     }
 }
 
-/// The RenderSourceObserver half of `RenderOrchestrator`.
+/// The `RenderSourceObserver` half of `RenderOrchestrator`.
 struct OrchestratorSourceObserver {
     events: EventSink,
 }
@@ -167,7 +169,7 @@ impl RenderSourceObserver for OrchestratorSourceObserver {
     }
 }
 
-fn ptr_eq_option<T: ?Sized>(a: &Option<Arc<T>>, b: &Option<Arc<T>>) -> bool {
+fn ptr_eq_option<T: ?Sized>(a: Option<&Arc<T>>, b: Option<&Arc<T>>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => Arc::ptr_eq(a, b),
@@ -221,7 +223,7 @@ pub struct RenderOrchestrator {
     filtered_layers_for_source: Vec<Immutable<dyn LayerProperties>>,
 
     thread_pool: TaggedScheduler,
-    /// Port-only: creates the tiles' workers (tile_worker_transport.rs).
+    /// Port-only: creates the tiles' workers (`tile_worker_transport.rs`).
     tile_worker_transport: Rc<dyn TileWorkerTransport>,
 
     global_state: Option<Arc<GlobalStateMap>>,
@@ -230,8 +232,8 @@ pub struct RenderOrchestrator {
     /// insertion order within an index.
     layer_groups_by_layer_index: VecMap<i32, Vec<LayerGroupBasePtr>>,
 
-    /// The `layerTweakers` (weak pointers) each C++ LayerGroupBase holds,
-    /// keyed by the layer group's id (see change_request.rs).
+    /// The `layerTweakers` (weak pointers) each C++ `LayerGroupBase` holds,
+    /// keyed by the layer group's id (see `change_request.rs`).
     layer_group_tweakers: HashMap<SimpleIdentity, Vec<Weak<RefCell<dyn LayerTweaker>>>>,
 
     /// `RenderItem::DebugLayerGroupMap debugLayerGroups` (layers: debug).
@@ -283,7 +285,7 @@ impl RenderOrchestrator {
             transform_state: TransformState::default(),
             glyph_manager,
             image_manager,
-            cross_tile_symbol_index: Default::default(),
+            cross_tile_symbol_index: crate::text::cross_tile_symbol_index::CrossTileSymbolIndex::default(),
             placement_controller: crate::text::placement::PlacementController::new(),
             dynamic_texture_atlas: Arc::new(DynamicTextureAtlas::new()),
             line_atlas: Rc::new(RefCell::new(LineAtlas::new())),
@@ -340,7 +342,7 @@ impl RenderOrchestrator {
 
     /// `getRenderSource(id)`.
     pub fn get_render_source(&self, id: &str) -> Option<&dyn RenderSource> {
-        self.render_sources.get(id).map(|source| source.as_ref())
+        self.render_sources.get(id).map(AsRef::as_ref)
     }
 
     pub fn get_zoom_history(&self) -> &ZoomHistory {
@@ -380,16 +382,16 @@ impl RenderOrchestrator {
             Duration::zero()
         });
 
-        let global_state_changed = !ptr_eq_option(&self.global_state, &update_parameters.global_state);
+        let global_state_changed = !ptr_eq_option(self.global_state.as_ref(), update_parameters.global_state.as_ref());
         let mut changed_global_state_keys: Option<Arc<VecSet<String>>> = None;
         let mut global_state_change = None;
-        if global_state_changed {
-            if let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state) {
-                let changed_keys = Arc::new(diff_global_state_keys(previous, current));
-                changed_global_state_keys = Some(changed_keys.clone());
-                global_state_change =
-                    Some(GlobalStateChange { prior_state: previous.clone(), changed_keys, state_only: false });
-            }
+        if global_state_changed
+            && let (Some(previous), Some(current)) = (&self.global_state, &update_parameters.global_state)
+        {
+            let changed_keys = Arc::new(diff_global_state_keys(previous, current));
+            changed_global_state_keys = Some(changed_keys.clone());
+            global_state_change =
+                Some(GlobalStateChange { prior_state: previous.clone(), changed_keys, state_only: false });
         }
         self.global_state = update_parameters.global_state.clone();
 
@@ -613,10 +615,11 @@ impl RenderOrchestrator {
 
             // A running transition may read the changed state too, from a
             // value the layer no longer has.
-            if let Some(parameters) = &global_state_transition_parameters {
-                if !layer_added_or_changed && (global_state_changed_and_matters || layer.has_transition()) {
-                    layer.transition(parameters);
-                }
+            if let Some(parameters) = &global_state_transition_parameters
+                && !layer_added_or_changed
+                && (global_state_changed_and_matters || layer.has_transition())
+            {
+                layer.transition(parameters);
             }
 
             if layer_added_or_changed
@@ -716,47 +719,48 @@ impl RenderOrchestrator {
                 render_tree_parameters.has_3d |= layer_info.pass3d == layer_type_info::Pass3D::Required;
 
                 if layer_info.source != layer_type_info::Source::NotRequired {
-                    if let Some(source_impl) = &source_impl {
-                        if has_render_source && base_impl.source == source_impl.base().id {
-                            let layer_id = layer.get_id().to_owned();
-                            // A global state change requires a relayout of
-                            // this layer's source if one of the changed state
-                            // properties is referenced by anything that is
-                            // baked into the tile's buckets.
-                            let global_state_requires_relayout = {
-                                if !global_state_changed
-                                    || !(base_impl.get_layout_dependencies()
-                                        | layer.base().evaluated_properties.get_evaluated_dependencies())
-                                    .intersects(Dependency::GLOBAL_STATE)
-                                {
-                                    false
-                                } else if changed_global_state_keys.is_none() {
-                                    true
-                                } else {
-                                    let mut refs = VecSet::new();
-                                    base_impl.collect_layout_global_state_refs(&mut refs);
-                                    layer.base().evaluated_properties.collect_evaluated_global_state_refs(&mut refs);
-                                    mln_style::expression::global_state_refs_intersect(
-                                        Some(&refs),
-                                        changed_global_state_keys.as_deref(),
-                                    )
-                                }
-                            };
-                            source_needs_relayout = source_needs_relayout
-                                || has_image_diff
-                                || constants_mask_changed.contains(&layer_id)
-                                || has_layout_difference(&layer_diff, &layer_id)
-                                || global_state_requires_relayout;
-                            if layer_is_visible {
-                                self.filtered_layers_for_source.push(layer.base().evaluated_properties.clone());
-                                if zoom_fits_layer {
-                                    source_needs_rendering = true;
-                                    let source_id = source_impl.base().id.clone();
-                                    layer_render_items.entry(index as u32).or_insert_with(|| {
-                                        LayerRenderItem::new(layer_ptr.clone(), Some(source_id), index as u32)
-                                    });
-                                    update_list[index] = true;
-                                }
+                    if let Some(source_impl) = &source_impl
+                        && has_render_source
+                        && base_impl.source == source_impl.base().id
+                    {
+                        let layer_id = layer.get_id().to_owned();
+                        // A global state change requires a relayout of
+                        // this layer's source if one of the changed state
+                        // properties is referenced by anything that is
+                        // baked into the tile's buckets.
+                        let global_state_requires_relayout = {
+                            if !global_state_changed
+                                || !(base_impl.get_layout_dependencies()
+                                    | layer.base().evaluated_properties.get_evaluated_dependencies())
+                                .intersects(Dependency::GLOBAL_STATE)
+                            {
+                                false
+                            } else if changed_global_state_keys.is_none() {
+                                true
+                            } else {
+                                let mut refs = VecSet::new();
+                                base_impl.collect_layout_global_state_refs(&mut refs);
+                                layer.base().evaluated_properties.collect_evaluated_global_state_refs(&mut refs);
+                                mln_style::expression::global_state_refs_intersect(
+                                    Some(&refs),
+                                    changed_global_state_keys.as_deref(),
+                                )
+                            }
+                        };
+                        source_needs_relayout = source_needs_relayout
+                            || has_image_diff
+                            || constants_mask_changed.contains(&layer_id)
+                            || has_layout_difference(&layer_diff, &layer_id)
+                            || global_state_requires_relayout;
+                        if layer_is_visible {
+                            self.filtered_layers_for_source.push(layer.base().evaluated_properties.clone());
+                            if zoom_fits_layer {
+                                source_needs_rendering = true;
+                                let source_id = source_impl.base().id.clone();
+                                layer_render_items.entry(index as u32).or_insert_with(|| {
+                                    LayerRenderItem::new(layer_ptr.clone(), Some(source_id), index as u32)
+                                });
+                                update_list[index] = true;
                             }
                         }
                     }
@@ -822,7 +826,7 @@ impl RenderOrchestrator {
 
         // Prepare. Update all matrices and generate data that we should upload
         // to the GPU.
-        for (name, render_source) in self.render_sources.iter_mut() {
+        for (name, render_source) in &mut self.render_sources {
             if render_source.is_enabled() {
                 render_source.prepare(&SourcePrepareParameters {
                     transform: &render_tree_parameters.transform_params,
@@ -840,8 +844,7 @@ impl RenderOrchestrator {
         let mut opaque_pass_cut_off_estimation = layer_render_items.len();
         for render_item in layer_render_items.values() {
             let mut render_layer = render_item.layer.borrow_mut();
-            let source =
-                render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(|source| source.as_ref());
+            let source = render_item.source.as_ref().and_then(|id| self.render_sources.get(id)).map(AsRef::as_ref);
             render_layer.prepare(&mut LayerPrepareParameters {
                 source,
                 image_manager: &self.image_manager, // conformance
@@ -864,8 +867,6 @@ impl RenderOrchestrator {
         }
 
         // Symbol placement. (symbols)
-        use crate::text::cross_tile_symbol_index::AddLayerResult;
-        use crate::text::placement::Placement;
         let mut symbol_buckets_changed = false;
         let mut symbol_buckets_added = false;
         let mut used_symbol_layers: VecSet<String> = VecSet::new();
@@ -971,13 +972,13 @@ impl RenderOrchestrator {
         Some(render_tree)
     }
 
-    pub fn has_transitions(&self, _time_point: TimePoint) -> bool {
+    pub fn has_transitions(&self, time_point: TimePoint) -> bool {
         // conformance
         if self.render_light.has_transition() {
             return true;
         }
 
-        if self.render_sky.as_ref().is_some_and(|render_sky| render_sky.has_transition()) {
+        if self.render_sky.as_ref().is_some_and(crate::render_sky::RenderSky::has_transition) {
             return true;
         }
 
@@ -987,7 +988,7 @@ impl RenderOrchestrator {
             }
         }
 
-        if self.placement_controller.has_transitions(_time_point) {
+        if self.placement_controller.has_transitions(time_point) {
             return true;
         }
 
@@ -1090,16 +1091,16 @@ impl RenderOrchestrator {
         if current == new_index {
             return;
         }
-        if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&current) {
-            if let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group)) {
-                groups.remove(pos);
-                if groups.is_empty() {
-                    self.layer_groups_by_layer_index.remove(&current);
-                }
-                layer_group.borrow_mut().update_layer_index(new_index);
-                self.layer_groups_by_layer_index.entry(new_index).or_default().push(layer_group.clone());
-                return;
+        if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&current)
+            && let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group))
+        {
+            groups.remove(pos);
+            if groups.is_empty() {
+                self.layer_groups_by_layer_index.remove(&current);
             }
+            layer_group.borrow_mut().update_layer_index(new_index);
+            self.layer_groups_by_layer_index.entry(new_index).or_default().push(layer_group.clone());
+            return;
         }
         // We're not tracking the layer, indicating that it's currently
         // disabled, so update it directly.
@@ -1119,14 +1120,14 @@ impl RenderOrchestrator {
 
     pub fn remove_layer_group(&mut self, layer_group: &LayerGroupBasePtr) -> bool {
         let index = layer_group.borrow().get_layer_index();
-        if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&index) {
-            if let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group)) {
-                groups.remove(pos);
-                if groups.is_empty() {
-                    self.layer_groups_by_layer_index.remove(&index);
-                }
-                return true;
+        if let Some(groups) = self.layer_groups_by_layer_index.get_mut(&index)
+            && let Some(pos) = groups.iter().position(|g| Rc::ptr_eq(g, layer_group))
+        {
+            groups.remove(pos);
+            if groups.is_empty() {
+                self.layer_groups_by_layer_index.remove(&index);
             }
+            return true;
         }
         false
     }
@@ -1170,7 +1171,7 @@ impl RenderOrchestrator {
             }
             live
         });
-        for (type_, group) in self.debug_layer_groups.iter() {
+        for (type_, group) in &self.debug_layer_groups {
             if self.debug_layer_tweakers.contains_key(type_) {
                 continue;
             }
@@ -1527,7 +1528,7 @@ impl RenderOrchestrator {
     ) -> Result<crate::query::FeatureExtensionValue, Error> {
         match self.get_render_source(source_id) {
             Some(source) => source.query_feature_extensions(feature, extension, extension_field, args),
-            None => Ok(Default::default()),
+            None => Ok(crate::query::FeatureExtensionValue::default()),
         }
     }
 
@@ -1564,7 +1565,7 @@ impl RenderOrchestrator {
     ) -> mln_style::expression::expression::FeatureState {
         match self.render_sources.get(source_id) {
             Some(render_source) => render_source.get_feature_state(source_layer_id, feature_id),
-            None => Default::default(),
+            None => mln_style::expression::expression::FeatureState::default(),
         }
     }
 

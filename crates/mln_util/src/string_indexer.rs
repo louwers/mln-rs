@@ -30,6 +30,7 @@ pub struct StringIndexer {
 const INITIAL_CAPACITY: usize = 100;
 
 impl StringIndexer {
+    #[must_use]
     pub fn new() -> Self {
         StringIndexer {
             inner: RwLock::new(Inner {
@@ -43,14 +44,14 @@ impl StringIndexer {
     pub fn get(&self, string: &str) -> StringIdentity {
         {
             let inner = self.inner.read_unpoisoned();
-            debug_assert!(inner.string_to_identity.len() == inner.identity_to_string.len());
+            debug_assert_eq!(inner.string_to_identity.len(), inner.identity_to_string.len());
             if let Some(&id) = inner.string_to_identity.get(string) {
                 return id;
             }
         }
 
         let mut inner = self.inner.write_unpoisoned();
-        debug_assert!(inner.string_to_identity.len() == inner.identity_to_string.len());
+        debug_assert_eq!(inner.string_to_identity.len(), inner.identity_to_string.len());
         if let Some(&id) = inner.string_to_identity.get(string) {
             // another writer inserted into the map
             return id;
@@ -73,7 +74,7 @@ impl StringIndexer {
     /// `size()`.
     pub fn size(&self) -> usize {
         let inner = self.inner.read_unpoisoned();
-        debug_assert!(inner.string_to_identity.len() == inner.identity_to_string.len());
+        debug_assert_eq!(inner.string_to_identity.len(), inner.identity_to_string.len());
         inner.identity_to_string.len()
     }
 }

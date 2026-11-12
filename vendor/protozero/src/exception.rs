@@ -27,6 +27,7 @@ pub enum Exception {
 
 impl Exception {
     /// Returns the explanatory string (`what()`).
+    #[must_use]
     pub const fn what(&self) -> &'static str {
         match self {
             Exception::Exception => "pbf exception",

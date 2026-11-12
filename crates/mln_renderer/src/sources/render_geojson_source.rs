@@ -26,7 +26,7 @@ use crate::tile::tile::Tile;
 use crate::tile_parameters::TileParameters;
 
 /// `std::weak_ptr::lock()` equality: both empty or both the same object.
-fn same_data(a: &Option<Arc<dyn GeoJSONData>>, b: &Option<Arc<dyn GeoJSONData>>) -> bool {
+fn same_data(a: Option<&Arc<dyn GeoJSONData>>, b: Option<&Arc<dyn GeoJSONData>>) -> bool {
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => std::ptr::addr_eq(Arc::as_ptr(a), Arc::as_ptr(b)),
@@ -138,7 +138,7 @@ impl RenderSource for RenderGeoJSONSource {
         let impl_ = self.impl_();
         let data = impl_.get_data().and_then(|weak| weak.upgrade());
         let current = self.data.as_ref().and_then(Weak::upgrade);
-        if !same_data(&current, &data) {
+        if !same_data(current.as_ref(), data.as_ref()) {
             self.data = data.as_ref().map(Arc::downgrade);
             if parameters.mode != MapMode::Continuous {
                 // Clearing the tile pyramid in order to avoid render tests
@@ -148,10 +148,10 @@ impl RenderSource for RenderGeoJSONSource {
                 self.tile_source.tile_pyramid.reduce_memory_use();
                 let max_z = impl_.get_zoom_range().max;
                 for (id, tile) in self.tile_source.tile_pyramid.get_tiles() {
-                    if id.canonical.z <= max_z {
-                        if let Some(tile) = tile.as_any().downcast_ref::<GeoJSONTile>() {
-                            tile.update_data(data.clone(), needs_relayout, parameters.is_update_synchronous);
-                        }
+                    if id.canonical.z <= max_z
+                        && let Some(tile) = tile.as_any().downcast_ref::<GeoJSONTile>()
+                    {
+                        tile.update_data(data.clone(), needs_relayout, parameters.is_update_synchronous);
                     }
                 }
             }
@@ -241,16 +241,16 @@ impl RenderSource for RenderGeoJSONSource {
         args: Option<&feature::PropertyMap>,
     ) -> Result<FeatureExtensionValue, Error> {
         if extension != "supercluster" {
-            return Ok(Default::default());
+            return Ok(FeatureExtensionValue::default());
         }
         let Some(cluster_id) = get_uint_property(&feature.properties, "cluster_id") else {
-            return Ok(Default::default());
+            return Ok(FeatureExtensionValue::default());
         };
         let Some(json_data) = self.data.as_ref().and_then(Weak::upgrade) else {
-            return Ok(Default::default());
+            return Ok(FeatureExtensionValue::default());
         };
         supercluster_extension(&*json_data, extension_field, cluster_id as u32, args)
-            .unwrap_or_else(|| Ok(Default::default()))
+            .unwrap_or_else(|| Ok(FeatureExtensionValue::default()))
     }
 
     // layers: feature state

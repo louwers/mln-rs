@@ -32,11 +32,13 @@ pub struct AnchorAlignment {
 }
 
 impl AnchorAlignment {
+    #[must_use]
     pub fn new(horizontal: f32, vertical: f32) -> Self {
         AnchorAlignment { horizontal_align: horizontal, vertical_align: vertical }
     }
 
     /// `AnchorAlignment::getAnchorAlignment`.
+    #[must_use]
     pub fn get_anchor_alignment(anchor: SymbolAnchorType) -> AnchorAlignment {
         let mut result = AnchorAlignment::new(0.5, 0.5);
 
@@ -64,7 +66,8 @@ impl AnchorAlignment {
     }
 }
 
-/// Choose the justification that matches the direction of the TextAnchor.
+/// Choose the justification that matches the direction of the `TextAnchor`.
+#[must_use]
 pub fn get_anchor_justification(anchor: SymbolAnchorType) -> TextJustifyType {
     match anchor {
         SymbolAnchorType::Right | SymbolAnchorType::TopRight | SymbolAnchorType::BottomRight => TextJustifyType::Right,
@@ -90,6 +93,7 @@ impl PositionedIcon {
     }
 
     /// `PositionedIcon::shapeIcon`.
+    #[must_use]
     pub fn shape_icon(image: &ImagePosition, icon_offset: &[f32; 2], icon_anchor: SymbolAnchorType) -> PositionedIcon {
         let anchor_align = AnchorAlignment::get_anchor_alignment(icon_anchor);
         let dx = icon_offset[0];
@@ -111,9 +115,10 @@ impl PositionedIcon {
         PositionedIcon::new(image.clone(), top, bottom, left, right, collision_padding)
     }
 
-    /// Called after a PositionedIcon has already been run through
+    /// Called after a `PositionedIcon` has already been run through
     /// fitIconToText, but needs further adjustment to apply textFitWidth
     /// and textFitHeight.
+    #[must_use]
     pub fn apply_text_fit(&self) -> PositionedIcon {
         if self.image.text_fit_width.is_none() && self.image.text_fit_height.is_none() {
             return self.clone();
@@ -168,7 +173,7 @@ impl PositionedIcon {
         icon_offset: &[f32; 2],
         font_scale: f32,
     ) {
-        debug_assert!(text_fit != IconTextFitType::None);
+        debug_assert_ne!(text_fit, IconTextFitType::None);
         debug_assert!(shaped_text.is_some());
 
         // We don't respect the icon-anchor, because icon-text-fit is set.
@@ -201,21 +206,27 @@ impl PositionedIcon {
         }
     }
 
+    #[must_use]
     pub fn image(&self) -> &ImagePosition {
         &self.image
     }
+    #[must_use]
     pub fn top(&self) -> f32 {
         self.top
     }
+    #[must_use]
     pub fn bottom(&self) -> f32 {
         self.bottom
     }
+    #[must_use]
     pub fn left(&self) -> f32 {
         self.left
     }
+    #[must_use]
     pub fn right(&self) -> f32 {
         self.right
     }
+    #[must_use]
     pub fn collision_padding(&self) -> &Padding {
         &self.collision_padding
     }
@@ -235,10 +246,10 @@ fn align(
     line_count: usize,
 ) {
     let shift_x = (justify - horizontal_align) * max_line_length;
-    let shift_y = if max_line_height != line_height {
-        -block_height * vertical_align - Shaping::Y_OFFSET as f32
-    } else {
+    let shift_y = if max_line_height == line_height {
         (-vertical_align * line_count as f32 + 0.5) * line_height
+    } else {
+        -block_height * vertical_align - Shaping::Y_OFFSET as f32
     };
 
     for line in &mut shaping.positioned_lines {
@@ -279,7 +290,7 @@ fn get_glyph_advance(
                 return 0.0;
             };
             match glyphs.get(&GlyphID::from(code_point)) {
-                Some(Some(glyph)) => (glyph.metrics.advance as f64 * section.scale) as f32 + spacing,
+                Some(Some(glyph)) => (f64::from(glyph.metrics.advance) * section.scale) as f32 + spacing,
                 _ => 0.0,
             }
         }
@@ -314,7 +325,7 @@ fn determine_average_line_width(
 
     // static_cast<int32_t>(::fmax(1, std::ceil(totalWidth / maxWidth)))
     // (an infinite quotient is UB in C++; `as` saturates)
-    let target_line_count = mln_math::fmax(1.0, (total_width / max_width).ceil() as f64) as i32;
+    let target_line_count = mln_math::fmax(1.0, f64::from((total_width / max_width).ceil())) as i32;
     total_width / target_line_count as f32
 }
 
@@ -322,15 +333,14 @@ fn determine_average_line_width(
 fn calculate_badness(line_width: f32, target_width: f32, penalty: f32, is_last_break: bool) -> f32 {
     // static_cast<float>(std::pow(lineWidth - targetWidth, 2)): pow of the
     // float difference in double, which is exact for a square.
-    let d = (line_width - target_width) as f64;
+    let d = f64::from(line_width - target_width);
     let raggedness = (d * d) as f32;
     if is_last_break {
         // Favor finals lines shorter than average over longer than average
         if line_width < target_width {
             return raggedness / 2.0;
-        } else {
-            return raggedness * 2.0;
         }
+        return raggedness * 2.0;
     }
     if penalty < 0.0 {
         return raggedness - penalty * penalty;
@@ -419,6 +429,7 @@ fn least_bad_breaks(last_line_break: &PotentialBreak, potential_breaks: &[Potent
 /// `determineLineBreaks`. We determine line breaks based on shaped text in
 /// logical order. Working in visual order would be more intuitive, but we
 /// can't do that because the visual order may be changed by line breaks!
+#[must_use]
 pub fn determine_line_breaks(
     logical_input: &TaggedString,
     spacing: f32,
@@ -596,7 +607,7 @@ fn shape_lines(
         line.trim();
 
         let line_max_scale: f64 = line.get_max_scale();
-        let max_line_offset: f64 = (line_max_scale - 1.0) * ONE_EM as f64;
+        let max_line_offset: f64 = (line_max_scale - 1.0) * f64::from(ONE_EM);
         let mut line_offset: f64 = 0.0;
         shaping.positioned_lines.push(PositionedLine::default());
         let line_index = shaping.positioned_lines.len() - 1;
@@ -620,7 +631,7 @@ fn shape_lines(
                 debug_assert!(section.start_index >= 0);
                 // std::cmp_greater_equal(i, startIndex) && i - startIndex <
                 // adjusts->size() (size_t arithmetic)
-                let offset = (i as u64).wrapping_sub(section.start_index as i64 as u64);
+                let offset = (i as u64).wrapping_sub(i64::from(section.start_index) as u64);
                 if (section.start_index < 0 || i as u64 >= section.start_index as u64) && offset < adjusts.len() as u64
                 {
                     adjust = Some(&adjusts[offset as usize]);
@@ -640,9 +651,7 @@ fn shape_lines(
             let mut section_scale: f64 = section.scale;
             debug_assert!(section_scale != 0.0);
 
-            let vertical = if !line_verticals.is_empty() {
-                line_verticals[i]
-            } else {
+            let vertical = if line_verticals.is_empty() {
                 writing_mode != WritingModeType::Horizontal
                     && code_point.type_ == GlyphIDType::FontPBF
                     && (if allow_vertical_placement {
@@ -651,6 +660,8 @@ fn shape_lines(
                     } else {
                         i18n::has_upright_vertical_orientation(code_point.code)
                     })
+            } else {
+                line_verticals[i]
             };
             if !line_verticals.is_empty() && vertical && !i18n::has_upright_vertical_orientation(code_point.code) {
                 let replacement = i18n::verticalize_punctuation(code_point.code);
@@ -682,8 +693,8 @@ fn shape_lines(
 
                     if let Some(adjust) = adjust {
                         advance = adjust.advance;
-                        x_hb_offset = (adjust.x_offset as f64 * section.scale) as f32;
-                        y_hb_offset = (adjust.y_offset as f64 * section.scale) as f32;
+                        x_hb_offset = (f64::from(adjust.x_offset) * section.scale) as f32;
+                        y_hb_offset = (f64::from(adjust.y_offset) * section.scale) as f32;
                     }
                     if advance < 0.01 {
                         // Advance is 0, this glyph should align to the
@@ -694,7 +705,7 @@ fn shape_lines(
                     // We don't know the baseline, but since we're laying
                     // out at 24 points, we can calculate how much it will
                     // move when we scale up or down.
-                    baseline_offset = (line_max_scale - section_scale) * ONE_EM as f64;
+                    baseline_offset = (line_max_scale - section_scale) * f64::from(ONE_EM);
                 }
                 Some(image_id) => {
                     let Some(image) = image_positions.get(image_id) else {
@@ -706,8 +717,8 @@ fn shape_lines(
                     // than its padding) is UB in C++; `as` saturates to 0.
                     metrics.width = display_size[0] as u32;
                     metrics.height = display_size[1] as u32;
-                    metrics.left = ImagePosition::PADDING as f32;
-                    metrics.top = -(Glyph::BORDER_SIZE as f32);
+                    metrics.left = f32::from(ImagePosition::PADDING);
+                    metrics.top = -f32::from(Glyph::BORDER_SIZE);
                     metrics.advance = if vertical { metrics.height } else { metrics.width };
                     rect = image.padded_rect;
 
@@ -715,20 +726,21 @@ fn shape_lines(
                     // using alias "image-scale" that could be alias for
                     // "font-scale" when FormattedSection is an image
                     // section.
-                    section_scale = section_scale * ONE_EM as f64 / layout_text_size as f64;
+                    section_scale = section_scale * f64::from(ONE_EM) / f64::from(layout_text_size);
 
                     // Difference between one EM and an image size. Aligns
                     // bottom of an image to a baseline level.
                     let image_offset: f32 = ONE_EM - display_size[1] * section_scale as f32;
-                    baseline_offset = max_line_offset + image_offset as f64;
+                    baseline_offset = max_line_offset + f64::from(image_offset);
                     vertical_advance = metrics.advance as f32;
                     advance = vertical_advance;
 
                     // Difference between height of an image and one EM at
                     // max line scale. Pushes current line down if an image
                     // size is over 1 EM at max line scale.
-                    let offset: f64 = (if vertical { display_size[0] } else { display_size[1] }) as f64 * section_scale
-                        - ONE_EM as f64 * line_max_scale;
+                    let offset: f64 = f64::from(if vertical { display_size[0] } else { display_size[1] })
+                        * section_scale
+                        - f64::from(ONE_EM) * line_max_scale;
                     if offset > 0.0 && offset > line_offset {
                         line_offset = offset;
                     }
@@ -736,7 +748,22 @@ fn shape_lines(
             }
 
             let positioned_glyphs = &mut shaping.positioned_lines[line_index].positioned_glyphs;
-            if !vertical {
+            if vertical {
+                positioned_glyphs.push(PositionedGlyph::new(
+                    code_point,
+                    x,
+                    y + baseline_offset as f32,
+                    vertical,
+                    section.font_stack_hash,
+                    section_scale as f32,
+                    rect,
+                    metrics,
+                    section.image_id.clone(),
+                    section_index,
+                ));
+                x += vertical_advance * section_scale as f32 + spacing;
+                shaping.verticalizable |= true;
+            } else {
                 positioned_glyphs.push(PositionedGlyph::new(
                     code_point,
                     x + x_hb_offset,
@@ -753,21 +780,6 @@ fn shape_lines(
                     // Only thce glyph with advance should increase spacing
                     x += advance * section_scale as f32 + spacing;
                 }
-            } else {
-                positioned_glyphs.push(PositionedGlyph::new(
-                    code_point,
-                    x,
-                    y + baseline_offset as f32,
-                    vertical,
-                    section.font_stack_hash,
-                    section_scale as f32,
-                    rect,
-                    metrics,
-                    section.image_id.clone(),
-                    section_index,
-                ));
-                x += vertical_advance * section_scale as f32 + spacing;
-                shaping.verticalizable |= true;
             }
         }
 
@@ -779,7 +791,7 @@ fn shape_lines(
             justify_line(positioned_glyphs, justify, line_offset as f32);
         }
 
-        let current_line_height = (line_height as f64 * line_max_scale + line_offset) as f32;
+        let current_line_height = (f64::from(line_height) * line_max_scale + line_offset) as f32;
         x = 0.0;
         y += current_line_height;
         // std::max(lineOffset, maxLineOffset)
@@ -878,9 +890,7 @@ pub fn get_shaping(
     let mut reordered_lines: Vec<TaggedString> = Vec::new();
     if !formatted_string.raw_text().is_empty() {
         if formatted_string.section_count() == 1 {
-            if formatted_string.get_section(0).type_ != GlyphIDType::FontPBF {
-                reordered_lines.push(formatted_string.clone());
-            } else {
+            if formatted_string.get_section(0).type_ == GlyphIDType::FontPBF {
                 let untagged_lines = bidi.process_text(
                     formatted_string.raw_text(),
                     determine_line_breaks(
@@ -895,6 +905,8 @@ pub fn get_shaping(
                 for line in untagged_lines {
                     reordered_lines.push(TaggedString::new(line, formatted_string.section_at(0).clone()));
                 }
+            } else {
+                reordered_lines.push(formatted_string.clone());
             }
         } else {
             let mut sub_string: StyledText = (Vec::new(), Vec::new());

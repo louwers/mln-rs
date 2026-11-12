@@ -117,19 +117,23 @@ impl ImageAllocation {
         }
     }
 
+    #[must_use]
     pub fn id(&self) -> u64 {
         self.id
     }
 
+    #[must_use]
     pub fn image(&self) -> vk::Image {
         self.image
     }
 
+    #[must_use]
     pub fn image_view(&self) -> vk::ImageView {
         self.image_view
     }
 
     /// The image's memory, if the CPU can read it.
+    #[must_use]
     pub fn mapped_ptr(&self) -> Option<*const u8> {
         self.allocation.as_ref()?.mapped_ptr().map(|p| p.as_ptr().cast::<u8>().cast_const())
     }
@@ -256,29 +260,35 @@ impl Texture2D {
         self.texture_dirty = true;
     }
 
+    #[must_use]
     pub fn is_dirty(&self) -> bool {
         self.sampler_state_dirty || self.texture_dirty
     }
 
+    #[must_use]
     pub fn get_vulkan_format(&self) -> vk::Format {
         Self::vulkan_format(self.pixel_format, self.channel_type)
     }
 
+    #[must_use]
     pub fn get_vulkan_image_layout(&self) -> vk::ImageLayout {
         self.image_layout
     }
 
     /// The view of the image, null until the texture is created.
+    #[must_use]
     pub fn get_vulkan_image_view(&self) -> vk::ImageView {
         self.image_allocation.as_ref().map_or(vk::ImageView::null(), |allocation| allocation.image_view())
     }
 
     /// The ids of the image and of the sampler (`unique_id`), 0 without one.
+    #[must_use]
     pub fn get_ids(&self) -> (u64, u64) {
         (self.image_allocation.as_ref().map_or(0, |allocation| allocation.id()), self.sampler_id)
     }
 
     /// The image, null until the texture is created.
+    #[must_use]
     pub fn get_vulkan_image(&self) -> vk::Image {
         self.image_allocation.as_ref().map_or(vk::Image::null(), |allocation| allocation.image())
     }
@@ -508,7 +518,7 @@ impl Texture2D {
         let Some(allocation) = &self.image_allocation else {
             return;
         };
-        debug_assert!(self.image_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+        debug_assert_eq!(self.image_layout, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
         transition_image(
             self.backend.get_device(),
             command_buffer,
@@ -550,7 +560,7 @@ impl Texture2D {
         let Some(allocation) = &self.image_allocation else {
             return;
         };
-        debug_assert!(self.image_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL);
+        debug_assert_eq!(self.image_layout, vk::ImageLayout::TRANSFER_DST_OPTIMAL);
         transition_image(
             self.backend.get_device(),
             command_buffer,

@@ -40,14 +40,17 @@ pub struct BackendImpl {
 }
 
 impl BackendImpl {
+    #[must_use]
     pub fn get_device(&self) -> &MTLDevicePtr {
         &self.device
     }
 
+    #[must_use]
     pub fn get_command_queue(&self) -> &MTLCommandQueuePtr {
         &self.command_queue
     }
 
+    #[must_use]
     pub fn is_base_vertex_instance_drawing_supported(&self) -> bool {
         self.base_vertex_instance_drawing_supported
     }
@@ -107,6 +110,7 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 
 impl RendererBackend {
     /// A backend on `device`, which submits to the device's command queue.
+    #[must_use]
     pub fn new(device: &Device) -> Self {
         // C++ checks Apple3 only, which no Mac GPU but Apple silicon is in;
         // every Mac2 GPU supports base vertex and instance too.

@@ -205,7 +205,7 @@ impl ShaderProgram {
         // Indexes must be unique, if there's a conflict check the
         // `attributes` array in the shader.
         #[cfg(debug_assertions)]
-        self.vertex_attributes.visit_attributes(|attrib| debug_assert!(attrib.get_index() != info.index as i32));
+        self.vertex_attributes.visit_attributes(|attrib| debug_assert_ne!(attrib.get_index(), info.index as i32));
         self.vertex_attributes.set(info.id, info.index as i32, info.data_type, 1);
     }
 

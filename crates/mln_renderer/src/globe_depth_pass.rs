@@ -155,6 +155,7 @@ impl GlobeDepthPass {
         }
     }
 
+    #[must_use]
     pub fn get_layer_group(&self) -> Option<&LayerGroupBasePtr> {
         self.layer_group.as_ref()
     }

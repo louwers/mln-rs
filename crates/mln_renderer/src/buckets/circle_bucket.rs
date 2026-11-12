@@ -11,7 +11,10 @@ use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_map_types::MapMode;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::*;
+use mln_style::layers::circle_layer_properties::{
+    CircleBlur, CircleColor, CircleLayerProperties, CircleOpacity, CirclePaintProperties, CircleRadius,
+    CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate,
+};
 use mln_style::properties::Property;
 use mln_style_types::image::ImagePositions;
 use mln_util::Color;
@@ -60,6 +63,7 @@ pub struct CircleBucket {
 
 impl CircleBucket {
     /// `CircleBucket(layerPaintProperties, mode, zoom)`.
+    #[must_use]
     pub fn new(
         layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
         mode: MapMode,
@@ -83,26 +87,23 @@ impl CircleBucket {
 
     /// `vertex(Point<int16_t> p, float ex, float ey)`: `p.x * 2` is an
     /// `int`, plus a `float`, converted to `int16_t` (truncation).
+    #[must_use]
     pub fn vertex(p: mln_tile_id::geometry_tile_data::GeometryCoordinate, ex: f32, ey: f32) -> CircleLayoutVertex {
         CircleLayoutVertex {
             a1: [
-                ((p.x as i32 * 2) as f32 + ((ex + 1.0) / 2.0)) as i32 as i16,
-                ((p.y as i32 * 2) as f32 + ((ey + 1.0) / 2.0)) as i32 as i16,
+                ((i32::from(p.x) * 2) as f32 + f32::midpoint(ex, 1.0)) as i32 as i16,
+                ((i32::from(p.y) * 2) as f32 + f32::midpoint(ey, 1.0)) as i32 as i16,
             ],
         }
     }
 }
 
 /// The anonymous-namespace `get<Property>(evaluated, id, binders)` of
-/// circle_bucket.cpp.
-fn get_radius_or_width(
-    evaluated_constant: Option<f32>,
-    default_value: f32,
-    statistics_max: Option<Option<f32>>,
-) -> f32 {
+/// `circle_bucket.cpp`.
+fn get_radius_or_width(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
     match statistics_max {
-        Some(Some(max)) => max,
-        _ => evaluated_constant.unwrap_or(default_value),
+        Some(max) => max,
+        None => evaluated_constant.unwrap_or(default_value),
     }
 }
 
@@ -128,12 +129,12 @@ impl Bucket for CircleBucket {
         let radius = get_radius_or_width(
             evaluated.get::<CircleRadius>().constant(),
             CircleRadius::default_value(),
-            binders.map(|b| b.read_unpoisoned().circle_radius.statistics.max()),
+            binders.and_then(|b| b.read_unpoisoned().circle_radius.statistics.max()),
         );
         let stroke = get_radius_or_width(
             evaluated.get::<CircleStrokeWidth>().constant(),
             CircleStrokeWidth::default_value(),
-            binders.map(|b| b.read_unpoisoned().circle_stroke_width.statistics.max()),
+            binders.and_then(|b| b.read_unpoisoned().circle_stroke_width.statistics.max()),
         );
         let translate = evaluated.get::<CircleTranslate>();
         // util::length(a, b) = std::sqrt(a * a + b * b), in float

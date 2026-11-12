@@ -45,7 +45,7 @@ use crate::tile::raster_tile::{RasterTileInner, RasterTileMessage, RasterTileWor
 /// passes, plus whether the worker runs synchronously
 /// (`TileParameters::isUpdateSynchronous`).
 ///
-/// Serde writes them for a worker in another worker instance (worker_codec),
+/// Serde writes them for a worker in another worker instance (`worker_codec`),
 /// without what can't cross: there, the instance's host gives the worker an
 /// `obsolete` flag and an atlas of its own, and the worker runs as an actor.
 #[derive(Clone, Serialize, Deserialize)]
@@ -67,33 +67,33 @@ pub struct WorkerParameters {
 }
 
 /// Where a worker's messages for its tile go: `TileMessage`s from a
-/// GeometryTileWorker, or `M` from another worker type.
+/// `GeometryTileWorker`, or `M` from another worker type.
 pub trait TileEndpoint<M = TileMessage>: Send {
     fn send(&self, message: M);
 }
 
 /// Where a tile's messages for its worker go: `WorkerMessage`s for a
-/// GeometryTileWorker, or `M` for another worker type. Dropping it drops the
+/// `GeometryTileWorker`, or `M` for another worker type. Dropping it drops the
 /// worker.
 pub trait WorkerEndpoint<M = WorkerMessage> {
     fn send(&self, message: M);
 }
 
-/// Creates the worker of each GeometryTile, RasterTile and RasterDEMTile.
+/// Creates the worker of each `GeometryTile`, `RasterTile` and `RasterDEMTile`.
 pub trait TileWorkerTransport {
-    /// Creates the worker for a GeometryTile; its replies go to `tile`. With
+    /// Creates the worker for a `GeometryTile`; its replies go to `tile`. With
     /// `parameters.synchronous`, `tile` is called directly on the calling
     /// thread.
     fn create(&self, parameters: WorkerParameters, tile: Box<dyn TileEndpoint>) -> Box<dyn WorkerEndpoint>;
 
-    /// Creates the `RasterTileWorker` of a RasterTile; its replies go to
+    /// Creates the `RasterTileWorker` of a `RasterTile`; its replies go to
     /// `tile`.
     fn create_raster(
         &self,
         tile: Box<dyn TileEndpoint<RasterTileMessage>>,
     ) -> Box<dyn WorkerEndpoint<RasterWorkerMessage>>;
 
-    /// Creates the `RasterDEMTileWorker` of a RasterDEMTile; its replies go
+    /// Creates the `RasterDEMTileWorker` of a `RasterDEMTile`; its replies go
     /// to `tile`.
     fn create_raster_dem(
         &self,
@@ -140,6 +140,7 @@ pub struct InProcessTransport {
 }
 
 impl InProcessTransport {
+    #[must_use]
     pub fn new(thread_pool: TaggedScheduler) -> Self {
         InProcessTransport { thread_pool }
     }

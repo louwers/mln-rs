@@ -20,7 +20,11 @@ use mln_gfx::UploadPass;
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::SymbolLayerPaintPropertyOverrides;
-use mln_style::layers::symbol_layer_properties::*;
+use mln_style::layers::symbol_layer_properties::{
+    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconOpacity, IconSize, SymbolLayerProperties,
+    SymbolLayoutProperties, SymbolPaintProperties, TextColor, TextField, TextHaloBlur, TextHaloColor, TextHaloWidth,
+    TextOpacity, TextSize, TextVariableAnchor, TextVariableAnchorOffset,
+};
 use mln_style::property_expression::PropertyExpression;
 use mln_style::property_value::PropertyValue;
 use mln_style_types::image::ImagePositions;
@@ -155,6 +159,7 @@ pub enum SymbolSizeBinder {
 
 impl SymbolSizeBinder {
     /// `SymbolSizeBinder::create(tileZoom, sizeProperty, defaultValue)`.
+    #[must_use]
     pub fn create(tile_zoom: f32, size_property: &PropertyValue<f32>, default_value: f32) -> Self {
         if size_property.is_undefined() {
             return SymbolSizeBinder::Constant { layout_size: default_value, covering_ranges: None, expression: None };
@@ -171,7 +176,9 @@ impl SymbolSizeBinder {
             let layout_size = expression.evaluate_zoom(tile_zoom + 1.0);
             // A feature-constant expression without a zoom dependency (e.g.
             // one that only depends on the global state) has no zoom curve.
-            let covering_ranges = if !expression.is_zoom_constant() {
+            let covering_ranges = if expression.is_zoom_constant() {
+                None
+            } else {
                 let zoom_levels = expression.get_covering_stops(tile_zoom, tile_zoom + 1.0);
                 Some((
                     zoom_levels,
@@ -180,8 +187,6 @@ impl SymbolSizeBinder {
                         max: expression.evaluate_zoom(zoom_levels.max),
                     },
                 ))
-            } else {
-                None
             };
             SymbolSizeBinder::Constant { layout_size, covering_ranges, expression: Some(expression) }
         } else if expression.is_zoom_constant() {
@@ -213,6 +218,7 @@ impl SymbolSizeBinder {
     }
 
     /// `evaluateForZoom(currentZoom)`.
+    #[must_use]
     pub fn evaluate_for_zoom(&self, current_zoom: f32) -> ZoomEvaluatedSize {
         let unused = 0.0_f32;
         match self {
@@ -290,6 +296,7 @@ pub struct PlacedSymbol {
 
 impl PlacedSymbol {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         anchor_point: Point<f32>,
         segment: usize,
@@ -419,7 +426,7 @@ pub struct PaintProperties {
     pub text_binders: SymbolTextBinders,
 }
 
-/// The state of a SymbolBucket that placement and sorting change after the
+/// The state of a `SymbolBucket` that placement and sorting change after the
 /// bucket is shared.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SymbolBucketState {
@@ -501,7 +508,7 @@ pub struct SymbolBucket {
     /// What changed (the C++ shared vectors' `updateModified`): the
     /// opacity vertices (placement), the dynamic vertices (line labels,
     /// variable anchors), the triangle order (sortFeatures) and the paint
-    /// property binders (feature state). RenderSymbolLayer refreshes only
+    /// property binders (feature state). `RenderSymbolLayer` refreshes only
     /// those in its drawables.
     #[serde(skip)]
     pub opacity_version: AtomicU32,
@@ -517,12 +524,13 @@ pub struct SymbolBucket {
 
 impl std::fmt::Debug for SymbolBucket {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SymbolBucket").field("bucket_leader_id", &self.bucket_leader_id).finish()
+        f.debug_struct("SymbolBucket").field("bucket_leader_id", &self.bucket_leader_id).finish_non_exhaustive()
     }
 }
 
 impl SymbolBucket {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         layout: Immutable<SymbolLayoutProperties::PossiblyEvaluated>,
         paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
@@ -674,15 +682,15 @@ impl SymbolBucket {
             if let Some(i) = symbol_instance.placed_right_text_index {
                 add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
             }
-            if let Some(i) = symbol_instance.placed_center_text_index {
-                if !symbol_instance.get_single_line() {
-                    add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-                }
+            if let Some(i) = symbol_instance.placed_center_text_index
+                && !symbol_instance.get_single_line()
+            {
+                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
             }
-            if let Some(i) = symbol_instance.placed_left_text_index {
-                if !symbol_instance.get_single_line() {
-                    add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
-                }
+            if let Some(i) = symbol_instance.placed_left_text_index
+                && !symbol_instance.get_single_line()
+            {
+                add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
             }
             if let Some(i) = symbol_instance.placed_vertical_text_index {
                 add_placed_symbol(&mut state.text.triangles, &state.text.placed_symbols[i]);
@@ -736,6 +744,7 @@ impl SymbolBucket {
     /// isSDF, pixelOffset, minFontScale)`, with the quad's atlas origin
     /// (`tex_origin`, see [`SymbolLayoutVertex::a4`]).
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn layout_attributes(
         label_anchor: Point<f32>,
         o: Point<f32>,
@@ -748,9 +757,9 @@ impl SymbolBucket {
         pixel_offset: Point<f32>,
         min_font_scale: Point<f32>,
     ) -> SymbolLayoutVertex {
-        let a_size_min =
-            (MAX_PACKED_SIZE.min((size_data.min * SIZE_PACK_FACTOR as f32) as u16) << 1).wrapping_add(is_sdf as u16);
-        let a_size_max = MAX_PACKED_SIZE.min((size_data.max * SIZE_PACK_FACTOR as f32) as u16);
+        let a_size_min = (MAX_PACKED_SIZE.min((size_data.min * f32::from(SIZE_PACK_FACTOR)) as u16) << 1)
+            .wrapping_add(u16::from(is_sdf));
+        let a_size_max = MAX_PACKED_SIZE.min((size_data.max * f32::from(SIZE_PACK_FACTOR)) as u16);
         SymbolLayoutVertex {
             // combining pos and offset to reduce number of vertex attributes
             // passed to shader (8 max for some devices)
@@ -772,16 +781,19 @@ impl SymbolBucket {
     }
 
     /// `dynamicLayoutAttributes(anchorPoint, labelAngle)`.
+    #[must_use]
     pub fn dynamic_layout_attributes(anchor_point: Point<f32>, label_angle: f32) -> SymbolDynamicLayoutVertex {
         SymbolDynamicLayoutVertex { a1: [anchor_point.x, anchor_point.y, label_angle] }
     }
 
     /// `opacityAttributes(placed, opacity)`.
+    #[must_use]
     pub fn opacity_attributes(placed: bool, opacity: f32) -> SymbolOpacityVertex {
-        SymbolOpacityVertex { a1: [((((opacity * 127.0) as u8 as u32) << 1) | placed as u32) as f32] }
+        SymbolOpacityVertex { a1: [((u32::from((opacity * 127.0) as u8) << 1) | u32::from(placed)) as f32] }
     }
 
     /// `collisionLayoutVertex(a, anchor, o)`.
+    #[must_use]
     pub fn collision_layout_vertex(a: Point<f32>, anchor: Point<f32>, o: Point<f32>) -> CollisionBoxLayoutVertex {
         CollisionBoxLayoutVertex {
             a1: [a.x as i16, a.y as i16],
@@ -791,8 +803,9 @@ impl SymbolBucket {
     }
 
     /// `collisionDynamicVertex(placed, notUsed, shift)`.
+    #[must_use]
     pub fn collision_dynamic_vertex(placed: bool, not_used: bool, shift: Point<f32>) -> CollisionBoxDynamicVertex {
-        CollisionBoxDynamicVertex { a1: [placed as u16, not_used as u16], a2: [shift.x, shift.y] }
+        CollisionBoxDynamicVertex { a1: [u16::from(placed), u16::from(not_used)], a2: [shift.x, shift.y] }
     }
 }
 
@@ -801,7 +814,7 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
     let end_index = placed_symbol.start_index + placed_symbol.glyph_offsets.len() * 4;
     let mut vertex_index = placed_symbol.start_index;
     while vertex_index < end_index {
-        triangles.extend_from_slice(&[(vertex_index + 0) as u16, (vertex_index + 1) as u16, (vertex_index + 2) as u16]);
+        triangles.extend_from_slice(&[vertex_index as u16, (vertex_index + 1) as u16, (vertex_index + 2) as u16]);
         triangles.extend_from_slice(&[(vertex_index + 1) as u16, (vertex_index + 2) as u16, (vertex_index + 3) as u16]);
         vertex_index += 4;
     }
@@ -810,6 +823,7 @@ fn add_placed_symbol(triangles: &mut Vec<u16>, placed_symbol: &PlacedSymbol) {
 /// `getSortedSymbols(angle)`: indices of `symbolInstances`, sorted by
 /// viewport Y, then by descending data feature index. Equal keys keep their
 /// index order.
+#[must_use]
 pub fn get_sorted_symbols(symbol_instances: &[SymbolInstance], angle: f32) -> Vec<usize> {
     let mut result: Vec<usize> = (0..symbol_instances.len()).collect();
     let sin = angle.sin();
@@ -852,7 +866,7 @@ impl Bucket for SymbolBucket {
 
     /// `update(states, layer, layerID, imagePositions)` (feature state).
     /// text-conformance: this is the `Bucket` override (it was an inherent
-    /// method, so GeometryTile's `bucket.update` hit the no-op default).
+    /// method, so `GeometryTile`'s `bucket.update` hit the no-op default).
     fn update(
         &self,
         states: &FeatureStates,

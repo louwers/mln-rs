@@ -18,7 +18,13 @@ use std::sync::atomic::Ordering;
 use geometry::Point;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_COLLISION_ANCHOR_POS_VERTEX_ATTRIBUTE, ID_COLLISION_EXTRUDE_VERTEX_ATTRIBUTE,
+    ID_COLLISION_PLACED_VERTEX_ATTRIBUTE, ID_COLLISION_POS_VERTEX_ATTRIBUTE, ID_COLLISION_SHIFT_VERTEX_ATTRIBUTE,
+    ID_SYMBOL_DATA_ATTRIBUTE, ID_SYMBOL_FADE_OPACITY_ATTRIBUTE, ID_SYMBOL_IMAGE_ICON_TEXTURE, ID_SYMBOL_IMAGE_TEXTURE,
+    ID_SYMBOL_OPACITY_ATTRIBUTE, ID_SYMBOL_PIXEL_OFFSET_ATTRIBUTE, ID_SYMBOL_POS_OFFSET_ATTRIBUTE,
+    ID_SYMBOL_PROJECTED_POS_ATTRIBUTE, ID_SYMBOL_TEX_ORIGIN_ATTRIBUTE,
+};
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_gfx::{
     AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, DrawableTweakerPtr,
@@ -28,7 +34,13 @@ use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::symbol_layer_impl::{Impl as SymbolLayerImpl, SymbolLayerPaintPropertyOverrides};
-use mln_style::layers::symbol_layer_properties::*;
+use mln_style::layers::symbol_layer_properties::{
+    IconColor, IconHaloBlur, IconHaloColor, IconHaloWidth, IconKeepUpright, IconOffset, IconOpacity,
+    IconPitchAlignment, IconRotationAlignment, IconSize, IconTextFit, IconTranslate, IconTranslateAnchor,
+    SymbolLayerProperties, SymbolLayoutProperties, SymbolPaintProperties, SymbolPlacement, SymbolScreenSpace,
+    SymbolSortKey, TextColor, TextField, TextHaloBlur, TextHaloColor, TextHaloWidth, TextKeepUpright, TextOpacity,
+    TextPitchAlignment, TextRotationAlignment, TextTranslate, TextTranslateAnchor,
+};
 use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{AlignmentType, IconTextFitType, SymbolPlacementType, TranslateAnchorType};
@@ -132,6 +144,7 @@ impl TileVersions {
 }
 
 /// `iconPropertyValues(evaluated, layout)`.
+#[must_use]
 pub fn icon_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
@@ -149,6 +162,7 @@ pub fn icon_property_values(
 }
 
 /// `textPropertyValues(evaluated, layout)`.
+#[must_use]
 pub fn text_property_values(
     evaluated: &SymbolPaintProperties::PossiblyEvaluated,
     layout: &SymbolLayoutProperties::PossiblyEvaluated,
@@ -166,7 +180,7 @@ pub fn text_property_values(
 }
 
 /// `getScreenMatrix(translation)`: the tile matrix of screen-space symbols.
-pub(crate) fn get_screen_matrix(translation: &[f32; 2]) -> Mat4 {
+pub(crate) fn get_screen_matrix(translation: [f32; 2]) -> Mat4 {
     let mut m: Mat4 = [0.0; 16];
     matrix::ortho(&mut m, 0.0, f64::from(EXTENT), -f64::from(EXTENT), 0.0, 0.0, 1.0);
     let a = m;
@@ -263,12 +277,12 @@ fn capture_rendered_features(
     // it lays out.
     let untranslated = [0.0f32; 2];
     let text_drawable_matrix = if is_screen_space {
-        get_screen_matrix(text_translation)
+        get_screen_matrix(*text_translation)
     } else {
         get_tile_matrix(&untranslated, text_translation_anchor)
     };
     let icon_drawable_matrix = if is_screen_space {
-        get_screen_matrix(icon_translation)
+        get_screen_matrix(*icon_translation)
     } else {
         get_tile_matrix(&untranslated, icon_translation_anchor)
     };
@@ -752,7 +766,7 @@ fn update_tile_drawable(
     }
 
     if let Some(attrs) = drawable.get_vertex_attributes().cloned() {
-        let key = Rc::as_ptr(&attrs) as *const ();
+        let key = Rc::as_ptr(&attrs).cast::<()>();
         if !refreshed_attributes.contains(&key) {
             refreshed_attributes.push(key);
             let mut attrs = attrs.borrow_mut();
@@ -762,20 +776,20 @@ fn update_tile_drawable(
             if refresh.opacity {
                 set_fade_opacity_attribute(buffer, &mut attrs);
             }
-            if refresh.binders {
-                if let Some(paint_props) = bucket.paint_properties.get(layer_id) {
-                    let paint_props = paint_props.read_unpoisoned();
-                    let mut properties_as_uniforms = StringIDSetsPair::default();
-                    set_binder_attributes(
-                        geometry,
-                        bucket,
-                        is_text,
-                        &paint_props,
-                        evaluated,
-                        &mut attrs,
-                        &mut properties_as_uniforms,
-                    );
-                }
+            if refresh.binders
+                && let Some(paint_props) = bucket.paint_properties.get(layer_id)
+            {
+                let paint_props = paint_props.read_unpoisoned();
+                let mut properties_as_uniforms = StringIDSetsPair::default();
+                set_binder_attributes(
+                    geometry,
+                    bucket,
+                    is_text,
+                    &paint_props,
+                    evaluated,
+                    &mut attrs,
+                    &mut properties_as_uniforms,
+                );
             }
         }
     }
@@ -1235,7 +1249,8 @@ impl RenderLayer for RenderSymbolLayer {
                     }
                     // std::upper_bound by sort key
                     let sort_position = self.base.placement_data.partition_point(|lhs| {
-                        !(sort_key_range.sort_key < lhs.sort_key_range.expect("sort key range").sort_key)
+                        let key = lhs.sort_key_range.expect("sort key range").sort_key;
+                        sort_key_range.sort_key.partial_cmp(&key) != Some(std::cmp::Ordering::Less)
                     });
                     self.base.placement_data.insert(sort_position, layer_data);
                 }
@@ -1253,6 +1268,13 @@ impl RenderLayer for RenderSymbolLayer {
         render_tree: &RenderTree,
         changes: &mut UniqueChangeRequestVec,
     ) {
+        /// The tweakers built for one tile.
+        #[derive(Default)]
+        struct TileInfo {
+            text_tweaker: Option<DrawableTweakerPtr>,
+            icon_tweaker: Option<DrawableTweakerPtr>,
+        }
+
         self.update_projection_variant(state);
         self.base.stats.rendered_features.clear();
         let passes = self.base.passes;
@@ -1266,14 +1288,14 @@ impl RenderLayer for RenderSymbolLayer {
         }
 
         // Set up a layer group
-        if self.base.layer_group.is_none() {
-            if let Some(layer_group) = context.create_tile_layer_group(
+        if self.base.layer_group.is_none()
+            && let Some(layer_group) = context.create_tile_layer_group(
                 self.base.layer_index,
                 /*initial_capacity=*/ 64,
                 self.get_id().to_owned(),
-            ) {
-                self.set_layer_group(Some(layer_group), changes);
-            }
+            )
+        {
+            self.set_layer_group(Some(layer_group), changes);
         }
         let Some(layer_group) = self.base.layer_group.clone() else {
             return;
@@ -1517,11 +1539,6 @@ impl RenderLayer for RenderSymbolLayer {
         // We'll be processing renderables across tiles, potentially
         // out-of-order, so keep track of some things by tile ID so we don't
         // have to re-build them multiple times.
-        #[derive(Default)]
-        struct TileInfo {
-            text_tweaker: Option<DrawableTweakerPtr>,
-            icon_tweaker: Option<DrawableTweakerPtr>,
-        }
         let mut tile_cache: HashMap<UnwrappedTileID, TileInfo> = HashMap::new();
         let mut builder: Option<mln_gfx::UniqueDrawableBuilder> = None;
         let mut properties_as_uniforms: StringIDSetsPair = Default::default();

@@ -44,10 +44,10 @@ const BACKGROUND_PATTERN_SHADER_NAME: &str = "BackgroundPatternShader";
 
 /// `addPatternIfNeeded(id, params)` (conformance).
 fn add_pattern_if_needed(id: &str, params: &LayerPrepareParameters<'_>) {
-    if params.pattern_atlas.borrow().get_pattern(id).is_none() {
-        if let Some(image) = params.image_manager.get_image(id) {
-            params.pattern_atlas.borrow_mut().add_pattern(&image);
-        }
+    if params.pattern_atlas.borrow().get_pattern(id).is_none()
+        && let Some(image) = params.image_manager.get_image(id)
+    {
+        params.pattern_atlas.borrow_mut().add_pattern(&image);
     }
 }
 

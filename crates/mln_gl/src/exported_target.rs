@@ -208,14 +208,13 @@ impl Allocator {
                         // GBM exports each plane as a descriptor of its own,
                         // even of one dmabuf: such planes share the first.
                         let shared =
-                            fds.iter().find(|earlier| same_file(earlier, &fd)).map(|earlier| earlier.as_raw_fd());
-                        let raw = match shared {
-                            Some(raw) => raw,
-                            None => {
-                                let raw = fd.as_raw_fd();
-                                fds.push(fd);
-                                raw
-                            }
+                            fds.iter().find(|earlier| same_file(earlier, &fd)).map(std::os::fd::AsRawFd::as_raw_fd);
+                        let raw = if let Some(raw) = shared {
+                            raw
+                        } else {
+                            let raw = fd.as_raw_fd();
+                            fds.push(fd);
+                            raw
                         };
                         planes.push(DmaBufPlane { fd: raw, offset, stride });
                     }
@@ -245,8 +244,8 @@ fn same_file(a: &OwnedFd, b: &OwnedFd) -> bool {
     unsafe {
         let mut first: libc::stat = std::mem::zeroed();
         let mut second: libc::stat = std::mem::zeroed();
-        libc::fstat(a.as_raw_fd(), &mut first) == 0
-            && libc::fstat(b.as_raw_fd(), &mut second) == 0
+        libc::fstat(a.as_raw_fd(), &raw mut first) == 0
+            && libc::fstat(b.as_raw_fd(), &raw mut second) == 0
             && first.st_dev == second.st_dev
             && first.st_ino == second.st_ino
     }
@@ -389,7 +388,7 @@ impl Exporter {
                 0,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
-                &mut count,
+                &raw mut count,
             )
         };
         if counted == egl::FALSE || count <= 0 {
@@ -405,7 +404,7 @@ impl Exporter {
                 count,
                 modifiers.as_mut_ptr(),
                 external.as_mut_ptr(),
-                &mut count,
+                &raw mut count,
             )
         };
         if listed == egl::FALSE {
@@ -424,7 +423,7 @@ impl Exporter {
         })
     }
 
-    /// An EGLImage over every plane of `buffer`.
+    /// An `EGLImage` over every plane of `buffer`.
     fn import(&self, buffer: &Buffer, fourcc: u32, size: Size) -> Result<*mut c_void, Error> {
         let mut attributes = vec![
             egl::WIDTH,
@@ -480,7 +479,7 @@ fn render_node(egl: &'static Egl, display: egl::Display) -> Option<std::ffi::CSt
     let mut device = 0isize;
     // SAFETY: plain queries of the display and its device.
     unsafe {
-        if query_display(display.as_ptr(), EGL_DEVICE, &mut device) == egl::FALSE || device == 0 {
+        if query_display(display.as_ptr(), EGL_DEVICE, &raw mut device) == egl::FALSE || device == 0 {
             return None;
         }
         let node = query_device(device as *mut c_void, DRM_RENDER_NODE_FILE);
@@ -490,6 +489,7 @@ fn render_node(egl: &'static Egl, display: egl::Display) -> Option<std::ffi::CSt
 
 /// The kinds of exported ring that sessions on `device` share their images
 /// in: dmabufs, where the display imports one that the target allocated.
+#[must_use]
 pub fn export_kinds(device: &Device) -> ExportKinds {
     if device.exporter().is_some() { ExportKinds::of(&[ExportKind::DmaBuf]) } else { ExportKinds::NONE }
 }
@@ -512,6 +512,7 @@ pub fn plan(device: &Device, ring: &ExportedRing) -> Result<ExportKind, Error> {
 /// The kinds of sync with which the host waits for a frame (the
 /// producer's), and the target for the host's reads (the consumer's): a
 /// finished frame, since the host reads outside the share group.
+#[must_use]
 pub fn sync_kinds() -> (SyncKinds, SyncKinds) {
     let kinds = SyncKinds::of(&[SyncKind::CpuComplete]);
     (kinds, kinds)
@@ -744,6 +745,10 @@ impl ExportedTarget {
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for
     /// another kind of sync.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the release takes the host's sync, as every backend's does, and drops it"
+    )]
     pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         if !sync_kinds().1.contains(consumer.sync.kind) {
             return Err(Error::unsupported(format!("an exported dmabuf waits for no {:?}", consumer.sync.kind)));

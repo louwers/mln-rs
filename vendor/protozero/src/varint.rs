@@ -70,11 +70,11 @@ mod detail {
 /// varint.
 pub fn decode_varint(data: &mut &[u8]) -> Result<u64, Exception> {
     // If this is a one-byte varint, decode it here.
-    if let Some(&b) = data.first() {
-        if b & 0x80 == 0 {
-            *data = &data[1..];
-            return Ok(u64::from(b));
-        }
+    if let Some(&b) = data.first()
+        && b & 0x80 == 0
+    {
+        *data = &data[1..];
+        return Ok(u64::from(b));
     }
     // If this varint is more than one byte, defer to complete implementation.
     detail::decode_varint_impl(data)
@@ -120,6 +120,7 @@ pub fn add_varint_to_buffer(buffer: &mut Vec<u8>, mut value: u64) {
 }
 
 /// `length_of_varint`: the number of bytes the varint of `value` would have.
+#[must_use]
 pub fn length_of_varint(mut value: u64) -> i32 {
     let mut n = 1;
     while value >= 0x80 {
@@ -130,21 +131,25 @@ pub fn length_of_varint(mut value: u64) -> i32 {
 }
 
 /// ZigZag encodes a 32 bit integer.
+#[must_use]
 pub const fn encode_zigzag32(value: i32) -> u32 {
     ((value as u32) << 1) ^ ((-(((value as u32) >> 31) as i32)) as u32)
 }
 
 /// ZigZag encodes a 64 bit integer.
+#[must_use]
 pub const fn encode_zigzag64(value: i64) -> u64 {
     ((value as u64) << 1) ^ ((-(((value as u64) >> 63) as i64)) as u64)
 }
 
 /// Decodes a 32 bit ZigZag-encoded integer.
+#[must_use]
 pub const fn decode_zigzag32(value: u32) -> i32 {
     ((value >> 1) ^ ((-((value & 1) as i32)) as u32)) as i32
 }
 
 /// Decodes a 64 bit ZigZag-encoded integer.
+#[must_use]
 pub const fn decode_zigzag64(value: u64) -> i64 {
     ((value >> 1) ^ ((-((value & 1) as i64)) as u64)) as i64
 }

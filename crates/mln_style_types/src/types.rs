@@ -61,6 +61,14 @@ pub enum RasterResamplingType {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
+pub enum ResamplingType {
+    #[default]
+    Linear,
+    Nearest,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[repr(u8)]
 pub enum HillshadeIlluminationAnchorType {
     #[default]
     Map,
@@ -217,6 +225,8 @@ define_enum!(
     [(RasterResamplingType::Linear, "linear"), (RasterResamplingType::Nearest, "nearest"),]
 );
 
+define_enum!(ResamplingType, [(ResamplingType::Linear, "linear"), (ResamplingType::Nearest, "nearest"),]);
+
 define_enum!(
     HillshadeIlluminationAnchorType,
     [(HillshadeIlluminationAnchorType::Map, "map"), (HillshadeIlluminationAnchorType::Viewport, "viewport"),]
@@ -348,6 +358,7 @@ uninterpolated_enums!(
     LineCapType,
     LineJoinType,
     RasterResamplingType,
+    ResamplingType,
     HillshadeIlluminationAnchorType,
     HillshadeMethodType,
     TranslateAnchorType,

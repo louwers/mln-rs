@@ -1,4 +1,4 @@
-//! Ports `vendor/vector-tile` (mapbox::vector_tile 1.0.5), the Mapbox
+//! Ports `vendor/vector-tile` (`mapbox::vector_tile` 1.0.5), the Mapbox
 //! Vector Tile reader the C++ core decodes MVT tiles with:
 //!
 //! - `vector_tile/vector_tile_config.hpp` → [`config`] (the protobuf tag

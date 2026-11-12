@@ -69,6 +69,7 @@ pub struct TileSourceRenderItem {
 }
 
 impl TileSourceRenderItem {
+    #[must_use]
     pub fn new(render_tiles: Rc<Vec<RenderTile>>, name: String) -> Self {
         TileSourceRenderItem { render_tiles, name }
     }
@@ -76,6 +77,7 @@ impl TileSourceRenderItem {
 
 /// The line properties of a debug layer group's polylines: red tile
 /// borders, and black text over a white outline (layers: debug).
+#[must_use]
 pub fn debug_line_properties(type_: DebugType) -> LineEvaluatedPropsUBO {
     let (color, width) = match type_ {
         DebugType::TextOutline => (Color::white(), 4.0),
@@ -389,13 +391,14 @@ impl LayerProperties for PolylineLayerProperties {
 pub struct PolylineLayerTweaker {
     base: LayerTweakerBase,
     props_ubo: LineEvaluatedPropsUBO,
-    /// MLN_UBO_CONSOLIDATION
+    /// `MLN_UBO_CONSOLIDATION`
     drawable_uniform_buffer: Option<UniformBufferPtr>,
     /// Port-only: the Metal line shaders' `LineExpressionUBO`.
     expression_uniform_buffer: Option<UniformBufferPtr>,
 }
 
 impl PolylineLayerTweaker {
+    #[must_use]
     pub fn new(properties: LineEvaluatedPropsUBO) -> Self {
         let layer_impl: Immutable<dyn layer::Impl> =
             Arc::new(PolylineLayerImpl { base: layer::ImplBase::new(String::new(), String::new()) });
@@ -433,7 +436,7 @@ impl LayerTweaker for PolylineLayerTweaker {
 
         // We would need to set up `idLineExpressionUBO` if the expression
         // mask isn't empty
-        debug_assert!(self.props_ubo.expression_mask == line_expression_mask::NONE);
+        debug_assert_eq!(self.props_ubo.expression_mask, line_expression_mask::NONE);
         // No GPU expressions; only the Metal line shaders read it.
         if context.backend_type() == BackendType::Metal {
             if self.expression_uniform_buffer.is_none() {

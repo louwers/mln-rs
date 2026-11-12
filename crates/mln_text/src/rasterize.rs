@@ -32,13 +32,13 @@ use crate::glyph::{Glyph, GlyphID};
 struct Collector {
     segments: Vec<Segment>,
     start: Option<(i64, i64)>,
-    /// All points, control points included (for FT_Outline_Get_CBox).
+    /// All points, control points included (for `FT_Outline_Get_CBox`).
     points: Vec<(i64, i64)>,
 }
 
 /// 26.6 from a skrifa coordinate (exact: skrifa keeps FreeType's 26.6).
 fn f26dot6(v: f32) -> i64 {
-    (v as f64 * 64.0).round() as i64
+    (f64::from(v) * 64.0).round() as i64
 }
 
 impl Collector {
@@ -81,7 +81,7 @@ impl PathSink for Collector {
     }
 }
 
-/// The hinting scaler of a face at `SDF_FONT_SIZE` (FT_LOAD_DEFAULT), on
+/// The hinting scaler of a face at `SDF_FONT_SIZE` (`FT_LOAD_DEFAULT`), on
 /// the face's own font data.
 pub(crate) fn new_scaler(data: &crate::glyph::FontData) -> Option<ScalerFont> {
     let font = skrifa::Font::new(data.shared(), 0)?;
@@ -94,15 +94,15 @@ fn pix_round(x: i64) -> i64 {
 }
 
 /// `FreeTypeFace::rasterizeGlyph`.
-pub fn rasterize_glyph(face: &FreeTypeFace, glyph: &GlyphID) -> Glyph {
-    let border = Glyph::BORDER_SIZE as u32;
-    let mut fixed_metrics = Glyph { id: *glyph, ..Glyph::default() };
+pub fn rasterize_glyph(face: &FreeTypeFace, glyph: GlyphID) -> Glyph {
+    let border = u32::from(Glyph::BORDER_SIZE);
+    let mut fixed_metrics = Glyph { id: glyph, ..Glyph::default() };
 
     // FT_Load_Glyph(face, glyph.complex.code, FT_LOAD_DEFAULT)
     let mut collector = Collector::default();
     let mut advance: i64 = 0;
     let mut overlap = false;
-    if let Some(outline) = face.scaler().and_then(|s| s.outline(GlyphId::new(glyph.code as u32))) {
+    if let Some(outline) = face.scaler().and_then(|s| s.outline(GlyphId::new(u32::from(glyph.code)))) {
         if let Ok(metrics) = outline.draw(DrawMemory::Scratch, &mut collector) {
             collector.close_contour();
             advance = pix_round(metrics.h_advance.map_or(0, f26dot6));
@@ -144,7 +144,7 @@ pub fn rasterize_glyph(face: &FreeTypeFace, glyph: &GlyphID) -> Glyph {
     } else {
         // Translate the outline into the bitmap.
         let x_shift = 64 * -bitmap_left;
-        let y_shift = 64 * -bitmap_top + 64 * rows as i64;
+        let y_shift = 64 * -bitmap_top + 64 * i64::from(rows);
         let translated: Vec<Segment> = collector
             .segments
             .iter()

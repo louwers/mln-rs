@@ -89,7 +89,7 @@ fn mask(parts: &[(u8, u32, u32)]) -> TileMask {
 
 fn total_area(r: &SubdivisionResult) -> f64 {
     let mut area = 0.0;
-    for triangle in r.triangle_indices.chunks_exact(3) {
+    for triangle in r.triangle_indices.as_chunks::<3>().0 {
         area += signed_area(&r.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize).abs() / 2.0;
     }
     area
@@ -99,7 +99,7 @@ type Edge = (u32, u32);
 
 fn edge_counts(r: &SubdivisionResult) -> BTreeMap<Edge, i32> {
     let mut edges = BTreeMap::new();
-    for triangle in r.triangle_indices.chunks_exact(3) {
+    for triangle in r.triangle_indices.as_chunks::<3>().0 {
         for k in 0..3 {
             let a = triangle[k];
             let b = triangle[(k + 1) % 3];
@@ -113,7 +113,7 @@ fn edge_counts(r: &SubdivisionResult) -> BTreeMap<Edge, i32> {
 // to the pole, and a polygon that reaches past that side has triangles on
 // both sides of it, so edges into a pole and edges along that side are
 // shared more than twice and are not part of the outline.
-fn touches_pole(r: &SubdivisionResult, edge: &Edge) -> bool {
+fn touches_pole(r: &SubdivisionResult, edge: Edge) -> bool {
     let y0 = r.vertices[edge.0 as usize * 2 + 1];
     let y1 = r.vertices[edge.1 as usize * 2 + 1];
     let at_pole = |y: i16| y == NORTH_POLE_Y || y == SOUTH_POLE_Y;
@@ -136,22 +136,21 @@ fn touches_pole(r: &SubdivisionResult, edge: &Edge) -> bool {
 // `clipped_at_zoom_zero` to false.)
 fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
     let mut seen = BTreeSet::new();
-    for (i, vertex) in r.vertices.chunks_exact(2).enumerate() {
+    for (i, vertex) in r.vertices.as_chunks::<2>().0.iter().enumerate() {
         assert!(seen.insert((vertex[0], vertex[1])), "duplicate vertex {i}");
     }
 
     let edges = edge_counts(r);
     for (edge, count) in &edges {
-        if *count > 2 && !touches_pole(r, edge) {
-            panic!(
-                "edge ({}, {})-({}, {}) is shared by {} triangles",
-                r.vertices[edge.0 as usize * 2],
-                r.vertices[edge.0 as usize * 2 + 1],
-                r.vertices[edge.1 as usize * 2],
-                r.vertices[edge.1 as usize * 2 + 1],
-                count
-            );
-        }
+        assert!(
+            *count <= 2 || touches_pole(r, *edge),
+            "edge ({}, {})-({}, {}) is shared by {} triangles",
+            r.vertices[edge.0 as usize * 2],
+            r.vertices[edge.0 as usize * 2 + 1],
+            r.vertices[edge.1 as usize * 2],
+            r.vertices[edge.1 as usize * 2 + 1],
+            count
+        );
     }
 
     // T-junctions show up as boundary edges with a vertex lying strictly
@@ -191,15 +190,15 @@ fn expect_sound_mesh(r: &SubdivisionResult, clipped_at_zoom_zero: bool) {
     }
     let mut exposed = BTreeSet::new();
     for (edge, count) in &edges {
-        if *count == 1 && !touches_pole(r, edge) {
+        if *count == 1 && !touches_pole(r, *edge) {
             exposed.insert(*edge);
         }
     }
     let mut outline = BTreeSet::new();
     for lines in &r.line_index_lists {
-        for pair in lines.chunks_exact(2) {
+        for pair in lines.as_chunks::<2>().0 {
             let edge = (pair[0].min(pair[1]), pair[0].max(pair[1]));
-            if touches_pole(r, &edge) {
+            if touches_pole(r, edge) {
                 continue;
             }
             assert!(outline.insert(edge), "outline edge {}-{} twice", edge.0, edge.1);
@@ -341,7 +340,7 @@ fn no_subdivision_keeps_triangles() {
     // JS's [2, 0, 3, 2, 1, 0].
     assert_eq!(6, result.triangle_indices.len());
     assert_double_eq(20000.0 * 20000.0, total_area(&result));
-    for triangle in result.triangle_indices.chunks_exact(3) {
+    for triangle in result.triangle_indices.as_chunks::<3>().0 {
         assert!(signed_area(&result.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize) < 0.0);
     }
     assert_eq!(1, result.line_index_lists.len());
@@ -358,7 +357,7 @@ fn splits_on_cell_boundaries_and_keeps_area() {
     assert_eq!(25, result.vertices.len() / 2);
     assert_eq!(32 * 3, result.triangle_indices.len());
     assert_double_eq(f64::from(EXTENT) * f64::from(EXTENT), total_area(&result));
-    for triangle in result.triangle_indices.chunks_exact(3) {
+    for triangle in result.triangle_indices.as_chunks::<3>().0 {
         assert!(signed_area(&result.vertices, triangle[0] as usize, triangle[1] as usize, triangle[2] as usize) < 0.0);
     }
     assert_eq!(1, result.line_index_lists.len());
@@ -405,7 +404,7 @@ fn pole_caps_reach_the_pole_where_the_input_touched_it() {
     ]]);
     let result = subdivide_polygon(&polygon, &CanonicalTileID::new(1, 0, 0), 64, true);
     let mut cap_reaches_the_pole = false;
-    for triangle in result.triangle_indices.chunks_exact(3) {
+    for triangle in result.triangle_indices.as_chunks::<3>().0 {
         let mut corner = false;
         let mut pole = false;
         for &index in triangle {
@@ -535,7 +534,7 @@ fn quad_and_grid() {
     assert_eq!(3 * 5, polar.vertices.len() / 2);
     assert_eq!(NORTH_POLE_Y, polar.vertices[1]);
     assert_eq!(SOUTH_POLE_Y, polar.vertices[(3 * 5 - 1) * 2 + 1]);
-    for triangle in polar.indices.chunks_exact(3) {
+    for triangle in polar.indices.as_chunks::<3>().0 {
         assert!(
             signed_area(&polar.vertices, usize::from(triangle[0]), usize::from(triangle[1]), usize::from(triangle[2]))
                 < 0.0
@@ -581,7 +580,7 @@ fn globe_mask_keeps_the_uncovered_parts() {
     let indices = masked_indices.vector();
     assert_eq!(1, masked.segments.len());
 
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0 {
         let mut x = 0.0;
         let mut y = 0.0;
         for &index in triangle {

@@ -51,7 +51,7 @@ impl<V: bytemuck::Pod> GlobeTileMesh<V> {
             let segment = segments.last_mut().expect("segment");
             let offset = segment.vertex_length;
             let extent = EXTENT >> part.z;
-            for point in mesh.vertices.chunks_exact(2) {
+            for point in mesh.vertices.as_chunks::<2>().0 {
                 let vy = point[1];
                 let position = Point::new(
                     (part.x as i32 * extent + (i32::from(point[0]) >> part.z)) as i16,
@@ -66,7 +66,7 @@ impl<V: bytemuck::Pod> GlobeTileMesh<V> {
                 let texture = Point::new(clamp(position.x), clamp(position.y));
                 vertices.push(layout_vertex(position, texture));
             }
-            for triangle in mesh.indices.chunks_exact(3) {
+            for triangle in mesh.indices.as_chunks::<3>().0 {
                 indices.push((offset + usize::from(triangle[0])) as u16);
                 indices.push((offset + usize::from(triangle[1])) as u16);
                 indices.push((offset + usize::from(triangle[2])) as u16);
@@ -103,6 +103,7 @@ impl<V: bytemuck::Pod> Default for GlobeTileMeshCache<V> {
 impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
     const MAX_MESHES: usize = 64;
 
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -141,6 +142,7 @@ impl<V: bytemuck::Pod> GlobeTileMeshCache<V> {
         self.meshes.clear();
     }
 
+    #[must_use]
     pub fn size(&self) -> usize {
         self.meshes.len()
     }
@@ -158,6 +160,7 @@ pub struct RawGlobeTileMesh {
 
 /// `rawGlobeTileMesh(canonical, generateBorders, granularity)`; C++ defaults
 /// `granularity` to the globe's tile granularity.
+#[must_use]
 pub fn raw_globe_tile_mesh(
     canonical: &CanonicalTileID,
     generate_borders: bool,
@@ -170,7 +173,7 @@ pub fn raw_globe_tile_mesh(
         extend_to_south_pole: canonical.y == (1u32 << canonical.z) - 1,
     });
     let vertex_count = mesh.vertices.len() / 2;
-    debug_assert!(vertex_count <= usize::from(u16::MAX));
+    debug_assert!(u16::try_from(vertex_count).is_ok());
     let index_count = mesh.indices.len();
     RawGlobeTileMesh {
         vertices: bytemuck::cast_slice(&mesh.vertices).to_vec(),

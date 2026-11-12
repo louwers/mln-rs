@@ -31,7 +31,7 @@ use mln_util::Color;
 use mln_util::geometry::FeatureType;
 use mln_vec_map::{VecMap, VecSet};
 
-/// test/include/mln/test/stub_geometry_tile_feature.hpp (the property-map
+/// `test/include/mln/test/stub_geometry_tile_feature.hpp` (the property-map
 /// constructor).
 struct StubGeometryTileFeature {
     properties: PropertyMap,
@@ -66,7 +66,7 @@ fn create_override(
     Arc::new(FormatSectionOverride::new(expr_type, prop_value, prop_name.to_owned()))
 }
 
-/// `parseExpression(json, expected)` of global_state.test.cpp.
+/// `parseExpression(json, expected)` of `global_state.test.cpp`.
 fn parse_expression(json: &str, expected: Option<Type>) -> Option<Box<dyn Expression>> {
     let document: serde_json::Value = serde_json::from_str(json).unwrap();
     let mut ctx = match expected {

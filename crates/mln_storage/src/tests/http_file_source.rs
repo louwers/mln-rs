@@ -232,9 +232,9 @@ fn expires_parsing() {
         Box::new(move |res: Response| {
             assert_eq!(None, res.error);
             assert_eq!(b"Hello World!", data(&res));
-            assert_eq!(Some(Timestamp::from_secs(1420797926)), res.expires);
+            assert_eq!(Some(Timestamp::from_secs(1_420_797_926)), res.expires);
             assert!(!res.must_revalidate);
-            assert_eq!(Some(Timestamp::from_secs(1420794326)), res.modified);
+            assert_eq!(Some(Timestamp::from_secs(1_420_794_326)), res.modified);
             assert_eq!(Some("foo"), res.etag.as_deref());
             stop.stop();
         }),
@@ -311,12 +311,12 @@ pub fn load_request(
 // gtest: HTTPFileSource.Load
 #[test]
 fn load() {
+    const CONCURRENCY: usize = 50;
+    const MAX: i32 = 10000;
+
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
     let fs: Rc<dyn FileSource> = Rc::new(http_file_source());
-
-    const CONCURRENCY: usize = 50;
-    const MAX: i32 = 10000;
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
     let base = server.url("/load/");

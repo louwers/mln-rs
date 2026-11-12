@@ -250,13 +250,19 @@ fn symbol_order() {
     for type_ in SORT_KEY_TYPES {
         let bucket = create_bucket(symbol_layer(type_, None), Shape::Point);
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
-        let order: Vec<usize> =
-            bucket.state().symbol_instances.iter().map(|symbol| symbol.get_data_feature_index()).collect();
+        let order: Vec<usize> = bucket
+            .state()
+            .symbol_instances
+            .iter()
+            .map(mln_renderer::layout::symbol_instance::SymbolInstance::get_data_feature_index)
+            .collect();
         assert_eq!(expected_order(type_), order, "{type_:?}");
         // An explicit constant key still disables viewport-Y sorting for symbol-z-order:auto.
         assert_eq!(type_ == SortKeyType::Undefined, bucket.sort_features_by_y, "{type_:?}");
         match type_ {
-            SortKeyType::Undefined => assert!(bucket.sort_key_ranges.is_empty()),
+            SortKeyType::Undefined => {
+                assert_eq!(bucket.sort_key_ranges, [] as [mln_renderer::buckets::symbol_bucket::SortKeyRange; 0]);
+            }
             SortKeyType::Constant | SortKeyType::Camera => {
                 assert_eq!(bucket.sort_key_ranges.len(), 1, "{type_:?}");
                 let range = bucket.sort_key_ranges[0];
@@ -274,8 +280,12 @@ fn symbol_viewport_y() {
         let bucket = bucket.downcast_ref::<SymbolBucket>().unwrap();
         assert!(bucket.sort_features_by_y, "{type_:?}");
         assert!(bucket.sort_key_ranges.is_empty(), "{type_:?}");
-        let order: Vec<usize> =
-            bucket.state().symbol_instances.iter().map(|symbol| symbol.get_data_feature_index()).collect();
+        let order: Vec<usize> = bucket
+            .state()
+            .symbol_instances
+            .iter()
+            .map(mln_renderer::layout::symbol_instance::SymbolInstance::get_data_feature_index)
+            .collect();
         assert_eq!(vec![0, 1, 2], order, "{type_:?}");
     }
 }

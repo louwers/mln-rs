@@ -18,6 +18,7 @@ pub struct RenderSky {
 
 impl RenderSky {
     /// `explicit RenderSky(Immutable<style::Sky::Impl>)`.
+    #[must_use]
     pub fn new(impl_: Immutable<sky::Impl>) -> Self {
         let transitioning = impl_.properties.untransitioned();
         RenderSky { impl_, transitioning, evaluated: EvaluatedSky::default() }
