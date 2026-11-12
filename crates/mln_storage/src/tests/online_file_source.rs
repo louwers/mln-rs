@@ -180,7 +180,11 @@ fn connection_error() {
                 r.borrow_mut().take();
                 stop.stop();
             }
-            wait.set(wait.get() + f64::from(1 << counter.get()) + CONNECTION_TIMEOUT);
+            // Timed from this failure (C++ adds to `wait`), since the next
+            // backoff starts when it arrives: a slow failure (NSURLSession's,
+            // on GitHub's macOS runners) would otherwise count again against
+            // every later attempt.
+            wait.set(duration + f64::from(1 << counter.get()) + CONNECTION_TIMEOUT);
             counter.set(counter.get() + 1);
         }),
     ));
