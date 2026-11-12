@@ -512,6 +512,9 @@ fn rate_limit_test(path: &str, expect_retry_after: bool) {
     let fs = online_file_source();
 
     let stop = run_loop.clone();
+    // The reset time has whole seconds, so it can pass before the response
+    // arrives; it's only certain to be after the request was made.
+    let requested_at = now();
     let _req = fs.request(
         &Resource::new(Kind::Unknown, server.url(path)),
         Box::new(move |res: Response| {
@@ -519,7 +522,7 @@ fn rate_limit_test(path: &str, expect_retry_after: bool) {
             assert_eq!(Reason::RateLimit, error.reason);
             if expect_retry_after {
                 let retry_after = error.retry_after.expect("retry after");
-                assert!(now() < retry_after);
+                assert!(requested_at < retry_after);
             } else {
                 assert!(error.retry_after.is_none());
             }
