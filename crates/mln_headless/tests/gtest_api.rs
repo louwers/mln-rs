@@ -1,10 +1,9 @@
 // Ports test/api/{api_misuse.test.cpp, custom_geometry_source.test.cpp,
-// custom_layer.test.cpp, recycle_map.cpp}. test/api/annotations.test.cpp,
-// test/api/location_indicator.test.cpp and test/api/query.test.cpp are the
-// modules below; the fixture is in support/mod.rs.
+// custom_layer.test.cpp, recycle_map.cpp}. test/api/annotations.test.cpp
+// and test/api/query.test.cpp are the modules below; the fixture is in
+// support/mod.rs.
 
 mod gtest_annotations;
-mod gtest_location_indicator;
 mod gtest_query;
 mod support;
 

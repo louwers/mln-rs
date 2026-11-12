@@ -39,7 +39,6 @@ use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
-use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
 use mln_style::layers::raster_layer::RasterLayer;
 use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
@@ -3951,92 +3950,6 @@ fn feature_state_source_removal_and_change_before_one_render() {
     assert_eq!(render_selected_halves(&test), (false, true));
 }
 
-fn count_green_pixels(image: &PremultipliedImage) -> usize {
-    let mut green_pixels = 0;
-    for pixel in image.data.as_chunks::<4>().0 {
-        if pixel[0] < 40 && pixel[1] > 200 && pixel[2] < 40 {
-            green_pixels += 1;
-        }
-    }
-    green_pixels
-}
-
-// gtest: Map.LocationIndicatorAccuracyColorsTransition
-#[test]
-#[ignore = "TODO(port): RenderLocationIndicatorLayer (the location-indicator layer type is registered in the style but not rendered); see map.test.cpp:2659"]
-fn location_indicator_accuracy_colors_transition() {
-    let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.load_json(
-        r#"{
-      "version": 8,
-      "sources": {},
-      "layers": [{
-        "id": "location",
-        "type": "location-indicator",
-        "paint": {
-          "location": [0, 0, 0],
-          "accuracy-radius": 100,
-          "accuracy-radius-color": "blue",
-          "accuracy-radius-border-color": "white"
-        }
-      }]
-    }"#,
-    );
-    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(16.0)));
-
-    let render_until_idle = || {
-        let idle = Rc::new(Cell::new(false));
-        let timeout = Timer::new();
-        {
-            let run_loop = test.run_loop.clone();
-            timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
-        }
-        {
-            let idle = idle.clone();
-            let run_loop = test.run_loop.clone();
-            test.observer.did_finish_rendering_frame_callback.set(move |status| {
-                if status.mode == RenderMode::Full && !status.needs_repaint {
-                    idle.set(true);
-                    run_loop.stop();
-                }
-            });
-        }
-        test.run_loop.run();
-        test.observer.did_finish_rendering_frame_callback.clear();
-        idle.get()
-    };
-    let center_channel = |image: &PremultipliedImage, channel: usize| center_pixel(image)[channel];
-
-    let read_image = || {
-        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
-        test.frontend.read_still_image()
-    };
-
-    assert!(render_until_idle());
-    let initial = read_image();
-    assert!(center_channel(&initial, 2) > 240);
-    assert!(center_channel(&initial, 0) < 10);
-
-    {
-        let mut map = test.map();
-        let style = map.style_mut();
-        let mut layer = style.get_layer_mut("location").expect("location layer");
-        let layer = layer.downcast_mut::<LocationIndicatorLayer>().expect("LocationIndicatorLayer");
-        let transition =
-            TransitionOptions { duration: Some(Duration::from_millis(100)), ..TransitionOptions::default() };
-        layer.set_accuracy_radius_color_transition(&transition);
-        layer.set_accuracy_radius_border_color_transition(&transition);
-        layer.set_accuracy_radius_color(&PropertyValue::Constant(Color::red()));
-        layer.set_accuracy_radius_border_color(&PropertyValue::Constant(Color::new(0.0, 1.0, 0.0, 1.0)));
-    }
-
-    assert!(render_until_idle());
-    let result = read_image();
-    assert!(center_channel(&result, 0) > 240);
-    assert!(center_channel(&result, 2) < 10);
-    assert!(count_green_pixels(&result) > 0, "The accuracy border should finish transitioning to green");
-}
-
 const CIRCLE_STYLE: &str = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{
     "type":"Point","coordinates":[0,0]}}},"layers":[{"id":"circle","type":"circle","source":"points"}]}"#;
 
@@ -4089,28 +4002,6 @@ fn frame_status_carries_rendering_stats() {
     assert!(stats.total_draw_calls >= stats.num_draw_calls);
     let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
     assert_eq!(**stats, *test.frontend.get_backend().get_context().rendering_stats());
-}
-
-// gtest: Map.LocationIndicatorWithoutImages
-#[test]
-#[ignore = "TODO(port): RenderLocationIndicatorLayer; until it draws, this passes without checking anything"]
-fn location_indicator_without_images() {
-    let test = MapTest::new();
-    test.load_json(
-        r#"{
-      "version": 8,
-      "sources": {},
-      "layers": [{
-        "id": "location",
-        "type": "location-indicator",
-        "paint": {"location": [0, 0, 0], "accuracy-radius": 0}
-      }]
-    }"#,
-    );
-    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(16.0)));
-
-    // Neither the accuracy circle nor any image should produce a draw call.
-    assert_eq!(test.render().stats.num_draw_calls, 0);
 }
 
 /// Renders a frame and returns the RGB of the pixel at the centre of the map.
@@ -4451,9 +4342,9 @@ fn empty_size_is_an_error() {
 
 // gtest: Map.SourcelessLayersRenderAfterLeavingZoomRange
 // Layers without a source rebuild what they draw when they return to their
-// zoom range. The C++ test draws a location-indicator layer, which mln-rs
-// core doesn't render; a second background layer, which isn't drawn as the
-// clear color, stands in for it.
+// zoom range. The C++ test draws a location-indicator layer, a type mln-rs
+// doesn't have; a second background layer, which isn't drawn as the clear
+// color, stands in for it.
 #[test]
 fn sourceless_layers_render_after_leaving_zoom_range() {
     let test = MapTest::new();

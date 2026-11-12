@@ -492,7 +492,7 @@ shader_source!(
 );
 
 /// `ShaderSource<shader_id, Metal>`, or `None` for the shaders the port's
-/// renderer doesn't draw with: the location indicator and the wide vector.
+/// renderer doesn't draw with: the wide vector.
 #[must_use]
 pub fn shader_source(shader_id: BuiltIn) -> Option<&'static ShaderSource> {
     match shader_id {
