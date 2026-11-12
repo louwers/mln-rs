@@ -185,11 +185,6 @@ fn create() {
     check_log_empty(&log);
 }
 
-// gtest: OfflineDatabase.CreateFail
-#[test]
-#[ignore = "TODO(port): test::SQLite3TestFS (test/src/mln/test/sqlite3_test_fs.cpp), a custom SQLite VFS that needs unsafe FFI"]
-fn create_fail() {}
-
 // gtest: OfflineDatabase.SchemaVersion
 #[test]
 fn schema_version() {
@@ -1709,11 +1704,6 @@ fn corrupt_database_on_query() {
     }
 }
 
-// gtest: OfflineDatabase.DisallowedIO
-#[test]
-#[ignore = "TODO(port): test::SQLite3TestFS (test/src/mln/test/sqlite3_test_fs.cpp), a custom SQLite VFS that needs unsafe FFI"]
-fn disallowed_io() {}
-
 // gtest: OfflineDatabase.MergeDatabaseWithSingleRegion_New
 #[test]
 fn merge_database_with_single_region_new() {
@@ -1981,11 +1971,6 @@ fn merge_database_with_invalid_db() {
     );
     check_log_empty(&log);
 }
-
-// gtest: OfflineDatabase.MergeDatabaseWithDiskFull
-#[test]
-#[ignore = "TODO(port): test::SQLite3TestFS (test/src/mln/test/sqlite3_test_fs.cpp), a custom SQLite VFS that needs unsafe FFI"]
-fn merge_database_with_disk_full() {}
 
 // gtest: OfflineDatabase.ChangePath
 #[test]

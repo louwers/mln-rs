@@ -170,7 +170,6 @@
 "crates/mln_actor/src/scheduler.rs" = 1
 "crates/mln_actor/src/thread.rs" = 1
 "crates/mln_actor/src/thread_pool.rs" = 1
-"crates/mln_actor/tests/gtest/run_loop.rs" = 1
 "crates/mln_actor/tests/gtest/thread.rs" = 1
 "crates/mln_expression/src/coercion.rs" = 1
 "crates/mln_expression/src/collator_expression.rs" = 1
@@ -181,7 +180,6 @@
 "crates/mln_expression/src/interpolate.rs" = 1
 "crates/mln_expression/src/number_format.rs" = 1
 "crates/mln_expression/src/slice.rs" = 2
-"crates/mln_expression/src/tests/dependency.rs" = 2
 "crates/mln_expression/src/value.rs" = 1
 "crates/mln_gfx/src/attribute.rs" = 1
 "crates/mln_gfx/src/backend_scope.rs" = 1
@@ -198,9 +196,7 @@
 "crates/mln_gfx/tests/gtest_backend_scope.rs" = 1
 "crates/mln_gl/src/context.rs" = 1
 "crates/mln_headless/src/headless_frontend.rs" = 1
-"crates/mln_headless/tests/gtest_annotations.rs" = 28
-"crates/mln_headless/tests/gtest_api.rs" = 1
-"crates/mln_headless/tests/gtest_map.rs" = 6
+"crates/mln_headless/tests/gtest_map.rs" = 3
 "crates/mln_headless/tests/gtest_query.rs" = 1
 "crates/mln_headless/tests/local_glyph_rasterizer_test.rs" = 1
 "crates/mln_headless/tests/support/mod.rs" = 1
@@ -231,7 +227,6 @@
 "crates/mln_renderer/src/tile_parameters.rs" = 1
 "crates/mln_renderer/src/update_parameters.rs" = 1
 "crates/mln_renderer/src/util/tile_cover.rs" = 1
-"crates/mln_renderer/tests/source_test.rs" = 6
 "crates/mln_storage/src/asset_file_source.rs" = 1
 "crates/mln_storage/src/database_file_source.rs" = 1
 "crates/mln_storage/src/local_file_source.rs" = 1
@@ -241,8 +236,6 @@
 "crates/mln_storage/src/pmtiles_file_source.rs" = 1
 "crates/mln_storage/src/sqlite3.rs" = 3
 "crates/mln_storage/src/stub_file_source.rs" = 2
-"crates/mln_storage/src/tests/offline_database.rs" = 3
-"crates/mln_storage_offline/src/tests/offline_download.rs" = 1
 "crates/mln_style/src/conversion/source.rs" = 1
 "crates/mln_style/src/layermanager/layer_factory.rs" = 1
 "crates/mln_style/src/layout_property.rs" = 1

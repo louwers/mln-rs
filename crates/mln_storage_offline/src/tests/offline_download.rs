@@ -934,11 +934,6 @@ fn all_offline_requests_have_low_priority_and_offline_usage() {
     test.run_loop.run();
 }
 
-// gtest: OfflineDownload.DiskFull
-#[test]
-#[ignore = "TODO(port): test::SQLite3TestFS (test/src/mln/test/sqlite3_test_fs.cpp), a custom SQLite VFS that needs unsafe FFI"]
-fn disk_full() {}
-
 // Test verifies that resource batch buffer is cleared at loading interrupt.
 // gtest: OfflineDownload.InterruptAndResume
 #[test]

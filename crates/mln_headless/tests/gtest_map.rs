@@ -918,28 +918,6 @@ fn style_expired() {
     assert!(test.map().style().get_layer("bg").is_some());
 }
 
-// gtest: Map.StyleExpiredWithAnnotations
-#[test]
-#[ignore = "TODO(port): annotations (Map::addAnnotation, AnnotationManager); see map.test.cpp:688"]
-fn style_expired_with_annotations() {
-    // Adding an annotation should not prevent revalidation of an expired style.
-    let test = MapTest::fake();
-
-    test.map().style_mut().load_url("maptiler://maps/test");
-    assert_eq!(1, test.file_source.requests_len());
-
-    let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
-
-    test.file_source.respond(Kind::Style, &response);
-    assert_eq!(1, test.file_source.requests_len());
-
-    // TODO(port): test.map.addAnnotation(LineAnnotation{LineString<double>{{{0, 0}, {10, 10}}}});
-    assert_eq!(1, test.file_source.requests_len());
-
-    test.file_source.respond(Kind::Style, &response);
-    assert_eq!(1, test.file_source.requests_len());
-}
-
 // gtest: Map.StyleExpiredWithRender
 #[test]
 fn style_expired_with_render() {
@@ -2515,14 +2493,6 @@ fn volatile_source() {
     test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
     assert_eq!(8, requested_tiles.get());
-}
-
-// gtest: Map.ObserveShaderRegistration
-#[test]
-#[ignore = "TODO(port): MapObserver::onRegisterShaders (gfx::ShaderRegistry observer hook); see map.test.cpp:1862"]
-fn observe_shader_registration() {
-    // test/map/map.test.cpp:1862: the first render calls onRegisterShaders,
-    // the second does not.
 }
 
 // gtest: Map.GlobeDepthShaderIdFollowsTheExistingShaders

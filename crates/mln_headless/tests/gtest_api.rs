@@ -1,9 +1,7 @@
-// Ports test/api/{api_misuse.test.cpp, custom_geometry_source.test.cpp,
-// custom_layer.test.cpp, recycle_map.cpp}. test/api/annotations.test.cpp
-// and test/api/query.test.cpp are the modules below; the fixture is in
+// Ports test/api/{custom_geometry_source.test.cpp, recycle_map.cpp}.
+// test/api/query.test.cpp is the module below; the fixture is in
 // support/mod.rs.
 
-mod gtest_annotations;
 mod gtest_query;
 mod support;
 
@@ -37,15 +35,6 @@ pub fn style_image(
         mln_style::image::Impl::new(id.to_owned(), image, pixel_ratio, false, Vec::new(), Vec::new(), None, None, None)
             .expect("style::Image"),
     )
-}
-
-// gtest: API.RenderWithoutCallback
-#[test]
-#[ignore = "not applicable as written: the Rust still image callback is a Box<dyn FnOnce>, so there is no null callback to pass (C++ renderStill(nullptr) logs \"StillImageCallback not set\"); see api_misuse.test.cpp:16"]
-fn render_without_callback() {
-    // C++: map->renderStill(nullptr); map.reset(); expects one Error/General
-    // log "StillImageCallback not set". The Rust type system rules the
-    // misuse out; nothing to run.
 }
 
 // gtest: CustomGeometrySource.Grid
@@ -113,22 +102,6 @@ fn grid() {
         0.0006,
         0.1,
     );
-}
-
-// gtest: CustomLayer.Basic
-#[test]
-#[ignore = "OpenGL-only in C++ (returns early on other backends; the CustomLayerHost draws with GL calls); also TODO(port): CustomLayer; see custom_layer.test.cpp:109"]
-fn basic() {
-    // test/api/custom_layer.test.cpp:109: a GL CustomLayer drawing a triangle
-    // under a fill layer (test/fixtures/custom_layer/basic, 0.0006, 0.1).
-}
-
-// gtest: CustomLayer.RendersAfterLeavingZoomRange
-#[test]
-#[ignore = "OpenGL-only in C++, and needs the CustomLayer that CustomLayer.Basic waits on"]
-fn renders_after_leaving_zoom_range() {
-    // A GL CustomLayer with minzoom 10 renders at zoom 16, is blank at zoom
-    // 5, and renders the same image at zoom 16 again.
 }
 
 // gtest: API.RecycleMapUpdateImages

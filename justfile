@@ -9,8 +9,8 @@ binstall_args := if env('CI', '') != '' {'--no-confirm --no-track --disable-tele
 # Where `just ci-coverage` writes the LCOV report that CI uploads to Codecov
 coverage_lcov := 'target/llvm-cov/lcov.info'
 
-# The C++ core the port is ported from, for the recipes that read its sources (update-testdata, the generate-* and the
-# analysis recipes).
+# The C++ core the port is ported from, for the recipes that read its sources (update-testdata and the generate-*
+# recipes).
 cpp := justfile_directory() / '..' / 'maplibre-native'
 # maplibre-native-ffi, whose C headers and ABI suite crates/mln_c and tools/c-abi-test copy (update-ffi-abi).
 ffi := justfile_directory() / '..' / 'maplibre-native-ffi'
@@ -241,19 +241,6 @@ web-dev:  web
 web-check *args:  web
     cargo build -p mln-rs-render-test --bin render-test
     node examples/web/check/check.mjs "$@"
-
-# Report which C++ gtests have Rust ports (`// gtest: Group.Name` markers), e.g. `just gtest-parity --missing util`
-[positional-arguments]
-gtest-parity *args:
-    python3 -I tools/gtest-parity/gtest_parity.py --cpp {{quote(cpp)}} "$@"
-
-# List which C++ files include which headers across selected module edges (tools/cycles)
-include-back-edges:
-    python3 -I tools/cycles/back_edges.py {{quote(cpp)}}
-
-# Print the C++ core's module-level include graph and its cycles (tools/cycles)
-include-graph:
-    python3 -I tools/cycles/include_graph.py {{quote(cpp)}}
 
 # The desktop app is never released.
 # The verify step serves the packaged crates to each other from a local registry, and Cargo
