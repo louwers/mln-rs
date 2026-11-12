@@ -8,8 +8,8 @@ use std::any::Any;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use mln_actor::RunLoopHandle;
@@ -441,7 +441,14 @@ impl Worker {
         self.map_published = Some(published);
         let scheduled = self.update_scheduled.clone();
         let run_loop = self.shared.run_loop.clone();
+        // A caller-driven session's thread runs only when the host services
+        // it, which the host may do only once it knows to draw, so the map's
+        // thread tells it of the update.
+        let redraw = (self.shared.driver == Driver::CallerThread).then(|| Arc::downgrade(&self.shared));
         reader.set_waker(Some(Arc::new(move || {
+            if let Some(wake) = redraw.as_ref().and_then(Weak::upgrade).and_then(|shared| shared.take_redraw_wake()) {
+                wake();
+            }
             if !scheduled.swap(true, Ordering::SeqCst) {
                 post(&run_loop, Worker::on_update);
             }
@@ -505,13 +512,7 @@ impl Worker {
     /// Tells the host that the map has something new to draw, unless it was
     /// told since its last demand, or the session has no target.
     fn wake_for_redraw(&self, outbox: &mut Outbox) {
-        let wake = {
-            let mut state = self.shared.state.lock_unpoisoned();
-            let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
-            state.redraw_armed &= !wake;
-            wake.then(|| self.shared.redraw_wake.clone()).flatten()
-        };
-        if let Some(wake) = wake {
+        if let Some(wake) = self.shared.take_redraw_wake() {
             outbox.push(move || wake());
         }
     }

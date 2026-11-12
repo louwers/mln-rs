@@ -16,7 +16,7 @@ use mln_runtime::{
     RenderTarget, Runtime, Wake,
 };
 use mln_util::size::Size;
-use support::{TIMEOUT, runtime, wait};
+use support::{TIMEOUT, eventually, runtime, wait};
 
 const SIZE: Size = Size { width: 64, height: 64 };
 
@@ -385,6 +385,24 @@ fn a_map_command_that_no_work_waits_for_wakes_no_driver() {
     // A demand waits for the commands sent before it, and wakes the driver.
     session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
     assert_eq!(1, wakes.load(Ordering::SeqCst));
+    assert_eq!(FrameDisposition::Rendered, take_one(&driver, &session).disposition);
+    wait_release(&driver, &session);
+}
+
+#[test]
+fn a_caller_driven_session_asks_for_a_redraw_before_a_service() {
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let (wake, redraws) = counter();
+    let (session, driver) = attach(&map, AttachOptions { redraw_wake: Some(wake), ..caller_options() });
+    session.demand_frame(FrameDemand::new(DemandMode::Force, 1)).unwrap();
+    take_one(&driver, &session);
+    let before = redraws.load(Ordering::SeqCst);
+    // The host hears of the change from the map's thread, and services the
+    // session only once it demands the frame.
+    wait(map.set_style_json(style("#0000ff")));
+    assert!(eventually(|| redraws.load(Ordering::SeqCst) == before + 1));
+    session.demand_frame(FrameDemand::new(DemandMode::IfChanged, 2)).unwrap();
     assert_eq!(FrameDisposition::Rendered, take_one(&driver, &session).disposition);
     wait_release(&driver, &session);
 }

@@ -315,6 +315,16 @@ impl SessionShared {
         self.state.lock_unpoisoned().released
     }
 
+    /// The redraw wake that tells the host the map has something new to
+    /// draw, unless the host was told since its last demand, or the session
+    /// has no target. The host isn't told again until its next demand.
+    pub(crate) fn take_redraw_wake(&self) -> Option<Wake> {
+        let mut state = self.state.lock_unpoisoned();
+        let wake = state.redraw_armed && state.has_target && state.lifecycle == RenderSessionState::Attached;
+        state.redraw_armed &= !wake;
+        wake.then(|| self.redraw_wake.clone()).flatten()
+    }
+
     /// Starts a detach on the session's thread, after the work sent before.
     /// The state is locked, and the session usable or failed.
     fn start_detach(&self, state: &mut SessionState) {
