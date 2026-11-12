@@ -173,8 +173,4 @@ impl OfflineRegionObserver for RegionObserver {
     fn response_error(&self, error: ResourceError) {
         self.send(RuntimeEventKind::OfflineRegionResponseError { region_id: self.region_id, error });
     }
-
-    fn mapbox_tile_count_limit_exceeded(&self, limit: u64) {
-        self.send(RuntimeEventKind::OfflineRegionTileCountLimitExceeded { region_id: self.region_id, limit });
-    }
 }

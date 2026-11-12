@@ -86,7 +86,7 @@ fn vector() {
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio).expect("a headless frontend");
     let mut map = test.map(&frontend, ratio);
     map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
-    map.style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("https://example.com/maps/streets");
 
     frontend.render(&mut map).expect("render");
 }
@@ -99,7 +99,7 @@ fn raster() {
 
     let mut frontend = HeadlessFrontend::new(Size::new(256, 256), ratio).expect("a headless frontend");
     let mut map = test.map(&frontend, ratio);
-    map.style_mut().load_url("maptiler://maps/hybrid");
+    map.style_mut().load_url("https://example.com/maps/hybrid");
 
     frontend.render(&mut map).expect("render");
 }
@@ -155,8 +155,8 @@ fn footprint() {
 
     // Warm up buffers and cache.
     for _ in 0..10 {
-        FrontendAndMap::new(&test, "maptiler://maps/streets");
-        FrontendAndMap::new(&test, "maptiler://maps/hybrid");
+        FrontendAndMap::new(&test, "https://example.com/maps/streets");
+        FrontendAndMap::new(&test, "https://example.com/maps/hybrid");
     }
 
     // Process close callbacks, mostly needed by
@@ -168,14 +168,14 @@ fn footprint() {
 
     let vector_initial_rss = get_current_rss();
     for _ in 0..runs {
-        maps.push(FrontendAndMap::new(&test, "maptiler://maps/streets"));
+        maps.push(FrontendAndMap::new(&test, "https://example.com/maps/streets"));
     }
 
     let vector_footprint = (get_current_rss() as f64 - vector_initial_rss as f64) / f64::from(runs);
 
     let raster_initial_rss = get_current_rss();
     for _ in 0..runs {
-        maps.push(FrontendAndMap::new(&test, "maptiler://maps/hybrid"));
+        maps.push(FrontendAndMap::new(&test, "https://example.com/maps/hybrid"));
     }
 
     let raster_footprint = (get_current_rss() as f64 - raster_initial_rss as f64) / f64::from(runs);
@@ -221,7 +221,7 @@ fn rendering_stats_count_live_resources() {
     let mut map = test.map(&frontend, 1.0);
     map.jump_to(&CameraOptions::default().with_zoom(Some(16.0)));
 
-    map.style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("https://example.com/maps/streets");
     frontend.render(&mut map).expect("render");
     let loaded = live_resources(&frontend);
     for (name, value) in &loaded {
@@ -243,7 +243,7 @@ fn rendering_stats_count_live_resources() {
     }
 
     // Loading the tiles again and dropping them leaves the same resources.
-    map.style_mut().load_url("maptiler://maps/streets");
+    map.style_mut().load_url("https://example.com/maps/streets");
     frontend.render(&mut map).expect("render");
     assert!(live(&live_resources(&frontend), "num_index_buffers") > 0);
     map.style_mut().load_json(EMPTY);

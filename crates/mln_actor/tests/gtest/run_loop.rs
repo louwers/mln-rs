@@ -56,13 +56,3 @@ fn multiple_run() {
 
     assert!(second_timeout.get());
 }
-
-// gtest: RunLoop.PlatformIntegration
-#[test]
-#[ignore = "TODO(port): RunLoop::setPlatformCallback"]
-fn platform_integration() {
-    // test/util/run_loop.test.cpp:68: two threads invoke 100000 tasks each on
-    // the main loop; the platform callback (on the invoking threads) wakes
-    // the main thread, which calls runOnce until all 200000 ran; both counts
-    // must be 200000.
-}

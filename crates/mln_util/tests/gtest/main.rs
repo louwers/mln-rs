@@ -1,6 +1,7 @@
 // Ported C++ gtests of test/util that test mln_util (and the low crates
 // next to it: mln_style_types' Position/Rotation, nunicode's case mapping).
-// Every test carries a `// gtest: Group.Name` marker (tools/gtest-parity).
+// Every test carries a `// gtest: Group.Name` marker naming the C++ test it
+// ports.
 
 mod color;
 mod geo;
@@ -9,7 +10,6 @@ mod position;
 mod rotation;
 mod string;
 mod text_conversions;
-mod tile_server_options;
 
 /// The ULP distance gtest's `FloatingPoint<T>::AlmostEquals` uses.
 const MAX_ULPS: u64 = 4;

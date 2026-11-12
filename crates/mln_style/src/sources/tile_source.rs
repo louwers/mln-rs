@@ -10,9 +10,6 @@
 // TileJSON response handler applies the overrides) and `VectorSource` /
 // `RasterSource` wrap it. Like GeoJSONSource, a TileSource is a handle to
 // an `Rc`'d state (see source.rs).
-//
-// TODO(port): `util::mapbox::canonicalizeSourceURL` / `canonicalizeTileset`
-// (only change URLs with the tile server's scheme alias, e.g. mapbox://).
 
 use std::any::Any;
 use std::cell::{Cell, RefCell};
@@ -232,8 +229,6 @@ fn on_description_response_for(this: &TileSource, derived: &dyn Source, res: &Re
             observer.on_source_error(this_source, mln_util::Error::native(error.message));
             return;
         };
-        // TODO(port): canonicalizeTileset for the "mapbox" scheme alias.
-
         this.set_tileset_overrides(&mut tileset);
 
         let current = this.impl_();

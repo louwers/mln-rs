@@ -14,7 +14,6 @@
 //   include/mln/shaders/webgpu/hillshade.hpp
 //   include/mln/shaders/webgpu/hillshade_prepare.hpp
 //   include/mln/shaders/webgpu/line.hpp
-//   include/mln/shaders/webgpu/location_indicator.hpp
 //   include/mln/shaders/webgpu/raster.hpp
 //   include/mln/shaders/webgpu/shader_group.hpp
 //   include/mln/shaders/webgpu/shader_program.hpp
@@ -4550,108 +4549,6 @@ fn main(in: FragmentInput) -> @location(0) vec4<f32> {
     prelude: None,
 };
 
-/// `ShaderSource<BuiltIn::LocationIndicatorShader, gfx::Backend::Type::WebGPU>`
-pub const LOCATION_INDICATOR_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LocationIndicatorShader",
-    name: r"LocationIndicatorShader",
-    vertex: Some(
-        r"
-struct VertexInput {
-    @location(5) position: vec2<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.position = projectTile(in.position, projectionVector[globalIndex.value]);
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct LocationIndicatorUBO {
-    matrix: mat4x4<f32>,
-    color: vec4<f32>,
-};
-
-@group(0) @binding(5) var<uniform> ubo: LocationIndicatorUBO;
-
-@fragment
-fn main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
-    return ubo.color;
-}
-",
-    ),
-    prelude: None,
-};
-
-/// `ShaderSource<BuiltIn::LocationIndicatorTexturedShader, gfx::Backend::Type::WebGPU>`
-pub const LOCATION_INDICATOR_TEXTURED_SHADER: WgslShaderSource = WgslShaderSource {
-    built_in: "LocationIndicatorTexturedShader",
-    name: r"LocationIndicatorTexturedShader",
-    vertex: Some(
-        r"
-struct VertexInput {
-    @location(5) position: vec2<f32>,
-    @location(6) uv: vec2<f32>,
-};
-
-struct VertexOutput {
-    @builtin(position) position: vec4<f32>,
-    @location(0) uv: vec2<f32>,
-};
-
-struct GlobalIndexUBO {
-    value: u32,
-    pad0: vec3<u32>,
-};
-
-@group(0) @binding(1) var<uniform> globalIndex: GlobalIndexUBO;
-@group(0) @binding(4) var<storage, read> projectionVector: array<ProjectionUBO>;
-
-@vertex
-fn main(in: VertexInput) -> VertexOutput {
-    var out: VertexOutput;
-    out.position = projectTile(in.position, projectionVector[globalIndex.value]);
-    out.uv = in.uv;
-    return out;
-}
-",
-    ),
-    fragment: Some(
-        r"
-struct LocationIndicatorUBO {
-    matrix: mat4x4<f32>,
-    color: vec4<f32>,
-};
-
-@group(0) @binding(5) var<uniform> ubo: LocationIndicatorUBO;
-@group(1) @binding(0) var colorSampler: sampler;
-@group(1) @binding(1) var colorTexture: texture_2d<f32>;
-
-@fragment
-fn main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let textureColor = textureSample(colorTexture, colorSampler, uv);
-    return textureColor * ubo.color;
-}
-",
-    ),
-    prelude: None,
-};
-
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::WebGPU>`
 pub const PRELUDE: WgslShaderSource = WgslShaderSource {
     built_in: "Prelude",
@@ -6222,8 +6119,6 @@ pub const ALL: &[&WgslShaderSource] = &[
     &LINE_PATTERN_SHADER,
     &LINE_SDF_SHADER,
     &LINE_SHADER,
-    &LOCATION_INDICATOR_SHADER,
-    &LOCATION_INDICATOR_TEXTURED_SHADER,
     &PRELUDE,
     &RASTER_SHADER,
     &SKY_SHADER,

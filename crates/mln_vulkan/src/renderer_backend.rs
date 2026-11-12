@@ -282,7 +282,7 @@ pub struct RendererBackend {
 
 /// The shader types registered by `initShaders`, in the C++ order.
 /// `init_shaders` skips the ones without a Vulkan source in the port
-/// (`shader_source`): the location indicator and wide vector shaders.
+/// (`shader_source`): the wide vector shader.
 const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::BackgroundShader,
     BuiltIn::BackgroundPatternShader,
@@ -312,8 +312,6 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
     BuiltIn::LineSDFShader,
     BuiltIn::LineGradientSDFShader,
     BuiltIn::LinePatternShader,
-    BuiltIn::LocationIndicatorShader,
-    BuiltIn::LocationIndicatorTexturedShader,
     BuiltIn::RasterShader,
     BuiltIn::SymbolIconShader,
     BuiltIn::SymbolSDFShader,

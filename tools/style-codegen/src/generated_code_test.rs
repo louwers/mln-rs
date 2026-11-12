@@ -36,12 +36,11 @@ fn every_layer_type_is_generated() {
         "hillshade",
         "color_relief",
         "background",
-        "location_indicator",
     ] {
         assert!(paths.contains(&format!("layers/{t}_layer.rs").as_str()), "{t}");
         assert!(paths.contains(&format!("layers/{t}_layer_properties.rs").as_str()), "{t}");
     }
     assert!(paths.contains(&"light.rs"));
     assert!(paths.contains(&"sky.rs"));
-    assert_eq!(files.len(), 24);
+    assert_eq!(files.len(), 22);
 }

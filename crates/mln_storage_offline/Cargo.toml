@@ -28,18 +28,12 @@ mln_text.workspace = true
 mln_tile_id.workspace = true
 mln_util.workspace = true
 mln_vec_map.workspace = true
-regex.workspace = true
 
 # OfflineDownload.ResourceOfflineUsageUnset renders a map after the
 # download.
 [[test]]
 name = "offline_download_map_test"
 path = "tests/offline_download_map.rs"
-
-# Ports test/util/mapbox.test.cpp.
-[[test]]
-name = "gtest_mapbox"
-path = "tests/gtest_mapbox.rs"
 
 [dev-dependencies]
 # Serves the styles of the DatabaseFileSource region tests.

@@ -198,7 +198,7 @@ fn failed_accessed_flush_waits_for_next_read() {
         Resource::with_tile_data(Kind::Unknown, "https://example.com/maintenance", None, LoadingMethod::CacheOnly);
     let mut response = Response::new();
     response.data = Some(Arc::new(b"cached".to_vec()));
-    OfflineDatabase::new(&path, &ResourceOptions::default().tile_server_options()).put(&resource, &response);
+    OfflineDatabase::new(&path).put(&resource, &response);
 
     let marker = format!("accessed failure {path}");
     let sql = Database::open(&path, OpenFlag::ReadWriteCreate).unwrap();

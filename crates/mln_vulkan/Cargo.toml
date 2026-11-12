@@ -54,10 +54,5 @@ path = "tests/background_test.rs"
 name = "surface_test"
 path = "tests/surface_test.rs"
 
-# test/renderer/vulkan_acquire.test.cpp: ignored placeholders.
-[[test]]
-name = "gtest_vulkan_acquire"
-path = "tests/gtest_vulkan_acquire.rs"
-
 [lints]
 workspace = true

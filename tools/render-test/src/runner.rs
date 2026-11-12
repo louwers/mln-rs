@@ -74,7 +74,6 @@ fn not_ported<T>(what: &str) -> Result<T, MapError> {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ResourceOptions {
     pub cache_path: String,
-    pub api_key: String,
 }
 
 /// `TestRunner::Impl` (frontend, file source and map for one
@@ -966,10 +965,7 @@ impl TestRunner {
                     ctx.metadata.render_errored += 1;
                     return;
                 };
-                let resource_options = ResourceOptions {
-                    cache_path: self.manifest.get_cache_path().to_string(),
-                    api_key: self.manifest.get_api_key().to_string(),
-                };
+                let resource_options = ResourceOptions { cache_path: self.manifest.get_cache_path().to_string() };
                 let created =
                     catch_unwind(AssertUnwindSafe(|| factory(ctx.metadata, &resource_options, &self.impl_options)));
                 match created {

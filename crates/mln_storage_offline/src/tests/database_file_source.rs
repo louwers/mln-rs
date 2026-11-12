@@ -185,7 +185,7 @@ fn a_download_refreshes_an_invalidated_region() {
 fn merging_copies_the_regions_of_another_database() {
     let dir = TempDir::new();
     let side_path = dir.path("side.db");
-    let side_region = OfflineDatabase::new(&side_path, &ResourceOptions::default().tile_server_options())
+    let side_region = OfflineDatabase::new(&side_path)
         .create_region(&definition("http://example.com/style.json"), &b"side".to_vec())
         .unwrap();
     let source = database_file_source(&dir);
