@@ -473,6 +473,88 @@ mod vulkan {
         wait(session.detach());
     }
 
+    fn timeline_of(frame: &mln_runtime::AcquiredFrame) -> (vk::Semaphore, u64) {
+        use vk::Handle as _;
+        let sync = frame.producer_sync();
+        assert_eq!(SyncKind::VulkanTimelineSemaphore, sync.kind);
+        (vk::Semaphore::from_raw(sync.handle), sync.value)
+    }
+
+    // A release of the ring's images completes once the host's reads of
+    // them end, so a new ring of the same image draws only after them. A
+    // wait that runs out still completes the release, and quarantines
+    // nothing.
+    #[test]
+    fn a_release_of_the_ring_waits_for_the_hosts_reads() {
+        let Some((device, mut host)) = with_timelines() else { return };
+        let images = [host.image()];
+        let timeline = host.timeline();
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (producer, value) = timeline_of(&frame);
+        assert!(eventually(|| host.counter(producer) >= value));
+        frame.release(timeline_sync(timeline, 1)).unwrap();
+
+        let host = &host;
+        std::thread::scope(|scope| {
+            let released = session.release_target().unwrap();
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                host.signal(timeline, 1);
+            });
+            released.wait().unwrap();
+            wait(session.set_ring(SIZE, Host::ring(&images)));
+            assert_eq!(FrameDisposition::Rendered, render(&session));
+            let frame = session.acquire_frame().unwrap().expect("a frame");
+            let (producer, value) = timeline_of(&frame);
+            assert!(eventually(|| host.counter(producer) >= value));
+            assert!(host.counter(timeline) >= 1, "the new ring drew into the image before the host's reads ended");
+            // The host never signals 2.
+            frame.release(timeline_sync(timeline, 2)).unwrap();
+        });
+        let started = std::time::Instant::now();
+        wait(session.release_target());
+        assert!(started.elapsed() >= std::time::Duration::from_millis(900));
+        wait(session.set_ring(SIZE, Host::ring(&images)));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        drop(session.acquire_frame().unwrap().expect("a frame"));
+        wait(session.detach());
+    }
+
+    // A new ring that lets go of an image completes once the host's reads
+    // of it end.
+    #[test]
+    fn a_new_ring_waits_for_the_hosts_reads_of_the_image_it_lets_go_of() {
+        let Some((device, mut host)) = with_timelines() else { return };
+        let (old, new) = ([host.image()], [host.image()]);
+        let timeline = host.timeline();
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&old), device: device.clone() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (producer, value) = timeline_of(&frame);
+        assert!(eventually(|| host.counter(producer) >= value));
+        frame.release(timeline_sync(timeline, 1)).unwrap();
+
+        let host = &host;
+        std::thread::scope(|scope| {
+            let replaced = session.set_ring(SIZE, Host::ring(&new)).unwrap();
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(400));
+                host.signal(timeline, 1);
+            });
+            replaced.wait().unwrap();
+            assert!(host.counter(timeline) >= 1, "the new ring let go of the image before the host's reads ended");
+        });
+        wait(session.detach());
+    }
+
     // The host reads each frame on the queue that it shares with the
     // session, and gives it back in queue order: the next frame waits for
     // those reads before it clears the image. The validation layer checks

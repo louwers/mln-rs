@@ -827,7 +827,10 @@ impl RenderSession {
 
     /// Gives a borrowed ring new textures, of `size` logical pixels: as many
     /// as it has, of its format. Once the completion reports success, the
-    /// session no longer uses the old textures.
+    /// session no longer uses the old textures, and no longer waits for the
+    /// consumer sync that they were given back with: the host may reuse or
+    /// destroy them. The session waits a second at most for that sync, and
+    /// logs a wait that runs out.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a
     /// session without a ring, with
@@ -976,7 +979,10 @@ impl RenderSession {
     /// [`set_surface`](Self::set_surface) gives the session a surface again,
     /// finish as [`FrameDisposition::TargetNotReady`](super::FrameDisposition).
     /// Once the release completes, the session no longer uses the surface or
-    /// the window it was made from.
+    /// the window it was made from, or a ring's textures, and no longer waits
+    /// for the consumer sync that the textures were given back with: the host
+    /// may reuse or destroy them. The session waits a second at most for that
+    /// sync, and logs a wait that runs out.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for an
     /// offscreen session, whose target is its own.

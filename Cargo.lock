@@ -2797,6 +2797,7 @@ dependencies = [
  "ash",
  "bytemuck",
  "gpu-allocator",
+ "libc",
  "mln-rs-gfx",
  "mln-rs-tile-id",
  "mln-rs-util",

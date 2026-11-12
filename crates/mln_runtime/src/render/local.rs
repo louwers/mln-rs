@@ -45,6 +45,9 @@ impl Borrowed for mln_mtl::BorrowedTarget {
         };
         mln_mtl::BorrowedTarget::replace(self, textures)
     }
+    fn settle(&self) {
+        mln_mtl::BorrowedTarget::settle(self);
+    }
 }
 
 /// Frames given back to the host: a ring of its textures.
@@ -53,6 +56,10 @@ trait Borrowed: FrameTarget {
     fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error>;
     fn discard(&self, slot: usize);
     fn replace(&self, ring: BorrowedRing) -> Result<(), Error>;
+    /// Waits, briefly, for the host's reads that the textures still wait
+    /// for, before the ring lets go of them. A target that waits for the
+    /// host's reads as it takes each texture back has none.
+    fn settle(&self) {}
 }
 
 #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
@@ -72,6 +79,9 @@ impl Borrowed for mln_vulkan::BorrowedTarget {
             return Err(Error::unsupported("a ring of Vulkan images takes Vulkan images only"));
         };
         mln_vulkan::BorrowedTarget::replace(self, images)
+    }
+    fn settle(&self) {
+        mln_vulkan::BorrowedTarget::settle(self);
     }
 }
 
@@ -499,12 +509,17 @@ impl LocalTarget {
         }
     }
 
-    /// Lets go of a surface target's surface, or of a ring's textures. The
+    /// Lets go of a surface target's surface, or of a ring's textures once
+    /// it waited, a second at most, for the host's reads of them. The
     /// backend stays.
     pub fn release_surface(&mut self) {
         match &mut self.frames {
             Frames::Presenting(target) => drop(target.take()),
-            Frames::Borrowed { target, .. } => drop(target.take()),
+            Frames::Borrowed { target, .. } => {
+                if let Some(target) = target.take() {
+                    target.settle();
+                }
+            }
             Frames::Offscreen(_) => {}
         }
     }

@@ -6,11 +6,13 @@ use std::any::Any;
 use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::rc::Rc;
+use std::time::{Duration, Instant};
 
 use mln_gfx::command_encoder::CommandEncoder;
 use mln_gfx::frame::{self, FrameTarget, Handoff};
 use mln_gfx::{ConsumerSync, GpuSync, SyncKind, SyncKinds};
 use mln_util::error::Error;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use objc2::rc::Retained;
 use objc2::runtime::ProtocolObject;
@@ -315,7 +317,7 @@ impl BorrowedTarget {
         // its new slot.
         let mut waits = self.resource.waits.borrow_mut();
         let mut previous = std::mem::take(&mut *waits);
-        *waits = self
+        let kept = self
             .resource
             .textures
             .borrow()
@@ -329,7 +331,21 @@ impl BorrowedTarget {
                     .and_then(Option::take)
             })
             .collect();
+        *waits = kept;
+        drop(waits);
+        // The host may use or destroy a texture that the ring let go of once
+        // the replacement completes.
+        settle_waits(previous.into_iter().flatten().collect());
         Ok(())
+    }
+
+    /// Waits, for about a second at most, for the host's reads that the
+    /// ring's textures still wait for, and lets go of them: the host may then
+    /// use or destroy the textures. A wait that runs out is logged, and the
+    /// texture's sync is let go of all the same.
+    pub fn settle(&self) {
+        let waits = self.resource.waits.borrow_mut().iter_mut().filter_map(Option::take).collect();
+        settle_waits(waits);
     }
 
     /// The sync the host waits for, once `command_buffer` was committed.
@@ -367,5 +383,30 @@ impl FrameTarget for BorrowedTarget {
         command_buffer.commit();
         let sync = self.producer_sync(&command_buffer);
         Handoff::GivenBack { slot: self.resource.selected.get(), sync }
+    }
+}
+
+/// The longest that a release of the ring's textures waits for the host's
+/// reads of them.
+const SETTLE_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// Waits, all within one timeout, for each shared event to reach its value.
+fn settle_waits(waits: Vec<(SharedEventPtr, u64)>) {
+    let deadline = Instant::now() + SETTLE_TIMEOUT;
+    let mut ended = true;
+    for (event, value) in waits {
+        // The event's signaled value, which any macOS that has shared events
+        // reports.
+        while event.signaledValue() < value && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        ended &= event.signaledValue() >= value;
+    }
+    if !ended {
+        Log::warning(
+            Event::Render,
+            "The host's reads of a borrowed texture didn't end within a second of its release; the session no longer \
+             waits for them",
+        );
     }
 }
