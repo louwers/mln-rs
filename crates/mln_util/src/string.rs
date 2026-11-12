@@ -57,12 +57,6 @@ pub fn to_string_double(value: f64) -> String {
     to_string_double_decimal(value, false)
 }
 
-/// `util::toString(float, decimal)`: promotes to double.
-#[must_use]
-pub fn to_string_f32(t: f32, decimal: bool) -> String {
-    to_string_double_decimal(f64::from(t), decimal)
-}
-
 /// The exceptions `std::stof` throws (libstdc++: `what()` is `"stof"`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("stof")]

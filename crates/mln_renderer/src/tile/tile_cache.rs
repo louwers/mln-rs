@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 
-use mln_actor::TaggedScheduler;
 use mln_tile_id::OverscaledTileID;
 
 use crate::tile::tile::{Tile, TileNecessity};
@@ -18,22 +17,17 @@ pub struct TileCache {
     tiles: BTreeMap<OverscaledTileID, Box<dyn Tile>>,
     /// `std::list<OverscaledTileID>`, oldest first.
     ordered_keys: Vec<OverscaledTileID>,
-    _thread_pool: TaggedScheduler,
     pending_releases: Vec<Box<dyn Tile>>,
     size: usize,
 }
 
 impl TileCache {
-    /// `TileCache(const TaggedScheduler&, size_t size = 0)`.
+    /// `TileCache(const TaggedScheduler&, size_t size = 0)`, without the
+    /// thread pool: released tiles are dropped on the render thread (see the
+    /// file comment).
     #[must_use]
-    pub fn new(thread_pool: TaggedScheduler, size: usize) -> Self {
-        TileCache {
-            tiles: BTreeMap::new(),
-            ordered_keys: Vec::new(),
-            _thread_pool: thread_pool,
-            pending_releases: Vec::new(),
-            size,
-        }
+    pub fn new(size: usize) -> Self {
+        TileCache { tiles: BTreeMap::new(), ordered_keys: Vec::new(), pending_releases: Vec::new(), size }
     }
 
     /// `std::list::remove(key)`: removes every occurrence.
@@ -55,12 +49,6 @@ impl TileCache {
         }
 
         debug_assert!(self.ordered_keys.len() <= self.size);
-    }
-
-    /// Get the maximum size
-    #[must_use]
-    pub fn get_max_size(&self) -> usize {
-        self.size
     }
 
     /// Add a new tile with the given ID. If a tile with the same ID is
@@ -187,7 +175,6 @@ mod tests {
     use std::cell::Cell;
     use std::rc::Rc;
 
-    use mln_actor::scheduler;
     use mln_style::layer_properties::LayerProperties;
     use mln_util::identity::SimpleIdentity;
     use mln_util::immutable::Immutable;
@@ -229,16 +216,12 @@ mod tests {
         }
     }
 
-    fn thread_pool() -> TaggedScheduler {
-        TaggedScheduler::new(scheduler::get_background(), SimpleIdentity::new())
-    }
-
     // Port-only: the cache keeps a tile that is still loading, and on the
     // globe the pyramid takes it back under another wrap of the same tile,
     // where it goes on loading.
     #[test]
     fn pop_any_wrap_takes_a_loading_tile() {
-        let mut cache = TileCache::new(thread_pool(), 2);
+        let mut cache = TileCache::new(2);
         let id = OverscaledTileID::with_zxy(2, 0, 2, 1, 1);
         let tile = VectorTileMock::new(id);
         tile.base.renderable.set(false);
@@ -254,7 +237,7 @@ mod tests {
     // gtest: TileCache.Smoke
     #[test]
     fn smoke() {
-        let mut cache = TileCache::new(thread_pool(), 1);
+        let mut cache = TileCache::new(1);
         let id = OverscaledTileID::from_zxy(0, 0, 0);
         let tile = VectorTileMock::new(id);
 
@@ -267,7 +250,7 @@ mod tests {
     // gtest: TileCache.Issue15926
     #[test]
     fn issue_15926() {
-        let mut cache = TileCache::new(thread_pool(), 2);
+        let mut cache = TileCache::new(2);
         let id0 = OverscaledTileID::from_zxy(0, 0, 0);
         let id1 = OverscaledTileID::from_zxy(1, 0, 0);
         let tile1 = VectorTileMock::new(id0);
@@ -307,7 +290,7 @@ mod tests {
     /// and a renderable one is left as it is.
     #[test]
     fn evicting_a_loading_tile_makes_it_optional() {
-        let mut cache = TileCache::new(thread_pool(), 2);
+        let mut cache = TileCache::new(2);
         let (loading, loaded) = (OverscaledTileID::from_zxy(1, 0, 0), OverscaledTileID::from_zxy(1, 1, 0));
         let loading_tile = VectorTileMock::new(loading);
         loading_tile.base.renderable.set(false);

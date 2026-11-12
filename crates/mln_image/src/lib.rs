@@ -5,8 +5,8 @@
 //! C++ throws `std::runtime_error`; here the functions return
 //! `Err(message)` with the same message.
 //!
-//! Port-only: `decoder::decode` is how the map's code decodes images, with
-//! `decode_image` unless the host sets a decoder of its own (the browser's).
+//! Port-only: `decoder::decode` is how the map's code decodes images: with
+//! `decode_image` natively, and with the browser's decoders on wasm.
 
 #[cfg(target_family = "wasm")]
 mod browser_decoder;

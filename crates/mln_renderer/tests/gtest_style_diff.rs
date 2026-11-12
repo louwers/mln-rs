@@ -40,8 +40,6 @@ impl Impl for TestLayerImpl {
         false
     }
 
-    fn stringify_layout(&self, _writer: &mut String) {}
-
     fn get_type_info(&self) -> &'static LayerTypeInfo {
         &TYPE_INFO
     }

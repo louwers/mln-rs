@@ -82,7 +82,7 @@ pub mod layer_type_info {
 
 /// Holds static data for a certain layer type. Compared by address, as in
 /// C++ (`impl->getTypeInfo() == BackgroundLayer::Impl::staticTypeInfo()`):
-/// use `std::ptr::eq` or [`layer_type_info_equals`].
+/// use `std::ptr::eq`.
 #[derive(Debug)]
 pub struct LayerTypeInfo {
     /// The layer type as defined in the style specification.
@@ -93,19 +93,6 @@ pub struct LayerTypeInfo {
     pub fading_tiles: layer_type_info::FadingTiles,
     pub cross_tile_index: layer_type_info::CrossTileIndex,
     pub tile_kind: layer_type_info::TileKind,
-}
-
-/// Added this to support plugins and that their `LayerTypeInfo` isn't the same
-/// pointer across the board.
-#[must_use]
-pub fn layer_type_info_equals(one: &LayerTypeInfo, other: &LayerTypeInfo) -> bool {
-    one.type_ == other.type_
-        && one.source == other.source
-        && one.pass3d == other.pass3d
-        && one.layout == other.layout
-        && one.fading_tiles == other.fading_tiles
-        && one.cross_tile_index == other.cross_tile_index
-        && one.tile_kind == other.tile_kind
 }
 
 /// `Layer::PropertyScope`.

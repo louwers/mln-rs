@@ -19,7 +19,6 @@ pub mod backend_scope;
 pub mod color_mode;
 pub mod command_encoder;
 pub mod context;
-pub mod context_observer;
 pub mod cull_face_mode;
 pub mod debug_group;
 pub mod depth_mode;

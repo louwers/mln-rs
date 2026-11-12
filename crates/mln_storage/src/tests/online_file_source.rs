@@ -12,11 +12,10 @@ use feature::Value;
 use mln_actor::{RunLoop, Timer};
 use mln_test_server::{HttpServer, closed_port_url};
 use mln_util::chrono::{Clock, Duration, Timestamp, now};
-use mln_util::tile_server_options::TileServerOptions;
 
 use super::http_file_source::{LoadState, load_request};
 use super::{Req, req, serial};
-use crate::file_source::{API_BASE_URL_KEY, API_KEY_KEY, FileSource, MAX_CONCURRENT_REQUESTS_KEY};
+use crate::file_source::{FileSource, MAX_CONCURRENT_REQUESTS_KEY};
 use crate::http_header_transform::HttpHeaderTransform;
 use crate::network_status::{NetworkStatus, Status};
 use crate::online_file_source::OnlineFileSource;
@@ -30,11 +29,10 @@ const CONNECTION_TIMEOUT: f64 = if cfg!(windows) { 2.0 } else { 0.0 };
 
 /// An online file source whose thread has set up its HTTP transport, so that
 /// the tests that time their requests don't count that setup.
-fn online_file_source() -> Rc<dyn FileSource> {
-    let fs: Rc<dyn FileSource> = Rc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
+fn online_file_source() -> Rc<OnlineFileSource> {
+    let fs = Rc::new(OnlineFileSource::new(&ResourceOptions::default()));
     // `pause` returns once the thread runs.
-    fs.pause();
-    fs.resume();
+    drop(fs.pause());
     fs
 }
 
@@ -45,13 +43,6 @@ fn data(res: &Response) -> &[u8] {
 /// `std::chrono::duration<const double>(Clock::now() - start).count()`.
 fn seconds_since(start: mln_util::chrono::TimePoint) -> f64 {
     (Clock::now() - start).count() as f64 / 1e9
-}
-
-fn string_property(fs: &dyn FileSource, key: &str) -> String {
-    match fs.get_property(key) {
-        Value::String(s) => s,
-        other => panic!("{key}: {other:?}"),
-    }
 }
 
 // gtest: OnlineFileSource.Cancel
@@ -362,7 +353,7 @@ fn load() {
     let _serial = serial();
     let server = HttpServer::new();
     let run_loop = RunLoop::new();
-    let fs = online_file_source();
+    let fs: Rc<dyn FileSource> = online_file_source();
 
     let state = Rc::new(LoadState { reqs: (0..CONCURRENCY).map(|_| req()).collect(), number: Cell::new(1) });
     let base = server.url("/load/");
@@ -425,7 +416,7 @@ fn network_status_change_preempt() {
     let _serial = serial();
     let run_loop = RunLoop::new();
     let fs = online_file_source();
-    fs.pause();
+    let paused = fs.pause();
 
     let start = Clock::now();
     let counter = Cell::new(0);
@@ -475,7 +466,7 @@ fn network_status_change_preempt() {
         NetworkStatus::reachable,
     );
 
-    fs.resume();
+    drop(paused);
     run_loop.run();
 }
 
@@ -557,89 +548,6 @@ fn rate_limit_default() {
     rate_limit_test("/rate-limit", false);
 }
 
-// gtest: OnlineFileSource.GetBaseURLAndApiKeyWhilePaused
-#[test]
-fn get_base_url_and_api_key_while_paused() {
-    let _run_loop = RunLoop::new();
-    let fs = online_file_source();
-
-    fs.pause();
-
-    let base_url = "http://url";
-    let api_key = "api_key";
-
-    fs.set_property(API_BASE_URL_KEY, &Value::String(base_url.to_owned()));
-    fs.set_property(API_KEY_KEY, &Value::String(api_key.to_owned()));
-
-    assert_eq!(string_property(&*fs, API_BASE_URL_KEY), base_url);
-    assert_eq!(string_property(&*fs, API_KEY_KEY), api_key);
-}
-
-// gtest: OnlineFileSource.ChangeAPIBaseURL
-#[test]
-fn change_api_base_url() {
-    let _run_loop = RunLoop::new();
-    let fs = online_file_source();
-    assert_eq!(
-        ResourceOptions::default_options().tile_server_options().base_url(),
-        string_property(&*fs, API_BASE_URL_KEY)
-    );
-    let custom_url = "test.domain";
-    fs.set_property(API_BASE_URL_KEY, &Value::String(custom_url.to_owned()));
-    assert_eq!(custom_url, string_property(&*fs, API_BASE_URL_KEY));
-
-    let updated_tile_server_options = fs.get_resource_options().tile_server_options();
-    assert_eq!(custom_url, updated_tile_server_options.base_url());
-}
-
-// gtest: OnlineFileSource.ChangeTileServerOptions
-#[test]
-fn change_tile_server_options() {
-    let _run_loop = RunLoop::new();
-    let fs = online_file_source();
-
-    let tile_server_opts_changed = TileServerOptions::new()
-        .with_api_key_parameter_name("apiKeyChanged")
-        .with_base_url("baseURLChanged")
-        .with_default_style("defaultStyleChanged")
-        .with_glyphs_template("defaultGlyphsTemplateChanged", "glyphsDomainChanged", None)
-        .with_source_template("sourceTemplateChanged", "sourceDomainChanged", None)
-        .with_sprites_template("spritesTemplateChanged", "spritesDomainChanged", None)
-        .with_style_template("styleTemplateChanged", "styleDomainChanged", None)
-        .with_tile_template("tileTemplateChanged", "tileDomainChanged", None)
-        .with_uri_scheme_alias("uriSchemeAliasChanged");
-    let res_opts =
-        ResourceOptions::new().with_api_key("changedAPIKey").with_tile_server_options(tile_server_opts_changed.clone());
-
-    fs.set_resource_options(res_opts.clone());
-
-    let actual_resource_opts = fs.get_resource_options();
-
-    assert_eq!(tile_server_opts_changed.base_url(), string_property(&*fs, API_BASE_URL_KEY));
-    assert_eq!(actual_resource_opts.api_key(), string_property(&*fs, API_KEY_KEY));
-
-    let a = res_opts.tile_server_options();
-    let b = &tile_server_opts_changed;
-    assert_eq!(res_opts.api_key(), actual_resource_opts.api_key());
-    assert_eq!(a.default_style(), b.default_style());
-    assert_eq!(a.base_url(), b.base_url());
-    assert_eq!(a.glyphs_template(), b.glyphs_template());
-    assert_eq!(a.glyphs_domain_name(), b.glyphs_domain_name());
-    assert_eq!(a.glyphs_version_prefix(), b.glyphs_version_prefix());
-    assert_eq!(a.source_template(), b.source_template());
-    assert_eq!(a.source_domain_name(), b.source_domain_name());
-    assert_eq!(a.source_version_prefix(), b.source_version_prefix());
-    assert_eq!(a.sprites_template(), b.sprites_template());
-    assert_eq!(a.sprites_domain_name(), b.sprites_domain_name());
-    assert_eq!(a.sprites_version_prefix(), b.sprites_version_prefix());
-    assert_eq!(a.tile_template(), b.tile_template());
-    assert_eq!(a.tile_domain_name(), b.tile_domain_name());
-    assert_eq!(a.tile_version_prefix(), b.tile_version_prefix());
-    assert_eq!(a.style_template(), b.style_template());
-    assert_eq!(a.style_domain_name(), b.style_domain_name());
-    assert_eq!(a.style_version_prefix(), b.style_version_prefix());
-}
-
 // gtest: OnlineFileSource.LowHighPriorityRequests
 #[test]
 fn low_high_priority_requests() {
@@ -655,7 +563,7 @@ fn low_high_priority_requests() {
     // After DefaultFileSource was split, OnlineFileSource lives on a separate
     // thread. Pause OnlineFileSource, so that messages are queued for
     // processing.
-    fs.pause();
+    let paused = fs.pause();
 
     // First regular request.
     let regular1 = Resource::new(Kind::Unknown, server.url("/load/1"));
@@ -702,7 +610,7 @@ fn low_high_priority_requests() {
     // two of them, those taken offline would wait for the reachability
     // notification and start after the later ones, low priority included.
     NetworkStatus::set(Status::Online);
-    fs.resume();
+    drop(paused);
     run_loop.run();
 }
 
@@ -719,7 +627,7 @@ fn low_high_priority_requests_many() {
 
     NetworkStatus::set(Status::Offline);
     fs.set_property(MAX_CONCURRENT_REQUESTS_KEY, &Value::Uint(1));
-    fs.pause();
+    let paused = fs.pause();
 
     let collector: Rc<RefCell<Vec<Req>>> = Rc::new(RefCell::new(Vec::new()));
 
@@ -777,7 +685,7 @@ fn low_high_priority_requests_many() {
 
     // Online before resuming, as in LowHighPriorityRequests.
     NetworkStatus::set(Status::Online);
-    fs.resume();
+    drop(paused);
     run_loop.run();
 }
 

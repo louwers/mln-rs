@@ -29,7 +29,6 @@ macro_rules! layout_property {
             type PossiblyEvaluatedType = $t;
             type EvaluatorType<'a> = $crate::renderer::property_evaluator::PropertyEvaluator<'a, $t>;
             const IS_DATA_DRIVEN: bool = false;
-            const IS_OVERRIDABLE: bool = false;
 
             fn default_value() -> $t {
                 $default
@@ -70,7 +69,6 @@ macro_rules! data_driven_layout_property {
             type EvaluatorType<'a> =
                 $crate::renderer::data_driven_property_evaluator::DataDrivenPropertyEvaluator<'a, $t, false>;
             const IS_DATA_DRIVEN: bool = true;
-            const IS_OVERRIDABLE: bool = false;
 
             fn default_value() -> $t {
                 $default

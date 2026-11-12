@@ -39,10 +39,8 @@ use std::rc::{Rc, Weak};
 
 use ash::vk;
 use mln_gfx::backend::Type as BackendType;
-use mln_gfx::color_mode::ColorMode;
 use mln_gfx::context::{Context as GfxContext, ContextBase};
 use mln_gfx::cull_face_mode::CullFaceMode;
-use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::drawable_builder::UniqueDrawableBuilder;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::globe_clip_mask::{GlobeClipMask, GlobeClipMeshFn};
@@ -57,7 +55,7 @@ use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBase
 use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::texture2d::{Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
+use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
@@ -82,13 +80,6 @@ use crate::surface_resource::SurfaceResource;
 use crate::texture2d::Texture2D;
 use crate::tile_layer_group::TileLayerGroup;
 use crate::uniform_buffer::UniformBuffer;
-
-/// Maximum number of vertex attributes, per vertex descriptor: 32 on most
-/// devices (~30% Android use 16), per
-/// <https://vulkan.gpuinfo.org/displaydevicelimit.php?name=maxVertexInputBindings>
-/// this can be queried at runtime
-/// (VkPhysicalDeviceLimits.maxVertexInputBindings).
-const MAXIMUM_VERTEX_BINDING_COUNT: u32 = 16;
 
 const GLOBAL_DESCRIPTOR_POOL_SIZE: u32 = 2;
 const LAYER_DESCRIPTOR_POOL_SIZE: u32 = 2 * 256;
@@ -296,7 +287,7 @@ impl Context {
         ];
 
         let context = Rc::new_cyclic(|weak| Context {
-            base: ContextBase::new(MAXIMUM_VERTEX_BINDING_COUNT),
+            base: ContextBase::default(),
             backend,
             weak_self: weak.clone(),
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
@@ -739,12 +730,11 @@ impl Context {
         BufferResource::new(self, data, size, usage, persistent)
     }
 
-    /// `createProgram(shaderID, name, vertex, fragment, programParameters,
+    /// `createProgram(name, vertex, fragment, programParameters,
     /// additionalDefines)`, with `source`'s stages and prelude: compiles the
     /// two stages with the program's defines and `additional_defines`.
     pub fn create_program(
         &self,
-        shader_id: BuiltIn,
         name: String,
         source: &GlslShaderSource,
         program_parameters: &ProgramParameters,
@@ -757,10 +747,6 @@ impl Context {
             let _ = writeln!(define_str, "#define {key} {value}");
         }
 
-        let observer = self.get_observer();
-        if let Some(observer) = &observer {
-            observer.on_pre_compile_shader(shader_id, BackendType::Vulkan, &define_str);
-        }
         let compile = |stage: Stage, stage_source: &str| {
             let spirv = compiler::compile(stage, &compiler::compose(stage, &define_str, source.prelude, stage_source))
                 .map_err(|error| Log::error(Event::Shader, format!("{name} - {error}")))
@@ -780,20 +766,13 @@ impl Context {
                     self.backend.get_device().destroy_shader_module(module, None);
                 }
             }
-            if let Some(observer) = &observer {
-                observer.on_shader_compile_failed(shader_id, BackendType::Vulkan, &define_str);
-            }
             debug_assert!(false, "shader compile failed");
             return None;
         };
         self.backend.set_debug_name(vertex_shader, &format!("{name}.vert"));
         self.backend.set_debug_name(fragment_shader, &format!("{name}.frag"));
 
-        let shader = ShaderProgram::new(name, self, vertex_shader, fragment_shader);
-        if let Some(observer) = &observer {
-            observer.on_post_compile_shader(shader_id, BackendType::Vulkan, &define_str);
-        }
-        Some(shader)
+        Some(ShaderProgram::new(name, self, vertex_shader, fragment_shader))
     }
 
     /// `createTexture2D()` with the concrete type.
@@ -1480,13 +1459,6 @@ impl GfxContext for Context {
         Box::new(CommandEncoder::new(self.rc(), self.get_command_buffer()))
     }
 
-    /// See `PaintParameters::clearStencil`.
-    fn clear_stencil_buffer(&self, _value: i32) {
-        debug_assert!(false);
-    }
-
-    fn set_dirty_state(&self) {}
-
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr {
         VertexAttributeArray::new_ptr()
     }
@@ -1497,10 +1469,6 @@ impl GfxContext for Context {
 
     fn create_uniform_buffer(&self, data: &[u8], persistent: bool, ssbo: bool) -> UniformBufferPtr {
         Rc::new(UniformBuffer::create(self, data, persistent, ssbo))
-    }
-
-    fn create_layer_uniform_buffer_array(&self) -> UniqueUniformBufferArray {
-        Box::new(UniformBufferArray::new())
     }
 
     fn get_generic_shader(
@@ -1529,8 +1497,6 @@ impl GfxContext for Context {
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_vulkan_texture_2d()
     }
-
-    fn reset_state(&self, _depth_mode: DepthMode, _color_mode: ColorMode) {}
 
     fn emplace_or_update_uniform_buffer(
         &self,

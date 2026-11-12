@@ -49,7 +49,7 @@ use mln_gfx::shaders::shader_program_base::{ShaderProgramBase, ShaderProgramBase
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{StencilOpType, TextureChannelDataType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
+use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_util::Color;
 use mln_util::logging::{Event, Log};
@@ -67,10 +67,6 @@ use crate::types::{
     BufferID, FramebufferID, Gl, ProgramID, RenderbufferID, ShaderID, TextureID, UniformLocation, VertexArrayID,
 };
 use crate::uniform_buffer::UniformBuffer;
-
-/// `gfx::Context::minimumRequiredVertexBindingCount`: what GL ES 3.0
-/// guarantees is twice that.
-const MAXIMUM_VERTEX_BINDING_COUNT: u32 = 16;
 
 /// The objects whose owners are gone, deleted by `perform_cleanup` while the
 /// context is current (C++: `abandonedPrograms` and the others).
@@ -119,6 +115,8 @@ pub struct Context {
     /// Whether a half-float texture can be rendered into
     /// (`EXT_color_buffer_half_float` or `EXT_color_buffer_float`).
     half_float_renderable: bool,
+    /// Whether the context is of desktop OpenGL rather than OpenGL ES.
+    desktop: bool,
     global_uniform_buffers: RefCell<UniformBufferArray>,
     /// The uniform buffers of the layer group being drawn.
     layer_uniform_buffers: RefCell<UniformBufferArray>,
@@ -152,17 +150,28 @@ impl Context {
         // SAFETY: the parameters are GL ES 3.0's.
         let (alignment, extensions) =
             unsafe { (gl.get_parameter_i32(glow::UNIFORM_BUFFER_OFFSET_ALIGNMENT), gl.supported_extensions()) };
-        let half_float_renderable = extensions.contains("EXT_color_buffer_half_float")
+        let desktop = !gl.version().is_embedded;
+        // Desktop OpenGL 3.0 renders into half-float textures without an
+        // extension.
+        let half_float_renderable = desktop
+            || extensions.contains("EXT_color_buffer_half_float")
             || extensions.contains("GL_EXT_color_buffer_half_float")
             || extensions.contains("EXT_color_buffer_float")
             || extensions.contains("GL_EXT_color_buffer_float");
+        if desktop {
+            // OpenGL ES encodes what it writes to an sRGB framebuffer, such
+            // as the host's texture, as sRGB; desktop OpenGL only with this.
+            // SAFETY: a capability of OpenGL 3.0.
+            unsafe { gl.enable(glow::FRAMEBUFFER_SRGB) };
+        }
         Rc::new_cyclic(|weak| Context {
-            base: ContextBase::new(MAXIMUM_VERTEX_BINDING_COUNT),
+            base: ContextBase::default(),
             backend,
             weak_self: weak.clone(),
             state: State::default(),
             uniform_buffer_offset_alignment: alignment.max(1) as usize,
             half_float_renderable,
+            desktop,
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             layer_uniform_buffers: RefCell::new(UniformBufferArray::new()),
             abandoned: RefCell::new(Abandoned::default()),
@@ -199,6 +208,13 @@ impl Context {
 
     pub fn uniform_buffer_offset_alignment(&self) -> usize {
         self.uniform_buffer_offset_alignment
+    }
+
+    /// Whether the context is of desktop OpenGL (3.3 or later) rather than
+    /// OpenGL ES or WebGL2. Its shaders compile as GLSL 3.30, and it has no
+    /// alpha or luminance textures.
+    pub fn is_desktop(&self) -> bool {
+        self.desktop
     }
 
     /// Port-only: deletes what the context caches and what is abandoned,
@@ -465,6 +481,12 @@ impl Context {
     /// `setCullFaceMode`
     pub fn set_cull_face_mode(&self, mode: &CullFaceMode) {
         self.state.set_cull_face_mode(self.gl(), mode);
+    }
+
+    /// Forgets the GL state the context tracks, so that the next draw sets
+    /// all of it again. Call it after code outside the context changed it.
+    pub fn set_dirty_state(&self) {
+        self.state.set_dirty();
     }
 
     /// `setScissorTest`. The renderer's rectangles have their origin at the
@@ -845,17 +867,6 @@ impl GfxContext for Context {
         Box::new(CommandEncoder::new(self.rc()))
     }
 
-    fn clear_stencil_buffer(&self, value: i32) {
-        // glClear writes only the bits the stencil write mask lets through,
-        // and clipping leaves that mask at zero.
-        self.clear(None, None, Some(value));
-        self.rendering_stats().stencil_clears += 1;
-    }
-
-    fn set_dirty_state(&self) {
-        self.state.set_dirty();
-    }
-
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr {
         VertexAttributeArray::new_ptr()
     }
@@ -866,10 +877,6 @@ impl GfxContext for Context {
 
     fn create_uniform_buffer(&self, data: &[u8], _persistent: bool, ssbo: bool) -> UniformBufferPtr {
         Rc::new(UniformBuffer::new(self, data, ssbo))
-    }
-
-    fn create_layer_uniform_buffer_array(&self) -> UniqueUniformBufferArray {
-        Box::new(UniformBufferArray::new())
     }
 
     fn get_generic_shader(
@@ -897,14 +904,6 @@ impl GfxContext for Context {
 
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_gl_texture_2d()
-    }
-
-    fn reset_state(&self, depth_mode: DepthMode, color_mode: ColorMode) {
-        // Reset dynamic state
-        self.set_depth_mode(&depth_mode);
-        self.set_stencil_mode(&StencilMode::disabled());
-        self.set_color_mode(&color_mode);
-        self.set_cull_face_mode(&CullFaceMode::disabled());
     }
 
     fn emplace_or_update_uniform_buffer(

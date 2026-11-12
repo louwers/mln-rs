@@ -3,7 +3,7 @@
 use core::ffi::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use ::mln_runtime::{Adapter, BackendType, Device, DeviceOptions, SurfaceType, SyncKind, SyncKinds};
+use ::mln_runtime::{Adapter, BackendType, Device, DeviceOptions, GlApi, SurfaceType, SyncKind, SyncKinds};
 use mln_util::ErrorKind;
 
 use crate::abi::{self, Fields};
@@ -43,7 +43,7 @@ pub(crate) const BACKENDS: &[(BackendType, mln_render_backend, mln_render_backen
     (BackendType::Metal, types::MLN_RENDER_BACKEND_METAL, types::MLN_RENDER_BACKEND_FLAG_METAL),
     #[cfg(not(any(target_vendor = "apple", target_family = "wasm")))]
     (BackendType::Vulkan, MLN_RENDER_BACKEND_VULKAN, types::MLN_RENDER_BACKEND_FLAG_VULKAN),
-    // OpenGL ES comes through EGL.
+    // OpenGL comes through EGL.
     #[cfg(all(unix, not(target_vendor = "apple")))]
     (BackendType::OpenGL, MLN_RENDER_BACKEND_OPEN_GL, types::MLN_RENDER_BACKEND_FLAG_OPEN_GL),
     #[cfg(not(target_family = "wasm"))]
@@ -214,31 +214,29 @@ unsafe fn request(options: *const mln_gpu_device_options) -> Result<Request, Err
         return Err(Error::invalid_argument("mln_gpu_device_options names the GPU more than once"));
     }
     let client_api = fields.get(MLN_GPU_DEVICE_OPTION_OPEN_GL_CLIENT_API, options.open_gl_client_api);
-    if client_api.is_some_and(|api| api != MLN_OPEN_GL_CLIENT_API_GL && api != MLN_OPEN_GL_CLIENT_API_GLES) {
-        return Err(Error::invalid_argument("mln_gpu_device_options.open_gl_client_api must name an OpenGL API"));
-    }
+    let gl_api = match client_api {
+        None | Some(MLN_OPEN_GL_CLIENT_API_GLES) => GlApi::Gles,
+        Some(MLN_OPEN_GL_CLIENT_API_GL) => GlApi::Gl,
+        Some(_) => {
+            return Err(Error::invalid_argument("mln_gpu_device_options.open_gl_client_api must name an OpenGL API"));
+        }
+    };
+    let single_context = fields.get(MLN_GPU_DEVICE_OPTION_OPEN_GL_SINGLE_CONTEXT, options.open_gl_single_context);
     Ok(Request {
         backend,
-        options: DeviceOptions { adapter: adapters.pop() },
+        options: DeviceOptions { adapter: adapters.pop(), gl_api, gl_single_context: single_context.unwrap_or(false) },
         client_api,
-        single_context: fields.get(MLN_GPU_DEVICE_OPTION_OPEN_GL_SINGLE_CONTEXT, options.open_gl_single_context),
+        single_context,
         queue_lock: HostQueueLock::new(&options.queue_lock)?,
     })
 }
 
 /// Fails with `MLN_STATUS_UNSUPPORTED` for OpenGL options that a device of
-/// `backend` can't take: only an OpenGL device reads them, and this
-/// library's renders with OpenGL ES, with a context for each session.
+/// `backend` can't take: only an OpenGL device reads them. The OpenGL device
+/// itself fails to create where it can't render with the client API.
 fn check_open_gl_options(request: &Request, backend: BackendType) -> Result<(), Error> {
-    let unsupported = |message: &'static str| Err(Error::new(ErrorKind::Unsupported, message));
     if (request.client_api.is_some() || request.single_context.is_some()) && backend != BackendType::OpenGL {
-        return unsupported("only an OpenGL device takes OpenGL options");
-    }
-    if request.client_api == Some(MLN_OPEN_GL_CLIENT_API_GL) {
-        return unsupported("this library's OpenGL devices render with OpenGL ES");
-    }
-    if request.single_context == Some(true) {
-        return unsupported("each session on this library's OpenGL devices has a context of its own");
+        return Err(Error::new(ErrorKind::Unsupported, "only an OpenGL device takes OpenGL options"));
     }
     Ok(())
 }
@@ -571,8 +569,8 @@ pub unsafe extern "C" fn mln_gpu_device_wrap_metal(
     })
 }
 
-/// `mln_gpu_device_wrap_open_gl()`: this library's OpenGL contexts don't
-/// join a host's share group yet.
+/// `mln_gpu_device_wrap_open_gl()`: the share group of the host's EGL
+/// context, of OpenGL ES 3, or of desktop OpenGL on Linux and FreeBSD.
 ///
 /// # Safety
 ///
@@ -752,19 +750,28 @@ mod tests {
     }
 
     #[test]
-    fn open_gl_options_need_an_open_gl_es_device_with_a_context_each() {
+    fn open_gl_options_need_an_open_gl_device() {
         let request = |client_api, single_context| Request { client_api, single_context, ..Request::default() };
         let status = |request: &Request, backend| check_open_gl_options(request, backend).map_err(|e| e.status());
         assert_eq!(status(&request(Some(MLN_OPEN_GL_CLIENT_API_GLES), Some(false)), BackendType::OpenGL), Ok(()));
+        assert_eq!(status(&request(Some(MLN_OPEN_GL_CLIENT_API_GL), Some(true)), BackendType::OpenGL), Ok(()));
         assert_eq!(
             status(&request(Some(MLN_OPEN_GL_CLIENT_API_GLES), None), BackendType::Vulkan),
             Err(MLN_STATUS_UNSUPPORTED)
         );
-        assert_eq!(
-            status(&request(Some(MLN_OPEN_GL_CLIENT_API_GL), None), BackendType::OpenGL),
-            Err(MLN_STATUS_UNSUPPORTED)
-        );
-        assert_eq!(status(&request(None, Some(true)), BackendType::OpenGL), Err(MLN_STATUS_UNSUPPORTED));
+        assert_eq!(status(&request(None, Some(false)), BackendType::Vulkan), Err(MLN_STATUS_UNSUPPORTED));
+    }
+
+    #[test]
+    fn open_gl_options_reach_the_device_options() {
+        let mut desktop =
+            options(MLN_GPU_DEVICE_OPTION_OPEN_GL_CLIENT_API | MLN_GPU_DEVICE_OPTION_OPEN_GL_SINGLE_CONTEXT);
+        desktop.open_gl_client_api = MLN_OPEN_GL_CLIENT_API_GL;
+        desktop.open_gl_single_context = true;
+        let request = checked(&desktop).unwrap();
+        assert_eq!(request.options.gl_api, GlApi::Gl);
+        assert!(request.options.gl_single_context);
+        assert_eq!(checked(&options(0)).unwrap().options, DeviceOptions::default());
     }
 
     #[test]

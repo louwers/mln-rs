@@ -29,7 +29,7 @@ fn a_provider_serves_a_scheme_the_library_cant_load() {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let record = seen.clone();
     wait(runtime.set_resource_provider(move |request: ResourceRequest| {
-        record.lock().unwrap().push((request.resource().kind, request.resolved_url().to_owned()));
+        record.lock().unwrap().push((request.resource().kind, request.resource().url.clone()));
         assert!(!request.is_cancelled());
         request.respond(style_response()).unwrap();
     }));
@@ -155,21 +155,6 @@ fn a_scheme_that_nothing_loads_fails_and_says_why() {
     wait(runtime.set_resource_provider(|request: ResourceRequest| request.pass_through().unwrap()));
     let error = wait_err(map.set_style_url("jar:file:/packaged/style.json"));
     assert!(error.message.contains("the registered resource provider declined"), "{}", error.message);
-}
-
-#[test]
-fn a_provider_sees_the_url_that_an_alias_names() {
-    let runtime = runtime();
-    let (resolved, seen) = std::sync::mpsc::channel();
-    wait(runtime.set_resource_provider(move |request: ResourceRequest| {
-        resolved.send((request.resource().url.clone(), request.resolved_url().to_owned())).unwrap();
-        request.respond(style_response()).unwrap();
-    }));
-    let map = map(&runtime);
-    wait(map.set_style_url("maplibre://maps/streets"));
-    let (url, resolved) = seen.recv_timeout(support::TIMEOUT).unwrap();
-    assert_eq!("maplibre://maps/streets", url);
-    assert!(resolved.starts_with("https://"), "{resolved}");
 }
 
 #[test]

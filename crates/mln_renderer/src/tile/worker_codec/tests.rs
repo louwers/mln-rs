@@ -448,12 +448,13 @@ fn pattern_layouts_cross() {
         .downcast_ref::<crate::buckets::fill_extrusion_bucket::FillExtrusionBucket>()
         .unwrap();
     let binders = extrusion.paint_property_binders["extrusion-pattern"].read().unwrap();
-    let crate::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { zoom_in_vertex_vector, .. } =
-        &binders.fill_extrusion_pattern.kind
-    else {
-        panic!("not a data-driven pattern");
-    };
-    assert_ne!(*zoom_in_vertex_vector, Vec::<[u16; 4]>::new());
+    assert!(matches!(
+        binders.fill_extrusion_pattern.kind,
+        crate::paint_property_binder::CrossFadedPaintPropertyBinderKind::Composite { .. }
+    ));
+    let buffer = &binders.interleaved_vertex_buffer;
+    assert_ne!(buffer.vertex_count, 0);
+    assert_eq!(buffer.shared_vertex_vector.data().len(), buffer.vertex_count * buffer.stride);
 }
 
 /// GeoJSON tiles cross as their features: each geometry type, properties

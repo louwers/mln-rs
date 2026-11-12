@@ -104,8 +104,9 @@ use super::glsl_sources;
 /// The GLSL members of a `ShaderSource<BuiltIn::X, gfx::Backend::Type::OpenGL>`
 /// specialisation.
 ///
-/// A stage compiles from `#version 300 es`, the program's defines, the
-/// prelude's source of that stage and the shader's.
+/// A stage compiles from `#version 300 es`, or `#version 330 core` on
+/// desktop OpenGL, the program's defines, the prelude's source of that stage
+/// and the shader's.
 #[derive(Debug)]
 pub struct GlslShaderSource {
     /// The `BuiltIn` enumerator name.

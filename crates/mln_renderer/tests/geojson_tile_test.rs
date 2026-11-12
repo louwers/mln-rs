@@ -50,7 +50,6 @@ impl GeoJSONTileTest {
             file_source: None,
             mode: MapMode::Continuous,
             prefetch_zoom_delta: 0,
-            thread_pool: self.thread_pool.clone(),
             tile_lod_min_radius: 3.0,
             tile_lod_scale: 1.0,
             tile_lod_pitch_threshold: (60.0 / 180.0) * std::f64::consts::PI,

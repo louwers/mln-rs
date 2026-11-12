@@ -44,9 +44,9 @@ pub use offline::Offline;
 pub use render::{
     AcquiredFrame, Adapter, AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions,
     DmaBufFormat, DmaBufPlane, Driver, DriverWork, ExportKind, ExportKinds, ExportedImage, ExportedRing, FrameDemand,
-    FrameDisposition, FrameResult, FrameTexture, FrameTextureKind, FrameView, GpuSync, LocalTarget, RenderSession,
-    RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget, RenderedQueryGeometry, Surface,
-    SurfaceType, SyncKind, SyncKinds, Wake,
+    FrameDisposition, FrameResult, FrameTexture, FrameTextureKind, FrameView, GlApi, GpuSync, LocalTarget,
+    RenderSession, RenderSessionCapabilities, RenderSessionSnapshot, RenderSessionState, RenderTarget,
+    RenderedQueryGeometry, Surface, SurfaceType, SyncKind, SyncKinds, Wake,
 };
 pub use resources::{CacheDatabaseOperation, ResourceProvider, ResourceRequest, is_managed_http_header};
 pub use runtime::{Runtime, RuntimeOptions};

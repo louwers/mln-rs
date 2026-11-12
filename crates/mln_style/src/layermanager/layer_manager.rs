@@ -17,10 +17,9 @@ use super::heatmap_layer_factory::HeatmapLayerFactory;
 use super::hillshade_layer_factory::HillshadeLayerFactory;
 use super::layer_factory::LayerFactory;
 use super::line_layer_factory::LineLayerFactory;
-use super::location_indicator_layer_factory::LocationIndicatorLayerFactory;
 use super::raster_layer_factory::RasterLayerFactory;
 use super::symbol_layer_factory::SymbolLayerFactory;
-use crate::layer::{Layer, LayerTypeInfo};
+use crate::layer::Layer;
 
 pub struct LayerManager {
     factories: Vec<Box<dyn LayerFactory>>,
@@ -49,7 +48,6 @@ impl LayerManager {
         manager.add_layer_type(Box::new(HeatmapLayerFactory));
         // The custom layer factory is registered only with the OpenGL
         // backend (MLN_RENDER_BACKEND_OPENGL); the port renders with WebGPU.
-        manager.add_layer_type(Box::new(LocationIndicatorLayerFactory));
         manager
     }
 
@@ -66,16 +64,6 @@ impl LayerManager {
 
     fn get_factory(&self, type_: &str) -> Option<&dyn LayerFactory> {
         self.type_to_factory.get(type_).map(|&i| self.factories[i].as_ref())
-    }
-
-    /// `getFactory(const LayerTypeInfo*)`: by address, as C++.
-    pub fn get_factory_by_type_info(&self, info: &LayerTypeInfo) -> Option<&dyn LayerFactory> {
-        self.factories.iter().find(|f| std::ptr::eq(f.get_type_info(), info)).map(std::convert::AsRef::as_ref)
-    }
-
-    #[must_use]
-    pub fn has_layer_type(&self, type_: &str) -> bool {
-        self.get_factory(type_).is_some()
     }
 
     /// Returns a new Layer instance on success call; returns `None` otherwise.

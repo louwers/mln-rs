@@ -12,7 +12,7 @@ use crate::offline::{
 #[test]
 fn offline_tile_pyramid_region_definition_encode_decode() {
     let region = OfflineTilePyramidRegionDefinition::new(
-        "maptiler://style",
+        "https://example.com/style",
         LatLngBounds::hull(LatLng::new(37.6609, -122.5744).unwrap(), LatLng::new(37.8271, -122.3204).unwrap()),
         0.0,
         20.0,
@@ -40,7 +40,7 @@ fn offline_tile_pyramid_region_definition_encode_decode() {
 #[test]
 fn offline_geometry_region_definition_encode_decode() {
     let region = OfflineGeometryRegionDefinition::new(
-        "maptiler://style",
+        "https://example.com/style",
         Geometry::Point(Point::new(-122.5744, 37.6609)),
         0.0,
         2.0,
@@ -68,7 +68,7 @@ fn offline_geometry_region_definition_encode_decode() {
 #[test]
 fn encoding_matches_rapidjson() {
     let region = OfflineTilePyramidRegionDefinition::new(
-        "maptiler://style",
+        "https://example.com/style",
         LatLngBounds::hull(LatLng::new(37.6609, -122.5744).unwrap(), LatLng::new(37.8271, -122.3204).unwrap()),
         0.0,
         20.0,
@@ -77,12 +77,12 @@ fn encoding_matches_rapidjson() {
     )
     .unwrap();
     assert_eq!(
-        r#"{"style_url":"maptiler://style","min_zoom":0.0,"max_zoom":20.0,"pixel_ratio":1.0,"include_ideographs":true,"bounds":[37.6609,-122.5744,37.8271,-122.3204]}"#,
+        r#"{"style_url":"https://example.com/style","min_zoom":0.0,"max_zoom":20.0,"pixel_ratio":1.0,"include_ideographs":true,"bounds":[37.6609,-122.5744,37.8271,-122.3204]}"#,
         encode_offline_region_definition(&region.into())
     );
 
     let region = OfflineGeometryRegionDefinition::new(
-        "maptiler://style",
+        "https://example.com/style",
         Geometry::Point(Point::new(-122.5744, 37.6609)),
         0.0,
         f64::INFINITY,
@@ -91,7 +91,7 @@ fn encoding_matches_rapidjson() {
     )
     .unwrap();
     assert_eq!(
-        r#"{"style_url":"maptiler://style","min_zoom":0.0,"pixel_ratio":2.0,"include_ideographs":false,"geometry":{"type":"Point","coordinates":[-122.5744,37.6609]}}"#,
+        r#"{"style_url":"https://example.com/style","min_zoom":0.0,"pixel_ratio":2.0,"include_ideographs":false,"geometry":{"type":"Point","coordinates":[-122.5744,37.6609]}}"#,
         encode_offline_region_definition(&region.into())
     );
 }

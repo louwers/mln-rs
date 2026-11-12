@@ -13,7 +13,6 @@ use crate::layers::fill_layer_properties::{
     FillAntialias, FillColor, FillOpacity, FillOutlineColor, FillPaintProperties, FillPattern, FillSortKey,
     FillTranslate, FillTranslateAnchor,
 };
-use crate::properties::Property as _;
 use crate::property_value::PropertyValue;
 use crate::style_property::{Kind, StyleProperty};
 use crate::transition_options::TransitionOptions;
@@ -84,11 +83,6 @@ impl FillLayer {
     // Layout properties
 
     #[must_use]
-    pub fn get_default_fill_sort_key() -> PropertyValue<f32> {
-        PropertyValue::Constant(FillSortKey::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_sort_key(&self) -> &PropertyValue<f32> {
         self.impl_().layout.get::<FillSortKey>()
     }
@@ -103,11 +97,6 @@ impl FillLayer {
     }
 
     // Paint properties
-
-    #[must_use]
-    pub fn get_default_fill_antialias() -> PropertyValue<bool> {
-        PropertyValue::Constant(FillAntialias::default_value())
-    }
 
     #[must_use]
     pub fn get_fill_antialias(&self) -> &PropertyValue<bool> {
@@ -132,11 +121,6 @@ impl FillLayer {
     #[must_use]
     pub fn get_fill_antialias_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillAntialias>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(FillColor::default_value())
     }
 
     #[must_use]
@@ -165,11 +149,6 @@ impl FillLayer {
     }
 
     #[must_use]
-    pub fn get_default_fill_opacity() -> PropertyValue<f32> {
-        PropertyValue::Constant(FillOpacity::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_opacity(&self) -> &PropertyValue<f32> {
         &self.impl_().paint.get::<FillOpacity>().value
     }
@@ -192,11 +171,6 @@ impl FillLayer {
     #[must_use]
     pub fn get_fill_opacity_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillOpacity>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_outline_color() -> PropertyValue<Color> {
-        PropertyValue::Constant(FillOutlineColor::default_value())
     }
 
     #[must_use]
@@ -225,11 +199,6 @@ impl FillLayer {
     }
 
     #[must_use]
-    pub fn get_default_fill_pattern() -> PropertyValue<Image> {
-        PropertyValue::Constant(FillPattern::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_pattern(&self) -> &PropertyValue<Image> {
         &self.impl_().paint.get::<FillPattern>().value
     }
@@ -255,11 +224,6 @@ impl FillLayer {
     }
 
     #[must_use]
-    pub fn get_default_fill_translate() -> PropertyValue<[f32; 2]> {
-        PropertyValue::Constant(FillTranslate::default_value())
-    }
-
-    #[must_use]
     pub fn get_fill_translate(&self) -> &PropertyValue<[f32; 2]> {
         &self.impl_().paint.get::<FillTranslate>().value
     }
@@ -282,11 +246,6 @@ impl FillLayer {
     #[must_use]
     pub fn get_fill_translate_transition(&self) -> TransitionOptions {
         self.impl_().paint.get::<FillTranslate>().options
-    }
-
-    #[must_use]
-    pub fn get_default_fill_translate_anchor() -> PropertyValue<TranslateAnchorType> {
-        PropertyValue::Constant(FillTranslateAnchor::default_value())
     }
 
     #[must_use]

@@ -431,10 +431,6 @@ pub struct PaintProperties {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct SymbolBucketState {
     pub sorted_angle: f32,
-    pub static_uploaded: bool,
-    pub placement_changes_uploaded: bool,
-    pub dynamic_uploaded: bool,
-    pub sort_uploaded: bool,
     // Set and used by placement.
     pub just_reloaded: bool,
     pub has_variable_placement: bool,
@@ -660,7 +656,6 @@ impl SymbolBucket {
             return;
         }
 
-        state.sort_uploaded = false;
         self.base.uploaded.store(false, Ordering::SeqCst);
         self.sort_version.fetch_add(1, Ordering::SeqCst);
         self.bump_version();
@@ -723,12 +718,10 @@ impl SymbolBucket {
     pub fn mark_vertices_updated(&self, update_opacities: bool, dynamic_updated: bool) {
         let mut state = self.state();
         if update_opacities {
-            state.placement_changes_uploaded = false;
             self.base.uploaded.store(false, Ordering::SeqCst);
             self.opacity_version.fetch_add(1, Ordering::SeqCst);
         }
         if dynamic_updated {
-            state.dynamic_uploaded = false;
             self.base.uploaded.store(false, Ordering::SeqCst);
             self.dynamic_version.fetch_add(1, Ordering::SeqCst);
         }
@@ -847,11 +840,6 @@ impl Bucket for SymbolBucket {
 
     fn upload(&self, _upload_pass: &dyn UploadPass) {
         self.base.uploaded.store(true, Ordering::SeqCst);
-        let mut state = self.state();
-        state.static_uploaded = true;
-        state.placement_changes_uploaded = true;
-        state.dynamic_uploaded = true;
-        state.sort_uploaded = true;
     }
 
     fn has_data(&self) -> bool {

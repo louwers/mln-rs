@@ -4,7 +4,7 @@
 
 use crate::emit_layer::{conversion_groups, let_else};
 use crate::spec::Property;
-use crate::types::{camelize, evaluated_type, property_value_type, snake};
+use crate::types::{camelize, property_value_type, snake};
 use crate::writer::{MAX_WIDTH, Writer, if_condition, imports_for};
 
 /// `typeName` of generateRootProperties: the property tag, which drops the
@@ -37,7 +37,6 @@ pub fn emit(class_name: &str, object_name: &str, properties: &[Property]) -> Str
     let mut imports = imports_for(properties.iter(), true);
     imports.push("crate::conversion::{Converter, convert_property_value}".into());
     imports.push("crate::conversion_impl::{make_style_property, make_transition_style_property}".into());
-    imports.push("crate::properties::Property as _".into());
     imports.push("crate::property_value::PropertyValue".into());
     imports.push("crate::style_property::StyleProperty".into());
     imports.push("crate::transition_options::TransitionOptions".into());
@@ -200,12 +199,6 @@ pub fn emit(class_name: &str, object_name: &str, properties: &[Property]) -> Str
         let tag = type_name(class_name, p);
         let s = snake(&p.name);
         let pv = property_value_type(p);
-        let t = evaluated_type(p).rust();
-        w.line("    #[must_use]");
-        w.line(&format!("    pub fn get_default_{s}() -> {t} {{"));
-        w.line(&format!("        {tag}::default_value()"));
-        w.line("    }");
-        w.blank();
         w.line("    #[must_use]");
         w.line(&format!("    pub fn get_{s}(&self) -> {pv} {{"));
         w.line(&format!("        self.impl_.properties.get::<{tag}>().value.clone()"));

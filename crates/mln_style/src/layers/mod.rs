@@ -49,11 +49,6 @@ pub mod line_layer_impl;
 #[rustfmt::skip]
 pub mod line_layer_properties;
 #[rustfmt::skip]
-pub mod location_indicator_layer;
-pub mod location_indicator_layer_impl;
-#[rustfmt::skip]
-pub mod location_indicator_layer_properties;
-#[rustfmt::skip]
 pub mod raster_layer;
 pub mod raster_layer_impl;
 #[rustfmt::skip]
@@ -84,10 +79,6 @@ pub use hillshade_layer::HillshadeLayer;
 pub use hillshade_layer_properties::{HillshadeLayerProperties, HillshadePaintProperties};
 pub use line_layer::LineLayer;
 pub use line_layer_properties::{LineLayerProperties, LineLayoutProperties, LinePaintProperties};
-pub use location_indicator_layer::LocationIndicatorLayer;
-pub use location_indicator_layer_properties::{
-    LocationIndicatorLayerProperties, LocationIndicatorLayoutProperties, LocationIndicatorPaintProperties,
-};
 pub use raster_layer::RasterLayer;
 pub use raster_layer_properties::{RasterLayerProperties, RasterPaintProperties};
 pub use symbol_layer::SymbolLayer;

@@ -141,7 +141,6 @@ impl LayerTweaker for FillLayerTweaker {
                 evaluated.get::<FillPattern>().constant_or(&Faded { from: Image::new(""), to: Image::new("") });
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(fill_pattern_value.from.id()));
             let pattern_pos_b = tile.and_then(|t| t.get_pattern(fill_pattern_value.to.id()));
-            binders.set_pattern_parameters(pattern_pos_a.as_ref(), pattern_pos_b.as_ref(), &crossfade);
 
             let projection = get_projection_data(
                 &tile_id,

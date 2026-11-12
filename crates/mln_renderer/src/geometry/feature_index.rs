@@ -7,8 +7,7 @@
 // built on a worker thread and shared (`Arc<FeatureIndex>`).
 //
 // The `layers` argument (C++ `std::unordered_map<std::string, const
-// RenderLayer*>`) is `QueryLayers`. `DynamicFeatureIndex` (filled only by
-// the location indicator layer) is TODO(port).
+// RenderLayer*>`) is `QueryLayers`.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

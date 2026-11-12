@@ -278,8 +278,11 @@ fn build_response(resource: &Resource, transfer: Result<Transfer, Box<ResourceEr
             // curl reports a failed transfer as an error code, not a status.
             Err(error) => response.error = Some(error),
         }
-    } else if response_code == 204 || (response_code == 404 && resource.kind == Kind::Tile) {
+    } else if response_code == 204 {
         response.no_content = true;
+    } else if response_code == 404 && resource.kind == Kind::Tile {
+        response.no_content = true;
+        response.tile_not_found = true;
     } else if response_code == 304 {
         response.not_modified = true;
     } else if response_code == 404 {

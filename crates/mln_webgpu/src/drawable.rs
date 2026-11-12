@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use mln_gfx::attribute::AttributeBindingArray;
 use mln_gfx::color_mode::{BlendFunction, ColorMode};
-use mln_gfx::cull_face_mode::CullFaceMode;
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::draw_mode::DrawMode;
 use mln_gfx::drawable::{self, DrawSegment, DrawableBase, UniqueDrawSegment};
@@ -26,7 +25,7 @@ use mln_gfx::uniform_buffer::UniformBufferArray;
 use mln_gfx::upload_pass::UploadPass as _;
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray, VertexAttributeArrayPtr};
-use mln_gfx::vertex_buffer::{IndexBuffer as GfxIndexBuffer, UniqueVertexBufferResource};
+use mln_gfx::vertex_buffer::IndexBuffer as GfxIndexBuffer;
 use mln_util::time::Instant;
 
 use crate::bind_groups::{BindGroupKey, EntryResource, SharedBindGroup};
@@ -145,7 +144,6 @@ struct BindGroupRecord {
 /// `webgpu::Drawable::Impl`
 struct DrawableImpl {
     segments: Vec<UniqueDrawSegment>,
-    vertex_desc_hash: u64,
     indexes: Option<IndexVectorBasePtr>,
     vertex_count: usize,
     vertex_type: AttributeDataType,
@@ -158,19 +156,14 @@ struct DrawableImpl {
     /// [`attribute_bindings`]: Self::attribute_bindings
     /// [`instance_bindings`]: Self::instance_bindings
     vertex_slots: Option<Vec<UniqueBinding>>,
-    /// Store dummy vertex buffers to keep them alive
-    dummy_vertex_buffers: Vec<UniqueVertexBufferResource>,
     uniform_buffers: UniformBufferArray,
     depth_mode: DepthMode,
     stencil_mode: StencilMode,
-    #[allow(dead_code)]
-    cull_face_mode: CullFaceMode,
     vertex_attr_id: usize,
     stencil_mode_hash: u64,
     stencil_mode_hash_valid: bool,
     /// We don't own the pipeline - it's owned by the shader program's cache.
     pipeline_state: Option<wgpu::RenderPipeline>,
-    previous_stencil_mode: StencilMode,
     bind_groups: Vec<BindGroupRecord>,
     /// The slot of the shader's index group, which [`bind_groups`] leaves
     /// out: a draw binds the context's table at its `ubo_index`.
@@ -201,23 +194,19 @@ impl Drawable {
             base: DrawableBase::new(name),
             impl_: DrawableImpl {
                 segments: Vec::new(),
-                vertex_desc_hash: 0,
                 indexes: None,
                 vertex_count: 0,
                 vertex_type: AttributeDataType::Invalid,
                 attribute_bindings: Vec::new(),
                 instance_bindings: Vec::new(),
                 vertex_slots: None,
-                dummy_vertex_buffers: Vec::new(),
                 uniform_buffers: UniformBufferArray::new(),
                 depth_mode: DepthMode::disabled(),
                 stencil_mode: StencilMode::default(),
-                cull_face_mode: CullFaceMode::disabled(),
                 vertex_attr_id: 0,
                 stencil_mode_hash: 0,
                 stencil_mode_hash_valid: false,
                 pipeline_state: None,
-                previous_stencil_mode: StencilMode::default(),
                 bind_groups: Vec::new(),
                 index_slot: None,
                 bind_groups_shader: None,
@@ -254,9 +243,6 @@ impl Drawable {
     }
 
     pub fn upload(&mut self, upload_pass: &UploadPass) {
-        if self.base.is_custom {
-            return;
-        }
         let Some(shader) = self.base.shader.clone() else {
             eprintln!("Missing shader for drawable {}/{}", self.base.unique_id, self.base.name);
             debug_assert!(false);
@@ -296,7 +282,6 @@ impl Drawable {
         if build_attribs {
             let attrs = self.base.vertex_attributes.get_or_insert_with(VertexAttributeArray::new_ptr).clone();
             // Apply drawable values to shader defaults (matching Metal's approach)
-            let mut vertex_buffers = Vec::new();
             let attribute_bindings = upload_pass.build_attribute_bindings(
                 self.impl_.vertex_count,
                 self.impl_.vertex_type,
@@ -306,15 +291,11 @@ impl Drawable {
                 &mut attrs.borrow_mut(),
                 usage,
                 self.base.attribute_update_time,
-                &mut vertex_buffers,
             );
             if self.impl_.attribute_bindings != attribute_bindings {
                 self.impl_.attribute_bindings = attribute_bindings;
                 self.impl_.vertex_slots = None;
-                self.impl_.vertex_desc_hash = 0; // Reset hash when bindings change
                 self.impl_.pipeline_state = None; // Reset pipeline state when attribute bindings change
-                // Store the dummy vertex buffers to keep them alive
-                self.impl_.dummy_vertex_buffers = vertex_buffers;
             }
         }
 
@@ -326,7 +307,6 @@ impl Drawable {
         };
         if build_instance_buffer {
             let attrs = self.base.instance_attributes.clone().unwrap();
-            let mut instance_buffers = Vec::new();
             let instance_count = attrs.borrow().get_min_count();
             let instance_bindings = upload_pass.build_attribute_bindings(
                 instance_count,
@@ -337,14 +317,11 @@ impl Drawable {
                 &mut attrs.borrow_mut(),
                 usage,
                 self.base.attribute_update_time,
-                &mut instance_buffers,
             );
             if self.impl_.instance_bindings != instance_bindings {
                 self.impl_.instance_bindings = instance_bindings;
                 self.impl_.vertex_slots = None;
                 self.impl_.pipeline_state = None; // Reset pipeline state when instance bindings change
-                // Store the dummy instance buffers to keep them alive
-                self.impl_.dummy_vertex_buffers.extend(instance_buffers);
             }
         }
 
@@ -710,10 +687,6 @@ impl drawable::Drawable for Drawable {
             c.set(c.get() + 1);
             c.get()
         });
-        if self.base.is_custom {
-            return;
-        }
-
         // Get WebGPU context and render pass (following Metal's pattern)
         let parameters: &dyn PaintParameters = parameters;
         let Some(context) = parameters.context().as_any().downcast_ref::<Context>() else {
@@ -792,7 +765,6 @@ impl drawable::Drawable for Drawable {
         self.impl_.depth_mode = depth_mode;
         self.impl_.stencil_mode = stencil_mode;
         self.impl_.stencil_mode_hash = new_stencil_hash;
-        self.impl_.previous_stencil_mode = stencil_mode;
 
         let unique_bindings = self.impl_.vertex_slots.get_or_insert_with(|| {
             const MAX_VERTEX_BUFFER_SLOTS: usize = 8;
@@ -1037,10 +1009,6 @@ impl drawable::Drawable for Drawable {
     fn set_index_data(&mut self, indexes: Option<IndexVectorBasePtr>, segments: Vec<UniqueDrawSegment>) {
         self.impl_.indexes = indexes;
         self.impl_.segments = segments;
-    }
-
-    fn get_uniform_buffers(&self) -> &UniformBufferArray {
-        &self.impl_.uniform_buffers
     }
 
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {

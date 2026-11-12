@@ -59,18 +59,6 @@ pub trait FileSource: Send + Sync {
     /// Checks whether a resource could be requested from this file source.
     fn can_request(&self, resource: &Resource) -> bool;
 
-    /// Pause file request activity.
-    ///
-    /// If pause is called then no revalidation or network request activity
-    /// will occur.
-    fn pause(&self) {}
-
-    /// Resume file request activity.
-    ///
-    /// Calling resume will unpause the file source and process any tasks
-    /// that expired while the file source was paused.
-    fn resume(&self) {}
-
     /// Sets a transformer for resource URLs (online file sources).
     fn set_resource_transform(&self, _transform: ResourceTransform) {}
 
@@ -99,14 +87,6 @@ pub trait FileSource: Send + Sync {
 }
 
 // Properties that may be supported by online file sources:
-
-/// Property name to set / get an access token.
-/// type: `std::string`
-pub const API_KEY_KEY: &str = "api-tkey";
-
-/// Property name to set / get base url.
-/// type: `std::string`
-pub const API_BASE_URL_KEY: &str = "api-base-url";
 
 /// Property name to set / get maximum number of concurrent requests.
 /// type: unsigned

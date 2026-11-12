@@ -249,13 +249,6 @@ impl OffscreenTextureResource {
     pub fn get_texture(&self) -> Texture2DPtr {
         self.color().expect("offscreen texture without color texture")
     }
-
-    pub fn take_texture(&self) -> Option<Texture2DPtr> {
-        let taken: Texture2DPtr = self.color_texture.borrow_mut().take()?;
-        self.copied_at.set(None);
-        *self.color_texture.borrow_mut() = Some(self.create_color_texture());
-        Some(taken)
-    }
 }
 
 impl Drop for OffscreenTextureResource {
@@ -320,10 +313,6 @@ impl OffscreenTexture {
 
     fn resource(&self) -> &OffscreenTextureResource {
         &self.resource
-    }
-
-    pub fn take_texture(&self) -> Option<Texture2DPtr> {
-        self.resource().take_texture()
     }
 }
 

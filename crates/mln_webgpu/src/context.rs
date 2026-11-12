@@ -39,7 +39,7 @@ use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::stencil_mode::{StencilMode, Test};
 use mln_gfx::texture2d::Texture2DPtr;
 use mln_gfx::types::{DepthFunctionType, DepthMaskType, StencilOpType, TextureChannelDataType};
-use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr, UniqueUniformBufferArray};
+use mln_gfx::uniform_buffer::{UniformBufferArray, UniformBufferPtr};
 use mln_gfx::util_hash::hash;
 use mln_gfx::vertex_attribute::{VertexAttributeArray, VertexAttributeArrayPtr};
 use mln_gfx::vertex_buffer::UniqueVertexBufferResource;
@@ -119,7 +119,7 @@ impl Context {
     /// `Context(RendererBackend&)`
     pub fn new(backend: Rc<BackendImpl>) -> Rc<Context> {
         Rc::new_cyclic(|weak| Context {
-            base: ContextBase::new(ContextBase::MINIMUM_REQUIRED_VERTEX_BINDING_COUNT),
+            base: ContextBase::default(),
             backend,
             weak_self: weak.clone(),
             global_uniform_buffers: RefCell::new(UniformBufferArray::new()),
@@ -675,14 +675,6 @@ impl GfxContext for Context {
         Box::new(CommandEncoder::new(self.rc()))
     }
 
-    fn clear_stencil_buffer(&self, _value: i32) {
-        // Clear stencil buffer to specified value (no-op in C++)
-    }
-
-    fn set_dirty_state(&self) {
-        // Mark state as needing update (no-op in C++)
-    }
-
     fn create_vertex_attribute_array(&self) -> VertexAttributeArrayPtr {
         VertexAttributeArray::new_ptr()
     }
@@ -693,10 +685,6 @@ impl GfxContext for Context {
 
     fn create_uniform_buffer(&self, data: &[u8], _persistent: bool, _ssbo: bool) -> UniformBufferPtr {
         self.create_webgpu_uniform_buffer(data)
-    }
-
-    fn create_layer_uniform_buffer_array(&self) -> UniqueUniformBufferArray {
-        Box::new(UniformBufferArray::new())
     }
 
     /// Align with Metal - just get the shader from the registry, no caching.
@@ -725,10 +713,6 @@ impl GfxContext for Context {
 
     fn create_texture_2d(&self) -> Texture2DPtr {
         self.create_webgpu_texture_2d()
-    }
-
-    fn reset_state(&self, _depth_mode: DepthMode, _color_mode: ColorMode) {
-        // Reset WebGPU render state (no-op in C++)
     }
 
     fn emplace_or_update_uniform_buffer(

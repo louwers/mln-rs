@@ -56,7 +56,7 @@ pub fn is_overridable(property: &Property) -> bool {
 }
 
 /// The C++ `evaluatedType` of a property, as a type the generator can print
-/// both as C++ (for comments and the difftest) and as Rust.
+/// both as C++ (for comments) and as Rust.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EvaluatedType {
     Bool,

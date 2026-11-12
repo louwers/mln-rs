@@ -220,7 +220,6 @@ impl LayerTweaker for LineLayerTweaker {
 
             let pattern_pos_a = tile.and_then(|t| t.get_pattern(line_pattern_value.from.id()));
             let pattern_pos_b = tile.and_then(|t| t.get_pattern(line_pattern_value.to.id()));
-            binders.set_pattern_parameters(pattern_pos_a.as_ref(), pattern_pos_b.as_ref(), &crossfade);
 
             let translation = *evaluated.get::<LineTranslate>();
             let anchor = *evaluated.get::<LineTranslateAnchor>();

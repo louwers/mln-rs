@@ -1,8 +1,9 @@
 // Ports Orbis's orb-camera `input/tests.rs` onto a bare Transform.
 //
-// Transitions start at `Clock::now()`, so the rig drives them from the start
-// of the latest one: each frame is 16 ms after the one before, counted from
-// that start, as the transform tests do.
+// The rig runs the transform on its own frame clock, as a host does with
+// `set_frame_time`: each frame samples the animations 16 ms after the one
+// before, and commands start at the latest frame's time. The clock runs an
+// hour ahead of `Clock::now()`, so its frame time never goes stale.
 
 use std::rc::Rc;
 
@@ -10,7 +11,7 @@ use mln_map::transform::{NullTransformObserver, Transform};
 use mln_map::{ConstrainMode, MomentumSnap, ViewportMode};
 use mln_style_types::ProjectionDefinition;
 use mln_util::LatLng;
-use mln_util::chrono::{TimePoint, milliseconds};
+use mln_util::chrono::{Clock, TimePoint, milliseconds, seconds};
 use mln_util::geo::LatLngBounds;
 use mln_util::size::Size;
 
@@ -39,8 +40,7 @@ struct Rig {
     camera: Transform,
     input: GestureRecognizer,
     now: f64,
-    start: TimePoint,
-    frames: i64,
+    time: TimePoint,
 }
 
 impl Rig {
@@ -49,13 +49,10 @@ impl Rig {
     }
 
     fn with(options: &GestureOptions) -> Self {
-        Rig {
-            camera: transform(),
-            input: GestureRecognizer::new(*options),
-            now: 1000.0,
-            start: TimePoint::default(),
-            frames: 0,
-        }
+        let time = Clock::now() + seconds(3600);
+        let mut camera = transform();
+        camera.set_frame_time(Some(time));
+        Rig { camera, input: GestureRecognizer::new(*options), now: 1000.0, time }
     }
 
     fn zoom(&self) -> f64 {
@@ -111,13 +108,9 @@ impl Rig {
     fn frame(&mut self) -> bool {
         self.now += 16.0;
         let gesture = self.input.frame(&mut self.camera, self.now);
-        let start = self.camera.get_latest_transition_start();
-        if start != self.start {
-            self.start = start;
-            self.frames = 0;
-        }
-        self.frames += 1;
-        self.camera.update_transitions(start + milliseconds(16 * self.frames));
+        self.time += milliseconds(16);
+        self.camera.update_transitions(self.time);
+        self.camera.set_frame_time(Some(self.time));
         gesture || self.camera.in_transition()
     }
 
@@ -813,6 +806,7 @@ fn gestures_and_their_steps_report_themselves_as_gestures() {
     let mut rig = Rig::new();
     rig.camera = Transform::new(sources.clone(), ConstrainMode::HeightOnly, ViewportMode::Default);
     rig.camera.resize(Size::new(800, 600)).unwrap();
+    rig.camera.set_frame_time(Some(rig.time));
     let take = || std::mem::take(&mut *sources.0.borrow_mut());
     take();
 

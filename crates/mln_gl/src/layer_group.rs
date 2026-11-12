@@ -176,10 +176,6 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         });
     }
 
-    fn get_uniform_buffers(&self) -> &UniformBufferArray {
-        &self.uniform_buffers
-    }
-
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
         &mut self.uniform_buffers
     }
@@ -213,9 +209,6 @@ impl layer_group::LayerGroupBase for LayerGroup {
     }
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
-    }
-    fn as_layer_group(&self) -> Option<&layer_group::LayerGroup> {
-        Some(&self.inner)
     }
     fn as_layer_group_mut(&mut self) -> Option<&mut layer_group::LayerGroup> {
         Some(&mut self.inner)
@@ -268,10 +261,6 @@ impl layer_group::LayerGroupBase for LayerGroup {
             }
             drawable.draw(parameters);
         });
-    }
-
-    fn get_uniform_buffers(&self) -> &UniformBufferArray {
-        &self.uniform_buffers
     }
 
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {

@@ -81,7 +81,6 @@ impl shader_group::ShaderGroup for ShaderGroup {
         let context = gfx_context.as_any().downcast_ref::<Context>()?;
         let shader_source = format!("{PRELUDE}{}{}", source.msl.prelude, source.msl.source);
         let mut shader = context.create_program(
-            self.shader_id,
             shader_name.clone(),
             &shader_source,
             source.msl.vertex_main_function,

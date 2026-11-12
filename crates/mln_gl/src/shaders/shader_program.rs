@@ -14,14 +14,11 @@ use std::any::Any;
 use std::rc::{Rc, Weak};
 
 use glow::HasContext;
-use mln_gfx::backend::Type as BackendType;
-use mln_gfx::context::Context as _;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::shader::Shader;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_defines::MAX_TEXTURE_COUNT_PER_SHADER;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
-use mln_gfx::shaders::shader_source::BuiltIn;
 use mln_gfx::vertex_attribute::VertexAttributeArray;
 use mln_util::identity::SimpleIdentity;
 use mln_util::logging::{Event, Log};
@@ -84,38 +81,34 @@ impl ShaderProgram {
     /// couldn't (C++ throws).
     pub fn create(
         context: &Context,
-        shader_id: BuiltIn,
         name: &str,
         program_parameters: &ProgramParameters,
         first_attrib_name: &str,
         source: &ShaderSource,
         additional_defines: &str,
     ) -> Option<ShaderProgram> {
-        const VERSION: &str = "#version 300 es\n";
+        // Desktop OpenGL compiles GLSL ES 3.00 only with
+        // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
+        // that the shaders are as well: what they use of GLSL ES is in it,
+        // and it ignores their precision qualifiers.
+        let version = if context.is_desktop() { "#version 330 core\n" } else { "#version 300 es\n" };
 
-        let observer = context.get_observer();
-        if let Some(observer) = &observer {
-            observer.on_pre_compile_shader(shader_id, BackendType::OpenGL, additional_defines);
-        }
         let failed = |message: String| {
             Log::error(Event::Shader, message);
-            if let Some(observer) = &observer {
-                observer.on_shader_compile_failed(shader_id, BackendType::OpenGL, additional_defines);
-            }
             None
         };
 
         let defines = program_parameters.get_defines_string();
         let vertex_shader = match context.create_shader(
             glow::VERTEX_SHADER,
-            &[VERSION, defines, additional_defines, PRELUDE.vertex, source.glsl.vertex],
+            &[version, defines, additional_defines, PRELUDE.vertex, source.glsl.vertex],
         ) {
             Ok(shader) => shader,
             Err(log) => return failed(format!("{name}: vertex shader failed to compile: {log}")),
         };
         let fragment_shader = match context.create_shader(
             glow::FRAGMENT_SHADER,
-            &[VERSION, defines, additional_defines, PRELUDE.fragment, source.glsl.fragment],
+            &[version, defines, additional_defines, PRELUDE.fragment, source.glsl.fragment],
         ) {
             Ok(shader) => shader,
             Err(log) => {
@@ -128,9 +121,6 @@ impl ShaderProgram {
             Ok(program) => program,
             Err(log) => return failed(format!("{name}: program failed to link: {log}")),
         };
-        if let Some(observer) = &observer {
-            observer.on_post_compile_shader(shader_id, BackendType::OpenGL, additional_defines);
-        }
 
         let gl = context.gl();
         let mut uniform_blocks = Vec::with_capacity(source.uniform_blocks.len());

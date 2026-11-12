@@ -292,7 +292,7 @@ impl TileCoverParameters {
 pub fn covering_zoom_level(zoom: f64, type_: SourceType, size: u16) -> i32 {
     let mut zoom = zoom;
     zoom += mln_math::log2(constants::TILE_SIZE_D / f64::from(size));
-    if type_ == SourceType::Raster || type_ == SourceType::RasterDEM || type_ == SourceType::Video {
+    if type_ == SourceType::Raster || type_ == SourceType::RasterDEM {
         zoom.round() as i32
     } else {
         zoom.floor() as i32

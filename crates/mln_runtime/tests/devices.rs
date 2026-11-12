@@ -9,7 +9,7 @@ mod support;
 use mln_map::MapMode;
 use mln_runtime::{
     AttachOptions, BackendType, BorrowedRing, ConsumerSync, DemandMode, Device, DeviceOptions, ErrorKind, FrameDemand,
-    FrameDisposition, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind, SyncKinds,
+    FrameDisposition, GlApi, GpuSync, Map, MapOptions, RenderSession, RenderTarget, Runtime, SyncKind, SyncKinds,
 };
 use mln_util::size::Size;
 use support::{eventually, runtime, wait};
@@ -56,39 +56,66 @@ fn center_pixel(session: &RenderSession) -> [u8; 4] {
 
 /// A device of `backend`, or `None` where this build or machine has none.
 fn device_of(backend: BackendType) -> Option<Device> {
-    match Device::with_backend(backend, DeviceOptions::default()) {
+    device_with(backend, DeviceOptions::default())
+}
+
+/// A device of `backend` made with `options`, or `None` where this build or
+/// machine has none.
+fn device_with(backend: BackendType, options: DeviceOptions) -> Option<Device> {
+    match Device::with_backend(backend, options) {
         Ok(device) => Some(device),
         Err(error) if error.kind == ErrorKind::Unsupported => {
-            eprintln!("skipped: no {backend:?} device: {error}");
+            eprintln!("skipped: no {backend:?} device with {options:?}: {error}");
             None
         }
-        Err(error) => panic!("a {backend:?} device: {error}"),
+        Err(error) => panic!("a {backend:?} device with {options:?}: {error}"),
     }
 }
 
 const RED: [u8; 4] = [255, 0, 0, 255];
 const BLUE: [u8; 4] = [0, 0, 255, 255];
 
+/// Two maps' sessions on `device`, each of which renders its own color,
+/// turn by turn.
+fn sessions_of_two_maps_share(device: Device, what: &str) {
+    let runtime = runtime();
+    let (red, blue) = (map_of(&runtime, "#ff0000"), map_of(&runtime, "#0000ff"));
+    let sessions: Vec<_> = [&red, &blue]
+        .into_iter()
+        .map(|map| {
+            let target = RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) };
+            attach(map, target, SyncKinds::NONE)
+        })
+        .collect();
+    // The device lasts while its sessions use it.
+    drop(device);
+    for _ in 0..2 {
+        for session in &sessions {
+            assert_eq!(FrameDisposition::Rendered, render(session), "{what}");
+        }
+        assert_eq!(RED, center_pixel(&sessions[0]), "{what}");
+        assert_eq!(BLUE, center_pixel(&sessions[1]), "{what}");
+    }
+}
+
 #[test]
 fn sessions_of_two_maps_share_each_backends_device() {
     for backend in [BackendType::Vulkan, BackendType::OpenGL, BackendType::WebGPU, BackendType::Metal] {
         let Some(device) = device_of(backend) else { continue };
-        let runtime = runtime();
-        let (red, blue) = (map_of(&runtime, "#ff0000"), map_of(&runtime, "#0000ff"));
-        let sessions: Vec<_> = [&red, &blue]
-            .into_iter()
-            .map(|map| {
-                let target = RenderTarget::Offscreen { size: SIZE, device: Some(device.clone()) };
-                attach(map, target, SyncKinds::NONE)
-            })
-            .collect();
-        // The device lasts while its sessions use it.
-        drop(device);
-        for session in &sessions {
-            assert_eq!(FrameDisposition::Rendered, render(session), "{backend:?}");
+        sessions_of_two_maps_share(device, &format!("{backend:?}"));
+    }
+}
+
+/// An OpenGL device of either API, whose sessions have a context each or
+/// take turns in one.
+#[test]
+fn sessions_of_two_maps_share_each_kind_of_open_gl_device() {
+    for gl_api in [GlApi::Gles, GlApi::Gl] {
+        for gl_single_context in [false, true] {
+            let options = DeviceOptions { gl_api, gl_single_context, ..DeviceOptions::default() };
+            let Some(device) = device_with(BackendType::OpenGL, options) else { continue };
+            sessions_of_two_maps_share(device, &format!("{options:?}"));
         }
-        assert_eq!(RED, center_pixel(&sessions[0]), "{backend:?}");
-        assert_eq!(BLUE, center_pixel(&sessions[1]), "{backend:?}");
     }
 }
 
@@ -1001,8 +1028,9 @@ mod gl {
 
     type Egl = egl::DynamicInstance<egl::EGL1_4>;
 
-    /// The host's OpenGL ES 3 context, current on a pbuffer of the ring's
-    /// size, which is also the surface a session presents to.
+    /// The host's context, of OpenGL ES 3 or of desktop OpenGL's
+    /// compatibility profile, current on a pbuffer of the ring's size, which
+    /// is also the surface a session presents to.
     struct Host {
         egl: Egl,
         display: egl::Display,
@@ -1013,7 +1041,8 @@ mod gl {
     }
 
     impl Host {
-        fn new() -> Option<Host> {
+        /// A context of `api`: `egl::OPENGL_ES_API` or `egl::OPENGL_API`.
+        fn new(api: egl::Enum) -> Option<Host> {
             const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
             // SAFETY: loading the system's EGL.
             let egl = unsafe { Egl::load_required() }.ok()?;
@@ -1029,10 +1058,11 @@ mod gl {
                     .or_else(|| egl.get_display(egl::DEFAULT_DISPLAY))
             }?;
             egl.initialize(display).ok()?;
-            egl.bind_api(egl::OPENGL_ES_API).ok()?;
+            egl.bind_api(api).ok()?;
+            let desktop = api == egl::OPENGL_API;
             let attributes = [
                 egl::RENDERABLE_TYPE,
-                egl::OPENGL_ES3_BIT,
+                if desktop { egl::OPENGL_BIT } else { egl::OPENGL_ES3_BIT },
                 egl::SURFACE_TYPE,
                 egl::PBUFFER_BIT,
                 egl::RED_SIZE,
@@ -1050,8 +1080,11 @@ mod gl {
                 egl::NONE,
             ];
             let config = egl.choose_first_config(display, &attributes).ok()??;
-            let context =
-                egl.create_context(display, config, None, &[egl::CONTEXT_CLIENT_VERSION, 3, egl::NONE]).ok()?;
+            let context_attributes: &[egl::Int] =
+                if desktop { &[egl::NONE] } else { &[egl::CONTEXT_CLIENT_VERSION, 3, egl::NONE] };
+            let context = egl.create_context(display, config, None, context_attributes).ok();
+            egl.bind_api(egl::OPENGL_ES_API).ok()?;
+            let context = context?;
             let size = [egl::WIDTH, SIZE.width as i32, egl::HEIGHT, SIZE.height as i32, egl::NONE];
             let pbuffer = egl.create_pbuffer_surface(display, config, &size).ok()?;
             egl.make_current(display, Some(pbuffer), Some(pbuffer), Some(context)).ok()?;
@@ -1152,7 +1185,7 @@ mod gl {
     // deletes it once the view ends.
     #[test]
     fn a_view_keeps_its_frames_fence_through_a_dispose() {
-        let Some(host) = Host::new() else {
+        let Some(host) = Host::new(egl::OPENGL_ES_API) else {
             eprintln!("skipped: no EGL context of OpenGL ES 3 with pbuffers");
             return;
         };
@@ -1190,8 +1223,19 @@ mod gl {
 
     #[test]
     fn a_ring_of_the_hosts_textures_hands_frames_back_with_fences() {
-        let Some(host) = Host::new() else {
-            eprintln!("skipped: no EGL context of OpenGL ES 3 with pbuffers");
+        a_ring_of_the_hosts_textures_hands_frames_back(egl::OPENGL_ES_API);
+    }
+
+    #[test]
+    fn a_ring_of_a_desktop_hosts_textures_hands_frames_back_with_fences() {
+        a_ring_of_the_hosts_textures_hands_frames_back(egl::OPENGL_API);
+    }
+
+    /// A ring of the textures of a host's context of `api`, and the
+    /// context's surface, which a session presents to.
+    fn a_ring_of_the_hosts_textures_hands_frames_back(api: egl::Enum) {
+        let Some(host) = Host::new(api) else {
+            eprintln!("skipped: no EGL context of {api:#x} with pbuffers");
             return;
         };
         let textures = [host.texture(), host.texture()];

@@ -122,10 +122,14 @@ pub fn buffer_usage(value: BufferUsageType) -> u32 {
     }
 }
 
+/// The format of the pixels of a texture of `value` pixels. Desktop OpenGL's
+/// core profile has no alpha or luminance textures, so a `desktop` context
+/// keeps them in the red channel ([`texture_swizzle`]).
 #[must_use]
-pub fn texture_pixel(value: TexturePixelType) -> u32 {
+pub fn texture_pixel(value: TexturePixelType, desktop: bool) -> u32 {
     match value {
         TexturePixelType::RGBA => glow::RGBA,
+        TexturePixelType::Alpha | TexturePixelType::Luminance if desktop => glow::RED,
         TexturePixelType::Alpha => glow::ALPHA,
         TexturePixelType::Stencil => glow::STENCIL_INDEX,
         TexturePixelType::Depth => glow::DEPTH_COMPONENT,
@@ -134,17 +138,34 @@ pub fn texture_pixel(value: TexturePixelType) -> u32 {
 }
 
 /// `Enum<gfx::TexturePixelType>::sizedFor`: the internal format of a texture
-/// of `value` pixels with `type_` channels.
+/// of `value` pixels with `type_` channels, on a `desktop` context or an
+/// OpenGL ES one.
 #[must_use]
-pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType) -> u32 {
+pub fn texture_pixel_sized_for(value: TexturePixelType, type_: TextureChannelDataType, desktop: bool) -> u32 {
     match (type_, value) {
-        (TextureChannelDataType::UnsignedByte, _) => texture_pixel(value),
+        (TextureChannelDataType::UnsignedByte, TexturePixelType::Alpha | TexturePixelType::Luminance) if desktop => {
+            glow::R8
+        }
+        (TextureChannelDataType::UnsignedByte, _) => texture_pixel(value, desktop),
         (TextureChannelDataType::HalfFloat, TexturePixelType::RGBA) => glow::RGBA16F,
         (TextureChannelDataType::Float, TexturePixelType::RGBA) => glow::RGBA32F,
         _ => {
             debug_assert!(false, "unsupported texture format");
-            texture_pixel(value)
+            texture_pixel(value, desktop)
         }
+    }
+}
+
+/// The `GL_TEXTURE_SWIZZLE_R`, `_G`, `_B` and `_A` of a texture of `value`
+/// pixels on a `desktop` context, which reads its alpha or luminance
+/// textures from the red channel, or `None` where the texture reads its
+/// channels as they are.
+#[must_use]
+pub fn texture_swizzle(value: TexturePixelType, desktop: bool) -> Option<[u32; 4]> {
+    match value {
+        TexturePixelType::Alpha if desktop => Some([glow::ZERO, glow::ZERO, glow::ZERO, glow::RED]),
+        TexturePixelType::Luminance if desktop => Some([glow::RED, glow::RED, glow::RED, glow::ONE]),
+        _ => None,
     }
 }
 

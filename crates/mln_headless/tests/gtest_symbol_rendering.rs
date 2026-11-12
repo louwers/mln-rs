@@ -113,8 +113,10 @@ impl TimedHeadlessFrontend {
         let mut parameters = (*update.parameters).clone();
         parameters.time_point = time;
         let parameters = Arc::new(parameters);
-        self.frontend.render_update(&parameters);
         let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
+        if let Some(frames) = self.frontend.target().frames() {
+            self.frontend.with_renderer(|renderer| renderer.render(&parameters, frames));
+        }
         RenderResult { image: self.frontend.read_still_image(), stats: stats(&self.frontend) }
     }
 }

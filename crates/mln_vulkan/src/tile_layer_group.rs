@@ -173,10 +173,6 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
         });
     }
 
-    fn get_uniform_buffers(&self) -> &UniformBufferArray {
-        &self.uniform_buffers
-    }
-
     fn mutable_uniform_buffers(&mut self) -> &mut UniformBufferArray {
         &mut self.uniform_buffers
     }

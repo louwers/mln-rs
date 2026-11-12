@@ -103,6 +103,17 @@ const _: unsafe extern "C" fn(
 const _: unsafe extern "C" fn(mln_delivery_queue, *mut mln_diagnostic) -> mln_status = crate::delivery::mln_delivery_queue_dispatch;
 const _: unsafe extern "C" fn(mln_delivery_queue) = crate::delivery::mln_delivery_queue_release;
 const _: unsafe extern "C" fn(
+    *const mln_frame_pacer_options,
+    *mut mln_frame_pacer,
+    *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::mln_frame_pacer_create;
+const _: unsafe extern "C" fn(mln_frame_pacer) = crate::render_session::mln_frame_pacer_release;
+const _: unsafe extern "C" fn(
+    mln_frame_pacer,
+    *const mln_frame_pacer_options,
+    *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::mln_frame_pacer_set_options;
+const _: unsafe extern "C" fn(
     *const mln_gpu_device_options,
     *mut mln_gpu_device,
     *mut mln_diagnostic,

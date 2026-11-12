@@ -381,11 +381,6 @@ pub fn downcast<T: Expression + Any>(e: &dyn Expression) -> Option<&T> {
     e.as_any().downcast_ref::<T>()
 }
 
-/// `Expression::depsOf`.
-pub fn deps_of(e: &dyn Expression) -> Dependency {
-    e.dependencies()
-}
-
 /// `Expression::depsOf` for an optional child.
 pub fn deps_of_opt<E: std::ops::Deref<Target = dyn Expression>>(e: &Option<E>) -> Dependency {
     e.as_ref().map_or(Dependency::NONE, |e| e.dependencies())
@@ -446,12 +441,6 @@ pub fn global_state_refs_intersect(refs: Option<&VecSet<String>>, changed_keys: 
         (Some(refs), Some(changed_keys)) => refs.iter().any(|key| changed_keys.contains(key)),
         _ => true,
     }
-}
-
-/// `util::toString(Dependency)`.
-#[must_use]
-pub fn dependency_to_string(deps: Dependency) -> String {
-    deps.to_string()
 }
 
 /// The `GeoJSONFeature` adapter of expression.cpp: a `GeometryTileFeature`

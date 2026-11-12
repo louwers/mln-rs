@@ -26,21 +26,11 @@ mln_vec_map.workspace = true
 raw-window-handle.workspace = true
 serde.workspace = true
 
-# Ports test/renderer/shader_registry.test.cpp
-[[test]]
-name = "shader_registry_test"
-path = "tests/shader_registry.rs"
-
 # gtests-core: test/renderer/backend_scope.test.cpp (OpenGL-only in C++; the
 # BackendScope logic it tests is backend-independent).
 [[test]]
 name = "gtest_backend_scope"
 path = "tests/gtest_backend_scope.rs"
-
-# Ports test/util/hash.test.cpp (marker `// gtest: Group.Name`).
-[[test]]
-name = "gtest_hash"
-path = "tests/gtest_hash.rs"
 
 [lints]
 workspace = true

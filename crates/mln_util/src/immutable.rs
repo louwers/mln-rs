@@ -6,8 +6,3 @@
 // the frozen form is an `Arc<T>`; identity diffing is `Arc::ptr_eq`.
 
 pub type Immutable<T> = std::sync::Arc<T>;
-
-/// `makeMutable<T>(args...)` then freeze: `Immutable::new(value)`.
-pub fn make_immutable<T>(value: T) -> Immutable<T> {
-    std::sync::Arc::new(value)
-}

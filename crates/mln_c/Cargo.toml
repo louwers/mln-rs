@@ -42,6 +42,15 @@ thiserror.workspace = true
 # The CAMetalLayers of Metal layer targets.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 mln_mtl.workspace = true
+# The display links of frame pacers, and the run loop of their thread.
+objc2.workspace = true
+objc2-core-foundation = { workspace = true, features = ["CFRunLoop"] }
+objc2-foundation = { workspace = true, features = ["NSRunLoop"] }
+objc2-quartz-core = { workspace = true, features = ["CADisplayLink", "CAFrameRateRange"] }
+
+# The eventfd and timerfd of Android frame pacers.
+[target.'cfg(target_os = "android")'.dependencies]
+libc.workspace = true
 
 # The host's EGL contexts, textures and surfaces.
 [target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]

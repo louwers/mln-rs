@@ -15,7 +15,7 @@ use std::sync::Arc;
 use geometry::Point;
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::rendering_stats::{LayerFeaturesMap, NDCBound};
-use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry, UploadPass};
+use mln_gfx::{Context, LayerGroupBasePtr, ShaderRegistry};
 use mln_map_types::{ProjectedTilePoint, TileProjector, TransformState};
 use mln_style::expression::Dependency;
 use mln_style::layer::layer_type_info;
@@ -108,8 +108,6 @@ pub struct LayerPrepareParameters<'a> {
 /// `RenderLayer::Stats`.
 #[derive(Clone, Debug, Default)]
 pub struct Stats {
-    pub drawables_added: usize,
-    pub drawables_removed: usize,
     /// The features this layer rendered in the current frame, filled by
     /// `update` when `UpdateParameters::capture_rendered_features` is set.
     pub rendered_features: LayerFeaturesMap,
@@ -533,18 +531,10 @@ pub trait RenderLayer {
         self.is_3d()
     }
 
-    fn upload(&mut self, _upload_pass: &dyn UploadPass) {}
-
-    fn render(&mut self, _parameters: &mut PaintParameters<'_>) {}
-
     /// `prepare(const LayerPrepareParameters&)`: reads the source's render
     /// tiles (`prepare_base`).
     fn prepare(&mut self, parameters: &mut LayerPrepareParameters<'_>) {
         prepare_base(self, parameters);
-    }
-
-    fn mark_context_destroyed(&mut self) {
-        // no-op
     }
 
     /// TODO: Only for background layers.
@@ -616,15 +606,10 @@ pub trait RenderLayer {
     }
 
     /// Remove all drawables for the tile from the layer group.
-    fn remove_all_drawables(&mut self) -> usize {
-        let base = self.base_mut();
-        if let Some(group) = &base.layer_group {
-            let count = group.borrow().get_drawable_count();
-            base.stats.drawables_removed += count;
+    fn remove_all_drawables(&mut self) {
+        if let Some(group) = &self.base().layer_group {
             group.borrow_mut().clear_drawables();
-            return count;
         }
-        0
     }
 
     // Non-virtual members of the C++ class.
@@ -652,16 +637,6 @@ pub trait RenderLayer {
         }
     }
 
-    /// `getRenderDataForPass(tile, pass)`.
-    fn get_render_data_for_pass<'t>(&self, tile: &'t RenderTile, pass: RenderPass) -> Option<&'t LayerRenderData> {
-        let render_data = tile.get_layer_render_data(&*self.base().base_impl)?;
-        if (RenderPass(render_data.layer_properties.render_passes) & pass) == RenderPass::None {
-            None
-        } else {
-            Some(render_data)
-        }
-    }
-
     /// Update `renderTileIDs` from `renderTiles`.
     fn update_render_tile_ids(&mut self) {
         let base = self.base_mut();
@@ -679,12 +654,6 @@ pub trait RenderLayer {
             .collect();
 
         base.render_tile_ids = new_render_tile_ids;
-    }
-
-    /// Whether a given tile ID is present in the current cover set
-    /// (`renderTiles`)
-    fn has_render_tile(&self, tile_id: &OverscaledTileID) -> bool {
-        self.base().render_tile_ids.contains_key(tile_id)
     }
 
     /// Get the bucket ID from which a given tile was built.
@@ -740,11 +709,6 @@ pub trait RenderLayer {
 
     fn get_layer_index(&self) -> i32 {
         self.base().layer_index
-    }
-
-    /// Checks whether the given render pass is used by this layer.
-    fn has_render_pass(&self, pass: RenderPass) -> bool {
-        (self.base().passes & pass) != RenderPass::None
     }
 
     /// Checks whether this layer needs to be rendered in the given render

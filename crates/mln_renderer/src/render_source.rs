@@ -8,11 +8,9 @@
 // by the orchestrator), which forwards to the source's observer exactly as
 // RenderSource::onTileChanged etc. do.
 
-use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_actor::TaggedScheduler;
 use mln_map_types::MapDebugOptions;
 use mln_style::layer_properties::LayerProperties;
 use mln_style::source;
@@ -160,8 +158,6 @@ pub trait RenderSource {
     fn base(&self) -> &RenderSourceBase;
     fn base_mut(&mut self) -> &mut RenderSourceBase;
 
-    fn as_any(&self) -> &dyn Any;
-
     fn is_loaded(&self) -> bool;
 
     fn update(
@@ -307,50 +303,38 @@ pub trait RenderSource {
     }
 }
 
-/// `RenderSource::create(impl, threadPool)`.
-pub fn create(impl_: &Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler) -> Option<Box<dyn RenderSource>> {
+/// `RenderSource::create(impl, threadPool)`, without the thread pool (see
+/// `TileCache::new`).
+pub fn create(impl_: &Immutable<dyn source::Impl>) -> Option<Box<dyn RenderSource>> {
     match impl_.type_ {
         // the TileSet isn't available yet, so we can't make different
         // sources by format
-        SourceType::Vector => Some(Box::new(RenderVectorSource::new(
-            source::static_immutable_cast::<tile_source::Impl>(impl_),
-            thread_pool,
-        ))),
-        SourceType::Raster => Some(Box::new(RenderRasterSource::new(
-            source::static_immutable_cast::<tile_source::Impl>(impl_),
-            thread_pool,
-        ))),
+        SourceType::Vector => {
+            Some(Box::new(RenderVectorSource::new(source::static_immutable_cast::<tile_source::Impl>(impl_))))
+        }
+        SourceType::Raster => {
+            Some(Box::new(RenderRasterSource::new(source::static_immutable_cast::<tile_source::Impl>(impl_))))
+        }
         // dem-heatmap
         SourceType::RasterDEM => Some(Box::new(crate::sources::render_raster_dem_source::RenderRasterDEMSource::new(
             source::static_immutable_cast::<tile_source::Impl>(impl_),
-            thread_pool,
         ))),
-        SourceType::GeoJSON => Some(Box::new(RenderGeoJSONSource::new(
-            source::static_immutable_cast::<geojson_source_impl::Impl>(impl_),
-            thread_pool,
-        ))),
+        SourceType::GeoJSON => {
+            Some(Box::new(RenderGeoJSONSource::new(source::static_immutable_cast::<geojson_source_impl::Impl>(impl_))))
+        }
         // conformance
         SourceType::Image => Some(Box::new(crate::sources::render_image_source::RenderImageSource::new(
             source::static_immutable_cast::<mln_style::sources::image_source::Impl>(impl_),
         ))),
-        SourceType::Video => {
-            debug_assert!(false);
-            None
-        }
         SourceType::CustomVector => {
             Some(Box::new(crate::sources::render_custom_geometry_source::RenderCustomGeometrySource::new(
                 source::static_immutable_cast::<mln_style::sources::custom_geometry_source::Impl>(impl_),
-                thread_pool,
             )))
         }
         SourceType::CustomMVTVector => {
             Some(Box::new(crate::sources::render_custom_vector_source::RenderCustomVectorSource::new(
                 source::static_immutable_cast::<mln_style::sources::custom_vector_source::Impl>(impl_),
-                thread_pool,
             )))
         }
-        // TODO(port): RenderAnnotationSource. The orchestrator skips the
-        // layers of a source without a render source.
-        SourceType::Annotations => None,
     }
 }
