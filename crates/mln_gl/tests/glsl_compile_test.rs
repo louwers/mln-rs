@@ -1,6 +1,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 //! Compiles and links every GLSL program `shader_source()` returns on an
-//! OpenGL ES 3.0 context, the way `gl::ShaderGroup` does: in both projection
+//! OpenGL ES 3.0 context and on a desktop OpenGL one, the way `gl::ShaderGroup` does: in both projection
 //! variants, with every data-driven property as a vertex attribute and with
 //! every one as a uniform. Also checks each program against its tables:
 //! every uniform block is as large as the UBO the renderer writes for it,
@@ -18,15 +18,21 @@ use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
 use mln_gl::shaders::glsl_sources::PRELUDE;
 use mln_gl::shaders::shader_program::as_gl_shader;
 use mln_gl::shaders::shader_source::{REGISTERED_SHADERS, ShaderSource, shader_source};
-use mln_gl::{Device, RendererBackend};
+use mln_gl::{Api, Device, DeviceOptions, RendererBackend};
 
-/// A backend, or none where there is no EGL to make an OpenGL ES 3.0 context
-/// with, as on macOS: the test is skipped there, unless `MLN_RENDER_BACKEND`
-/// asks for this backend.
-fn headless_backend() -> Option<RendererBackend> {
-    match Device::new().and_then(|device| RendererBackend::new(&device)) {
+/// A backend on a device of `api`, or none where there is no EGL to make a
+/// context of it with, as on macOS: the test is skipped there, unless
+/// `MLN_RENDER_BACKEND` asks for this backend with this API (`gl` for
+/// OpenGL ES, `gl-desktop` for desktop OpenGL).
+fn headless_backend(api: Api) -> Option<RendererBackend> {
+    let options = DeviceOptions { api, ..DeviceOptions::default() };
+    let knob = match api {
+        Api::Gles => "gl",
+        Api::Gl => "gl-desktop",
+    };
+    match Device::with_options(options).and_then(|device| RendererBackend::new(&device)) {
         Ok(backend) => Some(backend),
-        Err(error) if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("gl")) => {
+        Err(error) if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case(knob)) => {
             panic!("{error}")
         }
         Err(error) => {
@@ -104,12 +110,26 @@ fn fragment_shaders_declare_shared_uniform_blocks_first() {
 }
 
 #[test]
-fn every_program_links_and_matches_its_tables() {
-    let Some(backend) = headless_backend() else {
-        return;
-    };
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
-    println!("GL_RENDERER: {}", backend.get_renderer_name());
+fn every_program_links_and_matches_its_tables_on_open_gl_es() {
+    if let Some(backend) = headless_backend(Api::Gles) {
+        assert!(glow::HasContext::version(backend.gl()).is_embedded);
+        every_program_links_and_matches_its_tables(&backend);
+    }
+}
+
+/// The programs compile as GLSL 3.30 there.
+#[test]
+fn every_program_links_and_matches_its_tables_on_desktop_open_gl() {
+    if let Some(backend) = headless_backend(Api::Gl) {
+        assert!(!glow::HasContext::version(backend.gl()).is_embedded);
+        every_program_links_and_matches_its_tables(&backend);
+    }
+}
+
+fn every_program_links_and_matches_its_tables(backend: &RendererBackend) {
+    let _scope = BackendScope::new(backend, ScopeType::Explicit);
+    let version = glow::HasContext::version(backend.gl());
+    println!("GL_RENDERER: {}, GL_VERSION: {}", backend.get_renderer_name(), version.vendor_info);
     let registry = ShaderRegistry::new();
     backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
     let context = backend.get_context();

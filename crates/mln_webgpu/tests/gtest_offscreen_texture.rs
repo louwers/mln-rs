@@ -2,7 +2,7 @@
 //
 // The C++ file is `#if MLN_RENDER_BACKEND_OPENGL`. EmptyRed and
 // RenderToTexture drive OpenGL directly (glClear, GL shader programs and
-// framebuffers) and stay OpenGL-only; ClearRenderPassColor only uses the gfx
+// framebuffers), so they aren't ported; ClearRenderPassColor only uses the gfx
 // abstractions, so it runs here on the WebGPU headless backend, compared
 // with the same fixture.
 
@@ -46,16 +46,6 @@ fn check_image(base: &str, actual: &PremultipliedImage, image_threshold: f64, pi
     let diff = get_image_diff(base, actual, pixel_threshold);
     assert!(diff <= image_threshold, "{base}: diff {diff} > {image_threshold}");
 }
-
-// gtest: OffscreenTexture.EmptyRed
-#[test]
-#[ignore = "OpenGL-only: clears the default framebuffer with glClear and checks the scissor state of gl::HeadlessBackend::bind()"]
-fn empty_red() {}
-
-// gtest: OffscreenTexture.RenderToTexture
-#[test]
-#[ignore = "OpenGL-only: hand-written GL shader programs, buffers and framebuffers"]
-fn render_to_texture() {}
 
 // gtest: OffscreenTexture.ClearRenderPassColor
 #[test]

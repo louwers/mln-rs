@@ -9,8 +9,10 @@
 //! and regenerate; the generated code then checks that signature.
 //! maplibre-native-ffi's ABI suite runs against the library (`just c-abi-test`).
 //!
-//! Each header's functions live in the module of its name. The modules they
-//! share hold the C-only rules: `export!` bodies, `handles`, struct versioning
+//! Each header's functions live in the module of its name, except
+//! `mln_frame_pacer_create()`, which lives in `frame_pacer` beside each
+//! platform's source of display refreshes. The modules the headers share
+//! hold the C-only rules: `export!` bodies, `handles`, struct versioning
 //! (`abi`), `buffer`s, `callback` registrations, `delivery` queues and
 //! `completion`s, the event batches that handlers receive (`events`), the
 //! headers' geometry values (`geo`), and the
@@ -35,6 +37,7 @@ mod delivery;
 mod diagnostic;
 mod error;
 mod events;
+mod frame_pacer;
 mod geo;
 mod gpu_device;
 mod handles;

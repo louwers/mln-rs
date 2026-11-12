@@ -1,7 +1,7 @@
 //! Ports the C++ OpenGL backend (`src/mln/gl`, `include/mln/gl`,
 //! `include/mln/shaders/gl`, `src/mln/shaders/gl`, and the headless backend
 //! from platform/default) onto the `glow` bindings, which call OpenGL ES 3.0
-//! natively and WebGL2 in a browser.
+//! or desktop OpenGL 3.3 natively and WebGL2 in a browser.
 //!
 //! The renderer drives every backend the way C++ drives Metal and WebGPU, so
 //! this backend differs from the C++ one where that one has code of its own
@@ -19,10 +19,18 @@
 //! The GLSL comes from the C++ headers, with the port's changes
 //! (`shaders::glsl_sources`).
 //!
-//! A [`RendererBackend`] renders on a [`Device`], an EGL share group, into
-//! an `OffscreenTarget`'s framebuffer. A `SurfaceTarget` presents to a
-//! Wayland, X11 or Android window through EGL from a context of the window's
-//! display, and a `CanvasTarget` draws into the canvas of a WebGL2 context.
+//! On desktop OpenGL 3.3 or later, of either profile, the backend draws as
+//! on OpenGL ES 3.0 but where the APIs differ (`Context::is_desktop`): the
+//! GLSL compiles as `#version 330 core`, which every such context takes,
+//! alpha and luminance textures are red ones with a swizzle, and writes to an
+//! sRGB framebuffer are encoded, as OpenGL ES always encodes them. None of it
+//! is EGL's, so a desktop context of another platform draws through it too.
+//!
+//! A [`RendererBackend`] renders on a [`Device`], an EGL share group or one
+//! context that its backends take turns in, into an `OffscreenTarget`'s
+//! framebuffer. A `SurfaceTarget` presents to a Wayland, X11 or Android
+//! window through EGL from a context of the window's display, and a
+//! `CanvasTarget` draws into the canvas of a WebGL2 context.
 
 // OpenGL through glow is the FFI here.
 #![allow(unsafe_code)]
@@ -67,7 +75,7 @@ pub use borrowed_target::{BorrowedTarget, BorrowedTextures, HostSurface, HostSur
 pub use canvas_target::CanvasTarget;
 pub use context::Context;
 #[cfg(not(target_arch = "wasm32"))]
-pub use device::Device;
+pub use device::{Api, Device, DeviceOptions};
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
 pub use exported_target::ExportedTarget;
 #[cfg(not(target_arch = "wasm32"))]

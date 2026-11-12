@@ -94,8 +94,7 @@ pub fn js_number(value: f64) -> String {
     format!("{sign}{body}")
 }
 
-/// `num.toString()` for a `property.default` that is a JS number or (in
-/// style-spec.mjs's location-indicator) a string.
+/// `num.toString()` for a `property.default` that is a JS number.
 fn js_to_string(value: &Value) -> String {
     match value {
         Value::Number(n) => match (n.as_i64(), n.as_u64()) {
@@ -103,7 +102,6 @@ fn js_to_string(value: &Value) -> String {
             (_, Some(u)) => js_number(u as f64),
             _ => js_number(n.as_f64().expect("number")),
         },
-        Value::String(s) => s.clone(),
         other => panic!("formatNumber of {other}"),
     }
 }

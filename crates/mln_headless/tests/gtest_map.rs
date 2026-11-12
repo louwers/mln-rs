@@ -39,7 +39,6 @@ use mln_style::layer::Layer;
 use mln_style::layers::background_layer::BackgroundLayer;
 use mln_style::layers::fill_layer::FillLayer;
 use mln_style::layers::line_layer::LineLayer;
-use mln_style::layers::location_indicator_layer::LocationIndicatorLayer;
 use mln_style::layers::raster_layer::RasterLayer;
 use mln_style::projection::Projection;
 use mln_style::property_expression::PropertyExpression;
@@ -843,7 +842,7 @@ fn set_style_invalid_url() {
     let run_loop = test.run_loop.clone();
     test.observer.did_fail_loading_map_callback.set(move |()| run_loop.stop());
 
-    test.map().style_mut().load_url("maptiler://bar");
+    test.map().style_mut().load_url("https://example.com/bar");
 
     run_with_timeout(&test.run_loop, 60);
 }
@@ -874,7 +873,7 @@ fn style_fresh() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     // Timestamp::max()
@@ -891,7 +890,7 @@ fn style_expired() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let mut response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -919,28 +918,6 @@ fn style_expired() {
     assert!(test.map().style().get_layer("bg").is_some());
 }
 
-// gtest: Map.StyleExpiredWithAnnotations
-#[test]
-#[ignore = "TODO(port): annotations (Map::addAnnotation, AnnotationManager); see map.test.cpp:688"]
-fn style_expired_with_annotations() {
-    // Adding an annotation should not prevent revalidation of an expired style.
-    let test = MapTest::fake();
-
-    test.map().style_mut().load_url("maptiler://maps/test");
-    assert_eq!(1, test.file_source.requests_len());
-
-    let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
-
-    test.file_source.respond(Kind::Style, &response);
-    assert_eq!(1, test.file_source.requests_len());
-
-    // TODO(port): test.map.addAnnotation(LineAnnotation{LineString<double>{{{0, 0}, {10, 10}}}});
-    assert_eq!(1, test.file_source.requests_len());
-
-    test.file_source.respond(Kind::Style, &response);
-    assert_eq!(1, test.file_source.requests_len());
-}
-
 // gtest: Map.StyleExpiredWithRender
 #[test]
 fn style_expired_with_render() {
@@ -948,7 +925,7 @@ fn style_expired_with_render() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     assert_eq!(1, test.file_source.requests_len());
 
     let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
@@ -972,7 +949,7 @@ fn style_expired_with_projection() {
     for in_place in [false, true] {
         let test = MapTest::fake();
 
-        test.map().style_mut().load_url("maptiler://maps/test");
+        test.map().style_mut().load_url("https://example.com/maps/test");
 
         let response = expired_or_fresh_response("test/fixtures/api/empty.json", hours_from_now(-1));
         test.file_source.respond(Kind::Style, &response);
@@ -1003,7 +980,7 @@ fn style_early_mutation() {
 
     let test = MapTest::fake();
 
-    test.map().style_mut().load_url("maptiler://maps/test");
+    test.map().style_mut().load_url("https://example.com/maps/test");
     test.map().style_mut().add_layer(Box::new(BackgroundLayer::new("bg")), None).unwrap();
 
     let response = file_response("test/fixtures/api/water.json");
@@ -1062,7 +1039,7 @@ fn style_loaded_signal() {
 /// `MapTest<OnlineFileSource> test(ResourceOptions::Default())`.
 fn online_file_source_test() -> MapTest<OnlineFileSource> {
     let run_loop = RunLoop::new();
-    let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default_options()));
+    let file_source = Arc::new(OnlineFileSource::new(&ResourceOptions::default()));
     MapTest::create(run_loop, file_source, 1.0, MapMode::Static)
 }
 
@@ -2362,7 +2339,7 @@ fn keep_render_data() {
     test.file_source.set_response(Kind::SpriteImage, make_response("sprite.png", None));
 
     test.map().jump_to(&cam().with_zoom(Some(10.0)));
-    test.map().style_mut().load_url("maptiler://maps/streets");
+    test.map().style_mut().load_url("https://example.com/maps/streets");
     let iterations = 3;
     let resources_count = 4; /*tiles*/
 
@@ -2418,7 +2395,7 @@ fn disabled_placed_symbol_data() {
     // Camera options will give exactly one tile (12/1171/1566)
     test.map().jump_to(&cam().with_zoom(Some(16.0)).with_center(Some(ll(50.072_317, 14.444_827))));
 
-    test.map().style_mut().load_url("maptiler://maps/streets");
+    test.map().style_mut().load_url("https://example.com/maps/streets");
     let viewport_size = test.frontend.get_size();
     test.frontend.with_renderer(|renderer| renderer.collect_placed_symbol_data(true));
     test.render();
@@ -2516,14 +2493,6 @@ fn volatile_source() {
     test.observer.did_finish_loading_map_callback.set(move |()| run_loop.stop());
     run_with_timeout(&test.run_loop, 60);
     assert_eq!(8, requested_tiles.get());
-}
-
-// gtest: Map.ObserveShaderRegistration
-#[test]
-#[ignore = "TODO(port): MapObserver::onRegisterShaders (gfx::ShaderRegistry observer hook); see map.test.cpp:1862"]
-fn observe_shader_registration() {
-    // test/map/map.test.cpp:1862: the first render calls onRegisterShaders,
-    // the second does not.
 }
 
 // gtest: Map.GlobeDepthShaderIdFollowsTheExistingShaders
@@ -3951,92 +3920,6 @@ fn feature_state_source_removal_and_change_before_one_render() {
     assert_eq!(render_selected_halves(&test), (false, true));
 }
 
-fn count_green_pixels(image: &PremultipliedImage) -> usize {
-    let mut green_pixels = 0;
-    for pixel in image.data.as_chunks::<4>().0 {
-        if pixel[0] < 40 && pixel[1] > 200 && pixel[2] < 40 {
-            green_pixels += 1;
-        }
-    }
-    green_pixels
-}
-
-// gtest: Map.LocationIndicatorAccuracyColorsTransition
-#[test]
-#[ignore = "TODO(port): RenderLocationIndicatorLayer (the location-indicator layer type is registered in the style but not rendered); see map.test.cpp:2659"]
-fn location_indicator_accuracy_colors_transition() {
-    let test = MapTest::with_mode(1.0, MapMode::Continuous);
-    test.load_json(
-        r#"{
-      "version": 8,
-      "sources": {},
-      "layers": [{
-        "id": "location",
-        "type": "location-indicator",
-        "paint": {
-          "location": [0, 0, 0],
-          "accuracy-radius": 100,
-          "accuracy-radius-color": "blue",
-          "accuracy-radius-border-color": "white"
-        }
-      }]
-    }"#,
-    );
-    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(16.0)));
-
-    let render_until_idle = || {
-        let idle = Rc::new(Cell::new(false));
-        let timeout = Timer::new();
-        {
-            let run_loop = test.run_loop.clone();
-            timeout.start(Duration::from_secs(5), Duration::zero(), move || run_loop.stop());
-        }
-        {
-            let idle = idle.clone();
-            let run_loop = test.run_loop.clone();
-            test.observer.did_finish_rendering_frame_callback.set(move |status| {
-                if status.mode == RenderMode::Full && !status.needs_repaint {
-                    idle.set(true);
-                    run_loop.stop();
-                }
-            });
-        }
-        test.run_loop.run();
-        test.observer.did_finish_rendering_frame_callback.clear();
-        idle.get()
-    };
-    let center_channel = |image: &PremultipliedImage, channel: usize| center_pixel(image)[channel];
-
-    let read_image = || {
-        let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
-        test.frontend.read_still_image()
-    };
-
-    assert!(render_until_idle());
-    let initial = read_image();
-    assert!(center_channel(&initial, 2) > 240);
-    assert!(center_channel(&initial, 0) < 10);
-
-    {
-        let mut map = test.map();
-        let style = map.style_mut();
-        let mut layer = style.get_layer_mut("location").expect("location layer");
-        let layer = layer.downcast_mut::<LocationIndicatorLayer>().expect("LocationIndicatorLayer");
-        let transition =
-            TransitionOptions { duration: Some(Duration::from_millis(100)), ..TransitionOptions::default() };
-        layer.set_accuracy_radius_color_transition(&transition);
-        layer.set_accuracy_radius_border_color_transition(&transition);
-        layer.set_accuracy_radius_color(&PropertyValue::Constant(Color::red()));
-        layer.set_accuracy_radius_border_color(&PropertyValue::Constant(Color::new(0.0, 1.0, 0.0, 1.0)));
-    }
-
-    assert!(render_until_idle());
-    let result = read_image();
-    assert!(center_channel(&result, 0) > 240);
-    assert!(center_channel(&result, 2) < 10);
-    assert!(count_green_pixels(&result) > 0, "The accuracy border should finish transitioning to green");
-}
-
 const CIRCLE_STYLE: &str = r#"{"version":8,"sources":{"points":{"type":"geojson","data":{
     "type":"Point","coordinates":[0,0]}}},"layers":[{"id":"circle","type":"circle","source":"points"}]}"#;
 
@@ -4089,28 +3972,6 @@ fn frame_status_carries_rendering_stats() {
     assert!(stats.total_draw_calls >= stats.num_draw_calls);
     let _scope = BackendScope::new(test.frontend.get_backend(), ScopeType::Explicit);
     assert_eq!(**stats, *test.frontend.get_backend().get_context().rendering_stats());
-}
-
-// gtest: Map.LocationIndicatorWithoutImages
-#[test]
-#[ignore = "TODO(port): RenderLocationIndicatorLayer; until it draws, this passes without checking anything"]
-fn location_indicator_without_images() {
-    let test = MapTest::new();
-    test.load_json(
-        r#"{
-      "version": 8,
-      "sources": {},
-      "layers": [{
-        "id": "location",
-        "type": "location-indicator",
-        "paint": {"location": [0, 0, 0], "accuracy-radius": 0}
-      }]
-    }"#,
-    );
-    test.map().jump_to(&cam().with_center(Some(ll(0.0, 0.0))).with_zoom(Some(16.0)));
-
-    // Neither the accuracy circle nor any image should produce a draw call.
-    assert_eq!(test.render().stats.num_draw_calls, 0);
 }
 
 /// Renders a frame and returns the RGB of the pixel at the centre of the map.
@@ -4451,9 +4312,9 @@ fn empty_size_is_an_error() {
 
 // gtest: Map.SourcelessLayersRenderAfterLeavingZoomRange
 // Layers without a source rebuild what they draw when they return to their
-// zoom range. The C++ test draws a location-indicator layer, which mln-rs
-// core doesn't render; a second background layer, which isn't drawn as the
-// clear color, stands in for it.
+// zoom range. The C++ test draws a location-indicator layer, a type mln-rs
+// doesn't have; a second background layer, which isn't drawn as the clear
+// color, stands in for it.
 #[test]
 fn sourceless_layers_render_after_leaving_zoom_range() {
     let test = MapTest::new();
@@ -4586,7 +4447,10 @@ fn releases_tiles_outside_zoom_range(param: InactiveLayerCase) {
         } else if z == 15 && (x == 16383 || x == 16384) && (y == 16383 || y == 16384) {
             response.data = Some(large_tile.clone());
         } else {
+            // The tileset has no other tiles (HTTP 404), so a parent is drawn in their place. An
+            // empty raster tile (HTTP 204) would draw nothing, as in GL JS.
             response.no_content = true;
+            response.tile_not_found = true;
         }
         Some(response)
     });

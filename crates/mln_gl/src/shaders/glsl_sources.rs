@@ -27,8 +27,6 @@
 //   include/mln/shaders/gl/line_gradient_sdf.hpp
 //   include/mln/shaders/gl/line_pattern.hpp
 //   include/mln/shaders/gl/line_sdf.hpp
-//   include/mln/shaders/gl/location_indicator.hpp
-//   include/mln/shaders/gl/location_indicator_textured.hpp
 //   include/mln/shaders/gl/prelude.hpp
 //   include/mln/shaders/gl/raster.hpp
 //   include/mln/shaders/gl/shader_group_gl.hpp
@@ -4288,65 +4286,6 @@ lowp float opacity = u_opacity;
 ",
 };
 
-/// `ShaderSource<BuiltIn::LocationIndicatorShader, gfx::Backend::Type::OpenGL>`
-pub const LOCATION_INDICATOR_SHADER: GlslShaderSource = GlslShaderSource {
-    built_in: "LocationIndicatorShader",
-    name: r"LocationIndicatorShader",
-    vertex: r"layout (std140) uniform LocationIndicatorDrawableUBO {
-    mat4 u_matrix;
-    vec4 u_color;
-};
-
-layout(location = 0) in vec2 a_pos;
-
-void main() {
-    gl_Position = projectTile(a_pos);
-}
-",
-    fragment: r"layout (std140) uniform LocationIndicatorDrawableUBO {
-    mat4 u_matrix;
-    vec4 u_color;
-};
-
-void main() {
-    fragColor = u_color;
-}
-",
-};
-
-/// `ShaderSource<BuiltIn::LocationIndicatorTexturedShader, gfx::Backend::Type::OpenGL>`
-pub const LOCATION_INDICATOR_TEXTURED_SHADER: GlslShaderSource = GlslShaderSource {
-    built_in: "LocationIndicatorTexturedShader",
-    name: r"LocationIndicatorTexturedShader",
-    vertex: r"layout (std140) uniform LocationIndicatorDrawableUBO {
-    mat4 u_matrix;
-    vec4 u_color;
-};
-
-layout(location = 0) in vec2 a_pos;
-layout(location = 1) in vec2 a_uv;
-
-out vec2 frag_uv;
-
-void main() {
-    frag_uv = a_uv;
-    gl_Position = projectTile(a_pos);
-}
-",
-    fragment: r"layout (std140) uniform LocationIndicatorDrawableUBO {
-    mat4 u_matrix;
-    vec4 u_color;
-};
-
-in vec2 frag_uv;
-uniform sampler2D u_image;
-
-void main() {
-    fragColor = texture(u_image, frag_uv);
-}
-",
-};
-
 /// `ShaderSource<BuiltIn::Prelude, gfx::Backend::Type::OpenGL>`
 pub const PRELUDE: GlslShaderSource = GlslShaderSource {
     built_in: "Prelude",
@@ -5737,8 +5676,6 @@ pub const ALL: &[&GlslShaderSource] = &[
     &LINE_PATTERN_SHADER,
     &LINE_SDF_SHADER,
     &LINE_SHADER,
-    &LOCATION_INDICATOR_SHADER,
-    &LOCATION_INDICATOR_TEXTURED_SHADER,
     &PRELUDE,
     &RASTER_SHADER,
     &SKY_SHADER,

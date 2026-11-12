@@ -508,12 +508,15 @@ impl Map {
     /// in that thread's first service.
     ///
     /// Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the
-    /// map already has a session or was released, and with
+    /// map already has a session or was released, or a window is minimized
+    /// or has no client area, and with
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
     /// target, or a [`Surface::wgpu`](crate::Surface::wgpu) without the
     /// host's device. The completion fails as
     /// [`Device::new`](crate::Device::new) does when the
     /// session has to create its device and can't, with
+    /// [`ErrorKind::InvalidState`](mln_util::ErrorKind) when the window or
+    /// surface had no area to present to by then, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no GPU can present
     /// to a window, and with [`ErrorKind::Native`](mln_util::ErrorKind) when
     /// the window has no surface to give.

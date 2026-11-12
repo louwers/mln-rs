@@ -46,13 +46,11 @@ use crate::layers::fill_layer_properties::FillLayerProperties;
 use crate::layers::heatmap_layer_properties::HeatmapLayerProperties;
 use crate::layers::hillshade_layer_properties::HillshadeLayerProperties;
 use crate::layers::line_layer_properties::LineLayerProperties;
-use crate::layers::location_indicator_layer_properties::LocationIndicatorLayerProperties;
 use crate::layers::raster_layer_properties::RasterLayerProperties;
 use crate::layers::symbol_layer_properties::SymbolLayerProperties;
 use crate::layers::{
     background_layer_impl, circle_layer_impl, color_relief_layer_impl, fill_extrusion_layer_impl, fill_layer_impl,
-    heatmap_layer_impl, hillshade_layer_impl, line_layer_impl, location_indicator_layer_impl, raster_layer_impl,
-    symbol_layer_impl,
+    heatmap_layer_impl, hillshade_layer_impl, line_layer_impl, raster_layer_impl, symbol_layer_impl,
 };
 use crate::renderer::possibly_evaluated_property_value::PossiblyEvaluatedPropertyValue;
 
@@ -109,7 +107,6 @@ layer_types! {
     Heatmap: heatmap_layer_impl::Impl, HeatmapLayerProperties;
     Hillshade: hillshade_layer_impl::Impl, HillshadeLayerProperties;
     Line: line_layer_impl::Impl, LineLayerProperties;
-    LocationIndicator: location_indicator_layer_impl::Impl, LocationIndicatorLayerProperties;
     Raster: raster_layer_impl::Impl, RasterLayerProperties;
     Symbol: symbol_layer_impl::Impl, SymbolLayerProperties;
 }

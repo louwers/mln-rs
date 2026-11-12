@@ -4,17 +4,32 @@
 // own in the group, on its own thread. The root is the library's, which is
 // never current, or the host's.
 //
+// A library device can instead have one context, which its renderers take
+// turns in: each renderer waits for the turn, makes the context current on
+// its own thread for one stretch of work, and hands it back released. GL
+// objects that a context doesn't share (vertex arrays, framebuffers) are then
+// in the one context too, each renderer's own, so they stay valid between its
+// turns. What the context last had bound is the previous renderer's, so a
+// renderer forgets its cached GL state when another one had the context
+// since its last turn (`PlatformContext::take_state_lost`).
+//
 // The library's display is Mesa's surfaceless platform where the library has
 // it, so that no window system is needed; elsewhere it is the default
 // display, as in C++ (platform/linux/src/headless_backend_egl.cpp). A host's
 // group is on the host's display and config, and a renderer's context in it
 // makes the host's context current again when it is done, since it may be
 // current on the host's thread.
+//
+// EGL binds a client API to each thread, and makes and releases the current
+// context of the bound one, so a context binds its API around its use and
+// puts back the thread's API after.
 
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::{Arc, OnceLock};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::thread::ThreadId;
 
 use khronos_egl as egl;
 use mln_util::error::Error;
@@ -27,15 +42,129 @@ use crate::types::Gl;
 /// `EGL_PLATFORM_SURFACELESS_MESA` (`EGL_MESA_platform_surfaceless`).
 const PLATFORM_SURFACELESS_MESA: egl::Enum = 0x31DD;
 
+/// The OpenGL API that a device's contexts render with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Api {
+    /// OpenGL ES 3.0 or later.
+    #[default]
+    Gles,
+    /// Desktop OpenGL 3.3 or later, of the core profile where the library
+    /// makes the context.
+    Gl,
+}
+
+impl Api {
+    fn egl(self) -> egl::Enum {
+        match self {
+            Api::Gles => egl::OPENGL_ES_API,
+            Api::Gl => egl::OPENGL_API,
+        }
+    }
+
+    fn renderable_bit(self) -> egl::Int {
+        match self {
+            Api::Gles => egl::OPENGL_ES3_BIT,
+            Api::Gl => egl::OPENGL_BIT,
+        }
+    }
+
+    /// The token of `EGL_CLIENT_APIS` that names the API.
+    fn client_api_name(self) -> &'static str {
+        match self {
+            Api::Gles => "OpenGL_ES",
+            Api::Gl => "OpenGL",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Api::Gles => "OpenGL ES 3",
+            Api::Gl => "desktop OpenGL",
+        }
+    }
+
+    /// The attributes of the library's contexts: OpenGL ES 3.0, or the core
+    /// profile of OpenGL 3.3, which EGL makes the latest compatible version
+    /// of.
+    fn context_attributes(self) -> &'static [egl::Int] {
+        match self {
+            Api::Gles => &[egl::CONTEXT_CLIENT_VERSION, 3, egl::NONE],
+            Api::Gl => &[
+                egl::CONTEXT_MAJOR_VERSION,
+                3,
+                egl::CONTEXT_MINOR_VERSION,
+                3,
+                egl::CONTEXT_OPENGL_PROFILE_MASK,
+                egl::CONTEXT_OPENGL_CORE_PROFILE_BIT,
+                egl::NONE,
+            ],
+        }
+    }
+}
+
+/// How the library makes a device.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct DeviceOptions {
+    /// The API that the device's contexts render with. Only Linux's and
+    /// FreeBSD's EGL renders desktop OpenGL.
+    pub api: Api,
+    /// Whether the device's renderers take turns in one context instead of
+    /// having one each.
+    pub single_context: bool,
+}
+
+/// Whether this platform's EGL may render desktop OpenGL: the EGL of
+/// Android and `OpenHarmony` renders OpenGL ES only.
+const DESKTOP_GL_PLATFORM: bool = cfg!(all(any(target_os = "linux", target_os = "freebsd"), not(target_env = "ohos")));
+
+/// Runs `f` with `api` bound on the thread, which EGL makes contexts of, and
+/// binds the thread's API again after.
+fn with_api<T>(egl: &Egl, api: Api, f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    let previous = egl.query_api();
+    if previous != api.egl() {
+        egl.bind_api(api.egl()).map_err(|e| format!("Error setting the EGL rendering API: {e}"))?;
+    }
+    let result = f();
+    if previous != api.egl()
+        && let Err(e) = egl.bind_api(previous)
+    {
+        Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API back: {e}"));
+    }
+    result
+}
+
+/// A context of `api` on `config`, sharing objects with `share`, if any.
+fn create_context(
+    egl: &Egl,
+    display: egl::Display,
+    config: egl::Config,
+    share: Option<egl::Context>,
+    api: Api,
+    attributes: &[egl::Int],
+) -> Result<egl::Context, String> {
+    with_api(egl, api, || {
+        egl.create_context(display, config, share, attributes)
+            .map_err(|e| format!("Error creating the EGL context object: {e}"))
+    })
+}
+
+/// A 1x1 pbuffer of `config`, for a context to be current on.
+fn create_pbuffer(egl: &Egl, display: egl::Display, config: egl::Config) -> Result<egl::Surface, String> {
+    egl.create_pbuffer_surface(display, config, &[egl::WIDTH, 1, egl::HEIGHT, 1, egl::NONE])
+        .map_err(|e| format!("Could not create surface: {e}"))
+}
+
 /// The EGL library and its display (`EGLDisplayConfig`), which every
-/// library device of the process shares. The display stays initialized.
+/// library device of the process shares, and its config for each API. The
+/// display stays initialized.
 struct EglDisplay {
     egl: &'static Egl,
     display: egl::Display,
-    config: egl::Config,
+    /// The display's config of each API, found when first asked.
+    configs: [OnceLock<Result<egl::Config, String>>; 2],
 }
 
-// SAFETY: the display and the config are handles EGL lets every thread use;
+// SAFETY: the display and the configs are handles EGL lets every thread use;
 // the contexts made on them are used on one thread at a time.
 unsafe impl Send for EglDisplay {}
 // SAFETY: as above.
@@ -64,13 +193,36 @@ impl EglDisplay {
         }
         .ok_or("Failed to obtain a valid EGL display.")?;
         egl.initialize(display).map_err(|e| format!("eglInitialize() failed: {e}"))?;
-        egl.bind_api(egl::OPENGL_ES_API).map_err(|e| format!("Error setting the EGL rendering API: {e}"))?;
+        Ok(EglDisplay { egl, display, configs: [OnceLock::new(), OnceLock::new()] })
+    }
+
+    /// The display's config of `api`, or why it has none.
+    fn config(&self, api: Api) -> Result<egl::Config, String> {
+        let index = usize::from(api == Api::Gl);
+        self.configs[index].get_or_init(|| self.choose_config(api)).clone()
+    }
+
+    fn choose_config(&self, api: Api) -> Result<egl::Config, String> {
+        let EglDisplay { egl, display, .. } = *self;
+        if api == Api::Gl && !DESKTOP_GL_PLATFORM {
+            return Err("this platform's EGL renders OpenGL ES only, not desktop OpenGL".to_owned());
+        }
+        let client_apis = egl
+            .query_string(Some(display), egl::CLIENT_APIS)
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        if !client_apis.split(' ').any(|name| name == api.client_api_name()) {
+            return Err(format!("the EGL display renders no {}", api.name()));
+        }
+        if api == Api::Gl && !has_create_context(egl, display) {
+            return Err("the EGL display makes no core profile context: it lacks EGL_KHR_create_context".to_owned());
+        }
         // Note: we're choosing an arbitrary pixel format, since we're not
         // using the default surface anyway; all rendering will be directed to
         // framebuffer objects.
         let attributes = [
             egl::RENDERABLE_TYPE,
-            egl::OPENGL_ES3_BIT,
+            api.renderable_bit(),
             egl::SURFACE_TYPE,
             egl::PBUFFER_BIT,
             egl::RED_SIZE,
@@ -83,25 +235,28 @@ impl EglDisplay {
             8,
             egl::NONE,
         ];
-        let config = egl
-            .choose_first_config(display, &attributes)
+        egl.choose_first_config(display, &attributes)
             .map_err(|e| format!("Failed to choose an EGL config: {e}"))?
-            .ok_or("Failed to choose an EGL config.")?;
-        Ok(EglDisplay { egl, display, config })
+            .ok_or_else(|| format!("Failed to choose an EGL config of {}.", api.name()))
     }
+}
 
-    /// An OpenGL ES 3.0 context that shares with `share`, if any.
-    fn create_context(&self, share: Option<egl::Context>) -> Result<egl::Context, String> {
-        self.egl
-            .create_context(self.display, self.config, share, &[egl::CONTEXT_CLIENT_VERSION, 3, egl::NONE])
-            .map_err(|e| format!("Error creating the EGL context object: {e}"))
+/// Whether `display` takes the context attributes of EGL 1.5 or
+/// `EGL_KHR_create_context`: a version and a profile.
+fn has_create_context(egl: &Egl, display: egl::Display) -> bool {
+    if egl.upcast::<egl::EGL1_5>().is_some() {
+        return true;
     }
+    egl.query_string(Some(display), egl::EXTENSIONS)
+        .is_ok_and(|extensions| extensions.to_string_lossy().split(' ').any(|e| e == "EGL_KHR_create_context"))
 }
 
 /// The root context of a library device's share group, which is never
 /// current.
 struct ShareGroup {
     display: &'static EglDisplay,
+    config: egl::Config,
+    api: Api,
     root: egl::Context,
 }
 
@@ -120,12 +275,125 @@ impl Drop for ShareGroup {
     }
 }
 
+/// Who has the turn in a single context.
+#[derive(Default)]
+struct Turn {
+    /// The thread that has the context current.
+    holder: Option<ThreadId>,
+    /// How many stretches of work on the holder's thread have it, nested.
+    depth: u32,
+    /// The renderer that last had the turn, or 0 for none known.
+    last_user: u64,
+    /// The thread's client API before the turn, which it gets back after.
+    previous_api: Option<egl::Enum>,
+}
+
+/// The one context that a single-context device's renderers take turns in,
+/// and the pbuffer that it is current on.
+struct SingleContext {
+    display: &'static EglDisplay,
+    api: Api,
+    context: egl::Context,
+    surface: egl::Surface,
+    turn: Mutex<Turn>,
+    free: Condvar,
+    /// The last renderer's number. Renderers are numbered, not known by
+    /// address, since a new one can take a dropped one's.
+    users: AtomicU64,
+}
+
+// SAFETY: the context is current on the thread that has the turn only, and
+// released before another thread gets it.
+unsafe impl Send for SingleContext {}
+// SAFETY: as above.
+unsafe impl Sync for SingleContext {}
+
+impl SingleContext {
+    /// Waits for the turn and makes the context current on this thread, for
+    /// `user`. Returns whether another renderer had it since `user` last
+    /// did. A stretch of work nested in one on the same thread shares its
+    /// turn, rather than waiting for itself.
+    fn take(&self, user: u64) -> bool {
+        let thread = std::thread::current().id();
+        let mut turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        while turn.holder.is_some_and(|holder| holder != thread) {
+            turn = self.free.wait(turn).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+        let lost = turn.last_user != user;
+        turn.last_user = user;
+        if turn.depth == 0 {
+            let egl = self.display.egl;
+            let previous = egl.query_api();
+            if previous != self.api.egl()
+                && let Err(e) = egl.bind_api(self.api.egl())
+            {
+                Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API: {e}"));
+            }
+            turn.previous_api = Some(previous);
+            if let Err(e) =
+                egl.make_current(self.display.display, Some(self.surface), Some(self.surface), Some(self.context))
+            {
+                Log::error(Event::GraphicsBackend, format!("Switching OpenGL context failed: {e}"));
+            }
+            turn.holder = Some(thread);
+        }
+        turn.depth += 1;
+        lost
+    }
+
+    /// Ends `user`'s stretch of work: the last one on the thread releases
+    /// the context, which flushes it, and hands the turn on. After a stretch
+    /// nested in another, no renderer is known to have had the context last,
+    /// so every renderer's next turn finds its state lost. The outer stretch
+    /// goes on with the state that the nested one left.
+    fn give(&self, user: u64) {
+        let mut turn = self.turn.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if turn.depth == 0 {
+            return;
+        }
+        turn.depth -= 1;
+        if turn.depth > 0 {
+            if turn.last_user == user {
+                turn.last_user = 0;
+            }
+            return;
+        }
+        let egl = self.display.egl;
+        if let Err(e) = egl.make_current(self.display.display, None, None, None) {
+            Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+        }
+        if let Some(previous) = turn.previous_api.take()
+            && previous != self.api.egl()
+            && let Err(e) = egl.bind_api(previous)
+        {
+            Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API back: {e}"));
+        }
+        turn.holder = None;
+        drop(turn);
+        self.free.notify_one();
+    }
+}
+
+impl Drop for SingleContext {
+    fn drop(&mut self) {
+        // Each renderer holds the context, so none has the turn any more.
+        let EglDisplay { egl, display, .. } = self.display;
+        if let Err(e) = egl.destroy_surface(*display, self.surface) {
+            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL surface: {e}"));
+        }
+        if let Err(e) = egl.destroy_context(*display, self.context) {
+            Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL context: {e}"));
+        }
+    }
+}
+
 /// The host's EGL display, config and context, the root of a share group.
 struct HostGroup {
     egl: &'static Egl,
     display: egl::Display,
     config: egl::Config,
     root: egl::Context,
+    api: Api,
     /// Whether a context is made current without a surface, where the config
     /// has no pbuffers.
     surfaceless: bool,
@@ -140,11 +408,13 @@ unsafe impl Sync for HostGroup {}
 
 enum Kind {
     Library(ShareGroup),
+    Single(Arc<SingleContext>),
     Host(HostGroup),
 }
 
 /// A GL share group that renderers on any thread render in: the library's,
-/// or the host's. Clones share it.
+/// or the host's, or the one context that the library's renderers take
+/// turns in. Clones share it.
 #[derive(Clone)]
 pub struct Device {
     kind: Arc<Kind>,
@@ -163,22 +433,54 @@ impl Device {
     /// The library's share group, of OpenGL ES 3.0 contexts on EGL's
     /// display.
     ///
+    /// Fails as [`with_options`](Self::with_options) does.
+    pub fn new() -> Result<Device, Error> {
+        Self::with_options(DeviceOptions::default())
+    }
+
+    /// The library's device on EGL's display: a share group of contexts of
+    /// `options.api`, or one such context.
+    ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) when there
-    /// is no EGL, or no display or config for it, and with
+    /// is no EGL, or no display or config of the API for it, and with
     /// [`ErrorKind::Native`](mln_util::ErrorKind) when EGL makes no
     /// context.
-    pub fn new() -> Result<Device, Error> {
+    pub fn with_options(options: DeviceOptions) -> Result<Device, Error> {
+        let DeviceOptions { api, single_context } = options;
         let display = EglDisplay::get().map_err(Error::unsupported)?;
-        let root = display.create_context(None).map_err(Error::native)?;
-        Ok(Device::of(Kind::Library(ShareGroup { display, root })))
+        let config = display.config(api).map_err(Error::unsupported)?;
+        let EglDisplay { egl, display: egl_display, .. } = *display;
+        let context =
+            create_context(egl, egl_display, config, None, api, api.context_attributes()).map_err(Error::native)?;
+        if !single_context {
+            return Ok(Device::of(Kind::Library(ShareGroup { display, config, api, root: context })));
+        }
+        let surface = match create_pbuffer(egl, egl_display, config) {
+            Ok(surface) => surface,
+            Err(e) => {
+                let _ = egl.destroy_context(egl_display, context);
+                return Err(Error::native(e));
+            }
+        };
+        Ok(Device::of(Kind::Single(Arc::new(SingleContext {
+            display,
+            api,
+            context,
+            surface,
+            turn: Mutex::default(),
+            free: Condvar::new(),
+            users: AtomicU64::new(0),
+        }))))
     }
 
     /// The host's share group, whose root is `context`, of `config` on
-    /// `display`: each renderer's context shares its objects with it.
+    /// `display`: each renderer's context shares its objects with it, and
+    /// renders with its API.
     ///
     /// Fails with [`ErrorKind::Unsupported`](mln_util::ErrorKind) without
-    /// EGL, or for a context that isn't of OpenGL ES 3, the API that the
-    /// renderers draw with, and with [`ErrorKind::Native`](mln_util::ErrorKind)
+    /// EGL, or for a context of an API that the renderers don't draw with:
+    /// OpenGL ES 3 or later, or desktop OpenGL where the platform's EGL
+    /// renders it. Fails with [`ErrorKind::Native`](mln_util::ErrorKind)
     /// when EGL can't answer for the context.
     ///
     /// # Safety
@@ -203,12 +505,20 @@ impl Device {
         let client_type = egl
             .query_context(display, root, egl::CONTEXT_CLIENT_TYPE)
             .map_err(|e| Error::native(format!("The host's EGL context can't be queried: {e}")))?;
-        let version = egl.query_context(display, root, egl::CONTEXT_CLIENT_VERSION).unwrap_or(0);
-        if client_type != egl::OPENGL_ES_API as egl::Int || version < 3 {
-            return Err(Error::unsupported(
-                "the library's OpenGL renderers share objects with OpenGL ES 3 contexts only",
-            ));
-        }
+        let api = if client_type == egl::OPENGL_API as egl::Int && DESKTOP_GL_PLATFORM {
+            // EGL tells no desktop context's version: a renderer's context
+            // checks for 3.3 once it is current.
+            Api::Gl
+        } else if client_type == egl::OPENGL_ES_API as egl::Int
+            && egl.query_context(display, root, egl::CONTEXT_CLIENT_VERSION).unwrap_or(0) >= 3
+        {
+            Api::Gles
+        } else {
+            let desktop = if DESKTOP_GL_PLATFORM { " or desktop OpenGL" } else { "" };
+            return Err(Error::unsupported(format!(
+                "the library's OpenGL renderers share objects with OpenGL ES 3{desktop} contexts only",
+            )));
+        };
         let pbuffers =
             egl.get_config_attrib(display, config, egl::SURFACE_TYPE).is_ok_and(|types| types & egl::PBUFFER_BIT != 0);
         let extensions = egl
@@ -216,7 +526,7 @@ impl Device {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let surfaceless = !pbuffers && extensions.split(' ').any(|e| e == "EGL_KHR_surfaceless_context");
-        Ok(Device::of(Kind::Host(HostGroup { egl, display, config, root, surfaceless })))
+        Ok(Device::of(Kind::Host(HostGroup { egl, display, config, root, api, surfaceless })))
     }
 
     fn of(kind: Kind) -> Device {
@@ -232,6 +542,7 @@ impl Device {
     pub(crate) fn display(&self) -> (&'static Egl, egl::Display) {
         match &*self.kind {
             Kind::Library(group) => (group.display.egl, group.display.display),
+            Kind::Single(single) => (single.display.egl, single.display.display),
             Kind::Host(group) => (group.egl, group.display),
         }
     }
@@ -248,14 +559,41 @@ impl Device {
         matches!(*self.kind, Kind::Host(_))
     }
 
+    /// The API that the device's contexts render with.
+    #[must_use]
+    pub fn api(&self) -> Api {
+        match &*self.kind {
+            Kind::Library(group) => group.api,
+            Kind::Single(single) => single.api,
+            Kind::Host(group) => group.api,
+        }
+    }
+
+    /// Whether the device's renderers take turns in one context.
+    #[must_use]
+    pub fn is_single_context(&self) -> bool {
+        matches!(*self.kind, Kind::Single(_))
+    }
+
     /// A context in the share group, current on a 1x1 pbuffer around a
-    /// backend's frames, and the GL functions it calls.
+    /// backend's frames, or a turn in the device's one context, and the GL
+    /// functions it calls.
     pub(crate) fn create_context(&self) -> Result<(Gl, Box<dyn PlatformContext>), Error> {
-        let context = match &*self.kind {
-            Kind::Library(group) => EglContext::new(self.clone(), group).map_err(Error::native)?,
-            Kind::Host(group) => EglContext::in_host_group(self.clone(), group, None).map_err(Error::native)?,
-        };
-        Ok(Self::functions(context))
+        match &*self.kind {
+            Kind::Library(group) => {
+                let context = EglContext::new(self.clone(), group).map_err(Error::native)?;
+                Self::functions(Box::new(context))
+            }
+            Kind::Single(single) => {
+                let user = single.users.fetch_add(1, Ordering::Relaxed) + 1;
+                let turns = SingleContextTurns { single: single.clone(), user, lost: Cell::new(false) };
+                Self::functions(Box::new(turns))
+            }
+            Kind::Host(group) => {
+                let context = EglContext::in_host_group(self.clone(), group, None).map_err(Error::native)?;
+                Self::functions(Box::new(context))
+            }
+        }
     }
 
     /// A context in the host's share group, current on the host's `surface`
@@ -269,14 +607,16 @@ impl Device {
         };
         let context = EglContext::in_host_group(self.clone(), group, Some(surface)).map_err(Error::native)?;
         let swap = SurfaceSwap { egl: group.egl, display: group.display, surface };
-        let (gl, platform) = Self::functions(context);
+        let (gl, platform) = Self::functions(Box::new(context))?;
         Ok((gl, platform, swap))
     }
 
-    /// The GL functions of `context`, made current to look them up.
-    fn functions(context: EglContext) -> (Gl, Box<dyn PlatformContext>) {
+    /// The GL functions of `context`, made current to look them up. Fails
+    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a desktop
+    /// context older than OpenGL 3.3.
+    fn functions(context: Box<dyn PlatformContext>) -> Result<(Gl, Box<dyn PlatformContext>), Error> {
+        let egl = library().map_err(Error::unsupported)?;
         context.make_current();
-        let egl = context.egl;
         // SAFETY: the context is current, and EGL gives the functions of its
         // API.
         let gl = unsafe {
@@ -285,7 +625,14 @@ impl Device {
             })
         };
         context.done_current();
-        (gl, Box::new(context))
+        let version = glow::HasContext::version(&gl);
+        if !version.is_embedded && (version.major, version.minor) < (3, 3) {
+            return Err(Error::unsupported(format!(
+                "the library renders with OpenGL 3.3 or later, and the context is of {}.{}",
+                version.major, version.minor
+            )));
+        }
+        Ok((gl, context))
     }
 }
 
@@ -304,15 +651,42 @@ impl SurfaceSwap {
     }
 }
 
+/// A renderer's turns in the one context of a single-context device.
+struct SingleContextTurns {
+    /// The device's context, which outlives the renderer.
+    single: Arc<SingleContext>,
+    /// The renderer's number among the context's.
+    user: u64,
+    /// Whether another renderer had the context since this one's last turn.
+    lost: Cell<bool>,
+}
+
+impl PlatformContext for SingleContextTurns {
+    fn make_current(&self) {
+        if self.single.take(self.user) {
+            self.lost.set(true);
+        }
+    }
+
+    fn done_current(&self) {
+        self.single.give(self.user);
+    }
+
+    fn take_state_lost(&self) -> bool {
+        self.lost.replace(false)
+    }
+}
+
 /// The context that was current on the thread before a renderer's.
 type Previous = Option<(egl::Display, Option<egl::Surface>, Option<egl::Surface>, egl::Context)>;
 
-/// `EGLBackendImpl`: an OpenGL ES 3.0 context, and the 1x1 pbuffer it is
-/// current on, or the host's surface it presents to, or none.
+/// `EGLBackendImpl`: an OpenGL ES 3.0 or desktop OpenGL context, and the 1x1
+/// pbuffer it is current on, or the host's surface it presents to, or none.
 struct EglContext {
     egl: &'static Egl,
     display: egl::Display,
     context: egl::Context,
+    api: Api,
     surface: Option<egl::Surface>,
     /// Whether the surface is the context's own, which it destroys.
     owns_surface: bool,
@@ -320,33 +694,36 @@ struct EglContext {
     /// again when it is done.
     previous: Cell<Previous>,
     restores: bool,
+    /// The thread's client API before the context was made current.
+    previous_api: Cell<Option<egl::Enum>>,
     /// The share group, which outlives its contexts.
     _device: Device,
 }
 
 impl EglContext {
     fn new(device: Device, group: &ShareGroup) -> Result<Self, String> {
-        let display = group.display;
-        let context = display.create_context(Some(group.root))?;
-        let EglDisplay { egl, display: egl_display, config } = display;
+        let ShareGroup { display, config, api, root } = *group;
+        let EglDisplay { egl, display: egl_display, .. } = *display;
+        let context = create_context(egl, egl_display, config, Some(root), api, api.context_attributes())?;
         // Create a dummy pbuffer. We will render to framebuffers anyway, but
         // we need a pbuffer to activate the context.
-        let surface =
-            match egl.create_pbuffer_surface(*egl_display, *config, &[egl::WIDTH, 1, egl::HEIGHT, 1, egl::NONE]) {
-                Ok(surface) => surface,
-                Err(e) => {
-                    let _ = egl.destroy_context(*egl_display, context);
-                    return Err(format!("Could not create surface: {e}"));
-                }
-            };
+        let surface = match create_pbuffer(egl, egl_display, config) {
+            Ok(surface) => surface,
+            Err(e) => {
+                let _ = egl.destroy_context(egl_display, context);
+                return Err(e);
+            }
+        };
         Ok(EglContext {
             egl,
-            display: *egl_display,
+            display: egl_display,
             context,
+            api,
             surface: Some(surface),
             owns_surface: true,
             previous: Cell::new(None),
             restores: false,
+            previous_api: Cell::new(None),
             _device: device,
         })
     }
@@ -354,19 +731,23 @@ impl EglContext {
     /// A context in the host's group: current on `surface`, the host's,
     /// where it presents, and otherwise on a pbuffer of its own or none.
     fn in_host_group(device: Device, group: &HostGroup, surface: Option<egl::Surface>) -> Result<Self, String> {
-        let HostGroup { egl, display, config, root, surfaceless } = *group;
-        egl.bind_api(egl::OPENGL_ES_API).map_err(|e| format!("Error setting the EGL rendering API: {e}"))?;
-        let context = egl
-            .create_context(display, config, Some(root), &[egl::CONTEXT_CLIENT_VERSION, 3, egl::NONE])
-            .map_err(|e| format!("Error creating an EGL context that shares the host's: {e}"))?;
+        let HostGroup { egl, display, config, root, api, surfaceless } = *group;
+        let context = match api {
+            Api::Gles => create_context(egl, display, config, Some(root), api, api.context_attributes()),
+            // A context shares with one of the same profile: the host's may
+            // be of the compatibility profile, whose version EGL picks.
+            Api::Gl => create_context(egl, display, config, Some(root), api, api.context_attributes())
+                .or_else(|_| create_context(egl, display, config, Some(root), api, &[egl::NONE])),
+        }
+        .map_err(|e| format!("Error creating an EGL context that shares the host's: {e}"))?;
         let (surface, owns_surface) = match surface {
             Some(surface) => (Some(surface), false),
             None if surfaceless => (None, false),
-            None => match egl.create_pbuffer_surface(display, config, &[egl::WIDTH, 1, egl::HEIGHT, 1, egl::NONE]) {
+            None => match create_pbuffer(egl, display, config) {
                 Ok(surface) => (Some(surface), true),
                 Err(e) => {
                     let _ = egl.destroy_context(display, context);
-                    return Err(format!("Could not create surface: {e}"));
+                    return Err(e);
                 }
             },
         };
@@ -374,10 +755,12 @@ impl EglContext {
             egl,
             display,
             context,
+            api,
             surface,
             owns_surface,
             previous: Cell::new(None),
             restores: true,
+            previous_api: Cell::new(None),
             _device: device,
         })
     }
@@ -386,6 +769,13 @@ impl EglContext {
 impl PlatformContext for EglContext {
     fn make_current(&self) {
         let egl = self.egl;
+        let previous_api = egl.query_api();
+        if previous_api != self.api.egl()
+            && let Err(e) = egl.bind_api(self.api.egl())
+        {
+            Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API: {e}"));
+        }
+        self.previous_api.set(Some(previous_api));
         if self.restores {
             let previous = egl.get_current_context().filter(|context| *context != self.context).and_then(|context| {
                 Some((
@@ -410,6 +800,12 @@ impl PlatformContext for EglContext {
         };
         if let Err(e) = result {
             Log::error(Event::GraphicsBackend, format!("Removing OpenGL context failed: {e}"));
+        }
+        if let Some(previous) = self.previous_api.take()
+            && previous != self.api.egl()
+            && let Err(e) = egl.bind_api(previous)
+        {
+            Log::error(Event::GraphicsBackend, format!("Error setting the EGL rendering API back: {e}"));
         }
     }
 }

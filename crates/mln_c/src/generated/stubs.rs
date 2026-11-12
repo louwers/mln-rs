@@ -3,38 +3,6 @@
 use super::types::*;
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_android_frame_pacer_create(
-    options: *const mln_frame_pacer_options,
-    out_pacer: *mut mln_frame_pacer,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_android_frame_pacer_create")
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_apple_frame_pacer_create(
-    options: *const mln_frame_pacer_options,
-    out_pacer: *mut mln_frame_pacer,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_apple_frame_pacer_create")
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_ohos_frame_pacer_create(
-    options: *const mln_frame_pacer_options,
-    out_pacer: *mut mln_frame_pacer,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_ohos_frame_pacer_create")
-    }
-}
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_plugin_get_register_function_v1() -> mln_plugin_register_function_v1 {
     None
 }

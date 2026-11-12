@@ -15,7 +15,6 @@ pub mod hillshade_layer_factory;
 pub mod layer_factory;
 pub mod layer_manager;
 pub mod line_layer_factory;
-pub mod location_indicator_layer_factory;
 pub mod raster_layer_factory;
 pub mod symbol_layer_factory;
 

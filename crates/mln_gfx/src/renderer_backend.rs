@@ -38,6 +38,12 @@ impl RendererBackendBase {
     pub fn reset_context(&mut self) -> Option<Rc<dyn Context>> {
         self.context.take()
     }
+
+    /// Port-only: the context, if the backend has made it.
+    #[must_use]
+    pub fn existing_context(&self) -> Option<&Rc<dyn Context>> {
+        self.context.get()
+    }
 }
 
 /// A renderer's device-side state: its context and shaders. What it draws

@@ -2,9 +2,7 @@
 // src/mln/style/layers/layer.cpp.ejs: emits crates/mln_style/src/layers/<type>_layer.rs.
 
 use crate::spec::{LayerSpec, Property};
-use crate::types::{
-    EvaluatedType, camelize, evaluated_type, is_color_ramp, is_data_driven, property_value_type, snake,
-};
+use crate::types::{camelize, evaluated_type, is_color_ramp, is_data_driven, property_value_type, snake};
 use crate::writer::{MAX_WIDTH, Writer, if_condition, imports_for, layer_file_name};
 
 /// `layerCapabilities` of layer.cpp.ejs: (Source, `Pass3D`, Layout,
@@ -13,7 +11,7 @@ fn layer_capabilities(type_: &str) -> [&'static str; 6] {
     const N: &str = "NotRequired";
     const R: &str = "Required";
     match type_ {
-        "background" | "location-indicator" => [N, N, N, N, N, N],
+        "background" => [N, N, N, N, N, N],
         "fill" | "line" | "circle" => [R, N, R, N, N, "Geometry"],
         "fill-extrusion" => [R, R, R, N, N, "Geometry"],
         "hillshade" => [R, R, N, N, N, "RasterDEM"],
@@ -25,11 +23,10 @@ fn layer_capabilities(type_: &str) -> [&'static str; 6] {
     }
 }
 
-/// `(type === 'background') || (type === 'location-indicator')`: the
-/// constructor without a source ID.
+/// `type === 'background'`: the constructor without a source ID.
 #[must_use]
 pub fn is_source_less(type_: &str) -> bool {
-    type_ == "background" || type_ == "location-indicator"
+    type_ == "background"
 }
 
 /// The `convert<...>(value, error, dataDriven, convertTokens)` call of
@@ -40,10 +37,6 @@ pub fn conversion(property: &Property) -> String {
     let convert_tokens = property.name == "icon-image" || property.name == "text-field";
     if is_color_ramp(property) {
         format!("convert_color_ramp_property_value(value, &mut error, {data_driven}, {convert_tokens})")
-    } else if evaluated_type(property) == EvaluatedType::Array(Box::new(EvaluatedType::Double), 3) {
-        // `Converter<PropertyValue<std::array<double, 3>>>` is a separate
-        // specialization in C++.
-        format!("convert_property_value_double3(value, &mut error, {data_driven}, {convert_tokens})")
     } else {
         format!(
             "convert_property_value::<{}>(value, &mut error, {data_driven}, {convert_tokens})",
@@ -197,7 +190,6 @@ pub fn emit(layer: &LayerSpec) -> String {
     let mut imports = imports_for(layer.layout_properties.iter().chain(&layer.paint_properties), true);
     let any_color_ramp = paint.iter().any(|p| is_color_ramp(p));
     let any_plain = paint.iter().chain(&layout).any(|p| !is_color_ramp(p));
-    let any_double3 = paint.iter().chain(&layout).any(|p| conversion(p).starts_with("convert_property_value_double3"));
     let any_convert_property_value =
         paint.iter().chain(&layout).any(|p| conversion(p).starts_with("convert_property_value::"));
     let mut conversion_items = vec!["Converter"];
@@ -208,9 +200,6 @@ pub fn emit(layer: &LayerSpec) -> String {
         conversion_items.push("convert_property_value");
     }
     imports.push(format!("crate::conversion::{{{}}}", conversion_items.join(", ")));
-    if any_double3 {
-        imports.push("crate::conversion::property_value::convert_property_value_double3".into());
-    }
     let mut conversion_impl_items = vec!["make_transition_style_property"];
     if any_plain {
         conversion_impl_items.push("make_style_property");

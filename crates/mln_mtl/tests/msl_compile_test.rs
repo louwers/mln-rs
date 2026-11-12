@@ -57,8 +57,6 @@ const ALL_BUILT_INS: &[BuiltIn] = &[
     BuiltIn::LineShader,
     BuiltIn::LineGradientShader,
     BuiltIn::LinePatternShader,
-    BuiltIn::LocationIndicatorShader,
-    BuiltIn::LocationIndicatorTexturedShader,
     BuiltIn::LineSDFShader,
     BuiltIn::LineGradientSDFShader,
     BuiltIn::RasterShader,

@@ -19,7 +19,7 @@ use crate::resource_options::ResourceOptions;
 use crate::response::{Reason, Response};
 
 fn http_file_source() -> HTTPFileSource {
-    HTTPFileSource::new(&ResourceOptions::default_options())
+    HTTPFileSource::new(&ResourceOptions::default())
 }
 
 fn data(res: &Response) -> &[u8] {
@@ -130,6 +130,7 @@ fn http_tile404() {
         &Resource::new(Kind::Tile, server.url("/doesnotexist")),
         Box::new(move |res: Response| {
             assert!(res.no_content);
+            assert!(res.tile_not_found);
             assert!(res.error.is_none());
             assert!(res.data.is_none());
             assert!(res.expires.is_none());
@@ -180,6 +181,7 @@ fn http204() {
         &Resource::new(Kind::Unknown, server.url("/no-content")),
         Box::new(move |res: Response| {
             assert!(res.no_content);
+            assert!(!res.tile_not_found);
             assert!(res.error.is_none());
             assert!(res.data.is_none());
             assert!(res.expires.is_none());

@@ -3,8 +3,9 @@
 // LoadLocalCJKGlyph in glyph_manager.test.cpp exercises the
 // platform-independent part of LocalGlyphRasterizer. This test renders a
 // map with the platform's local glyph rasterizer. Only the NoLocal* cases
-// run on every C++ platform; PingFang* are Apple-only and NotoSansCJK is
-// Qt-on-Linux-only (platform fonts and expectations), so they stay ignored.
+// run on every C++ platform, and they are the ones ported: PingFang* are
+// Apple-only and NotoSansCJK is Qt-on-Linux-only (platform fonts and
+// expectations).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -115,26 +116,6 @@ impl LocalGlyphRasterizerTest {
 fn mixed_json() -> String {
     String::from_utf8(read_file("test/fixtures/local_glyphs/mixed.json")).unwrap()
 }
-
-// gtest: LocalGlyphRasterizer.PingFang
-#[test]
-#[ignore = "Apple-only in C++ (#if defined(__APPLE__)): PingFang TC system font and its expectations"]
-fn ping_fang() {}
-
-// gtest: LocalGlyphRasterizer.PingFangWithBoldInStyle
-#[test]
-#[ignore = "Apple-only in C++ (#if defined(__APPLE__)): PingFang TC system font and its expectations"]
-fn ping_fang_with_bold_in_style() {}
-
-// gtest: LocalGlyphRasterizer.PingFangSemibold
-#[test]
-#[ignore = "Apple-only in C++ (#if defined(__APPLE__) && !defined(__QT__)): PingFang TC Semibold system font"]
-fn ping_fang_semibold() {}
-
-// gtest: LocalGlyphRasterizer.NotoSansCJK
-#[test]
-#[ignore = "Qt-on-Linux-only in C++ (#if defined(__linux__) && defined(__QT__)): Qt's local glyph rasterizer"]
-fn noto_sans_cjk() {}
 
 // gtest: LocalGlyphRasterizer.NoLocal
 #[test]

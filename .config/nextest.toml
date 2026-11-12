@@ -1,0 +1,7 @@
+# cargo-nextest's configuration (https://nexte.st/docs/configuration/): `just test` and CI's
+# `just ci-coverage` run the tests with it.
+
+[profile.default]
+# A test that runs for over a minute is reported as slow, and one still running after ten is ended
+# as hung and fails. The slowest tests, the render suites, take a few minutes in CI.
+slow-timeout = { period = "60s", terminate-after = 10 }

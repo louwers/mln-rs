@@ -87,7 +87,11 @@ impl ShaderProgram {
         source: &ShaderSource,
         additional_defines: &str,
     ) -> Option<ShaderProgram> {
-        const VERSION: &str = "#version 300 es\n";
+        // Desktop OpenGL compiles GLSL ES 3.00 only with
+        // `GL_ARB_ES3_compatibility`, and every 3.3 context the GLSL 3.30
+        // that the shaders are as well: what they use of GLSL ES is in it,
+        // and it ignores their precision qualifiers.
+        let version = if context.is_desktop() { "#version 330 core\n" } else { "#version 300 es\n" };
 
         let failed = |message: String| {
             Log::error(Event::Shader, message);
@@ -97,14 +101,14 @@ impl ShaderProgram {
         let defines = program_parameters.get_defines_string();
         let vertex_shader = match context.create_shader(
             glow::VERTEX_SHADER,
-            &[VERSION, defines, additional_defines, PRELUDE.vertex, source.glsl.vertex],
+            &[version, defines, additional_defines, PRELUDE.vertex, source.glsl.vertex],
         ) {
             Ok(shader) => shader,
             Err(log) => return failed(format!("{name}: vertex shader failed to compile: {log}")),
         };
         let fragment_shader = match context.create_shader(
             glow::FRAGMENT_SHADER,
-            &[VERSION, defines, additional_defines, PRELUDE.fragment, source.glsl.fragment],
+            &[version, defines, additional_defines, PRELUDE.fragment, source.glsl.fragment],
         ) {
             Ok(shader) => shader,
             Err(log) => {

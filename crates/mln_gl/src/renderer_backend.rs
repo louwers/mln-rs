@@ -32,6 +32,13 @@ use crate::types::Gl;
 pub trait PlatformContext {
     fn make_current(&self);
     fn done_current(&self);
+
+    /// Whether something else used the context since the backend's last
+    /// `make_current`, so that the GL state its context cached is gone.
+    /// Reading it clears it.
+    fn take_state_lost(&self) -> bool {
+        false
+    }
 }
 
 /// The context state the backend and its `Context` share.
@@ -67,6 +74,13 @@ impl BackendImpl {
 
     pub fn make_current(&self) {
         self.platform.make_current();
+    }
+
+    /// Whether something else used the context since the last
+    /// `make_current`; reading it clears it.
+    #[must_use]
+    pub fn take_state_lost(&self) -> bool {
+        self.platform.take_state_lost()
     }
 
     pub fn done_current(&self) {
@@ -144,9 +158,16 @@ impl RendererBackend {
         }
     }
 
-    /// `activate()`
+    /// `activate()`. Where another renderer used the context since the
+    /// backend's last frame, the context forgets the GL state it cached.
     pub fn activate(&self) {
         self.impl_.make_current();
+        if self.impl_.take_state_lost()
+            && let Some(context) = self.base.existing_context()
+            && let Some(context) = context.as_any().downcast_ref::<Context>()
+        {
+            context.set_dirty_state();
+        }
     }
 
     /// `deactivate()`

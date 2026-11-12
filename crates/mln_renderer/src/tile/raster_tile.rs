@@ -108,6 +108,9 @@ pub struct RasterTileInner {
     pub base: TileBase,
     obsolete: Cell<bool>,
     correlation_id: Cell<u64>,
+    /// The tileset has no tile here (`LoaderTile::set_missing`): a parse without data leaves
+    /// the tile unrenderable. Otherwise such a tile is empty, renderable without a bucket.
+    missing: Cell<bool>,
     bucket: RefCell<Option<Arc<RasterBucket>>>,
     /// `Actor<RasterTileWorker> worker`, behind its transport.
     worker: Box<dyn WorkerEndpoint<RasterWorkerMessage>>,
@@ -126,7 +129,7 @@ impl RasterTileInner {
     /// `onParsed(std::unique_ptr<RasterBucket>, correlationID)`.
     pub fn on_parsed(&self, result: Option<Arc<RasterBucket>>, result_correlation_id: u64) {
         if !self.obsolete.get() {
-            let renderable = result.is_some();
+            let renderable = result.is_some() || !self.missing.get();
             *self.bucket.borrow_mut() = result;
             self.base.loaded.set(true);
             if result_correlation_id == self.correlation_id.get() {
@@ -187,7 +190,19 @@ impl LoaderTile for RasterTileInner {
 
     /// `setData(data)`.
     fn set_data(&self, data: Option<Data>, _encoding: VectorTileEncoding) {
+        self.parse(data, false);
+    }
+
+    fn set_missing(&self, _encoding: VectorTileEncoding) {
+        self.parse(None, true);
+    }
+}
+
+impl RasterTileInner {
+    /// Sends the worker `data` to parse, for a tile the tileset is `missing` or has.
+    fn parse(&self, data: Option<Data>, missing: bool) {
         if !self.obsolete.get() {
+            self.missing.set(missing);
             self.correlation_id.set(self.correlation_id.get() + 1);
             if !self.base.pending.get() {
                 self.base.on_tile_action(TileOperation::StartParse);
@@ -222,6 +237,7 @@ impl RasterTile {
             base: TileBase::new(Kind::Raster, id, source_id, observer),
             obsolete: Cell::new(false),
             correlation_id: Cell::new(0),
+            missing: Cell::new(false),
             bucket: RefCell::new(None),
             worker,
             mailbox: mailbox.clone(),

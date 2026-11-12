@@ -271,8 +271,9 @@ function served(json) {
 
 const SOURCE = 2; // Resource::Kind::Source: a TileJSON
 // The fixtures the current view asked for that the cache doesn't have. The
-// runner's cache-only file source answers those with no content, and so
-// does this server (204, as HTTPFileSource reads it).
+// runner's cache-only file source answers those as not found, and so does
+// this server (404, which HTTPFileSource reads as a tile the tileset doesn't
+// have, or as a Not Found error for other resources).
 let missing = [];
 // Whether the current view's fixtures come as over a network (LATENCY_MS).
 let slow = false;
@@ -281,7 +282,7 @@ function serveFixture(url, response) {
   const entry = cached(url);
   if (!entry) {
     missing.push(url);
-    response.writeHead(204).end();
+    response.writeHead(404).end();
   } else if (entry.kind === SOURCE) {
     response.writeHead(200, { 'content-type': 'application/json' });
     response.end(JSON.stringify(served(JSON.parse(entry.data.toString('utf8')))));
@@ -826,7 +827,7 @@ async function compare() {
     console.log(`${view.name}: ` +
       (failure ? failure : `loaded in ${Math.round(stats.loadedMs)} ms, ${stats.replies} worker replies`) +
       (again ? `, after the ${view.interaction} ${again.count} fetches again (at most ${MAX_REPEATS})` : '') +
-      (missing.length ? `, ${missing.length} tiles or resources not in the cache (no content)` : '') +
+      (missing.length ? `, ${missing.length} tiles or resources not in the cache (not found)` : '') +
       (errors.length ? `, ${errors.length} errors:\n  ${errors.map(firstLines).join('\n  ')}` : ''));
     if (process.env.MLN_WEB_CHECK_LOG && missing.length) console.error(`  not in the cache: ${missing.join(', ')}`);
     if (failure) {

@@ -30,12 +30,10 @@ fn style_paths(id: &str) -> crate::metadata::TestPaths {
     crate::metadata::TestPaths::new(format!("{dir}style.json"), vec![dir.clone()], vec![dir])
 }
 
-/// A fresh directory in the system's temporary directory.
-fn tmp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join("render-test").join(name);
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    dir
+/// A fresh directory in the system's temporary directory, which no other test run shares and
+/// which is removed when it drops.
+fn tmp_dir(name: &str) -> tempfile::TempDir {
+    tempfile::Builder::new().prefix(&format!("render-test-{name}-")).tempdir().unwrap()
 }
 
 /// `path` in the generic format the runner returns paths in, `/` on Windows
@@ -149,7 +147,8 @@ fn parses_the_cpp_linux_manifest() {
 
 #[test]
 fn manifest_errors() {
-    let dir = tmp_dir("manifest_errors");
+    let tmp = tmp_dir("manifest_errors");
+    let dir = tmp.path().to_owned();
     // Absolute, without the `\\?\` prefix that canonicalize gives on Windows.
     let integration = std::path::absolute(INTEGRATION).unwrap();
     // A JSON string, quotes included: Windows paths have backslashes to escape.
@@ -363,7 +362,8 @@ fn check(dir: &Path, actual: &PremultipliedImage, expectations: Vec<String>) -> 
 
 #[test]
 fn compares_against_expectations_like_cpp() {
-    let dir = tmp_dir("compare");
+    let tmp = tmp_dir("compare");
+    let dir = tmp.path().to_owned();
     let size = Size::new(8, 8);
     let red = solid(size, [255, 0, 0, 255]);
     let blue = solid(size, [0, 0, 255, 255]);
@@ -428,11 +428,13 @@ fn compares_against_expectations_like_cpp() {
 
 struct Suite {
     dir: PathBuf,
+    _tmp: tempfile::TempDir,
 }
 
 impl Suite {
     fn new(name: &str) -> Self {
-        Suite { dir: tmp_dir(name) }
+        let tmp = tmp_dir(name);
+        Suite { dir: tmp.path().to_owned(), _tmp: tmp }
     }
 
     /// A test drawing `color` (see `MockMap`) with `expected` images in the
