@@ -258,7 +258,8 @@ fn is_css_whitespace(c: u8) -> bool {
 }
 
 // Reads `none` as 0, or a CSS <number> followed by a `%` that makes 100%
-// `percent_reference` or, for a hue, by an angle unit, in degrees.
+// `percent_reference` or, for a hue, by an angle unit, in degrees within one
+// turn.
 fn read_oklch_argument(input: &[u8], pos: &mut usize, percent_reference: f64, hue: bool) -> Option<f64> {
     if input[*pos..].starts_with(b"none") {
         *pos += 4;
@@ -297,7 +298,9 @@ fn read_oklch_argument(input: &[u8], pos: &mut usize, percent_reference: f64, hu
         const UNITS: [(&[u8], f64); 4] = [(b"deg", 1.0), (b"grad", 0.9), (b"rad", RAD_TO_DEG), (b"turn", 360.0)];
         if let Some((unit, degrees)) = UNITS.iter().find(|(unit, _)| input[*pos..].starts_with(unit)) {
             *pos += unit.len();
-            value *= degrees;
+            // Within one turn in its own unit first: 1e306turn is finite, but
+            // not in degrees.
+            value = (value % (360.0 / degrees)) * degrees;
         }
     } else if *pos < input.len() && input[*pos] == b'%' {
         *pos += 1;
@@ -596,6 +599,12 @@ mod tests {
     // Ports (a subset of) test/util/color.test.cpp — extend when porting the
     // full file.
     use super::*;
+
+    #[test]
+    fn oklch_wraps_a_huge_hue_angle_before_converting_it() {
+        assert_eq!(Color::parse("oklch(0.6 0.1 1e306turn)"), Color::parse("oklch(0.6 0.1 0)"));
+        assert!(Color::parse("oklch(0.6 0.1 1e307rad)").is_some());
+    }
 
     #[test]
     fn parse_named() {
