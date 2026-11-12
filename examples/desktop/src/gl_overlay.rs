@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mln_gl::surface_backend::{Overlay, OverlayTarget};
+use mln_gl::surface_target::{Overlay, OverlayTarget};
 use mln_util::logging::{Event, Log};
 
 use crate::overlay::Paint;

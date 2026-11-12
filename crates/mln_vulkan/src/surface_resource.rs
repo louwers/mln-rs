@@ -1,14 +1,9 @@
 // Ports include/mln/vulkan/renderable_resource.hpp and src/mln/vulkan/renderable_resource.cpp
 //
-// `gfx::Renderable` stores its resource as `Rc<dyn gfx::RenderableResource>`.
-// The Vulkan resources are wrapped in `RenderableResourceBox`, the one
-// concrete type the backend downcasts to (`as_vulkan`), standing in for the
-// C++ `getResource<vulkan::RenderableResource>()` static_cast.
-//
 // C++'s `SurfaceRenderableResource` is a base class the platforms derive
 // from, to make their surface and, headless, to read every frame back. Here
-// it is one type: the platform's part is a `SurfaceProvider`, and reading
-// every frame back an option.
+// it is one type, the images of both kinds of target: the platform's part is
+// a `SurfaceProvider`, and reading every frame back an option.
 //
 // Differences from C++:
 // - The render pass is the context's for the resource's formats
@@ -26,12 +21,9 @@
 //   can have: the resource then has no images until it is made again.
 // - A frame that acquired no image has no framebuffer, and `swap` submits
 //   it without copying or presenting.
-// - Port-only: `release_surface` destroys the swapchain and the surface
-//   while the resource lives, for a window that goes or gets another
-//   backend; the provider makes the surface again as it does a lost one.
 // - Port-only: `set_overlay` draws over each frame in a render pass of its
 //   own, after the frame's passes and before the frame is copied for
-//   reading and submitted (`SurfaceBackend::set_overlay`).
+//   reading and submitted (`SurfaceTarget::set_overlay`).
 
 use std::any::Any;
 use std::cell::RefCell;
@@ -40,7 +32,6 @@ use std::rc::{Rc, Weak};
 use ash::vk;
 use gpu_allocator::MemoryLocation;
 use mln_gfx::context::Context as _;
-use mln_gfx::renderable;
 use mln_gfx::texture2d::Texture2D as _;
 use mln_gfx::types::{TextureChannelDataType, TexturePixelType};
 use mln_util::image::PremultipliedImage;
@@ -48,49 +39,10 @@ use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 
 use crate::context::{Context, RenderPassKey};
+use crate::draw_target::TargetResource;
 use crate::renderer_backend::{BackendImpl, SurfaceProvider};
-use crate::surface_backend::{Overlay, OverlayTarget};
+use crate::surface_target::{Overlay, OverlayTarget};
 use crate::texture2d::{ImageAllocation, Texture2D, Texture2DUsage, transition_image};
-
-pub trait RenderableResource {
-    /// Prepares the resource for a pass.
-    fn bind(&self);
-    /// Renderable resources that require a swap function to be called
-    /// explicitly can override this method.
-    fn swap(&self) {}
-    fn get_extent(&self) -> vk::Extent2D;
-    fn get_render_pass(&self) -> vk::RenderPass;
-    fn get_framebuffer(&self) -> vk::Framebuffer;
-    fn as_any(&self) -> &dyn Any;
-}
-
-/// The `gfx::RenderableResource` of every Vulkan renderable.
-pub struct RenderableResourceBox(pub Rc<dyn RenderableResource>);
-
-impl renderable::RenderableResource for RenderableResourceBox {
-    fn bind(&self) {
-        self.0.bind();
-    }
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-impl RenderableResourceBox {
-    pub fn new_rc(resource: Rc<dyn RenderableResource>) -> Rc<dyn renderable::RenderableResource> {
-        Rc::new(RenderableResourceBox(resource))
-    }
-}
-
-/// `renderable.getResource<vulkan::RenderableResource>()`
-pub fn as_vulkan(resource: &dyn renderable::RenderableResource) -> Option<&dyn RenderableResource> {
-    resource.as_any().downcast_ref::<RenderableResourceBox>().map(|b| b.0.as_ref())
-}
-
-/// `renderable.getResource<T>()` for a concrete Vulkan resource type.
-pub fn downcast_resource<T: 'static>(resource: &dyn renderable::RenderableResource) -> Option<&T> {
-    as_vulkan(resource)?.as_any().downcast_ref::<T>()
-}
 
 struct SurfaceState {
     surface: vk::SurfaceKHR,
@@ -124,10 +76,10 @@ struct SurfaceState {
     read_texture: Option<Texture2D>,
 }
 
-/// `SurfaceRenderableResource`: the default renderable's images, a
-/// swapchain's when there is a platform surface and its own otherwise, with
-/// a depth and stencil attachment.
-pub struct SurfaceRenderableResource {
+/// `SurfaceRenderableResource`: a frame target's images, a swapchain's when
+/// there is a platform surface and its own otherwise, with a depth and
+/// stencil attachment.
+pub struct SurfaceResource {
     backend: Rc<BackendImpl>,
     context: Weak<Context>,
     provider: Option<Rc<dyn SurfaceProvider>>,
@@ -138,7 +90,7 @@ pub struct SurfaceRenderableResource {
     overlay: RefCell<Option<Overlay>>,
 }
 
-impl SurfaceRenderableResource {
+impl SurfaceResource {
     /// A resource of `size`, on `surface` if there is one. `provider` makes
     /// the surface again when it is lost, and `present_mode` is used when
     /// the surface has it, FIFO otherwise.
@@ -150,7 +102,7 @@ impl SurfaceRenderableResource {
         present_mode: vk::PresentModeKHR,
         read_every_frame: bool,
     ) -> Rc<Self> {
-        let resource = Rc::new(SurfaceRenderableResource {
+        let resource = Rc::new(SurfaceResource {
             backend: context.get_backend().clone(),
             context: context.weak(),
             provider,
@@ -563,20 +515,6 @@ impl SurfaceRenderableResource {
         state.surface = vk::SurfaceKHR::null();
     }
 
-    /// Port-only: destroys the swapchain and the surface, once the frames
-    /// in flight are done. The resource has no images until
-    /// `recreate_swapchain(true)` makes the surface again.
-    pub fn release_surface(&self) {
-        let mut state = self.state.borrow_mut();
-        let state = &mut *state;
-        if state.surface == vk::SurfaceKHR::null() {
-            return;
-        }
-        self.backend.wait_idle("surface release");
-        self.destroy_images(state);
-        self.destroy_surface(state);
-    }
-
     /// `recreateSwapchain(recreateSurface)`: makes the swapchain, and the
     /// surface if it was lost, again. Returns whether it did.
     pub fn recreate_swapchain(&self, recreate_surface: bool) -> bool {
@@ -630,7 +568,7 @@ impl SurfaceRenderableResource {
     }
 
     /// Port-only: draws `overlay` over each frame from now on, or stops
-    /// with `None` (`SurfaceBackend::set_overlay`).
+    /// with `None` (`SurfaceTarget::set_overlay`).
     pub fn set_overlay(&self, overlay: Option<Overlay>) {
         *self.overlay.borrow_mut() = overlay;
     }
@@ -802,14 +740,13 @@ impl SurfaceRenderableResource {
     }
 }
 
-impl RenderableResource for SurfaceRenderableResource {
-    fn bind(&self) {}
-
+impl SurfaceResource {
     /// `swap()`: submits the frame, after the overlay has drawn over it and
-    /// it was copied for `read_image` if a read is queued.
-    fn swap(&self) {
+    /// it was copied for `read_image` if a read is queued. Returns whether
+    /// the frame had an image.
+    pub(crate) fn swap(&self) -> bool {
         let Some(context) = self.context.upgrade() else {
-            return;
+            return false;
         };
         if self.read_every_frame {
             self.queue_surface_read();
@@ -833,7 +770,12 @@ impl RenderableResource for SurfaceRenderableResource {
             }
             self.state.borrow_mut().surface_read = false;
         }
+        has_image
     }
+}
+
+impl TargetResource for SurfaceResource {
+    fn bind(&self) {}
 
     fn get_extent(&self) -> vk::Extent2D {
         self.state.borrow().extent
@@ -858,7 +800,7 @@ impl RenderableResource for SurfaceRenderableResource {
     }
 }
 
-impl Drop for SurfaceRenderableResource {
+impl Drop for SurfaceResource {
     /// `destroyResources()`
     fn drop(&mut self) {
         self.backend.wait_idle("surface deletion");

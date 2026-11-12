@@ -14,12 +14,12 @@ use std::rc::Rc;
 
 use mln_gfx::command_encoder;
 use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::frame::DrawTarget;
 use mln_gfx::render_pass::RenderPassDescriptor;
-use mln_gfx::renderable::Renderable;
 
 use crate::context::Context;
+use crate::draw_target::TargetResource;
 use crate::render_pass::RenderPass;
-use crate::renderable_resource::{RenderableResource, as_webgpu};
 use crate::upload_pass::UploadPass;
 
 pub struct CommandEncoder {
@@ -57,12 +57,12 @@ impl CommandEncoder {
     /// WebGPU-specific: submit the command buffer directly, then start a new
     /// encoder so subsequent passes in the same frame can continue recording.
     pub fn submit_command_buffer(&self) {
-        self.submit(None);
+        self.submit_frame(None);
     }
 
     /// Submits the command buffer, ending it with what `resource` records
     /// in `finish_frame`.
-    fn submit(&self, resource: Option<&dyn RenderableResource>) {
+    pub(crate) fn submit_frame(&self, resource: Option<&dyn TargetResource>) {
         let backend = self.context.get_backend();
         if backend.get_device().is_none() || backend.get_queue().is_none() {
             return;
@@ -93,8 +93,8 @@ impl DebugGroupTarget for CommandEncoder {
 }
 
 impl command_encoder::CommandEncoder for CommandEncoder {
-    fn create_upload_pass(&self, name: &str, renderable: &dyn Renderable) -> Box<dyn mln_gfx::upload_pass::UploadPass> {
-        Box::new(UploadPass::new(renderable, self, name))
+    fn create_upload_pass(&self, name: &str, _target: &dyn DrawTarget) -> Box<dyn mln_gfx::upload_pass::UploadPass> {
+        Box::new(UploadPass::new(self, name))
     }
 
     fn create_render_pass(
@@ -103,18 +103,6 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         descriptor: &RenderPassDescriptor<'_>,
     ) -> Box<dyn mln_gfx::render_pass::RenderPass> {
         Box::new(RenderPass::new(self, name, descriptor))
-    }
-
-    fn present(&self, renderable: &dyn Renderable) {
-        // Submit the command buffer first, then call swap on the
-        // RenderableResource to present the surface. (C++ catches the
-        // exception thrown when there is no resource.)
-        let resource = renderable.get_resource();
-        let resource = resource.as_deref().and_then(as_webgpu);
-        self.submit(resource);
-        if let Some(resource) = resource {
-            resource.swap();
-        }
     }
 
     fn as_any(&self) -> &dyn Any {

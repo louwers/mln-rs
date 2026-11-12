@@ -69,7 +69,7 @@ fn load_sync_render() {
     let fs = Arc::new(SyncFileSource::default());
     fs.add("maptiler://maps/streets", read_file("test/fixtures/resources/source_vector.json"));
     fs.add("maptiler://sprites/streets/sprite", read_file("test/fixtures/resources/sprite.png"));
-    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0);
+    let frontend = HeadlessFrontend::new(Size::new(512, 512), 1.0).expect("a headless frontend");
     let mut map = Map::with_file_source(fs, MapOptions::new()).unwrap();
     frontend.attach(&map);
     let style = String::from_utf8(read_file("test/fixtures/resources/style_vector.json")).unwrap();

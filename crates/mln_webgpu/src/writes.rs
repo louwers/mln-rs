@@ -63,10 +63,12 @@ impl<B> Default for Pending<B> {
 
 #[cfg(any(target_arch = "wasm32", test))]
 impl<B: Ord> Pending<B> {
-    fn gather(&mut self, buffer: B, offset: u64, data: &[u8]) {
-        let at = self.data.len() as u64;
+    /// Gathers `data` and the zeros after it up to `padded` bytes.
+    fn gather(&mut self, buffer: B, offset: u64, data: &[u8], padded: u64) {
+        let at = self.data.len();
         self.data.extend_from_slice(data);
-        self.writes.push(Write { buffer, offset, at, len: data.len() as u64 });
+        self.data.resize(at + padded as usize, 0);
+        self.writes.push(Write { buffer, offset, at: at as u64, len: padded });
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -178,6 +180,22 @@ impl Writes {
         offset: u64,
         data: &[u8],
     ) {
+        self.write_padded(device, queue, buffer, offset, data, data.len() as u64);
+    }
+
+    /// [`write`](Self::write)s `data`, where the bytes after it up to
+    /// `padded` bytes from `offset` already hold zeros: those may be written
+    /// too, so that the copy can join the next write's.
+    pub(crate) fn write_padded(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        buffer: &wgpu::Buffer,
+        offset: u64,
+        data: &[u8],
+        padded: u64,
+    ) {
+        debug_assert!(padded >= data.len() as u64);
         if data.is_empty() {
             return;
         }
@@ -186,9 +204,10 @@ impl Writes {
         let len = data.len() as u64;
         let aligned =
             offset.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) && len.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
+        let padded = if padded.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT) { padded } else { len };
         if aligned
             && (data.len() <= GATHERED || self.overlaps(buffer, offset, len))
-            && self.gather(device, buffer, offset, data)
+            && self.gather(device, buffer, offset, data, padded)
         {
             return;
         }
@@ -239,11 +258,12 @@ impl Writes {
         }
     }
 
-    /// Copies `data` into the belt, to land at `offset` in `buffer`; false if
-    /// the belt's slice isn't mapped.
+    /// Copies `data` and the zeros after it up to `padded` bytes into the
+    /// belt, to land at `offset` in `buffer`; false if the belt's slice isn't
+    /// mapped.
     #[cfg(not(target_arch = "wasm32"))]
-    fn gather(&mut self, device: &wgpu::Device, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) -> bool {
-        let Some(size) = wgpu::BufferSize::new(data.len() as u64) else {
+    fn gather(&mut self, device: &wgpu::Device, buffer: &wgpu::Buffer, offset: u64, data: &[u8], padded: u64) -> bool {
+        let Some(size) = wgpu::BufferSize::new(padded) else {
             return true;
         };
         let belt = self.belt.get_or_insert_with(|| wgpu::util::StagingBelt::new(device.clone(), GATHERED as u64));
@@ -252,6 +272,7 @@ impl Writes {
             return false;
         };
         view.slice(0..data.len()).copy_from_slice(data);
+        view.slice(data.len()..padded as usize).fill(0);
         drop(view);
         let (staging, at, len) = (slice.buffer().clone(), slice.offset(), size.get());
         if let Some(last) = self.copies.last_mut()
@@ -268,8 +289,8 @@ impl Writes {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn gather(&mut self, _device: &wgpu::Device, buffer: &wgpu::Buffer, offset: u64, data: &[u8]) -> bool {
-        self.pending.gather(buffer.clone(), offset, data);
+    fn gather(&mut self, _device: &wgpu::Device, buffer: &wgpu::Buffer, offset: u64, data: &[u8], padded: u64) -> bool {
+        self.pending.gather(buffer.clone(), offset, data, padded);
         true
     }
 
@@ -343,9 +364,14 @@ mod tests {
     use super::*;
 
     fn upload(writes: &[(u32, u64, &[u8])]) -> (Vec<(u32, u64, Vec<u8>)>, u64) {
+        let padded: Vec<_> = writes.iter().map(|&(b, o, d)| (b, o, d, d.len() as u64)).collect();
+        upload_padded(&padded)
+    }
+
+    fn upload_padded(writes: &[(u32, u64, &[u8], u64)]) -> (Vec<(u32, u64, Vec<u8>)>, u64) {
         let mut pending = Pending::default();
-        for &(b, o, d) in writes {
-            pending.gather(b, o, d);
+        for &(b, o, d, padded) in writes {
+            pending.gather(b, o, d, padded);
         }
         let size = pending.plan();
         let mut bytes = vec![0; size as usize];
@@ -385,5 +411,12 @@ mod tests {
             (0, 4, &[4, 4, 4, 4]),
         ]);
         assert_eq!(runs, [(0, 0, vec![2, 2, 2, 2, 4, 4, 4, 4, 3, 3, 3, 3])]);
+    }
+
+    #[test]
+    fn padding_joins_writes_to_neighboring_slots() {
+        let (runs, size) = upload_padded(&[(0, 0, &[1, 1, 1, 1], 8), (0, 8, &[2, 2, 2, 2], 8)]);
+        assert_eq!(runs, [(0, 0, vec![1, 1, 1, 1, 0, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 0])]);
+        assert_eq!(size, 16);
     }
 }

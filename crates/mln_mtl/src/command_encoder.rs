@@ -11,12 +11,11 @@ use std::rc::Rc;
 
 use mln_gfx::command_encoder;
 use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::frame::DrawTarget;
 use mln_gfx::render_pass::RenderPassDescriptor;
-use mln_gfx::renderable::Renderable;
 
 use crate::context::Context;
 use crate::render_pass::RenderPass;
-use crate::renderable_resource::as_mtl;
 use crate::upload_pass::UploadPass;
 
 pub struct CommandEncoder {
@@ -51,8 +50,8 @@ impl DebugGroupTarget for CommandEncoder {
 }
 
 impl command_encoder::CommandEncoder for CommandEncoder {
-    fn create_upload_pass(&self, name: &str, renderable: &dyn Renderable) -> Box<dyn mln_gfx::upload_pass::UploadPass> {
-        Box::new(UploadPass::new(renderable, self, name))
+    fn create_upload_pass(&self, name: &str, target: &dyn DrawTarget) -> Box<dyn mln_gfx::upload_pass::UploadPass> {
+        Box::new(UploadPass::new(target, self, name))
     }
 
     fn create_render_pass(
@@ -61,14 +60,6 @@ impl command_encoder::CommandEncoder for CommandEncoder {
         descriptor: &RenderPassDescriptor<'_>,
     ) -> Box<dyn mln_gfx::render_pass::RenderPass> {
         Box::new(RenderPass::new(self, name, descriptor))
-    }
-
-    fn present(&self, renderable: &dyn Renderable) {
-        if let Some(resource) = renderable.get_resource()
-            && let Some(resource) = as_mtl(&*resource)
-        {
-            resource.swap();
-        }
     }
 
     fn as_any(&self) -> &dyn Any {

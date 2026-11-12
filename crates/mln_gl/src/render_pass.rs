@@ -13,18 +13,16 @@ use mln_gfx::debug_group::DebugGroupTarget;
 use mln_gfx::render_pass::{self, RenderPassDescriptor};
 
 use crate::command_encoder::CommandEncoder;
-use crate::renderable_resource::as_gl;
+use crate::draw_target::as_gl;
 
 pub struct RenderPass;
 
 impl RenderPass {
-    /// `RenderPass(commandEncoder, name, descriptor)`: binds the renderable
-    /// and clears what the descriptor has values for.
+    /// `RenderPass(commandEncoder, name, descriptor)`: binds the draw
+    /// target and clears what the descriptor has values for.
     pub fn new(command_encoder: &CommandEncoder, _name: &str, descriptor: &RenderPassDescriptor<'_>) -> Self {
-        if let Some(resource) = descriptor.renderable.get_resource()
-            && let Some(resource) = as_gl(&*resource)
-        {
-            resource.bind();
+        if let Some(target) = as_gl(descriptor.target) {
+            target.resource().bind();
         }
         let context = command_encoder.get_context();
         context.clear(descriptor.clear_color, descriptor.clear_depth, descriptor.clear_stencil);

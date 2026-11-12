@@ -4,13 +4,19 @@ use std::any::Any;
 
 use mln_util::image::PremultipliedImage;
 
-use crate::renderable::Renderable;
+use crate::command_encoder::CommandEncoder;
+use crate::frame::DrawTarget;
 use crate::texture2d::Texture2DPtr;
 
-/// `gfx::OffscreenTexture`: a renderable backed by a texture.
-pub trait OffscreenTexture: Renderable + Any {
+/// `gfx::OffscreenTexture`: a texture that render passes draw into.
+pub trait OffscreenTexture: Any {
+    /// What a render pass draws into the texture through.
+    fn draw_target(&self) -> &dyn DrawTarget;
     fn is_renderable(&self) -> bool;
     fn read_still_image(&self) -> PremultipliedImage;
     fn get_texture(&self) -> Texture2DPtr;
+    /// Submits what `encoder` recorded so far, after the passes that drew
+    /// into the texture, so that what samples it later sees them.
+    fn submit(&self, encoder: &dyn CommandEncoder);
     fn as_any(&self) -> &dyn Any;
 }

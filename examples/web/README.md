@@ -236,7 +236,7 @@ keep lavapipe for the native runner (`VK_DRIVER_FILES`).
   canvases as white, so a screenshot shows nothing.
   `WebMap::request_pixels` draws the frame again and copies the canvas
   texture into a buffer, which the event loop maps
-  (`SurfaceBackend::take_readback`). A WebGL2 canvas can't be copied from
+  (`SurfaceTarget::take_readback`). A WebGL2 canvas can't be copied from
   on the GPU, so there the map's Web Worker reads the canvas after the
   frame.
 - The frames become the `expected.png` of render tests of the same views,

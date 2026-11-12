@@ -20,7 +20,6 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use mln_actor::AsyncTask;
-use mln_gfx::{ContextMode, SwapBehaviour};
 use mln_map::transform::Transform;
 use mln_map::{CameraOptions, Map, MapEvent, MapMode, MapOptions};
 use mln_storage::{FileSourceManager, ResourceOptions};
@@ -99,8 +98,7 @@ impl MapSnapshotter {
         resource_options: &ResourceOptions,
         observer: Rc<dyn MapSnapshotterObserver>,
     ) -> Result<Self, Error> {
-        let frontend =
-            HeadlessFrontend::with_options(size, pixel_ratio, SwapBehaviour::NoFlush, ContextMode::Unique, true);
+        let frontend = HeadlessFrontend::with_options(size, pixel_ratio, true)?;
         let map = Map::with_resource_options(
             MapOptions::new().with_map_mode(MapMode::Static).with_size(size).with_pixel_ratio(pixel_ratio),
             &FileSourceManager::new(),

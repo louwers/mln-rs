@@ -4,8 +4,8 @@
 // and its context: resources reach them through the context, as C++'s do
 // through `Context& -> getBackend()`.
 //
-// `getDefaultRenderable()` is implemented by the platform backends
-// (HeadlessBackend, SurfaceBackend), which embed this struct.
+// What the backend draws into is a target built on it (`OffscreenTarget`,
+// `SurfaceTarget`).
 //
 // C++ drains an autorelease pool around each frame
 // (`MLN_CREATE_AUTORELEASEPOOL` in `Renderer::Impl::render`), which the
@@ -13,19 +13,21 @@
 // and drains it when deactivated, around each frame's explicit
 // `BackendScope`.
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::ffi::c_void;
 use std::rc::Rc;
 
-use mln_gfx::renderer_backend::{ContextMode, RendererBackendBase};
+use mln_gfx::context::Context as GfxContext;
+use mln_gfx::renderer_backend::{self, RendererBackendBase};
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_source::BuiltIn;
-use mln_util::error::Error;
 use mln_util::logging::{Event, Log};
-use objc2_metal::{MTLCreateSystemDefaultDevice, MTLDevice, MTLGPUFamily};
+use objc2_metal::{MTLDevice, MTLGPUFamily};
 
 use crate::context::Context;
+use crate::device::Device;
 use crate::mtl_fwd::{MTLCommandQueuePtr, MTLDevicePtr};
 use crate::shaders::shader_group::ShaderGroup;
 use crate::shaders::shader_source::shader_source;
@@ -51,11 +53,11 @@ impl BackendImpl {
     }
 }
 
-/// `mtl::RendererBackend`: embedded by the platform backends, which
-/// implement `gfx::RendererBackend` by delegating to it.
+/// `mtl::RendererBackend`: a renderer's context on a [`Device`].
 pub struct RendererBackend {
-    pub base: RendererBackendBase,
+    base: RendererBackendBase,
     impl_: Rc<BackendImpl>,
+    device: Device,
     /// The autorelease pools opened by `activate`, innermost last. Scopes
     /// of other backends can nest between two of this backend's.
     autorelease_pools: RefCell<Vec<*mut c_void>>,
@@ -104,21 +106,35 @@ const REGISTERED_SHADERS: &[BuiltIn] = &[
 ];
 
 impl RendererBackend {
-    /// `RendererBackend(contextMode)`: the system's default device and a
-    /// command queue on it, or an error if there is no Metal device.
-    pub fn new(context_mode: ContextMode) -> Result<Self, Error> {
-        let device = MTLCreateSystemDefaultDevice().ok_or_else(|| Error::unsupported("No Metal device"))?;
-        let command_queue =
-            device.newCommandQueue().ok_or_else(|| Error::native("Failed to create a Metal command queue"))?;
+    /// A backend on `device`, which submits to the device's command queue.
+    pub fn new(device: &Device) -> Self {
         // C++ checks Apple3 only, which no Mac GPU but Apple silicon is in;
         // every Mac2 GPU supports base vertex and instance too.
+        let mtl_device = device.device();
         let base_vertex_instance_drawing_supported =
-            device.supportsFamily(MTLGPUFamily::Apple3) || device.supportsFamily(MTLGPUFamily::Mac2);
-        Ok(RendererBackend {
-            base: RendererBackendBase::new(context_mode),
-            impl_: Rc::new(BackendImpl { device, command_queue, base_vertex_instance_drawing_supported }),
+            mtl_device.supportsFamily(MTLGPUFamily::Apple3) || mtl_device.supportsFamily(MTLGPUFamily::Mac2);
+        RendererBackend {
+            base: RendererBackendBase::new(),
+            impl_: Rc::new(BackendImpl {
+                device: mtl_device.clone(),
+                command_queue: device.queue().clone(),
+                base_vertex_instance_drawing_supported,
+            }),
+            device: device.clone(),
             autorelease_pools: RefCell::new(Vec::new()),
-        })
+        }
+    }
+
+    /// The device the backend renders on.
+    pub fn device(&self) -> &Device {
+        &self.device
+    }
+
+    /// The backend's context, made on first use. Call inside a
+    /// `BackendScope`.
+    pub fn mtl_context(&self) -> Option<Rc<Context>> {
+        let context = renderer_backend::RendererBackend::get_context(self);
+        context.as_any().downcast_ref::<Context>().map(Context::rc)
     }
 
     pub fn backend_impl(&self) -> &Rc<BackendImpl> {
@@ -180,6 +196,32 @@ impl RendererBackend {
                 debug_assert!(false, "duplicate shader group");
             }
         }
+    }
+}
+
+impl renderer_backend::RendererBackend for RendererBackend {
+    fn renderer_backend_base(&self) -> &RendererBackendBase {
+        &self.base
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn init_shaders(&self, registry: &ShaderRegistry, parameters: &ProgramParameters) {
+        RendererBackend::init_shaders(self, registry, parameters);
+    }
+
+    fn create_context(&self) -> Rc<dyn GfxContext> {
+        RendererBackend::create_context(self)
+    }
+
+    fn activate(&self) {
+        RendererBackend::activate(self);
+    }
+
+    fn deactivate(&self) {
+        RendererBackend::deactivate(self);
     }
 }
 

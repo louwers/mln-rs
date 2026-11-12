@@ -17,16 +17,17 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use mln_gfx::offscreen_texture;
-use mln_gfx::renderable::{Renderable, RenderableBase};
+use mln_gfx::command_encoder::CommandEncoder as GfxCommandEncoder;
 use mln_gfx::texture2d::{SamplerState, Texture2D as _, Texture2DPtr};
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TexturePixelType, TextureWrapType};
+use mln_gfx::{frame, offscreen_texture};
 use mln_util::image::PremultipliedImage;
 use mln_util::size::Size;
 use mln_util::time::Instant;
 
+use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::renderable_resource::{RenderableResource, RenderableResourceBox, downcast_resource};
+use crate::draw_target::{DrawTarget, TargetResource};
 use crate::texture2d::Texture2D;
 
 const BYTES_PER_ROW_ALIGNMENT: u32 = 256;
@@ -263,7 +264,7 @@ impl Drop for OffscreenTextureResource {
     }
 }
 
-impl RenderableResource for OffscreenTextureResource {
+impl TargetResource for OffscreenTextureResource {
     fn bind(&self) {
         // Create textures if not already created
         if let Some(color) = self.color() {
@@ -272,10 +273,6 @@ impl RenderableResource for OffscreenTextureResource {
         if let Some(depth) = &self.depth_texture {
             depth.borrow_mut().create();
         }
-    }
-
-    fn swap(&self) {
-        // Offscreen targets do not present to a surface.
     }
 
     fn finish_frame(&self, encoder: &mut wgpu::CommandEncoder) {
@@ -311,44 +308,47 @@ impl RenderableResource for OffscreenTextureResource {
 
 /// `webgpu::OffscreenTexture`
 pub struct OffscreenTexture {
-    renderable: RenderableBase,
+    target: DrawTarget,
+    resource: Rc<OffscreenTextureResource>,
 }
 
 impl OffscreenTexture {
     pub fn new(context: Rc<Context>, size: Size, type_: TextureChannelDataType, depth: bool, stencil: bool) -> Self {
-        let resource =
-            RenderableResourceBox::new_rc(OffscreenTextureResource::new(context, size, type_, depth, stencil));
-        OffscreenTexture { renderable: RenderableBase::new(size, Some(resource)) }
+        let resource = Rc::new(OffscreenTextureResource::new(context, size, type_, depth, stencil));
+        OffscreenTexture { target: DrawTarget::new(size, resource.clone()), resource }
     }
 
-    fn with_resource<R>(&self, f: impl FnOnce(&OffscreenTextureResource) -> R) -> Option<R> {
-        let resource = self.get_resource()?;
-        downcast_resource::<OffscreenTextureResource>(&*resource).map(f)
+    fn resource(&self) -> &OffscreenTextureResource {
+        &self.resource
     }
 
     pub fn take_texture(&self) -> Option<Texture2DPtr> {
-        self.with_resource(|r| r.take_texture()).flatten()
-    }
-}
-
-impl Renderable for OffscreenTexture {
-    fn renderable_base(&self) -> &RenderableBase {
-        &self.renderable
+        self.resource().take_texture()
     }
 }
 
 impl offscreen_texture::OffscreenTexture for OffscreenTexture {
+    fn draw_target(&self) -> &dyn frame::DrawTarget {
+        &self.target
+    }
+
     /// Check if the texture resource is valid and can be rendered to
     fn is_renderable(&self) -> bool {
-        self.with_resource(|r| r.color().is_some()).unwrap_or(false)
+        self.resource().color().is_some()
     }
 
     fn read_still_image(&self) -> PremultipliedImage {
-        self.with_resource(|r| r.read_still_image()).unwrap_or_else(|| PremultipliedImage::new(self.get_size()))
+        self.resource().read_still_image()
     }
 
     fn get_texture(&self) -> Texture2DPtr {
-        self.with_resource(|r| r.get_texture()).expect("offscreen texture without resource")
+        self.resource().get_texture()
+    }
+
+    fn submit(&self, encoder: &dyn GfxCommandEncoder) {
+        if let Some(encoder) = encoder.as_any().downcast_ref::<CommandEncoder>() {
+            encoder.submit_frame(Some(self.target.resource()));
+        }
     }
 
     fn as_any(&self) -> &dyn Any {

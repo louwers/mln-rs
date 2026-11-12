@@ -45,8 +45,8 @@ use mln_util::immutable::Immutable;
 use mln_util::logging::{Event, EventSeverity, Log, Observer};
 use mln_util::size::Size;
 use mln_vec_map::VecMap;
-use mln_webgpu::headless_backend::HeadlessBackend;
 use mln_webgpu::upload_pass::UploadPass as WebGpuUploadPass;
+use mln_webgpu::{Device, OffscreenTarget};
 
 /// `StubGeometryTileFeature(id, type, geometry, properties)`.
 struct StubGeometryTileFeature {
@@ -81,14 +81,16 @@ fn collection(rings: &[&[(i16, i16)]]) -> GeometryCollection {
     )
 }
 
-/// Runs `f` with an upload pass of a headless backend (the C++ tests create
+/// Runs `f` with an upload pass of an offscreen target (the C++ tests create
 /// a `gl::HeadlessBackend`, a context and an upload pass).
 fn with_upload_pass(f: impl FnOnce(&dyn mln_gfx::UploadPass)) {
-    let backend = HeadlessBackend::create(Size { width: 512, height: 256 });
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let backend = std::rc::Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    let target = OffscreenTarget::new(backend.clone(), Size { width: 512, height: 256 });
+    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let context = backend.get_context();
     let command_encoder = context.create_command_encoder();
-    let upload_pass = command_encoder.create_upload_pass("upload", backend.get_default_renderable());
+    let image = mln_gfx::FrameTarget::begin_frame(&target).expect("a frame");
+    let upload_pass = command_encoder.create_upload_pass("upload", &*image);
     f(&*upload_pass);
 }
 
@@ -385,11 +387,13 @@ fn line_bucket_drawables_build_from_freed_indexes() {
         .unwrap();
     assert!(bucket.has_data());
 
-    let backend = HeadlessBackend::create(Size { width: 512, height: 256 });
-    let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    let backend = std::rc::Rc::new(mln_webgpu::RendererBackend::new(&Device::new(None).expect("device")));
+    let target = OffscreenTarget::new(backend.clone(), Size { width: 512, height: 256 });
+    let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
     let context = backend.get_context();
     let command_encoder = context.create_command_encoder();
-    let upload_pass = command_encoder.create_upload_pass("upload", backend.get_default_renderable());
+    let image = mln_gfx::FrameTarget::begin_frame(&target).expect("a frame");
+    let upload_pass = command_encoder.create_upload_pass("upload", &*image);
     bucket.upload(&*upload_pass);
 
     // An earlier drawable put the indexes in a buffer, which frees their CPU

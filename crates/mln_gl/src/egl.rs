@@ -1,5 +1,5 @@
-// The EGL library, which the headless backend (headless_backend.rs) and the
-// window backend (surface_backend.rs) make their contexts with. It is loaded
+// The EGL library, which the share groups (device.rs) and the
+// window targets (surface_target.rs) make their contexts with. It is loaded
 // at run time, once, so builds need no system development packages.
 
 use std::sync::OnceLock;

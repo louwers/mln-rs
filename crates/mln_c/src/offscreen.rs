@@ -1,7 +1,7 @@
 //! `offscreen.h`: the GPU devices that offscreen sessions render on, and the
 //! attach of an offscreen session.
 
-use ::mln_runtime::{OffscreenDevice, OffscreenDeviceOptions, RenderTarget};
+use ::mln_runtime::{Device, DeviceOptions, RenderTarget};
 use mln_util::size::Size;
 
 use crate::abi::{self, Fields};
@@ -18,16 +18,16 @@ use crate::{map, render_session};
 
 abi::versioned!(mln_offscreen_device_options, mln_offscreen_descriptor);
 
-static DEVICES: HandleTable<OffscreenDevice> = HandleTable::new(HandleKind::OffscreenDevice);
+static DEVICES: HandleTable<Device> = HandleTable::new(HandleKind::OffscreenDevice);
 
 /// The runtime layer's options for a caller's `mln_offscreen_device_options`.
 ///
 /// # Safety
 ///
 /// `options` is null or points to a readable struct of the size it declares.
-unsafe fn device_options(options: *const mln_offscreen_device_options) -> Result<OffscreenDeviceOptions, Error> {
+unsafe fn device_options(options: *const mln_offscreen_device_options) -> Result<DeviceOptions, Error> {
     if options.is_null() {
-        return Ok(OffscreenDeviceOptions::default());
+        return Ok(DeviceOptions::default());
     }
     // SAFETY: non-null, and the caller's contract.
     let options = unsafe { abi::read_sized(options) }?;
@@ -49,7 +49,7 @@ unsafe fn device_options(options: *const mln_offscreen_device_options) -> Result
         ));
     }
     let adapter_index = fields.get(MLN_OFFSCREEN_DEVICE_OPTION_ADAPTER_INDEX, options.adapter_index);
-    Ok(OffscreenDeviceOptions { adapter_index: adapter_index.map(|index| index as usize) })
+    Ok(DeviceOptions { adapter_index: adapter_index.map(|index| index as usize) })
 }
 
 /// The status that `offscreen.h` gives a device that can't be created: a
@@ -77,7 +77,7 @@ pub unsafe extern "C" fn mln_offscreen_device_create(
         let options = unsafe { device_options(options) }?;
         // SAFETY: the caller's contract.
         let out_device = unsafe { handles::out_handle(out_device, "out_device") }?;
-        let device = OffscreenDevice::new(options).map_err(device_error)?;
+        let device = Device::new(options).map_err(device_error)?;
         *out_device = DEVICES.insert(device.into())?;
         Ok(())
     })
@@ -114,7 +114,7 @@ pub unsafe extern "C" fn mln_map_attach_offscreen(
 ) -> mln_status {
     export!(out_diagnostic, {
         let map = map::resolve(map)?;
-        let device = if device == handles::NULL { None } else { Some(OffscreenDevice::clone(&*DEVICES.get(device)?)) };
+        let device = if device == handles::NULL { None } else { Some(Device::clone(&*DEVICES.get(device)?)) };
         // SAFETY: the caller's contract.
         let descriptor = unsafe { abi::read_sized(descriptor) }?;
         let size = descriptor.logical_size;
@@ -164,7 +164,7 @@ mod tests {
             assert_eq!(index.adapter_index, Some(3));
             let unset = device_options(&options(MLN_OFFSCREEN_DEVICE_OPTION_SINGLE_CONTEXT, 0)).unwrap();
             assert_eq!(unset.adapter_index, None);
-            assert_eq!(device_options(core::ptr::null()).unwrap(), OffscreenDeviceOptions::default());
+            assert_eq!(device_options(core::ptr::null()).unwrap(), DeviceOptions::default());
 
             let gl = device_options(&options(MLN_OFFSCREEN_DEVICE_OPTION_CLIENT_API, MLN_OPEN_GL_CLIENT_API_GL));
             assert_eq!(gl.unwrap_err().status(), MLN_STATUS_UNSUPPORTED);

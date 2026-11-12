@@ -90,7 +90,7 @@ impl LocalGlyphRasterizerTest {
 
         // `HeadlessFrontend(1, NoFlush, ContextMode::Unique, fontFamily)`:
         // the default size is 256x256.
-        let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0);
+        let frontend = HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend");
         // `MapAdapter map{frontend, nullObserver, fileSource, MapOptions()...}`.
         let map = Map::with_file_source(
             file_source,

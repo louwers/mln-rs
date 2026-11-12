@@ -1,11 +1,9 @@
 // Ports include/mln/gfx/backend.hpp and the `Backend::enableGPUExpressionEval`
 // definition from platform/default/src/mln/gfx/headless_backend.cpp.
 //
-// `Backend::Create<Type>()` is a C++ template specialised per backend; in the
-// port the backend crate's constructor is called directly (for example
-// `mln_webgpu::HeadlessBackend::new`). C++ builds one backend; the port can
-// build several (WebGPU, Metal, Vulkan, OpenGL), and the renderer asks a
-// context which one it is of (`Context::backend_type`).
+// C++ builds one backend; the port can build several (WebGPU, Metal, Vulkan,
+// OpenGL), and the renderer asks a context which one it is of
+// (`Context::backend_type`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 

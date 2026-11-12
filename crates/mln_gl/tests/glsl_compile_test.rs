@@ -10,23 +10,21 @@ use std::collections::{BTreeSet, HashSet};
 
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
 use mln_gfx::projection_variant::ProjectionVariant;
-use mln_gfx::renderable::SwapBehaviour;
-use mln_gfx::renderer_backend::{ContextMode, RendererBackend};
+use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_gfx::shader_group::StringIDSetsPair;
 use mln_gfx::shader_registry::ShaderRegistry;
 use mln_gfx::shaders::program_parameters::ProgramParameters;
 use mln_gfx::shaders::shader_program_base::ShaderProgramBase;
-use mln_gl::HeadlessBackend;
 use mln_gl::shaders::glsl_sources::PRELUDE;
 use mln_gl::shaders::shader_program::as_gl_shader;
 use mln_gl::shaders::shader_source::{REGISTERED_SHADERS, ShaderSource, shader_source};
-use mln_util::size::Size;
+use mln_gl::{Device, RendererBackend};
 
-/// A headless backend, or none where there is no EGL to make an OpenGL ES 3.0
-/// context with, as on macOS: the test is skipped there, unless
-/// MLN_RENDER_BACKEND asks for this backend.
-fn headless_backend(size: Size) -> Option<HeadlessBackend> {
-    match HeadlessBackend::new(size, SwapBehaviour::NoFlush, ContextMode::Unique) {
+/// A backend, or none where there is no EGL to make an OpenGL ES 3.0 context
+/// with, as on macOS: the test is skipped there, unless MLN_RENDER_BACKEND
+/// asks for this backend.
+fn headless_backend() -> Option<RendererBackend> {
+    match Device::new().and_then(|device| RendererBackend::new(&device)) {
         Ok(backend) => Some(backend),
         Err(error) if std::env::var("MLN_RENDER_BACKEND").is_ok_and(|backend| backend.eq_ignore_ascii_case("gl")) => {
             panic!("{error}")
@@ -107,11 +105,11 @@ fn fragment_shaders_declare_shared_uniform_blocks_first() {
 
 #[test]
 fn every_program_links_and_matches_its_tables() {
-    let Some(backend) = headless_backend(Size::new(16, 16)) else {
+    let Some(backend) = headless_backend() else {
         return;
     };
-    println!("GL_RENDERER: {}", backend.get_renderer_name());
     let _scope = BackendScope::new(&backend, ScopeType::Explicit);
+    println!("GL_RENDERER: {}", backend.get_renderer_name());
     let registry = ShaderRegistry::new();
     backend.init_shaders(&registry, &ProgramParameters::new(1.0, false));
     let context = backend.get_context();

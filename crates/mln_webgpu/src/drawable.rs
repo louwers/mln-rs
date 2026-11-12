@@ -194,7 +194,8 @@ thread_local! {
 /// wgpu handles compare by identity.
 #[derive(PartialEq)]
 enum EntryResource {
-    Buffer(wgpu::Buffer, u64),
+    /// A buffer, offset and size.
+    Buffer(wgpu::Buffer, u64, u64),
     Sampler(wgpu::Sampler),
     TextureView(wgpu::TextureView),
 }
@@ -458,9 +459,11 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        let gpu_buffer =
-                            buffer.as_any().downcast_ref::<UniformBuffer>().and_then(|b| b.get_buffer().cloned());
-                        let Some(gpu_buffer) = gpu_buffer else {
+                        let gpu_buffer = buffer
+                            .as_any()
+                            .downcast_ref::<UniformBuffer>()
+                            .and_then(|b| Some((b.get_buffer()?.clone(), b.get_offset(), b.get_aligned_size())));
+                        let Some((gpu_buffer, offset, size)) = gpu_buffer else {
                             if draw_call_count <= 200 {
                                 eprintln!(
                                     "Uniform buffer missing GPU handle for binding {} group={group}",
@@ -470,11 +473,10 @@ impl Drawable {
                             valid_bindings = false;
                             break;
                         };
-                        // The whole (256-byte aligned) buffer, as C++ binds
-                        // `getSize()`: some UBOs hold less data than their
-                        // shader struct.
-                        let size = gpu_buffer.size();
-                        resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, size)));
+                        // The UBO's whole (256-byte aligned) slot, as C++
+                        // binds `getSize()`: some UBOs hold less data than
+                        // their shader struct.
+                        resources.push((binding_info.binding, EntryResource::Buffer(gpu_buffer, offset, size)));
                     }
                     BindingType::Sampler => {
                         let Some(texture) = find_texture_for_binding(binding_info.binding, true) else {
@@ -538,11 +540,13 @@ impl Drawable {
                 .map(|(binding, resource)| wgpu::BindGroupEntry {
                     binding: *binding,
                     resource: match resource {
-                        EntryResource::Buffer(buffer, size) => wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer,
-                            offset: 0,
-                            size: wgpu::BufferSize::new(*size),
-                        }),
+                        EntryResource::Buffer(buffer, offset, size) => {
+                            wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                                buffer,
+                                offset: *offset,
+                                size: wgpu::BufferSize::new(*size),
+                            })
+                        }
                         EntryResource::Sampler(sampler) => wgpu::BindingResource::Sampler(sampler),
                         EntryResource::TextureView(view) => wgpu::BindingResource::TextureView(view),
                     },
@@ -784,8 +788,7 @@ impl drawable::Drawable for Drawable {
             }
         }
 
-        let mut encoder_guard = render_pass.get_encoder();
-        let Some(encoder) = encoder_guard.as_mut() else {
+        let Some(mut encoder) = render_pass.state_filter() else {
             eprintln!("renderPassEncoder is null!");
             return;
         };
@@ -834,7 +837,7 @@ impl drawable::Drawable for Drawable {
                 );
                 continue;
             }
-            encoder.set_vertex_buffer(buffer_slot, buffer.slice(binding.base_offset..buffer_size));
+            encoder.set_vertex_buffer(buffer_slot, buffer, binding.base_offset..buffer_size);
             buffer_slot += 1;
         }
 
@@ -850,7 +853,8 @@ impl drawable::Drawable for Drawable {
                 if let Some(buffer) = buffer_resource.get_buffer() {
                     // Always use Uint16 format for now
                     encoder.set_index_buffer(
-                        buffer.slice(0..buffer_resource.get_size_in_bytes() as u64),
+                        buffer,
+                        0..buffer_resource.get_size_in_bytes() as u64,
                         wgpu::IndexFormat::Uint16,
                     );
                 }
@@ -859,7 +863,7 @@ impl drawable::Drawable for Drawable {
 
         // Set bind groups
         for record in &self.impl_.bind_groups {
-            encoder.set_bind_group(record.slot, &record.handle, &[]);
+            encoder.set_bind_group(record.slot, &record.handle);
         }
 
         // Handle depth and stencil states (like Metal does). For 3D mode,
@@ -906,7 +910,7 @@ impl drawable::Drawable for Drawable {
                 draw_calls += 1;
             }
         }
-        drop(encoder_guard);
+        drop(encoder);
         if draw_calls > 0 {
             let mut stats = context.rendering_stats_mut();
             stats.num_draw_calls += draw_calls;

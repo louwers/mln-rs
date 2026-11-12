@@ -51,7 +51,7 @@ use winit::dpi::{LogicalSize, PhysicalSize};
 use winit::event_loop::EventLoopProxy;
 use winit::keyboard::KeyCode;
 
-use crate::backend::{Kind, SurfaceBackend};
+use crate::backend::{Kind, WindowTarget};
 use crate::host::{Inbox, Message, UserEvent};
 use crate::overlay::Paint;
 use crate::settings::Settings;
@@ -94,7 +94,7 @@ pub(crate) fn run(launch: Launch) {
 
     let framebuffer_size = Size::new(size.width, size.height);
     // Vsync unless benchmarking.
-    let backend = match SurfaceBackend::new(args.backend, &proxy, framebuffer_size, !args.benchmark) {
+    let backend = match WindowTarget::new(args.backend, &proxy, framebuffer_size, !args.benchmark) {
         Ok(backend) => backend,
         Err(e) => {
             Log::error(Event::GraphicsBackend, e.message);
@@ -182,8 +182,7 @@ pub(crate) fn run(launch: Launch) {
         start,
         frame_interval,
         next_frame_at: Instant::now(),
-        backend,
-        renderer,
+        gfx: Some(Gfx { renderer, backend }),
         updates,
         drawn_update: 0,
         dirty: false,
@@ -249,8 +248,11 @@ pub(crate) fn run(launch: Launch) {
     );
     // Drop order: the renderer, then the map, then the backend's surface,
     // while the window is still open.
-    let View { renderer, map, backend, .. } = view;
-    drop(renderer);
+    let View { gfx, map, .. } = view;
+    let backend = gfx.map(|Gfx { renderer, backend }| {
+        drop(renderer);
+        backend
+    });
     drop(map);
     drop(backend);
 }
@@ -278,8 +280,8 @@ struct View {
     frame_interval: std::time::Duration,
     next_frame_at: Instant,
 
-    backend: SurfaceBackend,
-    renderer: Renderer,
+    /// `None` only while the backend switches.
+    gfx: Option<Gfx>,
     /// The map's updates for the renderer.
     updates: UpdateReader,
     /// The generation of the update the renderer drew last.
@@ -335,7 +337,22 @@ struct View {
     style_reported: bool,
 }
 
+/// The renderer and the backend it draws with, which it goes before.
+struct Gfx {
+    renderer: Renderer,
+    backend: WindowTarget,
+}
+
 impl View {
+    /// The backend presenting to the window.
+    fn backend(&self) -> &WindowTarget {
+        &self.gfx.as_ref().expect("a backend").backend
+    }
+
+    fn renderer(&mut self) -> &mut Renderer {
+        &mut self.gfx.as_mut().expect("a renderer").renderer
+    }
+
     /// Milliseconds on the gesture recognizer's clock.
     fn ms(&self, at: Instant) -> f64 {
         at.saturating_duration_since(self.start).as_secs_f64() * 1000.0
@@ -373,7 +390,7 @@ impl View {
             self.frame();
         }
         if self.readback_path.is_some() {
-            self.backend.request_readback();
+            self.backend().request_readback();
             self.dirty = true;
             self.render();
             self.save_readback();
@@ -441,7 +458,7 @@ impl View {
         }
         // Wait for the display first, so that the frame takes the input that
         // came meanwhile.
-        let drawable = (self.needs_frame() || !self.inbox.is_empty()) && self.backend.acquire_next_texture();
+        let drawable = (self.needs_frame() || !self.inbox.is_empty()) && self.backend().acquire_next_texture();
 
         // The map samples its animations at this frame's time.
         self.map.set_frame_time(Some(Clock::now()));
@@ -467,7 +484,7 @@ impl View {
 
         // No texture right now (e.g. a timeout while the compositor is busy,
         // or a hidden window): try again on the next frame.
-        if drawable || (self.needs_frame() && self.backend.acquire_next_texture()) {
+        if drawable || (self.needs_frame() && self.backend().acquire_next_texture()) {
             self.render();
         }
         self.after_frame();
@@ -488,7 +505,7 @@ impl View {
                 if !focused {
                     // A drag the window can't see the end of ends here.
                     self.gesture(Input::Blur, at);
-                    self.renderer.reduce_memory_use();
+                    self.renderer().reduce_memory_use();
                 }
             }
             Message::Close => self.quit = true,
@@ -504,7 +521,7 @@ impl View {
     }
 
     fn on_resize(&mut self, size: PhysicalSize<u32>) {
-        self.backend.set_framebuffer_size(Size::new(size.width, size.height));
+        self.backend().set_framebuffer_size(Size::new(size.width, size.height));
         self.size = logical_size(size, self.pixel_ratio);
         // An empty size (a minimized window) fails.
         if let Err(e) = self.map.set_size(self.size) {
@@ -522,8 +539,8 @@ impl View {
             return;
         }
         self.pixel_ratio = pixel_ratio;
-        self.renderer.set_pixel_ratio(pixel_ratio as f32);
-        let size = self.backend.framebuffer_size();
+        self.renderer().set_pixel_ratio(pixel_ratio as f32);
+        let size = self.backend().framebuffer_size();
         self.on_resize(PhysicalSize::new(size.width, size.height));
     }
 
@@ -586,7 +603,7 @@ impl View {
                 let type_ = style.get_projection().get_type();
                 type_.is_constant() && type_.as_constant().from == ProjectionType::Globe
             },
-            backend: self.backend.kind(),
+            backend: self.backend().kind(),
             status: &status,
         };
         let mut actions = Vec::new();
@@ -651,37 +668,38 @@ impl View {
     /// Renders with `kind` from now on: a new backend on the window, and a
     /// new renderer on it, which loads the tiles again (from the cache).
     fn switch_backend(&mut self, kind: Kind) {
-        if self.backend.kind() == kind {
+        let old = self.backend().kind();
+        if old == kind {
             return;
         }
-        let size = self.backend.framebuffer_size();
-        // The old backend gives the window up before the new one makes its
-        // surface of it, and takes it back when there is no new one.
-        self.backend.release_surface();
-        let backend = match SurfaceBackend::new(kind, &self.proxy, size, !self.benchmark) {
+        let size = self.backend().framebuffer_size();
+        // The old renderer and backend go first: the window takes one
+        // backend's frames at a time. When there is no new one, the old kind
+        // takes the window back.
+        self.gfx = None;
+        let made = WindowTarget::new(kind, &self.proxy, size, !self.benchmark).or_else(|e| {
+            Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
+            WindowTarget::new(old, &self.proxy, size, !self.benchmark)
+        });
+        let backend = match made {
             Ok(backend) => backend,
             Err(e) => {
-                Log::error(Event::GraphicsBackend, format!("Can't switch to {}: {e}", kind.name()));
-                if let Err(e) = self.backend.restore_surface(&self.proxy) {
-                    Log::error(Event::GraphicsBackend, e.message);
-                }
-                self.dirty = true;
+                Log::error(Event::GraphicsBackend, e.message);
+                self.quit = true;
                 return;
             }
         };
         let mut renderer = Renderer::new(backend.renderer_backend(), self.pixel_ratio as f32, None);
         renderer.set_event_queue(Some(self.map.renderer_events()));
-        // The old renderer goes before its backend.
-        drop(std::mem::replace(&mut self.renderer, renderer));
-        drop(std::mem::replace(&mut self.backend, backend));
+        self.gfx = Some(Gfx { renderer, backend });
         // The new renderer draws the map's last update again.
         self.dirty = true;
-        self.backend.set_controls_overlay(self.paint.clone());
+        self.backend().set_controls_overlay(self.paint.clone());
         self.paint.borrow_mut().resend_textures(&self.ui);
         // The controls take egui's textures before the map's next frame.
         self.ui_repaint_at = Some(Instant::now());
-        self.adapter = self.backend.adapter();
-        Log::info(Event::Render, self.backend.describe());
+        self.adapter = self.backend().adapter();
+        Log::info(Event::Render, self.backend().describe());
         self.map.trigger_repaint();
     }
 
@@ -710,10 +728,13 @@ impl View {
         self.drawn_update = update.generation;
         let started = Instant::now();
         {
-            let backend = self.backend.renderer_backend();
+            let Some(Gfx { renderer, backend: target }) = self.gfx.as_mut() else {
+                return;
+            };
+            let backend = target.renderer_backend();
             let _scope = BackendScope::new(&*backend, ScopeType::Explicit);
             let _frame = BackendScope::new(&*backend, ScopeType::Implicit);
-            self.renderer.render(&update.parameters);
+            renderer.render(&update.parameters, target.frames());
         }
         self.report((1000.0 * started.elapsed().as_secs_f64()) as f32);
         if self.benchmark {
@@ -752,7 +773,7 @@ impl View {
             if self.readback_requested {
                 self.save_readback();
             } else if self.idle && self.style_reported {
-                self.backend.request_readback();
+                self.backend().request_readback();
                 self.readback_requested = true;
                 self.dirty = true;
             }
@@ -767,7 +788,7 @@ impl View {
     }
 
     fn save_readback(&mut self) {
-        let Some(image) = self.backend.take_readback() else {
+        let Some(image) = self.backend().take_readback() else {
             return;
         };
         let Some(path) = self.readback_path.take() else {
@@ -937,7 +958,7 @@ impl View {
                 ("window resize to 800x600", vec![], vec![], vec![])
             }
             step if Kind::ALL.len() > 1 && (16..16 + Kind::ALL.len()).contains(&step) => {
-                let next = self.backend.kind().next();
+                let next = self.backend().kind().next();
                 ("switch to the next backend", vec![], vec![], vec![Action::SetBackend(next)])
             }
             _ => {

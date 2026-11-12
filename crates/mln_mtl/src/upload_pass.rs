@@ -13,9 +13,9 @@ use std::rc::Rc;
 
 use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescriptor};
 use mln_gfx::debug_group::DebugGroupTarget;
+use mln_gfx::frame::DrawTarget;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::index_vector::IndexVectorBase;
-use mln_gfx::renderable::Renderable;
 use mln_gfx::types::BufferUsageType;
 use mln_gfx::upload_pass;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
@@ -25,7 +25,7 @@ use mln_util::time::Instant;
 
 use crate::command_encoder::CommandEncoder;
 use crate::context::Context;
-use crate::renderable_resource::as_mtl;
+use crate::draw_target::as_mtl;
 use crate::vertex_buffer_resource::{IndexBufferResource, VertexBufferResource};
 
 pub struct UploadPass {
@@ -45,11 +45,9 @@ impl VertexBufferBase for VertexBuffer {
 }
 
 impl UploadPass {
-    pub fn new(renderable: &dyn Renderable, command_encoder: &CommandEncoder, _name: &str) -> Self {
-        if let Some(resource) = renderable.get_resource()
-            && let Some(resource) = as_mtl(&*resource)
-        {
-            resource.bind();
+    pub fn new(target: &dyn DrawTarget, command_encoder: &CommandEncoder, _name: &str) -> Self {
+        if let Some(target) = as_mtl(target) {
+            target.resource().bind();
         }
         UploadPass { context: command_encoder.get_context().clone() }
     }

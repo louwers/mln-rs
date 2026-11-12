@@ -11,7 +11,7 @@ use std::time::{Duration as StdDuration, Instant};
 
 use mln_actor::{AsyncTask, RunLoop};
 use mln_gfx::rendering_stats::RenderingStats;
-use mln_gfx::{BackendScope, ContextMode, ScopeType, SwapBehaviour};
+use mln_gfx::{BackendScope, ScopeType};
 use mln_headless::{HeadlessFrontend, RenderResult};
 use mln_map::{CameraOptions, Map, MapMode, MapOptions, RenderMode};
 use mln_renderer::UpdateReader;
@@ -103,13 +103,7 @@ struct TimedHeadlessFrontend {
 impl TimedHeadlessFrontend {
     fn new() -> Self {
         TimedHeadlessFrontend {
-            frontend: HeadlessFrontend::with_options(
-                Size::new(256, 256),
-                1.0,
-                SwapBehaviour::NoFlush,
-                ContextMode::Unique,
-                false,
-            ),
+            frontend: HeadlessFrontend::with_options(Size::new(256, 256), 1.0, false).expect("a headless frontend"),
             updates: Rc::default(),
         }
     }
@@ -119,8 +113,8 @@ impl TimedHeadlessFrontend {
         let mut parameters = (*update.parameters).clone();
         parameters.time_point = time;
         let parameters = Arc::new(parameters);
+        self.frontend.render_update(&parameters);
         let _scope = BackendScope::new(self.frontend.get_backend(), ScopeType::Explicit);
-        self.frontend.with_renderer(|renderer| renderer.render(&parameters));
         RenderResult { image: self.frontend.read_still_image(), stats: stats(&self.frontend) }
     }
 }
@@ -159,7 +153,13 @@ struct SymbolRenderingTest<F> {
 
 impl SymbolRenderingTest<HeadlessFrontend> {
     fn new(count: usize, spacing: f64, kind: SymbolKind, mode: MapMode) -> Self {
-        Self::with_frontend(|| HeadlessFrontend::new(Size::new(256, 256), 1.0), count, spacing, kind, mode)
+        Self::with_frontend(
+            || HeadlessFrontend::new(Size::new(256, 256), 1.0).expect("a headless frontend"),
+            count,
+            spacing,
+            kind,
+            mode,
+        )
     }
 
     fn render(&self) -> RenderResult {

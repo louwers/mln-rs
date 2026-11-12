@@ -489,7 +489,7 @@ impl Map {
     /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty
     /// target, or a [`Surface::wgpu`](crate::Surface::wgpu) without the
     /// host's device. The completion fails as
-    /// [`OffscreenDevice::new`](crate::OffscreenDevice::new) does when the
+    /// [`Device::new`](crate::Device::new) does when the
     /// session has to create its device and can't, with
     /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) when no GPU can present
     /// to a window, and with [`ErrorKind::Native`](mln_util::ErrorKind) when

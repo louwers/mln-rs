@@ -37,8 +37,6 @@ mod ui;
 mod view;
 #[cfg(not(target_vendor = "apple"))]
 mod vulkan_overlay;
-#[cfg(not(target_vendor = "apple"))]
-mod vulkan_surface;
 
 use crate::settings::Settings;
 

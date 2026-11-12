@@ -501,7 +501,7 @@ pub(crate) fn attach(
     let (size, target) = match target {
         RenderTarget::Offscreen { size, device } => (size, TargetInit::Offscreen(device)),
         RenderTarget::Surface { size, surface, device } => {
-            if device.is_none() && !surface.is_window() {
+            if device.is_none() && !surface.needs_no_device() {
                 return Err(Error::invalid_argument("a surface that the host made needs the host's device"));
             }
             (size, TargetInit::Surface { surface, device })
@@ -809,9 +809,12 @@ impl RenderSession {
     /// Gives a surface session a new surface of `size` logical pixels, after
     /// [`release_target`](Self::release_target), or in place of the one it
     /// has, and resizes the map to it. Once the completion reports success,
-    /// the session no longer uses the old surface. A window becomes a
-    /// surface made with the instance of the session's device, and a
-    /// [`Surface::wgpu`] must come from that instance.
+    /// the session no longer uses the old surface. The session presents to
+    /// it on its device: a window becomes a surface of the device's backend,
+    /// and a `Surface::wgpu` must come from the instance of a WebGPU
+    /// device. Where the backend made for the old surface can't present to
+    /// the new one, as OpenGL ES's context can't to another window, the
+    /// session makes its backend and renderer again.
     ///
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
     /// empty size, and with [`ErrorKind::Unsupported`](mln_util::ErrorKind)

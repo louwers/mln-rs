@@ -1,32 +1,45 @@
-// HeadlessBackend on a device it shares: with other backends, with the host
-// that made it, and on an adapter picked by index, as maplibre-native-ffi's
+// Backends on a device they share: with other backends, with the host that
+// made it, and on an adapter picked by index, as maplibre-native-ffi's
 // offscreen device (tests/native/abi/render/offscreen.c) uses it.
 
+use std::rc::Rc;
+
 use mln_gfx::backend_scope::{BackendScope, ScopeType};
-use mln_gfx::headless_backend::HeadlessBackend as _;
+use mln_gfx::frame::FrameTarget as _;
 use mln_gfx::render_pass::RenderPassDescriptor;
-use mln_gfx::renderer_backend::{ContextMode, RendererBackend as _};
+use mln_gfx::renderer_backend::RendererBackend as _;
 use mln_util::Color;
 use mln_util::size::Size;
-use mln_webgpu::HeadlessBackend;
+use mln_webgpu::{Device, OffscreenTarget, RendererBackend};
 
 const SIZE: Size = Size { width: 16, height: 8 };
 
-/// Clears the backend's offscreen texture to `color` and reads it back.
-fn clear_and_read(backend: &HeadlessBackend, color: Color) -> Vec<[u8; 4]> {
-    let _scope = BackendScope::new(backend, ScopeType::Explicit);
+/// A backend on `device`, and an offscreen target on it.
+fn headless(device: &Device) -> OffscreenTarget {
+    OffscreenTarget::new(Rc::new(RendererBackend::new(device)), SIZE)
+}
+
+/// Clears the target to `color` and reads it back.
+fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
+    let backend = target.backend();
+    let _scope = BackendScope::new(&**backend, ScopeType::Explicit);
     let context = backend.get_context();
-    let renderable = backend.get_default_renderable();
+    let image = target.begin_frame().expect("a frame");
     context.begin_frame();
     let encoder = context.create_command_encoder();
     let pass = encoder.create_render_pass(
         "main buffer",
-        &RenderPassDescriptor { renderable, clear_color: Some(color), clear_depth: Some(1.0), clear_stencil: Some(0) },
+        &RenderPassDescriptor {
+            target: &*image,
+            clear_color: Some(color),
+            clear_depth: Some(1.0),
+            clear_stencil: Some(0),
+        },
     );
     drop(pass);
-    encoder.present(renderable);
+    target.end_frame(&*encoder);
     context.end_frame();
-    let image = backend.read_still_image();
+    let image = target.read_image().expect("a frame");
     assert_eq!(image.size, SIZE);
     image.data.chunks_exact(4).map(|px| px.try_into().unwrap()).collect()
 }
@@ -41,11 +54,11 @@ const BLUE: Color = Color { r: 0.0, g: 0.0, b: 1.0, a: 1.0 };
 
 #[test]
 fn backends_on_one_device_render_in_turn() {
-    let (device, queue) = HeadlessBackend::request_device(None).expect("device");
-    let first = HeadlessBackend::with_device(device.clone(), queue.clone(), SIZE, ContextMode::Unique);
-    let second = HeadlessBackend::with_device(device.clone(), queue, SIZE, ContextMode::Unique);
-    assert_eq!(first.get_device().as_ref(), Some(&device));
-    assert_eq!(second.get_device().as_ref(), Some(&device));
+    let device = Device::new(None).expect("device");
+    let first = headless(&device);
+    let second = headless(&device);
+    assert_eq!(first.backend().device().device(), device.device());
+    assert_eq!(second.backend().device().device(), device.device());
 
     assert_all(&clear_and_read(&first, RED), [255, 0, 0, 255]);
     assert_all(&clear_and_read(&second, BLUE), [0, 0, 255, 255]);
@@ -55,10 +68,10 @@ fn backends_on_one_device_render_in_turn() {
 
 #[test]
 fn a_backend_renders_after_the_host_drops_its_device() {
-    let (device, queue) = HeadlessBackend::request_device(None).expect("device");
-    let backend = HeadlessBackend::with_device(device.clone(), queue.clone(), SIZE, ContextMode::Unique);
-    drop((device, queue));
-    assert_all(&clear_and_read(&backend, RED), [255, 0, 0, 255]);
+    let device = Device::new(None).expect("device");
+    let target = headless(&device);
+    drop(device);
+    assert_all(&clear_and_read(&target, RED), [255, 0, 0, 255]);
 }
 
 #[test]
@@ -81,9 +94,9 @@ fn a_backend_renders_on_a_device_the_host_made() {
     }))
     .expect("device");
 
-    let backend = HeadlessBackend::with_device(device.clone(), queue.clone(), SIZE, ContextMode::Unique);
-    assert_eq!(backend.get_adapter_info(), Some(adapter.get_info()));
-    assert_all(&clear_and_read(&backend, BLUE), [0, 0, 255, 255]);
+    let target = headless(&Device::from_wgpu(Some(instance), device.clone(), queue.clone(), None));
+    assert_eq!(target.backend().device().adapter_info(), adapter.get_info());
+    assert_all(&clear_and_read(&target, BLUE), [0, 0, 255, 255]);
 
     // The host's own work on the device still runs alongside.
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -99,14 +112,13 @@ fn a_backend_renders_on_a_device_the_host_made() {
 
 #[test]
 fn the_first_named_adapter_renders() {
-    let (device, queue) = HeadlessBackend::request_device(Some(0)).expect("adapter 0");
-    let backend = HeadlessBackend::with_device(device, queue, SIZE, ContextMode::Unique);
-    assert_all(&clear_and_read(&backend, RED), [255, 0, 0, 255]);
+    let target = headless(&Device::new(Some(0)).expect("adapter 0"));
+    assert_all(&clear_and_read(&target, RED), [255, 0, 0, 255]);
 }
 
 #[test]
 fn requesting_a_missing_adapter_fails() {
-    let error = HeadlessBackend::request_device(Some(usize::MAX)).expect_err("no such adapter");
+    let error = Device::new(Some(usize::MAX)).expect_err("no such adapter");
     assert_eq!(error.kind, mln_util::ErrorKind::NotFound, "{error}");
     assert!(error.message.contains("past the"), "{error}");
 }

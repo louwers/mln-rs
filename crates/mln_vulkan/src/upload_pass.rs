@@ -13,7 +13,6 @@ use mln_gfx::attribute::{AttributeBinding, AttributeBindingArray, AttributeDescr
 use mln_gfx::debug_group::DebugGroupTarget;
 use mln_gfx::gfx_types::AttributeDataType;
 use mln_gfx::index_vector::IndexVectorBase;
-use mln_gfx::renderable::Renderable;
 use mln_gfx::types::BufferUsageType;
 use mln_gfx::upload_pass;
 use mln_gfx::vertex_attribute::{VertexAttribute, VertexAttributeArray};
@@ -43,7 +42,7 @@ impl VertexBufferBase for VertexBuffer {
 }
 
 impl UploadPass {
-    pub fn new(_renderable: &dyn Renderable, command_encoder: &CommandEncoder, name: &str) -> Self {
+    pub fn new(command_encoder: &CommandEncoder, name: &str) -> Self {
         let pass = UploadPass {
             context: command_encoder.get_context().clone(),
             command_buffer: command_encoder.get_command_buffer(),
