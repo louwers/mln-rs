@@ -28,12 +28,34 @@ abi::versioned!(
 
 /// An acquired frame, until the host releases or discards it.
 struct FrameObject {
-    frame: Mutex<Option<AcquiredFrame>>,
+    frame: Mutex<Held>,
     /// The views that keep the frame in place.
     views: AtomicU32,
+    /// How many views are open on the session's frames.
+    session_views: Arc<Mutex<u32>>,
     /// The scale factor that the session's map was created with, which the
     /// frame's view reports exactly.
     initial_scale_factor: f64,
+}
+
+/// What a frame's handle holds.
+#[derive(Default)]
+struct Held {
+    /// The frame, until the host releases or discards it.
+    frame: Option<AcquiredFrame>,
+    /// A frame that the host discarded while a view was open on it, which
+    /// the session takes back once the last view ends.
+    discarded: Option<AcquiredFrame>,
+}
+
+impl Held {
+    fn as_ref(&self) -> Option<&AcquiredFrame> {
+        self.frame.as_ref()
+    }
+
+    fn take(&mut self) -> Option<AcquiredFrame> {
+        self.frame.take()
+    }
 }
 
 static FRAMES: HandleTable<FrameObject> = HandleTable::new(HandleKind::AcquiredFrame);
@@ -90,8 +112,9 @@ pub unsafe extern "C" fn mln_render_session_acquire_frame(
             return Ok(());
         };
         let frame = FrameObject {
-            frame: Mutex::new(Some(frame)),
+            frame: Mutex::new(Held { frame: Some(frame), discarded: None }),
             views: AtomicU32::new(0),
+            session_views: object.views.clone(),
             initial_scale_factor: object.initial_scale_factor,
         };
         // A frame that gets no handle drops, which gives it back.
@@ -221,13 +244,16 @@ pub unsafe extern "C" fn mln_acquired_frame_discard(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, {
-        // A view's objects stay as they are: the session renders into the
-        // frame's texture no more.
         let object = FRAMES.get(frame)?;
         let mut held = object.frame.lock_unpoisoned();
         let acquired = held.take().ok_or_else(|| Error::invalid_state("acquired frame was already released"))?;
-        drop(held);
         let _ = FRAMES.remove(frame);
+        // A view keeps the frame's sync objects in place until it ends.
+        if object.views.load(Ordering::Acquire) != 0 {
+            held.discarded = Some(acquired);
+            return Ok(());
+        }
+        drop(held);
         acquired.discard();
         Ok(())
     })
@@ -255,9 +281,12 @@ pub unsafe extern "C" fn mln_acquired_frame_view_begin(
         {
             let held = object.frame.lock_unpoisoned();
             let acquired = held.as_ref().ok_or_else(|| Error::invalid_state("acquired frame was already released"))?;
+            // No abandon runs while the session's views are counted.
+            let mut session_views = object.session_views.lock_unpoisoned();
             if !acquired.session_live() {
                 return Err(target_lost());
             }
+            *session_views += 1;
             object.views.fetch_add(1, Ordering::AcqRel);
         }
         let scope = Box::into_raw(Box::new(ViewScope(object)));
@@ -280,7 +309,17 @@ pub unsafe extern "C" fn mln_acquired_frame_view_end(scope: *mut c_void) {
     }
     // SAFETY: the caller's contract: a scope of `view_begin`, ended once.
     let scope = unsafe { Box::from_raw(scope.cast::<ViewScope>()) };
-    scope.0.views.fetch_sub(1, Ordering::AcqRel);
+    let object = &scope.0;
+    let mut held = object.frame.lock_unpoisoned();
+    {
+        let mut session_views = object.session_views.lock_unpoisoned();
+        *session_views = session_views.saturating_sub(1);
+    }
+    let discarded = (object.views.fetch_sub(1, Ordering::AcqRel) == 1).then(|| held.discarded.take()).flatten();
+    drop(held);
+    if let Some(frame) = discarded {
+        frame.discard();
+    }
 }
 
 /// The texture of the frame `frame` names, the scale factor it rendered at,

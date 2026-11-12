@@ -2,13 +2,14 @@
 //! results, and the work it runs on its driver.
 
 use core::ffi::c_char;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use ::mln_runtime::{
     AttachOptions, DemandMode, Driver, FrameDemand, FrameDisposition, FrameResult, LogicalExtent, RenderSession,
     RenderSessionState, RenderTarget,
 };
 use mln_util::size::Size;
+use mln_util::sync::MutexExt;
 
 use crate::abi::{self, Fields};
 use crate::callback::Wake;
@@ -55,6 +56,9 @@ pub(crate) struct SessionObject {
     /// Held so that its user data lives as long as the session's handle: a
     /// core worker never runs it.
     _driver_work_wake: Arc<Wake>,
+    /// How many views are open on the session's acquired frames. An abandon
+    /// holds the lock, so no view opens while it runs.
+    pub(crate) views: Arc<Mutex<u32>>,
 }
 
 static SESSIONS: HandleTable<SessionObject> = HandleTable::new(HandleKind::RenderSession);
@@ -176,6 +180,7 @@ pub(crate) fn attach(
         initial_scale_factor: map.scale_factor,
         has_redraw_wake: request.has_redraw_wake,
         _driver_work_wake: Arc::clone(&request.driver_work_wake),
+        views: Arc::default(),
     };
     match SESSIONS.insert(Arc::new(object)) {
         Ok(handle) => Ok((handle, attached)),
@@ -659,9 +664,21 @@ pub unsafe extern "C" fn mln_render_session_abandon(
         // Checked before the abandon, which can't be undone.
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &abandon_result(0)) }?;
-        resolve(session)?.session.abandon()?;
-        Ok(())
+        unviewed(&*resolve(session)?, |session| Ok(session.abandon()?))
     })
+}
+
+/// Runs `abandon` on the session, unless a view is open on one of its
+/// frames: the view keeps the frame's texture and sync objects in place.
+fn unviewed<R>(object: &SessionObject, abandon: impl FnOnce(&RenderSession) -> Result<R, Error>) -> Result<R, Error> {
+    let views = object.views.lock_unpoisoned();
+    if *views != 0 {
+        return Err(Error::new(
+            mln_util::ErrorKind::Busy,
+            "a view is open on one of the render session's acquired frames",
+        ));
+    }
+    abandon(&object.session)
 }
 
 /// What an abandon reports when it kept `kept` graphics objects until the
@@ -682,7 +699,7 @@ pub(crate) fn abandon_result(kept: u32) -> mln_render_abandon_result {
 /// Abandons `session` without graphics calls, keeping its graphics objects
 /// until the process exits, and returns how many it keeps.
 pub(crate) fn abandon_keeping_graphics(session: mln_render_session) -> Result<u32, Error> {
-    Ok(resolve(session)?.session.abandon_keeping_graphics()?)
+    unviewed(&*resolve(session)?, |session| Ok(session.abandon_keeping_graphics()?))
 }
 
 /// Releases `session` in any state without graphics calls past the one in
