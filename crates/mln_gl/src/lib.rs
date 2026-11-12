@@ -54,6 +54,8 @@ pub mod canvas_target;
 pub mod device;
 #[cfg(not(target_arch = "wasm32"))]
 mod egl;
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+pub mod exported_target;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod offscreen_target;
 #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
@@ -66,6 +68,8 @@ pub use canvas_target::CanvasTarget;
 pub use context::Context;
 #[cfg(not(target_arch = "wasm32"))]
 pub use device::Device;
+#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+pub use exported_target::ExportedTarget;
 #[cfg(not(target_arch = "wasm32"))]
 pub use offscreen_target::OffscreenTarget;
 pub use renderer_backend::RendererBackend;

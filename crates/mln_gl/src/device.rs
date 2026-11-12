@@ -148,6 +148,9 @@ enum Kind {
 #[derive(Clone)]
 pub struct Device {
     kind: Arc<Kind>,
+    /// What exports the group's dmabufs, found once, when first asked.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    exporter: Arc<OnceLock<Option<Arc<crate::exported_target::Exporter>>>>,
 }
 
 impl std::fmt::Debug for Device {
@@ -167,7 +170,7 @@ impl Device {
     pub fn new() -> Result<Device, Error> {
         let display = EglDisplay::get().map_err(Error::unsupported)?;
         let root = display.create_context(None).map_err(Error::native)?;
-        Ok(Device { kind: Arc::new(Kind::Library(ShareGroup { display, root })) })
+        Ok(Device::of(Kind::Library(ShareGroup { display, root })))
     }
 
     /// The host's share group, whose root is `context`, of `config` on
@@ -213,7 +216,30 @@ impl Device {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
         let surfaceless = !pbuffers && extensions.split(' ').any(|e| e == "EGL_KHR_surfaceless_context");
-        Ok(Device { kind: Arc::new(Kind::Host(HostGroup { egl, display, config, root, surfaceless })) })
+        Ok(Device::of(Kind::Host(HostGroup { egl, display, config, root, surfaceless })))
+    }
+
+    fn of(kind: Kind) -> Device {
+        Device {
+            kind: Arc::new(kind),
+            #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+            exporter: Arc::default(),
+        }
+    }
+
+    /// The EGL library and the display of the group.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    pub(crate) fn display(&self) -> (&'static Egl, egl::Display) {
+        match &*self.kind {
+            Kind::Library(group) => (group.display.egl, group.display.display),
+            Kind::Host(group) => (group.egl, group.display),
+        }
+    }
+
+    /// What exports the group's dmabufs, or `None` where nothing does.
+    #[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+    pub(crate) fn exporter(&self) -> Option<Arc<crate::exported_target::Exporter>> {
+        self.exporter.get_or_init(|| crate::exported_target::Exporter::probe(self).map(Arc::new)).clone()
     }
 
     /// Whether the group's root is the host's context.

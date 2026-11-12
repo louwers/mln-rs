@@ -27,8 +27,10 @@ mln_util.workspace = true
 khronos-egl.workspace = true
 
 # The window backend: the window's handles, and libwayland-egl, loaded at run
-# time, for a Wayland surface.
+# time, for a Wayland surface. The exported ring: libgbm, loaded at run time,
+# and the system calls that allocate dmabufs.
 [target.'cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))'.dependencies]
+libc.workspace = true
 libloading.workspace = true
 raw-window-handle.workspace = true
 
