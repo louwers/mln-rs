@@ -28,6 +28,7 @@ pub struct DrawableAtlasesTweaker {
 
 impl DrawableAtlasesTweaker {
     #[allow(clippy::too_many_arguments)]
+    #[must_use]
     pub fn new(
         atlases: Option<Rc<TileAtlasTextures>>,
         icon_texture_id: Option<usize>,
@@ -38,7 +39,7 @@ impl DrawableAtlasesTweaker {
         icon_scaled: bool,
         text_size_is_zoom_constant: bool,
     ) -> Self {
-        debug_assert!(icon_texture_id != glyph_texture_id);
+        debug_assert_ne!(icon_texture_id, glyph_texture_id);
         DrawableAtlasesTweaker {
             atlases,
             icon_texture_id,
@@ -79,7 +80,7 @@ impl DrawableAtlasesTweaker {
         if let Some(icon_texture_id) = self.icon_texture_id
             && shader.get_sampler_location(icon_texture_id).is_some()
         {
-            debug_assert!(glyph_texture_id != icon_texture_id);
+            debug_assert_ne!(glyph_texture_id, icon_texture_id);
             drawable.set_texture(glyph, glyph_texture_id);
             drawable.set_texture(icon, icon_texture_id);
         } else {

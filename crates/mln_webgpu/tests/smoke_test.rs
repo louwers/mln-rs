@@ -98,8 +98,8 @@ fn clear_offscreen_texture_and_read_back() {
     let mapped = readback.get_mapped_range(..).expect("get_mapped_range failed");
     for y in 0..height as usize {
         let row = &mapped[y * padded as usize..][..unpadded as usize];
-        for px in row.chunks_exact(4) {
-            assert_eq!(px, [255, 0, 0, 255], "row {y}");
+        for px in row.as_chunks::<4>().0 {
+            assert_eq!(px, &[255, 0, 0, 255], "row {y}");
         }
     }
 }

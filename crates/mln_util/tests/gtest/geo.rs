@@ -179,11 +179,11 @@ fn boundaries() {
     assert_double_eq(-180.1, coordinate.longitude());
 
     coordinate.wrap();
-    assert_double_eq(179.90000000000001, coordinate.longitude()); // 1E-14
+    assert_double_eq(179.9, coordinate.longitude()); // 1E-14
 
     coordinate = ll(0.0, 180.9);
     coordinate.wrap();
-    assert_double_eq(-179.09999999999999, coordinate.longitude());
+    assert_double_eq(-179.1, coordinate.longitude());
 
     coordinate = ll(0.0, -360.5);
     coordinate.wrap();
@@ -193,7 +193,7 @@ fn boundaries() {
     coordinate.wrap();
     assert_double_eq(0.5, coordinate.longitude());
 
-    coordinate = ll(0.0, 360000.5);
+    coordinate = ll(0.0, 360_000.5);
     coordinate.wrap();
     assert_double_eq(0.5, coordinate.longitude());
 }

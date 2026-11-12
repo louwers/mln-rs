@@ -17,7 +17,11 @@ use mln_map_types::TransformState;
 use mln_style::PropertyEvaluationParameters;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::fill_extrusion_layer_properties::*;
+use mln_style::layers::fill_extrusion_layer_properties::{
+    FillExtrusionBase, FillExtrusionColor, FillExtrusionHeight, FillExtrusionLayerProperties,
+    FillExtrusionLayoutProperties, FillExtrusionPaintProperties, FillExtrusionPattern,
+    FillExtrusionRoundedCornerDistance, FillExtrusionTranslate,
+};
 use mln_style::light::{LightAnchor, LightColor, LightIntensity, LightPosition};
 use mln_style::properties::Property;
 use mln_style::renderer::possibly_evaluated_property_value::PossiblyEvaluatedFadedPropertyValue;
@@ -100,6 +104,7 @@ fn dist_u16(a: Point<f64>, b: Point<f64>) -> u16 {
 
 impl FillExtrusionBucket {
     /// `FillExtrusionBucket(layout, layerPaintProperties, zoom, overscaling)`.
+    #[must_use]
     pub fn new(
         layout: FillExtrusionLayoutProperties::PossiblyEvaluated,
         layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
@@ -128,6 +133,7 @@ impl FillExtrusionBucket {
     }
 
     /// `layoutVertex(p, edgeDistance, isDiscarded)`.
+    #[must_use]
     pub fn layout_vertex(p: Point<f64>, edge_distance: u16, is_discarded: bool) -> FillExtrusionLayoutVertex {
         let int_part = Point::new(p.x.floor(), p.y.floor());
         // Multiply factional part by 2^7 to pack them into integers [0..127]
@@ -227,9 +233,9 @@ impl FillExtrusionBucket {
         self.add_outline(polygon);
 
         let indices: Vec<u32> = earcut::earcut::<u32, _, _>(polygon);
-        debug_assert!(indices.len() % 3 == 0);
+        debug_assert!(indices.len().is_multiple_of(3));
         let index = |i: u32| (first_index + i as usize) as u16;
-        for triangle in indices.chunks_exact(3) {
+        for triangle in indices.as_chunks::<3>().0 {
             // Counter-Clockwise winding order.
             self.triangles.get_mut().extend_from_slice(&[index(triangle[0]), index(triangle[2]), index(triangle[1])]);
         }
@@ -241,6 +247,7 @@ impl FillExtrusionBucket {
     }
 
     /// `lightColor(const EvaluatedLight&)`.
+    #[must_use]
     pub fn light_color(light: &EvaluatedLight) -> [f32; 3] {
         let color = light.get::<LightColor>();
         [color.r, color.g, color.b]
@@ -261,6 +268,7 @@ impl FillExtrusionBucket {
     }
 
     /// `lightIntensity(const EvaluatedLight&)`.
+    #[must_use]
     pub fn light_intensity(light: &EvaluatedLight) -> f32 {
         *light.get::<LightIntensity>()
     }
@@ -305,7 +313,7 @@ impl Bucket for FillExtrusionBucket {
             if granularity >= 2 {
                 let subdivided_rings: Vec<GeometryCoordinates> =
                     polygon.iter().map(|ring| subdivide_vertex_line(ring, granularity, true)).collect();
-                let ring_vertices: usize = subdivided_rings.iter().map(|ring| ring.len()).sum();
+                let ring_vertices: usize = subdivided_rings.iter().map(Vec::len).sum();
                 if ring_vertices <= MAX_SEGMENT_VERTICES {
                     let roof = subdivide_polygon(&polygon, canonical, granularity, false);
                     self.add_polygon(&subdivided_rings, Some(&roof))?;
@@ -316,7 +324,7 @@ impl Bucket for FillExtrusionBucket {
         }
 
         let length = self.vertices.len();
-        for (id, binders) in self.paint_property_binders.iter_mut() {
+        for (id, binders) in &mut self.paint_property_binders {
             binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,

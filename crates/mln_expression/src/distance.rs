@@ -957,6 +957,7 @@ pub struct Distance {
 }
 
 impl Distance {
+    #[must_use]
     pub fn new(geojson: geojson::GeoJSON, geometries: Geometry<f64>) -> Self {
         Distance {
             base: ExpressionBase::new(Kind::Distance, Type::Number, Dependency::FEATURE),
@@ -1051,15 +1052,11 @@ impl Expression for Distance {
 
     fn serialize(&self) -> MbglValue {
         let value = geojson::to_json(&self.geojson_source);
-        let serialized: ValueObject = match &value {
-            serde_json::Value::Object(o) => o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect(),
-            _ => {
-                Log::error(
-                    Event::Style,
-                    "Failed to serialize 'distance' expression, converted rapidJSON is not an object",
-                );
-                ValueObject::new()
-            }
+        let serialized: ValueObject = if let serde_json::Value::Object(o) = &value {
+            o.iter().map(|(k, v)| (k.clone(), convert_value(v))).collect()
+        } else {
+            Log::error(Event::Style, "Failed to serialize 'distance' expression, converted rapidJSON is not an object");
+            ValueObject::new()
         };
         MbglValue::Array(vec![MbglValue::String(self.get_operator()), MbglValue::Object(serialized)])
     }
@@ -1215,7 +1212,7 @@ mod tests {
     fn points(count: usize, seed: u64, x0: f64) -> Vec<Point<f64>> {
         let mut state = seed;
         let mut next = move || {
-            state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
             (state >> 11) as f64 / (1u64 << 53) as f64
         };
         (0..count).map(|_| Point::new(x0 + next() * 0.02, 60.16 + next() * 0.01)).collect()

@@ -28,6 +28,7 @@ use crate::stops::Stops;
 use crate::type_::Type;
 use crate::value::Value;
 
+#[must_use]
 pub fn compound(op: &str, args: Vec<Box<dyn Expression>>) -> Box<dyn Expression> {
     let mut ctx = ParsingContext::new();
     let result = create_compound_expression(op, args, &mut ctx);
@@ -35,6 +36,7 @@ pub fn compound(op: &str, args: Vec<Box<dyn Expression>>) -> Box<dyn Expression>
 }
 
 /// `dsl::createExpression(const char*)`: parses JSON text.
+#[must_use]
 pub fn create_expression_from_str(expr: &str) -> Option<Box<dyn Expression>> {
     // TODO(port): rapidjson `Parse<0>`; serde_json accepts the same JSON.
     let document: serde_json::Value = serde_json::from_str(expr).ok()?;
@@ -42,6 +44,7 @@ pub fn create_expression_from_str(expr: &str) -> Option<Box<dyn Expression>> {
     ctx.parse_expression(&Convertible::from(&document), None)
 }
 
+#[must_use]
 pub fn create_expression(expr: &Convertible<'_>) -> Option<Box<dyn Expression>> {
     let mut ctx = ParsingContext::new();
     ctx.parse_expression(expr, None)
@@ -51,22 +54,27 @@ pub fn error(message: impl Into<String>) -> Box<dyn Expression> {
     Box::new(Error::new(message.into()))
 }
 
+#[must_use]
 pub fn literal_str(value: &str) -> Box<dyn Expression> {
     literal(Value::String(value.to_owned()))
 }
 
+#[must_use]
 pub fn literal(value: Value) -> Box<dyn Expression> {
     Box::new(Literal::new(value))
 }
 
+#[must_use]
 pub fn literal_numbers(value: &[f64]) -> Box<dyn Expression> {
     literal(Value::Array(value.iter().map(|v| Value::Number(*v)).collect()))
 }
 
+#[must_use]
 pub fn literal_strings(value: &[&str]) -> Box<dyn Expression> {
     literal(Value::Array(value.iter().map(|v| Value::String((*v).to_owned())).collect()))
 }
 
+#[must_use]
 pub fn assertion(type_: Type, value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     let mut v = vec![value];
     if let Some(def) = def {
@@ -75,14 +83,17 @@ pub fn assertion(type_: Type, value: Box<dyn Expression>, def: Option<Box<dyn Ex
     Box::new(Assertion::new(type_, v))
 }
 
+#[must_use]
 pub fn number(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     assertion(Type::Number, value, def)
 }
 
+#[must_use]
 pub fn string(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     assertion(Type::String, value, def)
 }
 
+#[must_use]
 pub fn boolean(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     assertion(Type::Boolean, value, def)
 }
@@ -95,66 +106,82 @@ fn coercion(type_: Type, value: Box<dyn Expression>, def: Option<Box<dyn Express
     Box::new(Coercion::new(type_, v))
 }
 
+#[must_use]
 pub fn to_color(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::Color, value, def)
 }
 
+#[must_use]
 pub fn to_padding(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::Padding, value, def)
 }
 
+#[must_use]
 pub fn to_projection_definition(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::ProjectionDefinition, value, def)
 }
 
+#[must_use]
 pub fn to_variable_anchor_offset(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::VariableAnchorOffsetCollection, value, def)
 }
 
+#[must_use]
 pub fn to_string(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::String, value, def)
 }
 
+#[must_use]
 pub fn to_formatted(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::Formatted, value, def)
 }
 
+#[must_use]
 pub fn to_image(value: Box<dyn Expression>, def: Option<Box<dyn Expression>>) -> Box<dyn Expression> {
     coercion(Type::Image, value, def)
 }
 
+#[must_use]
 pub fn get_str(value: &str) -> Box<dyn Expression> {
     get(literal_str(value))
 }
 
+#[must_use]
 pub fn get(property: Box<dyn Expression>) -> Box<dyn Expression> {
     compound("get", vec![property])
 }
 
+#[must_use]
 pub fn id() -> Box<dyn Expression> {
     compound("id", vec![])
 }
 
+#[must_use]
 pub fn zoom() -> Box<dyn Expression> {
     compound("zoom", vec![])
 }
 
+#[must_use]
 pub fn eq(lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Box<dyn Expression> {
     Box::new(BasicComparison::new("==".to_owned(), lhs, rhs))
 }
 
+#[must_use]
 pub fn ne(lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Box<dyn Expression> {
     Box::new(BasicComparison::new("!=".to_owned(), lhs, rhs))
 }
 
+#[must_use]
 pub fn gt(lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Box<dyn Expression> {
     Box::new(BasicComparison::new(">".to_owned(), lhs, rhs))
 }
 
+#[must_use]
 pub fn lt(lhs: Box<dyn Expression>, rhs: Box<dyn Expression>) -> Box<dyn Expression> {
     Box::new(BasicComparison::new("<".to_owned(), lhs, rhs))
 }
 
+#[must_use]
 pub fn step(
     input: Box<dyn Expression>,
     output0: Box<dyn Expression>,
@@ -168,19 +195,23 @@ pub fn step(
     Box::new(Step::new(type_, input, stops))
 }
 
+#[must_use]
 pub fn linear() -> Interpolator {
     ExponentialInterpolator::new(1.0).into()
 }
 
+#[must_use]
 pub fn exponential(base: f64) -> Interpolator {
     ExponentialInterpolator::new(base).into()
 }
 
+#[must_use]
 pub fn cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64) -> Interpolator {
     CubicBezierInterpolator::new(x1, y1, x2, y2).into()
 }
 
 /// The `dsl::interpolate` overloads: stops as (input, output) pairs.
+#[must_use]
 pub fn interpolate(
     interpolator: Interpolator,
     input: Box<dyn Expression>,
@@ -196,23 +227,28 @@ pub fn interpolate(
     result.expect("dsl::interpolate")
 }
 
+#[must_use]
 pub fn concat(inputs: Vec<Box<dyn Expression>>) -> Box<dyn Expression> {
     compound("concat", inputs)
 }
 
+#[must_use]
 pub fn format_str(value: &str) -> Box<dyn Expression> {
     Box::new(Literal::new(Value::Formatted(Formatted::from_plain(value))))
 }
 
+#[must_use]
 pub fn format(input: Box<dyn Expression>) -> Box<dyn Expression> {
     let sections = vec![FormatExpressionSection::new(input)];
     Box::new(FormatExpression::new(sections))
 }
 
+#[must_use]
 pub fn image_str(value: &str) -> Box<dyn Expression> {
     Box::new(Literal::new(Value::Image(Image::new(value))))
 }
 
+#[must_use]
 pub fn image(expression: Box<dyn Expression>) -> Box<dyn Expression> {
     Box::new(ImageExpression::new(expression))
 }

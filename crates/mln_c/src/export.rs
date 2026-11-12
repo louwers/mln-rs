@@ -130,14 +130,14 @@ mod tests {
     #[test]
     fn success_clears_the_diagnostic() {
         let mut out = diagnostic();
-        assert_eq!(entry(&0, false, &mut *out), MLN_STATUS_OK);
+        assert_eq!(entry(&0, false, &raw mut *out), MLN_STATUS_OK);
         assert_eq!(message(&out), "");
     }
 
     #[test]
     fn a_failure_writes_its_status_and_message() {
         let mut out = diagnostic();
-        assert_eq!(entry(&0, true, &mut *out), MLN_STATUS_NOT_FOUND);
+        assert_eq!(entry(&0, true, &raw mut *out), MLN_STATUS_NOT_FOUND);
         assert_eq!(message(&out), "nothing is there");
         assert_eq!(entry(&0, true, core::ptr::null_mut()), MLN_STATUS_NOT_FOUND);
     }
@@ -145,7 +145,7 @@ mod tests {
     #[test]
     fn a_listed_null_pointer_is_an_invalid_argument() {
         let mut out = diagnostic();
-        assert_eq!(entry(core::ptr::null(), false, &mut *out), MLN_STATUS_INVALID_ARGUMENT);
+        assert_eq!(entry(core::ptr::null(), false, &raw mut *out), MLN_STATUS_INVALID_ARGUMENT);
         assert_eq!(message(&out), "pointer must not be null");
     }
 
@@ -156,14 +156,14 @@ mod tests {
             let _outer = ForbidReentry::enter("outer callback");
             {
                 let _inner = ForbidReentry::enter("inner callback");
-                assert_eq!(entry(&0, false, &mut *out), MLN_STATUS_INVALID_STATE);
+                assert_eq!(entry(&0, false, &raw mut *out), MLN_STATUS_INVALID_STATE);
                 assert_eq!(message(&out), "inner callback");
             }
-            assert_eq!(entry(&0, false, &mut *out), MLN_STATUS_INVALID_STATE);
+            assert_eq!(entry(&0, false, &raw mut *out), MLN_STATUS_INVALID_STATE);
             assert_eq!(message(&out), "outer callback");
             // Another thread isn't in the scope.
             std::thread::spawn(|| assert_eq!(entry(&0, false, core::ptr::null_mut()), MLN_STATUS_OK)).join().unwrap();
         }
-        assert_eq!(entry(&0, false, &mut *out), MLN_STATUS_OK);
+        assert_eq!(entry(&0, false, &raw mut *out), MLN_STATUS_OK);
     }
 }

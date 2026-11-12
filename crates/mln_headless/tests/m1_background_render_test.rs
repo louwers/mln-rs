@@ -59,7 +59,7 @@ fn run_on(test: &str, frontend: impl FnOnce(Size, f32) -> HeadlessFrontend) -> (
         0.1285,
         false,
     );
-    let difference = pixels as f64 / expected.size.area() as f64;
+    let difference = pixels as f64 / f64::from(expected.size.area());
     eprintln!(
         "{test}: difference {difference} (allowed {allowed}); actual[0] = {:?}, expected[0] = {:?}",
         &actual.data[..4],
@@ -100,7 +100,7 @@ fn background_color_color_space_hcl() {
     eprintln!("colorSpace-hcl (C++ fails it too): difference {difference}, allowed {allowed}");
 }
 
-/// Needs the render-test runner's ProxyFileSource: the style's sprite
+/// Needs the render-test runner's `ProxyFileSource`: the style's sprite
 /// (`local://sprites/sprite`) is served cache-only from
 /// metrics/cache-style.db as `http://sprites/sprite.*`. With a plain Map the
 /// cache misses and the request falls through to the network (C++: an

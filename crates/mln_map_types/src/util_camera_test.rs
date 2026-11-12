@@ -16,13 +16,13 @@ fn ll(lat: f64, lon: f64) -> LatLng {
 /// gtest's `FloatingPoint<double>::AlmostEquals`: at most 4 ULPs apart,
 /// NaN never equal.
 fn almost_equals_f64(a: f64, b: f64) -> bool {
-    if a.is_nan() || b.is_nan() {
-        return false;
-    }
     fn biased(x: f64) -> u64 {
         const SIGN: u64 = 1 << 63;
         let bits = x.to_bits();
         if bits & SIGN != 0 { (!bits).wrapping_add(1) } else { bits | SIGN }
+    }
+    if a.is_nan() || b.is_nan() {
+        return false;
     }
     let (a, b) = (biased(a), biased(b));
     a.abs_diff(b) <= 4
@@ -66,7 +66,7 @@ fn set_location() {
 
     options.set_location(&LatLngAltitude { location: ll(25.0, -180.0), altitude: 1000.0 });
     assert!(options.position.is_some());
-    assert_vec3_near_1e7(&options.position.unwrap(), &[0.0, 0.4282409625, 0.000027532812465]);
+    assert_vec3_near_1e7(&options.position.unwrap(), &[0.0, 0.428_240_962_5, 0.000_027_532_812_465]);
 
     options.set_location(&LatLngAltitude {
         location: ll(LATITUDE_MAX, 0.0),
@@ -105,16 +105,14 @@ fn set_location_unwrapped_location() {
 // gtest: FreeCameraOptions.GetLocation
 #[test]
 fn get_location() {
-    let mut options = FreeCameraOptions::default();
-
-    options.position = Some([0.5, 0.5, 0.5]);
+    let mut options = FreeCameraOptions { position: Some([0.5, 0.5, 0.5]), ..FreeCameraOptions::default() };
     assert!(options.get_location().is_some());
     let lat_lng_altitude = options.get_location().unwrap();
     assert_double_eq(lat_lng_altitude.location.latitude(), 0.0);
     assert_double_eq(lat_lng_altitude.location.longitude(), 0.0);
-    assert_double_eq(lat_lng_altitude.altitude, 20037508.342789244);
+    assert_double_eq(lat_lng_altitude.altitude, 20_037_508.342_789_244);
 
-    options.position = Some([0.0, 0.4282409625, 0.000027532812465]);
+    options.position = Some([0.0, 0.428_240_962_5, 0.000_027_532_812_465]);
     assert!(options.get_location().is_some());
     let lat_lng_altitude = options.get_location().unwrap();
     assert_near(lat_lng_altitude.location.latitude(), 25.0, 1e-7);
@@ -126,7 +124,7 @@ fn get_location() {
     let lat_lng_altitude = options.get_location().unwrap();
     assert_near(lat_lng_altitude.location.latitude(), LATITUDE_MAX, 1e-7);
     assert_near(lat_lng_altitude.location.longitude(), 0.0, 1e-7);
-    assert_near(lat_lng_altitude.altitude, 1728570.489074, 1e-6);
+    assert_near(lat_lng_altitude.altitude, 1_728_570.489_074, 1e-6);
 }
 
 // gtest: FreeCameraOptions.GetLocationInvalidPosition
@@ -146,8 +144,7 @@ fn get_location_invalid_position() {
 // gtest: FreeCameraOptions.GetLocationNegativeAltitude
 #[test]
 fn get_location_negative_altitude() {
-    let mut options = FreeCameraOptions::default();
-    options.position = Some([0.5, 0.5, -0.25]);
+    let options = FreeCameraOptions { position: Some([0.5, 0.5, -0.25]), ..FreeCameraOptions::default() };
     let lat_lng_altitude = options.get_location();
     assert!(lat_lng_altitude.is_some());
 
@@ -157,8 +154,7 @@ fn get_location_negative_altitude() {
 // gtest: FreeCameraOptions.GetLocationUnwrappedPosition
 #[test]
 fn get_location_unwrapped_position() {
-    let mut options = FreeCameraOptions::default();
-    options.position = Some([1.25, 0.5, 0.0]);
+    let options = FreeCameraOptions { position: Some([1.25, 0.5, 0.0]), ..FreeCameraOptions::default() };
     let lat_lng_altitude = options.get_location();
     assert!(lat_lng_altitude.is_some());
     let lat_lng_altitude = lat_lng_altitude.unwrap();
@@ -229,8 +225,8 @@ fn look_at_point() {
     assert!(options.orientation.is_some());
     let (right, up, forward) = rotated_frame(&options.orientation.unwrap());
 
-    assert_vec3_near_1e7(&right, &[0.0, 0.9714568644195829, 0.2372162738348117]);
-    assert_vec3_near_1e7(&up, &[0.0, -0.23721627383481167, 0.97145686441958301]);
+    assert_vec3_near_1e7(&right, &[0.0, 0.971_456_864_419_582_9, 0.237_216_273_834_811_7]);
+    assert_vec3_near_1e7(&up, &[0.0, -0.237_216_273_834_811_67, 0.971_456_864_419_583]);
     assert_vec3_near_1e7(&forward, &[1.0, 0.0, 0.0]);
 
     // Up vector pointing downwards
@@ -247,10 +243,8 @@ fn look_at_point() {
 // gtest: FreeCameraOptions.LookAtPointInvalidInput
 #[test]
 fn look_at_point_invalid_input() {
-    let mut options = FreeCameraOptions::default();
-
     // Position not set
-    options.orientation = Some([0.0, 0.0, 0.0, 0.0]);
+    let mut options = FreeCameraOptions { orientation: Some([0.0, 0.0, 0.0, 0.0]), ..FreeCameraOptions::default() };
     options.look_at_point(&ll(0.0, 0.0), None);
     assert!(options.orientation.is_none());
 

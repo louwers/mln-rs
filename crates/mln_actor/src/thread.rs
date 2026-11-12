@@ -134,10 +134,10 @@ impl<O: 'static> Drop for Thread<O> {
     /// `~Thread()`: resume if paused, wait for the queue up to here, stop
     /// the loop and join.
     fn drop(&mut self) {
-        if let Backing::Spawned { paused, .. } = &self.backing {
-            if paused.lock_unpoisoned().is_some() {
-                self.resume();
-            }
+        if let Backing::Spawned { paused, .. } = &self.backing
+            && paused.lock_unpoisoned().is_some()
+        {
+            self.resume();
         }
         let Backing::Spawned { thread, running, run_loop, .. } = &mut self.backing else {
             return;

@@ -14,7 +14,7 @@ fn empty_clipper_returns_false() {
     let mut w = Wagyu::new();
     let mut out: MultiPolygon<i32> = Vec::new();
     assert_eq!(w.execute(ClipType::Union, &mut out, FillType::EvenOdd, FillType::EvenOdd), Ok(false));
-    assert!(out.is_empty());
+    assert_eq!(out, [] as [std::vec::Vec<std::vec::Vec<geometry::Point<i32>>>; 0]);
 }
 
 #[test]

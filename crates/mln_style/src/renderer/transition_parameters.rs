@@ -31,10 +31,12 @@ pub struct TransitionParameters {
 
 impl TransitionParameters {
     /// Parameters without a global-state change.
+    #[must_use]
     pub fn new(now: TimePoint, transition: TransitionOptions) -> Self {
         TransitionParameters { now, transition, global_state_change: None }
     }
 
+    #[must_use]
     pub fn is_global_state_only(&self) -> bool {
         self.global_state_change.as_ref().is_some_and(|change| change.state_only)
     }

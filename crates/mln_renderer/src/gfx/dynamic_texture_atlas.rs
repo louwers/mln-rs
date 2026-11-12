@@ -32,7 +32,7 @@ pub type DynamicTextureAtlasPtr = Arc<DynamicTextureAtlas>;
 /// Port-only: what a `LayoutResult`'s atlases release their bins to. In
 /// C++ that is always the map's `DynamicTextureAtlas`; for a tile worker in
 /// another wasm instance it is the map side's mirror of that instance's
-/// atlas (tile/worker_codec), which sends the releases on.
+/// atlas (`tile/worker_codec`), which sends the releases on.
 pub trait TextureAtlas: Send + Sync {
     /// `removeTextures(textureHandles, dynamicTexture)`.
     fn remove_textures(&self, texture_handles: &[TextureHandle], dynamic_texture: &Option<DynamicTexturePtr>);
@@ -55,7 +55,7 @@ const PADDING: u16 = ImagePosition::PADDING + EXTRA_PADDING;
 const START_SIZE: Size = Size { width: 512, height: 512 };
 const DUMMY_SIZE: Size = Size { width: 1, height: 1 };
 
-fn rect_without_extra_padding(rect: &RectU16) -> RectU16 {
+fn rect_without_extra_padding(rect: RectU16) -> RectU16 {
     RectU16 {
         x: rect.x + EXTRA_PADDING,
         y: rect.y + EXTRA_PADDING,
@@ -65,7 +65,7 @@ fn rect_without_extra_padding(rect: &RectU16) -> RectU16 {
 }
 
 /// `gfx::GlyphAtlas`. Port-only: serde writes the texture by key, as the
-/// worker instance's (tile/worker_codec).
+/// worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct GlyphAtlas {
     pub glyph_positions: GlyphPositions,
@@ -75,7 +75,7 @@ pub struct GlyphAtlas {
 }
 
 /// `gfx::ImageAtlas`. Port-only: serde writes the texture by key, as the
-/// worker instance's (tile/worker_codec).
+/// worker instance's (`tile/worker_codec`).
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ImageAtlas {
     #[serde(with = "sorted::map")]
@@ -160,6 +160,7 @@ fn pixel_type_key(t: TexturePixelType) -> u8 {
 }
 
 impl DynamicTextureAtlas {
+    #[must_use]
     pub fn new() -> Self {
         DynamicTextureAtlas::default()
     }
@@ -213,12 +214,11 @@ impl DynamicTextureAtlas {
                     if !glyph.bitmap.valid() {
                         continue;
                     }
-                    match Self::reserve_glyph(&mut state, &texture, glyph) {
-                        Some(tex_handle) => glyphs_to_upload.push((tex_handle, glyph.clone(), font_stack)),
-                        None => {
-                            has_space = false;
-                            break;
-                        }
+                    if let Some(tex_handle) = Self::reserve_glyph(&mut state, &texture, glyph) {
+                        glyphs_to_upload.push((tex_handle, glyph.clone(), font_stack));
+                    } else {
+                        has_space = false;
+                        break;
                     }
                 }
                 if !has_space {
@@ -240,13 +240,13 @@ impl DynamicTextureAtlas {
             let rect = *tex_handle.get_rectangle();
 
             if tex_handle.is_upload_needed() {
-                let mut padded_image = AlphaImage::new(Size::new(rect.w as u32, rect.h as u32));
+                let mut padded_image = AlphaImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
                 padded_image.fill(0);
                 let _ = AlphaImage::copy(
                     &glyph.bitmap,
                     &mut padded_image,
                     Point::new(0, 0),
-                    Point::new(PADDING as u32, PADDING as u32),
+                    Point::new(u32::from(PADDING), u32::from(PADDING)),
                     glyph.bitmap.size,
                 );
                 texture.upload_image(&padded_image.data, &mut tex_handle);
@@ -257,7 +257,7 @@ impl DynamicTextureAtlas {
                 .entry(font_stack)
                 .or_default()
                 .entry(glyph.id)
-                .or_insert(GlyphPosition { rect: rect_without_extra_padding(&rect), metrics: glyph.metrics });
+                .or_insert(GlyphPosition { rect: rect_without_extra_padding(rect), metrics: glyph.metrics });
         }
         glyph_atlas
     }
@@ -311,22 +311,20 @@ impl DynamicTextureAtlas {
 
             let mut has_space = true;
             for icon in icons.values() {
-                match Self::reserve_image(&mut state, &texture, icon, ImageType::Icon) {
-                    Some(tex_handle) => icons_to_upload.push((tex_handle, icon.clone())),
-                    None => {
-                        has_space = false;
-                        break;
-                    }
+                if let Some(tex_handle) = Self::reserve_image(&mut state, &texture, icon, ImageType::Icon) {
+                    icons_to_upload.push((tex_handle, icon.clone()));
+                } else {
+                    has_space = false;
+                    break;
                 }
             }
             if has_space {
                 for pattern in patterns.values() {
-                    match Self::reserve_image(&mut state, &texture, pattern, ImageType::Pattern) {
-                        Some(tex_handle) => patterns_to_upload.push((tex_handle, pattern.clone())),
-                        None => {
-                            has_space = false;
-                            break;
-                        }
+                    if let Some(tex_handle) = Self::reserve_image(&mut state, &texture, pattern, ImageType::Pattern) {
+                        patterns_to_upload.push((tex_handle, pattern.clone()));
+                    } else {
+                        has_space = false;
+                        break;
                     }
                 }
             }
@@ -353,13 +351,13 @@ impl DynamicTextureAtlas {
             let rect = *tex_handle.get_rectangle();
 
             if tex_handle.is_upload_needed() {
-                let mut padded_image = PremultipliedImage::new(Size::new(rect.w as u32, rect.h as u32));
+                let mut padded_image = PremultipliedImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
                 padded_image.fill(0);
                 let _ = PremultipliedImage::copy(
                     &icon.image,
                     &mut padded_image,
                     Point::new(0, 0),
-                    Point::new(PADDING as u32, PADDING as u32),
+                    Point::new(u32::from(PADDING), u32::from(PADDING)),
                     icon.image.size,
                 );
                 texture.upload_image(&padded_image.data, &mut tex_handle);
@@ -369,7 +367,7 @@ impl DynamicTextureAtlas {
             image_atlas
                 .icon_positions
                 .entry(icon.id.clone())
-                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(&rect), &icon, version));
+                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(rect), &icon, version));
         }
 
         image_atlas.pattern_positions.reserve(patterns.len());
@@ -377,19 +375,19 @@ impl DynamicTextureAtlas {
             let rect = *tex_handle.get_rectangle();
 
             if tex_handle.is_upload_needed() {
-                let mut padded_image = PremultipliedImage::new(Size::new(rect.w as u32, rect.h as u32));
+                let mut padded_image = PremultipliedImage::new(Size::new(u32::from(rect.w), u32::from(rect.h)));
                 padded_image.fill(0);
                 let src = &pattern.image;
                 let _ = PremultipliedImage::copy(
                     src,
                     &mut padded_image,
                     Point::new(0, 0),
-                    Point::new(PADDING as u32, PADDING as u32),
+                    Point::new(u32::from(PADDING), u32::from(PADDING)),
                     src.size,
                 );
 
-                let x = PADDING as u32;
-                let y = PADDING as u32;
+                let x = u32::from(PADDING);
+                let y = u32::from(PADDING);
                 let w = src.size.width;
                 let h = src.size.height;
 
@@ -430,7 +428,7 @@ impl DynamicTextureAtlas {
             image_atlas
                 .pattern_positions
                 .entry(pattern.id.clone())
-                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(&rect), &pattern, version));
+                .or_insert_with(|| ImagePosition::new(rect_without_extra_padding(rect), &pattern, version));
         }
 
         image_atlas
@@ -443,7 +441,10 @@ impl DynamicTextureAtlas {
         image: &Immutable<ImageImpl>,
         type_: ImageType,
     ) -> Option<TextureHandle> {
-        let size = Size::new(image.image.size.width + 2 * PADDING as u32, image.image.size.height + 2 * PADDING as u32);
+        let size = Size::new(
+            image.image.size.width + 2 * u32::from(PADDING),
+            image.image.size.height + 2 * u32::from(PADDING),
+        );
         let key =
             ImageAllocationKey { dynamic_texture: dynamic_texture.id(), image: Arc::as_ptr(image) as usize, type_ };
 
@@ -451,15 +452,13 @@ impl DynamicTextureAtlas {
         // assign a fresh id.
         let existing = state.image_allocations.get(&key).map(|a| a.bin_id);
         let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
-        if let Some(tex_handle) = &tex_handle {
-            if existing.is_none() {
-                state
-                    .image_allocations
-                    .insert(key, ImageAllocation { _image: image.clone(), bin_id: tex_handle.get_id() });
-                state
-                    .image_allocation_keys
-                    .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
-            }
+        if let Some(tex_handle) = &tex_handle
+            && existing.is_none()
+        {
+            state.image_allocations.insert(key, ImageAllocation { _image: image.clone(), bin_id: tex_handle.get_id() });
+            state
+                .image_allocation_keys
+                .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
         }
         tex_handle
     }
@@ -470,23 +469,23 @@ impl DynamicTextureAtlas {
         dynamic_texture: &DynamicTexturePtr,
         glyph: &Immutable<Glyph>,
     ) -> Option<TextureHandle> {
-        let size =
-            Size::new(glyph.bitmap.size.width + 2 * PADDING as u32, glyph.bitmap.size.height + 2 * PADDING as u32);
+        let size = Size::new(
+            glyph.bitmap.size.width + 2 * u32::from(PADDING),
+            glyph.bitmap.size.height + 2 * u32::from(PADDING),
+        );
         let key = GlyphAllocationKey { dynamic_texture: dynamic_texture.id(), glyph: Arc::as_ptr(glyph) as usize };
 
         // Reuse the bin of this exact glyph; otherwise let the shelf pack
         // assign a fresh id.
         let existing = state.glyph_allocations.get(&key).map(|a| a.bin_id);
         let tex_handle = dynamic_texture.reserve_size(size, existing.unwrap_or(-1));
-        if let Some(tex_handle) = &tex_handle {
-            if existing.is_none() {
-                state
-                    .glyph_allocations
-                    .insert(key, GlyphAllocation { _glyph: glyph.clone(), bin_id: tex_handle.get_id() });
-                state
-                    .glyph_allocation_keys
-                    .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
-            }
+        if let Some(tex_handle) = &tex_handle
+            && existing.is_none()
+        {
+            state.glyph_allocations.insert(key, GlyphAllocation { _glyph: glyph.clone(), bin_id: tex_handle.get_id() });
+            state
+                .glyph_allocation_keys
+                .insert(BinKey { dynamic_texture: dynamic_texture.id(), bin_id: tex_handle.get_id() }, key);
         }
         tex_handle
     }
@@ -523,7 +522,7 @@ impl DynamicTextureAtlas {
 
     /// Port-only: the textures of the atlas, the dummy ones included, for
     /// the map side's mirror of a tile worker's atlas in another wasm
-    /// instance (tile/worker_codec).
+    /// instance (`tile/worker_codec`).
     pub fn textures(&self) -> Vec<DynamicTexturePtr> {
         let state = self.state.lock_unpoisoned();
         state.dynamic_textures.iter().chain(state.dummy_dynamic_texture.values()).cloned().collect()

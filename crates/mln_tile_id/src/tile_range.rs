@@ -29,6 +29,7 @@ fn clamp(value: f64, min: f64, max: f64) -> f64 {
 
 impl TileRange {
     /// Compute the range of tiles covered by the bounds at maxZoom.
+    #[must_use]
     pub fn from_lat_lng_bounds_range(bounds: &LatLngBounds, mut min_zoom: u8, mut max_zoom: u8) -> TileRange {
         if min_zoom > max_zoom {
             std::mem::swap(&mut min_zoom, &mut max_zoom);
@@ -42,7 +43,7 @@ impl TileRange {
         // inverted interval counts as its west edge.
         let west = wrap(bounds.west() % constants::DEGREES_MAX, -constants::LONGITUDE_MAX, constants::LONGITUDE_MAX);
         let width = std_max(bounds.east() - bounds.west(), 0.0);
-        let covers_world = !(width < constants::DEGREES_MAX);
+        let covers_world = width.is_nan() || width >= constants::DEGREES_MAX;
         let max_tile = 2.0f64.powf(f64::from(max_zoom));
         // C++ `LatLng(lat, lon)` throws for a NaN or infinite edge, which
         // these finite, in-range edges can't be.
@@ -88,10 +89,12 @@ impl TileRange {
     }
 
     /// Compute the range of tiles covered by the bounds.
+    #[must_use]
     pub fn from_lat_lng_bounds(bounds: &LatLngBounds, z: u8) -> TileRange {
         Self::from_lat_lng_bounds_range(bounds, z, z)
     }
 
+    #[must_use]
     pub fn contains(&self, tile_id: &CanonicalTileID) -> bool {
         if tile_id.z <= self.zoom_range.max && tile_id.z >= self.zoom_range.min {
             if tile_id.z == 0 {

@@ -12,6 +12,7 @@ pub struct RenderedQueryOptions {
 }
 
 impl RenderedQueryOptions {
+    #[must_use]
     pub fn new(layer_ids: Option<Vec<String>>, filter: Option<Filter>) -> Self {
         RenderedQueryOptions { layer_ids, filter }
     }
@@ -20,13 +21,14 @@ impl RenderedQueryOptions {
 /// Options for query source features
 #[derive(Clone, Debug, Default)]
 pub struct SourceQueryOptions {
-    /// Required for VectorSource, ignored for GeoJSONSource
+    /// Required for `VectorSource`, ignored for `GeoJSONSource`
     pub source_layers: Option<Vec<String>>,
 
     pub filter: Option<Filter>,
 }
 
 impl SourceQueryOptions {
+    #[must_use]
     pub fn new(source_layers: Option<Vec<String>>, filter: Option<Filter>) -> Self {
         SourceQueryOptions { source_layers, filter }
     }

@@ -4,7 +4,7 @@
 //! `FileSourceManager`, `MainResourceLoader`, the database, online/HTTP,
 //! asset, local file, MBTiles and PMTiles file sources, `OfflineDatabase`
 //! and the offline region definitions. `OfflineDownload` needs the style
-//! parser and is in //crates/mln_storage_offline.
+//! parser and is in `//crates/mln_storage_offline`.
 //!
 //! The `sqlite` feature (on by default) holds everything that needs SQLite:
 //! `OfflineDatabase`, the database file source and the MBTiles file source.

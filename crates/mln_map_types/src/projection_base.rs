@@ -55,22 +55,23 @@ pub fn mercator_tile_matrix(matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale:
     matrix::translate(
         matrix,
         &a,
-        (tile_id.canonical.x as i64 + tile_id.wrap as i64 * tile_scale as i64) as f64 * s,
-        (tile_id.canonical.y as i64) as f64 * s,
+        (i64::from(tile_id.canonical.x) + i64::from(tile_id.wrap) * tile_scale as i64) as f64 * s,
+        i64::from(tile_id.canonical.y) as f64 * s,
         0.0,
     );
     let a = *matrix;
-    matrix::scale(matrix, &a, s / constants::EXTENT as f64, s / constants::EXTENT as f64, 1.0);
+    matrix::scale(matrix, &a, s / f64::from(constants::EXTENT), s / f64::from(constants::EXTENT), 1.0);
 }
 
 /// The Mercator extent of a tile, the same on every projection.
+#[must_use]
 pub fn mercator_tile_coords(tile_id: &UnwrappedTileID) -> Vec4 {
     let tile_scale = (1u64 << tile_id.canonical.z) as f64;
     [
-        tile_id.canonical.x as f64 / tile_scale,
-        tile_id.canonical.y as f64 / tile_scale,
-        1.0 / tile_scale / constants::EXTENT as f64,
-        1.0 / tile_scale / constants::EXTENT as f64,
+        f64::from(tile_id.canonical.x) / tile_scale,
+        f64::from(tile_id.canonical.y) / tile_scale,
+        1.0 / tile_scale / f64::from(constants::EXTENT),
+        1.0 / tile_scale / f64::from(constants::EXTENT),
     ]
 }
 
@@ -78,7 +79,7 @@ pub trait ProjectionBase: fmt::Debug + Send + Sync {
     fn project(&self, lat_lng: &LatLng, scale: f64) -> Point<f64>;
 
     /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) when
-    /// the point unprojects to an invalid LatLng.
+    /// the point unprojects to an invalid `LatLng`.
     fn unproject(&self, point: &Point<f64>, scale: f64, wrap_mode: WrapMode) -> Result<LatLng, Error>;
 
     fn tile_matrix(&self, matrix: &mut Mat4, tile_id: &UnwrappedTileID, scale: f64);

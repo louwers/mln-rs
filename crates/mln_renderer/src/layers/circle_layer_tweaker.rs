@@ -8,7 +8,10 @@ use mln_gfx::shaders::layer_ubo::ProjectionUBO;
 use mln_gfx::shaders::shader_defines::{ID_CIRCLE_DRAWABLE_UBO, ID_CIRCLE_EVALUATED_PROPS_UBO};
 use mln_gfx::{LayerGroupBase, UniformBufferPtr};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::circle_layer_properties::*;
+use mln_style::layers::circle_layer_properties::{
+    CircleBlur, CircleColor, CircleLayerProperties, CircleOpacity, CirclePitchAlignment, CirclePitchScale,
+    CircleRadius, CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate, CircleTranslateAnchor,
+};
 use mln_style::properties::Property;
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
 use mln_util::immutable::Immutable;
@@ -76,8 +79,8 @@ impl LayerTweaker for CircleLayerTweaker {
                 opacity: const_or_default!(evaluated, CircleOpacity),
                 stroke_width: const_or_default!(evaluated, CircleStrokeWidth),
                 stroke_opacity: const_or_default!(evaluated, CircleStrokeOpacity),
-                scale_with_map: scale_with_map as i32,
-                pitch_with_map: pitch_with_map as i32,
+                scale_with_map: i32::from(scale_with_map),
+                pitch_with_map: i32::from(pitch_with_map),
                 pad1: 0.0,
             };
             context
@@ -95,6 +98,8 @@ impl LayerTweaker for CircleLayerTweaker {
         let latitude_scale = parameters.state.get_projection().circle_radius_correction(parameters.state);
         let self_ptr: *const Self = self;
         visit_layer_group_drawables(layer_group, |drawable| {
+            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
+            const NEAR_CLIPPED: bool = false;
             debug_assert!(drawable.get_tile_id().is_some(), "Circles only render with tiles");
             let Some(tile_id) = drawable.get_tile_id() else {
                 return;
@@ -121,8 +126,6 @@ impl LayerTweaker for CircleLayerTweaker {
 
             let translation = evaluated.get::<CircleTranslate>();
             let anchor = *evaluated.get::<CircleTranslateAnchor>();
-            const IN_VIEWPORT_PIXEL_UNITS: bool = false; // from RenderTile::translatedMatrix
-            const NEAR_CLIPPED: bool = false;
             let projection = get_projection_data(
                 &tile_id,
                 parameters,

@@ -183,7 +183,7 @@ fn get_tile_us_states() {
     features_eq(&square, &index.get_tile(9, 148, 192).unwrap().features); // clipped square
 
     assert_eq!(&EMPTY_TILE, index.get_tile(11, 800, 400).unwrap()); // non-existing tile
-    assert!(std::ptr::eq(&EMPTY_TILE, index.get_tile(11, 800, 400).unwrap())); // non-existing tile
+    assert!(std::ptr::eq(&raw const EMPTY_TILE, index.get_tile(11, 800, 400).unwrap())); // non-existing tile
 
     assert_eq!(37, index.total);
 }
@@ -191,11 +191,12 @@ fn get_tile_us_states() {
 #[test]
 fn get_tile_generate_ids() {
     let geojson = geojson::parse(&load_file("test/fixtures/us-states.json")).unwrap();
-    let mut options = Options::default();
-    options.max_zoom = 20;
-    options.tile.extent = 8192;
-    options.tile.tolerance = 0.0;
-    options.generate_id = true;
+    let options = Options {
+        tile: TileOptions { extent: 8192, tolerance: 0.0, ..TileOptions::default() },
+        max_zoom: 20,
+        generate_id: true,
+        ..Options::default()
+    };
 
     let mut index = GeoJSONVT::from_geojson(&geojson, options);
 
@@ -246,10 +247,11 @@ fn get_tile_polygon_clipping_bug() {
 fn get_tile_projection() {
     let geojson = geojson::parse(&load_file("test/fixtures/linestring.json")).unwrap();
 
-    let mut options = Options::default();
-    options.max_zoom = 20;
-    options.tile.extent = 8192;
-    options.tile.tolerance = 0.0;
+    let options = Options {
+        tile: TileOptions { extent: 8192, tolerance: 0.0, ..TileOptions::default() },
+        max_zoom: 20,
+        ..Options::default()
+    };
 
     let mut index = GeoJSONVT::from_geojson(&geojson, options);
 
@@ -272,9 +274,9 @@ fn get_tile_projection() {
         (15, 5241, 12664),
         (16, 10482, 25329),
         (17, 20964, 50660),
-        (18, 41929, 101320),
-        (19, 83859, 202640),
-        (20, 167719, 405281),
+        (18, 41929, 101_320),
+        (19, 83859, 202_640),
+        (20, 167_719, 405_281),
     ];
 
     for (z, x, y) in tile_coordinates {
@@ -299,11 +301,11 @@ fn get_tile_projection() {
 
         let tolerance = 0.1 / (1.0 + f64::from(z));
 
-        assert!((-122.41822421550751 - to_web_mercator_lon(&line_string[0])).abs() <= tolerance);
-        assert!((37.77852514599172 - to_web_mercator_lat(&line_string[0])).abs() <= tolerance);
+        assert!((-122.418_224_215_507_51 - to_web_mercator_lon(&line_string[0])).abs() <= tolerance);
+        assert!((37.778_525_145_991_72 - to_web_mercator_lat(&line_string[0])).abs() <= tolerance);
 
-        assert!((-122.41707086563109 - to_web_mercator_lon(&line_string[1])).abs() <= tolerance);
-        assert!((37.780424620898664 - to_web_mercator_lat(&line_string[1])).abs() <= tolerance);
+        assert!((-122.417_070_865_631_09 - to_web_mercator_lon(&line_string[1])).abs() <= tolerance);
+        assert!((37.780_424_620_898_664 - to_web_mercator_lat(&line_string[1])).abs() <= tolerance);
     }
 }
 
@@ -313,11 +315,13 @@ fn gen_tiles(
     max_points: u32,
     line_metrics: bool,
 ) -> Result<BTreeMap<String, Vec<Feature<i16>>>, geojson::Error> {
-    let mut options = Options::default();
-    options.max_zoom = 14;
-    options.index_max_zoom = max_zoom;
-    options.index_max_points = max_points;
-    options.tile.line_metrics = line_metrics;
+    let options = Options {
+        tile: TileOptions { line_metrics, ..TileOptions::default() },
+        max_zoom: 14,
+        index_max_zoom: max_zoom,
+        index_max_points: max_points,
+        ..Options::default()
+    };
 
     let geojson = geojson::parse(data)?;
     let mut index = GeoJSONVT::from_geojson(&geojson, options);

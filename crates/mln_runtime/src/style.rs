@@ -143,7 +143,7 @@ impl GeoJsonSourceOptions {
     fn into_core(self) -> Result<GeoJSONOptions, Error> {
         let cluster_properties = match &self.cluster_properties {
             Some(json) => parse_cluster_properties(json)?,
-            None => Default::default(),
+            None => mln_style::sources::geojson_source::ClusterProperties::default(),
         };
         Ok(GeoJSONOptions {
             minzoom: self.min_zoom,
@@ -232,7 +232,9 @@ pub struct CustomSourceCallbacks {
 
 impl std::fmt::Debug for CustomSourceCallbacks {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CustomSourceCallbacks").field("cancel_tile", &self.cancel_tile.is_some()).finish()
+        f.debug_struct("CustomSourceCallbacks")
+            .field("cancel_tile", &self.cancel_tile.is_some())
+            .finish_non_exhaustive()
     }
 }
 

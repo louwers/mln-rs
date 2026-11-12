@@ -64,10 +64,10 @@ fn sprite_json(ratio: u32) -> Vec<u8> {
         .into_bytes()
 }
 
-fn response(data: Vec<u8>) -> Option<Response> {
+fn response(data: Vec<u8>) -> Response {
     let mut response = Response::new();
     response.data = Some(Arc::new(data));
-    Some(response)
+    response
 }
 
 /// What the map requested.
@@ -91,12 +91,12 @@ fn map_test(pixel_ratio: f32) -> (MapTest, Rc<Requests>) {
     let r = requests.clone();
     fs.set_response(Kind::SpriteJSON, move |resource| {
         r.sprites.borrow_mut().push(resource.url.clone());
-        response(sprite_json(if resource.url.contains("@2x") { 2 } else { 1 }))
+        Some(response(sprite_json(if resource.url.contains("@2x") { 2 } else { 1 })))
     });
     let r = requests.clone();
     fs.set_response(Kind::SpriteImage, move |resource| {
         r.sprites.borrow_mut().push(resource.url.clone());
-        response(sprite_image(if resource.url.contains("@2x") { 2 } else { 1 }))
+        Some(response(sprite_image(if resource.url.contains("@2x") { 2 } else { 1 })))
     });
     test.load_json(STYLE);
     (test, requests)

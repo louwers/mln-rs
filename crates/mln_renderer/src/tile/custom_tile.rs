@@ -63,10 +63,10 @@ impl<D: Clone + Send + 'static> Link<D> {
 
     /// `setTileError(error)`.
     fn set_tile_error(&self, error: Error) {
-        if let Some(tile) = self.tile.upgrade() {
-            if !tile.is_obsolete() {
-                tile.set_error(error);
-            }
+        if let Some(tile) = self.tile.upgrade()
+            && !tile.is_obsolete()
+        {
+            tile.set_error(error);
         }
     }
 
@@ -151,6 +151,7 @@ impl<D: Clone + Send + 'static> CustomTile<D> {
         self.link.invalidate_tile_data();
     }
 
+    #[must_use]
     pub fn geometry_tile(&self) -> &GeometryTile {
         &self.tile
     }
@@ -165,6 +166,7 @@ impl CustomGeometryTile {
     /// const TileParameters&, Immutable<TileOptions>,
     /// ActorRef<CustomTileLoader>, TileObserver*)`, without the tile
     /// options: the loader cuts the tile's features.
+    #[must_use]
     pub fn new(
         overscaled_tile_id: OverscaledTileID,
         source_id: String,
@@ -189,6 +191,7 @@ impl CustomVectorTile {
     /// const TileParameters&, ActorRef<CustomVectorTileLoader>,
     /// TileObserver*, bool fastPFOREnabled)`: MLT data is decoded with
     /// `fast_pfor_enabled`.
+    #[must_use]
     pub fn new(
         overscaled_tile_id: OverscaledTileID,
         source_id: String,
@@ -261,7 +264,7 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
         }
     }
 
-    /// Closes the loader's mailbox as well as the GeometryTile's.
+    /// Closes the loader's mailbox as well as the `GeometryTile`'s.
     fn cancel(&self) {
         self.mailbox.close();
         self.tile.cancel();
@@ -343,18 +346,17 @@ impl<D: Clone + Send + 'static> Tile for CustomTile<D> {
             return self.tile.query_source_features(result, options, global_state);
         }
         // Ignore the sourceLayer, there is only one
-        if let Some(feature_index) = self.tile.get_feature_index() {
-            if let Some(tile_data) = feature_index.get_data() {
-                if let Some(layer) = tile_data.get_layer("")? {
-                    crate::tile::geometry_tile::query_layer_source_features(
-                        &*layer,
-                        result,
-                        options,
-                        global_state,
-                        &self.tile.inner().base.id(),
-                    )?;
-                }
-            }
+        if let Some(feature_index) = self.tile.get_feature_index()
+            && let Some(tile_data) = feature_index.get_data()
+            && let Some(layer) = tile_data.get_layer("")?
+        {
+            crate::tile::geometry_tile::query_layer_source_features(
+                &*layer,
+                result,
+                options,
+                global_state,
+                &self.tile.inner().base.id(),
+            )?;
         }
         Ok(())
     }

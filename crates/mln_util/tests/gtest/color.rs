@@ -41,7 +41,7 @@ fn test_cases() -> Vec<(&'static str, Option<Color>)> {
 // gtest: ColorParse.AllCases
 #[test]
 fn all_cases() {
-    let abs_error = 0.02f32 as f64;
+    let abs_error = f64::from(0.02f32);
     for (input, expected_result) in test_cases() {
         let result = Color::parse(input);
 
@@ -49,10 +49,10 @@ fn all_cases() {
             Some(expected) => {
                 // Valid case: Check the values
                 let result = result.unwrap_or_else(|| panic!("{input}: no value"));
-                assert_near(result.r as f64, expected.r as f64, abs_error);
-                assert_near(result.g as f64, expected.g as f64, abs_error);
-                assert_near(result.b as f64, expected.b as f64, abs_error);
-                assert_near(result.a as f64, expected.a as f64, abs_error);
+                assert_near(f64::from(result.r), f64::from(expected.r), abs_error);
+                assert_near(f64::from(result.g), f64::from(expected.g), abs_error);
+                assert_near(f64::from(result.b), f64::from(expected.b), abs_error);
+                assert_near(f64::from(result.a), f64::from(expected.a), abs_error);
             }
             None => {
                 // Invalid case: Ensure no value is returned
@@ -76,11 +76,11 @@ fn hsl_with_alpha_matches_hsla() {
 
 #[track_caller]
 fn expect_color(actual: Color, r: f32, g: f32, b: f32, a: f32) {
-    let abs_error = 1e-5f32 as f64;
-    assert_near(r as f64, actual.r as f64, abs_error);
-    assert_near(g as f64, actual.g as f64, abs_error);
-    assert_near(b as f64, actual.b as f64, abs_error);
-    assert_near(a as f64, actual.a as f64, abs_error);
+    let abs_error = f64::from(1e-5f32);
+    assert_near(f64::from(r), f64::from(actual.r), abs_error);
+    assert_near(f64::from(g), f64::from(actual.g), abs_error);
+    assert_near(f64::from(b), f64::from(actual.b), abs_error);
+    assert_near(f64::from(a), f64::from(actual.a), abs_error);
 }
 
 // Expected values come from GL JS's Color.interpolate (maplibre-gl-style-spec), premultiplied.
@@ -90,14 +90,14 @@ fn lab() {
     let red = Color::parse("rgba(255,0,0,0.5)").unwrap();
     let blue = Color::blue();
     expect_color(Color::interpolate(&red, &blue, 0.0, ColorSpace::Lab), 0.5, 0.0, 0.0, 0.5);
-    expect_color(Color::interpolate(&red, &blue, 0.25, ColorSpace::Lab), 0.556105, 0.0, 0.1941047, 0.625);
-    expect_color(Color::interpolate(&red, &blue, 0.5, ColorSpace::Lab), 0.5676148, 0.0, 0.4005062, 0.75);
+    expect_color(Color::interpolate(&red, &blue, 0.25, ColorSpace::Lab), 0.556_105, 0.0, 0.194_104_7, 0.625);
+    expect_color(Color::interpolate(&red, &blue, 0.5, ColorSpace::Lab), 0.567_614_8, 0.0, 0.400_506_2, 0.75);
     expect_color(Color::interpolate(&red, &blue, 1.0, ColorSpace::Lab), 0.0, 0.0, 1.0, 1.0);
     expect_color(
         Color::interpolate(&Color::black(), &Color::white(), 0.5, ColorSpace::Lab),
-        0.4663266,
-        0.4663266,
-        0.4663266,
+        0.466_326_6,
+        0.466_326_6,
+        0.466_326_6,
         1.0,
     );
 }
@@ -106,13 +106,13 @@ fn lab() {
 #[test]
 fn hcl() {
     let red = Color::parse("rgba(255,0,0,0.5)").unwrap();
-    expect_color(Color::interpolate(&red, &Color::blue(), 0.5, ColorSpace::Hcl), 0.7204395, 0.0, 0.3944121, 0.75);
+    expect_color(Color::interpolate(&red, &Color::blue(), 0.5, ColorSpace::Hcl), 0.720_439_5, 0.0, 0.394_412_1, 0.75);
     // A hueless start takes the end's hue.
     expect_color(
         Color::interpolate(&Color::white(), &Color::red(), 0.5, ColorSpace::Hcl),
         1.0,
-        0.6241198,
-        0.5030824,
+        0.624_119_8,
+        0.503_082_4,
         1.0,
     );
     // The hue takes the short way round.
@@ -124,8 +124,8 @@ fn hcl() {
             ColorSpace::Hcl,
         ),
         1.0,
-        0.2827256,
-        0.298255,
+        0.282_725_6,
+        0.298_255,
         1.0,
     );
 }

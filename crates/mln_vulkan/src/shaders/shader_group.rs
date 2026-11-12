@@ -81,9 +81,7 @@ impl shader_group::ShaderGroup for ShaderGroup {
         let mut shader = context.create_program(
             self.shader_id,
             shader_name.clone(),
-            source.glsl.prelude,
-            source.glsl.vertex,
-            source.glsl.fragment,
+            source.glsl,
             &self.program_parameters,
             &additional_defines,
         )?;

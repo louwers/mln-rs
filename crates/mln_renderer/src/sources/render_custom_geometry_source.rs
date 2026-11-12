@@ -27,6 +27,7 @@ pub struct RenderCustomGeometrySource {
 
 impl RenderCustomGeometrySource {
     /// `RenderCustomGeometrySource(Immutable<style::CustomGeometrySource::Impl>, const TaggedScheduler&)`.
+    #[must_use]
     pub fn new(impl_: Arc<custom_geometry_source::Impl>, thread_pool: &TaggedScheduler) -> Self {
         let impl_: Immutable<dyn source::Impl> = impl_;
         RenderCustomGeometrySource { tile_source: RenderTileSource::new(impl_, thread_pool) }

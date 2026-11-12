@@ -80,7 +80,7 @@ fn interns_the_glyphs_of_a_range_parsed_on_two_threads() {
         (a.join().unwrap(), b.join().unwrap())
     });
 
-    assert!(!first.is_empty());
+    assert_ne!(first, [] as [std::sync::Arc<mln_text::Glyph>; 0]);
     assert_eq!(first.len(), second.len());
     assert!(first.iter().zip(&second).all(|(a, b)| Arc::ptr_eq(a, b)));
 }

@@ -78,7 +78,7 @@ impl Subdivider {
 
         if self.granularity >= 2 && self.canonical.z == 0 {
             triangles = self.remove_triangles_outside_tile_x(&triangles);
-            for line in lines.iter_mut() {
+            for line in &mut lines {
                 *line = self.remove_lines_outside_tile_x(line);
             }
         }
@@ -422,12 +422,12 @@ impl Subdivider {
 
     fn vertex_outside_tile_x(&self, index: u32) -> bool {
         let x = i32::from(self.vertices[index as usize * 2]);
-        x < 0 || x > EXTENT
+        !(0..=EXTENT).contains(&x)
     }
 
     fn remove_triangles_outside_tile_x(&self, indices: &[u32]) -> Vec<u32> {
         let mut result = Vec::new();
-        for triangle in indices.chunks_exact(3) {
+        for triangle in indices.as_chunks::<3>().0 {
             if self.vertex_outside_tile_x(triangle[0])
                 || self.vertex_outside_tile_x(triangle[1])
                 || self.vertex_outside_tile_x(triangle[2])
@@ -441,7 +441,7 @@ impl Subdivider {
 
     fn remove_lines_outside_tile_x(&self, indices: &[u32]) -> Vec<u32> {
         let mut result = Vec::new();
-        for line in indices.chunks_exact(2) {
+        for line in indices.as_chunks::<2>().0 {
             if self.vertex_outside_tile_x(line[0]) || self.vertex_outside_tile_x(line[1]) {
                 continue;
             }
@@ -457,6 +457,7 @@ impl Subdivider {
 /// tiles and removal of geometry outside the tile on zoom 0. Output triangles
 /// are counter-clockwise in tile space. (C++ defaults
 /// `generate_outline_lines` to true.)
+#[must_use]
 pub fn subdivide_polygon(
     polygon: &GeometryCollection,
     canonical: &CanonicalTileID,
@@ -468,6 +469,7 @@ pub fn subdivide_polygon(
 
 /// Inserts a vertex wherever the line crosses a cell boundary; `is_ring`
 /// closes the line first. (C++ defaults `is_ring` to false.)
+#[must_use]
 pub fn subdivide_vertex_line(line: &GeometryCoordinates, granularity: u32, is_ring: bool) -> GeometryCoordinates {
     if line.len() < 2 {
         return GeometryCoordinates::new();
@@ -558,9 +560,10 @@ pub fn subdivide_vertex_line(line: &GeometryCoordinates, granularity: u32, is_ri
 }
 
 /// Reorders every triangle to counter-clockwise winding in tile space.
+#[must_use]
 pub fn fix_winding_order(vertices: &[i16], indices: &[u32]) -> Vec<u32> {
     let mut corrected = Vec::with_capacity(indices.len());
-    for triangle in indices.chunks_exact(3) {
+    for triangle in indices.as_chunks::<3>().0 {
         let (i0, i1, i2) = (triangle[0], triangle[1], triangle[2]);
         let vertex = |index: u32, axis: usize| i32::from(vertices[index as usize * 2 + axis]);
         let e0x = f64::from(vertex(i1, 0) - vertex(i0, 0));

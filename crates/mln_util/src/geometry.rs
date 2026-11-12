@@ -21,11 +21,10 @@ pub enum FeatureType {
 /// `mln::ToFeatureType` applied to a geometry.
 pub fn to_feature_type<T>(geometry: &Geometry<T>) -> FeatureType {
     match geometry {
-        Geometry::Empty => FeatureType::Unknown,
         Geometry::Point(_) | Geometry::MultiPoint(_) => FeatureType::Point,
         Geometry::LineString(_) | Geometry::MultiLineString(_) => FeatureType::LineString,
         Geometry::Polygon(_) | Geometry::MultiPolygon(_) => FeatureType::Polygon,
-        Geometry::GeometryCollection(_) => FeatureType::Unknown,
+        Geometry::Empty | Geometry::GeometryCollection(_) => FeatureType::Unknown,
     }
 }
 

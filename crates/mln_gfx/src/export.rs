@@ -42,14 +42,17 @@ pub struct ExportKinds(u8);
 impl ExportKinds {
     pub const NONE: ExportKinds = ExportKinds(0);
 
+    #[must_use]
     pub fn of(kinds: &[ExportKind]) -> ExportKinds {
         ExportKinds(kinds.iter().fold(0, |bits, kind| bits | kind.bit()))
     }
 
+    #[must_use]
     pub fn contains(self, kind: ExportKind) -> bool {
         self.0 & kind.bit() != 0
     }
 
+    #[must_use]
     pub fn is_empty(self) -> bool {
         self.0 == 0
     }

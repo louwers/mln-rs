@@ -10,7 +10,7 @@ fn identity() {
     assert_eq!(m, matrix::identity4());
     let f = matrix::identity4f();
     for i in 0..16 {
-        assert_eq!(f[i] as f64, m[i]);
+        assert_eq!(f64::from(f[i]), m[i]);
     }
 }
 

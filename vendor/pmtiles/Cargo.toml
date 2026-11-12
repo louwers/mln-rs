@@ -13,5 +13,8 @@ name = "pmtiles"
 # The doc comments have no examples to run.
 doctest = false
 
+[dependencies]
+thiserror.workspace = true
+
 [lints]
 workspace = true

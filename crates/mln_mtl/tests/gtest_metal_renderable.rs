@@ -29,7 +29,7 @@ fn bind_keeps_the_pending_command_buffer() {
 
     resource.bind();
     let rebound = resource.get_command_buffer().expect("a pending command buffer");
-    assert!(std::ptr::eq(&*rebound, &*pending));
+    assert!(std::ptr::eq(&raw const *rebound, &raw const *pending));
 
     resource.commit();
     resource.bind();

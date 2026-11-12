@@ -1,5 +1,5 @@
-//! NSURLSession as the `HttpTransport` on Apple platforms, as
-//! platform/darwin/src/http_file_source.mm: the system's TLS, trust store,
+//! `NSURLSession` as the `HttpTransport` on Apple platforms, as
+//! `platform/darwin/src/http_file_source.mm`: the system's TLS, trust store,
 //! proxy settings and HTTP/2 instead of ureq's.
 //!
 //! The session follows redirects itself and has no URL cache (the ambient
@@ -8,13 +8,13 @@
 //! agent "MapLibreNative/1.0"), plus `Accept-Encoding: identity` with a
 //! `Range`, since a range of a compressed body can't be decompressed. The
 //! response headers go to the `Transfer` in a fixed order, `Cache-Control`
-//! before `Expires` as in the .mm (NSHTTPURLResponse doesn't keep the
+//! before `Expires` as in the .mm (`NSHTTPURLResponse` doesn't keep the
 //! server's order). Errors map to `Reason`s as in the .mm, with the
-//! NSError's localized description as the message.
+//! `NSError`'s localized description as the message.
 //!
 //! The host's headers (`TransferRequest::headers`) go with the request too.
 //! The session's delegate drops them from a redirect that leaves the origin,
-//! as maplibre-native-ffi's http_file_source.mm does.
+//! as maplibre-native-ffi's `http_file_source.mm` does.
 
 // Foundation through objc2 is the FFI here.
 #![allow(unsafe_code)]
@@ -41,10 +41,10 @@ use crate::response::{Reason, ResourceError};
 
 /// How long a transfer may go without receiving data before it fails with
 /// a timeout: bounds a stalled connection or handshake without capping a
-/// slow download that still progresses (NSURLSession's default is 60 s).
+/// slow download that still progresses (`NSURLSession`'s default is 60 s).
 const IDLE_TIMEOUT_SECONDS: f64 = 30.0;
 
-/// MLNNetworkConfiguration's limit (NSURLSession's default is 6).
+/// `MLNNetworkConfiguration`'s limit (`NSURLSession`'s default is 6).
 const MAXIMUM_CONNECTIONS_PER_HOST: NSInteger = 8;
 
 /// The response headers a `Response` reads, in the order they go to the
@@ -111,7 +111,7 @@ impl RedirectDelegate {
     }
 }
 
-/// One NSURLSession for the file source's transfers, which run on the
+/// One `NSURLSession` for the file source's transfers, which run on the
 /// session's own threads. Dropping the transport lets the transfers in
 /// flight finish, then releases the session.
 pub(crate) struct NSURLSessionTransport {
@@ -239,7 +239,7 @@ fn url_request(request: &TransferRequest) -> Option<Retained<NSMutableURLRequest
     Some(url_request)
 }
 
-/// The `Transfer` for what NSURLSession's completion handler got.
+/// The `Transfer` for what `NSURLSession`'s completion handler got.
 fn transfer(
     data: Option<&NSData>,
     response: Option<&NSURLResponse>,
@@ -263,7 +263,7 @@ fn transfer(
     Ok(Transfer { status, headers, body })
 }
 
-/// The NSURLErrorDomain codes the .mm maps to `Reason::Connection`.
+/// The `NSURLErrorDomain` codes the .mm maps to `Reason::Connection`.
 const CONNECTION_ERRORS: [NSInteger; 9] = [
     NSURLErrorNetworkConnectionLost,
     NSURLErrorCannotFindHost,
@@ -276,7 +276,7 @@ const CONNECTION_ERRORS: [NSInteger; 9] = [
     NSURLErrorTimedOut,
 ];
 
-/// The `Reason` for an NSURLErrorDomain code, as the .mm maps them.
+/// The `Reason` for an `NSURLErrorDomain` code, as the .mm maps them.
 fn reason(code: NSInteger) -> Reason {
     if code == NSURLErrorBadServerResponse {
         // 5xx errors

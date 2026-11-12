@@ -43,7 +43,7 @@ pub struct SourcePrepareParameters<'a> {
 }
 
 /// `RenderTiles = std::shared_ptr<const std::vector<std::reference_wrapper<
-/// const RenderTile>>>`: a shared selection of the RenderTiles of an
+/// const RenderTile>>>`: a shared selection of the `RenderTiles` of an
 /// `Immutable<std::vector<RenderTile>>`, kept alive by it.
 #[derive(Clone)]
 pub struct RenderTiles {
@@ -52,6 +52,7 @@ pub struct RenderTiles {
 }
 
 impl RenderTiles {
+    #[must_use]
     pub fn new(owner: Rc<Vec<RenderTile>>, indices: Vec<usize>) -> Self {
         RenderTiles { owner, indices: Rc::new(indices) }
     }
@@ -60,19 +61,23 @@ impl RenderTiles {
         self.indices.iter().map(|&i| &self.owner[i])
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.indices.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.indices.is_empty()
     }
 
+    #[must_use]
     pub fn get(&self, i: usize) -> Option<&RenderTile> {
         self.indices.get(i).map(|&i| &self.owner[i])
     }
 
     /// The `Immutable<std::vector<RenderTile>>` the selection points into.
+    #[must_use]
     pub fn owner(&self) -> &Rc<Vec<RenderTile>> {
         &self.owner
     }
@@ -124,7 +129,7 @@ impl TileObserver for RenderSourceTileObserver {
 pub struct RenderSourceBase {
     pub base_impl: Immutable<dyn source::Impl>,
     pub enabled: bool,
-    /// `this` as the TileObserver of the source's tiles.
+    /// `this` as the `TileObserver` of the source's tiles.
     tile_observer: Rc<RenderSourceTileObserver>,
 }
 
@@ -143,6 +148,7 @@ impl RenderSourceBase {
     }
 
     /// The source as the observer of its tiles.
+    #[must_use]
     pub fn tile_observer(&self) -> Rc<dyn TileObserver> {
         self.tile_observer.clone()
     }
@@ -180,13 +186,13 @@ pub trait RenderSource {
     fn update_fading_tiles(&mut self);
     fn has_fading_tiles(&self) -> bool;
 
-    /// If supported, returns a shared list of RenderTiles, sorted by tile id
+    /// If supported, returns a shared list of `RenderTiles`, sorted by tile id
     /// and excluding tiles hold for fade; returns `None` otherwise.
     fn get_render_tiles(&self) -> Option<RenderTiles> {
         None
     }
 
-    /// If supported, returns a shared list of RenderTiles, sorted in
+    /// If supported, returns a shared list of `RenderTiles`, sorted in
     /// opposite y position, so tiles with overlapping symbols are drawn on
     /// top of each other, with lower symbols being drawn on top of higher
     /// symbols; returns `None` otherwise.
@@ -219,7 +225,7 @@ pub trait RenderSource {
         _source_layer_id: Option<&str>,
         _feature_id: &str,
     ) -> mln_style::expression::expression::FeatureState {
-        Default::default()
+        mln_style::expression::expression::FeatureState::default()
     }
 
     /// `removeFeatureState(sourceLayerID, featureID, stateKey)`.
@@ -245,7 +251,7 @@ pub trait RenderSource {
         _global_state: Option<&mln_style::expression::GlobalStateMap>,
         _proj_matrix: &mln_util::mat4::Mat4,
     ) -> Result<crate::geometry::feature_index::QueryResults, mln_util::error::Error> {
-        Ok(Default::default())
+        Ok(crate::geometry::feature_index::QueryResults::default())
     }
 
     /// `querySourceFeatures(options, globalState)`.
@@ -266,7 +272,7 @@ pub trait RenderSource {
         _extension_field: &str,
         _args: Option<&feature::PropertyMap>,
     ) -> Result<crate::query::FeatureExtensionValue, mln_util::error::Error> {
-        Ok(Default::default())
+        Ok(crate::query::FeatureExtensionValue::default())
     }
 
     fn set_cache_enabled(&mut self, _enable: bool) {}
@@ -345,6 +351,6 @@ pub fn create(impl_: &Immutable<dyn source::Impl>, thread_pool: &TaggedScheduler
         }
         // TODO(port): RenderAnnotationSource. The orchestrator skips the
         // layers of a source without a render source.
-        _ => None,
+        SourceType::Annotations => None,
     }
 }

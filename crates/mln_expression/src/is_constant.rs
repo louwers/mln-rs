@@ -32,14 +32,14 @@ pub fn is_feature_constant(expression: &dyn Expression) -> bool {
         let e = downcast::<CompoundExpression>(expression).expect("CompoundExpression");
         let name = e.get_operator();
         let parameter_count = e.get_parameter_count();
-        if name == "get" && parameter_count == Some(1) {
-            return false;
-        } else if name == "has" && parameter_count == Some(1) {
-            return false;
-        } else if name == "properties" || name == "geometry-type" || name == "id" || name == "feature-state" {
-            return false;
-        } else if name.starts_with(FILTER) {
-            // Legacy filters begin with "filter-" and are never constant.
+        // Legacy filters begin with "filter-" and are never constant.
+        if ((name == "get" || name == "has") && parameter_count == Some(1))
+            || name == "properties"
+            || name == "geometry-type"
+            || name == "id"
+            || name == "feature-state"
+            || name.starts_with(FILTER)
+        {
             return false;
         }
     }

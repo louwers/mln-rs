@@ -1,7 +1,7 @@
 // Ports vendor/wagyu/include/mapbox/geometry/wagyu/intersect.hpp,
 // intersect_util.hpp and bubble_sort.hpp.
 
-use std::cmp::Reverse;
+use std::cmp::{Ordering, Reverse};
 
 use crate::active_bound_list::{is_even_odd_fill_type, swap_rings, swap_sides};
 use crate::bound::{Bound, BoundPtr};
@@ -72,7 +72,7 @@ pub(crate) fn get_edge_intersection(e1: &Edge, e2: &Edge) -> Option<(f64, f64)> 
 
 /// `intersection_compare`.
 pub(crate) fn intersection_compare(b1: &Bound, b2: &Bound) -> bool {
-    !(b1.current_x > b2.current_x && !slopes_equal(b1.cur(), b2.cur()))
+    b1.current_x.partial_cmp(&b2.current_x) != Some(Ordering::Greater) || slopes_equal(b1.cur(), b2.cur())
 }
 
 /// `bubble_sort(begin, end, c, m)` over the active bounds; `m` is called
@@ -163,15 +163,15 @@ pub(crate) fn intersect_bounds(
             }
         }
     } else {
-        if !is_even_odd_fill_type(&b[b2], subject_fill_type, clip_fill_type) {
+        if is_even_odd_fill_type(&b[b2], subject_fill_type, clip_fill_type) {
+            b[b1].winding_count2 = i32::from(b[b1].winding_count2 == 0);
+        } else {
             b[b1].winding_count2 += i32::from(b[b2].winding_delta);
-        } else {
-            b[b1].winding_count2 = if b[b1].winding_count2 == 0 { 1 } else { 0 };
         }
-        if !is_even_odd_fill_type(&b[b1], subject_fill_type, clip_fill_type) {
-            b[b2].winding_count2 -= i32::from(b[b1].winding_delta);
+        if is_even_odd_fill_type(&b[b1], subject_fill_type, clip_fill_type) {
+            b[b2].winding_count2 = i32::from(b[b2].winding_count2 == 0);
         } else {
-            b[b2].winding_count2 = if b[b2].winding_count2 == 0 { 1 } else { 0 };
+            b[b2].winding_count2 -= i32::from(b[b1].winding_delta);
         }
     }
 

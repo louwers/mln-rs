@@ -226,6 +226,7 @@ impl<O: Send + 'static> Actor<O> {
     }
 
     /// `self()`.
+    #[must_use]
     pub fn self_ref(&self) -> PoolActorRef<O> {
         PoolActorRef { mailbox: Arc::downgrade(&self.mailbox) }
     }
@@ -275,14 +276,11 @@ mod tests {
 
     #[test]
     fn self_sends_and_drop_waits() {
-        let pool: SchedulerPtr = Arc::new(ThreadPool::new());
-        let (tx, rx) = mpsc::channel();
         struct Ping {
             self_ref: PoolActorRef<Ping>,
             left: u32,
             done: mpsc::Sender<()>,
         }
-        let actor = Actor::new(pool, |self_ref| Ping { self_ref, left: 10, done: tx });
         fn ping(p: &mut Ping) {
             if p.left == 0 {
                 p.done.send(()).unwrap();
@@ -291,6 +289,9 @@ mod tests {
             p.left -= 1;
             p.self_ref.invoke(ping);
         }
+        let pool: SchedulerPtr = Arc::new(ThreadPool::new());
+        let (tx, rx) = mpsc::channel();
+        let actor = Actor::new(pool, |self_ref| Ping { self_ref, left: 10, done: tx });
         actor.self_ref().invoke(ping);
         rx.recv().unwrap();
         let weak = actor.self_ref();

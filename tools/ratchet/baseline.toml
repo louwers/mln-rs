@@ -86,7 +86,7 @@
 "crates/mln_renderer/src/text/collision_feature.rs" = 2
 "crates/mln_renderer/src/text/collision_index.rs" = 3
 "crates/mln_renderer/src/text/cross_tile_symbol_index.rs" = 2
-"crates/mln_renderer/src/text/placement.rs" = 18
+"crates/mln_renderer/src/text/placement.rs" = 17
 "crates/mln_renderer/src/text/quads.rs" = 1
 "crates/mln_renderer/src/tile/geometry_tile_worker.rs" = 3
 "crates/mln_renderer/src/tile/worker_codec/transport.rs" = 1
@@ -141,7 +141,7 @@
 "crates/mln_text/src/hb_ft.rs" = 2
 "crates/mln_text/src/icu/ushape.rs" = 1
 "crates/mln_text/src/shaping.rs" = 6
-"crates/mln_text/src/tagged_string.rs" = 5
+"crates/mln_text/src/tagged_string.rs" = 4
 "crates/mln_util/src/geo.rs" = 3
 "crates/mln_util/src/image.rs" = 1
 "crates/mln_util/src/lru_cache.rs" = 1

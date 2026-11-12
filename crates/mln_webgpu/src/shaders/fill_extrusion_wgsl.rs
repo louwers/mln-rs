@@ -1,8 +1,8 @@
 // The fill extrusion WGSL the port draws with: the roofs, and the walls
 // instanced as on Metal (include/mln/shaders/mtl/fill_extrusion.hpp), one
 // instance per outline vertex. C++'s WebGPU backend has no instanced walls, so
-// these vertex shaders are the port's and `just vendor-shaders` leaves them
-// alone; the fragment shaders are the vendored ones (`wgsl_sources`).
+// these vertex shaders are the port's; the fragment shaders are
+// `wgsl_sources`'.
 //
 // A wall instance reads its outline vertex and the next one as attributes,
 // the same buffer bound twice, one vertex apart. Where the lowest bit of the

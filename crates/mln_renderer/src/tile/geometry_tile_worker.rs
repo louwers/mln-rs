@@ -79,7 +79,7 @@ enum State {
 
 /// The messages a `GeometryTile` sends its `GeometryTileWorker`: the
 /// worker's public member functions. Port-only: serde writes them for a
-/// worker in another wasm instance (tile/worker_codec).
+/// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum WorkerMessage {
     /// `setData(data, availableImages, correlationID)`.
@@ -127,6 +127,7 @@ pub enum WorkerMessage {
 impl WorkerMessage {
     /// The message's correlation id, or 0 for the glyph and image replies,
     /// which have none.
+    #[must_use]
     pub fn correlation_id(&self) -> u64 {
         match self {
             WorkerMessage::SetData { correlation_id, .. }
@@ -142,7 +143,7 @@ impl WorkerMessage {
 
 /// The messages a `GeometryTileWorker` sends its `GeometryTile`: the tile's
 /// member functions the worker calls. Port-only: serde writes them for a
-/// worker in another wasm instance (tile/worker_codec).
+/// worker in another wasm instance (`tile/worker_codec`).
 #[derive(Serialize, Deserialize)]
 pub enum TileMessage {
     /// `onLayout(result, correlationID)`.
@@ -158,6 +159,14 @@ pub enum TileMessage {
 /// `OptionalActorRef<GeometryTileWorker>` (the worker's `self`): `None` for
 /// the synchronous worker, whose self-sent messages are direct calls.
 pub type SelfRef = Option<PoolActorRef<GeometryTileWorker>>;
+
+/// The tile data a `GeometryTileWorker` received.
+enum ReceivedData {
+    /// No `set_data` since the worker was created or reset.
+    Pending,
+    /// The tile's data; `None` when the tile has no data.
+    Received(Option<SharedTileData>),
+}
 
 /// `GeometryTileWorker`.
 pub struct GeometryTileWorker {
@@ -178,9 +187,9 @@ pub struct GeometryTileWorker {
     correlation_id: u64,
     image_correlation_id: u64,
 
-    // Outer Option indicates whether we've received it or not.
+    // `None` until the worker has received the layers.
     layers: Option<Vec<Immutable<dyn LayerProperties>>>,
-    data: Option<Option<SharedTileData>>,
+    data: ReceivedData,
 
     // The style's global state, used by "global-state" expressions during
     // layout.
@@ -238,7 +247,7 @@ impl GeometryTileWorker {
             correlation_id: 0,
             image_correlation_id: 0,
             layers: None,
-            data: None,
+            data: ReceivedData::Pending,
             global_state: None,
             layouts: Vec::new(),
             pending_glyph_dependencies: GlyphDependencies::default(),
@@ -264,7 +273,7 @@ impl GeometryTileWorker {
     pub fn handle(&mut self, message: WorkerMessage) {
         match message {
             WorkerMessage::SetData { data, available_images, correlation_id } => {
-                self.set_data(data, available_images, correlation_id)
+                self.set_data(data, available_images, correlation_id);
             }
             WorkerMessage::SetLayers {
                 layers,
@@ -275,19 +284,19 @@ impl GeometryTileWorker {
                 correlation_id,
             } => {
                 self.pixel_ratio = pixel_ratio;
-                self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id)
+                self.set_layers(layers, global_state, available_images, subdivision_granularity, correlation_id);
             }
             WorkerMessage::SetAvailableImages { available_images, correlation_id } => {
-                self.set_available_images(available_images, correlation_id)
+                self.set_available_images(available_images, correlation_id);
             }
             WorkerMessage::Reset { correlation_id } => self.reset(correlation_id),
             WorkerMessage::SetShowCollisionBoxes { show_collision_boxes, correlation_id } => {
-                self.set_show_collision_boxes(show_collision_boxes, correlation_id)
+                self.set_show_collision_boxes(show_collision_boxes, correlation_id);
             }
             WorkerMessage::RetryMissingGlyphs { correlation_id } => self.retry_missing_glyphs(correlation_id),
             WorkerMessage::GlyphsAvailable { glyph_map, results } => self.on_glyphs_available(glyph_map, results),
             WorkerMessage::ImagesAvailable { icon_map, pattern_map, version_map, image_correlation_id } => {
-                self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id)
+                self.on_images_available(icon_map, pattern_map, version_map, image_correlation_id);
             }
         }
     }
@@ -339,14 +348,14 @@ impl GeometryTileWorker {
         correlation_id: u64,
     ) {
         self.guarded(|this| {
-            this.data = Some(data);
+            this.data = ReceivedData::Received(data);
             this.correlation_id = correlation_id;
             this.available_images = available_images;
 
             match this.state {
                 State::Idle => {
                     this.parse()?;
-                    this.coalesce()?;
+                    this.coalesce();
                 }
                 State::Coalescing | State::NeedsParse | State::NeedsSymbolLayout => {
                     this.state = State::NeedsParse;
@@ -376,7 +385,7 @@ impl GeometryTileWorker {
             match this.state {
                 State::Idle => {
                     this.parse()?;
-                    this.coalesce()?;
+                    this.coalesce();
                 }
                 State::Coalescing | State::NeedsSymbolLayout => {
                     this.state = State::NeedsParse;
@@ -396,7 +405,7 @@ impl GeometryTileWorker {
             match this.state {
                 State::Idle => {
                     this.parse()?;
-                    this.coalesce()?;
+                    this.coalesce();
                 }
                 State::Coalescing | State::NeedsSymbolLayout => {
                     this.state = State::NeedsParse;
@@ -410,7 +419,7 @@ impl GeometryTileWorker {
     /// `reset(correlationID)`.
     pub fn reset(&mut self, correlation_id: u64) {
         self.layers = None;
-        self.data = None;
+        self.data = ReceivedData::Pending;
         self.correlation_id = correlation_id;
 
         match self.state {
@@ -433,7 +442,7 @@ impl GeometryTileWorker {
                         // Trigger parse if nothing is in flight, otherwise
                         // symbol layout will automatically pick up the change
                         this.parse()?;
-                        this.coalesce()?;
+                        this.coalesce();
                     }
                 }
                 State::Coalescing => {
@@ -457,7 +466,7 @@ impl GeometryTileWorker {
             match this.state {
                 State::Idle => {
                     this.parse()?;
-                    this.coalesce()?;
+                    this.coalesce();
                 }
                 State::Coalescing | State::NeedsSymbolLayout => {
                     this.state = State::NeedsParse;
@@ -479,7 +488,7 @@ impl GeometryTileWorker {
                         // also clears the layouts.
                         debug_assert!(this.has_pending_parse_result());
                         this.finalize_layout()?;
-                        this.coalesce()?;
+                        this.coalesce();
                     }
                 }
                 State::Coalescing => {
@@ -505,7 +514,7 @@ impl GeometryTileWorker {
                 }
                 State::NeedsParse => {
                     this.parse()?;
-                    this.coalesce()?;
+                    this.coalesce();
                 }
                 State::NeedsSymbolLayout => {
                     // We may have entered NeedsSymbolLayout while coalescing
@@ -516,7 +525,7 @@ impl GeometryTileWorker {
                     } else {
                         this.parse()?;
                     }
-                    this.coalesce()?;
+                    this.coalesce();
                 }
             }
             Ok(())
@@ -524,16 +533,14 @@ impl GeometryTileWorker {
     }
 
     /// `coalesce()`. The synchronous worker's self-sent `coalesced` is a
-    /// direct call (an exception from it propagates to the caller's
-    /// handler, as in C++).
-    fn coalesce(&mut self) -> Result<(), Error> {
+    /// direct call.
+    fn coalesce(&mut self) {
         self.state = State::Coalescing;
         match &self.self_ref {
             Some(self_ref) => self_ref.invoke(|worker: &mut GeometryTileWorker| worker.coalesced()),
             // OptionalActorRef with an object: a direct call.
             None => self.coalesced(),
         }
-        Ok(())
     }
 
     /// `onGlyphsAvailable(newGlyphMap, results)`.
@@ -543,7 +550,7 @@ impl GeometryTileWorker {
         let mut shaped_glyph_map = new_glyph_map.clone();
         for (font_stack, new_glyphs) in new_glyph_map {
             let glyphs = self.glyph_map.entry(font_stack).or_default();
-            for (pending_font_stack, pending_glyph_ids) in self.pending_glyph_dependencies.glyphs.iter_mut() {
+            for (pending_font_stack, pending_glyph_ids) in &mut self.pending_glyph_dependencies.glyphs {
                 // Linear lookup here to handle reverse of FontStackHash ->
                 // FontStack, since dependencies need the full font stack
                 // name to make a request. There should not be many
@@ -578,7 +585,7 @@ impl GeometryTileWorker {
                 }
             }
 
-            for layout in self.layouts.iter_mut() {
+            for layout in &mut self.layouts {
                 if layout.need_finalize_symbols() {
                     layout.finalize_symbols(&mut results);
                 }
@@ -653,7 +660,11 @@ impl GeometryTileWorker {
 
     /// `parse()`.
     fn parse(&mut self) -> Result<(), Error> {
-        let (Some(data), Some(layers)) = (&self.data, &self.layers) else {
+        // Avoid small reallocations for populated cells. If we had a total
+        // feature count, this could be based on that and the cell count.
+        const ESTIMATED_ELEMENTS_PER_CELL: usize = 8;
+
+        let (ReceivedData::Received(data), Some(layers)) = (&self.data, &self.layers) else {
             return Ok(());
         };
         let data = data.clone();
@@ -664,9 +675,6 @@ impl GeometryTileWorker {
 
         let mut feature_index = Box::new(FeatureIndex::new(data.clone()));
 
-        // Avoid small reallocations for populated cells. If we had a total
-        // feature count, this could be based on that and the cell count.
-        const ESTIMATED_ELEMENTS_PER_CELL: usize = 8;
         feature_index.reserve(ESTIMATED_ELEMENTS_PER_CELL);
         self.feature_index = Some(feature_index);
 
@@ -836,7 +844,7 @@ impl GeometryTileWorker {
 
     /// `finalizeLayout()`.
     fn finalize_layout(&mut self) -> Result<(), Error> {
-        if self.data.is_none()
+        if matches!(self.data, ReceivedData::Pending)
             || self.layers.is_none()
             || !self.has_pending_parse_result()
             || self.has_pending_dependencies()
@@ -855,7 +863,7 @@ impl GeometryTileWorker {
             }
 
             let mut layouts = std::mem::take(&mut self.layouts);
-            for layout in layouts.iter_mut() {
+            for layout in &mut layouts {
                 if self.obsolete() {
                     if let Some(atlas) = &self.dynamic_texture_atlas {
                         atlas.remove_textures(&glyph_atlas.texture_handles, &glyph_atlas.dynamic_texture);
@@ -903,6 +911,7 @@ impl GeometryTileWorker {
         Ok(())
     }
 
+    #[must_use]
     pub fn source_id(&self) -> &str {
         &self.source_id
     }

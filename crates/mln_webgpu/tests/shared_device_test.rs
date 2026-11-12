@@ -41,7 +41,7 @@ fn clear_and_read(target: &OffscreenTarget, color: Color) -> Vec<[u8; 4]> {
     context.end_frame();
     let image = target.read_image().expect("a frame");
     assert_eq!(image.size, SIZE);
-    image.data.chunks_exact(4).map(|px| px.try_into().unwrap()).collect()
+    image.data.as_chunks::<4>().0.to_vec()
 }
 
 #[track_caller]

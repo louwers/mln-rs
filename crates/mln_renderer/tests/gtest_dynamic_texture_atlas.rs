@@ -203,8 +203,8 @@ fn updated_icon_gets_fresh_allocation() {
 
 #[test]
 fn many_live_icon_revisions_get_their_own_allocations() {
-    let mut test = DynamicTextureAtlasTest::new();
     const REVISIONS: u32 = 64;
+    let mut test = DynamicTextureAtlasTest::new();
     let ids: std::collections::HashSet<i32> = (0..REVISIONS)
         .map(|version| test.upload_icon(&make_image("marker", false), version).texture_handles[0].get_id())
         .collect();

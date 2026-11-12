@@ -13,6 +13,7 @@ pub enum ImageType {
 
 /// The magic-byte dispatch of `mln::decodeImage`: the type of the image in
 /// `data`, if it is one of the three.
+#[must_use]
 pub fn image_type(data: &[u8]) -> Option<ImageType> {
     let read_uint = |offset: usize| -> u32 {
         let ptr = &data[offset..offset + 4];
@@ -25,20 +26,20 @@ pub fn image_type(data: &[u8]) -> Option<ImageType> {
         let magic1 = read_uint(0x0);
         let magic2 = read_uint(0x8);
         // RIFF <xxxx = file size> WEBP
-        if magic1 == 0x52494646 && magic2 == 0x57454250 {
+        if magic1 == 0x5249_4646 && magic2 == 0x5745_4250 {
             return Some(ImageType::Webp);
         }
     }
 
     if size >= 4 {
         let magic = read_uint(0x0);
-        if magic == 0x89504E47 {
+        if magic == 0x8950_4E47 {
             return Some(ImageType::Png);
         }
     }
 
     if size >= 2 {
-        let magic = ((u16::from(data[0]) << 8) | u16::from(data[1])) & 0xffff;
+        let magic = (u16::from(data[0]) << 8) | u16::from(data[1]);
         if magic == 0xFFD8 {
             return Some(ImageType::Jpeg);
         }
@@ -156,7 +157,7 @@ mod fixture_tests {
         let image = decode_image(&db).unwrap();
         assert_eq!(image.size.width, 512);
         assert_eq!(image.size.height, 512);
-        assert!(image.data.chunks_exact(4).all(|p| p[3] == 255));
+        assert!(image.data.as_chunks::<4>().0.iter().all(|p| p[3] == 255));
     }
 
     fn metrics_file(path: &str) -> Vec<u8> {

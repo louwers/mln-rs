@@ -144,8 +144,7 @@ pub(crate) fn process_edges_at_top_of_scanbeam(
     process_horizontals(top_y, active_bounds, b, manager, scanbeam, cliptype, subject_fill_type, clip_fill_type);
 
     // 4. Promote intermediate vertices
-    for i in 0..active_bounds.len() {
-        let bb = active_bounds[i];
+    for &bb in active_bounds.iter() {
         if is_intermediate(&b[bb], top_y) {
             if b[bb].ring != NIL {
                 let top = b[bb].cur().top;

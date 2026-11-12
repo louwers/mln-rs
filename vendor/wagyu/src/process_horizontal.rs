@@ -122,10 +122,10 @@ fn process_horizontal_left_to_right(
         add_point_to_ring(h, top, b, rings);
     }
 
-    if b[h].next_edge != b[h].edges.len() {
-        next_edge_in_bound(&mut b[h], scanbeam);
-    } else {
+    if b[h].next_edge == b[h].edges.len() {
         active_bounds[horz_bound] = NIL;
+    } else {
+        next_edge_in_bound(&mut b[h], scanbeam);
     }
 
     if !shifted {
@@ -242,10 +242,10 @@ fn process_horizontal_right_to_left(
         add_point_to_ring(h, top, b, rings);
     }
 
-    if b[h].next_edge != b[h].edges.len() {
-        next_edge_in_bound(&mut b[h], scanbeam);
-    } else {
+    if b[h].next_edge == b[h].edges.len() {
         active_bounds[horz_bound as usize] = NIL;
+    } else {
+        next_edge_in_bound(&mut b[h], scanbeam);
     }
     next_bnd_itr
 }

@@ -3,7 +3,7 @@
 // The per-backend `ShaderSource<BuiltIn, Backend::Type>` specialisations live
 // with their backend (mln_webgpu::shaders).
 
-/// This enum is used with the ShaderSource template to select source code for
+/// This enum is used with the `ShaderSource` template to select source code for
 /// the desired program and graphics back-end.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BuiltIn {

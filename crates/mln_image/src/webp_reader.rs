@@ -14,6 +14,7 @@ use mln_util::size::Size;
 
 /// `decodeWEBP(data, size)`: an empty image (and a warning) when the data
 /// can't be decoded, as C++.
+#[must_use]
 pub fn decode_webp(data: &[u8]) -> PremultipliedImage {
     let Ok(mut decoder) = image_webp::WebPDecoder::new(Cursor::new(data)) else {
         Log::warning(Event::Image, "Failed to decode WebP image header!");
@@ -36,7 +37,7 @@ pub fn decode_webp(data: &[u8]) -> PremultipliedImage {
         buffer
     } else {
         let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
-        for rgb in buffer.chunks_exact(3) {
+        for rgb in buffer.as_chunks::<3>().0 {
             rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
         }
         rgba

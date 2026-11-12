@@ -16,6 +16,7 @@
 // TODO(port): makeThreadPrioritySetter(EXPERIMENTAL_THREAD_PRIORITY_FILE).
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -62,8 +63,8 @@ type AsyncCallback = Rc<dyn Fn(ErrorPtr)>;
 /// `AsyncTileCallback`.
 type AsyncTileCallback = Rc<dyn Fn((u64, u32), ErrorPtr)>;
 
-fn error(reason: Reason, message: impl Into<String>) -> ErrorPtr {
-    Some(Box::new(ResourceError::new(reason, message)))
+fn error(reason: Reason, message: impl Into<String>) -> ResourceError {
+    ResourceError::new(reason, message)
 }
 
 fn json_double(d: f64) -> Json {
@@ -127,13 +128,13 @@ impl State {
 
                 if response_error.message.is_empty() && response_error.reason == Reason::NotFound {
                     if let Some(path) = url.strip_prefix(FILE_PROTOCOL) {
-                        message += &format!("path not found: {path}");
+                        let _ = write!(message, "path not found: {path}");
                     } else {
-                        message += &format!("url not found: {url}");
+                        let _ = write!(message, "url not found: {url}");
                     }
                 }
 
-                callback(error(response_error.reason, message));
+                callback(Some(Box::new(error(response_error.reason, message))));
 
                 return;
             }
@@ -143,7 +144,7 @@ impl State {
             }
 
             let Some(data) = &response.data else {
-                callback(error(Reason::Other, "PMTiles header response has no data"));
+                callback(Some(Box::new(error(Reason::Other, "PMTiles header response has no data"))));
                 return;
             };
 
@@ -161,7 +162,7 @@ impl State {
                     this.header_cache.borrow_mut().entry(url.clone()).or_insert(header);
                     callback(None);
                 }
-                Err(e) => callback(error(Reason::Other, format!("Error parsing PMTiles header: {e}"))),
+                Err(e) => callback(Some(Box::new(error(Reason::Other, format!("Error parsing PMTiles header: {e}"))))),
             }
         });
     }
@@ -270,7 +271,10 @@ impl State {
                     let callback = callback.clone();
                     this.request(req, &resource, move |response_metadata: Response| {
                         if let Some(e) = &response_metadata.error {
-                            callback(error(e.reason, format!("Error fetching PMTiles metadata: {}", e.message)));
+                            callback(Some(Box::new(error(
+                                e.reason,
+                                format!("Error fetching PMTiles metadata: {}", e.message),
+                            ))));
 
                             return;
                         }
@@ -280,7 +284,7 @@ impl State {
                         }
 
                         let Some(data) = &response_metadata.data else {
-                            callback(error(
+                            callback(Some(Box::new(error(
                                 Reason::Other,
                                 format!(
                                     "PMTiles metadata response has no data (range={}-{})",
@@ -290,7 +294,7 @@ impl State {
                                         .wrapping_add(header.json_metadata_bytes)
                                         .wrapping_sub(1)
                                 ),
-                            ));
+                            ))));
                             return;
                         };
 
@@ -300,10 +304,10 @@ impl State {
                             match decompress(&data) {
                                 Ok(decompressed) => data = decompressed,
                                 Err(e) => {
-                                    callback(error(
+                                    callback(Some(Box::new(error(
                                         Reason::Other,
                                         format!("Error decompressing PMTiles metadata: {e}"),
-                                    ));
+                                    ))));
                                     return;
                                 }
                             }
@@ -397,7 +401,10 @@ impl State {
                 let (this2, url, callback) = (this.clone(), url.clone(), callback.clone());
                 this.request(req, &resource, move |response: Response| {
                     if let Some(e) = &response.error {
-                        callback(error(e.reason, format!("Error fetching PMTiles directory: {}", e.message)));
+                        callback(Some(Box::new(error(
+                            e.reason,
+                            format!("Error fetching PMTiles directory: {}", e.message),
+                        ))));
 
                         return;
                     }
@@ -407,7 +414,7 @@ impl State {
                     }
 
                     let Some(data) = &response.data else {
-                        callback(error(Reason::Other, "PMTiles directory response has no data"));
+                        callback(Some(Box::new(error(Reason::Other, "PMTiles directory response has no data"))));
                         return;
                     };
 
@@ -422,7 +429,10 @@ impl State {
                     })();
                     match result {
                         Ok(()) => callback(None),
-                        Err(e) => callback(error(Reason::Other, format!("Error parsing PMTiles directory: {e}"))),
+                        Err(e) => callback(Some(Box::new(error(
+                            Reason::Other,
+                            format!("Error parsing PMTiles directory: {e}"),
+                        )))),
                     }
                 });
             }),
@@ -443,7 +453,10 @@ impl State {
         if directory_depth > 3 {
             callback(
                 (0, 0),
-                error(Reason::Other, "Error fetching PMTiles tile address: Maximum directory depth exceeded"),
+                Some(Box::new(error(
+                    Reason::Other,
+                    "Error fetching PMTiles tile address: Maximum directory depth exceeded",
+                ))),
             );
 
             return;
@@ -563,7 +576,7 @@ impl PMTilesFileSourceThread {
                     Err(e) => {
                         let mut response = Response::new();
                         response.no_content = true;
-                        response.error = error(Reason::Other, format!("Invalid tile: {e}"));
+                        response.error = Some(Box::new(error(Reason::Other, format!("Invalid tile: {e}"))));
                         send(&r, response);
                         return;
                     }
@@ -606,7 +619,10 @@ impl PMTilesFileSourceThread {
                             response.no_content = true;
 
                             if let Some(e) = &tile_response.error {
-                                response.error = error(e.reason, format!("Error fetching PMTiles tile: {}", e.message));
+                                response.error = Some(Box::new(error(
+                                    e.reason,
+                                    format!("Error fetching PMTiles tile: {}", e.message),
+                                )));
                                 send(&r, response);
                                 return;
                             }
@@ -616,8 +632,10 @@ impl PMTilesFileSourceThread {
                             }
 
                             let Some(data) = &tile_response.data else {
-                                response.error =
-                                    error(Reason::Other, "Error fetching PMTiles tile: response has no data");
+                                response.error = Some(Box::new(error(
+                                    Reason::Other,
+                                    "Error fetching PMTiles tile: response has no data",
+                                )));
                                 send(&r, response);
                                 return;
                             };
@@ -634,8 +652,10 @@ impl PMTilesFileSourceThread {
                                     match decompress(data) {
                                         Ok(decompressed) => response.data = Some(Arc::new(decompressed)),
                                         Err(e) => {
-                                            response.error =
-                                                error(Reason::Other, format!("Error decompressing PMTiles tile: {e}"))
+                                            response.error = Some(Box::new(error(
+                                                Reason::Other,
+                                                format!("Error decompressing PMTiles tile: {e}"),
+                                            )));
                                         }
                                     }
                                 } else {
@@ -672,6 +692,7 @@ pub struct PMTilesFileSource {
 impl PMTilesFileSource {
     /// A PMTiles file source that reads archives through `file_sources`'
     /// `ResourceLoader`.
+    #[must_use]
     pub fn new(file_sources: &FileSourceManager, resource_options: &ResourceOptions) -> Self {
         let resource_options = Arc::new(Mutex::new(resource_options.clone()));
         let ro = resource_options.clone();

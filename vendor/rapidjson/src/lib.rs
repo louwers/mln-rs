@@ -8,7 +8,7 @@
 //!   (`kWriteNoFlags`: NaN and infinities are rejected, no UTF-8
 //!   validation), used by expression and style stringification.
 //!
-//! JSON parsing is not ported; the port parses with serde_json.
+//! JSON parsing is not ported; the port parses with `serde_json`.
 
 pub mod internal;
 pub mod writer;

@@ -28,6 +28,7 @@ pub struct ResourceTransform {
 
 impl ResourceTransform {
     /// `ResourceTransform(TransformCallback = {})`.
+    #[must_use]
     pub fn new(callback: Option<TransformCallback>) -> Self {
         ResourceTransform { transform_callback: callback }
     }
@@ -39,6 +40,7 @@ impl ResourceTransform {
     }
 
     /// `explicit operator bool()`.
+    #[must_use]
     pub fn is_set(&self) -> bool {
         self.transform_callback.is_some()
     }

@@ -7,14 +7,18 @@ use std::sync::Arc;
 
 use geometry::Point;
 use mln_gfx::shader_group::{ShaderGroupPtr, StringIDSetsPair};
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{ID_CIRCLE_COLOR_VERTEX_ATTRIBUTE, ID_CIRCLE_POS_VERTEX_ATTRIBUTE};
 use mln_gfx::vertex_vector::VertexVectorBasePtr;
 use mln_gfx::{AttributeDataType, ColorMode, Context, CullFaceMode, DepthMaskType, DrawMode, ShaderRegistry};
 use mln_map_types::{TileProjector, TransformState};
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::circle_layer_impl::Impl as CircleLayerImpl;
-use mln_style::layers::circle_layer_properties::*;
+use mln_style::layers::circle_layer_properties::{
+    CircleBlur, CircleColor, CircleLayerProperties, CircleOpacity, CirclePaintProperties, CirclePitchAlignment,
+    CirclePitchScale, CircleRadius, CircleStrokeColor, CircleStrokeOpacity, CircleStrokeWidth, CircleTranslate,
+    CircleTranslateAnchor,
+};
 use mln_style::properties::Property;
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
 use mln_style_types::{AlignmentType, CirclePitchScaleType};
@@ -319,7 +323,7 @@ fn read_circle_attributes(
 // query
 /// `projectPoint(p, projector, size)`.
 fn project_point(
-    p: &mln_tile_id::geometry_tile_data::GeometryCoordinate,
+    p: mln_tile_id::geometry_tile_data::GeometryCoordinate,
     projector: &mln_map_types::TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinate {
@@ -337,7 +341,7 @@ fn project_query_geometry(
     projector: &mln_map_types::TileProjector<'_>,
     size: mln_util::size::Size,
 ) -> mln_tile_id::geometry_tile_data::GeometryCoordinates {
-    query_geometry.iter().map(|p| project_point(p, projector, size)).collect()
+    query_geometry.iter().map(|p| project_point(*p, projector, size)).collect()
 }
 
 pub struct RenderCircleLayer {
@@ -480,7 +484,7 @@ impl RenderLayer for RenderCircleLayer {
                     continue;
                 }
                 let transformed_point =
-                    if align_with_map { *point } else { project_point(point, projector, transform_state.get_size()) };
+                    if align_with_map { *point } else { project_point(*point, projector, transform_state.get_size()) };
 
                 let projected = projector.project(&geometry::Point::new(f64::from(point.x), f64::from(point.y)), 0.0);
                 let mut adjusted_size = transformed_size;
@@ -640,7 +644,7 @@ impl RenderLayer for RenderCircleLayer {
                             &paint(),
                             evaluated,
                             &mut Default::default(),
-                        )
+                        );
                     });
                 }
                 current

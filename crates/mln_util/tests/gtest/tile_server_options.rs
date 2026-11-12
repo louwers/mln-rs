@@ -8,7 +8,7 @@ fn copy_assignment() {
     let options = TileServerOptions::mapbox_configuration();
     #[allow(clippy::redundant_clone)]
     let options_copy = options.clone();
-    assert!(!std::ptr::eq(&options_copy, &options));
+    assert!(!std::ptr::eq(&raw const options_copy, &raw const options));
     assert_eq!(options_copy.base_url(), options.base_url());
 }
 
@@ -17,6 +17,6 @@ fn copy_assignment() {
 fn copy_constructor() {
     let options = TileServerOptions::mapbox_configuration();
     let options_copy = TileServerOptions::clone(&options);
-    assert!(!std::ptr::eq(&options_copy, &options));
+    assert!(!std::ptr::eq(&raw const options_copy, &raw const options));
     assert_eq!(options_copy.base_url(), options.base_url());
 }

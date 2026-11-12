@@ -46,7 +46,7 @@ fn trie_get16(c: i32) -> u16 {
     } else if c <= 0xffff {
         let offset = if c <= 0xdbff { UTRIE2_LSCP_INDEX_2_OFFSET - (0xd800 >> UTRIE2_SHIFT_2) } else { 0 };
         index_raw(index, offset, c)
-    } else if c > 0x10ffff {
+    } else if c > 0x0010_ffff {
         TRIE_INDEX_LENGTH + UTRIE2_BAD_UTF8_DATA_OFFSET
     } else if c >= TRIE_HIGH_START {
         TRIE_HIGH_VALUE_INDEX
@@ -66,21 +66,21 @@ const UBIDI_IX_MIRROR_LENGTH: usize = 3;
 // definitions for 16-bit bidi/shaping properties word
 const UBIDI_BPT_SHIFT: u32 = 8;
 const UBIDI_MIRROR_DELTA_SHIFT: u32 = 13;
-const UBIDI_CLASS_MASK: u16 = 0x0000001f;
-const UBIDI_BPT_MASK: u16 = 0x00000300;
+const UBIDI_CLASS_MASK: u16 = 0x0000_001f;
+const UBIDI_BPT_MASK: u16 = 0x0000_0300;
 const UBIDI_ESC_MIRROR_DELTA: i32 = -4;
 const UBIDI_MIRROR_INDEX_SHIFT: u32 = 21;
 
 /// `UBIDI_GET_MIRROR_DELTA(props)` (arithmetic shift of the signed word).
 #[inline]
 fn get_mirror_delta(props: u16) -> i32 {
-    ((props as i16) >> UBIDI_MIRROR_DELTA_SHIFT) as i32
+    i32::from((props as i16) >> UBIDI_MIRROR_DELTA_SHIFT)
 }
 
 /// `UBIDI_GET_MIRROR_CODE_POINT(m)`.
 #[inline]
 fn get_mirror_code_point(m: u32) -> i32 {
-    (m & 0x1fffff) as i32
+    (m & 0x001f_ffff) as i32
 }
 
 /// `UBiDiPairedBracketType`.
@@ -89,6 +89,7 @@ pub const U_BPT_OPEN: u32 = 1;
 pub const U_BPT_CLOSE: u32 = 2;
 
 /// `ubidi_getClass(c)` = `u_charDirection(c)`: the `UCharDirection`.
+#[must_use]
 pub fn ubidi_get_class(c: i32) -> u8 {
     let props = trie_get16(c);
     (props & UBIDI_CLASS_MASK) as u8
@@ -97,9 +98,7 @@ pub fn ubidi_get_class(c: i32) -> u8 {
 /// `getMirror(c, props)`.
 fn get_mirror(c: i32, props: u16) -> i32 {
     let delta = get_mirror_delta(props);
-    if delta != UBIDI_ESC_MIRROR_DELTA {
-        c + delta
-    } else {
+    if delta == UBIDI_ESC_MIRROR_DELTA {
         // look for mirror code point in the mirrors[] table
         let mirrors = &UBIDI_PROPS_MIRRORS;
         let length = UBIDI_PROPS_INDEXES[UBIDI_IX_MIRROR_LENGTH];
@@ -116,22 +115,27 @@ fn get_mirror(c: i32, props: u16) -> i32 {
         }
         // c not found, return it itself
         c
+    } else {
+        c + delta
     }
 }
 
 /// `ubidi_getMirror(c)` = `u_charMirror(c)`.
+#[must_use]
 pub fn ubidi_get_mirror(c: i32) -> i32 {
     let props = trie_get16(c);
     get_mirror(c, props)
 }
 
 /// `ubidi_getPairedBracketType(c)`.
+#[must_use]
 pub fn ubidi_get_paired_bracket_type(c: i32) -> u32 {
     let props = trie_get16(c);
-    ((props & UBIDI_BPT_MASK) >> UBIDI_BPT_SHIFT) as u32
+    u32::from((props & UBIDI_BPT_MASK) >> UBIDI_BPT_SHIFT)
 }
 
 /// `ubidi_getPairedBracket(c)` = `u_getBidiPairedBracket(c)`.
+#[must_use]
 pub fn ubidi_get_paired_bracket(c: i32) -> i32 {
     let props = trie_get16(c);
     if (props & UBIDI_BPT_MASK) == 0 { c } else { get_mirror(c, props) }

@@ -14,8 +14,8 @@ pub struct Literal {
     value: Value,
 }
 
-fn check_number(n: f64) -> Option<Value> {
-    if n > f64::MAX { Some(Value::Number(f64::INFINITY)) } else { Some(Value::Number(n)) }
+fn check_number(n: f64) -> Value {
+    if n > f64::MAX { Value::Number(f64::INFINITY) } else { Value::Number(n) }
 }
 
 /// `parseValue` of literal.cpp.
@@ -57,22 +57,25 @@ pub(crate) fn parse_value(value: &Convertible<'_>, ctx: &mut ParsingContext) -> 
     let v = value.to_value().expect("to_value of a JSON scalar");
 
     match v {
-        MbglValue::Uint(n) => check_number(n as f64),
-        MbglValue::Int(n) => check_number(n as f64),
-        MbglValue::Double(n) => check_number(n),
+        MbglValue::Uint(n) => Some(check_number(n as f64)),
+        MbglValue::Int(n) => Some(check_number(n as f64)),
+        MbglValue::Double(n) => Some(check_number(n)),
         v => Some(from_mbgl_value(&v)),
     }
 }
 
 impl Literal {
+    #[must_use]
     pub fn new(value: Value) -> Self {
         Literal { base: ExpressionBase::new(Kind::Literal, type_of(&value), Dependency::NONE), value }
     }
 
+    #[must_use]
     pub fn with_array_type(type_: type_::Array, value: Vec<Value>) -> Self {
         Literal { base: ExpressionBase::new(Kind::Literal, type_.into(), Dependency::NONE), value: Value::Array(value) }
     }
 
+    #[must_use]
     pub fn get_value(&self) -> &Value {
         &self.value
     }
@@ -94,12 +97,12 @@ impl Literal {
 
             // special case: infer the item type if possible for zero-length
             // arrays
-            if let (Some(Type::Array(expected)), Value::Array(items)) = (ctx.get_expected(), &parsed_value) {
-                if let Type::Array(t) = type_of(&parsed_value) {
-                    if t.n == Some(0) && (expected.n.is_none() || expected.n == Some(0)) {
-                        return Some(Box::new(Literal::with_array_type(*expected, items.clone())));
-                    }
-                }
+            if let (Some(Type::Array(expected)), Value::Array(items)) = (ctx.get_expected(), &parsed_value)
+                && let Type::Array(t) = type_of(&parsed_value)
+                && t.n == Some(0)
+                && (expected.n.is_none() || expected.n == Some(0))
+            {
+                return Some(Box::new(Literal::with_array_type(*expected, items.clone())));
             }
 
             Some(Box::new(Literal::new(parsed_value)))

@@ -53,6 +53,7 @@ impl TileZoomFunction {
     /// here, for a whole cover. (C++ defaults the last two arguments to
     /// `DEFAULT_MAX_ZOOM_LEVELS_ON_SCREEN` and
     /// `DEFAULT_TILE_COUNT_MAX_MIN_RATIO`.)
+    #[must_use]
     pub fn new(
         camera_vertical_fov_degrees: f64,
         max_zoom_levels_on_screen: f64,
@@ -79,6 +80,7 @@ impl TileZoomFunction {
 
     /// `operator()`: distances share one unit (GL JS uses Mercator units at
     /// zoom 0). Returns an unrounded zoom.
+    #[must_use]
     pub fn call(
         &self,
         requested_center_zoom: f64,
@@ -111,6 +113,7 @@ impl TileZoomFunction {
 /// `center_elevation` is the terrain height under the map center and
 /// `max_content_elevation` the tallest content the style is known to hold;
 /// both are zero without terrain (C++ defaults them to 0).
+#[must_use]
 pub fn elevation_for_tile_culling(
     pitch_degrees: f64,
     fov_degrees: f64,
@@ -118,15 +121,8 @@ pub fn elevation_for_tile_culling(
     max_content_elevation: f64,
 ) -> f64 {
     let bottom_edge_degrees_above_horizontal = MAX_MERCATOR_HORIZON_ANGLE_DEGREES - pitch_degrees - fov_degrees / 2.0;
-    // std::clamp(x, 0.0, 1.0)
     let proximity = (TILE_CULLING_HORIZON_ONSET_DEGREES - bottom_edge_degrees_above_horizontal)
         / TILE_CULLING_HORIZON_ONSET_DEGREES;
-    let proximity_to_horizon = if proximity < 0.0 {
-        0.0
-    } else if 1.0 < proximity {
-        1.0
-    } else {
-        proximity
-    };
+    let proximity_to_horizon = proximity.clamp(0.0, 1.0);
     center_elevation + proximity_to_horizon * std_max(ASSUMED_MAX_FEATURE_HEIGHT_METERS, max_content_elevation)
 }

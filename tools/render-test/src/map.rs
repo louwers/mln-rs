@@ -32,8 +32,8 @@ fn map_mode(mode: MapMode) -> mln_map::MapMode {
 /// `TestRunner::Impl`.
 pub struct Impl {
     pub frontend: HeadlessFrontend,
-    /// `std::shared_ptr<FileSource> fileSource`: the ProxyFileSource over
-    /// the cache database of ResourceOptions::cachePath.
+    /// `std::shared_ptr<FileSource> fileSource`: the `ProxyFileSource` over
+    /// the cache database of `ResourceOptions::cachePath`.
     pub file_source: Option<Arc<dyn FileSource>>,
     pub map: Map,
 }
@@ -54,7 +54,7 @@ impl Impl {
             HeadlessFrontend::with_options(metadata.size, metadata.pixel_ratio, true).map_err(|e| e.to_string())?;
         if impl_options.tile_worker_codec > 0 {
             let count = impl_options.tile_worker_codec;
-            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, replies)));
+            let transport = SerializingTransport::new(|replies| Box::new(ThreadWorkerInstances::new(count, &replies)));
             frontend.with_renderer(|renderer| renderer.set_tile_worker_transport(transport));
         }
         let file_source = file_sources.get_file_source(FileSourceType::ResourceLoader, &resource_options);
@@ -78,7 +78,7 @@ impl Impl {
 
 impl TestRunnerImpl for Impl {
     fn reset_context(&mut self, metadata: &TestMetadata) -> Result<(), MapError> {
-        self.frontend.with_renderer(|renderer| renderer.clear_data());
+        self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
         self.frontend.set_size(metadata.size);
         self.map.set_size(metadata.size).map_err(|e| MapError::Exception(e.to_string()))?;
         self.map.set_projection_mode(

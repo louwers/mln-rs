@@ -20,7 +20,9 @@ use std::sync::Arc;
 use mln_gfx::index_vector::{IndexVectorBase, IndexVectorBasePtr};
 use mln_gfx::projection_variant::ProjectionVariant;
 use mln_gfx::shaders::segment::SegmentBase;
-use mln_gfx::shaders::shader_defines::*;
+use mln_gfx::shaders::shader_defines::{
+    ID_HILLSHADE_IMAGE_TEXTURE, ID_HILLSHADE_POS_VERTEX_ATTRIBUTE, ID_HILLSHADE_TEXTURE_POS_VERTEX_ATTRIBUTE,
+};
 use mln_gfx::texture2d::SamplerState;
 use mln_gfx::types::{TextureChannelDataType, TextureFilterType, TextureWrapType};
 use mln_gfx::vertex_attribute::VertexAttributeArrayPtr;
@@ -33,8 +35,11 @@ use mln_map_types::TransformState;
 use mln_style::layer::static_immutable_cast;
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
 use mln_style::layers::hillshade_layer_impl::Impl as HillshadeLayerImpl;
-use mln_style::layers::hillshade_layer_properties::*;
+use mln_style::layers::hillshade_layer_properties::{
+    HillshadeExaggeration, HillshadeLayerProperties, HillshadePaintProperties, Resampling,
+};
 use mln_style::{PropertyEvaluationParameters, TransitionParameters, layer};
+use mln_style_types::ResamplingType;
 use mln_util::constants;
 use mln_util::identity::SimpleIdentity;
 use mln_util::immutable::Immutable;
@@ -111,14 +116,14 @@ impl RenderHillshadeLayer {
 
     /// `addRenderTarget(renderTarget, changes)`.
     fn add_render_target(&mut self, render_target: &RenderTargetPtr, changes: &mut UniqueChangeRequestVec) {
-        activate_render_target(&Some(render_target.clone()), true, changes);
+        activate_render_target(Some(render_target), true, changes);
         self.activated_render_targets.push(render_target.clone());
     }
 
     /// `removeRenderTargets(changes)`.
     fn remove_render_targets(&mut self, changes: &mut UniqueChangeRequestVec) {
         for render_target in &self.activated_render_targets {
-            activate_render_target(&Some(render_target.clone()), false, changes);
+            activate_render_target(Some(render_target), false, changes);
         }
         self.activated_render_targets.clear();
     }
@@ -331,6 +336,14 @@ impl RenderLayer for RenderHillshadeLayer {
 
         let mut hillshade_prepare_vertex_attrs: Option<VertexAttributeArrayPtr> = None;
 
+        // `resampling` filters the prepared texture the tile drawable
+        // samples; the prepare pass reads the DEM with Nearest regardless.
+        let evaluated = get_evaluated::<HillshadeLayerProperties>(&self.base.evaluated_properties);
+        let resampling_filter = match *evaluated.get::<Resampling>() {
+            ResamplingType::Linear => TextureFilterType::Linear,
+            ResamplingType::Nearest => TextureFilterType::Nearest,
+        };
+
         // Drop the render targets of buckets that are no longer rendered
         // (C++ releases them with the bucket).
         let live_buckets: HashSet<SimpleIdentity> =
@@ -447,6 +460,12 @@ impl RenderLayer for RenderHillshadeLayer {
             }
             let render_target_texture =
                 self.bucket_render_targets.get(&bucket_id).expect("render target").0.borrow().get_texture();
+            render_target_texture.borrow_mut().set_sampler_configuration(SamplerState {
+                filter: resampling_filter,
+                wrap_u: TextureWrapType::Clamp,
+                wrap_v: TextureWrapType::Clamp,
+                ..Default::default()
+            });
 
             // Set up tile drawable
             let (vertices, vertex_count, indices, segments, geometry_time) = {

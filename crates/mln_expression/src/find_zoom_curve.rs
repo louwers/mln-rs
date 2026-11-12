@@ -50,6 +50,7 @@ pub enum ZoomCurvePtr<'a> {
 }
 
 impl ZoomCurvePtr<'_> {
+    #[must_use]
     pub fn is_null(&self) -> bool {
         matches!(self, ZoomCurvePtr::Null)
     }

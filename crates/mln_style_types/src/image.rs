@@ -88,7 +88,7 @@ fn validate_stretch(stretches: &ImageStretches, size: f32) -> bool {
     true
 }
 
-fn validate_content(content: &ImageContent, size: &Size) -> bool {
+fn validate_content(content: &ImageContent, size: Size) -> bool {
     let (width, height) = (size.width as f32, size.height as f32);
     if content.left < 0.0 || width < content.left {
         return false;
@@ -137,7 +137,7 @@ impl Impl {
             return Err(Error::invalid_argument("stretchX is out of bounds or overlapping"));
         } else if !validate_stretch(&stretch_y, image.size.height as f32) {
             return Err(Error::invalid_argument("stretchY is out of bounds or overlapping"));
-        } else if content.as_ref().is_some_and(|content| !validate_content(content, &image.size)) {
+        } else if content.as_ref().is_some_and(|content| !validate_content(content, image.size)) {
             return Err(Error::invalid_argument("content area is invalid"));
         }
         Ok(Impl {
@@ -192,42 +192,52 @@ impl Image {
     }
 
     /// `explicit Image(Immutable<Impl>)`.
+    #[must_use]
     pub fn from_impl(base_impl: Immutable<Impl>) -> Self {
         Image { base_impl }
     }
 
+    #[must_use]
     pub fn get_id(&self) -> String {
         self.base_impl.id.clone()
     }
 
+    #[must_use]
     pub fn get_image(&self) -> &PremultipliedImage {
         &self.base_impl.image
     }
 
+    #[must_use]
     pub fn get_pixel_ratio(&self) -> f32 {
         self.base_impl.pixel_ratio
     }
 
+    #[must_use]
     pub fn is_sdf(&self) -> bool {
         self.base_impl.sdf
     }
 
+    #[must_use]
     pub fn get_stretch_x(&self) -> &ImageStretches {
         &self.base_impl.stretch_x
     }
 
+    #[must_use]
     pub fn get_stretch_y(&self) -> &ImageStretches {
         &self.base_impl.stretch_y
     }
 
+    #[must_use]
     pub fn get_content(&self) -> &Option<ImageContent> {
         &self.base_impl.content
     }
 
+    #[must_use]
     pub fn get_text_fit_width(&self) -> &Option<TextFit> {
         &self.base_impl.text_fit_width
     }
 
+    #[must_use]
     pub fn get_text_fit_height(&self) -> &Option<TextFit> {
         &self.base_impl.text_fit_height
     }
@@ -277,6 +287,7 @@ impl ImagePosition {
     pub const PADDING: u16 = 1;
 
     /// `ImagePosition(const Rect<uint16_t>&, const style::Image::Impl&, uint32_t version = 0)`.
+    #[must_use]
     pub fn new(rect: RectU16, image: &Impl, version: u32) -> Self {
         ImagePosition {
             padded_rect: rect,
@@ -292,22 +303,25 @@ impl ImagePosition {
     }
 
     /// `tl()`: the `int` sums narrowed to `uint16_t`.
+    #[must_use]
     pub fn tl(&self) -> [u16; 2] {
         [
-            (self.padded_rect.x as i32 + Self::PADDING as i32) as u16,
-            (self.padded_rect.y as i32 + Self::PADDING as i32) as u16,
+            (i32::from(self.padded_rect.x) + i32::from(Self::PADDING)) as u16,
+            (i32::from(self.padded_rect.y) + i32::from(Self::PADDING)) as u16,
         ]
     }
 
     /// `br()`.
+    #[must_use]
     pub fn br(&self) -> [u16; 2] {
         [
-            (self.padded_rect.x as i32 + self.padded_rect.w as i32 - Self::PADDING as i32) as u16,
-            (self.padded_rect.y as i32 + self.padded_rect.h as i32 - Self::PADDING as i32) as u16,
+            (i32::from(self.padded_rect.x) + i32::from(self.padded_rect.w) - i32::from(Self::PADDING)) as u16,
+            (i32::from(self.padded_rect.y) + i32::from(self.padded_rect.h) - i32::from(Self::PADDING)) as u16,
         ]
     }
 
     /// `tlbr()`.
+    #[must_use]
     pub fn tlbr(&self) -> [u16; 4] {
         let tl = self.tl();
         let br = self.br();
@@ -315,10 +329,11 @@ impl ImagePosition {
     }
 
     /// `displaySize()`.
+    #[must_use]
     pub fn display_size(&self) -> [f32; 2] {
         [
-            (self.padded_rect.w as i32 - Self::PADDING as i32 * 2) as f32 / self.pixel_ratio,
-            (self.padded_rect.h as i32 - Self::PADDING as i32 * 2) as f32 / self.pixel_ratio,
+            (i32::from(self.padded_rect.w) - i32::from(Self::PADDING) * 2) as f32 / self.pixel_ratio,
+            (i32::from(self.padded_rect.h) - i32::from(Self::PADDING) * 2) as f32 / self.pixel_ratio,
         ]
     }
 }
@@ -327,7 +342,7 @@ impl ImagePosition {
 pub type ImagePositions = std::collections::HashMap<String, ImagePosition>;
 
 /// Port-only: the `shared::Kind` of the images of an `ImageMap`, which cross
-/// once per pair of sides, then by key (mln_util::serialization::shared): a
+/// once per pair of sides, then by key (`mln_util::serialization::shared)`: a
 /// tile worker in another wasm instance gets the same icons and patterns for
 /// every tile.
 pub struct SharedImage;
@@ -350,7 +365,7 @@ impl shared::Kind for SharedImage {
 pub mod shared_image_map {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-    use super::*;
+    use super::{ImageMap, Immutable, Impl, SharedImage, shared};
 
     #[derive(Serialize, Deserialize)]
     struct Image(

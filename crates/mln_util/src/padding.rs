@@ -14,11 +14,13 @@ pub struct Padding {
 }
 
 impl Padding {
+    #[must_use]
     pub const fn new(top: f32, right: f32, bottom: f32, left: f32) -> Self {
         Padding { top, right, bottom, left }
     }
 
     /// Same padding on all sides.
+    #[must_use]
     pub const fn uniform(value: f32) -> Self {
         Padding::new(value, value, value, value)
     }
@@ -36,22 +38,26 @@ impl Padding {
     }
 
     /// `explicit operator bool`.
+    #[must_use]
     pub fn is_nonzero(&self) -> bool {
         self.top != 0.0 || self.right != 0.0 || self.bottom != 0.0 || self.left != 0.0
     }
 
     /// `toArray()`: the C++ returns `std::array<float, 4>`; this keeps the
     /// seed's `[f64; 4]` (exact promotions of the same floats).
+    #[must_use]
     pub fn to_array(&self) -> [f64; 4] {
-        [self.top as f64, self.right as f64, self.bottom as f64, self.left as f64]
+        [f64::from(self.top), f64::from(self.right), f64::from(self.bottom), f64::from(self.left)]
     }
 
     /// `toArray()` with the C++ element type.
+    #[must_use]
     pub fn to_float_array(&self) -> [f32; 4] {
         [self.top, self.right, self.bottom, self.left]
     }
 
     /// Used by `ValueFactory<Padding>::make()`: floats promote to double.
+    #[must_use]
     pub fn serialize(&self) -> Value {
         Value::Array(self.to_array().iter().map(|v| Value::Double(*v)).collect())
     }

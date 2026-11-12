@@ -7,7 +7,7 @@
 
 #[inline]
 fn byte(s: &[u8], i: usize) -> u32 {
-    s.get(i).copied().unwrap_or(0) as u32
+    u32::from(s.get(i).copied().unwrap_or(0))
 }
 
 #[inline]
@@ -33,6 +33,7 @@ fn utf8_4b(s: &[u8], i: usize) -> u32 {
 /// `nu_utf8_read`: decodes the codepoint at `i`, returns the position of the
 /// next one and the codepoint.
 #[inline]
+#[must_use]
 pub fn nu_utf8_read(s: &[u8], i: usize) -> (usize, u32) {
     let c = byte(s, i);
     if c >= 0x80 {
@@ -81,9 +82,9 @@ pub fn nu_utf8_write(unicode: u32, out: &mut Vec<u8>) {
             // b4_utf8 (len == 4). Quirk kept from the C: bit 12 goes into
             // the third byte (mask 0x001F00) instead of the second, which
             // yields invalid UTF-8 when it is set.
-            out.push((0xF0 | ((c & 0x1C0000) >> 18)) as u8);
-            out.push((0x80 | (c & 0x030000) >> 12 | (c & 0x00E000) >> 12) as u8);
-            out.push((0x80 | (c & 0x001F00) >> 6 | (c & 0x0000E0) >> 6) as u8);
+            out.push((0xF0 | ((c & 0x001C_0000) >> 18)) as u8);
+            out.push((0x80 | (c & 0x0003_0000) >> 12 | (c & 0x0000_E000) >> 12) as u8);
+            out.push((0x80 | (c & 0x0000_1F00) >> 6 | (c & 0x0000_00E0) >> 6) as u8);
             out.push((0x80 | (c & 0x3F)) as u8);
         }
     }

@@ -78,7 +78,7 @@ struct OnlineFileRequest {
     /// transform again instead of loading the original URL.
     transform_failed: Cell<bool>,
 
-    /// Lazily created for the ResourceTransform's reply (`actor()`).
+    /// Lazily created for the `ResourceTransform`'s reply (`actor()`).
     mailbox: RefCell<Option<Arc<Mailbox>>>,
 }
 
@@ -654,6 +654,7 @@ pub struct OnlineFileSource {
 }
 
 impl OnlineFileSource {
+    #[must_use]
     pub fn new(resource_options: &ResourceOptions) -> Self {
         OnlineFileSource { impl_: Impl::new(resource_options) }
     }
@@ -682,7 +683,7 @@ impl FileSource for OnlineFileSource {
             },
             Kind::Glyphs => res.url = mapbox::normalize_glyphs_url(&options, &resource.url, &api_key),
             Kind::SpriteImage | Kind::SpriteJSON => {
-                res.url = mapbox::normalize_sprite_url(&options, &resource.url, &api_key)
+                res.url = mapbox::normalize_sprite_url(&options, &resource.url, &api_key);
             }
             Kind::Tile => res.url = mapbox::normalize_tile_url(&options, &resource.url, &api_key),
         }

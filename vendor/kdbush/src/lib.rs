@@ -28,8 +28,11 @@ impl<T: Number> Nth for (T, T) {
 
 /// `TNumber`: the arithmetic `range`/`within` use.
 pub trait Number: Copy + PartialOrd + std::fmt::Debug {
+    #[must_use]
     fn add(self, other: Self) -> Self;
+    #[must_use]
     fn sub(self, other: Self) -> Self;
+    #[must_use]
     fn mul(self, other: Self) -> Self;
 }
 
@@ -81,8 +84,11 @@ pub trait Index: Copy + Ord + std::fmt::Debug {
     fn to_f64(self) -> f64;
     /// `TIndex(double)`, saturating out of range.
     fn from_f64(v: f64) -> Self;
+    #[must_use]
     fn wrapping_add(self, other: Self) -> Self;
+    #[must_use]
     fn wrapping_sub(self, other: Self) -> Self;
+    #[must_use]
     fn shr1(self) -> Self;
 }
 
@@ -158,6 +164,7 @@ impl<N: Number, I: Index> Default for KDBush<N, I> {
 
 impl<N: Number, I: Index> KDBush<N, I> {
     /// `KDBush(nodeSize)`
+    #[must_use]
     pub fn new(node_size: u8) -> Self {
         KDBush { ids: Vec::new(), points: Vec::new(), node_size }
     }
@@ -171,7 +178,7 @@ impl<N: Number, I: Index> KDBush<N, I> {
 
     /// `fill(points)`
     pub fn fill<P: Nth<Number = N>>(&mut self, points: &[P]) {
-        debug_assert!(self.points.is_empty());
+        debug_assert_eq!(self.points, [] as [(N, N); 0]);
         let size = I::from_usize(points.len());
 
         if size == I::ZERO {

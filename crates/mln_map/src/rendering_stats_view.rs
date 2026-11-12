@@ -2,6 +2,7 @@
 // src/mln/gfx/rendering_stats.cpp): the rendering stats as text in the map's
 // top right corner, drawn by a symbol layer that the view adds to the style.
 
+use std::fmt::Write;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -57,6 +58,7 @@ pub const RENDERING_STATS_LAYER_ID: &str = "rendering-stats";
 pub const RENDERING_STATS_SOURCE_ID: &str = "rendering-stats-source";
 
 impl RenderingStatsView {
+    #[must_use]
     pub fn new(options: RenderingStatsViewOptions) -> Self {
         RenderingStatsView { options, last_update: None, frame_count: 0, encoding_time: 0.0, rendering_time: 0.0 }
     }
@@ -149,8 +151,8 @@ impl RenderingStatsView {
         let verbose = self.options.verbose;
         let frames = f64::from(self.frame_count.max(1));
         let mut text = String::new();
-        text += &format!("Encoding time (ms): {:7.3}\n", self.encoding_time / frames * 1000.0);
-        text += &format!("Rendering time (ms): {:7.3}\n", self.rendering_time / frames * 1000.0);
+        let _ = writeln!(text, "Encoding time (ms): {:7.3}", self.encoding_time / frames * 1000.0);
+        let _ = writeln!(text, "Rendering time (ms): {:7.3}", self.rendering_time / frames * 1000.0);
 
         let t = &mut text;
         number(t, "Frame count", f64::from(stats.num_frames), true);
@@ -193,14 +195,14 @@ impl RenderingStatsView {
 /// `printNumber`: a line of a count.
 fn number(text: &mut String, label: &str, value: f64, print: bool) {
     if print {
-        *text += &format!("{label}: {}\n", format_number(value));
+        let _ = writeln!(text, "{label}: {}", format_number(value));
     }
 }
 
 /// `printMemory`: a line of a byte count.
 fn memory(text: &mut String, label: &str, value: u64, print: bool) {
     if print {
-        *text += &format!("{label}: {}\n", format_memory(value));
+        let _ = writeln!(text, "{label}: {}", format_memory(value));
     }
 }
 

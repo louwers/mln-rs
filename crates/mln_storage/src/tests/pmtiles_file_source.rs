@@ -30,13 +30,13 @@ fn tile(url: &str, z: i8) -> Resource {
 }
 
 /// Requests `resource`, runs the loop until the response and returns it.
-fn request(fs: &PMTilesFileSource, resource: Resource) -> Response {
+fn request(fs: &PMTilesFileSource, resource: &Resource) -> Response {
     let run_loop = RunLoop::new();
     let req = req();
     let result = Rc::new(RefCell::new(None));
     let (r, out, stop) = (req.clone(), result.clone(), run_loop.clone());
     *req.borrow_mut() = Some(fs.request(
-        &resource,
+        resource,
         Box::new(move |res: Response| {
             r.borrow_mut().take();
             *out.borrow_mut() = Some(res);
@@ -63,7 +63,7 @@ fn accepts_url() {
 #[test]
 fn non_existent_file() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
+    let res = request(&pmtiles, &Resource::new(Kind::Unknown, to_absolute_url("does_not_exist")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::NotFound, error.reason);
     assert!(error.message.contains("Cannot find file"), "{}", error.message);
@@ -75,7 +75,7 @@ fn non_existent_file() {
 #[test]
 fn tile_json() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, Resource::new(Kind::Unknown, to_absolute_url("geography-class-png.pmtiles")));
+    let res = request(&pmtiles, &Resource::new(Kind::Unknown, to_absolute_url("geography-class-png.pmtiles")));
     assert_eq!(None, res.error);
     let data = res.data.expect("data");
     // basic test that TileJSON included a tile URL
@@ -87,7 +87,7 @@ fn tile_json() {
 #[test]
 fn tile_data() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, tile(&to_absolute_url("geography-class-png.pmtiles"), 0));
+    let res = request(&pmtiles, &tile(&to_absolute_url("geography-class-png.pmtiles"), 0));
     assert_eq!(None, res.error);
     assert!(res.data.is_some());
     assert!(!res.no_content);
@@ -98,7 +98,7 @@ fn tile_data() {
 #[test]
 fn non_existent_tile() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, tile(&to_absolute_url("geography-class-png.pmtiles"), 4));
+    let res = request(&pmtiles, &tile(&to_absolute_url("geography-class-png.pmtiles"), 4));
     assert_eq!(None, res.error);
     assert!(res.data.is_none());
     assert!(res.no_content);
@@ -111,7 +111,7 @@ fn non_existent_tile() {
 #[test]
 fn corrupt_gzip_tile() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, tile(&to_absolute_url("corrupt-gzip-tile.pmtiles"), 0));
+    let res = request(&pmtiles, &tile(&to_absolute_url("corrupt-gzip-tile.pmtiles"), 0));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(error.message.contains("Error decompressing PMTiles tile:"), "{}", error.message);
@@ -124,7 +124,7 @@ fn corrupt_gzip_tile() {
 #[test]
 fn corrupt_gzip_metadata() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, Resource::new(Kind::Unknown, to_absolute_url("corrupt-gzip-metadata.pmtiles")));
+    let res = request(&pmtiles, &Resource::new(Kind::Unknown, to_absolute_url("corrupt-gzip-metadata.pmtiles")));
     let error = res.error.as_ref().expect("error");
     assert_eq!(Reason::Other, error.reason);
     assert!(error.message.contains("Error decompressing PMTiles metadata:"), "{}", error.message);
@@ -176,7 +176,7 @@ fn repeated_tile_request() {
 #[test]
 fn uncompressed_tile() {
     let pmtiles = pmtiles_file_source();
-    let res = request(&pmtiles, tile(&to_absolute_url("uncompressed-tiles.pmtiles"), 0));
+    let res = request(&pmtiles, &tile(&to_absolute_url("uncompressed-tiles.pmtiles"), 0));
     assert_eq!(None, res.error);
     assert!(res.data.is_some());
     assert!(!res.no_content);

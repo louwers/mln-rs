@@ -1,7 +1,7 @@
 #![cfg(target_vendor = "apple")]
 //! Compiles every MSL source `shader_source()` returns with the system's
-//! Metal compiler, the way mtl::ShaderGroup does: `PRELUDE + prelude +
-//! source`, MSL 2.4, fast math, the ProgramParameters defines, a
+//! Metal compiler, the way `mtl::ShaderGroup` does: `PRELUDE + prelude +
+//! source`, MSL 2.4, fast math, the `ProgramParameters` defines, a
 //! `HAS_UNIFORM_u_<name>` define per property passed as a uniform, and
 //! `PROJECTION_GLOBE` for the globe variant. Also checks that the UBO ids and
 //! sizes the MSL declares are the renderer's, and that the shaders' pipelines
@@ -12,6 +12,7 @@
 #![allow(unsafe_code)]
 
 use std::collections::BTreeSet;
+use std::fmt::Write as _;
 use std::mem::size_of;
 
 use mln_gfx::gfx_types::AttributeDataType;
@@ -375,11 +376,11 @@ fn ubo_ids_and_sizes_are_the_renderers() {
         let mut text = full_source(source);
         let mut asserts = String::new();
         for (id, value) in ubo_ids(source) {
-            asserts.push_str(&format!("static_assert({id} == {value}, \"{id} != {value}\");\n"));
+            let _ = writeln!(asserts, "static_assert({id} == {value}, \"{id} != {value}\");");
         }
         for &(name, size) in UBO_SIZES {
             if declares(&text, name) {
-                asserts.push_str(&format!("static_assert(sizeof({name}) == {size}, \"sizeof({name}) != {size}\");\n"));
+                let _ = writeln!(asserts, "static_assert(sizeof({name}) == {size}, \"sizeof({name}) != {size}\");");
             }
         }
         text.push_str(&asserts);

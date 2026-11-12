@@ -22,37 +22,44 @@ impl Quaternion {
     /// `Quaternion::identity` (a mutable static in C++, never written).
     pub const IDENTITY: Quaternion = Quaternion::new(0.0, 0.0, 0.0, 1.0);
 
+    #[must_use]
     pub const fn new(x: f64, y: f64, z: f64, w: f64) -> Self {
         Quaternion { x, y, z, w }
     }
 
     /// `Quaternion(const vec4&)`.
+    #[must_use]
     pub const fn from_vec4(vec: &Vec4) -> Self {
         Quaternion { x: vec[0], y: vec[1], z: vec[2], w: vec[3] }
     }
 
     /// The `vec4 m` member of the C++ union.
+    #[must_use]
     pub const fn m(&self) -> Vec4 {
         [self.x, self.y, self.z, self.w]
     }
 
+    #[must_use]
     pub fn conjugate(&self) -> Quaternion {
         Quaternion::new(-self.x, -self.y, -self.z, self.w)
     }
 
     /// The C++ `assert(len > 0.0)` becomes a debug assertion.
+    #[must_use]
     pub fn normalized(&self) -> Quaternion {
         let len = self.length();
         debug_assert!(len > 0.0);
         Quaternion::new(self.x / len, self.y / len, self.z / len, self.w / len)
     }
 
+    #[must_use]
     pub fn from_axis_angle(axis: &Vec3, angle_rad: f64) -> Quaternion {
         let coss = (0.5 * angle_rad).cos();
         let sins = (0.5 * angle_rad).sin();
         Quaternion::new(sins * axis[0], sins * axis[1], sins * axis[2], coss)
     }
 
+    #[must_use]
     pub fn from_euler_angles(x: f64, y: f64, z: f64) -> Quaternion {
         let cz = (z * 0.5).cos();
         let sz = (z * 0.5).sin();
@@ -69,6 +76,7 @@ impl Quaternion {
         )
     }
 
+    #[must_use]
     pub fn multiply(&self, o: &Quaternion) -> Quaternion {
         let (x, y, z, w) = (self.x, self.y, self.z, self.w);
         Quaternion::new(
@@ -79,16 +87,19 @@ impl Quaternion {
         )
     }
 
+    #[must_use]
     pub fn length(&self) -> f64 {
         (self.x * self.x + self.y * self.y + self.z * self.z + self.w * self.w).sqrt()
     }
 
+    #[must_use]
     pub fn transform(&self, v: &Vec3) -> Vec3 {
         let src = Quaternion::new(v[0], v[1], v[2], 0.0);
         let res = self.multiply(&src).multiply(&self.conjugate());
         [res.x, res.y, res.z]
     }
 
+    #[must_use]
     pub fn to_rotation_matrix(&self) -> Mat4 {
         let (x, y, z, w) = (self.x, self.y, self.z, self.w);
         let mut mat: Mat4 = [0.0; 16];

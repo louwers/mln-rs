@@ -9,7 +9,11 @@ use mln_gfx::polyline_generator::{PolylineGenerator, PolylineGeneratorDistances,
 use mln_gfx::shaders::segment::SegmentBase;
 use mln_style::expression::{Image, Value};
 use mln_style::layer_properties::{LayerProperties, get_evaluated};
-use mln_style::layers::line_layer_properties::*;
+use mln_style::layers::line_layer_properties::{
+    LineBlur, LineCap, LineColor, LineFloorWidth, LineGapWidth, LineJoin, LineLayerProperties, LineLayoutProperties,
+    LineMiterLimit, LineOffset, LineOpacity, LinePaintProperties, LinePattern, LineRoundLimit, LineTranslate,
+    LineWidth,
+};
 use mln_style::properties::Property;
 use mln_style_types::image::ImagePositions;
 use mln_style_types::{LineCapType, LineJoinType};
@@ -83,6 +87,7 @@ static WARNED_INVALID_GEOMETRY: AtomicBool = AtomicBool::new(false);
 
 impl LineBucket {
     /// `LineBucket(layout, layerPaintProperties, zoom, overscaling)`.
+    #[must_use]
     pub fn new(
         layout: LineLayoutProperties::PossiblyEvaluated,
         layer_paint_properties: &VecMap<String, Immutable<dyn LayerProperties>>,
@@ -119,6 +124,7 @@ impl LineBucket {
     /// @param round whether the vertex uses a round line cap
     /// @param up whether the line normal points up or down
     /// @param dir direction of the line cap (-1/0/1)
+    #[must_use]
     pub fn layout_vertex(
         p: Point<i16>,
         e: Point<f64>,
@@ -129,17 +135,11 @@ impl LineBucket {
     ) -> LineLayoutVertex {
         let extrude = |v: f64| -> u8 {
             // add 128 to store a byte in an unsigned byte
-            mln_math::clamp_f64((EXTRUDE_SCALE as f64 * v).round() + 128.0, 0.0, 255.0) as u8
+            mln_math::clamp_f64((f64::from(EXTRUDE_SCALE) * v).round() + 128.0, 0.0, 255.0) as u8
         };
-        let dir_value: i32 = if dir == 0 {
-            0
-        } else if dir < 0 {
-            -1
-        } else {
-            1
-        };
+        let dir_value = i32::from(dir.signum());
         LineLayoutVertex {
-            a1: [((p.x as i32 * 2) | round as i32) as i16, ((p.y as i32 * 2) | up as i32) as i16],
+            a1: [((i32::from(p.x) * 2) | i32::from(round)) as i16, ((i32::from(p.y) * 2) | i32::from(up)) as i16],
             a2: [
                 extrude(e.x),
                 extrude(e.y),
@@ -209,21 +209,20 @@ impl LineBucket {
             return;
         }
 
-        if let Some(clip_start) = feature.get_value("mapbox_clip_start") {
-            if let Some(clip_end) = feature.get_value("mapbox_clip_end") {
-                let start_value = numeric_value_f64(&clip_start);
-                let end_value = numeric_value_f64(&clip_end);
-                if let (Some(start_value), Some(end_value)) = (start_value, end_value) {
-                    if start_value < end_value {
-                        let mut total_length = 0.0;
-                        for i in first..len - 1 {
-                            total_length += dist(coordinates[i], coordinates[i + 1]);
-                        }
-
-                        options.clip_distances =
-                            Some(PolylineGeneratorDistances::new(start_value, end_value, total_length));
-                    }
+        if let Some(clip_start) = feature.get_value("mapbox_clip_start")
+            && let Some(clip_end) = feature.get_value("mapbox_clip_end")
+        {
+            let start_value = numeric_value_f64(&clip_start);
+            let end_value = numeric_value_f64(&clip_end);
+            if let (Some(start_value), Some(end_value)) = (start_value, end_value)
+                && start_value < end_value
+            {
+                let mut total_length = 0.0;
+                for i in first..len - 1 {
+                    total_length += dist(coordinates[i], coordinates[i + 1]);
                 }
+
+                options.clip_distances = Some(PolylineGeneratorDistances::new(start_value, end_value, total_length));
             }
         }
 
@@ -249,11 +248,11 @@ impl LineBucket {
 }
 
 /// The anonymous-namespace `get<Property>(evaluated, id, binders)` of
-/// line_bucket.cpp.
-fn get_or_max(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<Option<f32>>) -> f32 {
+/// `line_bucket.cpp`.
+fn get_or_max(evaluated_constant: Option<f32>, default_value: f32, statistics_max: Option<f32>) -> f32 {
     match statistics_max {
-        Some(Some(max)) => max,
-        _ => evaluated_constant.unwrap_or(default_value),
+        Some(max) => max,
+        None => evaluated_constant.unwrap_or(default_value),
     }
 }
 
@@ -290,7 +289,7 @@ impl Bucket for LineBucket {
         }
 
         let length = self.vertices.len();
-        for (id, binders) in self.paint_property_binders.iter_mut() {
+        for (id, binders) in &mut self.paint_property_binders {
             binders.get_mut_unpoisoned().populate_vertex_vectors(
                 feature,
                 length,
@@ -319,17 +318,17 @@ impl Bucket for LineBucket {
         let offset = get_or_max(
             evaluated.get::<LineOffset>().constant(),
             LineOffset::default_value(),
-            binders.map(|b| b.read_unpoisoned().line_offset.statistics.max()),
+            binders.and_then(|b| b.read_unpoisoned().line_offset.statistics.max()),
         );
         let mut line_width = get_or_max(
             evaluated.get::<LineWidth>().constant(),
             LineWidth::default_value(),
-            binders.map(|b| b.read_unpoisoned().line_width.statistics.max()),
+            binders.and_then(|b| b.read_unpoisoned().line_width.statistics.max()),
         );
         let gap_width = get_or_max(
             evaluated.get::<LineGapWidth>().constant(),
             LineGapWidth::default_value(),
-            binders.map(|b| b.read_unpoisoned().line_gap_width.statistics.max()),
+            binders.and_then(|b| b.read_unpoisoned().line_gap_width.statistics.max()),
         );
         if gap_width != 0.0 {
             line_width = gap_width + 2.0 * line_width;

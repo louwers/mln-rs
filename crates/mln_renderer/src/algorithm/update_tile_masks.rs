@@ -49,8 +49,8 @@ fn compute_tile_masks(
     ));
 }
 
-/// `updateTileMasks(renderables)`: updates the TileMasks for all renderable
-/// tiles (sorted by id). A TileMask describes all regions within a
+/// `updateTileMasks(renderables)`: updates the `TileMasks` for all renderable
+/// tiles (sorted by id). A `TileMask` describes all regions within a
 /// renderable tile that are *not* covered by other renderable tiles, as
 /// tile ids relative to the tile (see the C++ header for the picture).
 pub fn update_tile_masks(renderables: &[(UnwrappedTileID, &dyn Tile)]) {

@@ -555,12 +555,15 @@ impl LentSource {
                     northeast: geo::from_lat_lng(bounds.northeast()),
                 };
             }
-            if let Some(encoding) = tiles.raster_encoding {
+            // The C API has no value for a custom encoding, so it reports none.
+            let c_encoding = match tiles.raster_encoding {
+                Some(RasterEncoding::Mapbox) => Some(MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX),
+                Some(RasterEncoding::Terrarium) => Some(MLN_STYLE_RASTER_DEM_ENCODING_TERRARIUM),
+                Some(RasterEncoding::Custom { .. }) | None => None,
+            };
+            if let Some(encoding) = c_encoding {
                 fields |= MLN_STYLE_SOURCE_INFO_RASTER_ENCODING;
-                raster_encoding = match encoding {
-                    RasterEncoding::Mapbox => MLN_STYLE_RASTER_DEM_ENCODING_MAPBOX,
-                    RasterEncoding::Terrarium => MLN_STYLE_RASTER_DEM_ENCODING_TERRARIUM,
-                };
+                raster_encoding = encoding;
             }
         }
         if info.tile_size.is_some() {
@@ -730,8 +733,8 @@ impl CompletionValue for OptionalText {
     }
 }
 
-fn optional_text_value(text: Option<String>) -> OptionalText {
-    OptionalText(text.as_deref().map(LentText::new))
+fn optional_text_value(text: Option<&str>) -> OptionalText {
+    OptionalText(text.map(LentText::new))
 }
 
 // MARK: - Global state
@@ -1709,7 +1712,7 @@ pub unsafe extern "C" fn mln_map_get_style_layer_json(
         // SAFETY: the caller's contract.
         let id = unsafe { required_text(layer_id, "layer_id") }?;
         // SAFETY: the caller's contract.
-        unsafe { query(map, completion, |map| map.style_layer_json(id), optional_text_value) }
+        unsafe { query(map, completion, |map| map.style_layer_json(id), |text| optional_text_value(text.as_deref())) }
     })
 }
 
@@ -1759,7 +1762,14 @@ pub unsafe extern "C" fn mln_map_get_style_layer_property(
         let (id, name) =
             unsafe { (required_text(layer_id, "layer_id")?, required_text(property_name, "property_name")?) };
         // SAFETY: the caller's contract.
-        unsafe { query(map, completion, |map| map.style_layer_property(id, name), optional_text_value) }
+        unsafe {
+            query(
+                map,
+                completion,
+                |map| map.style_layer_property(id, name),
+                |text| optional_text_value(text.as_deref()),
+            )
+        }
     })
 }
 
@@ -1802,7 +1812,9 @@ pub unsafe extern "C" fn mln_map_get_style_root_property(
         // SAFETY: the caller's contract.
         let name = unsafe { required_text(property_name, "property_name") }?;
         // SAFETY: the caller's contract.
-        unsafe { query(map, completion, |map| map.style_root_property(name), optional_text_value) }
+        unsafe {
+            query(map, completion, |map| map.style_root_property(name), |text| optional_text_value(text.as_deref()))
+        }
     })
 }
 
@@ -1843,7 +1855,9 @@ pub unsafe extern "C" fn mln_map_get_style_light_property(
         // SAFETY: the caller's contract.
         let name = unsafe { required_text(property_name, "property_name") }?;
         // SAFETY: the caller's contract.
-        unsafe { query(map, completion, |map| map.style_light_property(name), optional_text_value) }
+        unsafe {
+            query(map, completion, |map| map.style_light_property(name), |text| optional_text_value(text.as_deref()))
+        }
     })
 }
 
@@ -1973,7 +1987,7 @@ mod tests {
             assert!(image(&pixels(1, 2, 3, &padded)).unwrap_err().message().contains("stride"));
             assert!(image(&pixels(0, 2, 6, &padded)).unwrap_err().message().contains("dimensions"));
             let no_pixels = mln_premultiplied_rgba8_image { pixels: core::ptr::null(), ..pixels(1, 1, 4, &padded) };
-            assert_eq!(image(&no_pixels).unwrap_err().message(), "image pixels must not be null");
+            assert_eq!(image(&raw const no_pixels).unwrap_err().message(), "image pixels must not be null");
         }
     }
 

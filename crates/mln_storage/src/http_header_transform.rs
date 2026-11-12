@@ -31,12 +31,14 @@ pub struct HttpHeaderTransform {
 
 impl HttpHeaderTransform {
     /// Adds the headers `callback` returns; `None` adds none.
+    #[must_use]
     pub fn new(callback: Option<HttpHeaderCallback>) -> Self {
         HttpHeaderTransform { callback }
     }
 
     /// The headers for a request of `kind` to `url`: none for a URL that
     /// isn't `http` or `https`.
+    #[must_use]
     pub fn headers(&self, kind: Kind, url: &str) -> HttpHeaders {
         match &self.callback {
             Some(callback) if is_http_url(url) => callback(kind, url),
@@ -44,6 +46,7 @@ impl HttpHeaderTransform {
         }
     }
 
+    #[must_use]
     pub fn is_set(&self) -> bool {
         self.callback.is_some()
     }
@@ -65,9 +68,9 @@ mod tests {
             HttpHeaderTransform::new(Some(Arc::new(|_, _| vec![("X-Token".to_owned(), "secret".to_owned())])));
         assert_eq!(1, transform.headers(Kind::Style, "http://example.test/style.json").len());
         assert_eq!(1, transform.headers(Kind::Style, "HTTPS://example.test/style.json").len());
-        assert!(transform.headers(Kind::Style, "file:///style.json").is_empty());
-        assert!(transform.headers(Kind::Style, "mbtiles:///tiles.mbtiles").is_empty());
-        assert!(transform.headers(Kind::Style, "httpx://example.test").is_empty());
-        assert!(HttpHeaderTransform::default().headers(Kind::Style, "http://example.test").is_empty());
+        assert_eq!(transform.headers(Kind::Style, "file:///style.json"), HttpHeaders::new());
+        assert_eq!(transform.headers(Kind::Style, "mbtiles:///tiles.mbtiles"), HttpHeaders::new());
+        assert_eq!(transform.headers(Kind::Style, "httpx://example.test"), HttpHeaders::new());
+        assert_eq!(HttpHeaderTransform::default().headers(Kind::Style, "http://example.test"), HttpHeaders::new());
     }
 }

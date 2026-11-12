@@ -25,7 +25,7 @@ use crate::tile_render_data::TileRenderData;
 
 /// The address of a `GeoJSONData` (C++ `data.get()`).
 fn data_address(data: &Arc<dyn GeoJSONData>) -> *const () {
-    Arc::as_ptr(data) as *const ()
+    Arc::as_ptr(data).cast::<()>()
 }
 
 /// `GeoJSONTile`.
@@ -54,14 +54,15 @@ impl GeoJSONTile {
 
     /// `updateData(data, needsRelayout, runSynchronously)`.
     pub fn update_data(&self, data: Arc<dyn GeoJSONData>, needs_relayout: bool, run_synchronously: bool) {
-        *self.data.borrow_mut() = Some(data.clone());
+        let requested = data.clone();
+        *self.data.borrow_mut() = Some(data);
         if needs_relayout {
             self.tile.reset();
         }
         let weak_tile = Rc::downgrade(self.tile.inner());
         let weak_data = Rc::downgrade(&self.data);
-        let captured_data = data_address(&data);
-        data.get_tile(
+        let captured_data = data_address(&requested);
+        requested.get_tile(
             &self.tile.inner().base.id().canonical,
             Box::new(move |features: TileFeatures| {
                 // If the data has changed, a new request is being processed,
@@ -78,6 +79,7 @@ impl GeoJSONTile {
         );
     }
 
+    #[must_use]
     pub fn geometry_tile(&self) -> &GeometryTile {
         &self.tile
     }
@@ -181,18 +183,17 @@ impl Tile for GeoJSONTile {
         global_state: Option<&GlobalStateMap>,
     ) -> Result<(), mln_util::error::Error> {
         // Ignore the sourceLayer, there is only one
-        if let Some(feature_index) = self.tile.get_feature_index() {
-            if let Some(tile_data) = feature_index.get_data() {
-                if let Some(layer) = tile_data.get_layer("")? {
-                    crate::tile::geometry_tile::query_layer_source_features(
-                        &*layer,
-                        result,
-                        options,
-                        global_state,
-                        &self.tile.inner().base.id(),
-                    )?;
-                }
-            }
+        if let Some(feature_index) = self.tile.get_feature_index()
+            && let Some(tile_data) = feature_index.get_data()
+            && let Some(layer) = tile_data.get_layer("")?
+        {
+            crate::tile::geometry_tile::query_layer_source_features(
+                &*layer,
+                result,
+                options,
+                global_state,
+                &self.tile.inner().base.id(),
+            )?;
         }
         Ok(())
     }

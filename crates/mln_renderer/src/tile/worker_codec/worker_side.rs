@@ -44,7 +44,7 @@ pub struct WorkerCodec {
     /// of the instance's atlas.
     tables: shared::Tables,
     /// The texture atlas of the instance's workers. The map side keeps a
-    /// copy of each of its textures (map_side.rs).
+    /// copy of each of its textures (`map_side.rs`).
     atlas: DynamicTextureAtlasPtr,
 }
 
@@ -135,20 +135,20 @@ impl WorkerCodec {
     }
 
     /// Encodes what the `RasterTileWorker` of `tile` sends its tile.
-    pub fn encode_raster(&mut self, tile: u64, message: RasterTileMessage) -> Encoded {
-        let (RasterTileMessage::Parsed { correlation_id, .. } | RasterTileMessage::Error { correlation_id, .. }) =
+    pub fn encode_raster(&mut self, tile: u64, message: &RasterTileMessage) -> Encoded {
+        let (&RasterTileMessage::Parsed { correlation_id, .. } | &RasterTileMessage::Error { correlation_id, .. }) =
             message;
-        self.encode_reply(tile, correlation_id, None, &message, |error| RasterTileMessage::Error {
+        self.encode_reply(tile, correlation_id, None, message, |error| RasterTileMessage::Error {
             error: Error::native(error),
             correlation_id,
         })
     }
 
     /// Encodes what the `RasterDEMTileWorker` of `tile` sends its tile.
-    pub fn encode_raster_dem(&mut self, tile: u64, message: RasterDEMTileMessage) -> Encoded {
-        let (RasterDEMTileMessage::Parsed { correlation_id, .. } | RasterDEMTileMessage::Error { correlation_id, .. }) =
-            message;
-        self.encode_reply(tile, correlation_id, None, &message, |error| RasterDEMTileMessage::Error {
+    pub fn encode_raster_dem(&mut self, tile: u64, message: &RasterDEMTileMessage) -> Encoded {
+        let (&RasterDEMTileMessage::Parsed { correlation_id, .. }
+        | &RasterDEMTileMessage::Error { correlation_id, .. }) = message;
+        self.encode_reply(tile, correlation_id, None, message, |error| RasterDEMTileMessage::Error {
             error: Error::native(error),
             correlation_id,
         })

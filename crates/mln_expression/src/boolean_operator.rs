@@ -29,6 +29,7 @@ pub struct Any {
 }
 
 impl Any {
+    #[must_use]
     pub fn new(inputs: Vec<Box<dyn Expression>>) -> Self {
         Any { base: ExpressionBase::new(Kind::Any, Type::Boolean, collect_dependencies(&inputs)), inputs }
     }
@@ -82,6 +83,7 @@ pub struct All {
 }
 
 impl All {
+    #[must_use]
     pub fn new(inputs: Vec<Box<dyn Expression>>) -> Self {
         All { base: ExpressionBase::new(Kind::All, Type::Boolean, collect_dependencies(&inputs)), inputs }
     }

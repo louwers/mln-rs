@@ -42,19 +42,21 @@ pub struct RealWorld {
 }
 
 pub const REAL_WORLD: &[RealWorld] = &[
-    RealWorld { name: "chicago", latitude: 41.8703965, longitude: -87.6942445, zoom: 13.0 },
-    RealWorld { name: "sanfrancisco", latitude: 37.7669995, longitude: -122.448635, zoom: 15.0 },
-    RealWorld { name: "norway", latitude: 64.863174, longitude: 10.8181, zoom: 12.0 },
+    RealWorld { name: "chicago", latitude: 41.870_396_5, longitude: -87.694_244_5, zoom: 13.0 },
+    RealWorld { name: "sanfrancisco", latitude: 37.766_999_5, longitude: -122.448_635, zoom: 15.0 },
+    RealWorld { name: "norway", latitude: 64.863_174, longitude: 10.8181, zoom: 12.0 },
 ];
 
 /// The render tests' view, whose 1x sprites the cache database holds.
 pub const REAL_WORLD_SIZE: Size = Size { width: 512, height: 512 };
 
 impl RealWorld {
+    #[must_use]
     pub fn style_url(&self) -> String {
         format!("local://styles/{}.json", self.name)
     }
 
+    #[must_use]
     pub fn center(&self) -> LatLng {
         LatLng::new(self.latitude, self.longitude).expect("a scene's center")
     }
@@ -79,8 +81,9 @@ pub const CJK_STYLE: &str = r#"{
 }"#;
 
 /// The `text-font/chinese` test's camera, at its size.
+#[must_use]
 pub fn cjk_center() -> LatLng {
-    LatLng::new(43.3900489867738, -70.752954126).expect("the CJK view's center")
+    LatLng::new(43.390_048_986_773_8, -70.752_954_126).expect("the CJK view's center")
 }
 pub const CJK_ZOOM: f64 = 11.0;
 pub const CJK_SIZE: Size = Size { width: 512, height: 512 };
@@ -92,6 +95,7 @@ pub const BASEMAP_ZOOM: f64 = 14.0;
 
 /// A point of the basemap's 5 x 5 block of zoom-14 tiles, in tile
 /// coordinates: x from 2618 to 2623, y from 6330 to 6335.
+#[must_use]
 pub fn basemap_point(x: f64, y: f64) -> LatLng {
     let tiles = 16384.0;
     let longitude = x / tiles * 360.0 - 180.0;
@@ -100,17 +104,21 @@ pub fn basemap_point(x: f64, y: f64) -> LatLng {
 }
 
 /// The block's center, and the corners of the views that share no tile.
+#[must_use]
 pub fn basemap_center() -> LatLng {
     basemap_point(2620.5, 6332.5)
 }
+#[must_use]
 pub fn basemap_north_west() -> LatLng {
     basemap_point(2619.0, 6331.0)
 }
+#[must_use]
 pub fn basemap_south_east() -> LatLng {
     basemap_point(2622.0, 6334.0)
 }
 
 /// The basemap's style, its URLs pointing into `fixtures`.
+#[must_use]
 pub fn basemap_style(fixtures: &Path) -> String {
     let style = include_str!("../style.json");
     style.replace("mln-bench-fixtures:/", &format!("file://{}/", fixtures.display()))
@@ -175,6 +183,7 @@ pub struct Scene {
 impl Scene {
     /// A map without a style; its GPU device is ready. Its renderer has a
     /// glyph cache of its own.
+    #[must_use]
     pub fn new(size: Size, mode: Mode) -> Scene {
         Scene::with_glyph_cache(size, mode, Arc::default())
     }
@@ -416,7 +425,7 @@ impl Scene {
     /// Drops every loaded tile and the renderer's other data, as after a
     /// memory warning: the next frames load and lay out again.
     pub fn clear_data(&self) {
-        self.frontend.with_renderer(|renderer| renderer.clear_data());
+        self.frontend.with_renderer(mln_renderer::Renderer::clear_data);
     }
 
     /// Sets `selected` on every other feature of `source_layer` in the

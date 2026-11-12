@@ -31,6 +31,7 @@ impl BorrowedTextures {
     /// The kinds of sync with which the host can wait for a frame (the
     /// producer's) and the target for the host's reads (the consumer's): a
     /// fence in the share group, or a finished frame.
+    #[must_use]
     pub fn sync_kinds() -> (SyncKinds, SyncKinds) {
         let kinds = SyncKinds::of(&[SyncKind::CpuComplete, SyncKind::OpenGlFence]);
         (kinds, kinds)
@@ -180,6 +181,10 @@ impl BorrowedTarget {
     /// [`BorrowedTextures::sync_kinds`]'s consumer kinds, and the target
     /// deletes the fence it names. Call it with the backend's context
     /// current.
+    #[expect(
+        clippy::needless_pass_by_value,
+        reason = "the release takes the host's sync, as every backend's does, and drops it"
+    )]
     pub fn release(&self, slot: usize, consumer: ConsumerSync) -> Result<(), Error> {
         self.delete_fence(slot);
         let sync = consumer.sync;
@@ -251,29 +256,26 @@ impl FrameTarget for BorrowedTarget {
         let slot = self.selected.get();
         self.delete_fence(slot);
         let gl = self.backend.gl();
-        let sync = match self.producer {
-            SyncKind::OpenGlFence => {
-                // SAFETY: the context is current (the renderer's backend
-                // scope).
-                let fence = unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) };
-                match fence {
-                    Ok(fence) => {
-                        // SAFETY: as above; a flush makes the fence reach the
-                        // GPU, so that another context's wait ends.
-                        unsafe { gl.flush() };
-                        if let Some(entry) = self.fences.borrow_mut().get_mut(slot) {
-                            *entry = Some(fence);
-                        }
-                        GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
+        let sync = if self.producer == SyncKind::OpenGlFence {
+            // SAFETY: the context is current (the renderer's backend
+            // scope).
+            let fence = unsafe { gl.fence_sync(glow::SYNC_GPU_COMMANDS_COMPLETE, 0) };
+            match fence {
+                Ok(fence) => {
+                    // SAFETY: as above; a flush makes the fence reach the
+                    // GPU, so that another context's wait ends.
+                    unsafe { gl.flush() };
+                    if let Some(entry) = self.fences.borrow_mut().get_mut(slot) {
+                        *entry = Some(fence);
                     }
-                    Err(_) => return Handoff::Dropped,
+                    GpuSync { kind: SyncKind::OpenGlFence, handle: fence.0 as usize as u64, value: 0 }
                 }
+                Err(_) => return Handoff::Dropped,
             }
-            _ => {
-                // SAFETY: as above.
-                unsafe { gl.finish() };
-                GpuSync::of(SyncKind::CpuComplete)
-            }
+        } else {
+            // SAFETY: as above.
+            unsafe { gl.finish() };
+            GpuSync::of(SyncKind::CpuComplete)
         };
         Handoff::GivenBack { slot, sync }
     }
@@ -392,6 +394,7 @@ impl HostSurface {
     ///
     /// `surface` is a live `EGLSurface` of the display of the device whose
     /// targets present to it, which outlives them.
+    #[must_use]
     pub unsafe fn from_raw(surface: std::ptr::NonNull<std::ffi::c_void>) -> HostSurface {
         // SAFETY: the caller's contract.
         HostSurface(unsafe { khronos_egl::Surface::from_ptr(surface.as_ptr()) })

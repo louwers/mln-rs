@@ -11,6 +11,7 @@ pub fn hash_combine(seed: &mut u64, v: u64) {
 }
 
 /// `util::hash(args...)`: fold `hash_combine` over the arguments from seed 0.
+#[must_use]
 pub fn hash(values: &[u64]) -> u64 {
     let mut seed = 0u64;
     for &v in values {
@@ -20,6 +21,7 @@ pub fn hash(values: &[u64]) -> u64 {
 }
 
 /// `std::hash<std::string>` stand-in (FNV-1a; deterministic across runs).
+#[must_use]
 pub fn hash_str(s: &str) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for b in s.bytes() {
@@ -37,7 +39,7 @@ pub fn hash_str(s: &str) -> u64 {
 /// still approximates it.
 pub fn order_independent_hash(values: impl IntoIterator<Item = u64>) -> u64 {
     // Default factor prime value from 64-bit FNV hash.
-    const FACTOR: u64 = 1099511628211;
+    const FACTOR: u64 = 1_099_511_628_211;
     let mut sum: u64 = 0;
     let mut product: u64 = 1;
     for value in values {

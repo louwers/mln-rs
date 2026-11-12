@@ -83,30 +83,27 @@ where
     }
 
     fn create_tile(&mut self, id: &OverscaledTileID) -> Option<OverscaledTileID> {
-        if let Some(tile_range) = &self.tile_range {
-            if !tile_range.contains(&id.canonical) {
-                return None;
-            }
+        if let Some(tile_range) = &self.tile_range
+            && !tile_range.contains(&id.canonical)
+        {
+            return None;
         }
         let mut tile = self.cache.pop(id);
         if tile.is_none() && self.parameters.transform_state.is_globe_rendering() {
             tile = self.cache.pop_any_wrap(id);
         }
-        let tile = match tile {
-            Some(tile) => {
-                // A tile cached before the pixel ratio changed.
-                if tile.set_pixel_ratio(self.parameters.pixel_ratio) {
-                    tile.set_layers(self.layers, self.parameters.global_state.clone());
-                }
-                tile
-            }
-            None => {
-                let tile = (self.create_tile)(id, self.observer.clone())?;
-                tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
-                tile.set_pixel_ratio(self.parameters.pixel_ratio);
+        let tile = if let Some(tile) = tile {
+            // A tile cached before the pixel ratio changed.
+            if tile.set_pixel_ratio(self.parameters.pixel_ratio) {
                 tile.set_layers(self.layers, self.parameters.global_state.clone());
-                tile
             }
+            tile
+        } else {
+            let tile = (self.create_tile)(id, self.observer.clone())?;
+            tile.set_subdivision_granularity(&self.parameters.subdivision_granularity);
+            tile.set_pixel_ratio(self.parameters.pixel_ratio);
+            tile.set_layers(self.layers, self.parameters.global_state.clone());
+            tile
         };
 
         // `tiles.emplace(tileID, std::move(tile))` keeps an existing tile.
@@ -169,6 +166,7 @@ where
 
 impl TilePyramid {
     /// `TilePyramid(const TaggedScheduler&)`.
+    #[must_use]
     pub fn new(thread_pool: TaggedScheduler) -> Self {
         TilePyramid {
             tiles: BTreeMap::new(),
@@ -182,6 +180,7 @@ impl TilePyramid {
         }
     }
 
+    #[must_use]
     pub fn is_loaded(&self) -> bool {
         self.tiles.values().all(|tile| tile.is_complete())
     }
@@ -215,7 +214,9 @@ impl TilePyramid {
         if !needs_rendering {
             let tiles = std::mem::take(&mut self.tiles);
             for (id, tile) in tiles {
-                if !relayout {
+                if relayout {
+                    self.cache.deferred_release(tile);
+                } else {
                     // These tiles are invisible, we set optional necessity
                     // for them and thus suppress network requests on tiles
                     // expiration (see `OnlineFileRequest`). One that hasn't
@@ -226,8 +227,6 @@ impl TilePyramid {
                     } else {
                         self.cache.deferred_release(tile);
                     }
-                } else {
-                    self.cache.deferred_release(tile);
                 }
             }
 
@@ -465,11 +464,13 @@ impl TilePyramid {
         self.rendered_tiles.iter().map(|(id, key)| (id, self.tiles[key].as_ref()))
     }
 
+    #[must_use]
     pub fn rendered_tile_count(&self) -> usize {
         self.rendered_tiles.len()
     }
 
     /// `getTile(tileID)`: a pyramid tile or a cached one.
+    #[must_use]
     pub fn get_tile(&self, tile_id: &OverscaledTileID) -> Option<&dyn Tile> {
         match self.tiles.get(tile_id) {
             Some(tile) => Some(tile.as_ref()),
@@ -585,15 +586,15 @@ impl TilePyramid {
                     covered && bounds_min.0 <= c.x && c.x <= bounds_max.0 && bounds_min.1 <= c.y && c.y <= bounds_max.1;
             }
             let center = mln_util::geo::ScreenCoordinate::new(
-                (screen_min.0 + screen_max.0) / 2.0,
-                (screen_min.1 + screen_max.1) / 2.0,
+                f64::midpoint(screen_min.0, screen_max.0),
+                f64::midpoint(screen_min.1, screen_max.1),
             );
             if reaches_into_space && on_planet(&center) {
                 let c = to_world(&center);
                 covered = covered && bounds_min.0 <= c.x && c.x <= bounds_max.0;
             }
             if !covered {
-                for c in query_geometry.iter_mut() {
+                for c in &mut query_geometry {
                     if c.x > 0.5 {
                         c.x -= 1.0;
                     }
@@ -745,6 +746,7 @@ impl TilePyramid {
     }
 
     /// `getRenderedTile(tileID)`.
+    #[must_use]
     pub fn get_rendered_tile(&self, tile_id: &UnwrappedTileID) -> Option<&dyn Tile> {
         self.rendered_tiles.get(tile_id).map(|key| self.tiles[key].as_ref())
     }
@@ -785,20 +787,20 @@ impl TilePyramid {
 
     /// `handleWrapJump(lng)`.
     ///
-    /// On top of the regular z/x/y values, TileIDs have a `wrap` value that
+    /// On top of the regular z/x/y values, `TileIDs` have a `wrap` value that
     /// specify which copy of the world the tile belongs to. For example, at
     /// `lng: 10` you might render z/x/y/0 while at `lng: 370` you would
     /// render z/x/y/1.
     ///
     /// When lng values get wrapped (going from `lng: 370` to `long: 10`) you
     /// expect to see the same thing on the screen (370 degrees and 10
-    /// degrees is the same place in the world) but all the TileIDs will have
+    /// degrees is the same place in the world) but all the `TileIDs` will have
     /// different wrap values.
     ///
     /// In order to make this transition seamless, we calculate the rounded
     /// difference of "worlds" between the last frame and the current frame.
     /// If the map panned by a world, then we can assign all the tiles new
-    /// TileIDs with updated wrap values. For example, assign z/x/y/1 a new
+    /// `TileIDs` with updated wrap values. For example, assign z/x/y/1 a new
     /// id: z/x/y/0. It is the same tile, just rendered in a different
     /// position.
     ///
@@ -860,6 +862,7 @@ impl TilePyramid {
     }
 
     /// `getTiles()`.
+    #[must_use]
     pub fn get_tiles(&self) -> &BTreeMap<OverscaledTileID, Box<dyn Tile>> {
         &self.tiles
     }
@@ -884,11 +887,13 @@ impl TilePyramid {
         }
     }
 
+    #[must_use]
     pub fn has_fading_tiles(&self) -> bool {
         self.fading_tiles
     }
 
     /// The tile cache, for tests.
+    #[must_use]
     pub fn cache(&self) -> &TileCache {
         &self.cache
     }

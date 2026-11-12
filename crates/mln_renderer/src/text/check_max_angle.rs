@@ -11,16 +11,16 @@ use crate::geometry::anchor::Anchor;
 /// differences are `int`, `std::sqrt` of the `int` sum is a double sqrt,
 /// then narrowed to float. The sum is formed in f64, which is exact where
 /// the C++ `int` sum does not overflow.
-fn dist(a: &GeometryCoordinate, b: &GeometryCoordinate) -> f32 {
-    let dx = (b.x as i32 - a.x as i32) as f64;
-    let dy = (b.y as i32 - a.y as i32) as f64;
+fn dist(a: GeometryCoordinate, b: GeometryCoordinate) -> f32 {
+    let dx = f64::from(i32::from(b.x) - i32::from(a.x));
+    let dy = f64::from(i32::from(b.y) - i32::from(a.y));
     (dx * dx + dy * dy).sqrt() as f32
 }
 
 /// `util::angle_to(a, b)` on `Point<int16_t>`: `std::atan2` of the `int`
 /// differences, in double.
-fn angle_to(a: &GeometryCoordinate, b: &GeometryCoordinate) -> f64 {
-    ((a.y as i32 - b.y as i32) as f64).atan2((a.x as i32 - b.x as i32) as f64)
+fn angle_to(a: GeometryCoordinate, b: GeometryCoordinate) -> f64 {
+    f64::from(i32::from(a.y) - i32::from(b.y)).atan2(f64::from(i32::from(a.x) - i32::from(b.x)))
 }
 
 /// `Corner`.
@@ -31,6 +31,7 @@ struct Corner {
 
 /// `checkMaxAngle`: whether the label fits on the line without the sum of
 /// the angles within `window_size` exceeding `max_angle`.
+#[must_use]
 pub fn check_max_angle(
     line: &GeometryCoordinates,
     anchor: &Anchor,
@@ -56,11 +57,11 @@ pub fn check_max_angle(
         }
 
         index -= 1;
-        anchor_distance -= dist(&line[index], &p);
+        anchor_distance -= dist(line[index], p);
         p = line[index];
     }
 
-    anchor_distance += dist(&line[index], &line[index + 1]);
+    anchor_distance += dist(line[index], line[index + 1]);
     index += 1;
 
     // store recent corners and their total angle difference
@@ -78,7 +79,7 @@ pub fn check_max_angle(
         let current = &line[index];
         let next = &line[index + 1];
 
-        let mut angle_delta: f64 = angle_to(prev, current) - angle_to(current, next);
+        let mut angle_delta: f64 = angle_to(*prev, *current) - angle_to(*current, *next);
         // restrict angle to -pi..pi range (`%` on f64 is C fmod)
         angle_delta = ((angle_delta + 3.0 * PI) % (PI * 2.0) - PI).abs();
 
@@ -103,7 +104,7 @@ pub fn check_max_angle(
         }
 
         index += 1;
-        anchor_distance += dist(current, next);
+        anchor_distance += dist(*current, *next);
     }
 
     // no part of the line had an angle greater than the maximum allowed. check passes.

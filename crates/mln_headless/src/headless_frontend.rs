@@ -59,7 +59,7 @@ pub struct HeadlessFrontend {
 }
 
 /// The device a frontend renders on without one of its own: on the backend
-/// MLN_RENDER_BACKEND names, or on WebGPU.
+/// `MLN_RENDER_BACKEND` names, or on WebGPU.
 pub fn harness_device() -> Result<Device, Error> {
     let backend = match std::env::var("MLN_RENDER_BACKEND").map(|backend| backend.to_ascii_lowercase()).as_deref() {
         Ok("metal") => BackendType::Metal,
@@ -145,10 +145,12 @@ impl HeadlessFrontend {
         Self::new(Size::new(256, 256), pixel_ratio)
     }
 
+    #[must_use]
     pub fn get_frame_time(&self) -> f64 {
         self.shared.frame_time.get()
     }
 
+    #[must_use]
     pub fn get_size(&self) -> Size {
         self.shared.size.get()
     }
@@ -160,6 +162,7 @@ impl HeadlessFrontend {
         }
     }
 
+    #[must_use]
     pub fn get_pixel_ratio(&self) -> f32 {
         self.shared.pixel_ratio.get()
     }
@@ -202,16 +205,19 @@ impl HeadlessFrontend {
     }
 
     /// `getBackend()`.
+    #[must_use]
     pub fn get_backend(&self) -> &dyn RendererBackend {
         &*self.shared.backend
     }
 
     /// The device the frontend renders on.
+    #[must_use]
     pub fn device(&self) -> &Device {
         self.shared.target.device()
     }
 
     /// `getCameraOptions()`.
+    #[must_use]
     pub fn get_camera_options(&self) -> CameraOptions {
         match self.shared.latest_parameters().as_ref() {
             // RendererState::getCameraOptions(updateParameters, padding = {})
@@ -222,7 +228,8 @@ impl HeadlessFrontend {
         }
     }
 
-    /// `hasLayer(id)` (RendererState::hasLayer).
+    /// `hasLayer(id)` (`RendererState::hasLayer`).
+    #[must_use]
     pub fn has_layer(&self, id: &str) -> bool {
         match self.shared.latest_parameters().as_ref() {
             Some(parameters) => parameters.layers.iter().any(|layer| layer.id == id),
@@ -230,7 +237,8 @@ impl HeadlessFrontend {
         }
     }
 
-    /// `hasSource(id)` (RendererState::hasSource).
+    /// `hasSource(id)` (`RendererState::hasSource`).
+    #[must_use]
     pub fn has_source(&self, id: &str) -> bool {
         match self.shared.latest_parameters().as_ref() {
             Some(parameters) => parameters.sources.iter().any(|source| source.base().id == id),
@@ -238,7 +246,8 @@ impl HeadlessFrontend {
         }
     }
 
-    /// `hasImage(id)` (RendererState::hasImage).
+    /// `hasImage(id)` (`RendererState::hasImage`).
+    #[must_use]
     pub fn has_image(&self, id: &str) -> bool {
         match self.shared.latest_parameters().as_ref() {
             Some(parameters) => parameters.images.iter().any(|image| image.id == id),
@@ -249,6 +258,7 @@ impl HeadlessFrontend {
     // gtests-core: pixelForLatLng/latLngForPixel (test/map Map.RendererState),
     // with RendererState::pixelForLatLng/latLngForPixel inlined.
     /// `pixelForLatLng(coordinate)`.
+    #[must_use]
     pub fn pixel_for_lat_lng(&self, coordinate: &mln_util::geo::LatLng) -> mln_util::geo::ScreenCoordinate {
         match self.shared.latest_parameters().as_ref() {
             Some(parameters) => {
@@ -281,6 +291,7 @@ impl HeadlessFrontend {
     }
 
     /// The last frame's pixels, or an empty image without one.
+    #[must_use]
     pub fn read_still_image(&self) -> PremultipliedImage {
         self.shared.read_image().unwrap_or_else(|_| PremultipliedImage::new(Size::default()))
     }
@@ -289,6 +300,11 @@ impl HeadlessFrontend {
     /// image error. The map handles its renderer's events meanwhile, and
     /// keeps its own events for its owner.
     pub fn render(&mut self, map: &mut Map) -> Result<RenderResult, Error> {
+        // C++ spins on runOnce, which costs a core per renderer while the
+        // workers parse tiles. Sleeping as soon as the loop is idle delays
+        // the short waits of a single renderer; spinning briefly keeps them.
+        const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
+
         let backend = self.shared.backend.clone();
         self.attach(map);
         let _guard = BackendScope::new(&*backend, ScopeType::Explicit);
@@ -297,10 +313,6 @@ impl HeadlessFrontend {
         let o = outcome.clone();
         map.render_still(Box::new(move |result| *o.borrow_mut() = Some(result)));
 
-        // C++ spins on runOnce, which costs a core per renderer while the
-        // workers parse tiles. Sleeping as soon as the loop is idle delays
-        // the short waits of a single renderer; spinning briefly keeps them.
-        const SPIN: std::time::Duration = std::time::Duration::from_millis(2);
         let run_loop = RunLoop::get();
         let mut idle_since = mln_util::time::Instant::now();
         let mut image = PremultipliedImage::new(Size::default());
@@ -344,6 +356,7 @@ impl HeadlessFrontend {
         Shared::render(&self.shared, parameters);
     }
 
+    #[must_use]
     pub fn get_transform_state(&self) -> Option<TransformState> {
         self.shared.latest_parameters().map(|p| p.transform_state.clone())
     }

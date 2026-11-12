@@ -1,9 +1,9 @@
-// Compiles every WGSL source extracted from include/mln/shaders/webgpu/*.hpp
-// the way webgpu::ShaderGroup + ShaderProgram do (Prelude, then the struct
-// prelude if any, through the preprocessor with the default ProgramParameters
-// defines, in both projection variants) and reports which ones wgpu's WGSL
-// front end (naga) rejects. C++ compiles them with Dawn's Tint, so a failure
-// here is a wgpu-vs-Dawn difference.
+// Compiles every WGSL source of `wgsl_sources` the way webgpu::ShaderGroup +
+// ShaderProgram do (Prelude, then the struct prelude if any, through the
+// preprocessor with the default ProgramParameters defines, in both projection
+// variants) and reports which ones wgpu's WGSL front end (naga) rejects. C++
+// compiles them with Dawn's Tint, so a failure here is a wgpu-vs-Dawn
+// difference.
 //
 // The shaders on the M1 path must compile; the rest are reported only.
 
@@ -89,7 +89,7 @@ fn conditional_symbols(source: &str) -> Vec<String> {
     symbols
 }
 
-/// The variant with every conditional defined (e.g. all HAS_UNIFORM_u_*, as
+/// The variant with every conditional defined (e.g. all `HAS_UNIFORM_u`_*, as
 /// when all data-driven properties are constant). Reported, not asserted.
 #[test]
 fn all_extracted_wgsl_compiles_with_all_conditionals_defined() {

@@ -1,6 +1,7 @@
 // Ports include/mln/mtl/tile_layer_group.hpp and src/mln/mtl/tile_layer_group.cpp
 
 use std::any::Any;
+use std::cell::OnceCell;
 
 use mln_gfx::depth_mode::DepthMode;
 use mln_gfx::paint_parameters::PaintParameters;
@@ -22,6 +23,7 @@ pub struct TileLayerGroup {
 }
 
 impl TileLayerGroup {
+    #[must_use]
     pub fn new(layer_index: i32, initial_capacity: usize, name: String) -> Self {
         TileLayerGroup {
             inner: layer_group::TileLayerGroup::new(layer_index, initial_capacity, name),
@@ -34,7 +36,7 @@ impl TileLayerGroup {
 /// first used: by depth enabled, then stencil enabled.
 #[derive(Default)]
 struct States3D {
-    states: [[Option<Option<MTLDepthStencilStatePtr>>; 2]; 2],
+    states: [[OnceCell<Option<MTLDepthStencilStatePtr>>; 2]; 2],
 }
 
 impl layer_group::LayerGroupBase for TileLayerGroup {
@@ -140,7 +142,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
 
         let uniform_buffers = &self.uniform_buffers;
         let mut bind_ubos = false;
-        let mut states_3d = States3D::default();
+        let states_3d = States3D::default();
         let mut visited = 0;
         self.inner.visit_drawables(|drawable| {
             let own_slot = own_stencil_slots.get(visited).copied().flatten();
@@ -193,7 +195,7 @@ impl layer_group::LayerGroupBase for TileLayerGroup {
                     && let Some(context) = parameters.context().as_any().downcast_ref::<Context>()
                 {
                     let (depth, stencil) = (drawable.get_enable_depth(), drawable.get_enable_stencil());
-                    let state = states_3d.states[usize::from(depth)][usize::from(stencil)].get_or_insert_with(|| {
+                    let state = states_3d.states[usize::from(depth)][usize::from(stencil)].get_or_init(|| {
                         let depth_mode = if depth { depth_mode_3d } else { DepthMode::disabled() };
                         let stencil_mode = if stencil { stencil_mode_3d } else { StencilMode::disabled() };
                         context.make_depth_stencil_state(&depth_mode, &stencil_mode, render_pass)

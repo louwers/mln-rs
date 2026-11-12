@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use mln_actor::actor::{Actor, PoolActorRef};
 use mln_actor::scheduler;
 
-use crate::get;
+use crate::{get, wait};
 
 // gtest: ActorRef.CanOutliveActor
 #[test]
@@ -44,10 +44,10 @@ fn ask() {
     // Ask returns a Future eventually returning the result
     struct TestActorRef;
     impl TestActorRef {
-        fn gimme(&mut self) -> i32 {
+        fn gimme() -> i32 {
             20
         }
-        fn echo(&mut self, i: i32) -> i32 {
+        fn echo(i: i32) -> i32 {
             i
         }
     }
@@ -55,8 +55,8 @@ fn ask() {
     let actor = Actor::new(scheduler::get_background(), |_| TestActorRef);
     let r: PoolActorRef<TestActorRef> = actor.self_ref();
 
-    assert_eq!(20, get(&r.ask(TestActorRef::gimme)));
-    assert_eq!(30, get(&r.ask(|a: &mut TestActorRef| a.echo(30))));
+    assert_eq!(20, get(&r.ask(|_: &mut TestActorRef| TestActorRef::gimme())));
+    assert_eq!(30, get(&r.ask(|_: &mut TestActorRef| TestActorRef::echo(30))));
 }
 
 // gtest: ActorRef.AskVoid
@@ -77,7 +77,7 @@ fn ask_void() {
     let actor = Actor::new(scheduler::get_background(), move |_| TestActorRef { executed: e });
     let r: PoolActorRef<TestActorRef> = actor.self_ref();
 
-    get(&r.ask(TestActorRef::do_it));
+    wait(&r.ask(TestActorRef::do_it));
     assert!(executed.load(Ordering::SeqCst));
 }
 
@@ -95,7 +95,7 @@ fn ask_on_destroyed_actor() {
         }
     }
     impl TestActorRef {
-        fn receive(&mut self) -> i32 {
+        fn receive() -> i32 {
             1
         }
     }
@@ -112,6 +112,6 @@ fn ask_on_destroyed_actor() {
     // maplibre-native#876): `auto result = ref.ask(&TestActorRef::receive);
     // EXPECT_ANY_THROW(result.get());`. The port has no dangling pointer, so
     // it checks it: the future is broken (C++ std::future_error).
-    let result = r.ask(TestActorRef::receive);
+    let result = r.ask(|_: &mut TestActorRef| TestActorRef::receive());
     assert!(result.recv().is_err());
 }

@@ -183,7 +183,7 @@ fn defined_functions(src_dir: &Path, skip_dir: &Path) -> Result<BTreeMap<String,
 fn module_path(src_dir: &Path, file: &Path) -> Result<String, Box<dyn Error>> {
     let mut path = String::from("crate");
     let relative: PathBuf = file.strip_prefix(src_dir)?.with_extension("");
-    for component in relative.iter() {
+    for component in &relative {
         let component = component.to_str().ok_or("a source path is not UTF-8")?;
         if component != "lib" && component != "mod" {
             path.push_str("::");

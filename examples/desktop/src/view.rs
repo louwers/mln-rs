@@ -78,7 +78,7 @@ pub(crate) struct Launch {
     pub proxy: EventLoopProxy<UserEvent>,
 }
 
-/// Where the app opens without `--style` or MLN_STYLE_URL.
+/// Where the app opens without `--style` or `MLN_STYLE_URL`.
 const DEFAULT_STYLE: &str = "https://tiles.openfreemap.org/styles/liberty";
 
 /// Opens the map in the window and runs it until the window closes.
@@ -270,7 +270,7 @@ fn log_error(result: Result<(), mln_util::Error>) {
 
 struct View {
     run_loop: RunLoop,
-    /// Wakes the RunLoop when the next frame or a deadline is due.
+    /// Wakes the `RunLoop` when the next frame or a deadline is due.
     wake: Timer,
     inbox: Arc<Inbox>,
     proxy: EventLoopProxy<UserEvent>,
@@ -431,7 +431,7 @@ impl View {
         [self.ui_repaint_at, test, self.quit_at].into_iter().flatten().min()
     }
 
-    /// Sleeps in the RunLoop until it has work, or until `deadline`.
+    /// Sleeps in the `RunLoop` until it has work, or until `deadline`.
     fn wait_until(&self, deadline: Option<Instant>) {
         match deadline {
             Some(at) => {

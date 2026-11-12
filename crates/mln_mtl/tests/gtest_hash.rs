@@ -52,14 +52,13 @@ fn check_shader_hashes(shader_id: BuiltIn) {
         let mut first_hash = None;
         loop {
             let hash = order_independent_hash(subset.iter().copied());
-            match first_hash {
+            if let Some(first) = first_hash {
                 // All permutations of the subset must yield the same hash key as the first
-                Some(first) => assert_eq!(first, hash, "{}: {subset:?}", source.name),
-                None => {
-                    first_hash = Some(hash);
-                    // All subset hashes must be unique
-                    assert!(subset_hashes.insert(hash), "{}: {subset:?}", source.name);
-                }
+                assert_eq!(first, hash, "{}: {subset:?}", source.name);
+            } else {
+                first_hash = Some(hash);
+                // All subset hashes must be unique
+                assert!(subset_hashes.insert(hash), "{}: {subset:?}", source.name);
             }
             if !next_permutation(&mut subset) {
                 break;

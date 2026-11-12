@@ -27,7 +27,7 @@ fn assert_double_eq(a: f64, b: f64) {
     assert!(a == b || (to_biased(ia) - to_biased(ib)).abs() <= 4, "{a} != {b}");
 }
 
-/// The test's `operator==(vt_point, vt_point)` (EXPECT_DOUBLE_EQ on x and
+/// The test's `operator==(vt_point, vt_point)` (`EXPECT_DOUBLE_EQ` on x and
 /// y) applied through the geometry variants.
 fn assert_geometry_eq(a: &VtGeometry, b: &VtGeometry) {
     fn points(a: &[VtPoint], b: &[VtPoint]) {
@@ -303,7 +303,7 @@ fn geojsonvt_clip_vertex_on_tile_border() {
     let mut index = GeoJSONVT::from_geojson(&geojson, options);
 
     let tile = index.get_tile(13, 2344, 3134).unwrap();
-    assert!(!tile.features.is_empty());
+    assert_ne!(tile.features, [] as [feature::Feature<i16>; 0]);
     let expected = vec![Point::new(-2048i16, 2747), Point::new(408, 5037)];
     assert_eq!(tile.features[0].geometry, Geometry::LineString(expected));
 
@@ -311,6 +311,6 @@ fn geojsonvt_clip_vertex_on_tile_border() {
     let props = &tile.features[0].properties;
     let Value::Double(clip_start1) = props["mapbox_clip_start"] else { panic!() };
     let Value::Double(clip_end1) = props["mapbox_clip_end"] else { panic!() };
-    assert!((0.660622 - clip_start1).abs() <= k_epsilon);
+    assert!((0.660_622 - clip_start1).abs() <= k_epsilon);
     assert!((1.0 - clip_end1).abs() <= k_epsilon);
 }

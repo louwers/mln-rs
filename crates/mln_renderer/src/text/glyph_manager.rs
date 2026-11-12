@@ -88,7 +88,7 @@ pub trait GlyphRequestor {
 pub type GlyphRequestorKey = usize;
 
 pub fn glyph_requestor_key<T: ?Sized>(requestor: &Rc<T>) -> GlyphRequestorKey {
-    Rc::as_ptr(requestor) as *const () as usize
+    Rc::as_ptr(requestor).cast::<()>() as usize
 }
 
 #[derive(Default)]
@@ -123,6 +123,9 @@ impl Entry {
 }
 
 type Notification = (Weak<dyn GlyphRequestor>, GlyphMap, HBShapeRequests);
+
+/// The loaded HarfBuzz shapers of each font stack, by font face type.
+type HBShapers = VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>;
 
 /// What the font-face engine's `prepare` reported, and how to wake the
 /// manager when it does; shared with its `ready` callback, which may run on
@@ -165,12 +168,13 @@ pub struct GlyphManager {
     deferred_responses: RefCell<Vec<(FontData, FontStack, GlyphRange)>>,
     /// Parses `deferred_responses` on this thread once the engine is ready.
     deferred_task: RefCell<Option<AsyncTask>>,
-    hb_shapers: RefCell<VecMap<FontStack, VecMap<GlyphIDType, Rc<dyn FontFaceShaper>>>>,
+    hb_shapers: RefCell<HBShapers>,
 }
 
 impl GlyphManager {
     /// `GlyphManager(std::unique_ptr<LocalGlyphRasterizer>)`: a manager
     /// with a glyph cache of its own.
+    #[must_use]
     pub fn new(local_glyph_rasterizer: Option<Box<dyn LocalGlyphRasterizer>>) -> Rc<GlyphManager> {
         Self::with_glyph_cache(local_glyph_rasterizer, Arc::default())
     }
@@ -234,8 +238,8 @@ impl GlyphManager {
     ///
     /// Workers send a `getGlyphs` message to the main thread once they have
     /// determined their `GlyphDependencies`. If all glyphs are already
-    /// locally available, GlyphManager will provide them to the requestor
-    /// immediately. Otherwise, it makes a request on the FileSource is made
+    /// locally available, `GlyphManager` will provide them to the requestor
+    /// immediately. Otherwise, it makes a request on the `FileSource` is made
     /// for each range needed, and notifies the observer when all are
     /// complete.
     pub fn get_glyphs(
@@ -285,7 +289,7 @@ impl GlyphManager {
         }
 
         for (font_stack, range) in to_request {
-            self.request_range(&font_stack, &range, file_source);
+            self.request_range(&font_stack, range, file_source);
         }
 
         // If the shared dependencies pointer is already unique, then all
@@ -306,11 +310,11 @@ impl GlyphManager {
     }
 
     /// `requestRange(request, fontStack, range, fileSource)`.
-    fn request_range(&self, font_stack: &FontStack, range: &GlyphRange, file_source: Option<&Arc<dyn FileSource>>) {
+    fn request_range(&self, font_stack: &FontStack, range: GlyphRange, file_source: Option<&Arc<dyn FileSource>>) {
         // A failed range's request is replaced, and dropped after the borrow.
         let failed_request = {
             let mut entries = self.entries.borrow_mut();
-            entries.get_mut(font_stack).and_then(|entry| entry.ranges.get_mut(range)).and_then(|request| {
+            entries.get_mut(font_stack).and_then(|entry| entry.ranges.get_mut(&range)).and_then(|request| {
                 let failed = std::mem::take(&mut request.failed);
                 if failed { request.req.take() } else { None }
             })
@@ -319,7 +323,7 @@ impl GlyphManager {
 
         if let Some(data) = self.get_font_face_data(range.type_) {
             // A face that holds its font file needs no request.
-            self.observer.borrow().clone().on_glyphs_requested(font_stack, range);
+            self.observer.borrow().clone().on_glyphs_requested(font_stack, &range);
             self.process_data(Ok(Some(data)), font_stack, range);
             return;
         }
@@ -339,7 +343,7 @@ impl GlyphManager {
         };
 
         let observer = self.observer.borrow().clone();
-        observer.on_glyphs_requested(font_stack, range);
+        observer.on_glyphs_requested(font_stack, &range);
 
         let Some(file_source) = file_source else {
             // C++ always has a file source; without one the request never
@@ -349,26 +353,27 @@ impl GlyphManager {
 
         let weak_self = self.self_weak.clone();
         let callback_font_stack = font_stack.clone();
-        let callback_range = *range;
+        let callback_range = range;
         let req = file_source.request(
             &resource,
             Box::new(move |response: Response| {
                 if let Some(this) = weak_self.upgrade() {
-                    this.process_response(&response, &callback_font_stack, &callback_range);
+                    this.process_response(&response, &callback_font_stack, callback_range);
                 }
             }),
         );
 
         let mut entries = self.entries.borrow_mut();
-        if let Some(request) = entries.get_mut(font_stack).and_then(|entry| entry.ranges.get_mut(range)) {
-            if !request.parsed && request.req.is_none() {
-                request.req = Some(req);
-            }
+        if let Some(request) = entries.get_mut(font_stack).and_then(|entry| entry.ranges.get_mut(&range))
+            && !request.parsed
+            && request.req.is_none()
+        {
+            request.req = Some(req);
         }
     }
 
     /// `processResponse(response, fontStack, range)`.
-    fn process_response(&self, res: &Response, font_stack: &FontStack, range: &GlyphRange) {
+    fn process_response(&self, res: &Response, font_stack: &FontStack, range: GlyphRange) {
         if res.not_modified {
             return;
         }
@@ -382,18 +387,17 @@ impl GlyphManager {
 
     /// The rest of `processResponse`, for a glyph PBF or font file: `None`
     /// when the response had no content, an error when the request failed.
-    fn process_data(&self, data: Result<Option<FontData>, Error>, font_stack: &FontStack, range: &GlyphRange) {
+    fn process_data(&self, data: Result<Option<FontData>, Error>, font_stack: &FontStack, range: GlyphRange) {
         let observer = self.observer.borrow().clone();
         let (data, mut error) = match data {
             Ok(data) => (data, None),
             Err(error) => (None, Some(error)),
         };
-        if range.type_ != GlyphIDType::FontPBF {
-            if let Some(data) = &data {
-                if self.defer_until_engine_ready(data, font_stack, range) {
-                    return;
-                }
-            }
+        if range.type_ != GlyphIDType::FontPBF
+            && let Some(data) = &data
+            && self.defer_until_engine_ready(data, font_stack, range)
+        {
+            return;
         }
 
         let mut notifications = Vec::new();
@@ -404,7 +408,7 @@ impl GlyphManager {
             let mut range_glyphs = None;
             if let Some(data) = &data {
                 if range.type_ == GlyphIDType::FontPBF {
-                    match parse_glyph_pbf(range, data.as_bytes()) {
+                    match parse_glyph_pbf(&range, data.as_bytes()) {
                         Ok(glyphs) => {
                             let mut interned = GlyphCacheRange::new();
                             for glyph in glyphs {
@@ -425,7 +429,7 @@ impl GlyphManager {
                 }
             }
 
-            let request = entry.ranges.entry(*range).or_default();
+            let request = entry.ranges.entry(range).or_default();
             if error.is_some() {
                 request.failed = true;
             } else {
@@ -458,8 +462,8 @@ impl GlyphManager {
         Self::deliver(notifications);
 
         match error {
-            Some(error) => observer.on_glyphs_error(font_stack, range, error),
-            None => observer.on_glyphs_loaded(font_stack, range),
+            Some(error) => observer.on_glyphs_error(font_stack, &range, error),
+            None => observer.on_glyphs_loaded(font_stack, &range),
         }
     }
 
@@ -534,14 +538,14 @@ impl GlyphManager {
             return glyph;
         }
 
-        if glyph_id.type_ != GlyphIDType::FontPBF {
-            if let Some(shaper) = self.get_hb_shaper(font_stack, glyph_id.type_) {
-                let mut glyph = shaper.rasterize(&glyph_id);
-                glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
-                let glyph = Arc::new(glyph);
-                entry.glyphs.insert(glyph_id, glyph.clone());
-                return glyph;
-            }
+        if glyph_id.type_ != GlyphIDType::FontPBF
+            && let Some(shaper) = self.get_hb_shaper(font_stack, glyph_id.type_)
+        {
+            let mut glyph = shaper.rasterize(&glyph_id);
+            glyph.bitmap = transform_raster_to_sdf(&glyph.bitmap, 8.0, 0.25);
+            let glyph = Arc::new(glyph);
+            entry.glyphs.insert(glyph_id, glyph.clone());
+            return glyph;
         }
 
         Arc::new(Glyph::default())
@@ -578,12 +582,12 @@ impl GlyphManager {
     /// Whether `data`, a font file, has to wait for the engine: if so, keeps
     /// it for `process_deferred_responses`, which runs once the engine
     /// reports back.
-    fn defer_until_engine_ready(&self, data: &FontData, font_stack: &FontStack, range: &GlyphRange) -> bool {
+    fn defer_until_engine_ready(&self, data: &FontData, font_stack: &FontStack, range: GlyphRange) -> bool {
         self.prepare_engine();
         if self.engine_readiness.is_reported() {
             return false;
         }
-        self.deferred_responses.borrow_mut().push((data.clone(), font_stack.clone(), *range));
+        self.deferred_responses.borrow_mut().push((data.clone(), font_stack.clone(), range));
         let mut task = self.deferred_task.borrow_mut();
         let task = task.get_or_insert_with(|| {
             let weak_self = self.self_weak.clone();
@@ -606,7 +610,7 @@ impl GlyphManager {
     fn process_deferred_responses(&self) {
         let responses = std::mem::take(&mut *self.deferred_responses.borrow_mut());
         for (data, font_stack, range) in responses {
-            self.process_data(Ok(Some(data)), &font_stack, &range);
+            self.process_data(Ok(Some(data)), &font_stack, range);
         }
     }
 
