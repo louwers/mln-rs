@@ -205,7 +205,7 @@ offscreen!(mln_vulkan::OffscreenTarget);
 presenting!(mln_vulkan::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 offscreen!(mln_gl::OffscreenTarget);
-#[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
 presenting!(mln_gl::SurfaceTarget);
 #[cfg(all(feature = "gl", not(target_family = "wasm")))]
 presenting!(mln_gl::HostSurfaceTarget);
@@ -447,7 +447,7 @@ fn surface_backend(device: &Device, surface: Surface, size: Size) -> Result<(Bac
             let (backend, target) = mln_gl::HostSurfaceTarget::with_backend(device, *host, size)?;
             Ok((Backend::Gl(backend), Box::new(target)))
         }
-        #[cfg(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))]
+        #[cfg(all(feature = "gl", unix, not(target_vendor = "apple")))]
         (Device::Gl(_), SurfaceKind::Window(window)) => {
             let (backend, target) = mln_gl::SurfaceTarget::with_backend(window.clone(), size, true)?;
             Ok((Backend::Gl(backend), Box::new(target)))

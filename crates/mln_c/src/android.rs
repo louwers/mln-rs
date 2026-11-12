@@ -81,13 +81,14 @@ mod tests {
         MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER,
         MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER, MLN_GPU_SYNC_CPU_COMPLETE,
         MLN_GPU_SYNC_KIND_FLAG_CPU_COMPLETE, MLN_GPU_SYNC_KIND_FLAG_SYNC_FD, MLN_GPU_SYNC_SYNC_FD,
-        MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_RESULT_RENDERED, MLN_RENDER_RESULT_TARGET_NOT_READY,
-        MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION,
-        MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_EXPORTED_RING,
-        MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, MLN_STATUS_OK, MLN_STATUS_UNSUPPORTED,
-        mln_android_hardware_buffer_frame, mln_android_window_target, mln_dma_buf_frame, mln_exported_ring_target,
-        mln_gpu_device, mln_gpu_device_capabilities, mln_gpu_device_options, mln_gpu_sync, mln_logical_size, mln_map,
-        mln_render_session, mln_render_session_capabilities, mln_render_target, mln_render_target_data,
+        MLN_RENDER_BACKEND_OPEN_GL, MLN_RENDER_BACKEND_VULKAN, MLN_RENDER_RESULT_RENDERED,
+        MLN_RENDER_RESULT_TARGET_NOT_READY, MLN_RENDER_SESSION_CAPABILITY_FRAME_ACQUISITION,
+        MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_TARGET_KIND_ANDROID_WINDOW,
+        MLN_RENDER_TARGET_KIND_EXPORTED_RING, MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, MLN_STATUS_OK,
+        MLN_STATUS_UNSUPPORTED, mln_android_hardware_buffer_frame, mln_android_window_target, mln_dma_buf_frame,
+        mln_exported_ring_target, mln_gpu_device, mln_gpu_device_capabilities, mln_gpu_device_options, mln_gpu_sync,
+        mln_logical_size, mln_map, mln_render_session, mln_render_session_capabilities, mln_render_target,
+        mln_render_target_data,
     };
     use crate::gpu_device::{mln_gpu_device_create, mln_gpu_device_get_capabilities, mln_gpu_device_release};
     use crate::map::mln_map_set_style_json;
@@ -244,15 +245,16 @@ mod tests {
         capabilities
     }
 
-    fn vulkan_device() -> mln_gpu_device {
-        let options = mln_gpu_device_options {
-            fields: MLN_GPU_DEVICE_OPTION_BACKEND,
-            backend: MLN_RENDER_BACKEND_VULKAN,
-            ..sized()
-        };
+    /// A library device of `backend` that presents to Android windows.
+    fn device(backend: u32) -> mln_gpu_device {
+        let options = mln_gpu_device_options { fields: MLN_GPU_DEVICE_OPTION_BACKEND, backend, ..sized() };
         let mut device = 0;
         // SAFETY: local arguments.
         assert_eq!(unsafe { mln_gpu_device_create(&options, &mut device, NO_DIAGNOSTIC) }, MLN_STATUS_OK);
+        let mut capabilities = sized::<mln_gpu_device_capabilities>();
+        // SAFETY: local arguments.
+        unsafe { mln_gpu_device_get_capabilities(device, &mut capabilities, NO_DIAGNOSTIC) };
+        assert_ne!(capabilities.target_kinds & MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, 0, "backend {backend}");
         device
     }
 
@@ -262,18 +264,14 @@ mod tests {
     }
 
     // A window target presents to an `ANativeWindow`, moves to another, and
-    // outlives the windows that the platform destroys, on the Vulkan device
-    // and on the device that the session makes.
+    // outlives the windows that the platform destroys, on a Vulkan and an
+    // OpenGL device and on the device that the session makes.
     #[test]
     fn an_android_window_target_presents_moves_and_outlives_its_window() {
         let runtime = create();
         let map = red_map(runtime);
-        let vulkan = vulkan_device();
-        let mut device_capabilities = sized::<mln_gpu_device_capabilities>();
-        // SAFETY: local arguments.
-        unsafe { mln_gpu_device_get_capabilities(vulkan, &mut device_capabilities, NO_DIAGNOSTIC) };
-        assert_ne!(device_capabilities.target_kinds & MLN_RENDER_TARGET_KIND_FLAG_ANDROID_WINDOW, 0);
-        for device in [vulkan, 0] {
+        let devices = [device(MLN_RENDER_BACKEND_VULKAN), device(MLN_RENDER_BACKEND_OPEN_GL), 0];
+        for device in devices {
             let first = Reader::new(64, 48);
             let session = attach(map, &window_target(first.window(), 64, 48), device, 0);
             assert_eq!(capabilities(session).flags, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION);
@@ -314,7 +312,9 @@ mod tests {
             assert_eq!((status, released.status()), (MLN_STATUS_OK, MLN_STATUS_OK));
             release_session(session);
         }
-        mln_gpu_device_release(vulkan);
+        for device in devices {
+            mln_gpu_device_release(device);
+        }
         release_map(map);
         release(runtime);
     }

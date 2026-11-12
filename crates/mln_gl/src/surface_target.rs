@@ -1,6 +1,6 @@
 // The target of a native window: frames presented to an EGL window surface
-// on a Wayland surface or an X11 window, from an OpenGL ES 3.0 context of
-// the window's display. After the
+// on a Wayland surface, an X11 window or an Android `ANativeWindow`, from an
+// OpenGL ES 3.0 context of the window's display. After the
 // GLFW app's backend (platform/glfw/glfw_gl_backend.cpp), which gets its
 // context and its buffer swaps from GLFW; here they are EGL's.
 //
@@ -40,6 +40,9 @@ enum WindowHandle {
     /// An Xlib `Display` and a window of it, with the ID of the window's
     /// visual, or 0 for one that isn't known.
     Xlib { display: *mut c_void, window: c_ulong, visual_id: c_ulong },
+    /// An `ANativeWindow`, on Android's one display.
+    #[cfg(target_os = "android")]
+    Android { window: *mut c_void },
 }
 
 impl WindowHandle {
@@ -58,7 +61,11 @@ impl WindowHandle {
                 window: window.window,
                 visual_id: window.visual_id,
             }),
-            _ => Err("The window is neither a Wayland surface nor an Xlib window.".to_owned()),
+            #[cfg(target_os = "android")]
+            (RawDisplayHandle::Android(_), RawWindowHandle::AndroidNdk(window)) => {
+                Ok(WindowHandle::Android { window: window.a_native_window.as_ptr() })
+            }
+            _ => Err("The window is neither a Wayland surface, an Xlib window nor an Android window.".to_owned()),
         }
     }
 }
@@ -70,6 +77,12 @@ const PLATFORM_WAYLAND_KHR: egl::Enum = 0x31D8;
 type WlEglWindowCreate = unsafe extern "C" fn(*mut c_void, c_int, c_int) -> *mut c_void;
 type WlEglWindowResize = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
 type WlEglWindowDestroy = unsafe extern "C" fn(*mut c_void);
+
+#[cfg(target_os = "android")]
+#[link(name = "android")]
+unsafe extern "C" {
+    fn ANativeWindow_getFormat(window: *mut c_void) -> i32;
+}
 
 /// The context, and the window surface it is current on.
 struct EglWindow {
@@ -98,13 +111,19 @@ impl EglWindow {
         let handle = WindowHandle::of(&*window)?;
         let egl = library()?;
         let (platform, native_display, wayland) = match handle {
-            WindowHandle::Wayland { display, .. } => (PLATFORM_WAYLAND_KHR, display, true),
-            WindowHandle::Xlib { display, .. } => (PLATFORM_X11_KHR, display, false),
+            WindowHandle::Wayland { display, .. } => (Some(PLATFORM_WAYLAND_KHR), display, true),
+            WindowHandle::Xlib { display, .. } => (Some(PLATFORM_X11_KHR), display, false),
+            #[cfg(target_os = "android")]
+            WindowHandle::Android { .. } => (None, egl::DEFAULT_DISPLAY, false),
         };
-        // SAFETY: the native display is the live one of `window`.
+        // SAFETY: the native display is the live one of `window`, or EGL's
+        // default one.
         let display = unsafe {
-            egl.upcast::<egl::EGL1_5>()
-                .and_then(|egl15| egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok())
+            platform
+                .and_then(|platform| {
+                    let egl15 = egl.upcast::<egl::EGL1_5>()?;
+                    egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok()
+                })
                 .or_else(|| egl.get_display(native_display))
         }
         .ok_or("Failed to obtain an EGL display for the window.")?;
@@ -134,15 +153,21 @@ impl EglWindow {
         egl.choose_config(display, &attributes, &mut configs)
             .map_err(|e| format!("Failed to choose an EGL config: {e}"))?;
         let attribute = |config, attribute| egl.get_config_attrib(display, config, attribute).ok();
-        // An X11 window takes the surfaces of its visual only. Elsewhere, a
-        // config without alpha: the window is opaque, as the map's frames
-        // are, and a compositor would blend what alpha they have left.
-        let of_visual = match handle {
-            WindowHandle::Xlib { visual_id, .. } if visual_id != 0 => configs
-                .iter()
-                .find(|&&config| attribute(config, egl::NATIVE_VISUAL_ID) == egl::Int::try_from(visual_id).ok()),
-            _ => None,
+        // An X11 window takes the surfaces of its visual only, and an
+        // Android window keeps the format that its host gave it, which is
+        // its config's native visual. Elsewhere, a config without alpha: the
+        // window is opaque, as the map's frames are, and a compositor would
+        // blend what alpha they have left.
+        let visual_id = match handle {
+            WindowHandle::Xlib { visual_id, .. } => egl::Int::try_from(visual_id).ok(),
+            // SAFETY: the window is the live one of `window`.
+            #[cfg(target_os = "android")]
+            WindowHandle::Android { window } => Some(unsafe { ANativeWindow_getFormat(window) }),
+            WindowHandle::Wayland { .. } => None,
         };
+        let of_visual = visual_id.filter(|visual_id| *visual_id > 0).and_then(|visual_id| {
+            configs.iter().find(|&&config| attribute(config, egl::NATIVE_VISUAL_ID) == Some(visual_id))
+        });
         let opaque = || configs.iter().find(|&&config| attribute(config, egl::ALPHA_SIZE) == Some(0));
         let config = *of_visual
             .or_else(opaque)
@@ -201,6 +226,8 @@ impl EglWindow {
                 window
             }
             WindowHandle::Xlib { window, .. } => window as *mut c_void,
+            #[cfg(target_os = "android")]
+            WindowHandle::Android { window } => window,
         };
         // SAFETY: the native window is the live one of `_window`, or the
         // `wl_egl_window` just made of it.
@@ -353,10 +380,10 @@ pub struct SurfaceTarget {
 impl SurfaceTarget {
     /// A backend on a context of `window`'s display, and a target that
     /// presents frames of `framebuffer_size` pixels to `window`, a Wayland
-    /// surface or an Xlib window, which it keeps. It takes the window over
-    /// with its first frame, not before: until then another target may
-    /// present to it. With `cap_frame_rate`, presenting to an X11 window
-    /// waits for the display.
+    /// surface, an Xlib window or an Android window, which it keeps. It
+    /// takes the window over with its first frame, not before: until then
+    /// another target may present to it. With `cap_frame_rate`, presenting
+    /// to an X11 or Android window waits for the display.
     ///
     /// Fails with [`ErrorKind::Native`](mln_util::ErrorKind) when EGL has no
     /// OpenGL ES 3.0 context for the window.

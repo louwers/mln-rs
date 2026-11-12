@@ -481,8 +481,9 @@ impl SurfaceType {
                 cfg!(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm")))) && windowing
             }
             BackendType::OpenGL => {
-                cfg!(all(feature = "gl", unix, not(target_vendor = "apple"), not(target_os = "android")))
-                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland)
+                cfg!(all(feature = "gl", unix, not(target_vendor = "apple")))
+                    && windowing
+                    && matches!(self, SurfaceType::Xlib | SurfaceType::Wayland | SurfaceType::AndroidNdk)
             }
             BackendType::WebGPU => cfg!(all(feature = "webgpu", not(target_family = "wasm"))) && windowing,
             #[allow(unreachable_patterns)]
