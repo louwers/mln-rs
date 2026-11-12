@@ -396,7 +396,7 @@ impl Map {
                         held.removal = Some(resolver);
                         return Ok(completion);
                     }
-                    Some(_) => return Err(Error::invalid_state("the map still has an attached render session")),
+                    Some(_) => return Err(Error::invalid_state("map still has an attached render session")),
                     // The session is gone without letting go of the map.
                     None => Some((held.id, None)),
                 },

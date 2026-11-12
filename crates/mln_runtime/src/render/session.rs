@@ -981,11 +981,14 @@ impl RenderSession {
     /// shows the old. An exported ring gets images of the new size, and the
     /// frames that the host holds keep theirs until it gives them back.
     ///
-    /// Fails with [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an
-    /// empty size, or a scale factor that isn't finite and positive, and
-    /// with [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed
-    /// ring, which [`set_ring`](Self::set_ring) resizes.
+    /// Fails first as a call that sends work does once the session no
+    /// longer takes work. Then fails with
+    /// [`ErrorKind::Unsupported`](mln_util::ErrorKind) for a borrowed ring,
+    /// which [`set_ring`](Self::set_ring) resizes, and with
+    /// [`ErrorKind::InvalidArgument`](mln_util::ErrorKind) for an empty size,
+    /// or a scale factor that isn't finite and positive.
     pub fn resize(&self, extent: LogicalExtent) -> Result<Completion<Applied>, Error> {
+        check_usable(&self.shared().state.lock_unpoisoned())?;
         let capabilities = self.shared().capabilities;
         if capabilities.frame_acquisition && capabilities.export_kind.is_none() {
             return Err(Error::unsupported("a borrowed ring is sized by its owner: give it new textures instead"));
