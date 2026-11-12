@@ -71,6 +71,36 @@ fn validated<T>(device: &wgpu::Device, create: impl FnOnce() -> T) -> Result<T, 
     }
 }
 
+/// `source` for wgpu: natively, the module naga parses it to. Parsing the
+/// WGSL is most of what creating a shader costs, and every renderer creates
+/// the same shaders, so the process parses each source once. A source that
+/// doesn't parse goes as WGSL, for wgpu to report its error.
+#[cfg(not(target_family = "wasm"))]
+fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
+    use std::sync::Mutex;
+
+    use mln_util::sync::MutexExt;
+
+    static PARSED: Mutex<Option<HashMap<String, wgpu::naga::Module>>> = Mutex::new(None);
+    let cached = PARSED.lock_unpoisoned().get_or_insert_default().get(source).cloned();
+    let module = match cached {
+        Some(module) => module,
+        None => {
+            let Ok(module) = wgpu::naga::front::wgsl::parse_str(source) else {
+                return wgpu::ShaderSource::Wgsl(Cow::Borrowed(source));
+            };
+            PARSED.lock_unpoisoned().get_or_insert_default().insert(source.to_owned(), module.clone());
+            module
+        }
+    };
+    wgpu::ShaderSource::Naga(Cow::Owned(module))
+}
+
+#[cfg(target_family = "wasm")]
+fn shader_source(source: &str) -> wgpu::ShaderSource<'_> {
+    wgpu::ShaderSource::Wgsl(Cow::Borrowed(source))
+}
+
 fn is_space(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r')
 }
@@ -262,7 +292,7 @@ impl ShaderProgram {
             let module = validated(&device, || {
                 device.create_shader_module(wgpu::ShaderModuleDescriptor {
                     label: Some(label),
-                    source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(source)),
+                    source: shader_source(source),
                 })
             });
             module.map_err(|error| eprintln!("{error}")).ok()
