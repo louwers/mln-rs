@@ -272,7 +272,7 @@ impl BorrowedTarget {
                 _ => {}
             }
         }
-        this.reset_slots();
+        this.reset_slots(&[]);
         Ok(this)
     }
 
@@ -428,23 +428,28 @@ impl BorrowedTarget {
         let resource = Rc::new(Resource::new(self.backend.vulkan_context(), &images)?);
         *self.target.borrow_mut() = Rc::new(DrawTarget::new(images.size, resource.clone()));
         *self.resource.borrow_mut() = resource;
-        *self.images.borrow_mut() = images;
-        self.reset_slots();
+        let old = std::mem::replace(&mut *self.images.borrow_mut(), images);
+        self.reset_slots(&old.images);
         Ok(())
     }
 
-    /// Forgets what each slot waits for and handed over.
-    fn reset_slots(&self) {
-        let depth = self.depth();
+    /// Gives each image that the ring had in `old` what it waited for, at
+    /// its new slot, and forgets the rest and what the slots handed over.
+    fn reset_slots(&self, old: &[BorrowedImage]) {
+        let images = self.images.borrow();
         let mut slots = self.slots.borrow_mut();
-        for slot in slots.iter_mut() {
-            self.forget_wait(slot);
-            #[cfg(unix)]
-            {
-                slot.producer_fd = None;
-            }
+        let mut previous = std::mem::take(&mut *slots);
+        for image in &images.images {
+            let carried = old
+                .iter()
+                .position(|old| old.image == image.image)
+                .and_then(|index| previous.get_mut(index))
+                .and_then(|slot| slot.consumer_wait.take());
+            slots.push(Slot { consumer_wait: carried, ..Slot::default() });
         }
-        slots.resize_with(depth, Slot::default);
+        for slot in &mut previous {
+            self.forget_wait(slot);
+        }
     }
 
     /// Releases the frame's image to the host's queue family, after the

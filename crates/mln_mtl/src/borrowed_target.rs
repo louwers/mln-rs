@@ -306,10 +306,25 @@ impl BorrowedTarget {
         }
         textures.check(self.backend.device())?;
         self.target.set_size(textures.size);
-        *self.resource.textures.borrow_mut() = textures;
-        for wait in self.resource.waits.borrow_mut().iter_mut() {
-            *wait = None;
-        }
+        let old = std::mem::replace(&mut *self.resource.textures.borrow_mut(), textures);
+        // A texture that the new ring has again keeps what it waits for, at
+        // its new slot.
+        let mut waits = self.resource.waits.borrow_mut();
+        let mut previous = std::mem::take(&mut *waits);
+        *waits = self
+            .resource
+            .textures
+            .borrow()
+            .textures
+            .iter()
+            .map(|texture| {
+                old.textures
+                    .iter()
+                    .position(|old| std::ptr::eq(Retained::as_ptr(old), Retained::as_ptr(texture)))
+                    .and_then(|index| previous.get_mut(index))
+                    .and_then(Option::take)
+            })
+            .collect();
         Ok(())
     }
 

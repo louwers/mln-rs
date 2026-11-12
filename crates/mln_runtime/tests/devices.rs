@@ -299,6 +299,17 @@ mod vulkan {
             semaphore
         }
 
+        fn counter(&self, semaphore: vk::Semaphore) -> u64 {
+            // SAFETY: a timeline of the device.
+            unsafe { self.device.get_semaphore_counter_value(semaphore) }.unwrap()
+        }
+
+        fn signal(&self, semaphore: vk::Semaphore, value: u64) {
+            let info = vk::SemaphoreSignalInfo::default().semaphore(semaphore).value(value);
+            // SAFETY: a timeline of the device, below `value`.
+            unsafe { self.device.signal_semaphore(&info) }.unwrap();
+        }
+
         /// Submits a copy of `image`, in its final layout, to a buffer, to
         /// the queue that sessions share, without waiting for it.
         fn read(&mut self, image: vk::Image) {
@@ -424,6 +435,41 @@ mod vulkan {
         frame.release(timeline_sync(timeline, 0)).unwrap();
         assert_eq!(FrameDisposition::Rendered, render(&session));
         drop(session.acquire_frame().unwrap().expect("a frame"));
+        wait(session.detach());
+    }
+
+    // The host's timeline wait holds a frame back, even when a new ring of
+    // another size has the frame's image again.
+    #[test]
+    fn a_ring_waits_for_the_hosts_timeline_in_a_new_ring() {
+        let Some((device, mut host)) = with_timelines() else { return };
+        let images = [host.image()];
+        let timeline = host.timeline();
+        let runtime = runtime();
+        let map = map_of(&runtime, "#ff0000");
+        let target = RenderTarget::Borrowed { size: SIZE, ring: Host::ring(&images), device: device.clone() };
+        let session = attach(&map, target, SyncKinds::of(&[SyncKind::VulkanTimelineSemaphore]));
+        let produced = |frame: &mln_runtime::AcquiredFrame| {
+            let sync = frame.producer_sync();
+            assert_eq!(SyncKind::VulkanTimelineSemaphore, sync.kind);
+            use vk::Handle as _;
+            (vk::Semaphore::from_raw(sync.handle), sync.value)
+        };
+
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (producer, value) = produced(&frame);
+        assert!(eventually(|| host.counter(producer) >= value));
+        frame.release(timeline_sync(timeline, 1)).unwrap();
+        wait(session.set_ring(Size::new(SIZE.width / 2, SIZE.height / 2), Host::ring(&images)));
+        assert_eq!(FrameDisposition::Rendered, render(&session));
+        let frame = session.acquire_frame().unwrap().expect("a frame");
+        let (_, value) = produced(&frame);
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(host.counter(producer) < value, "the frame didn't wait for the host's timeline");
+        host.signal(timeline, 1);
+        assert!(eventually(|| host.counter(producer) >= value));
+        drop(frame);
         wait(session.detach());
     }
 
@@ -713,6 +759,36 @@ fn no_frame_is_acquired_while_a_release_of_the_ring_is_on_its_way() {
     released.wait().unwrap();
     assert!(session.acquire_frame().unwrap().is_none());
     assert_eq!(mln_runtime::RenderSessionState::Attached, session.snapshot().unwrap().state);
+    wait(session.detach());
+}
+
+// A texture that the host gave up stays quarantined when a new ring of
+// another size has it again.
+#[cfg(feature = "webgpu")]
+#[test]
+fn a_texture_that_the_host_gave_up_stays_quarantined_in_a_new_ring() {
+    let Some((device, textures)) = webgpu_ring(1) else { return };
+    let runtime = runtime();
+    let map = map_of(&runtime, "#ff0000");
+    let session = webgpu_session(&map, &device, &textures, AttachOptions::default());
+    assert_eq!(FrameDisposition::Rendered, render(&session));
+    session.acquire_frame().unwrap().expect("a frame").discard();
+    let quarantined = |session: &RenderSession| {
+        session
+            .demand_frame(FrameDemand::new(DemandMode::Force, 2))
+            .is_err_and(|error| error.kind == ErrorKind::InvalidState)
+    };
+    assert!(eventually(|| quarantined(&session)));
+
+    let ring = BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: textures.clone(), size: SIZE });
+    wait(session.set_ring(Size::new(SIZE.width / 2, SIZE.height / 2), ring));
+    assert!(quarantined(&session));
+
+    // A new texture renders.
+    let ring =
+        BorrowedRing::webgpu(mln_webgpu::BorrowedTextures { textures: vec![webgpu_texture(&device)], size: SIZE });
+    wait(session.set_ring(SIZE, ring));
+    assert_eq!(FrameDisposition::Rendered, render(&session));
     wait(session.detach());
 }
 

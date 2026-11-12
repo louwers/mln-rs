@@ -104,7 +104,7 @@ pub(crate) struct RingSlot {
     pub(crate) acquired: bool,
     pub(crate) rendering: bool,
     /// The host's GPU may still read the texture, so the session renders
-    /// into it no more, until new textures replace the ring's.
+    /// into it no more, even when a new ring has it again.
     pub(crate) quarantined: bool,
 }
 
@@ -1337,8 +1337,9 @@ impl AcquiredFrame {
     }
 
     /// Gives the frame up without saying when the host's reads end: the
-    /// session never renders into its texture again, until new textures
-    /// replace the ring's.
+    /// session never renders into its texture again, even when
+    /// [`set_ring`](RenderSession::set_ring) gives the ring the texture
+    /// again.
     pub fn discard(mut self) {
         self.done = true;
         give_back(&self.shared, self.slot, None);

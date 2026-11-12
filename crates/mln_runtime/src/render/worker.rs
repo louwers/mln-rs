@@ -769,8 +769,8 @@ impl Worker {
     }
 
     /// Renders into `ring` from now on, at `size` logical pixels, after the
-    /// map resized. The ring's slots then hold no frames, and none is
-    /// quarantined.
+    /// map resized. The ring's slots then hold no frames, and only the
+    /// textures that were quarantined stay so.
     pub(crate) fn set_ring(
         &mut self,
         size: Size,
@@ -798,12 +798,25 @@ impl Worker {
             gfx.target.set_ring(ring.clone())
         };
         replaced?;
-        self.ring = Some(ring);
+        let old = self.ring.replace(ring.clone());
         {
             let mut state = self.shared.state.lock_unpoisoned();
-            for slot in &mut state.ring {
-                slot.frame = None;
-                slot.quarantined = false;
+            // The host's GPU may still read a texture it gave up, wherever it
+            // is in the new ring.
+            let quarantined: Vec<bool> = (0..state.ring.len())
+                .map(|slot| {
+                    old.as_ref().is_some_and(|old| {
+                        state
+                            .ring
+                            .iter()
+                            .enumerate()
+                            .any(|(old_slot, entry)| entry.quarantined && ring.same_texture(slot, old, old_slot))
+                    })
+                })
+                .collect();
+            for (entry, quarantined) in state.ring.iter_mut().zip(quarantined) {
+                entry.frame = None;
+                entry.quarantined = quarantined;
             }
         }
         self.target_changed(size, Some(true));

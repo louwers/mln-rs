@@ -202,6 +202,38 @@ impl BorrowedRing {
         }
     }
 
+    /// Whether the texture at `slot` is the one at `other`'s `other_slot`.
+    #[cfg_attr(target_family = "wasm", allow(unused_variables))]
+    pub(crate) fn same_texture(&self, slot: usize, other: &BorrowedRing, other_slot: usize) -> bool {
+        #[allow(unreachable_patterns)]
+        match (&self.kind, &other.kind) {
+            #[cfg(all(feature = "vulkan", not(any(target_vendor = "apple", target_family = "wasm"))))]
+            (RingKind::Vulkan(images), RingKind::Vulkan(others)) => images
+                .images
+                .get(slot)
+                .zip(others.images.get(other_slot))
+                .is_some_and(|(image, other)| image.image == other.image),
+            #[cfg(all(feature = "metal", target_vendor = "apple"))]
+            (RingKind::Metal(textures), RingKind::Metal(others)) => {
+                textures.textures.get(slot).zip(others.textures.get(other_slot)).is_some_and(|(texture, other)| {
+                    std::ptr::eq(
+                        mln_mtl::objc2::rc::Retained::as_ptr(texture),
+                        mln_mtl::objc2::rc::Retained::as_ptr(other),
+                    )
+                })
+            }
+            #[cfg(all(feature = "gl", not(target_family = "wasm")))]
+            (RingKind::Gl(textures), RingKind::Gl(others)) => {
+                textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
+            }
+            #[cfg(all(feature = "webgpu", not(target_family = "wasm")))]
+            (RingKind::WebGpu(textures), RingKind::WebGpu(others)) => {
+                textures.textures.get(slot).is_some_and(|texture| others.textures.get(other_slot) == Some(texture))
+            }
+            _ => false,
+        }
+    }
+
     /// The texture at `slot`, which sessions on `device` render into.
     #[cfg_attr(target_family = "wasm", allow(unused_variables))]
     pub fn texture(&self, slot: usize, device: &Device) -> Option<FrameTexture> {
