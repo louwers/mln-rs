@@ -376,7 +376,7 @@ impl SingleContext {
 
 impl Drop for SingleContext {
     fn drop(&mut self) {
-        // Each renderer holds the device, so none has the turn any more.
+        // Each renderer holds the context, so none has the turn any more.
         let EglDisplay { egl, display, .. } = self.display;
         if let Err(e) = egl.destroy_surface(*display, self.surface) {
             Log::error(Event::GraphicsBackend, format!("Failed to destroy EGL surface: {e}"));
@@ -408,7 +408,7 @@ unsafe impl Sync for HostGroup {}
 
 enum Kind {
     Library(ShareGroup),
-    Single(SingleContext),
+    Single(Arc<SingleContext>),
     Host(HostGroup),
 }
 
@@ -462,7 +462,7 @@ impl Device {
                 return Err(Error::native(e));
             }
         };
-        Ok(Device::of(Kind::Single(SingleContext {
+        Ok(Device::of(Kind::Single(Arc::new(SingleContext {
             display,
             api,
             context,
@@ -470,7 +470,7 @@ impl Device {
             turn: Mutex::default(),
             free: Condvar::new(),
             users: AtomicU64::new(0),
-        })))
+        }))))
     }
 
     /// The host's share group, whose root is `context`, of `config` on
@@ -586,7 +586,7 @@ impl Device {
             }
             Kind::Single(single) => {
                 let user = single.users.fetch_add(1, Ordering::Relaxed) + 1;
-                let turns = SingleContextTurns { device: self.clone(), user, lost: Cell::new(false) };
+                let turns = SingleContextTurns { single: single.clone(), user, lost: Cell::new(false) };
                 Self::functions(Box::new(turns))
             }
             Kind::Host(group) => {
@@ -653,32 +653,23 @@ impl SurfaceSwap {
 
 /// A renderer's turns in the one context of a single-context device.
 struct SingleContextTurns {
-    /// The device, whose context outlives the renderer.
-    device: Device,
+    /// The device's context, which outlives the renderer.
+    single: Arc<SingleContext>,
     /// The renderer's number among the context's.
     user: u64,
     /// Whether another renderer had the context since this one's last turn.
     lost: Cell<bool>,
 }
 
-impl SingleContextTurns {
-    fn single(&self) -> &SingleContext {
-        match &*self.device.kind {
-            Kind::Single(single) => single,
-            _ => unreachable!("a single context's turns are of a single-context device"),
-        }
-    }
-}
-
 impl PlatformContext for SingleContextTurns {
     fn make_current(&self) {
-        if self.single().take(self.user) {
+        if self.single.take(self.user) {
             self.lost.set(true);
         }
     }
 
     fn done_current(&self) {
-        self.single().give(self.user);
+        self.single.give(self.user);
     }
 
     fn take_state_lost(&self) -> bool {
