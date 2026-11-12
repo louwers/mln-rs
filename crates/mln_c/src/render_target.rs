@@ -899,14 +899,14 @@ mod tests {
 
         // OpenHarmony takes only its own windows: see the OpenHarmony test.
         #[cfg(not(target_env = "ohos"))]
-        assert!(matches!(read(&ohos(8, fake), None), Ok(Target::Unsupported(_))));
-        assert_eq!(read(&ohos(8, core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+        assert!(matches!(read(&ohos(8, 8, fake), None), Ok(Target::Unsupported(_))));
+        assert_eq!(read(&ohos(8, 8, core::ptr::null_mut()), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
     }
 
-    /// An OpenHarmony target of `window`, `size` logical pixels square.
-    fn ohos(size: u32, window: *mut c_void) -> mln_render_target {
+    /// An OpenHarmony target of `window`, `width` by `height` logical pixels.
+    fn ohos(width: u32, height: u32, window: *mut c_void) -> mln_render_target {
         use crate::generated::types::{mln_ohos_window_target, mln_render_target_data};
-        let logical_size = mln_logical_size { width: size, height: size };
+        let logical_size = mln_logical_size { width, height };
         let data = mln_render_target_data { ohos_window: mln_ohos_window_target { logical_size, window } };
         target(MLN_RENDER_TARGET_KIND_OHOS_WINDOW, data)
     }
@@ -914,10 +914,14 @@ mod tests {
     // An OpenHarmony window, of a consumer surface that nothing shows: the
     // target takes a reference of its own, which outlives the host's, and
     // presents on each backend that a device of the library's has, through
-    // the C API.
+    // the C API. The window has no buffer size of its own, so the session
+    // gives it the frames'.
     #[cfg(target_env = "ohos")]
     #[test]
     fn an_ohos_window_target_holds_its_window_and_presents_on_each_backend() {
+        use std::os::fd::FromRawFd as _;
+        use std::time::{Duration, Instant};
+
         use crate::generated::types::{
             MLN_FRAME_DEMAND_FORCE, MLN_GPU_DEVICE_OPTION_BACKEND, MLN_RENDER_RESULT_RENDERED,
             MLN_RENDER_SESSION_CAPABILITY_PRESENTATION, MLN_RENDER_TARGET_KIND_FLAG_OHOS_WINDOW,
@@ -930,22 +934,115 @@ mod tests {
         use crate::render_session::tests::{attach_options, demand, release_session, sized, wait_for_result};
         use crate::runtime::tests::{Waiter, create, release};
 
+        /// `OH_NativeBuffer_Config`.
+        #[repr(C)]
+        #[derive(Default)]
+        struct BufferConfig {
+            width: i32,
+            height: i32,
+            format: i32,
+            usage: i32,
+            stride: i32,
+        }
+        #[repr(C)]
+        struct PollFd {
+            fd: i32,
+            events: i16,
+            revents: i16,
+        }
         #[link(name = "native_image")]
         unsafe extern "C" {
             fn OH_ConsumerSurface_Create() -> *mut c_void;
+            fn OH_ConsumerSurface_SetDefaultUsage(image: *mut c_void, usage: u64) -> i32;
             fn OH_NativeImage_AcquireNativeWindow(image: *mut c_void) -> *mut c_void;
+            fn OH_NativeImage_AcquireNativeWindowBuffer(
+                image: *mut c_void,
+                buffer: *mut *mut c_void,
+                fence: *mut i32,
+            ) -> i32;
+            fn OH_NativeImage_ReleaseNativeWindowBuffer(image: *mut c_void, buffer: *mut c_void, fence: i32) -> i32;
             fn OH_NativeImage_Destroy(image: *mut *mut c_void);
         }
-        #[link(name = "native_window")]
+        #[link(name = "native_buffer")]
         unsafe extern "C" {
-            fn OH_NativeWindow_NativeWindowHandleOpt(window: *mut c_void, code: i32, ...) -> i32;
+            fn OH_NativeBuffer_FromNativeWindowBuffer(buffer: *mut c_void, out: *mut *mut c_void) -> i32;
+            fn OH_NativeBuffer_GetConfig(buffer: *mut c_void, config: *mut BufferConfig);
+            fn OH_NativeBuffer_Map(buffer: *mut c_void, data: *mut *mut c_void) -> i32;
+            fn OH_NativeBuffer_Unmap(buffer: *mut c_void) -> i32;
         }
-        const SET_BUFFER_GEOMETRY: i32 = 0;
+        unsafe extern "C" {
+            fn poll(fds: *mut PollFd, count: core::ffi::c_ulong, timeout: i32) -> i32;
+        }
+        const USAGE_CPU_READ: u64 = 1;
+        const USAGE_HW_RENDER: u64 = 1 << 8;
+        const POLLIN: i16 = 1;
+        // `OH_NativeBuffer_Format`'s 8-bit RGB orders, with or without alpha.
+        const RGBX_8888: i32 = 11;
+        const RGBA_8888: i32 = 12;
+        const BGRX_8888: i32 = 19;
+        const BGRA_8888: i32 = 20;
+
+        /// The size and the center pixel, as RGB, of the newest frame that
+        /// `image` has, which comes within a few seconds of its present.
+        ///
+        /// # Safety
+        ///
+        /// `image` is a live consumer surface.
+        unsafe fn newest_frame(image: *mut c_void) -> ((i32, i32), [u8; 3]) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut newest = None;
+            while newest.is_none() || Instant::now() < deadline {
+                let (mut buffer, mut fence) = (core::ptr::null_mut(), -1);
+                // SAFETY: the live image, and local outputs.
+                if unsafe { OH_NativeImage_AcquireNativeWindowBuffer(image, &mut buffer, &mut fence) } != 0 {
+                    if newest.is_some() {
+                        break;
+                    }
+                    assert!(Instant::now() < deadline, "the consumer got no frame");
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                if fence >= 0 {
+                    let mut wait = PollFd { fd: fence, events: POLLIN, revents: 0 };
+                    // SAFETY: one local pollfd, then the fence that is the
+                    // test's to close.
+                    unsafe {
+                        poll(&mut wait, 1, -1);
+                        drop(std::os::fd::OwnedFd::from_raw_fd(fence));
+                    }
+                }
+                let (mut native, mut data, mut config) =
+                    (core::ptr::null_mut(), core::ptr::null_mut(), BufferConfig::default());
+                // SAFETY: the acquired buffer, until its release.
+                unsafe {
+                    assert_eq!(OH_NativeBuffer_FromNativeWindowBuffer(buffer, &mut native), 0);
+                    OH_NativeBuffer_GetConfig(native, &mut config);
+                    assert_eq!(OH_NativeBuffer_Map(native, &mut data), 0, "the frame maps for the CPU");
+                }
+                let center = (config.height / 2) as usize * config.stride as usize + (config.width / 2) as usize * 4;
+                // SAFETY: the mapped buffer holds `height` rows of `stride`
+                // bytes.
+                let [first, green, third, _] = unsafe { data.cast::<[u8; 4]>().byte_add(center).read() };
+                let rgb = match config.format {
+                    RGBA_8888 | RGBX_8888 => [first, green, third],
+                    BGRA_8888 | BGRX_8888 => [third, green, first],
+                    format => panic!("the frame has 8-bit RGB pixels, not format {format}"),
+                };
+                // SAFETY: the mapped, acquired buffer, which the consumer
+                // takes back.
+                unsafe {
+                    OH_NativeBuffer_Unmap(native);
+                    OH_NativeImage_ReleaseNativeWindowBuffer(image, buffer, -1);
+                }
+                newest = Some(((config.width, config.height), rgb));
+            }
+            newest.expect("a frame")
+        }
 
         // Memory that is no native object, which the target turns down.
         let mut not_a_window = [0u64; 8];
         let not_a_window = not_a_window.as_mut_ptr().cast::<c_void>();
-        assert_eq!(read(&ohos(8, not_a_window), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
+        assert_eq!(read(&ohos(8, 8, not_a_window), None).err(), Some(MLN_STATUS_INVALID_ARGUMENT));
 
         let runtime = create();
         let map = create_map(runtime, &options(1.0));
@@ -976,12 +1073,13 @@ mod tests {
             let mut image = unsafe { OH_ConsumerSurface_Create() };
             assert!(!image.is_null(), "a consumer surface");
             // SAFETY: as above, of the live image.
-            let window = unsafe { OH_NativeImage_AcquireNativeWindow(image) };
+            let window = unsafe {
+                assert_eq!(OH_ConsumerSurface_SetDefaultUsage(image, USAGE_CPU_READ | USAGE_HW_RENDER), 0);
+                OH_NativeImage_AcquireNativeWindow(image)
+            };
             assert!(!window.is_null(), "the consumer surface's window");
-            // SAFETY: the live window, and the operation's arguments.
-            unsafe { OH_NativeWindow_NativeWindowHandleOpt(window, SET_BUFFER_GEOMETRY, 64i32, 64i32) };
 
-            let (target, attach) = (ohos(64, window), attach_options());
+            let (target, attach) = (ohos(48, 40, window), attach_options());
             let (mut session, attached) = (0, Waiter::new());
             // SAFETY: local arguments.
             let status = unsafe {
@@ -993,8 +1091,11 @@ mod tests {
             // SAFETY: local capabilities.
             unsafe { mln_render_session_get_capabilities(session, &mut session_capabilities, core::ptr::null_mut()) };
             assert_eq!(session_capabilities.flags, MLN_RENDER_SESSION_CAPABILITY_PRESENTATION);
-            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, index as u64 + 1), MLN_STATUS_OK);
+            let token = 10 * index as u64;
+            assert_eq!(demand(session, MLN_FRAME_DEMAND_FORCE, token + 1), MLN_STATUS_OK);
             assert_eq!(wait_for_result(session).disposition, MLN_RENDER_RESULT_RENDERED, "{backend:?}");
+            // SAFETY: the live image.
+            assert_eq!(unsafe { newest_frame(image) }, ((48, 40), [0xff, 0, 0]), "{backend:?}");
             release_session(session);
             // SAFETY: the image is the test's, and the session let go of its
             // window.

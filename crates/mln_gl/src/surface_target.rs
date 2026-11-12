@@ -76,6 +76,35 @@ type WlEglWindowCreate = unsafe extern "C" fn(*mut c_void, c_int, c_int) -> *mut
 type WlEglWindowResize = unsafe extern "C" fn(*mut c_void, c_int, c_int, c_int, c_int);
 type WlEglWindowDestroy = unsafe extern "C" fn(*mut c_void);
 
+#[cfg(target_env = "ohos")]
+#[link(name = "native_window")]
+unsafe extern "C" {
+    fn OH_NativeWindow_NativeWindowHandleOpt(window: *mut c_void, code: c_int, ...) -> i32;
+}
+
+/// Gives an OpenHarmony window's buffers `size`, which EGL draws the window's
+/// surface at. A window's own geometry is its consumer's default size, which
+/// may differ from the frames' or be none, and EGL makes no surface of a
+/// window without one.
+#[cfg(target_env = "ohos")]
+fn set_ohos_buffer_geometry(window: *mut c_void, size: Size) {
+    /// `SET_BUFFER_GEOMETRY`, of `NativeWindowOperation`.
+    const SET_BUFFER_GEOMETRY: c_int = 0;
+    let dimension = |pixels: u32| c_int::try_from(pixels.max(1)).unwrap_or(c_int::MAX);
+    // SAFETY: the live window, and the operation's two `int32_t` arguments.
+    let status = unsafe {
+        OH_NativeWindow_NativeWindowHandleOpt(
+            window,
+            SET_BUFFER_GEOMETRY,
+            dimension(size.width),
+            dimension(size.height),
+        )
+    };
+    if status != 0 {
+        Log::error(Event::GraphicsBackend, format!("Setting the window's buffer geometry failed: {status}"));
+    }
+}
+
 /// The context, and the window surface it is current on.
 struct EglWindow {
     egl: &'static Egl,
@@ -213,7 +242,11 @@ impl EglWindow {
                 window
             }
             WindowHandle::Xlib { window, .. } => window as *mut c_void,
-            WindowHandle::Ohos { window } => window,
+            WindowHandle::Ohos { window } => {
+                #[cfg(target_env = "ohos")]
+                set_ohos_buffer_geometry(window, size);
+                window
+            }
         };
         // SAFETY: the native window is the live one of `_window`, or the
         // `wl_egl_window` just made of it.
@@ -247,6 +280,12 @@ impl EglWindow {
 
     fn resize(&self, size: Size) {
         self.size.set(size);
+        // The surface takes the new geometry with its next buffer. A surface
+        // not made yet sets it when it is.
+        #[cfg(target_env = "ohos")]
+        if let (WindowHandle::Ohos { window }, Some(_)) = (self.handle, self.surface.get()) {
+            set_ohos_buffer_geometry(window, size);
+        }
         let window = self.wl_egl_window.get();
         if !window.is_null()
             && let Some(library) = &self.wayland_egl
