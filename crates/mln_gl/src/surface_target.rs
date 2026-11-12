@@ -1,6 +1,6 @@
 // The target of a native window: frames presented to an EGL window surface
-// on a Wayland surface or an X11 window, from an OpenGL ES 3.0 context of
-// the window's display. After the
+// on a Wayland surface, an X11 window or an OpenHarmony window, from an
+// OpenGL ES 3.0 context of the window's display. After the
 // GLFW app's backend (platform/glfw/glfw_gl_backend.cpp), which gets its
 // context and its buffer swaps from GLFW; here they are EGL's.
 //
@@ -40,6 +40,8 @@ enum WindowHandle {
     /// An Xlib `Display` and a window of it, with the ID of the window's
     /// visual, or 0 for one that isn't known.
     Xlib { display: *mut c_void, window: c_ulong, visual_id: c_ulong },
+    /// An OpenHarmony `OHNativeWindow`, which EGL's default display draws.
+    Ohos { window: *mut c_void },
 }
 
 impl WindowHandle {
@@ -58,7 +60,10 @@ impl WindowHandle {
                 window: window.window,
                 visual_id: window.visual_id,
             }),
-            _ => Err("The window is neither a Wayland surface nor an Xlib window.".to_owned()),
+            (RawDisplayHandle::Ohos(_), RawWindowHandle::OhosNdk(window)) => {
+                Ok(WindowHandle::Ohos { window: window.native_window.as_ptr() })
+            }
+            _ => Err("The window is no Wayland surface, Xlib window or OpenHarmony window.".to_owned()),
         }
     }
 }
@@ -98,13 +103,19 @@ impl EglWindow {
         let handle = WindowHandle::of(&*window)?;
         let egl = library()?;
         let (platform, native_display, wayland) = match handle {
-            WindowHandle::Wayland { display, .. } => (PLATFORM_WAYLAND_KHR, display, true),
-            WindowHandle::Xlib { display, .. } => (PLATFORM_X11_KHR, display, false),
+            WindowHandle::Wayland { display, .. } => (Some(PLATFORM_WAYLAND_KHR), display, true),
+            WindowHandle::Xlib { display, .. } => (Some(PLATFORM_X11_KHR), display, false),
+            // OpenHarmony's windows are all of EGL's default display.
+            WindowHandle::Ohos { .. } => (None, egl::DEFAULT_DISPLAY, false),
         };
-        // SAFETY: the native display is the live one of `window`.
+        // SAFETY: the native display is the live one of `window`, or EGL's
+        // default one.
         let display = unsafe {
             egl.upcast::<egl::EGL1_5>()
-                .and_then(|egl15| egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok())
+                .zip(platform)
+                .and_then(|(egl15, platform)| {
+                    egl15.get_platform_display(platform, native_display, &[egl::ATTRIB_NONE]).ok()
+                })
                 .or_else(|| egl.get_display(native_display))
         }
         .ok_or("Failed to obtain an EGL display for the window.")?;
@@ -173,8 +184,9 @@ impl EglWindow {
             size: Cell::new(size),
             // A Wayland compositor shows whole frames whenever they come,
             // and a swap that waits for it would wait forever on a hidden
-            // window.
-            swap_interval: egl::Int::from(cap_frame_rate && !wayland),
+            // window. OpenHarmony's compositor queues them as Android's does,
+            // and the host paces its frames to the display.
+            swap_interval: egl::Int::from(cap_frame_rate && matches!(handle, WindowHandle::Xlib { .. })),
             presenting: Cell::new(false),
             surface: Cell::new(None),
             wl_egl_window: Cell::new(std::ptr::null_mut()),
@@ -201,6 +213,7 @@ impl EglWindow {
                 window
             }
             WindowHandle::Xlib { window, .. } => window as *mut c_void,
+            WindowHandle::Ohos { window } => window,
         };
         // SAFETY: the native window is the live one of `_window`, or the
         // `wl_egl_window` just made of it.
@@ -353,7 +366,8 @@ pub struct SurfaceTarget {
 impl SurfaceTarget {
     /// A backend on a context of `window`'s display, and a target that
     /// presents frames of `framebuffer_size` pixels to `window`, a Wayland
-    /// surface or an Xlib window, which it keeps. It takes the window over
+    /// surface, an Xlib window or an OpenHarmony window, which it keeps. It
+    /// takes the window over
     /// with its first frame, not before: until then another target may
     /// present to it. With `cap_frame_rate`, presenting to an X11 window
     /// waits for the display.
