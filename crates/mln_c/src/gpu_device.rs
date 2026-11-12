@@ -369,11 +369,17 @@ fn capabilities(device: &Device) -> mln_gpu_device_capabilities {
         let (producer, consumer) = mln_mtl::BorrowedTextures::sync_kinds(metal);
         sync = producer.union(consumer);
     }
+    let exports = device.export_kinds();
+    if !exports.is_empty() {
+        target_kinds |= types::MLN_RENDER_TARGET_KIND_FLAG_EXPORTED_RING;
+        let (producer, consumer) = device.export_sync_kinds();
+        sync = sync.union(producer).union(consumer);
+    }
     mln_gpu_device_capabilities {
         size: size_of::<mln_gpu_device_capabilities>() as u32,
         backend: BACKENDS.iter().find(|(built, _, _)| *built == backend).map_or(0, |(_, value, _)| *value),
         target_kinds,
-        export_kinds: 0,
+        export_kinds: crate::render_target::export_flags(exports),
         sync_kinds: sync_flags(sync),
     }
 }

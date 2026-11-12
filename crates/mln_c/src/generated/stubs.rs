@@ -3,55 +3,6 @@
 use super::types::*;
 
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
-    frame: mln_acquired_frame,
-    out_frame: *mut mln_android_hardware_buffer_frame,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(
-            out_diagnostic,
-            "mln_acquired_frame_get_android_hardware_buffer",
-        )
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_dma_buf(
-    frame: mln_acquired_frame,
-    out_frame: *mut mln_dma_buf_frame,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_acquired_frame_get_dma_buf")
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_dxgi_shared_texture(
-    frame: mln_acquired_frame,
-    out_frame: *mut mln_dxgi_shared_texture_frame,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(
-            out_diagnostic,
-            "mln_acquired_frame_get_dxgi_shared_texture",
-        )
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_acquired_frame_get_io_surface(
-    frame: mln_acquired_frame,
-    out_frame: *mut mln_io_surface_frame,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(
-            out_diagnostic,
-            "mln_acquired_frame_get_io_surface",
-        )
-    }
-}
-#[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_android_frame_pacer_create(
     options: *const mln_frame_pacer_options,
     out_pacer: *mut mln_frame_pacer,
@@ -81,67 +32,6 @@ pub unsafe extern "C" fn mln_apple_frame_pacer_create(
 }
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_frame_pacer_release(pacer: mln_frame_pacer) {}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_attach_android_hardware_buffer_ring(
-    map: mln_map,
-    descriptor: *const mln_android_hardware_buffer_ring_descriptor,
-    device: mln_gpu_device,
-    options: *const mln_render_session_attach_options,
-    out_session: *mut mln_render_session,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(
-            out_diagnostic,
-            "mln_map_attach_android_hardware_buffer_ring",
-        )
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_attach_dma_buf_ring(
-    map: mln_map,
-    descriptor: *const mln_dma_buf_ring_descriptor,
-    device: mln_gpu_device,
-    options: *const mln_render_session_attach_options,
-    out_session: *mut mln_render_session,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_map_attach_dma_buf_ring")
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_attach_dxgi_shared_texture_ring(
-    map: mln_map,
-    descriptor: *const mln_dxgi_shared_texture_ring_descriptor,
-    device: mln_gpu_device,
-    options: *const mln_render_session_attach_options,
-    out_session: *mut mln_render_session,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(
-            out_diagnostic,
-            "mln_map_attach_dxgi_shared_texture_ring",
-        )
-    }
-}
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn mln_map_attach_io_surface_ring(
-    map: mln_map,
-    descriptor: *const mln_io_surface_ring_descriptor,
-    options: *const mln_render_session_attach_options,
-    out_session: *mut mln_render_session,
-    completion: *const mln_completion,
-    out_diagnostic: *mut mln_diagnostic,
-) -> mln_status {
-    unsafe {
-        crate::diagnostic::unsupported(out_diagnostic, "mln_map_attach_io_surface_ring")
-    }
-}
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mln_ohos_frame_pacer_create(
     options: *const mln_frame_pacer_options,

@@ -5,9 +5,34 @@ use super::types::*;
 const _: unsafe extern "C" fn(mln_acquired_frame, *mut mln_diagnostic) -> mln_status = crate::acquired_frame::mln_acquired_frame_discard;
 const _: unsafe extern "C" fn(
     mln_acquired_frame,
+    *mut mln_android_hardware_buffer_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_android_hardware_buffer;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_dma_buf_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_dma_buf;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_dxgi_shared_texture_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_dxgi_shared_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_io_surface_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_io_surface;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
     *mut mln_metal_texture_frame,
     *mut mln_diagnostic,
 ) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_metal_texture;
+const _: unsafe extern "C" fn(
+    mln_acquired_frame,
+    *mut mln_opaque_fd_frame,
+    *mut mln_diagnostic,
+) -> mln_status = crate::acquired_frame::mln_acquired_frame_get_opaque_fd;
 const _: unsafe extern "C" fn(
     mln_acquired_frame,
     *mut mln_open_gl_texture_frame,

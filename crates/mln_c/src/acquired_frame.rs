@@ -5,14 +5,18 @@ use core::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use ::mln_runtime::{AcquiredFrame, ConsumerSync, FrameTexture, FrameTextureKind, FrameView, GpuSync, SyncKind};
+use ::mln_runtime::{
+    AcquiredFrame, ConsumerSync, ExportedImage, FrameTexture, FrameTextureKind, FrameView, GpuSync, SyncKind,
+};
 use mln_util::ErrorKind;
 use mln_util::sync::MutexExt;
 
 use crate::error::Error;
 use crate::generated::types::{
-    mln_acquired_frame, mln_diagnostic, mln_gpu_sync, mln_metal_texture_frame, mln_open_gl_texture_frame,
-    mln_render_frame_result, mln_render_session, mln_status, mln_vulkan_texture_frame, mln_web_gpu_texture_frame,
+    mln_acquired_frame, mln_android_hardware_buffer_frame, mln_diagnostic, mln_dma_buf_frame, mln_dma_buf_plane,
+    mln_dxgi_shared_texture_frame, mln_gpu_sync, mln_io_surface_frame, mln_metal_texture_frame, mln_opaque_fd_frame,
+    mln_open_gl_texture_frame, mln_render_frame_result, mln_render_session, mln_status, mln_vulkan_texture_frame,
+    mln_web_gpu_texture_frame,
 };
 use crate::handles::{self, HandleKind, HandleTable};
 use crate::{abi, render_session};
@@ -23,7 +27,12 @@ abi::versioned!(
     mln_vulkan_texture_frame,
     mln_metal_texture_frame,
     mln_open_gl_texture_frame,
-    mln_web_gpu_texture_frame
+    mln_web_gpu_texture_frame,
+    mln_io_surface_frame,
+    mln_dma_buf_frame,
+    mln_android_hardware_buffer_frame,
+    mln_dxgi_shared_texture_frame,
+    mln_opaque_fd_frame
 );
 
 /// An acquired frame, until the host releases or discards it.
@@ -34,6 +43,9 @@ struct FrameObject {
     /// The scale factor that the session's map was created with, which the
     /// frame's view reports exactly.
     initial_scale_factor: f64,
+    /// The planes of an exported dmabuf, which `mln_dma_buf_frame.planes`
+    /// points into while the frame lives.
+    dma_buf_planes: Vec<mln_dma_buf_plane>,
 }
 
 /// What a frame's handle holds.
@@ -109,10 +121,18 @@ pub unsafe extern "C" fn mln_render_session_acquire_frame(
         let Some(frame) = object.session.acquire_frame()? else {
             return Ok(());
         };
+        let dma_buf_planes = match frame.texture().map(|texture| &texture.kind) {
+            Some(FrameTextureKind::Exported(ExportedImage::DmaBuf { planes, .. })) => planes
+                .iter()
+                .map(|plane| mln_dma_buf_plane { fd: plane.fd, offset: plane.offset, stride: plane.stride })
+                .collect(),
+            _ => Vec::new(),
+        };
         let frame = FrameObject {
             frame: Mutex::new(Held { frame: Some(frame), discarded: None }),
             views: AtomicU32::new(0),
             initial_scale_factor: object.initial_scale_factor,
+            dma_buf_planes,
         };
         // A frame that gets no handle drops, which gives it back.
         *out_frame = FRAMES.insert(Arc::new(frame))?;
@@ -482,6 +502,164 @@ pub unsafe extern "C" fn mln_acquired_frame_get_web_gpu_texture(
     out_diagnostic: *mut mln_diagnostic,
 ) -> mln_status {
     export!(out_diagnostic, non_null(out_frame), { other_backend(frame, out_frame) })
+}
+
+/// The exported image of the frame `frame` names, the scale factor it
+/// rendered at, its slot, and the planes of a dmabuf, which stay in place
+/// while the frame lives.
+fn exported_image(frame: mln_acquired_frame) -> Result<(FrameTexture, f64, u32, *const mln_dma_buf_plane), Error> {
+    let object = FRAMES.get(frame)?;
+    let (texture, scale_factor, slot) = frame_texture(frame)?;
+    if !matches!(texture.kind, FrameTextureKind::Exported(_)) {
+        return Err(unsupported("the frame's texture isn't of an exported ring"));
+    }
+    Ok((texture, scale_factor, slot, object.dma_buf_planes.as_ptr()))
+}
+
+fn other_export() -> Error {
+    unsupported("the frame's ring shares its textures in another way")
+}
+
+/// `mln_acquired_frame_get_io_surface()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_acquired_frame_get_io_surface(
+    frame: mln_acquired_frame,
+    out_frame: *mut mln_io_surface_frame,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_frame), {
+        // SAFETY: the caller's contract.
+        unsafe { abi::check_out_size(out_frame) }?;
+        let (texture, scale_factor, slot, _) = exported_image(frame)?;
+        let FrameTextureKind::Exported(ExportedImage::IoSurface { surface }) = texture.kind else {
+            return Err(other_export());
+        };
+        let record = mln_io_surface_frame {
+            size: size_of::<mln_io_surface_frame>() as u32,
+            width: texture.size.width,
+            height: texture.size.height,
+            scale_factor,
+            slot,
+            surface: surface as usize as *mut c_void,
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
+    })
+}
+
+/// `mln_acquired_frame_get_dma_buf()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_acquired_frame_get_dma_buf(
+    frame: mln_acquired_frame,
+    out_frame: *mut mln_dma_buf_frame,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_frame), {
+        // SAFETY: the caller's contract.
+        unsafe { abi::check_out_size(out_frame) }?;
+        let (texture, scale_factor, slot, planes) = exported_image(frame)?;
+        let FrameTextureKind::Exported(ExportedImage::DmaBuf { fourcc, modifier, planes: listed }) = texture.kind
+        else {
+            return Err(other_export());
+        };
+        let record = mln_dma_buf_frame {
+            size: size_of::<mln_dma_buf_frame>() as u32,
+            width: texture.size.width,
+            height: texture.size.height,
+            scale_factor,
+            slot,
+            fourcc,
+            modifier,
+            planes,
+            plane_count: listed.len(),
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
+    })
+}
+
+/// `mln_acquired_frame_get_opaque_fd()`.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_acquired_frame_get_opaque_fd(
+    frame: mln_acquired_frame,
+    out_frame: *mut mln_opaque_fd_frame,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_frame), {
+        // SAFETY: the caller's contract.
+        unsafe { abi::check_out_size(out_frame) }?;
+        let (texture, scale_factor, slot, _) = exported_image(frame)?;
+        let FrameTextureKind::Exported(ExportedImage::OpaqueFd { fd, allocation_size, dedicated, format }) =
+            texture.kind
+        else {
+            return Err(other_export());
+        };
+        let record = mln_opaque_fd_frame {
+            size: size_of::<mln_opaque_fd_frame>() as u32,
+            width: texture.size.width,
+            height: texture.size.height,
+            scale_factor,
+            slot,
+            fd,
+            allocation_size,
+            dedicated,
+            format,
+        };
+        // SAFETY: the caller's contract.
+        unsafe { abi::write_sized(out_frame, &record) }
+    })
+}
+
+/// `mln_acquired_frame_get_android_hardware_buffer()`: no ring of this
+/// library shares hardware buffers yet.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_acquired_frame_get_android_hardware_buffer(
+    frame: mln_acquired_frame,
+    out_frame: *mut mln_android_hardware_buffer_frame,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_frame), {
+        // SAFETY: the caller's contract.
+        unsafe { abi::check_out_size(out_frame) }?;
+        exported_image(frame)?;
+        Err(other_export())
+    })
+}
+
+/// `mln_acquired_frame_get_dxgi_shared_texture()`: no ring of this library
+/// shares DXGI textures yet.
+///
+/// # Safety
+///
+/// Each pointer is null or valid for the header's use of it.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mln_acquired_frame_get_dxgi_shared_texture(
+    frame: mln_acquired_frame,
+    out_frame: *mut mln_dxgi_shared_texture_frame,
+    out_diagnostic: *mut mln_diagnostic,
+) -> mln_status {
+    export!(out_diagnostic, non_null(out_frame), {
+        // SAFETY: the caller's contract.
+        unsafe { abi::check_out_size(out_frame) }?;
+        exported_image(frame)?;
+        Err(other_export())
+    })
 }
 
 #[cfg(all(test, unix))]

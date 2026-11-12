@@ -4,7 +4,9 @@
 use core::ffi::c_void;
 use core::ptr::NonNull;
 
-use ::mln_runtime::{BorrowedRing, RenderTarget, Surface, SurfaceType};
+use ::mln_runtime::{
+    BorrowedRing, DmaBufFormat, ExportKind, ExportKinds, ExportedRing, RenderTarget, Surface, SurfaceType,
+};
 use mln_util::ErrorKind;
 use mln_util::size::Size;
 use raw_window_handle::{
@@ -14,7 +16,7 @@ use raw_window_handle::{
 use crate::completion::{self, Generations, PendingCompletion};
 use crate::error::Error;
 use crate::generated::types::{
-    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_HTML_CANVAS,
+    MLN_RENDER_TARGET_KIND_ANDROID_WINDOW, MLN_RENDER_TARGET_KIND_EXPORTED_RING, MLN_RENDER_TARGET_KIND_HTML_CANVAS,
     MLN_RENDER_TARGET_KIND_METAL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_METAL_LAYER,
     MLN_RENDER_TARGET_KIND_OFFSCREEN, MLN_RENDER_TARGET_KIND_OHOS_WINDOW,
     MLN_RENDER_TARGET_KIND_OPEN_GL_BORROWED_TEXTURES, MLN_RENDER_TARGET_KIND_OPEN_GL_SURFACE,
@@ -71,6 +73,11 @@ enum Target {
         size: Size,
         ring: BorrowedRing,
     },
+    /// A ring of the library's images, which it exports.
+    Exported {
+        size: Size,
+        ring: ExportedRing,
+    },
     /// A target that this library doesn't render to.
     Unsupported(&'static str),
 }
@@ -81,7 +88,8 @@ impl Target {
             Target::Offscreen(size)
             | Target::Surface { size, .. }
             | Target::HostSurface { size, .. }
-            | Target::Borrowed { size, .. } => Some(*size),
+            | Target::Borrowed { size, .. }
+            | Target::Exported { size, .. } => Some(*size),
             Target::Unsupported(_) => None,
         }
     }
@@ -279,6 +287,9 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
             MLN_RENDER_TARGET_KIND_WEB_GPU_BORROWED_TEXTURES => {
                 (target.data.web_gpu_borrowed_textures.logical_size, "mln_web_gpu_borrowed_textures_target")
             }
+            MLN_RENDER_TARGET_KIND_EXPORTED_RING => {
+                (target.data.exported_ring.logical_size, "mln_exported_ring_target")
+            }
             _ => return Err(Error::invalid_argument("mln_render_target.kind is invalid")),
         }
     };
@@ -458,6 +469,7 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
                 }
                 Target::Unsupported("WebGPU textures are not supported by this build")
             }
+            MLN_RENDER_TARGET_KIND_EXPORTED_RING => exported_ring(size, &target.data.exported_ring, name)?,
             _ => {
                 if target.data.html_canvas.selector.size == 0 {
                     return Err(Error::invalid_argument(format!("{} must not be empty", field("selector"))));
@@ -467,6 +479,89 @@ unsafe fn read_target(target: *const mln_render_target, scale_factor: Option<f64
         }
     };
     Ok(target)
+}
+
+/// The export kinds of a set of `mln_gpu_export_kind_flag` bits.
+pub(crate) fn export_kinds(flags: crate::generated::types::mln_gpu_export_kind_flags) -> ExportKinds {
+    use crate::generated::types::{
+        MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER, MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF,
+        MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE, MLN_GPU_EXPORT_KIND_FLAG_IO_SURFACE,
+        MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD,
+    };
+    [
+        (MLN_GPU_EXPORT_KIND_FLAG_IO_SURFACE, ExportKind::IoSurface),
+        (MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF, ExportKind::DmaBuf),
+        (MLN_GPU_EXPORT_KIND_FLAG_ANDROID_HARDWARE_BUFFER, ExportKind::AndroidHardwareBuffer),
+        (MLN_GPU_EXPORT_KIND_FLAG_DXGI_SHARED_HANDLE, ExportKind::DxgiSharedHandle),
+        (MLN_GPU_EXPORT_KIND_FLAG_OPAQUE_FD, ExportKind::OpaqueFd),
+    ]
+    .into_iter()
+    .filter(|(flag, _)| flags & flag != 0)
+    .fold(ExportKinds::NONE, |kinds, (_, kind)| kinds.with(kind))
+}
+
+/// The `mln_gpu_export_kind_flag` bits of `kinds`.
+pub(crate) fn export_flags(kinds: ExportKinds) -> crate::generated::types::mln_gpu_export_kind_flags {
+    kinds.iter().map(|kind| 1 << (export_kind_value(kind) - 1)).fold(0, |flags, bit| flags | bit)
+}
+
+/// The `mln_gpu_export_kind` of `kind`.
+pub(crate) fn export_kind_value(kind: ExportKind) -> crate::generated::types::mln_gpu_export_kind {
+    use crate::generated::types::{
+        MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER, MLN_GPU_EXPORT_KIND_DMA_BUF,
+        MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE, MLN_GPU_EXPORT_KIND_IO_SURFACE, MLN_GPU_EXPORT_KIND_OPAQUE_FD,
+    };
+    match kind {
+        ExportKind::IoSurface => MLN_GPU_EXPORT_KIND_IO_SURFACE,
+        ExportKind::DmaBuf => MLN_GPU_EXPORT_KIND_DMA_BUF,
+        ExportKind::AndroidHardwareBuffer => MLN_GPU_EXPORT_KIND_ANDROID_HARDWARE_BUFFER,
+        ExportKind::DxgiSharedHandle => MLN_GPU_EXPORT_KIND_DXGI_SHARED_HANDLE,
+        ExportKind::OpaqueFd => MLN_GPU_EXPORT_KIND_OPAQUE_FD,
+    }
+}
+
+/// A caller's exported ring.
+///
+/// # Safety
+///
+/// `ring.dma_buf_formats` is null or points to `dma_buf_format_count`
+/// readable entries.
+unsafe fn exported_ring(
+    size: Size,
+    ring: &crate::generated::types::mln_exported_ring_target,
+    name: &str,
+) -> Result<Target, Error> {
+    use crate::generated::types::{MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF, MLN_TEXTURE_RING_MAX_DEPTH};
+    if ring.texture_count == 0 || ring.texture_count > MLN_TEXTURE_RING_MAX_DEPTH {
+        return Err(Error::invalid_argument(format!(
+            "{name}.texture_count must be from 1 to MLN_TEXTURE_RING_MAX_DEPTH"
+        )));
+    }
+    let kinds = export_kinds(ring.export_kinds);
+    if ring.export_kinds == 0 || export_flags(kinds) != ring.export_kinds {
+        return Err(Error::invalid_argument(format!("{name}.export_kinds must name known kinds of image")));
+    }
+    let formats = if ring.dma_buf_format_count == 0 {
+        &[][..]
+    } else if ring.dma_buf_formats.is_null() {
+        return Err(Error::invalid_argument(format!("{name}.dma_buf_formats must not be null")));
+    } else {
+        // SAFETY: the caller's contract.
+        unsafe { core::slice::from_raw_parts(ring.dma_buf_formats, ring.dma_buf_format_count) }
+    };
+    if ring.export_kinds & MLN_GPU_EXPORT_KIND_FLAG_DMA_BUF != 0 && formats.is_empty() {
+        return Err(Error::invalid_argument(format!("{name} needs dma_buf_formats to export dmabufs")));
+    }
+    let ring = ExportedRing {
+        depth: ring.texture_count as usize,
+        kinds,
+        dma_buf_formats: formats
+            .iter()
+            .map(|format| DmaBufFormat { fourcc: format.fourcc, modifier: format.modifier })
+            .collect(),
+        android_hardware_buffer_usage: ring.android_hardware_buffer_usage,
+    };
+    Ok(Target::Exported { size, ring })
 }
 
 /// A `CAMetalLayer`'s target, on the platforms that have one.
@@ -548,6 +643,10 @@ pub unsafe extern "C" fn mln_map_attach(
                 options.require_core_worker("this library drives a borrowed ring on a core worker")?;
                 RenderTarget::Borrowed { size, ring, device }
             }
+            Target::Exported { size, ring } => {
+                options.require_core_worker("an exported ring renders on a library thread, which owns its images")?;
+                RenderTarget::Exported { size, ring, device }
+            }
             Target::Unsupported(message) => return Err(unsupported(message)),
         };
         let (handle, attached) = render_session::attach(&map, target, options)?;
@@ -581,6 +680,9 @@ pub unsafe extern "C" fn mln_render_session_set_target(
         if let Target::Offscreen(_) = target {
             return Err(unsupported("an offscreen target replaces no window"));
         }
+        if let Target::Exported { .. } = target {
+            return Err(unsupported("an exported ring is no replacement target: resize the session instead"));
+        }
         // SAFETY: the caller's contract.
         let pending = unsafe { PendingCompletion::optional(completion) }?;
         let object = render_session::resolve(session)?;
@@ -597,6 +699,9 @@ pub unsafe extern "C" fn mln_render_session_set_target(
             }
             Target::HostSurface { size, surface } => object.session.set_surface(size, surface)?,
             Target::Borrowed { size, ring } => object.session.set_ring(size, ring)?,
+            Target::Exported { .. } => {
+                return Err(unsupported("an exported ring is no replacement target: resize the session instead"));
+            }
             Target::Unsupported(message) => return Err(unsupported(message)),
             Target::Offscreen(_) => return Err(unsupported("an offscreen target replaces no window")),
         };

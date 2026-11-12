@@ -238,6 +238,9 @@ pub unsafe extern "C" fn mln_render_session_get_capabilities(
                 .producer_sync_kind
                 .map_or(MLN_GPU_SYNC_CPU_COMPLETE, crate::gpu_device::sync_kind_value),
             consumer_sync_kinds: crate::gpu_device::sync_flags(capabilities.consumer_sync_kinds),
+            export_kind: capabilities
+                .export_kind
+                .map_or(crate::generated::types::MLN_GPU_EXPORT_KIND_NONE, crate::render_target::export_kind_value),
         };
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_capabilities, &capabilities) }

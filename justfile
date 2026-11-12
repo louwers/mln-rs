@@ -411,9 +411,7 @@ update-testdata checkout=cpp:
 # The headers go to crates/mln_c/include and the ABI suite, with the support files, plugin, fixtures and GPU fixtures it
 # builds with, to tools/c-abi-test/testdata, each directory whole, so new files come along; then tools/c-abi-test/patches
 # fix the suite's own bugs, and the declarations are regenerated. The copies are from maplibre/maplibre-native-ffi's
-# t3/gpu-device-targets branch, which changes the render target headers ahead of their merge: its 81ae4b77d1de, with its
-# 547953e79b38 and 3ec4e727a32f applied on top, but not the exported rings of b2648fcd2 or the Vulkan device extensions
-# of 807db30b3 in between.
+# t3/gpu-device-targets branch at b2648fcd2622, which changes the render target headers ahead of their merge.
 [doc("Refresh the copies of maplibre-native-ffi's C headers and ABI suite from a checkout of it, and regenerate crates/mln_c's declarations")]
 update-ffi-abi checkout=ffi:
     #!/usr/bin/env bash
