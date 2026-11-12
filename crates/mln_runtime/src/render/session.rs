@@ -14,6 +14,7 @@ use mln_renderer::query::{RenderedQueryOptions, SourceQueryOptions};
 use mln_util::error::Error;
 use mln_util::feature::Feature;
 use mln_util::image::PremultipliedImage;
+use mln_util::logging::{Event, Log};
 use mln_util::size::Size;
 use mln_util::sync::MutexExt;
 
@@ -276,6 +277,10 @@ pub(crate) struct SessionShared {
     /// Held while the session's thread runs a task, so an abandon waits for
     /// the graphics work in progress.
     pub(crate) gate: Mutex<()>,
+    /// Whether the session's thread is inside a driver call: a core worker
+    /// running a task and delivering what it sent the host, or a service of
+    /// a caller-driven session.
+    pub(crate) in_call: AtomicBool,
     pub(crate) frame_wake: Option<Wake>,
     pub(crate) redraw_wake: Option<Wake>,
     capabilities: RenderSessionCapabilities,
@@ -383,16 +388,40 @@ impl SessionShared {
         Ok(())
     }
 
-    /// Stops the session at once, as [`RenderSession::abandon`] documents.
-    /// The library may abandon a released session too.
-    pub(crate) fn abandon(&self, by: Abandoner) -> Result<(), Error> {
-        with_unlocked_wakes(|| self.abandon_locked(by, false)).map(drop)
+    /// Stops the session at once, as [`RenderSession::abandon`] documents,
+    /// and returns how many graphics objects it keeps. The library may
+    /// abandon a released session too.
+    pub(crate) fn abandon(&self, by: Abandoner) -> Result<u32, Error> {
+        with_unlocked_wakes(|| self.abandon_locked(by, false))
+    }
+
+    /// Marks the session's thread as inside a driver call until the guard
+    /// drops.
+    pub(crate) fn enter_call(&self) -> InCall<'_> {
+        InCall { shared: self, previous: self.in_call.swap(true, Ordering::SeqCst) }
     }
 
     /// Abandons the session, which keeps its graphics objects until the
     /// process exits if `keep_graphics`, and returns how many it keeps.
+    ///
+    /// A driver call can't be waited for on its own thread, where the
+    /// session's callbacks run inside it, and a host's service on another
+    /// thread is the host's to end, so either is busy. A core worker's call
+    /// on another thread is waited for. A caller-driven session that is
+    /// abandoned off its thread keeps its graphics objects, which only its
+    /// thread may free: once this returns, the host may destroy what they
+    /// were made on.
     fn abandon_locked(&self, by: Abandoner, keep_graphics: bool) -> Result<u32, Error> {
         let on_driver = self.thread.get() == Some(&std::thread::current().id());
+        if self.in_call.load(Ordering::SeqCst) {
+            if on_driver {
+                return Err(Error::busy("the render session's driver call is running on this thread"));
+            }
+            if self.driver == Driver::CallerThread && by == Abandoner::Host {
+                return Err(Error::busy("the render session's driver work is running on another thread"));
+            }
+        }
+        let off_thread = self.driver == Driver::CallerThread && !on_driver;
         let gate = if on_driver {
             self.gate.try_lock().map_err(|_| Error::busy("the render session is rendering on this thread"))?
         } else {
@@ -419,7 +448,7 @@ impl SessionShared {
                 return Err(Error::busy("a view is open on one of the render session's acquired frames"));
             }
             state.lifecycle = RenderSessionState::Abandoned;
-            state.keep_graphics |= keep_graphics;
+            state.keep_graphics |= keep_graphics || off_thread;
             let kept = if state.keep_graphics { state.graphics_objects } else { 0 };
             (state.take_waiters(), state.map.take(), kept)
         };
@@ -446,10 +475,34 @@ impl SessionShared {
             // A worker that ended drops the task, and the sender with it.
             let _ = receiver.recv();
         }
+        if kept != 0 {
+            let reason = if keep_graphics {
+                "it was abandoned without graphics calls"
+            } else {
+                "only the thread that services it may free them"
+            };
+            Log::warning(
+                Event::Render,
+                format!("An abandoned render session keeps {kept} graphics objects until the process exits: {reason}"),
+            );
+        }
         let lost = || Error::target_lost("the render session was abandoned");
         waiters.settle(&Err(lost()), lost);
         drop(map);
         Ok(kept)
+    }
+}
+
+/// Marks a session's thread as inside a driver call, as
+/// [`SessionShared::enter_call`] does.
+pub(crate) struct InCall<'a> {
+    shared: &'a SessionShared,
+    previous: bool,
+}
+
+impl Drop for InCall<'_> {
+    fn drop(&mut self) {
+        self.shared.in_call.store(self.previous, Ordering::SeqCst);
     }
 }
 
@@ -698,6 +751,7 @@ pub(crate) fn attach(
         },
         driver_work_taken: AtomicBool::new(false),
         driver_armed,
+        in_call: AtomicBool::new(false),
     });
     let (completion, resolver) = shared.completion();
     shared.state.lock_unpoisoned().attach = Some(resolver);
@@ -718,6 +772,11 @@ pub(crate) fn attach(
         // The map was released meanwhile: the session lets go of it.
         drop(session);
         return Err(error);
+    }
+    if options.driver == Driver::CallerThread {
+        // The first service builds the renderer, which is work that is ready
+        // now: the host hears of it before the attach returns.
+        session.shared().run_loop.invoke(|| {});
     }
     Ok((session, completion))
 }
@@ -1286,14 +1345,20 @@ impl RenderSession {
     /// returns, the session renders no more, and another session can attach
     /// to the map. Release the session afterward.
     ///
-    /// A caller-driven session lets go of its graphics objects on the host's
-    /// thread, at its next service or when its [`DriverWork`] drops.
+    /// Returns how many graphics objects the session keeps until the
+    /// process exits. A caller-driven session abandoned on the thread that
+    /// services it lets go of them there, at its next service or when its
+    /// [`DriverWork`] drops, and keeps none. Abandoned on another thread, it
+    /// keeps them, since only that thread may free them, and logs a warning.
     ///
-    /// It waits for a frame that the session is rendering. Fails with
-    /// [`ErrorKind::Busy`](mln_util::ErrorKind) on the session's own thread
-    /// while that runs, and with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
+    /// It waits for a core worker's driver call on another thread, such as a
+    /// frame that it renders. Fails with
+    /// [`ErrorKind::Busy`](mln_util::ErrorKind) inside a driver call on the
+    /// session's own thread, such as from a completion that the session
+    /// delivers, and while a caller-driven session's service runs on another
+    /// thread. Fails with [`ErrorKind::InvalidState`](mln_util::ErrorKind)
     /// once the session is detached, abandoned or released.
-    pub fn abandon(&self) -> Result<(), Error> {
+    pub fn abandon(&self) -> Result<u32, Error> {
         self.shared().abandon(Abandoner::Host)
     }
 

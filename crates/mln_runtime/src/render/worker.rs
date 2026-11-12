@@ -66,20 +66,20 @@ pub(crate) fn post(run_loop: &RunLoopHandle, task: impl FnOnce(&mut Worker, &mut
 }
 
 /// Runs `task` on the session, then delivers what it sends to the host, with
-/// the session unborrowed and unlocked. A session that was abandoned lets go
-/// of its graphics objects first.
+/// the session unborrowed and unlocked: a driver call, which the delivery is
+/// part of. A session that was abandoned lets go of its graphics objects
+/// first.
 fn run(task: impl FnOnce(&mut Worker, &mut Outbox)) {
+    let Some(slot) = CURRENT.with(|current| current.borrow().clone()) else { return };
+    let Some(shared) = slot.borrow().as_ref().map(|worker| worker.shared.clone()) else { return };
+    let _call = shared.enter_call();
     let mut outbox = Outbox::default();
-    if let Some(slot) = CURRENT.with(|current| current.borrow().clone()) {
-        let mut slot = slot.borrow_mut();
-        if let Some(worker) = slot.as_mut() {
-            let shared = worker.shared.clone();
-            let _gate = shared.gate.lock_unpoisoned();
-            if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
-                worker.tear_down(&mut outbox);
-            }
-            task(worker, &mut outbox);
+    if let Some(worker) = slot.borrow_mut().as_mut() {
+        let _gate = shared.gate.lock_unpoisoned();
+        if !worker.torn_down && shared.state.lock_unpoisoned().lifecycle == RenderSessionState::Abandoned {
+            worker.tear_down(&mut outbox);
         }
+        task(worker, &mut outbox);
     }
     outbox.deliver();
 }
@@ -135,6 +135,7 @@ pub(crate) fn build(shared: &Arc<SessionShared>, slot: &Slot) {
     let Some(Ok(init)) = shared.state.lock_unpoisoned().init.take().map(<Box<dyn Any + Send>>::downcast::<Init>) else {
         return;
     };
+    let _call = shared.enter_call();
     let mut outbox = Outbox::default();
     let gate = shared.gate.lock_unpoisoned();
     let worker = Worker::new(shared.clone(), *init, &mut outbox);

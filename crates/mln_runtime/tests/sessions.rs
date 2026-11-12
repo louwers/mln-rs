@@ -600,6 +600,26 @@ fn abandon_ends_pending_work_and_frees_the_map_at_once() {
 }
 
 #[test]
+fn an_abandon_from_a_completion_that_the_worker_delivers_is_busy() {
+    let runtime = runtime();
+    let map = red_map(&runtime);
+    let session = attach(&map);
+    demand(&session, DemandMode::Force, 1);
+    take_one(&session);
+    let (sender, receiver) = channel();
+    let abandoned = session.clone();
+    session.reduce_memory_use().unwrap().on_complete(move |result| {
+        let _ = sender.send((result, abandoned.abandon().map_err(|error| error.kind)));
+    });
+    let (result, abandon) = receiver.recv_timeout(TIMEOUT).unwrap();
+    result.unwrap();
+    assert_eq!(Err(ErrorKind::Busy), abandon);
+    assert_eq!(RenderSessionState::Attached, session.snapshot().unwrap().state);
+    // Off the worker's thread, the abandon waits for its call.
+    assert_eq!(0, session.abandon().unwrap());
+}
+
+#[test]
 fn an_abandon_that_keeps_graphics_counts_the_renderer_and_its_backend() {
     let runtime = runtime();
     let map = red_map(&runtime);

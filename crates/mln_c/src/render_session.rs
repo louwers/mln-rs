@@ -646,8 +646,8 @@ pub unsafe extern "C" fn mln_render_session_detach(
     })
 }
 
-/// `mln_render_session_abandon()`: this library's sessions keep no graphics
-/// objects past an abandon.
+/// `mln_render_session_abandon()`: a session keeps its graphics objects
+/// only when it is driven by the caller's thread and abandoned on another.
 ///
 /// # Safety
 ///
@@ -662,8 +662,9 @@ pub unsafe extern "C" fn mln_render_session_abandon(
         // Checked before the abandon, which can't be undone.
         // SAFETY: the caller's contract.
         unsafe { abi::write_sized(out_result, &abandon_result(0)) }?;
-        resolve(session)?.session.abandon()?;
-        Ok(())
+        let kept = resolve(session)?.session.abandon()?;
+        // SAFETY: the caller's contract, checked above.
+        unsafe { abi::write_sized(out_result, &abandon_result(kept)) }
     })
 }
 
