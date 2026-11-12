@@ -759,6 +759,11 @@ const _: unsafe extern "C" fn(
     *mut mln_diagnostic,
 ) -> mln_status = crate::runtime::mln_network_get_status;
 const _: unsafe extern "C" fn(mln_network_status, *mut mln_diagnostic) -> mln_status = crate::runtime::mln_network_set_status;
+const _: unsafe extern "C" fn(
+    *const mln_frame_pacer_options,
+    *mut mln_frame_pacer,
+    *mut mln_diagnostic,
+) -> mln_status = crate::frame_pacer::ohos::mln_ohos_frame_pacer_create;
 const _: unsafe extern "C" fn() -> mln_open_gl_context_provider_flags = crate::render_target::mln_open_gl_supported_context_provider_mask;
 const _: unsafe extern "C" fn(
     *const mln_plugin_descriptor_v1,

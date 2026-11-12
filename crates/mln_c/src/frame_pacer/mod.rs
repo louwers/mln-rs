@@ -25,6 +25,7 @@
 
 pub(crate) mod android;
 pub(crate) mod apple;
+pub(crate) mod ohos;
 
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::Duration;

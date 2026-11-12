@@ -215,6 +215,23 @@ fn options_check_their_fields_and_limit() {
     assert_eq!(created.unwrap_err().status(), MLN_STATUS_INVALID_ARGUMENT);
 }
 
+#[test]
+fn each_platform_but_its_own_refuses_to_create_a_pacer() {
+    let create = [
+        (android::mln_android_frame_pacer_create as unsafe extern "C" fn(_, _, _) -> _, cfg!(target_os = "android")),
+        (apple::mln_apple_frame_pacer_create, cfg!(any(target_os = "macos", target_os = "ios", target_os = "tvos"))),
+        (ohos::mln_ohos_frame_pacer_create, cfg!(target_env = "ohos")),
+    ];
+    for (create, native) in create {
+        if !native {
+            let mut pacer = handles::NULL;
+            // SAFETY: null options, a local out-handle and a null diagnostic.
+            let status = unsafe { create(core::ptr::null(), &mut pacer, NO_DIAGNOSTIC) };
+            assert_eq!((status, pacer), (crate::generated::types::MLN_STATUS_UNSUPPORTED, handles::NULL));
+        }
+    }
+}
+
 // MARK: - Scheduling
 
 #[test]
