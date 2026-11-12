@@ -67,5 +67,10 @@ khronos-egl.workspace = true
 libc.workspace = true
 winit.workspace = true
 
+# The D3D11 device of the exported ring tests, which opens the ring's
+# textures and fences as a host does.
+[target.'cfg(windows)'.dev-dependencies]
+windows.workspace = true
+
 [lints]
 workspace = true
